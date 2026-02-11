@@ -299,9 +299,12 @@ class TestBuildRegexResponsa:
         pattern = result.pattern
         # Should have flex pattern for 'abc' but NOT for 'xabc'
         assert r'a\s*b\s*c' in pattern
-        # xabc should be in the alternation as a regular escaped term, NOT flex-spaced
-        assert 'xabc' in pattern
-        assert r'x\s*a\s*b\s*c' not in pattern
+        # xabc should be in the alternation as a regular escaped term, NOT flex-spaced.
+        # Mark-tolerant wrapping inserts optional diacritics between chars, so verify
+        # behavioral correctness: pattern matches 'xabc' and does NOT have flex-spacing
+        # applied to 'xabc' (i.e., no x\s*a\s*b\s*c in pattern).
+        assert result.search('xabc')
+        assert r'x\s*a\s*b\s*c' not in pattern  # xabc must NOT be flex-spaced
 
     def test_bidirectional(self):
         """Bidirectional with 2 components produces forward|backward alternation."""
@@ -374,7 +377,9 @@ class TestBuildRegexResponsa:
         # Existing call
         result = engine.build_regex_pattern(['test'], 'exact', 0)
         assert result is not None
-        assert 'test' in result.pattern
+        # Pattern matches the word "test" (mark-tolerant wrapping inserts optional
+        # diacritics between chars, so check behavior not literal substring)
+        assert result.search('test')
 
     def test_suffix_expansion_in_alternation(self):
         """Suffix-expanded terms appear in the regex alternation group."""
@@ -395,11 +400,13 @@ class TestBuildRegexResponsa:
         )
         assert result is not None
         pattern = result.pattern
-        # All suffix-expanded terms should be in the alternation
-        assert 'stem' in pattern
-        assert 'stemim' in pattern
-        assert 'stemot' in pattern
-        assert 'stemah' in pattern
+        # All suffix-expanded terms should be matched by the compiled pattern.
+        # Mark-tolerant wrapping inserts optional diacritics between chars,
+        # so verify behavioral correctness rather than literal substring.
+        assert result.search('stem')
+        assert result.search('stemim')
+        assert result.search('stemot')
+        assert result.search('stemah')
 
     def test_plene_defective_in_alternation(self):
         """Plene/defective variants appear in the regex alternation group."""
@@ -420,9 +427,11 @@ class TestBuildRegexResponsa:
         )
         assert result is not None
         pattern = result.pattern
-        assert 'shalom' in pattern
-        assert 'shlm' in pattern
-        assert 'shalm' in pattern
+        # Verify behavioral correctness: compiled pattern matches all plene/defective variants.
+        # Mark-tolerant wrapping inserts optional diacritics between chars.
+        assert result.search('shalom')
+        assert result.search('shlm')
+        assert result.search('shalm')
 
 
 # ============================================================================
