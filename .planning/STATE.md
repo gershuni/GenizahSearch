@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 ## Current Position
 
 Phase: 18 of 20 (Dead Code Removal)
-Plan: 2 of 2 in current phase
-Status: Plan 18-02 complete
-Last activity: 2026-02-11 -- Completed 18-02 (Web AI Artifacts Removal)
+Plan: 2 of 2 in current phase (all complete)
+Status: Phase 18 complete
+Last activity: 2026-02-11 -- Completed 18-01 (Desktop AI Artifacts Removal)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [██░░░░░░░░] 15%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 57 (across all milestones)
+- Total plans completed: 59 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~7.5 hours
 
@@ -42,6 +42,7 @@ Progress: [█░░░░░░░░░] 10%
 
 ### Decisions
 
+- [18-01] Removed all AI support infrastructure (constants, imports, signals) not just named classes
 - [18-02] Kept Regex help description concise after removing AI reference (no replacement text added)
 - Decisions are also logged in PROJECT.md Key Decisions table.
 
@@ -59,6 +60,6 @@ Progress: [█░░░░░░░░░] 10%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 18-02-PLAN.md (Web AI Artifacts Removal)
+Stopped at: Completed 18-01-PLAN.md (Desktop AI Artifacts Removal)
 Resume file: None
-Notes: Phase 18 plan 02 done. Plan 01 (desktop AI removal) still pending.
+Notes: Phase 18 fully complete (both plans done). Ready for Phase 19.
