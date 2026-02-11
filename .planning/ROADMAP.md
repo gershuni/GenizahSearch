@@ -73,10 +73,11 @@ Responsa Project-style advanced search with syntax parsing, JA expansion, tabula
   3. Help documentation in both apps contains no mention of AI Search features
   4. genizah_core.py has no google-genai import and no AI_PROVIDER_ENDPOINTS constant
   5. Both apps start and function normally after removal (no import errors, no missing references)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 18-01: TBD
+- [ ] 18-01-PLAN.md -- Remove AI from core + desktop (genizah_core.py, gui_threads.py, genizah_app.py, Help.html)
+- [ ] 18-02-PLAN.md -- Remove AI from web + dependencies (web/main.py, web/state.py, web/pages/help.py, requirements.txt, CHANGELOG.md)
 
 ### Phase 19: Search Normalization
 **Goal**: Users searching with diacritical marks or geresh/gershayim get correct results, and highlighting works even when source text contains combining marks
