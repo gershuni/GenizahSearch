@@ -133,10 +133,10 @@ Phases 18 and 19 are independent and can execute in either order. Phase 20 execu
 **Plans:** 3 plans
 
 Plans:
-- [ ] 21-01-PLAN.md -- TDD: HTML section parser + fix regex fallback for all marker variants
+- [ ] 21-01-PLAN.md -- TDD: HTML section parser (h3 inside data-canvas divs) + fix regex fallback for all marker variants
 - [ ] 21-02-PLAN.md -- Schema migration (sections JSONB column) + import script for pgp-text HTML
 - [ ] 21-03-PLAN.md -- Wire structured sections into display pipeline (both apps) + integration tests
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 21 replanning (structural HTML import)*
+*Last updated: 2026-02-11 after Phase 21 replan (corrected h3 inside data-canvas divs)*
