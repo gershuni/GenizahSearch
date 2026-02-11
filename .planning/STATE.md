@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 ## Current Position
 
 Phase: 18 of 20 (Dead Code Removal)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-11 -- Roadmap created for v5.7.1
+Plan: 2 of 2 in current phase
+Status: Plan 18-02 complete
+Last activity: 2026-02-11 -- Completed 18-02 (Web AI Artifacts Removal)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 10%
 
 ## Performance Metrics
 
@@ -42,7 +42,8 @@ Progress: [░░░░░░░░░░] 0%
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
+- [18-02] Kept Regex help description concise after removing AI reference (no replacement text added)
+- Decisions are also logged in PROJECT.md Key Decisions table.
 
 ### Blockers/Concerns
 
@@ -58,6 +59,6 @@ Decisions are logged in PROJECT.md Key Decisions table.
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Roadmap created for v5.7.1 milestone
+Stopped at: Completed 18-02-PLAN.md (Web AI Artifacts Removal)
 Resume file: None
-Notes: 3 phases (18-20), 13 requirements. Ready to plan Phase 18.
+Notes: Phase 18 plan 02 done. Plan 01 (desktop AI removal) still pending.
