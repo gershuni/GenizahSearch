@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.7.1 Cleanup & Polish -- Phase 18 (Dead Code Removal)
+**Current focus:** v5.7.1 Cleanup & Polish -- Phase 19 (Search Normalization)
 
 ## Current Position
 
-Phase: 18 of 20 (Dead Code Removal)
-Plan: 2 of 2 in current phase (all complete)
-Status: Phase 18 complete
-Last activity: 2026-02-11 -- Completed 18-01 (Desktop AI Artifacts Removal)
+Phase: 19 of 20 (Search Normalization)
+Plan: 1 of 2 in current phase
+Status: Plan 19-01 complete, 19-02 remaining
+Last activity: 2026-02-11 -- Completed 19-01 (Core Normalization Functions)
 
-Progress: [██░░░░░░░░] 15%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 59 (across all milestones)
+- Total plans completed: 60 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~7.5 hours
 
@@ -42,6 +42,8 @@ Progress: [██░░░░░░░░] 15%
 
 ### Decisions
 
+- [19-01] Placed normalization functions between expand_judeo_arabic and _SOFIT_TO_NORMAL for logical grouping
+- [19-01] Used regex token splitting to handle escape sequences as single units in make_mark_tolerant_pattern
 - [18-01] Removed all AI support infrastructure (constants, imports, signals) not just named classes
 - [18-02] Kept Regex help description concise after removing AI reference (no replacement text added)
 - Decisions are also logged in PROJECT.md Key Decisions table.
@@ -60,6 +62,6 @@ Progress: [██░░░░░░░░] 15%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 18-01-PLAN.md (Desktop AI Artifacts Removal)
+Stopped at: Completed 19-01-PLAN.md (Core Normalization Functions)
 Resume file: None
-Notes: Phase 18 fully complete (both plans done). Ready for Phase 19.
+Notes: Plan 19-01 complete (TDD, 2 min). Ready for 19-02 (search pipeline integration).
