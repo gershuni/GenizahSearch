@@ -1093,7 +1093,7 @@ class LabEngine:
                 
                 # Create a regex OR pattern: (word1|word2|...)
                 # We use re.escape to handle any special chars in the text
-                highlight_regex_str = "|".join(re.escape(w) for w in found_words) if found_words else ""
+                highlight_regex_str = "|".join(make_mark_tolerant_pattern(re.escape(w)) for w in found_words) if found_words else ""
                 
                 # Populate display metadata correctly
                 display_meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
@@ -5087,7 +5087,7 @@ class SearchEngine:
                 # Add regex terms (sorted by length descending, escaped)
                 unique_terms = sorted(set(regex_terms), key=len, reverse=True)
                 for t in unique_terms:
-                    all_alternatives.append(re.escape(t))
+                    all_alternatives.append(make_mark_tolerant_pattern(re.escape(t)))
 
                 # Add flex spacing patterns (already regex, NOT escaped)
                 if flex_spacing and flex_patterns:
@@ -5157,7 +5157,7 @@ class SearchEngine:
             unique_vars = sorted(list(set(vars_list)), key=len, reverse=True)
 
             # 4. Escape special chars
-            escaped = [re.escape(v) for v in unique_vars]
+            escaped = [make_mark_tolerant_pattern(re.escape(v)) for v in unique_vars]
 
             # 5. Simple Group (Removed strict Lookbehind/Lookahead)
             # Allow prefix matches when search term appears inside a word
