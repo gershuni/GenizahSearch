@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.7.1 Cleanup & Polish -- Phase 19 (Search Normalization)
+**Current focus:** v5.7.1 Cleanup & Polish -- Phase 20 (Test Suite Green)
 
 ## Current Position
 
-Phase: 19 of 20 (Search Normalization) -- COMPLETE
-Plan: 3 of 3 in current phase -- ALL DONE
-Status: Phase 19 complete (all 3 plans executed, UAT gap closed)
-Last activity: 2026-02-11 - Completed quick task 9: Fix tabular query builder checkboxes invisible in dark mode
+Phase: 20 of 20 (Test Suite Green)
+Plan: 1 of 2 in current phase
+Status: Plan 20-01 complete (export service + boundary search tests fixed)
+Last activity: 2026-02-11 - Completed 20-01: Fix failing export service and boundary search tests
 
 Progress: [█████░░░░░] 50%
 
@@ -42,6 +42,8 @@ Progress: [█████░░░░░] 50%
 
 ### Decisions
 
+- [20-01] Updated test expectations to match production behavior rather than reverting code changes
+- [20-01] Used longer test input texts for boundary tests to satisfy min_distance=3 default
 - [19-03] Added 3 apostrophe variants (U+0027, U+2018, U+2019) to normalization patterns -- no index rebuild needed
 - [19-02] Regex mode exempted from diacritics stripping -- users control their regex patterns directly
 - [19-02] Wildcard/flex-spacing patterns not wrapped with mark tolerance -- custom regex where marks would confuse semantics
@@ -76,6 +78,6 @@ Progress: [█████░░░░░] 50%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed quick task 9 (Fix Tabular Query Builder Checkboxes Invisible in Dark Mode)
+Stopped at: Completed 20-01-PLAN.md (Fix failing export service and boundary search tests)
 Resume file: None
-Notes: Quick task 9 complete (2 tasks, ~1 min). Dark-mode checkbox CSS fixes and theme-aware border variable. Ready for Phase 20.
+Notes: Plan 20-01 complete (2 tasks, ~3 min). 7 test failures fixed, 3 obsolete files confirmed deleted. Plan 20-02 already executed in parallel.
