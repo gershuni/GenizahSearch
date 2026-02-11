@@ -88,10 +88,11 @@ Plans:
   2. A search query containing Hebrew geresh or gershayim returns the same results as the query without them
   3. Search result highlighting correctly marks matched text even when the source text contains combining marks between base letters
   4. All existing search modes (standard, variants, Responsa, PGP Tags) produce identical results to before normalization was added
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 19-01: TBD
+- [ ] 19-01-PLAN.md -- TDD: Core normalization functions (strip_search_diacritics, make_mark_tolerant_pattern) with unit tests
+- [ ] 19-02-PLAN.md -- Wire normalization into search pipeline (execute_search, lab_search, build_regex_pattern)
 
 ### Phase 20: Test Suite Green
 **Goal**: Full test suite passes with zero failures -- all pre-existing broken tests fixed and obsolete test files removed
