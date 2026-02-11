@@ -58,7 +58,7 @@ Responsa Project-style advanced search with syntax parsing, JA expansion, tabula
 **Milestone Goal:** Remove dead AI code, add diacritics normalization for Judeo-Arabic search, and resolve all pre-existing test failures.
 
 - [x] **Phase 18: Dead Code Removal** - Remove all AI Search artifacts from both apps, help docs, and core (completed 2026-02-11)
-- [ ] **Phase 19: Search Normalization** - Diacritics and geresh/gershayim stripping with mark-tolerant highlighting
+- [x] **Phase 19: Search Normalization** - Diacritics and geresh/gershayim stripping with mark-tolerant highlighting (completed 2026-02-11)
 - [ ] **Phase 20: Test Suite Green** - Fix broken tests, delete obsolete files, achieve zero failures
 
 ## Phase Details
@@ -91,8 +91,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 19-01-PLAN.md -- TDD: Core normalization functions (strip_search_diacritics, make_mark_tolerant_pattern) with unit tests
-- [ ] 19-02-PLAN.md -- Wire normalization into search pipeline (execute_search, lab_search, build_regex_pattern)
+- [x] 19-01-PLAN.md -- TDD: Core normalization functions (strip_search_diacritics, make_mark_tolerant_pattern) with unit tests
+- [x] 19-02-PLAN.md -- Wire normalization into search pipeline (execute_search, lab_search, build_regex_pattern)
 
 ### Phase 20: Test Suite Green
 **Goal**: Full test suite passes with zero failures -- all pre-existing broken tests fixed and obsolete test files removed
@@ -120,9 +120,9 @@ Phases 18 and 19 are independent and can execute in either order. Phase 20 execu
 | 8-12 | v5.6.0 | 25/25 | Complete | 2026-02-09 |
 | 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
 | 18. Dead Code Removal | v5.7.1 | 2/2 | Complete | 2026-02-11 |
-| 19. Search Normalization | v5.7.1 | 0/TBD | Not started | - |
+| 19. Search Normalization | v5.7.1 | 2/2 | Complete | 2026-02-11 |
 | 20. Test Suite Green | v5.7.1 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 18 completion*
+*Last updated: 2026-02-11 after Phase 19 completion*
