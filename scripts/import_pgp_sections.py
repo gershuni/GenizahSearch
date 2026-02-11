@@ -225,6 +225,44 @@ def parse_best_file_for_type(files: List[Dict], file_type: str) -> Optional[Dict
     return best_result
 
 
+def _match_file_to_source(file_info: Dict, source_records: List[Dict]) -> Optional[Dict]:
+    """
+    Match an HTML file to its specific source record by author_slug + type.
+
+    The HTML filename contains _s{N}_{author_slug}_{type}.html where author_slug
+    maps to the source_scholar field. Type maps to doc_relation.
+
+    Returns: Matching source record dict, or None if no match.
+    """
+    author_slug = file_info['author_slug'].lower()
+    file_type = file_info['type']  # 'transcription' or 'translation'
+    relation_keyword = 'Edition' if file_type == 'transcription' else 'Translation'
+
+    # Split hyphenated slug into name parts (e.g., "udovitch-rustow" -> ["udovitch", "rustow"])
+    slug_parts = author_slug.split('-')
+
+    # Filter to sources of the correct type
+    type_sources = [
+        s for s in source_records
+        if relation_keyword in (s.get('doc_relation') or '')
+    ]
+
+    # Match by checking if slug parts appear in source_scholar
+    for source in type_sources:
+        scholar_lower = (source.get('source_scholar') or '').lower()
+        if all(part in scholar_lower for part in slug_parts):
+            return source
+
+    # Fallback: match by first slug part only (handles partial matches)
+    if slug_parts:
+        for source in type_sources:
+            scholar_lower = (source.get('source_scholar') or '').lower()
+            if slug_parts[0] in scholar_lower:
+                return source
+
+    return None
+
+
 def load_existing_sources(client: Optional[Client]) -> Dict[int, List[Dict]]:
     """
     Load all document_sources records from Supabase.
@@ -243,7 +281,7 @@ def load_existing_sources(client: Optional[Client]) -> Dict[int, List[Dict]]:
 
     while True:
         response = client.table('document_sources').select(
-            'pgpid, source_scholar, doc_relation'
+            'id, pgpid, source_scholar, doc_relation'
         ).range(offset, offset + page_size - 1).execute()
 
         if not response.data:
@@ -271,10 +309,10 @@ def build_update_batches(
     Match parsed HTML sections to document_sources records and build update batches.
 
     Strategy per pgpid:
-    - For each _transcription.html: parse sections, apply to ALL "Digital Edition"
-      sources for that pgpid (same physical manuscript structure)
-    - For each _translation.html: parse sections, apply to ALL "Digital Translation"
-      sources for that pgpid
+    - Each HTML file contains _s{N}_ where N is the source_id in document_sources.
+      Match each HTML file to its SPECIFIC source record by ID.
+    - Only the matching source gets that file's sections — prevents cross-source
+      contamination where one scholar's section text gets applied to another's record.
 
     Returns: (update_records, stats)
     """
@@ -289,6 +327,7 @@ def build_update_batches(
         'translation_files_parsed': 0,
         'parse_errors': 0,
         'unmatched_pgpids': [],  # In pgp-text but not in DB
+        'source_id_mismatches': 0,  # HTML source_id not found in DB
     }
 
     for pgpid, files in tqdm(pgpid_files.items(), desc="Matching sections"):
@@ -301,43 +340,44 @@ def build_update_batches(
 
         stats['pgpids_matched'] += 1
 
-        # Parse transcription HTML -> apply to all Edition sources
-        transcription_result = parse_best_file_for_type(files, 'transcription')
-        if transcription_result and transcription_result.get('sections'):
-            stats['transcription_files_parsed'] += 1
-            edition_sources = [
-                s for s in source_records
-                if 'Edition' in (s.get('doc_relation') or '')
-            ]
-            for source in edition_sources:
-                updates.append({
-                    'pgpid': pgpid,
-                    'source_scholar': source['source_scholar'],
-                    'doc_relation': source['doc_relation'],
-                    'sections': transcription_result['sections'],
-                    'source_language': transcription_result.get('language'),
-                    'source_direction': transcription_result.get('direction'),
-                })
-                stats['editions_updated'] += 1
+        # Match each HTML file to its specific source by author_slug + type
+        for file_info in files:
+            source_record = _match_file_to_source(
+                file_info, source_records
+            )
 
-        # Parse translation HTML -> apply to all Translation sources
-        translation_result = parse_best_file_for_type(files, 'translation')
-        if translation_result and translation_result.get('sections'):
-            stats['translation_files_parsed'] += 1
-            translation_sources = [
-                s for s in source_records
-                if 'Translation' in (s.get('doc_relation') or '')
-            ]
-            for source in translation_sources:
+            if not source_record:
+                stats['source_id_mismatches'] += 1
+                continue
+
+            try:
+                with open(file_info['path'], 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+
+                result = parse_html_sections(html_content)
+                if not result or not result.get('sections'):
+                    continue
+
+                if file_info['type'] == 'transcription':
+                    stats['transcription_files_parsed'] += 1
+                    stats['editions_updated'] += 1
+                else:
+                    stats['translation_files_parsed'] += 1
+                    stats['translations_updated'] += 1
+
                 updates.append({
+                    'id': source_record['id'],
                     'pgpid': pgpid,
-                    'source_scholar': source['source_scholar'],
-                    'doc_relation': source['doc_relation'],
-                    'sections': translation_result['sections'],
-                    'source_language': translation_result.get('language'),
-                    'source_direction': translation_result.get('direction'),
+                    'source_scholar': source_record['source_scholar'],
+                    'doc_relation': source_record['doc_relation'],
+                    'sections': result['sections'],
+                    'source_language': result.get('language'),
+                    'source_direction': result.get('direction'),
                 })
-                stats['translations_updated'] += 1
+
+            except Exception as e:
+                stats['parse_errors'] += 1
+                print(f"  WARNING: Failed to parse {file_info['path']}: {e}")
 
     return updates, stats
 
@@ -348,10 +388,10 @@ def build_update_batches(
 
 def execute_updates(client: Client, updates: List[Dict]) -> int:
     """
-    Execute section updates using individual update+match calls.
+    Execute section updates using individual update calls matched by source ID.
 
     Updates only the sections/source_language/source_direction columns
-    on existing records matched by (pgpid, source_scholar, doc_relation).
+    on existing records matched by their unique ID.
 
     Returns: Number of records processed.
     """
@@ -369,16 +409,12 @@ def execute_updates(client: Client, updates: List[Dict]) -> int:
                     'sections': record['sections'],
                     'source_language': record.get('source_language'),
                     'source_direction': record.get('source_direction'),
-                }).match({
-                    'pgpid': record['pgpid'],
-                    'source_scholar': record['source_scholar'],
-                    'doc_relation': record['doc_relation'],
-                }).execute()
+                }).eq('id', record['id']).execute()
                 processed += 1
             except Exception as e:
                 errors += 1
                 if errors <= 5:
-                    print(f"  Error updating pgpid={record['pgpid']}: {e}")
+                    print(f"  Error updating id={record['id']} pgpid={record['pgpid']}: {e}")
 
     if errors:
         print(f"  {errors} errors during update")

@@ -277,9 +277,19 @@ def get_section_for_page(transcription: str, page_num: int, sections: list = Non
     if sections:
         for section in sections:
             if section.get('canvas_num') == page_num:
-                return section.get('text')
-        # page_num beyond available canvases -- return full transcription
-        return transcription
+                text = section.get('text')
+                if text:
+                    # Validate section text belongs to this source's content.
+                    # The import may have assigned the same sections to all sources
+                    # for a PGPID; if so, fall through to regex on the actual content.
+                    sample = ''.join(text.split())[:40]
+                    if sample and sample in ''.join(transcription.split()):
+                        return text
+                # Section empty or doesn't match -- fall through to regex
+                break
+        else:
+            # page_num beyond available canvases -- return full transcription
+            return transcription
 
     # Path 2: Regex fallback (existing logic)
     parsed = parse_transcription_sections(transcription)

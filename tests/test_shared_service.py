@@ -433,10 +433,14 @@ class TestStructuredSectionsIntegration:
          "canvas_num": 2, "label": "Verso.", "text": "structured verso line 1\nstructured verso line 2"},
     ]
 
-    TRANSCRIPTION = "Recto\nregex recto text\nVerso\nregex verso text"
+    # Transcription content that CONTAINS the section text (valid match)
+    TRANSCRIPTION = "Recto\nstructured recto line 1\nstructured recto line 2\nVerso\nstructured verso line 1\nstructured verso line 2"
+
+    # Transcription from a DIFFERENT source (section text not found in it)
+    OTHER_SOURCE_TRANSCRIPTION = "Recto\nother scholar recto text here\nVerso\nother scholar verso text"
 
     def test_structured_sections_canvas_lookup(self):
-        """Structured sections use canvas_num matching for page lookup."""
+        """Structured sections use canvas_num matching when text matches source."""
         from shared.document_service import get_section_for_page
         result1 = get_section_for_page(self.TRANSCRIPTION, 1, self.SECTIONS)
         assert result1 == "structured recto line 1\nstructured recto line 2"
@@ -444,13 +448,21 @@ class TestStructuredSectionsIntegration:
         assert result2 == "structured verso line 1\nstructured verso line 2"
 
     def test_structured_sections_override_regex(self):
-        """Structured sections take priority over regex-parsed text."""
+        """Structured sections take priority over regex when text matches source."""
         from shared.document_service import get_section_for_page
         # The transcription has recto/verso markers that regex would parse,
-        # but structured sections should be used instead
+        # but structured sections should be used instead (text matches)
         result = get_section_for_page(self.TRANSCRIPTION, 1, self.SECTIONS)
         assert 'structured recto' in result
-        assert 'regex recto' not in result
+
+    def test_structured_sections_mismatch_falls_back_to_regex(self):
+        """Sections with text from a different source fall back to regex parsing."""
+        from shared.document_service import get_section_for_page
+        # Sections contain text from one source, but transcription is from another.
+        # Validation guard detects mismatch and falls back to regex.
+        result = get_section_for_page(self.OTHER_SOURCE_TRANSCRIPTION, 1, self.SECTIONS)
+        assert 'other scholar recto' in result
+        assert 'structured recto' not in result
 
     def test_structured_sections_none_falls_back(self):
         """sections=None falls back to regex parsing."""
@@ -479,18 +491,20 @@ class TestStructuredSectionsIntegration:
     def test_structured_sections_multi_canvas(self):
         """Three-canvas document returns correct margin text for page 3."""
         from shared.document_service import get_section_for_page
+        margin_text = "margin notes here"
+        transcription_3 = self.TRANSCRIPTION + f"\nMargin\n{margin_text}"
         sections_3 = self.SECTIONS + [
             {"canvas_url": "https://cudl.lib.cam.ac.uk/iiif/MS-TS/canvas/3",
-             "canvas_num": 3, "label": "Margin", "text": "margin notes here"},
+             "canvas_num": 3, "label": "Margin", "text": margin_text},
         ]
-        result = get_section_for_page(self.TRANSCRIPTION, 3, sections_3)
-        assert result == "margin notes here"
+        result = get_section_for_page(transcription_3, 3, sections_3)
+        assert result == margin_text
 
     def test_source_dict_flow(self):
         """Simulate full consumer flow: source dict with and without sections key."""
         from shared.document_service import get_section_for_page
 
-        # Source WITH sections (structured path)
+        # Source WITH sections (structured path, text matches content)
         source_with = {
             'content': self.TRANSCRIPTION,
             'sections': self.SECTIONS,
