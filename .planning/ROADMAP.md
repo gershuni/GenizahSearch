@@ -93,11 +93,11 @@ Shared corrections service, amber styling (web), emoji labels (desktop).
   3. A meta table exists in the sidecar with a version number that can be checked programmatically
   4. Both web and desktop apps can import and use `FjmsService` to query domain, join, and catalog data for a given sys_id
   5. The web app's SQLite connection is thread-safe and read-only (no write errors under concurrent NiceGUI requests)
-**Plans**: TBD
+**Plans**: 2 plans in 2 waves
 
 Plans:
-- [ ] 25-01: Export script and sidecar schema
-- [ ] 25-02: Shared FjmsService class
+- [ ] 25-01-PLAN.md -- Export script and sidecar schema (Wave 1)
+- [ ] 25-02-PLAN.md -- Shared FjmsService class with web shim and tests (Wave 2, depends on 25-01)
 
 ### Phase 26: Scientific Joins
 **Goal**: Users can see scholarly join groups with attribution and navigate between related fragments
