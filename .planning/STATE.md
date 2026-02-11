@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-11)
 Phase: 21 (Debug PGP Integration)
 Plan: 1 of 3 in current phase -- COMPLETE
 Status: Plan 21-01 complete (HTML parser + regex fix, 28 new tests, 438 total passing)
-Last activity: 2026-02-11 - Completed 21-01-PLAN.md (HTML parser and regex fix)
+Last activity: 2026-02-11 - Completed quick task 11: Fix profile page showing 0 reputation and 0 corrections
 
 Progress: [███-------] 33% (plan 1 of 3 in phase 21)
 
