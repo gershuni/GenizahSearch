@@ -6,7 +6,7 @@
 - v5.6.0 Desktop Parity & PGP Integration - Phases 8-12 (shipped 2026-02-09, Phase 13 deferred)
 - v5.7.0 Responsa Search - Phases 14-17 (shipped 2026-02-10)
 - v5.7.2 Cleanup, Normalization & Sections - Phases 18-21 (shipped 2026-02-11)
-- v5.7.3 Pending Corrections Visibility - Phases 22-24 (in progress)
+- v5.7.3 Pending Corrections Visibility - Phases 22-24 (shipped 2026-02-11)
 
 ## Phases
 
@@ -66,7 +66,7 @@ structural HTML section parser for PGP transcriptions.
 
 - [x] **Phase 22: Pending Corrections Data Layer** - Shared service to fetch user's own pending corrections per page (completed 2026-02-11)
 - [x] **Phase 23: Web Pending Corrections Display** - Web version selector shows pending corrections with visual distinction (completed 2026-02-11)
-- [ ] **Phase 24: Desktop Pending Corrections Display** - Desktop version selector shows pending corrections with visual distinction
+- [x] **Phase 24: Desktop Pending Corrections Display** - Desktop version selector shows pending corrections with visual distinction (completed 2026-02-11)
 
 ## Phase Details
 
@@ -111,7 +111,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 24-01-PLAN.md -- Verify existing desktop pending corrections via automated tests
+- [x] 24-01-PLAN.md -- Verify existing desktop pending corrections via automated tests
 
 ## Progress
 
@@ -126,8 +126,8 @@ Phases execute in numeric order: 22 -> 23 -> 24
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22. Data Layer | v5.7.3 | 1/1 | Complete | 2026-02-11 |
 | 23. Web Display | v5.7.3 | 1/1 | Complete | 2026-02-11 |
-| 24. Desktop Display | v5.7.3 | 0/1 | Not started | - |
+| 24. Desktop Display | v5.7.3 | 1/1 | Complete | 2026-02-11 |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 24 planning complete*
+*Last updated: 2026-02-11 after Phase 24 execution complete*
