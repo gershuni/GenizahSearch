@@ -47,29 +47,27 @@ Requirements for v5.7.1 Cleanup & Polish. Each maps to roadmap phases.
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLEAN-01 | TBD | Pending |
-| CLEAN-02 | TBD | Pending |
-| CLEAN-03 | TBD | Pending |
-| CLEAN-04 | TBD | Pending |
-| NORM-01 | TBD | Pending |
-| NORM-02 | TBD | Pending |
-| NORM-03 | TBD | Pending |
-| NORM-04 | TBD | Pending |
-| TEST-01 | TBD | Pending |
-| TEST-02 | TBD | Pending |
-| TEST-03 | TBD | Pending |
-| TEST-04 | TBD | Pending |
-| TEST-05 | TBD | Pending |
+| CLEAN-01 | Phase 18 | Pending |
+| CLEAN-02 | Phase 18 | Pending |
+| CLEAN-03 | Phase 18 | Pending |
+| CLEAN-04 | Phase 18 | Pending |
+| NORM-01 | Phase 19 | Pending |
+| NORM-02 | Phase 19 | Pending |
+| NORM-03 | Phase 19 | Pending |
+| NORM-04 | Phase 19 | Pending |
+| TEST-01 | Phase 20 | Pending |
+| TEST-02 | Phase 20 | Pending |
+| TEST-03 | Phase 20 | Pending |
+| TEST-04 | Phase 20 | Pending |
+| TEST-05 | Phase 20 | Pending |
 
 **Coverage:**
 - v5.7.1 requirements: 13 total
-- Mapped to phases: 0
-- Unmapped: 13
+- Mapped to phases: 13
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-11*
-*Last updated: 2026-02-11 after initial definition*
+*Last updated: 2026-02-11 after roadmap creation*

@@ -5,29 +5,38 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.7.1 Cleanup & Polish
+**Current focus:** v5.7.1 Cleanup & Polish -- Phase 18 (Dead Code Removal)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: --
-Status: Defining requirements
-Last activity: 2026-02-11 -- Milestone v5.7.1 started
+Phase: 18 of 20 (Dead Code Removal)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-02-11 -- Roadmap created for v5.7.1
+
+Progress: [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+- Total plans completed: 57 (across all milestones)
+- Average duration: ~8 min
+- Total execution time: ~7.5 hours
+
+**By Milestone:**
+
+| Milestone | Phases | Plans | Total Time |
+|-----------|--------|-------|------------|
+| v1 | 1-7 | 18 | 173 min |
+| v5.6.0 | 8-12 | 25 | ~134 min |
+| v5.7.0 | 14-17 | 14 | ~140 min |
+| v5.7.1 | 18-20 | TBD | -- |
 
 ## Milestone History
 
 - **v5.7.0 Responsa Search** -- Shipped 2026-02-10 (git tag v5.7.0)
-  - 4 phases (14-17), 14 plans, 221 Responsa tests
-  - See: .planning/milestones/v5.7.0-ROADMAP.md
-
-- **v5.6.0 Desktop Parity & PGP Integration** -- Shipped 2026-02-09 (git tag v5.6.0)
-  - 5 phases (8-12), 25 plans, ~134 min execution
-  - Phase 13 (Transcription Search) deferred
-  - See: .planning/milestones/v5.6.0-ROADMAP.md
-
+- **v5.6.0 Desktop Parity** -- Shipped 2026-02-09 (git tag v5.6.0)
 - **v1 External Data Integration** -- Shipped 2026-02-07 (git tag v5.5.0)
-  - 9 phases, 18 plans, 173 min execution
-  - See: .planning/milestones/v1-ROADMAP.md
 
 ## Accumulated Context
 
@@ -35,33 +44,20 @@ Last activity: 2026-02-11 -- Milestone v5.7.1 started
 
 Decisions are logged in PROJECT.md Key Decisions table.
 
-### Data State
-
-- documents table: 35,839 records (all PGP documents with full metadata)
-- document_sources: 9,364 records (7,664 editions + 1,696 translations)
-- document_footnotes: 22,757 records (bibliography/scholarship)
-- document_fragments: 36,155 records (with collection/library/URL metadata)
-
 ### Blockers/Concerns
 
+- Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - Recto/verso section headers stripped during parsing (v1 tech debt, not blocking)
-- Phase 13 (Transcription Search) deferred -- needs server-side index architecture
 
 ### Future Improvements
 
-- **Show user's pending corrections in browse page**: indicator + corrected text display
-- **Search WITH JA diacritical marks**: allow intentional searching for marked letters (deferred from v5.7.1)
-- **NLI joins import**: ~424K PartOf relationships
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 8 | Fix web corrections singleton Supabase client bug + improve desktop login errors | 2026-02-10 | 787c236 | [8-fix-web-corrections-singleton-supabase-c](./quick/8-fix-web-corrections-singleton-supabase-c/) |
+- Search WITH JA diacritical marks (intentional marked-letter matching)
+- NLI joins import (~424K PartOf relationships)
+- Show user's pending corrections in browse page
 
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: v5.7.1 milestone initialization
+Stopped at: Roadmap created for v5.7.1 milestone
 Resume file: None
-Notes: v5.7.1 Cleanup & Polish milestone started. Defining requirements.
+Notes: 3 phases (18-20), 13 requirements. Ready to plan Phase 18.

@@ -5,6 +5,7 @@
 - v1 External Data Integration - Phases 1-7 (shipped 2026-02-07)
 - v5.6.0 Desktop Parity & PGP Integration - Phases 8-12 (shipped 2026-02-09, Phase 13 deferred)
 - v5.7.0 Responsa Search - Phases 14-17 (shipped 2026-02-10)
+- v5.7.1 Cleanup & Polish - Phases 18-20 (in progress)
 
 ## Phases
 
@@ -52,17 +53,74 @@ Responsa Project-style advanced search with syntax parsing, JA expansion, tabula
 
 </details>
 
+### v5.7.1 Cleanup & Polish (In Progress)
+
+**Milestone Goal:** Remove dead AI code, add diacritics normalization for Judeo-Arabic search, and resolve all pre-existing test failures.
+
+- [ ] **Phase 18: Dead Code Removal** - Remove all AI Search artifacts from both apps, help docs, and core
+- [ ] **Phase 19: Search Normalization** - Diacritics and geresh/gershayim stripping with mark-tolerant highlighting
+- [ ] **Phase 20: Test Suite Green** - Fix broken tests, delete obsolete files, achieve zero failures
+
+## Phase Details
+
+### Phase 18: Dead Code Removal
+**Goal**: AI Search artifacts fully removed -- both apps launch and function with no trace of AI features
+**Depends on**: Nothing (standalone cleanup)
+**Requirements**: CLEAN-01, CLEAN-02, CLEAN-03, CLEAN-04
+**Success Criteria** (what must be TRUE):
+  1. Desktop app launches without AI-related classes (AIManager, AIDialog, AIWorkerThread) and no AI button or Settings panel section exists
+  2. Web app starts without AI import or initialization code
+  3. Help documentation in both apps contains no mention of AI Search features
+  4. genizah_core.py has no google-genai import and no AI_PROVIDER_ENDPOINTS constant
+  5. Both apps start and function normally after removal (no import errors, no missing references)
+**Plans**: TBD
+
+Plans:
+- [ ] 18-01: TBD
+
+### Phase 19: Search Normalization
+**Goal**: Users searching with diacritical marks or geresh/gershayim get correct results, and highlighting works even when source text contains combining marks
+**Depends on**: Nothing (independent of Phase 18)
+**Requirements**: NORM-01, NORM-02, NORM-03, NORM-04
+**Success Criteria** (what must be TRUE):
+  1. A search query containing combining diacritical marks (U+0300-U+036F) returns the same results as the query without them
+  2. A search query containing Hebrew geresh or gershayim returns the same results as the query without them
+  3. Search result highlighting correctly marks matched text even when the source text contains combining marks between base letters
+  4. All existing search modes (standard, variants, Responsa, PGP Tags) produce identical results to before normalization was added
+**Plans**: TBD
+
+Plans:
+- [ ] 19-01: TBD
+
+### Phase 20: Test Suite Green
+**Goal**: Full test suite passes with zero failures -- all pre-existing broken tests fixed and obsolete test files removed
+**Depends on**: Phase 18, Phase 19 (TEST-05 requires all code changes complete)
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05
+**Success Criteria** (what must be TRUE):
+  1. Export filename tests pass with underscore-separated expectations (4 tests)
+  2. Boundary search tests pass with aligned expectations (2 tests)
+  3. Excel column index test passes with correct assertion (1 test)
+  4. Obsolete backend test files (test_api_flow.py, test_corrections_api.py, test_corrections_integration.py) no longer exist
+  5. `pytest` runs to completion with zero failures across the entire test suite
+**Plans**: TBD
+
+Plans:
+- [ ] 20-01: TBD
+
 ## Progress
+
+**Execution Order:**
+Phases 18 and 19 are independent and can execute in either order. Phase 20 executes last.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 1-7 | v1 | 18/18 | Complete | 2026-02-07 |
 | 8-12 | v5.6.0 | 25/25 | Complete | 2026-02-09 |
-| 14. Responsa Core Engine | v5.7.0 | 2/2 | Complete | 2026-02-09 |
-| 15. Search UI (Both Apps) | v5.7.0 | 4/4 | Complete | 2026-02-10 |
-| 16. Tabular Query Builder | v5.7.0 | 3/3 | Complete | 2026-02-10 |
-| 17. Integration Testing & Polish | v5.7.0 | 5/5 | Complete | 2026-02-10 |
+| 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
+| 18. Dead Code Removal | v5.7.1 | 0/TBD | Not started | - |
+| 19. Search Normalization | v5.7.1 | 0/TBD | Not started | - |
+| 20. Test Suite Green | v5.7.1 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-10 after v5.7.0 shipped*
+*Last updated: 2026-02-11 after v5.7.1 roadmap creation*
