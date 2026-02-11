@@ -4432,6 +4432,50 @@ def expand_judeo_arabic(word: str) -> List[str]:
     return result
 
 
+# --------------------------------------------------------------------------
+# Search normalization: diacritics stripping and mark-tolerant patterns
+# --------------------------------------------------------------------------
+
+# Matches combining diacritical marks (U+0300-U+036F) and Hebrew geresh/gershayim
+# Does NOT match Hebrew nikud (U+05B0-U+05C7) which are vowel points
+COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u05F3\u05F4]')
+
+
+def strip_search_diacritics(text: str) -> str:
+    """Strip combining diacritical marks and geresh/gershayim from search text.
+
+    Removes:
+    - Combining diacritical marks (U+0300-U+036F)
+    - Hebrew geresh (U+05F3)
+    - Hebrew gershayim (U+05F4)
+
+    Preserves:
+    - Hebrew base letters, nikud/vowel points, Latin chars, digits, punctuation
+    """
+    if not text:
+        return text
+    return COMBINING_DIACRITICALS_PATTERN.sub('', text)
+
+
+# Inserted between regex tokens to allow optional combining marks in source text
+MARK_TOLERANT_INSERTER = '[\u0300-\u036F]*'
+
+
+def make_mark_tolerant_pattern(escaped_term: str) -> str:
+    """Insert optional combining mark matchers between characters of an escaped regex term.
+
+    Takes an already-escaped regex term (from re.escape) and inserts optional
+    combining mark matchers between each token. Escape sequences like \\. are
+    treated as single tokens.
+
+    Example: re.escape("abc") -> "a[\\u0300-\\u036F]*b[\\u0300-\\u036F]*c"
+    """
+    if not escaped_term:
+        return escaped_term
+    # Split escaped string into tokens: \\X (escape sequences) or single chars
+    tokens = re.findall(r'\\.|.', escaped_term)
+    return MARK_TOLERANT_INSERTER.join(tokens)
+
 
 # Hebrew final-letter to regular-letter mapping (sofit → normal)
 _SOFIT_TO_NORMAL = {
