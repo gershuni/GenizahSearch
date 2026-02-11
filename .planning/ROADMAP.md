@@ -124,16 +124,19 @@ Phases 18 and 19 are independent and can execute in either order. Phase 20 execu
 | 18. Dead Code Removal | v5.7.1 | 2/2 | Complete | 2026-02-11 |
 | 19. Search Normalization | v5.7.1 | 3/3 | Complete | 2026-02-11 |
 | 20. Test Suite Green | v5.7.1 | 2/2 | Complete | 2026-02-11 |
+| 21. Debug PGP Integration | v5.7.2 | 0/3 | Planned | -- |
 
 ### Phase 21: Debug PGP Integration
 
-**Goal:** Fix PGP transcription section parsing so recto/verso markers are correctly recognized and text is split across the right manuscript images
+**Goal:** Import PGP transcriptions from pgp-text GitHub repository's structured HTML files, replacing flat-text regex parsing with structural canvas-based section mapping. All recto/verso/margin sections correctly display alongside their corresponding manuscript images.
 **Depends on:** Phase 20
-**Plans:** 1 plan
+**Plans:** 3 plans
 
 Plans:
-- [ ] 21-01-PLAN.md -- TDD: Fix section parsing regex + add comprehensive marker variant tests
+- [ ] 21-01-PLAN.md -- TDD: HTML section parser + fix regex fallback for all marker variants
+- [ ] 21-02-PLAN.md -- Schema migration (sections JSONB column) + import script for pgp-text HTML
+- [ ] 21-03-PLAN.md -- Wire structured sections into display pipeline (both apps) + integration tests
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 21 planning complete*
+*Last updated: 2026-02-11 after Phase 21 replanning (structural HTML import)*
