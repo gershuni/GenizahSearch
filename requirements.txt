@@ -1,7 +1,6 @@
 PyQt6
 tantivy
 requests
-google-genai
 tqdm
 colorama
 openpyxl

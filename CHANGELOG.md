@@ -4,6 +4,13 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.7.1] - 2026-02-11
+
+### Cleanup & Polish
+
+- Removed deprecated AI Search feature code (AIManager, AIDialog, AIWorkerThread, Settings panel, button, help references)
+- Removed `google-genai` dependency
+
 ## [5.7.0] - 2026-02-10
 
 ### Milestone: Responsa Search
