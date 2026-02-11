@@ -4444,18 +4444,20 @@ def expand_judeo_arabic(word: str) -> List[str]:
 # Search normalization: diacritics stripping and mark-tolerant patterns
 # --------------------------------------------------------------------------
 
-# Matches combining diacritical marks (U+0300-U+036F) and Hebrew geresh/gershayim
-# Does NOT match Hebrew nikud (U+05B0-U+05C7) which are vowel points
-COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u05F3\u05F4]')
+# Matches combining diacritical marks (U+0300-U+036F), apostrophe variants (ASCII and curly),
+# and Hebrew geresh/gershayim. Does NOT match Hebrew nikud (U+05B0-U+05C7).
+COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u0027\u05F3\u05F4\u2018\u2019]')
 
 
 def strip_search_diacritics(text: str) -> str:
-    """Strip combining diacritical marks and geresh/gershayim from search text.
+    """Strip combining diacritical marks, apostrophe variants, and geresh/gershayim from search text.
 
     Removes:
     - Combining diacritical marks (U+0300-U+036F)
+    - ASCII apostrophe (U+0027)
     - Hebrew geresh (U+05F3)
     - Hebrew gershayim (U+05F4)
+    - Curly single quotes (U+2018, U+2019)
 
     Preserves:
     - Hebrew base letters, nikud/vowel points, Latin chars, digits, punctuation
@@ -4465,8 +4467,8 @@ def strip_search_diacritics(text: str) -> str:
     return COMBINING_DIACRITICALS_PATTERN.sub('', text)
 
 
-# Inserted between regex tokens to allow optional combining marks in source text
-MARK_TOLERANT_INSERTER = '[\u0300-\u036F]*'
+# Inserted between regex tokens to allow optional combining marks and apostrophe variants in source text
+MARK_TOLERANT_INSERTER = '[\u0300-\u036F\u0027\u05F3\u05F4\u2018\u2019]*'
 
 
 def make_mark_tolerant_pattern(escaped_term: str) -> str:
