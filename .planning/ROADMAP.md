@@ -108,10 +108,10 @@ Plans:
   2. Pending corrections are visually distinct from approved corrections (different label, styling, or indicator showing their pending status)
   3. User can select a pending correction and see its full text displayed, same as selecting an approved correction
   4. When the user is not logged in or has no pending corrections for the current page, the version selector behaves exactly as before
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 24-01: TBD
+- [ ] 24-01-PLAN.md -- Verify existing desktop pending corrections via automated tests
 
 ## Progress
 
@@ -126,8 +126,8 @@ Phases execute in numeric order: 22 -> 23 -> 24
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22. Data Layer | v5.7.3 | 1/1 | Complete | 2026-02-11 |
 | 23. Web Display | v5.7.3 | 1/1 | Complete | 2026-02-11 |
-| 24. Desktop Display | v5.7.3 | 0/TBD | Not started | - |
+| 24. Desktop Display | v5.7.3 | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 23 execution complete*
+*Last updated: 2026-02-11 after Phase 24 planning complete*
