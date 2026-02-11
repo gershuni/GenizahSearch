@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 25 of 28 (Data Infrastructure) -- first of 4 in v5.8.0
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-02-12 -- Roadmap created for v5.8.0
+Plan: 1 of 2 in current phase
+Status: Executing
+Last activity: 2026-02-12 -- Completed 25-01 (Export Script)
 
-Progress: [░░░░░░░░░░] 0% (0/6 plans)
+Progress: [█░░░░░░░░░] 16% (1/6 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 71 (across all milestones)
+- Total plans completed: 72 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~8.5 hours
 
@@ -32,7 +32,7 @@ Progress: [░░░░░░░░░░] 0% (0/6 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 0/6 | -- |
+| v5.8.0 | 25-28 | 1/6 | 3 min |
 
 ## Accumulated Context
 
@@ -42,11 +42,13 @@ Progress: [░░░░░░░░░░] 0% (0/6 plans)
 - FTS5 schema included in sidecar now, UI deferred to future milestone
 - Phase ordering: Data infra -> Joins -> Domains -> Catalog (user priority)
 - AlmaId maps directly to libraries.csv system_number (no normalization needed)
+- Catalog table has 322K rows (vs 243K estimated) due to richer join paths; more data is better
+- fist_data/ and FIST_DB_BACKUP/ added to .gitignore (large binary files)
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
-- FIST.db is 13 GB; export script must be efficient with targeted queries
+- FIST.db is 13 GB; export script completed in ~20 seconds with batched inserts
 - Thread-safe SQLite for NiceGUI web app (concurrent requests) -- needs `check_same_thread=False`
 
 ### Future Improvements
@@ -58,6 +60,6 @@ Progress: [░░░░░░░░░░] 0% (0/6 plans)
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Roadmap created for v5.8.0 FJMS Integration
+Stopped at: Completed 25-01-PLAN.md (Export Script)
 Resume file: None
-Notes: 4 phases, 6 plans, 19 requirements. Ready for `/gsd:plan-phase 25`.
+Notes: Plan 25-01 complete. fjms_enrichment.db ready (762K rows). Next: 25-02 (Loader Service).
