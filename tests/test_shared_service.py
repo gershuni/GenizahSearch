@@ -101,3 +101,196 @@ class TestDesktopImportability:
         """Desktop imports shared.document_service, not web.document_service."""
         from shared.document_service import get_document_for_fragment
         assert callable(get_document_for_fragment)
+
+
+class TestParseHtmlSections:
+    """Tests for parse_html_sections -- PGP HTML parser for structured canvas sections."""
+
+    BASIC_TWO_CANVAS_HTML = """<html><body>
+<section dir="rtl" lang="jrb">
+  <div data-canvas="https://cudl.lib.cam.ac.uk/iiif/MS-TS-00008-J-00027-00016/canvas/1">
+    <h3>recto</h3>
+    <ol><li>recto line 1</li><li>recto line 2</li></ol>
+  </div>
+  <div data-canvas="https://cudl.lib.cam.ac.uk/iiif/MS-TS-00008-J-00027-00016/canvas/2">
+    <h3>Verso.</h3>
+    <ol><li>verso line 1</li><li>verso line 2</li></ol>
+  </div>
+</section>
+</body></html>"""
+
+    def test_basic_two_canvas_document(self):
+        """HTML with two data-canvas divs returns 2 sections with correct keys."""
+        from shared.document_service import parse_html_sections
+        result = parse_html_sections(self.BASIC_TWO_CANVAS_HTML)
+        assert len(result['sections']) == 2
+        for section in result['sections']:
+            assert 'canvas_url' in section
+            assert 'canvas_num' in section
+            assert 'label' in section
+            assert 'text' in section
+
+    def test_canvas_url_extraction(self):
+        """Canvas URLs extracted exactly from data-canvas attributes."""
+        from shared.document_service import parse_html_sections
+        result = parse_html_sections(self.BASIC_TWO_CANVAS_HTML)
+        assert result['sections'][0]['canvas_url'] == \
+            'https://cudl.lib.cam.ac.uk/iiif/MS-TS-00008-J-00027-00016/canvas/1'
+        assert result['sections'][1]['canvas_url'] == \
+            'https://cudl.lib.cam.ac.uk/iiif/MS-TS-00008-J-00027-00016/canvas/2'
+
+    def test_canvas_num_from_url(self):
+        """Canvas_num parsed from CUDL URL: /canvas/1 -> 1, /canvas/2 -> 2."""
+        from shared.document_service import parse_html_sections
+        result = parse_html_sections(self.BASIC_TWO_CANVAS_HTML)
+        assert result['sections'][0]['canvas_num'] == 1
+        assert result['sections'][1]['canvas_num'] == 2
+
+    def test_canvas_num_positional_for_figgy(self):
+        """Figgy UUID URLs get positional canvas_num (1, 2, ...)."""
+        from shared.document_service import parse_html_sections
+        html = """<html><body>
+<section dir="rtl" lang="he">
+  <div data-canvas="https://figgy.princeton.edu/concern/scanned_resources/abc/manifest/canvas/def-uuid-1">
+    <h3>recto</h3>
+    <ol><li>line 1</li></ol>
+  </div>
+  <div data-canvas="https://figgy.princeton.edu/concern/scanned_resources/abc/manifest/canvas/ghi-uuid-2">
+    <h3>verso</h3>
+    <ol><li>line 2</li></ol>
+  </div>
+</section>
+</body></html>"""
+        result = parse_html_sections(html)
+        assert result['sections'][0]['canvas_num'] == 1
+        assert result['sections'][1]['canvas_num'] == 2
+
+    def test_section_label_from_h3_inside_div(self):
+        """h3 INSIDE data-canvas div provides the section label."""
+        from shared.document_service import parse_html_sections
+        result = parse_html_sections(self.BASIC_TWO_CANVAS_HTML)
+        assert result['sections'][0]['label'] == 'recto'
+        assert result['sections'][1]['label'] == 'Verso.'
+
+    def test_first_canvas_no_h3(self):
+        """First canvas div with no h3 gets label=None (matches PGPID 3750/444)."""
+        from shared.document_service import parse_html_sections
+        html = """<html><body>
+<section dir="rtl" lang="jrb">
+  <div data-canvas="https://cudl.lib.cam.ac.uk/iiif/MS-TEST/canvas/1">
+    <ol><li>line without header</li></ol>
+  </div>
+</section>
+</body></html>"""
+        result = parse_html_sections(html)
+        assert result['sections'][0]['label'] is None
+
+    def test_text_from_ordered_list(self):
+        """Text extracted from ol/li elements joined with newlines."""
+        from shared.document_service import parse_html_sections
+        result = parse_html_sections(self.BASIC_TWO_CANVAS_HTML)
+        assert result['sections'][0]['text'] == 'recto line 1\nrecto line 2'
+        assert result['sections'][1]['text'] == 'verso line 1\nverso line 2'
+
+    def test_text_from_p_elements(self):
+        """Standalone p elements inside canvas div captured as text."""
+        from shared.document_service import parse_html_sections
+        html = """<html><body>
+<section dir="rtl" lang="jrb">
+  <div data-canvas="https://cudl.lib.cam.ac.uk/iiif/MS-TEST/canvas/1">
+    <h3>verso - address</h3>
+    <p>address text line 1</p>
+    <p>address text line 2</p>
+  </div>
+</section>
+</body></html>"""
+        result = parse_html_sections(html)
+        assert 'address text line 1' in result['sections'][0]['text']
+        assert 'address text line 2' in result['sections'][0]['text']
+
+    def test_li_with_nested_p(self):
+        """li containing p (PGPID 7003 pattern) extracts text without duplication."""
+        from shared.document_service import parse_html_sections
+        html = """<html><body>
+<section dir="rtl" lang="jrb">
+  <div data-canvas="https://cudl.lib.cam.ac.uk/iiif/MS-TEST/canvas/1">
+    <h3>recto</h3>
+    <ol><li><p>nested text 1</p></li><li><p>nested text 2</p></li></ol>
+  </div>
+</section>
+</body></html>"""
+        result = parse_html_sections(html)
+        text = result['sections'][0]['text']
+        assert 'nested text 1' in text
+        assert 'nested text 2' in text
+        # Should NOT have duplicated lines
+        assert text.count('nested text 1') == 1
+
+    def test_multiple_subsections_per_canvas(self):
+        """Multiple h3+ol pairs in one canvas div merged into single entry."""
+        from shared.document_service import parse_html_sections
+        html = """<html><body>
+<section dir="rtl" lang="jrb">
+  <div data-canvas="https://cudl.lib.cam.ac.uk/iiif/MS-TEST/canvas/1">
+    <h3>recto</h3>
+    <ol><li>main line 1</li><li>main line 2</li></ol>
+    <h3>recto - right margin</h3>
+    <ol><li>margin line 1</li></ol>
+  </div>
+</section>
+</body></html>"""
+        result = parse_html_sections(html)
+        # Should be ONE section for canvas 1
+        assert len(result['sections']) == 1
+        section = result['sections'][0]
+        assert section['canvas_num'] == 1
+        # Merged text includes sub-section label and all lines
+        assert 'main line 1' in section['text']
+        assert 'margin line 1' in section['text']
+        assert '[recto - right margin]' in section['text']
+        # Subsections list should have 2 entries
+        assert section['subsections'] is not None
+        assert len(section['subsections']) == 2
+
+    def test_language_and_direction(self):
+        """Language and direction extracted from section element."""
+        from shared.document_service import parse_html_sections
+        result = parse_html_sections(self.BASIC_TWO_CANVAS_HTML)
+        assert result['language'] == 'jrb'
+        assert result['direction'] == 'rtl'
+
+    def test_translation_language(self):
+        """English translation section has language=en, direction=ltr."""
+        from shared.document_service import parse_html_sections
+        html = """<html><body>
+<section lang="en" dir="ltr">
+  <div data-canvas="https://example.com/canvas/1">
+    <h3>recto</h3>
+    <ol><li>English text</li></ol>
+  </div>
+</section>
+</body></html>"""
+        result = parse_html_sections(html)
+        assert result['language'] == 'en'
+        assert result['direction'] == 'ltr'
+
+    def test_empty_html(self):
+        """Empty string returns empty sections with None metadata."""
+        from shared.document_service import parse_html_sections
+        result = parse_html_sections('')
+        assert result == {'sections': [], 'language': None, 'direction': None}
+
+    def test_html_entities_decoded(self):
+        """HTML entities decoded to plain text."""
+        from shared.document_service import parse_html_sections
+        html = """<html><body>
+<section dir="rtl" lang="jrb">
+  <div data-canvas="https://example.com/canvas/1">
+    <h3>recto</h3>
+    <ol><li>text &amp; more &gt; less &hellip;</li></ol>
+  </div>
+</section>
+</body></html>"""
+        result = parse_html_sections(html)
+        assert 'text & more > less' in result['sections'][0]['text']
+        assert '...' in result['sections'][0]['text']
