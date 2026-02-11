@@ -348,10 +348,10 @@ def build_update_batches(
 
 def execute_updates(client: Client, updates: List[Dict]) -> int:
     """
-    Execute section updates in batches using upsert.
+    Execute section updates using individual update+match calls.
 
-    Uses the existing unique constraint on (pgpid, source_scholar, doc_relation)
-    to update only the sections/source_language/source_direction columns.
+    Updates only the sections/source_language/source_direction columns
+    on existing records matched by (pgpid, source_scholar, doc_relation).
 
     Returns: Number of records processed.
     """
@@ -359,13 +359,29 @@ def execute_updates(client: Client, updates: List[Dict]) -> int:
         return 0
 
     processed = 0
+    errors = 0
 
     for i in tqdm(range(0, len(updates), BATCH_SIZE), desc="Updating sections"):
         batch = updates[i:i + BATCH_SIZE]
-        client.table('document_sources').upsert(
-            batch, on_conflict='pgpid,source_scholar,doc_relation'
-        ).execute()
-        processed += len(batch)
+        for record in batch:
+            try:
+                client.table('document_sources').update({
+                    'sections': record['sections'],
+                    'source_language': record.get('source_language'),
+                    'source_direction': record.get('source_direction'),
+                }).match({
+                    'pgpid': record['pgpid'],
+                    'source_scholar': record['source_scholar'],
+                    'doc_relation': record['doc_relation'],
+                }).execute()
+                processed += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    print(f"  Error updating pgpid={record['pgpid']}: {e}")
+
+    if errors:
+        print(f"  {errors} errors during update")
 
     return processed
 
