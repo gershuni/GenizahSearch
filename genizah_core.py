@@ -1014,6 +1014,9 @@ class LabEngine:
     def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
         if not self.lab_searcher: return []
 
+        # Strip combining diacritical marks and geresh/gershayim from query
+        query_str = strip_search_diacritics(query_str)
+
         # Determine strategy: Static or Dynamic
         use_dyn = self.settings.use_dynamic_weights and self.dynamic_rank_map is not None
 
@@ -1149,6 +1152,11 @@ class LabEngine:
         """
         if not full_text:
             return {'main': [], 'filtered': [], 'known': [], 'partial': False, 'boundary_stats': None}
+
+        # Strip combining diacritical marks and geresh/gershayim from queries
+        full_text = strip_search_diacritics(full_text)
+        if filter_text:
+            filter_text = strip_search_diacritics(filter_text)
 
         # Reset debug counter for this search (prevents state leak between searches)
         self._filter_match_count = 0
@@ -5362,6 +5370,11 @@ class SearchEngine:
 
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None):
         if not self.searcher: return []
+
+        # Strip combining diacritical marks and geresh/gershayim from query
+        # Skip for Regex mode -- user controls the pattern directly
+        if mode != 'Regex':
+            query_str = strip_search_diacritics(query_str)
 
         # --- Metadata Search Modes ---
         if mode in ['Title', 'Shelfmark']:
