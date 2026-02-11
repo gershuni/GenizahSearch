@@ -95,6 +95,7 @@
     <ul>
         <li><a href="#intro">Introduction: How it Works</a></li>
         <li><a href="#search">Search Tab</a></li>
+        <li><a href="#responsa">Responsa-Style Search</a></li>
         <li><a href="#composition">Composition Search</a></li>
         <li><a href="#browse">Browse Manuscript</a></li>
         <li><a href="#lab">Lab Mode</a></li>
@@ -123,6 +124,7 @@
         <li><b>AI Assistant (🤖):</b> Click the AI button to open a chat interface that helps generate regex patterns. Describe what you're looking for in plain language, and the AI will create the appropriate regex. Supports Google Gemini, OpenAI, and Anthropic Claude (configure your API key in the Settings tab).</li>
         <li><b>Title:</b> Searches within the catalog titles of compositions. Example: searching "Mishneh Torah" will retrieve all manuscripts identified as Maimonides' Mishneh Torah.</li>
         <li><b>Shelfmark:</b> Fast search for shelfmarks (e.g., "T-S 13.15").</li>
+        <li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Familiar to Responsa Project users; easy to learn for newcomers. See <a href="#responsa">Responsa-Style Search</a> below.</li>
     </ul>
 
     <h3>Additional Options</h3>
@@ -142,6 +144,57 @@
         <li><b>Aggressive Mode:</b> Ignores word length limits for variant generation.</li>
         <li><b>Custom Variant Pairs:</b> Define your own letter substitution pairs (e.g., "מ=נו", one per line).</li>
     </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="responsa">Responsa-Style Search</h2>
+    <p>This mode uses a query syntax inspired by the <b>Bar-Ilan Responsa Project</b> (פרויקט השו"ת) — the widely-used database for searching Hebrew and Aramaic texts. If you are already familiar with the Responsa Project's search conventions, you will feel right at home. If not, the syntax is straightforward to learn and offers powerful tools for Hebrew and Judeo-Arabic manuscript searching: prefix/suffix expansion, wildcards, spelling variants, and proximity gaps.</p>
+
+    <h3>Activating Responsa Mode</h3>
+    <ul>
+        <li>Select <b>Responsa (R)</b> from the search Mode dropdown, or</li>
+        <li>Type <code>R </code> (R followed by a space) at the beginning of your query</li>
+    </ul>
+    <p>When Responsa mode is active, the standard prefix shortcuts (=, ?, ~, /, $, #) are disabled — the query uses Responsa syntax instead.</p>
+
+    <h3>Syntax Reference</h3>
+    <ul>
+        <li><b><code>#word</code></b> — Prefix expansion: adds 24 Hebrew prefix forms (ו, ה, ב, כ, ל, מ, ש + compounds). Example: <code>#שלום</code> finds ושלום, השלום, בשלום, etc.</li>
+        <li><b><code>word#</code></b> — Suffix expansion: adds 25 Hebrew suffix forms (י, ו, ם, ן, ה, ך, כם, כן, etc.). Example: <code>שלום#</code> finds שלומם, שלומו, שלומך, etc.</li>
+        <li><b><code>#word#</code></b> — Both prefix and suffix expansion. Example: <code>#שלום#</code> finds all prefix+suffix combinations.</li>
+        <li><b><code>*word</code></b> — Wildcard prefix: any characters before the word. Example: <code>*שלום</code> matches כבשלום, etc.</li>
+        <li><b><code>word*</code></b> — Wildcard suffix: any characters after the word. Example: <code>שלום*</code> matches שלומות, etc.</li>
+        <li><b><code>%word</code></b> — Plene/defective variants: inserts/removes ו/י for spelling variants. Example: <code>%שלום</code> finds שלום, שלם.</li>
+        <li><b><code>(a/b)</code></b> — OR alternatives: matches any of the listed options. Example: <code>(שלום/שלומות)</code> matches either.</li>
+        <li><b><code>[N]</code></b> — Gap of N words between terms. Example: <code>שלום [3] עולם</code> = up to 3 words between.</li>
+    </ul>
+    <p><b>Tip:</b> Modifiers can be combined, e.g. <code>#%word*</code> applies prefix expansion + plene variants + wildcard suffix.</p>
+
+    <h3>Sub-Options</h3>
+    <p>When Responsa mode is active, four checkboxes appear below the search field:</p>
+    <ul>
+        <li><b>Variants:</b> Enable letter-variant matching (same as Variants mode) on all expanded terms.</li>
+        <li><b>Judeo-Arabic (JA):</b> Expand words with the Arabic definite article אל- (8 forms per word).</li>
+        <li><b>Flexible Spacing:</b> Tolerate spaces within words — useful for OCR errors where spaces are inserted mid-word.</li>
+        <li><b>Bidirectional Gap:</b> Search for terms in both forward and reverse order.</li>
+    </ul>
+
+    <h3>Query Builder</h3>
+    <p>The Query Builder provides a visual interface for constructing Responsa queries:</p>
+    <ol>
+        <li>Click the <b>Query Builder</b> button (visible when Responsa mode is active).</li>
+        <li>Add 2–4 <b>components</b>, each representing a search term or group.</li>
+        <li>Enter one or more <b>words</b> per component (multiple words = OR alternatives).</li>
+        <li>Toggle <b>per-word modifiers</b>: prefix (#), suffix (#), wildcard (*), plene (%), negation.</li>
+        <li>Set the <b>distance</b> (max words) between components using the spinners.</li>
+        <li>Watch the <b>live preview</b> update as you modify the query.</li>
+        <li>Click <b>Apply</b> to generate the Responsa syntax and trigger a search.</li>
+    </ol>
+    <p><i>Note:</i> The builder is one-way — changes in the builder update the search field, but editing the text field does not update the builder.</p>
+
+    <h3>Explosion Guard</h3>
+    <p>When a query expands beyond <b>500 terms</b>, the system automatically downgrades options to keep the search fast. The downgrade order is: variants basic → off → JA off → plene off → suffixes off → prefixes off. A warning notification will appear explaining which options were turned off.</p>
+    <p><b>Tip:</b> Use more specific queries or fewer modifiers to avoid hitting the guard.</p>
     </div>
 
     <div class="section">
@@ -311,6 +364,7 @@
     <ul>
         <li><a href="#intro">הקדמה: איך זה עובד?</a></li>
         <li><a href="#search">לשונית חיפוש</a></li>
+        <li><a href="#responsa">חיפוש בסגנון פרויקט השו"ת</a></li>
         <li><a href="#composition">חיפוש חיבורים</a></li>
         <li><a href="#browse">עיון בכתב יד</a></li>
         <li><a href="#lab">מצב מעבדה</a></li>
@@ -339,6 +393,7 @@
         <li><b>עוזר בינה מלאכותית (🤖):</b> לחצו על כפתור ה-AI לפתיחת ממשק צ'אט שעוזר ליצור תבניות רגקס. תארו בשפה חופשית מה אתם מחפשים, והבינה המלאכותית תיצור את הביטוי הרגולרי המתאים. תומך ב-Google Gemini, OpenAI ו-Anthropic Claude (הגדירו את מפתח ה-API בלשונית ההגדרות).</li>
         <li><b>כותרת:</b> חיפוש בתוך המידע הקטלוגי של הכותרות. דוגמה: חיפוש "משנה תורה" יביא את כל כתבי היד המזוהים כמשנה תורה לרמב"ם.</li>
         <li><b>מספר מדף:</b> חיפוש מהיר של מספר מדף (למשל: "<bdi dir="ltr">T-S 13.15</bdi>").</li>
+        <li><b>רספונסה (R):</b> תחביר חיפוש בסגנון פרויקט השו"ת של אוניברסיטת בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. מוכר למשתמשי פרויקט השו"ת; קל ללמוד גם למי שלא מכיר. ראו <a href="#responsa">חיפוש בסגנון פרויקט השו"ת</a> להלן.</li>
     </ul>
 
     <h3>אפשרויות נוספות</h3>
@@ -358,6 +413,57 @@
         <li><b>מצב אגרסיבי:</b> מתעלם ממגבלות אורך מילה ביצירת וריאנטים.</li>
         <li><b>זוגות וריאנטים מותאמים אישית:</b> הגדירו זוגות החלפת אותיות משלכם (למשל: "נו=מ", אחד בכל שורה).</li>
     </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="responsa">חיפוש בסגנון פרויקט השו"ת</h2>
+    <p>מצב זה משתמש בתחביר חיפוש בהשראת <b>פרויקט השו"ת של אוניברסיטת בר-אילן</b> — מאגר המידע הנפוץ לחיפוש טקסטים בעברית ובארמית. אם אתם כבר מכירים את מוסכמות החיפוש של פרויקט השו"ת, תרגישו בבית. אם לא — התחביר פשוט ללמידה ומציע כלים עוצמתיים לחיפוש כתבי יד בעברית ובערבית-יהודית: הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים.</p>
+
+    <h3>הפעלת המצב</h3>
+    <ul>
+        <li>בחרו <b>רספונסה (R)</b> מתפריט מצב החיפוש, או</li>
+        <li>הקלידו <code><bdi dir="ltr">R </bdi></code> (R ואחריו רווח) בתחילת השאילתה</li>
+    </ul>
+    <p>כאשר מצב זה פעיל, קיצורי הדרך הרגילים (=, ?, ~, /, $, #) מושבתים — השאילתה משתמשת בתחביר השו"ת במקום.</p>
+
+    <h3>מדריך תחביר</h3>
+    <ul>
+        <li><b><code><bdi dir="ltr">#word</bdi></code></b> — הרחבת תחיליות: מוסיף 24 צורות תחילית עבריות (ו, ה, ב, כ, ל, מ, ש + צירופים). דוגמה: <code>#שלום</code> מוצא ושלום, השלום, בשלום וכו'.</li>
+        <li><b><code><bdi dir="ltr">word#</bdi></code></b> — הרחבת סיומות: מוסיף 25 צורות סיומת עבריות (י, ו, ם, ן, ה, ך, כם, כן וכו'). דוגמה: <code>שלום#</code> מוצא שלומם, שלומו, שלומך וכו'.</li>
+        <li><b><code><bdi dir="ltr">#word#</bdi></code></b> — הרחבת תחיליות וסיומות יחד. דוגמה: <code>#שלום#</code> מוצא את כל הצירופים.</li>
+        <li><b><code><bdi dir="ltr">*word</bdi></code></b> — תו כללי בתחילת מילה: כל תווים לפני המילה. דוגמה: <code>*שלום</code> מתאים לכבשלום וכו'.</li>
+        <li><b><code><bdi dir="ltr">word*</bdi></code></b> — תו כללי בסוף מילה: כל תווים אחרי המילה. דוגמה: <code>שלום*</code> מתאים לשלומות וכו'.</li>
+        <li><b><code><bdi dir="ltr">%word</bdi></code></b> — חלופות כתיב מלא/חסר: הוספת/הסרת ו/י. דוגמה: <code>%שלום</code> מוצא שלום, שלם.</li>
+        <li><b><code><bdi dir="ltr">(a/b)</bdi></code></b> — חלופות OR: מתאים לכל אחת מהאפשרויות. דוגמה: <code>(שלום/שלומות)</code> מתאים לשתיהן.</li>
+        <li><b><code><bdi dir="ltr">[N]</bdi></code></b> — מרווח של N מילים בין מונחים. דוגמה: <code>שלום [3] עולם</code> = עד 3 מילים ביניהם.</li>
+    </ul>
+    <p><b>טיפ:</b> ניתן לשלב מגדירים, למשל <code><bdi dir="ltr">#%word*</bdi></code> מפעיל הרחבת תחיליות + חלופות כתיב + תו כללי בסוף.</p>
+
+    <h3>אפשרויות משנה</h3>
+    <p>כאשר מצב זה פעיל, מופיעות ארבע תיבות סימון מתחת לשדה החיפוש:</p>
+    <ul>
+        <li><b>וריאנטים:</b> הפעלת התאמת חלופי אותיות (כמו במצב וריאנטים) על כל המונחים המורחבים.</li>
+        <li><b>ערבית-יהודית (JA):</b> הרחבת מילים עם ה"א הידיעה הערבית אל- (8 צורות למילה).</li>
+        <li><b>ריווח גמיש:</b> סובלנות לרווחים בתוך מילים — שימושי לשגיאות OCR שבהן נוספים רווחים באמצע מילה.</li>
+        <li><b>מרווח דו-כיווני:</b> חיפוש מונחים גם בסדר קדימה וגם בסדר הפוך.</li>
+    </ul>
+
+    <h3>בונה השאילתות</h3>
+    <p>בונה השאילתות מספק ממשק ויזואלי לבניית שאילתות בתחביר השו"ת:</p>
+    <ol>
+        <li>לחצו על כפתור <b>בונה השאילתות</b> (גלוי כאשר מצב שו"ת פעיל).</li>
+        <li>הוסיפו 2–4 <b>רכיבים</b>, כל אחד מייצג מונח חיפוש או קבוצה.</li>
+        <li>הזינו <b>מילה</b> אחת או יותר לכל רכיב (מספר מילים = חלופות OR).</li>
+        <li>הפעילו <b>מגדירים למילה</b>: תחילית (#), סיומת (#), תו כללי (*), כתיב מלא/חסר (%), שלילה.</li>
+        <li>הגדירו את ה<b>מרחק</b> (מספר מילים מרבי) בין רכיבים באמצעות הספינרים.</li>
+        <li>צפו ב<b>תצוגה מקדימה חיה</b> המתעדכנת בזמן שאתם משנים את השאילתה.</li>
+        <li>לחצו על <b>החל</b> כדי ליצור את שאילתת השו"ת ולהפעיל חיפוש.</li>
+    </ol>
+    <p><i>הערה:</i> הבונה הוא חד-כיווני — שינויים בבונה מעדכנים את שדה החיפוש, אך עריכת שדה הטקסט אינה מעדכנת את הבונה.</p>
+
+    <h3>מגן פיצוץ</h3>
+    <p>כאשר שאילתה מתרחבת מעבר ל-<b>500 מונחים</b>, המערכת מורידה אוטומטית אפשרויות כדי לשמור על מהירות החיפוש. סדר ההורדה: וריאנטים בסיסיים ← כבוי ← ערבית-יהודית כבוי ← כתיב מלא/חסר כבוי ← סיומות כבוי ← תחיליות כבוי. תופיע התראה המסבירה אילו אפשרויות כובו.</p>
+    <p><b>טיפ:</b> השתמשו בשאילתות ספציפיות יותר או בפחות מגדירים כדי להימנע מהפעלת המגן.</p>
     </div>
 
     <div class="section">

@@ -63,6 +63,7 @@ def _create_english_content():
             toc_items = [
                 ('intro', 'Introduction: How it Works'),
                 ('search', 'Search'),
+                ('responsa', 'Responsa-Style Search'),
                 ('parallels', 'Parallels Search'),
                 ('browse', 'Browse Manuscript'),
                 ('lists', 'Lists'),
@@ -116,6 +117,7 @@ The application fetches metadata and images from:
             ('Regex (/)', 'Advanced search for experienced users. Example: \\bא[א-ת]{3}\\b finds 4-letter words starting with Aleph. You can use your preferred AI engine to help build a regex pattern suited to your needs.'),
             ('Title ($)', 'Searches within the catalog titles of compositions.'),
             ('Shelfmark (#)', 'Fast search for shelfmarks (e.g., "T-S NS 13.15").'),
+            ('Responsa (R)', 'Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Familiar to Responsa Project users; easy to learn for newcomers. See [Responsa-Style Search](#help-responsa) below.'),
         ]
 
         with ui.column().classes('gap-3 mb-4'):
@@ -132,6 +134,86 @@ When using **Variants** mode, you can control the flexibility level:
   - ×1 = Very strict, fewer false positives
   - ×2 = Balanced (recommended)
   - ×3 = Lenient, may find more obscure matches
+        ''').style('color: var(--text-secondary);')
+
+    # === Responsa-Style Search ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-responsa"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('tune').classes('text-2xl text-primary')
+            h2('Responsa-Style Search', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+This mode uses a query syntax inspired by the **Bar-Ilan Responsa Project** (פרויקט השו"ת) — the widely-used
+database for searching Hebrew and Aramaic texts. If you are already familiar with the Responsa Project's search
+conventions, you will feel right at home. If not, the syntax is straightforward to learn and offers powerful
+tools for Hebrew and Judeo-Arabic manuscript searching: prefix/suffix expansion, wildcards, spelling variants,
+and proximity gaps.
+        ''').style('color: var(--text-secondary);').classes('mb-4')
+
+        h3('Activating Responsa Mode', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
+        ui.markdown('''
+- Select **Responsa (R)** from the search Mode dropdown, or
+- Type `R ` (R followed by a space) at the beginning of your query
+
+When Responsa mode is active, the standard prefix shortcuts (=, ?, ~, /, $, #) are disabled — the query uses Responsa syntax instead.
+        ''').style('color: var(--text-secondary);').classes('mb-4')
+
+        h3('Syntax Reference', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
+
+        syntax_data = [
+            ('#word', 'Prefix expansion — adds 24 Hebrew prefix forms (ו, ה, ב, כ, ל, מ, ש + compounds)', '#שלום finds ושלום, השלום, בשלום, etc.'),
+            ('word#', 'Suffix expansion — adds 25 Hebrew suffix forms (י, ו, ם, ן, ה, ך, כם, כן, etc.)', 'שלום# finds שלומם, שלומו, שלומך, etc.'),
+            ('#word#', 'Both prefix and suffix expansion', '#שלום# finds all prefix+suffix combinations'),
+            ('*word', 'Wildcard prefix — any characters before the word', '*שלום matches כבשלום, etc.'),
+            ('word*', 'Wildcard suffix — any characters after the word', 'שלום* matches שלומות, etc.'),
+            ('%word', 'Plene/defective variants — inserts/removes ו/י for spelling variants', '%שלום finds שלום, שלם'),
+            ('(a/b)', 'OR alternatives — matches any of the listed options', '(שלום/שלומות) matches either'),
+            ('[N]', 'Gap of N words between terms', 'שלום [3] עולם = up to 3 words between'),
+        ]
+
+        with ui.column().classes('gap-3 mb-4'):
+            for syntax, meaning, example in syntax_data:
+                with ui.column().classes('gap-1 p-3 rounded').style('background: var(--bg-secondary);'):
+                    with ui.row().classes('gap-2 items-center'):
+                        ui.label(syntax).classes('font-bold font-mono').style('color: var(--primary-700); min-width: 80px;')
+                        ui.label(meaning).style('color: var(--text-secondary);')
+                    ui.label(f'Example: {example}').classes('text-sm ml-4').style('color: var(--text-tertiary, #888);')
+
+        ui.markdown('**Tip:** Modifiers can be combined, e.g. `#%word*` applies prefix expansion + plene variants + wildcard suffix.').style('color: var(--text-secondary);').classes('mb-4')
+
+        h3('Sub-Options', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
+        ui.markdown('''
+When Responsa mode is active, four checkboxes appear below the search field:
+
+- **Variants**: Enable letter-variant matching (same as Variants mode) on all expanded terms
+- **Judeo-Arabic (JA)**: Expand words with the Arabic definite article אל- (8 forms per word)
+- **Flexible Spacing**: Tolerate spaces within words — useful for OCR errors where spaces are inserted mid-word
+- **Bidirectional Gap**: Search for terms in both forward and reverse order
+        ''').style('color: var(--text-secondary);').classes('mb-4')
+
+        h3('Query Builder', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
+        ui.markdown('''
+The Query Builder provides a visual interface for constructing Responsa queries:
+
+1. Click the **Query Builder** button (visible when Responsa mode is active)
+2. Add 2-4 **components**, each representing a search term or group
+3. Enter one or more **words** per component (multiple words = OR alternatives)
+4. Toggle **per-word modifiers**: prefix (#), suffix (#), wildcard (*), plene (%), negation
+5. Set the **distance** (max words) between components using the spinners
+6. Watch the **live preview** update as you modify the query
+7. Click **Apply** to generate the Responsa syntax and trigger a search
+
+*Note:* The builder is one-way — changes in the builder update the search field, but editing the text field does not update the builder.
+        ''').style('color: var(--text-secondary);').classes('mb-4')
+
+        h3('Explosion Guard', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
+        ui.markdown('''
+When a query expands beyond **500 terms**, the system automatically downgrades options to keep the search fast.
+The downgrade order is: variants basic → off → JA off → plene off → suffixes off → prefixes off.
+A warning notification will appear explaining which options were turned off.
+
+**Tip:** Use more specific queries or fewer modifiers to avoid hitting the guard.
         ''').style('color: var(--text-secondary);')
 
     # === Parallels Search (MAIN SECTION) ===
@@ -319,6 +401,7 @@ def _create_hebrew_content():
             toc_items = [
                 ('intro', 'הקדמה: איך זה עובד?'),
                 ('search', 'חיפוש'),
+                ('responsa', 'חיפוש בסגנון פרויקט השו"ת'),
                 ('parallels', 'חיפוש מקבילות'),
                 ('browse', 'עיון בכתב יד'),
                 ('lists', 'רשימות'),
@@ -371,6 +454,7 @@ def _create_hebrew_content():
             ('ביטוי רגולרי (/)', 'חיפוש מתקדם למשתמשים מנוסים. דוגמה: \\bא[א-ת]{3}\\b מוצא מילים בנות 4 אותיות המתחילות באל"ף. תוכלו להיעזר במנוע הבינה המלאכותית המועדף עליכם כדי לבנות ביטוי רגולרי המתאים לצרכיכם.'),
             ('כותרת ($)', 'חיפוש בתוך כותרות הקטלוג של חיבורים.'),
             ('מספר מדף (#)', 'חיפוש מהיר של מספרי מדף (למשל: "T-S NS 13.15").'),
+            ('רספונסה (R)', 'תחביר חיפוש בסגנון פרויקט השו"ת של אוניברסיטת בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. מוכר למשתמשי פרויקט השו"ת; קל ללמוד גם למי שלא מכיר. ראו [חיפוש בסגנון פרויקט השו"ת](#help-responsa) להלן.'),
         ]
 
         with ui.column().classes('gap-3 mb-4 w-full'):
@@ -387,6 +471,85 @@ def _create_hebrew_content():
   - ×1 = מחמיר מאוד, פחות חיובי שגוי
   - ×2 = מאוזן (מומלץ)
   - ×3 = מקל, עשוי למצוא התאמות נדירות יותר
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Responsa-Style Search ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-responsa"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('tune').classes('text-2xl text-primary')
+            h2('חיפוש בסגנון פרויקט השו"ת', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+מצב זה משתמש בתחביר חיפוש בהשראת **פרויקט השו"ת של אוניברסיטת בר-אילן** — מאגר המידע הנפוץ לחיפוש
+טקסטים בעברית ובארמית. אם אתם כבר מכירים את מוסכמות החיפוש של פרויקט השו"ת, תרגישו בבית.
+אם לא — התחביר פשוט ללמידה ומציע כלים עוצמתיים לחיפוש כתבי יד בעברית ובערבית-יהודית:
+הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        h3('הפעלת המצב', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        ui.markdown('''
+- בחרו **רספונסה (R)** מתפריט מצב החיפוש, או
+- הקלידו `R ` (R ואחריו רווח) בתחילת השאילתה
+
+כאשר מצב זה פעיל, קיצורי הדרך הרגילים (=, ?, ~, /, $, #) מושבתים — השאילתה משתמשת בתחביר השו"ת במקום.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        h3('מדריך תחביר', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
+
+        syntax_data = [
+            ('#word', 'הרחבת תחיליות — מוסיף 24 צורות תחילית עבריות (ו, ה, ב, כ, ל, מ, ש + צירופים)', '#שלום מוצא ושלום, השלום, בשלום וכו\''),
+            ('word#', 'הרחבת סיומות — מוסיף 25 צורות סיומת עבריות (י, ו, ם, ן, ה, ך, כם, כן וכו\')', 'שלום# מוצא שלומם, שלומו, שלומך וכו\''),
+            ('#word#', 'הרחבת תחיליות וסיומות יחד', '#שלום# מוצא את כל הצירופים'),
+            ('*word', 'תו כללי בתחילת מילה — כל תווים לפני המילה', '*שלום מתאים לכבשלום וכו\''),
+            ('word*', 'תו כללי בסוף מילה — כל תווים אחרי המילה', 'שלום* מתאים לשלומות וכו\''),
+            ('%word', 'חלופות כתיב מלא/חסר — הוספת/הסרת ו/י', '%שלום מוצא שלום, שלם'),
+            ('(a/b)', 'חלופות OR — מתאים לכל אחת מהאפשרויות', '(שלום/שלומות) מתאים לשתיהן'),
+            ('[N]', 'מרווח של N מילים בין מונחים', 'שלום [3] עולם = עד 3 מילים ביניהם'),
+        ]
+
+        with ui.column().classes('gap-3 mb-4 w-full'):
+            for syntax, meaning, example in syntax_data:
+                with ui.column().classes('gap-1 p-3 rounded w-full').style('background: var(--bg-secondary);'):
+                    with ui.row().classes('gap-2 items-center w-full').style('direction: rtl;'):
+                        ui.label(syntax).classes('font-bold font-mono').style('color: var(--primary-700); min-width: 80px; direction: ltr;')
+                        ui.label(meaning).style('color: var(--text-secondary);')
+                    ui.label(f'דוגמה: {example}').classes('text-sm').style('color: var(--text-tertiary, #888); direction: rtl; text-align: right;')
+
+        ui.markdown('**טיפ:** ניתן לשלב מגדירים, למשל `#%word*` מפעיל הרחבת תחיליות + חלופות כתיב + תו כללי בסוף.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        h3('אפשרויות משנה', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        ui.markdown('''
+כאשר מצב זה פעיל, מופיעות ארבע תיבות סימון מתחת לשדה החיפוש:
+
+- **וריאנטים**: הפעלת התאמת חלופי אותיות (כמו במצב וריאנטים) על כל המונחים המורחבים
+- **ערבית-יהודית (JA)**: הרחבת מילים עם ה"א הידיעה הערבית אל- (8 צורות למילה)
+- **ריווח גמיש**: סובלנות לרווחים בתוך מילים — שימושי לשגיאות OCR שבהן נוספים רווחים באמצע מילה
+- **מרווח דו-כיווני**: חיפוש מונחים גם בסדר קדימה וגם בסדר הפוך
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        h3('בונה השאילתות', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        ui.markdown('''
+בונה השאילתות מספק ממשק ויזואלי לבניית שאילתות בתחביר השו"ת:
+
+1. לחצו על כפתור **בונה השאילתות** (גלוי כאשר מצב שו"ת פעיל)
+2. הוסיפו 2-4 **רכיבים**, כל אחד מייצג מונח חיפוש או קבוצה
+3. הזינו **מילה** אחת או יותר לכל רכיב (מספר מילים = חלופות OR)
+4. הפעילו **מגדירים למילה**: תחילית (#), סיומת (#), תו כללי (*), כתיב מלא/חסר (%), שלילה
+5. הגדירו את ה**מרחק** (מספר מילים מרבי) בין רכיבים באמצעות הספינרים
+6. צפו ב**תצוגה מקדימה חיה** המתעדכנת בזמן שאתם משנים את השאילתה
+7. לחצו על **החל** כדי ליצור את שאילתת השו"ת ולהפעיל חיפוש
+
+*הערה:* הבונה הוא חד-כיווני — שינויים בבונה מעדכנים את שדה החיפוש, אך עריכת שדה הטקסט אינה מעדכנת את הבונה.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        h3('מגן פיצוץ', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        ui.markdown('''
+כאשר שאילתה מתרחבת מעבר ל-**500 מונחים**, המערכת מורידה אוטומטית אפשרויות כדי לשמור על מהירות החיפוש.
+סדר ההורדה: וריאנטים בסיסיים ← כבוי ← ערבית-יהודית כבוי ← כתיב מלא/חסר כבוי ← סיומות כבוי ← תחיליות כבוי.
+תופיע התראה המסבירה אילו אפשרויות כובו.
+
+**טיפ:** השתמשו בשאילתות ספציפיות יותר או בפחות מגדירים כדי להימנע מהפעלת המגן.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Parallels Search (MAIN SECTION) ===
