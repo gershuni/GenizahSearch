@@ -5,7 +5,7 @@
 - v1 External Data Integration - Phases 1-7 (shipped 2026-02-07)
 - v5.6.0 Desktop Parity & PGP Integration - Phases 8-12 (shipped 2026-02-09, Phase 13 deferred)
 - v5.7.0 Responsa Search - Phases 14-17 (shipped 2026-02-10)
-- v5.7.1 Cleanup & Polish - Phases 18-20 (in progress)
+- v5.7.1 Cleanup & Polish - Phases 18-20 (shipped 2026-02-11)
 
 ## Phases
 
@@ -59,7 +59,7 @@ Responsa Project-style advanced search with syntax parsing, JA expansion, tabula
 
 - [x] **Phase 18: Dead Code Removal** - Remove all AI Search artifacts from both apps, help docs, and core (completed 2026-02-11)
 - [x] **Phase 19: Search Normalization** - Diacritics and geresh/gershayim stripping with mark-tolerant highlighting (completed 2026-02-11)
-- [ ] **Phase 20: Test Suite Green** - Fix broken tests, delete obsolete files, achieve zero failures
+- [x] **Phase 20: Test Suite Green** - Fix broken tests, delete obsolete files, achieve zero failures (completed 2026-02-11)
 
 ## Phase Details
 
@@ -108,8 +108,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 20-01-PLAN.md -- Delete obsolete backend tests, fix export service + boundary search test expectations
-- [ ] 20-02-PLAN.md -- Fix responsa integration + shelfmark normalization test expectations, achieve full green suite
+- [x] 20-01-PLAN.md -- Delete obsolete backend tests, fix export service + boundary search test expectations
+- [x] 20-02-PLAN.md -- Fix responsa integration + shelfmark normalization test expectations, achieve full green suite
 
 ## Progress
 
@@ -123,7 +123,7 @@ Phases 18 and 19 are independent and can execute in either order. Phase 20 execu
 | 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
 | 18. Dead Code Removal | v5.7.1 | 2/2 | Complete | 2026-02-11 |
 | 19. Search Normalization | v5.7.1 | 3/3 | Complete | 2026-02-11 |
-| 20. Test Suite Green | v5.7.1 | 0/TBD | Not started | - |
+| 20. Test Suite Green | v5.7.1 | 2/2 | Complete | 2026-02-11 |
 
 ### Phase 21: Debug PGP integration
 
@@ -136,4 +136,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 19 gap closure complete*
+*Last updated: 2026-02-11 after Phase 20 complete — v5.7.1 milestone shipped*
