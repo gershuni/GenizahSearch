@@ -121,7 +121,7 @@ class TestTextProcessingUtilities:
         """Hebrew query should work correctly."""
         query = "שלום עולם"
         result = make_safe_filename(query)
-        assert result == "שלום עולם"
+        assert result == "שלום_עולם"
 
     def test_contains_any_term_positive(self):
         """Should return True when term is found."""
@@ -326,7 +326,7 @@ class TestExportService:
 
         assert isinstance(content, bytes)
         assert filename.endswith('.xlsx')
-        assert "test query" in filename
+        assert "test_query" in filename
 
         # Verify Excel content
         stream = io.BytesIO(content)
@@ -351,7 +351,7 @@ class TestExportService:
 
         assert isinstance(content, bytes)
         assert filename.endswith('.docx')
-        assert "test query" in filename
+        assert "test_query" in filename
 
     def test_export_search_results_word_empty_raises(self, export_service):
         """Should raise ValueError for empty results."""
@@ -419,7 +419,7 @@ class TestExportService:
         content, filename = export_service.export_browse_word(sample_browse_data)
 
         assert isinstance(content, bytes)
-        assert filename == "manuscript.docx"
+        assert filename == "T-S_12345.docx"
 
     def test_export_browse_word_with_pages(self, export_service):
         """Should handle multi-page browse data."""
@@ -536,7 +536,7 @@ class TestEdgeCases:
         ws = wb.active
 
         # Full text should be truncated
-        assert len(ws.cell(row=2, column=6).value) <= 32000
+        assert len(ws.cell(row=2, column=7).value) <= 32000
 
     def test_special_characters_in_filename(self):
         """Special characters in query should create safe filename."""
