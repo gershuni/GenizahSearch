@@ -97,3 +97,28 @@
 
 ---
 
+
+## v5.7.3 Pending Corrections Visibility (Shipped: 2026-02-11)
+
+**Delivered:** Added pending corrections visibility to both web and desktop apps — users can now see their own unapproved corrections as selectable versions in the version selector while browsing manuscripts, with visual distinction from approved corrections.
+
+**Phases completed:** 22-24 (3 plans total)
+
+**Key accomplishments:**
+- Shared pending corrections data layer (client-as-parameter pattern for both apps)
+- Web version selector shows pending corrections with amber/orange styling and schedule icon
+- Desktop pending corrections verified in Browse tab and Reading Desk (9 verification tests)
+- 20 new tests across corrections service, web UI, and desktop verification
+- Fixed NiceGUI timer parent_slot RuntimeError (bonus bugfix)
+
+**Stats:**
+- 26 files modified
+- +2,184 / -18 lines
+- 3 phases (22-24), 3 plans, 5 tasks
+- 1 day (Feb 11, 2026)
+- 6/6 requirements satisfied (audit passed)
+
+**Git tag:** v5.7.3
+
+---
+

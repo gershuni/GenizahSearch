@@ -43,17 +43,13 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Structural HTML section parser for PGP transcriptions (canvas-based, replaces regex) -- v5.7.2
 - Sections JSONB schema with language/direction metadata per source -- v5.7.2
 - Cross-app canvas section display with language-based translation ordering -- v5.7.2
+- Pending corrections visible as selectable version in web version selector (amber styling, schedule icon) -- v5.7.3
+- Pending corrections visible in desktop Browse tab and Reading Desk (emoji labels) -- v5.7.3
+- Shared corrections service with auth-filtered pending corrections (only submitter sees own) -- v5.7.3
 
 ### Active
 
-## Current Milestone: v5.7.3 Pending Corrections Visibility
-
-**Goal:** Let users see their own pending (unapproved) corrections as a selectable version in the version selector while browsing manuscripts.
-
-**Target features:**
-- User's pending corrections appear as a version source in the version selector
-- Only the submitter sees their own pending corrections (auth-aware)
-- Works in both web and desktop apps
+(No active requirements -- ready for next milestone)
 
 ### Out of Scope
 
@@ -75,20 +71,21 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ## Context
 
-### Current State (after v5.7.2)
+### Current State (after v5.7.3)
 
-**Shipped:** v5.7.2 Cleanup, Normalization & Sections (2026-02-11, git tag v5.7.2)
-- Dead AI code removed from both apps
-- Unicode search normalization (diacritics, geresh, apostrophes) with mark-tolerant highlighting
-- Full green test suite: 447 tests, 0 failures
-- Structural HTML section parser for PGP transcriptions
-- Sections JSONB schema with per-source language/direction metadata
+**Shipped:** v5.7.3 Pending Corrections Visibility (2026-02-11, git tag v5.7.3)
+- Shared pending corrections data layer with dual-app service pattern
+- Web version selector shows pending corrections with amber/orange styling
+- Desktop pending corrections verified in Browse tab and Reading Desk
+- Fixed NiceGUI timer parent_slot RuntimeError (ui.timer -> asyncio.call_later)
+- 467 tests passing, 5 skipped
 
 **Architecture:**
 - Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index)
 - Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index)
 - Shared: genizah_core.py (~8,200 lines -- search engine, metadata, variants, Responsa)
 - Shared: shared/document_service.py (PGP data access)
+- Shared: shared/corrections_service.py (corrections data access)
 
 **Data:**
 - documents: 35,839 records (full PGP corpus)
@@ -139,6 +136,9 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | stdlib HTMLParser for PGP canvases | No external dependency, sufficient for structured HTML | Good |
 | Sections JSONB per-source (not per-document) | Multi-scholar support, avoids cross-contamination | Good |
 | Author_slug matching for section import | Prevents broadcasting sections to wrong sources | Good |
+| Client-as-parameter for corrections service | Enables both web and desktop to pass their own authenticated client | Good |
+| Shared+shim pattern for corrections (like document_service) | Consistent import pattern, backward-compatible | Good |
+| asyncio.call_later replaces ui.timer for one-shot loads | Avoids NiceGUI parent_slot crash on container clear | Good |
 
 ---
-*Last updated: 2026-02-11 after starting v5.7.3 milestone*
+*Last updated: 2026-02-11 after v5.7.3 milestone*

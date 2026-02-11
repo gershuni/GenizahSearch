@@ -5,16 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 24 -- Desktop Pending Corrections Display
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 24 (3 of 3 in v5.7.3 milestone)
-Plan: 01 of 01 COMPLETE
-Status: Phase 24 complete -- v5.7.3 milestone complete, ready for tagging
-Last activity: 2026-02-11 -- Phase 24-01 executed (desktop pending corrections verification)
-
-Progress: [██████████] 100%
+Phase: None (between milestones)
+Plan: N/A
+Status: v5.7.3 shipped and tagged -- ready for next milestone
+Last activity: 2026-02-11 -- v5.7.3 milestone archived
 
 ## Performance Metrics
 
@@ -35,6 +33,7 @@ Progress: [██████████] 100%
 
 ## Milestone History
 
+- **v5.7.3 Pending Corrections Visibility** -- Shipped 2026-02-11 (git tag v5.7.3)
 - **v5.7.2 Cleanup, Normalization & Sections** -- Shipped 2026-02-11 (git tag v5.7.2)
 - **v5.7.0 Responsa Search** -- Shipped 2026-02-10 (git tag v5.7.0)
 - **v5.6.0 Desktop Parity** -- Shipped 2026-02-09 (git tag v5.6.0)
@@ -44,10 +43,7 @@ Progress: [██████████] 100%
 
 ### Decisions
 
-- Phase 22-01: Client passed as parameter (not imported internally) for cross-app flexibility
-- Phase 22-01: Followed document_service.py shared+shim pattern exactly
-- Phase 23-01: Pending section placed after approved corrections, amber/orange styling for visual distinction
-- Phase 24-01: File-read source verification instead of inspect.getsource on PyQt6 classes (avoids QApplication dependency)
+(Cleared at milestone boundary -- see PROJECT.md Key Decisions for history)
 
 ### Blockers/Concerns
 
@@ -71,6 +67,6 @@ Progress: [██████████] 100%
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 24-01-PLAN.md -- Phase 24 done, v5.7.3 milestone complete
+Stopped at: v5.7.3 milestone shipped and archived
 Resume file: None
-Notes: v5.7.3 milestone complete (3 phases: 22 data layer, 23 web, 24 desktop). Ready for tagging.
+Notes: All milestones through v5.7.3 complete. Ready for /gsd:new-milestone.
