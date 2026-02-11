@@ -57,6 +57,7 @@ Last activity: 2026-02-11 -- v5.7.3 milestone archived
 | 9 | Fix tabular query builder checkboxes invisible in dark mode | 2026-02-11 | 313a9db | [9-fix-tabular-query-builder-checkboxes-inv](./quick/9-fix-tabular-query-builder-checkboxes-inv/) |
 | 10 | Fix desktop community tab corrections SupabaseCorrectionsClient error | 2026-02-11 | 9ef0ac7 | [10-fix-desktop-community-tab-corrections-su](./quick/10-fix-desktop-community-tab-corrections-su/) |
 | 11 | Fix profile page showing 0 reputation and 0 corrections | 2026-02-11 | 575ba11 | [11-fix-profile-page-showing-0-reputation-an](./quick/11-fix-profile-page-showing-0-reputation-an/) |
+| 12 | Fix leaderboard 0 points and desktop contributor names | 2026-02-11 | f3cf437 | [12-fix-leaderboard-0-points-and-desktop-con](./quick/12-fix-leaderboard-0-points-and-desktop-con/) |
 
 ### Future Improvements
 
@@ -67,6 +68,6 @@ Last activity: 2026-02-11 -- v5.7.3 milestone archived
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: v5.7.3 milestone shipped and archived
+Stopped at: Completed quick-12 (leaderboard 0 points + desktop contributor names)
 Resume file: None
-Notes: All milestones through v5.7.3 complete. Ready for /gsd:new-milestone.
+Notes: Quick task 12 fixed leaderboard field names and desktop profile batch lookup.
