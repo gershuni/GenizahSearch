@@ -105,10 +105,11 @@ Plans:
   3. Excel column index test passes with correct assertion (1 test)
   4. Obsolete backend test files (test_api_flow.py, test_corrections_api.py, test_corrections_integration.py) no longer exist
   5. `pytest` runs to completion with zero failures across the entire test suite
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 20-01: TBD
+- [ ] 20-01-PLAN.md -- Delete obsolete backend tests, fix export service + boundary search test expectations
+- [ ] 20-02-PLAN.md -- Fix responsa integration + shelfmark normalization test expectations, achieve full green suite
 
 ## Progress
 
@@ -123,6 +124,15 @@ Phases 18 and 19 are independent and can execute in either order. Phase 20 execu
 | 18. Dead Code Removal | v5.7.1 | 2/2 | Complete | 2026-02-11 |
 | 19. Search Normalization | v5.7.1 | 3/3 | Complete | 2026-02-11 |
 | 20. Test Suite Green | v5.7.1 | 0/TBD | Not started | - |
+
+### Phase 21: Debug PGP integration
+
+**Goal:** [To be planned]
+**Depends on:** Phase 20
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 21 to break down)
 
 ---
 *Roadmap created: 2026-02-09*
