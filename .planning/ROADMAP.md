@@ -125,15 +125,15 @@ Phases 18 and 19 are independent and can execute in either order. Phase 20 execu
 | 19. Search Normalization | v5.7.1 | 3/3 | Complete | 2026-02-11 |
 | 20. Test Suite Green | v5.7.1 | 2/2 | Complete | 2026-02-11 |
 
-### Phase 21: Debug PGP integration
+### Phase 21: Debug PGP Integration
 
-**Goal:** [To be planned]
+**Goal:** Fix PGP transcription section parsing so recto/verso markers are correctly recognized and text is split across the right manuscript images
 **Depends on:** Phase 20
-**Plans:** 0 plans
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 21 to break down)
+- [ ] 21-01-PLAN.md -- TDD: Fix section parsing regex + add comprehensive marker variant tests
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after Phase 20 complete — v5.7.1 milestone shipped*
+*Last updated: 2026-02-11 after Phase 21 planning complete*
