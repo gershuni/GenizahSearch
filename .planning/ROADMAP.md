@@ -76,7 +76,7 @@ Shared corrections service, amber styling (web), emoji labels (desktop).
 
 **Milestone Goal:** Integrate FJMS scholarly metadata (domain classifications, scientific joins, catalog records) into GenizahSearch via a SQLite sidecar database, enabling subject-based filtering and enriched manuscript display in both apps.
 
-- [ ] **Phase 25: Data Infrastructure** - Export FIST.db into SQLite sidecar with shared service layer
+- [x] **Phase 25: Data Infrastructure** - Export FIST.db into SQLite sidecar with shared service layer (completed 2026-02-12)
 - [ ] **Phase 26: Scientific Joins** - FJMS join groups with scholar attribution in both apps
 - [ ] **Phase 27: Domain Classifications** - Domain badges and search filtering in both apps
 - [ ] **Phase 28: Catalog Enrichment** - FJMS titles, authors, dates on browse page in both apps
@@ -96,8 +96,8 @@ Shared corrections service, amber styling (web), emoji labels (desktop).
 **Plans**: 2 plans in 2 waves
 
 Plans:
-- [ ] 25-01-PLAN.md -- Export script and sidecar schema (Wave 1)
-- [ ] 25-02-PLAN.md -- Shared FjmsService class with web shim and tests (Wave 2, depends on 25-01)
+- [x] 25-01-PLAN.md -- Export script and sidecar schema (Wave 1)
+- [x] 25-02-PLAN.md -- Shared FjmsService class with web shim and tests (Wave 2, depends on 25-01)
 
 ### Phase 26: Scientific Joins
 **Goal**: Users can see scholarly join groups with attribution and navigate between related fragments
@@ -156,11 +156,11 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
-| 25. Data Infrastructure | v5.8.0 | 0/2 | Not started | - |
+| 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
 | 26. Scientific Joins | v5.8.0 | 0/1 | Not started | - |
 | 27. Domain Classifications | v5.8.0 | 0/2 | Not started | - |
 | 28. Catalog Enrichment | v5.8.0 | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-12 after v5.8.0 roadmap created*
+*Last updated: 2026-02-12 after Phase 25 completed*
