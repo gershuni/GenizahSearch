@@ -5,14 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.7.3 Pending Corrections Visibility
+**Current focus:** Phase 22 -- Pending Corrections Data Layer
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-11 — Milestone v5.7.3 started
+Phase: 22 (1 of 3 in v5.7.3 milestone)
+Plan: --
+Status: Ready to plan
+Last activity: 2026-02-11 -- v5.7.3 roadmap created
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -29,6 +31,7 @@ Last activity: 2026-02-11 — Milestone v5.7.3 started
 | v5.6.0 | 8-12 | 25 | ~134 min |
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
+| v5.7.3 | 22-24 | TBD | -- |
 
 ## Milestone History
 
@@ -60,12 +63,11 @@ Last activity: 2026-02-11 — Milestone v5.7.3 started
 
 - Search WITH JA diacritical marks (intentional marked-letter matching)
 - NLI joins import (~424K PartOf relationships)
-- Show user's pending corrections in browse page
 - Transcription search (Phase 13, needs server-side index architecture)
 
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: v5.7.2 milestone archived
+Stopped at: v5.7.3 roadmap created, Phase 22 ready to plan
 Resume file: None
-Notes: All 4 milestones complete. Next step: /gsd:new-milestone for next development cycle.
+Notes: 3-phase milestone. Phase 22 (data layer) -> 23 (web) -> 24 (desktop). Next: /gsd:plan-phase 22
