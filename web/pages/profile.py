@@ -8,7 +8,7 @@ Edit user profile details and change password.
 from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, create_login_dialog
-from web.supabase_client import update_profile, get_user_client
+from web.supabase_client import update_profile, get_user_client, get_user_corrections_count
 from web.components.typography import h1, h2, h3
 
 
@@ -178,11 +178,13 @@ async def create_profile_page():
 
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Reputation')).classes('text-sm').style('color: var(--text-muted);')
-                    ui.label(str(profile.get('reputation_score', 0))).classes('font-medium')
+                    ui.label(str(profile.get('reputation', 0))).classes('font-medium')
 
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Corrections')).classes('text-sm').style('color: var(--text-muted);')
-                    ui.label(str(profile.get('corrections_count', 0))).classes('font-medium')
+                    user_id = GlobalAuthState.get_user_id()
+                    corrections_count = get_user_corrections_count(user_id) if user_id else 0
+                    ui.label(str(corrections_count)).classes('font-medium')
 
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Member Since')).classes('text-sm').style('color: var(--text-muted);')

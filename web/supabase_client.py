@@ -336,6 +336,16 @@ def get_profile(user_id: str) -> Optional[Dict]:
         return None
 
 
+def get_user_corrections_count(user_id: str) -> int:
+    """Get count of approved corrections for a user."""
+    try:
+        client = get_client()
+        response = client.table('corrections').select('id', count='exact').eq('author_id', user_id).eq('status', 'approved').execute()
+        return response.count if response.count is not None else 0
+    except Exception:
+        return 0
+
+
 def update_profile(user_id: str, data: Dict) -> Dict:
     """Update a user's profile."""
     try:
