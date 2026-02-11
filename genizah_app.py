@@ -6101,18 +6101,25 @@ class GenizahGUI(QMainWindow):
             combo.addItem("-- Translations --", {"source": "header"})
             combo.model().item(combo.count() - 1).setEnabled(False)
 
-            for trans in translations:
-                scholar = trans.get('source_scholar', 'Unknown')
-                language = trans.get('language', '')
-                label = f"  {language} - {scholar}" if language else f"  {scholar}"
-                combo.addItem(label, {
-                    "source": "pgp_translation",
-                    "content": trans.get('content', ''),
-                    "scholar": scholar,
-                    "language": language,
-                    "pgpid": trans.get('pgpid'),
-                    "source_id": trans.get('id')
-                })
+            # Group translations by language (Hebrew first, English second, others last)
+            # Matches web app grouping: web/components/version_selector.py:256-264
+            hebrew_trans = [t for t in translations if t.get('language') == 'Hebrew']
+            english_trans = [t for t in translations if t.get('language') == 'English']
+            other_trans = [t for t in translations if t.get('language') not in ('Hebrew', 'English')]
+
+            for trans_group in [hebrew_trans, english_trans, other_trans]:
+                for trans in trans_group:
+                    scholar = trans.get('source_scholar', 'Unknown')
+                    language = trans.get('language', '')
+                    label = f"  {language} - {scholar}" if language else f"  {scholar}"
+                    combo.addItem(label, {
+                        "source": "pgp_translation",
+                        "content": trans.get('content', ''),
+                        "scholar": scholar,
+                        "language": language,
+                        "pgpid": trans.get('pgpid'),
+                        "source_id": trans.get('id')
+                    })
 
         # === Visual divider before HTR ===
         combo.addItem("─────────────", {"source": "header"})
