@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-11)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Debug PGP Integration -- Phase 21 (Plan 1 of 3 complete)
+**Current focus:** Debug PGP Integration -- Phase 21 COMPLETE (all 3 plans done)
 
 ## Current Position
 
-Phase: 21 (Debug PGP Integration)
-Plan: 1 of 3 in current phase -- COMPLETE
-Status: Plan 21-01 complete (HTML parser + regex fix, 28 new tests, 438 total passing)
-Last activity: 2026-02-11 - Completed quick task 11: Fix profile page showing 0 reputation and 0 corrections
+Phase: 21 (Debug PGP Integration) -- COMPLETE
+Plan: 3 of 3 in current phase -- COMPLETE
+Status: Phase 21 complete (HTML parser, import script, display pipeline wired, 446 tests passing)
+Last activity: 2026-02-11 - Completed plan 21-03: Display pipeline wiring with structured sections
 
-Progress: [███-------] 33% (plan 1 of 3 in phase 21)
+Progress: [██████████] 100% (plan 3 of 3 in phase 21)
 
 ## Performance Metrics
 
@@ -42,6 +42,8 @@ Progress: [███-------] 33% (plan 1 of 3 in phase 21)
 
 ### Decisions
 
+- [21-03] Renamed local variable 'sections' to 'parsed' in regex fallback path to avoid shadowing new parameter
+- [21-03] Empty list sections=[] treated same as None (falsy) for regex fallback
 - [21-01] Used explicit [Rr]ecto/[Vv]erso casing instead of re.IGNORECASE to avoid false positives on content lines
 - [21-01] Structured regex alternation for marker modifiers instead of broad catch-all pattern
 - [21-01] HTML entity &hellip; decodes to Unicode U+2026, not ASCII dots
@@ -86,6 +88,6 @@ Progress: [███-------] 33% (plan 1 of 3 in phase 21)
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed quick-11 (profile page reputation/corrections fix)
+Stopped at: Completed 21-03-PLAN.md (Phase 21 complete)
 Resume file: None
-Notes: Quick task 11 complete (3 bugs fixed: wrong field name, missing count query, missing reputation increment). Next: 21-02 (import script).
+Notes: Phase 21 complete. All 3 plans done: HTML parser (01), import script (02), display pipeline (03). 446 tests passing. Both apps use canvas-based sections when available.
