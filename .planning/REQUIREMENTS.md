@@ -1,0 +1,98 @@
+# Requirements: GenizahSearch
+
+**Defined:** 2026-02-12
+**Core Value:** Researchers can find what they need in the Genizah corpus
+
+## v5.8.0 Requirements
+
+Requirements for FJMS Integration milestone. Each maps to roadmap phases.
+
+### Data Infrastructure
+
+- [ ] **DATA-01**: Export script generates `fjms_enrichment.db` from FIST.db with domains, joins, and catalog tables
+- [ ] **DATA-02**: SQLite sidecar includes FTS5 virtual table for catalog descriptions (UI deferred)
+- [ ] **DATA-03**: Meta table with version number for sidecar update management
+- [ ] **DATA-04**: Shared FjmsService class accessible by both web and desktop apps
+- [ ] **DATA-05**: Web app uses thread-safe SQLite connection (read-only)
+
+### Scientific Joins
+
+- [ ] **JOIN-01**: User can see FJMS join group members in the Related Fragments panel
+- [ ] **JOIN-02**: Join display includes scholar attribution (who identified the join)
+- [ ] **JOIN-03**: Join display includes join type (Physical Join, Codex Join, etc.)
+- [ ] **JOIN-04**: User can navigate to other fragments in a join group
+- [ ] **JOIN-05**: FJMS joins integrated in Related Fragments panel in both apps
+
+### Domain Classifications
+
+- [ ] **DOM-01**: User can see domain classification badges on the browse page
+- [ ] **DOM-02**: User can filter search results by domain (e.g., Piyyut, Letters, Bible)
+- [ ] **DOM-03**: Domain hierarchy preserved (parent/child domains displayed)
+- [ ] **DOM-04**: Domain display and filtering works in both web and desktop apps
+
+### Catalog Enrichment
+
+- [ ] **CAT-01**: User can see FJMS catalog title (Hebrew/English) on the browse page
+- [ ] **CAT-02**: User can see author information from FJMS catalog
+- [ ] **CAT-03**: User can see copy date and place from FJMS catalog
+- [ ] **CAT-04**: User can see FJMS description alongside PGP description
+- [ ] **CAT-05**: Catalog enrichment displayed in both web and desktop apps
+
+## Future Requirements
+
+### Catalog Search (FTS5 UI)
+
+- **CATSEARCH-01**: User can search FJMS catalog descriptions via FTS5
+- **CATSEARCH-02**: Catalog search integrated as a search mode in both apps
+
+### NLI CrossReference
+
+- **NLI-01**: Import NLI crossreference relationships (PartOf, BifolioWith)
+- **NLI-02**: Material type display (Paper/Parchment)
+- **NLI-03**: FGP image ID linking
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| FTS5 catalog search UI | Schema included, UI deferred to future milestone |
+| NLI crossreference integration | Separate data source, defer to future milestone |
+| FJMS full texts (65K transcriptions) | Storage/deduplication complexity, lower priority |
+| FJMS bibliography (733K references) | Large volume, unclear UX, defer |
+| Migrating libraries.csv to SQLite | High refactoring risk, no user-visible benefit yet |
+| PGP people/places integration | Complexity too high, existing out-of-scope item |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DATA-01 | Pending | Pending |
+| DATA-02 | Pending | Pending |
+| DATA-03 | Pending | Pending |
+| DATA-04 | Pending | Pending |
+| DATA-05 | Pending | Pending |
+| JOIN-01 | Pending | Pending |
+| JOIN-02 | Pending | Pending |
+| JOIN-03 | Pending | Pending |
+| JOIN-04 | Pending | Pending |
+| JOIN-05 | Pending | Pending |
+| DOM-01 | Pending | Pending |
+| DOM-02 | Pending | Pending |
+| DOM-03 | Pending | Pending |
+| DOM-04 | Pending | Pending |
+| CAT-01 | Pending | Pending |
+| CAT-02 | Pending | Pending |
+| CAT-03 | Pending | Pending |
+| CAT-04 | Pending | Pending |
+| CAT-05 | Pending | Pending |
+
+**Coverage:**
+- v5.8.0 requirements: 18 total
+- Mapped to phases: 0
+- Unmapped: 18
+
+---
+*Requirements defined: 2026-02-12*
+*Last updated: 2026-02-12 after initial definition*
