@@ -13,6 +13,8 @@ from nicegui import ui
 from web.translations import tr
 from web.supabase_client import get_corrections
 from web.auth_state import GlobalAuthState
+from web.corrections_service import get_pending_corrections_for_page
+from web.supabase_client import get_user_client
 from typing import Optional, Callable, List, Dict, Any
 
 
@@ -199,6 +201,21 @@ def create_version_selector(
                 # Load corrections from Supabase
                 corrections = fetch_document_corrections(document_id, page_number)
 
+                # Fetch pending corrections for logged-in user
+                pending_corrections = []
+                if GlobalAuthState.is_logged_in():
+                    try:
+                        user_client = get_user_client()
+                        user_id = GlobalAuthState.get_user_id()
+                        pending_corrections = get_pending_corrections_for_page(
+                            client=user_client,
+                            sys_id=document_id,
+                            page_number=page_number,
+                            user_id=user_id
+                        )
+                    except Exception as e:
+                        print(f"Error fetching pending corrections: {e}")
+
                 # Rebuild the menu
                 menu.clear()
                 with menu:
@@ -359,7 +376,45 @@ def create_version_selector(
                                     ui.label(author_name).classes('font-medium')
                                     if date:
                                         ui.label(str(date)[:10]).classes('text-xs').style('color: var(--text-muted);')
-                    else:
+
+                    # Pending corrections (only for logged-in user)
+                    if pending_corrections:
+                        ui.separator()
+                        ui.label(tr('My Pending Corrections')).classes(
+                            'text-xs px-4 py-1 font-semibold'
+                        ).style('color: var(--q-warning);')
+
+                        for pc in pending_corrections:
+                            status_label = pc.get('status', 'pending').replace('_', ' ').title()
+                            date = pc.get('created_at', '')
+
+                            def make_select_pending(c=pc, status=status_label):
+                                def select_pending():
+                                    version_label.text = f"{tr('Pending')} ({status})"
+                                    version_label.style('color: var(--q-warning);')
+                                    menu.close()
+                                    if on_version_change:
+                                        on_version_change(c.get('corrected_text', ''), {
+                                            'source': 'pending',
+                                            'correction_id': c.get('id'),
+                                            'status': c.get('status'),
+                                            'is_pending': True
+                                        })
+                                return select_pending
+
+                            with ui.menu_item(on_click=make_select_pending()).classes('text-sm'):
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.icon('schedule', size='xs').classes('text-amber-600')
+                                    with ui.column().classes('gap-0'):
+                                        ui.label(f"{tr('Pending')} ({status_label})").classes(
+                                            'text-sm text-amber-700'
+                                        )
+                                        if date:
+                                            ui.label(str(date)[:10]).classes(
+                                                'text-xs'
+                                            ).style('color: var(--text-muted);')
+
+                    if not corrections and not pending_corrections:
                         ui.separator()
                         ui.menu_item(tr('No other versions')).props('disable').classes('text-sm')
 
