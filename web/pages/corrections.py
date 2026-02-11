@@ -76,7 +76,7 @@ async def create_corrections_page():
                         with ui.column().classes('gap-0'):
                             # Changed to H3
                             h3(user.get('full_name', user.get('username', '')), classes='font-bold')
-                            ui.label(f"{tr('Role')}: {user.get('role', 'contributor').title()} | {tr('Reputation')}: {user.get('reputation_score', 0)}").classes('text-sm').style('color: var(--text-secondary);')
+                            ui.label(f"{tr('Role')}: {user.get('role', 'contributor').title()} | {tr('Reputation')}: {user.get('reputation', 0)}").classes('text-sm').style('color: var(--text-secondary);')
 
                     def handle_logout():
                         do_logout()
@@ -647,6 +647,12 @@ async def create_corrections_page():
                 client = get_client()
                 response = client.table('profiles').select('*').order('reputation', desc=True).limit(20).execute()
                 users = response.data or []
+                # Batch-fetch correction counts for leaderboard users
+                if users:
+                    from web.supabase_client import get_user_corrections_count
+                    for u in users:
+                        if u.get('id'):
+                            u['_corrections_count'] = get_user_corrections_count(u['id'])
             except Exception as e:
                 ui.label(f"{tr('Error loading leaderboard')}: {str(e)}").style('color: var(--danger);')
                 return
@@ -674,8 +680,8 @@ async def create_corrections_page():
                                     ui.label(user.get('full_name') or user.get('username', 'Unknown')).classes('font-medium')
 
                                 with ui.row().classes('items-center gap-4'):
-                                    ui.label(f"{user.get('corrections_count', 0)} {tr('corrections')}").style('color: var(--text-secondary);')
-                                    ui.badge(f"{user.get('reputation_score', 0)} pts").props('color=primary')
+                                    ui.label(f"{user.get('_corrections_count', 0)} {tr('corrections')}").style('color: var(--text-secondary);')
+                                    ui.badge(f"{user.get('reputation', 0)} pts").props('color=primary')
 
         # Initial render
         refresh_page()
