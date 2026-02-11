@@ -3,7 +3,7 @@
 # gui_threads.py
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
-from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, AIManager
+from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager
 
 class IndexerThread(QThread):
     """Build or refresh the index without blocking the UI."""
@@ -276,20 +276,9 @@ class ShelfmarkLoaderThread(QThread):
             print(f"Error in background loader: {e}")
             self.finished_signal.emit(False)
 
-class AIWorkerThread(QThread):
-    """Send a prompt to the AI manager in the background."""
-
-    finished_signal = pyqtSignal(dict, str)
-    def __init__(self, ai_mgr, prompt):
-        super().__init__()
-        self.ai_mgr = ai_mgr; self.prompt = prompt
-    def run(self):
-        data, err = self.ai_mgr.send_prompt(self.prompt)
-        self.finished_signal.emit(data if data else {}, err if err else "")
-
 class StartupThread(QThread):
     """Initialize heavy components in the background."""
-    finished_signal = pyqtSignal(object, object, object, object, object)
+    finished_signal = pyqtSignal(object, object, object, object)
     error_signal = pyqtSignal(str)
 
     def run(self):
@@ -298,12 +287,11 @@ class StartupThread(QThread):
             var_mgr = VariantManager()
             searcher = SearchEngine(meta_mgr, var_mgr)
             indexer = Indexer(meta_mgr)
-            ai_mgr = AIManager()
 
             # Start loading heavy resources in background
             meta_mgr.start_background_loading()
 
-            self.finished_signal.emit(meta_mgr, var_mgr, searcher, indexer, ai_mgr)
+            self.finished_signal.emit(meta_mgr, var_mgr, searcher, indexer)
         except Exception as e:
             self.error_signal.emit(str(e))
 

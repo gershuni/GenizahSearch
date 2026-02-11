@@ -373,12 +373,6 @@ def natural_sort_key(text):
 
 
 try:
-    from google import genai
-    HAS_GENAI = True
-except ImportError:
-    HAS_GENAI = False
-    
-try:
     import tantivy
 except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
@@ -1874,12 +1868,6 @@ def configure_lab_logger():
 
 LAB_LOGGER = configure_lab_logger()
 
-AI_PROVIDER_ENDPOINTS = {
-    "Google Gemini": "https://generativelanguage.googleapis.com",
-    "OpenAI": "https://api.openai.com/v1/models",
-    "Anthropic Claude": "https://api.anthropic.com/v1/models",
-}
-
 # Paths resolved through PyInstaller-friendly helper
 Config.HELP_FILE = Config.resource_path("Help.html")
 
@@ -1903,7 +1891,7 @@ def save_language(lang):
         LOGGER.error("Failed to save language preference to %s: %s", Config.LANGUAGE_FILE, e)
 
 def load_app_config():
-    """Load general app configuration (non-AI)."""
+    """Load general app configuration."""
     cfg = {}
     if os.path.exists(Config.CONFIG_FILE):
         try:
@@ -1937,147 +1925,6 @@ try:
     import tantivy
 except ImportError:
     raise ImportError(tr("Tantivy library missing. Please install it."))
-
-# ==============================================================================
-#  AI MANAGER
-# ==============================================================================
-class AIManager:
-    """Manage AI configuration (Provider, Model, Key) and prompt sessions."""
-    def __init__(self):
-        self.provider = "Google Gemini"
-        self.model_name = "gemini-3-flash-preview"
-        self.api_key = ""
-        self.chat = None
-        self._genai_client = None
-
-        # Ensure dir exists
-        if not os.path.exists(Config.INDEX_DIR):
-            try:
-                os.makedirs(Config.INDEX_DIR)
-            except Exception as e:
-                LOGGER.error("Failed to create index directory for AI config at %s: %s", Config.INDEX_DIR, e)
-
-        if os.path.exists(Config.CONFIG_FILE):
-            try:
-                with open(Config.CONFIG_FILE, 'rb') as f:
-                    cfg = pickle.load(f)
-                    # Support legacy key
-                    if 'gemini_key' in cfg and 'api_key' not in cfg:
-                        self.api_key = cfg.get('gemini_key', '')
-                    else:
-                        self.api_key = cfg.get('api_key', '')
-                        self.provider = cfg.get('provider', 'Google Gemini')
-                        self.model_name = cfg.get('model_name', 'gemini-3-flash-preview')
-            except Exception as e:
-                LOGGER.warning("Failed to load AI configuration from %s: %s", Config.CONFIG_FILE, e)
-
-    def save_config(self, provider, model_name, key):
-        self.provider = provider
-        self.model_name = model_name
-        self.api_key = key.strip()
-
-        if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
-        with open(Config.CONFIG_FILE, 'wb') as f:
-            pickle.dump({
-                'provider': self.provider,
-                'model_name': self.model_name,
-                'api_key': self.api_key
-            }, f)
-        # Reset session
-        self.chat = None
-
-    def _get_sys_inst(self):
-        base_inst = """You are an expert in Regex for Hebrew manuscripts (Cairo Genizah).
-            Your goal is to help the user construct Python Regex patterns.
-            
-            IMPORTANT RULES:
-            1. Do NOT use \\w. Instead, use [\\u0590-\\u05FF"] to match Hebrew letters and Geresh.
-            2. For "word starting with X", use \\bX...
-            3. For spaces, use \\s+.
-            4. Output format MUST be strictly JSON: {"regex": "THE_PATTERN", "explanation": "Brief explanation"}.
-            5. Do not include markdown formatting like ```json.
-            """
-
-        if CURRENT_LANG == 'he':
-            base_inst += "\n\nIMPORTANT: Provide the 'explanation' field in Hebrew."
-
-        return base_inst
-
-    def init_session(self):
-        if not self.api_key: return "Error: Missing API Key."
-
-        if self.provider == "Google Gemini":
-            if not HAS_GENAI: return "Error: 'google-genai' library missing."
-            try:
-                self._genai_client = genai.Client(api_key=self.api_key)
-                self.chat = self._genai_client.chats.create(
-                    model=self.model_name,
-                    history=[
-                        {"role": "user", "parts": [{"text": self._get_sys_inst()}]},
-                        {"role": "model", "parts": [{"text": "Understood. I will provide JSON output with robust Hebrew regex."}]}
-                    ]
-                )
-                return None
-            except Exception as e:
-                return str(e)
-
-        return None # Other providers are stateless or handled in send_prompt
-
-    def send_prompt(self, user_text):
-        if self.provider == "Google Gemini" and not self.chat:
-            err = self.init_session()
-            if err: return None, err
-            
-        try:
-            response_text = ""
-
-            if self.provider == "Google Gemini":
-                response = self.chat.send_message(user_text)
-                response_text = response.text
-
-            elif self.provider == "OpenAI":
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}"
-                }
-                payload = {
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system", "content": self._get_sys_inst()},
-                        {"role": "user", "content": user_text}
-                    ],
-                    "response_format": { "type": "json_object" }
-                }
-                r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
-                if r.status_code != 200:
-                    return None, f"OpenAI Error {r.status_code}: {r.text}"
-                res_json = r.json()
-                response_text = res_json['choices'][0]['message']['content']
-
-            elif self.provider == "Anthropic Claude":
-                headers = {
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                }
-                payload = {
-                    "model": self.model_name,
-                    "max_tokens": 1024,
-                    "messages": [
-                        {"role": "user", "content": self._get_sys_inst() + "\n\n" + user_text}
-                    ]
-                }
-                r = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=20)
-                if r.status_code != 200:
-                    return None, f"Claude Error {r.status_code}: {r.text}"
-                res_json = r.json()
-                response_text = res_json['content'][0]['text']
-
-            clean = response_text.strip().replace('```json', '').replace('```', '').strip()
-            data = json.loads(clean)
-            return data, None
-        except Exception as e:
-            return None, str(e)
 
 # ==============================================================================
 #  VARIANTS LOGIC
