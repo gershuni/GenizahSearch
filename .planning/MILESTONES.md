@@ -71,3 +71,29 @@
 
 ---
 
+
+## v5.7.2 Cleanup, Normalization & Sections (Shipped: 2026-02-11)
+
+**Delivered:** Removed dead AI code, added Unicode search normalization (diacritics + apostrophe variants), fixed all pre-existing test failures, and rebuilt PGP transcription import with structural HTML parsing for correct recto/verso section display.
+
+**Phases completed:** 18-21 (11 plans total, including 2 gap closure plans)
+
+**Key accomplishments:**
+- Purged all AI Search artifacts from both apps (314+ lines, google-genai dependency removed)
+- Unicode search normalization: combining marks, geresh, and apostrophe variants stripped at query time with mark-tolerant highlighting
+- Full green test suite: fixed 17 pre-existing failures, deleted 3 obsolete backend tests, 447 tests passing
+- Structural HTML section parser for PGP transcriptions (replaces fragile regex with canvas-based parsing)
+- Sections JSONB schema migration with language/direction metadata for structured section display
+- Cross-app display parity for canvas sections with language-based translation ordering
+
+**Stats:**
+- 75 files modified
+- +8,799 / -1,546 lines
+- 4 phases (18-21), 11 plans, 83 commits
+- 1 day (Feb 10-11, 2026)
+- 13/13 v5.7.1 requirements satisfied + Phase 21 bonus
+
+**Git tag:** v5.7.2
+
+---
+

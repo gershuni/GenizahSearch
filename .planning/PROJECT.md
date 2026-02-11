@@ -36,16 +36,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Desktop UI: Responsa as combo mode with sub-options, syntax legend -- v5.7.0
 - Tabular query builder (web dialog + desktop QDialog) with 2-4 components, per-word modifiers -- v5.7.0
 - Cross-app parity: identical Responsa results in web and desktop (221 tests) -- v5.7.0
+- AI Search artifacts removed from both apps (desktop + web + help docs + core) -- v5.7.2
+- Unicode search normalization: combining marks, geresh, apostrophe variants stripped at query time -- v5.7.2
+- Mark-tolerant search highlighting (matches through interleaved combining marks) -- v5.7.2
+- Full green test suite: 447 tests passing, 0 failures -- v5.7.2
+- Structural HTML section parser for PGP transcriptions (canvas-based, replaces regex) -- v5.7.2
+- Sections JSONB schema with language/direction metadata per source -- v5.7.2
+- Cross-app canvas section display with language-based translation ordering -- v5.7.2
 
 ### Active
 
-#### Current Milestone: v5.7.1 Cleanup & Polish
-
-**Goal:** Remove dead code, fix diacritics normalization for JA search, and resolve all pre-existing test failures.
-
-- [ ] Remove AI Search component (desktop + web + help docs)
-- [ ] JA diacritics normalization (combining marks + geresh/apostrophes stripped, mark-tolerant highlighting)
-- [ ] Fix/delete all pre-existing test failures (export filenames, boundary search, obsolete backend tests)
+(No active milestone -- start next with `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -67,31 +68,24 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ## Context
 
-### Current State (after v5.7.0)
+### Current State (after v5.7.2)
 
-**Shipped:** v5.7.0 Responsa Search (2026-02-10, git tag v5.7.0)
-- Responsa Project-style advanced search in both apps
-- Full syntax: `#`prefix, suffix`#`, `*`wildcards, `%`plene/defective, `(a/b)` OR, `[N]` gaps
-- Tabular query builder with 2-4 components and per-word modifiers
-- 221 automated Responsa tests, 25/25 requirements satisfied
-- Explosion guard with 6-step cascade
+**Shipped:** v5.7.2 Cleanup, Normalization & Sections (2026-02-11, git tag v5.7.2)
+- Dead AI code removed from both apps
+- Unicode search normalization (diacritics, geresh, apostrophes) with mark-tolerant highlighting
+- Full green test suite: 447 tests, 0 failures
+- Structural HTML section parser for PGP transcriptions
+- Sections JSONB schema with per-source language/direction metadata
 
 **Architecture:**
 - Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index)
 - Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index)
-- Shared: genizah_core.py (~8,233 lines -- search engine, metadata, variants, Responsa)
+- Shared: genizah_core.py (~8,200 lines -- search engine, metadata, variants, Responsa)
 - Shared: shared/document_service.py (PGP data access)
-
-**Codebase:**
-- genizah_app.py: ~18,454 lines (desktop)
-- web/pages/search.py: ~3,204 lines (web search)
-- genizah_core.py: ~8,233 lines (shared core)
-- gui_threads.py: ~616 lines (desktop async)
-- Total core: ~30,507 lines Python
 
 **Data:**
 - documents: 35,839 records (full PGP corpus)
-- document_sources: 9,364 (7,664 editions + 1,696 translations)
+- document_sources: 9,364 (7,664 editions + 1,696 translations) with sections JSONB
 - document_footnotes: 22,757 records
 - document_fragments: 36,155 links
 - manuscripts (libraries.csv): ~217,000 records
@@ -133,6 +127,11 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Desktop QDialog for tabular | Avoids crowding, follows existing patterns | Good |
 | One-way tabular -> text sync | Complexity-appropriate for MVP | Good |
 | Phase 13 deferred | Transcription index build too slow for desktop | Revisit |
+| Query-time diacritics stripping (not re-index) | No index rebuild needed, sufficient for Genizah text | Good |
+| Regex mode exempt from normalization | Users control their own regex patterns | Good |
+| stdlib HTMLParser for PGP canvases | No external dependency, sufficient for structured HTML | Good |
+| Sections JSONB per-source (not per-document) | Multi-scholar support, avoids cross-contamination | Good |
+| Author_slug matching for section import | Prevents broadcasting sections to wrong sources | Good |
 
 ---
-*Last updated: 2026-02-11 after v5.7.1 milestone start*
+*Last updated: 2026-02-11 after v5.7.2 milestone*
