@@ -348,6 +348,19 @@ COMMON_STYLES = '''
         background: var(--bg-card) !important;
     }
 
+    /* Dark Theme Checkbox Fixes */
+    [data-theme="dark"] .q-checkbox__inner {
+        color: var(--text-secondary) !important;
+    }
+
+    [data-theme="dark"] .q-checkbox__inner--truthy {
+        color: var(--primary-400) !important;
+    }
+
+    [data-theme="dark"] .q-checkbox .q-checkbox__label {
+        color: var(--text-primary) !important;
+    }
+
     /* Parchment theme input fixes */
     [data-theme="parchment"] .q-field__native,
     [data-theme="parchment"] .q-field__input,
