@@ -57,7 +57,7 @@ Responsa Project-style advanced search with syntax parsing, JA expansion, tabula
 
 **Milestone Goal:** Remove dead AI code, add diacritics normalization for Judeo-Arabic search, and resolve all pre-existing test failures.
 
-- [ ] **Phase 18: Dead Code Removal** - Remove all AI Search artifacts from both apps, help docs, and core
+- [x] **Phase 18: Dead Code Removal** - Remove all AI Search artifacts from both apps, help docs, and core (completed 2026-02-11)
 - [ ] **Phase 19: Search Normalization** - Diacritics and geresh/gershayim stripping with mark-tolerant highlighting
 - [ ] **Phase 20: Test Suite Green** - Fix broken tests, delete obsolete files, achieve zero failures
 
@@ -76,8 +76,8 @@ Responsa Project-style advanced search with syntax parsing, JA expansion, tabula
 **Plans**: 2 plans
 
 Plans:
-- [ ] 18-01-PLAN.md -- Remove AI from core + desktop (genizah_core.py, gui_threads.py, genizah_app.py, Help.html)
-- [ ] 18-02-PLAN.md -- Remove AI from web + dependencies (web/main.py, web/state.py, web/pages/help.py, requirements.txt, CHANGELOG.md)
+- [x] 18-01-PLAN.md -- Remove AI from core + desktop (genizah_core.py, gui_threads.py, genizah_app.py, Help.html)
+- [x] 18-02-PLAN.md -- Remove AI from web + dependencies (web/main.py, web/state.py, web/pages/help.py, requirements.txt, CHANGELOG.md)
 
 ### Phase 19: Search Normalization
 **Goal**: Users searching with diacritical marks or geresh/gershayim get correct results, and highlighting works even when source text contains combining marks
@@ -118,10 +118,10 @@ Phases 18 and 19 are independent and can execute in either order. Phase 20 execu
 | 1-7 | v1 | 18/18 | Complete | 2026-02-07 |
 | 8-12 | v5.6.0 | 25/25 | Complete | 2026-02-09 |
 | 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
-| 18. Dead Code Removal | v5.7.1 | 0/TBD | Not started | - |
+| 18. Dead Code Removal | v5.7.1 | 2/2 | Complete | 2026-02-11 |
 | 19. Search Normalization | v5.7.1 | 0/TBD | Not started | - |
 | 20. Test Suite Green | v5.7.1 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-11 after v5.7.1 roadmap creation*
+*Last updated: 2026-02-11 after Phase 18 completion*
