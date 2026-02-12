@@ -128,13 +128,13 @@ class TestFjmsJoinsMergeIntoFetchConnectedFragments:
         )
 
         # Should have FJMS joins (SYS002, SYS003 are in groups with SYS001)
-        fjms_joins = [j for j in result.get("joins", []) if j.get("source") == "FJMS"]
+        fjms_joins = [j for j in result.get("joins", []) if 'FJMS' in j.get('sources', [])]
         assert len(fjms_joins) == 2
 
         # Check structure
         for j in fjms_joins:
             assert j["id"] is None
-            assert j["source"] == "FJMS"
+            assert 'FJMS' in j.get('sources', [])
             assert "scholar_name" in j
             assert "join_group_id" in j
             assert j["fragment_a"] == "T-S 12.100"
@@ -153,7 +153,7 @@ class TestFjmsJoinsDeduplication:
     @patch("web.document_service.get_document_for_fragment", return_value=None)
     @patch("web.fjms_service.get_fjms_service")
     def test_fjms_deduplication_with_user_joins(self, mock_get_fjms, mock_doc_for_frag, mock_state, mock_get_joins, fjms_service, mock_meta_mgr):
-        """When a fragment appears in both user and FJMS joins, it is not duplicated."""
+        """When a fragment appears in both user and FJMS joins, it is not duplicated but sources are merged."""
         # Simulate user join already containing T-S 12.200
         mock_get_joins.return_value = [
             {
@@ -185,6 +185,13 @@ class TestFjmsJoinsDeduplication:
         # But T-S 12.300 should appear (new from FJMS)
         assert any("12.300" in s for s in shelfmarks)
 
+        # The user join for T-S 12.200 should have FJMS merged into its sources
+        joins = result.get("joins", [])
+        join_200 = [j for j in joins if j.get("fragment_b", "").upper() == "T-S 12.200"]
+        assert len(join_200) == 1
+        assert 'user' in join_200[0].get('sources', [])
+        assert 'FJMS' in join_200[0].get('sources', [])
+
 
 class TestFjmsJoinsScholarAttribution:
     """Test scholar name preservation through the pipeline."""
@@ -207,7 +214,7 @@ class TestFjmsJoinsScholarAttribution:
             force_refresh=True,
         )
 
-        fjms_joins = [j for j in result.get("joins", []) if j.get("source") == "FJMS"]
+        fjms_joins = [j for j in result.get("joins", []) if 'FJMS' in j.get('sources', [])]
         # SYS002 join -- has scholars from both groups (Goitein, Ben-Sasson)
         sys002_joins = [j for j in fjms_joins if j["fragment_b"] == "T-S 12.200"]
         assert len(sys002_joins) == 1
@@ -244,8 +251,106 @@ class TestFjmsJoinsGracefulDegradation:
             force_refresh=True,
         )
 
-        fjms_joins = [j for j in result.get("joins", []) if j.get("source") == "FJMS"]
+        fjms_joins = [j for j in result.get("joins", []) if 'FJMS' in j.get('sources', [])]
         assert len(fjms_joins) == 0
+
+
+# ── Web dual-source badge tests ──────────────────────────────────
+
+
+class TestDualSourceBadges:
+    """Test dual-source badge rendering for PGP+FJMS overlap."""
+
+    @patch("web.components.joins_panel.get_fragment_joins")
+    @patch("web.components.joins_panel.state")
+    @patch("web.document_service.get_fragments_for_document")
+    @patch("web.document_service.get_document_for_fragment")
+    @patch("web.fjms_service.get_fjms_service")
+    def test_dual_source_badges_pgp_and_fjms(self, mock_get_fjms, mock_doc_for_frag, mock_get_frags, mock_state, mock_get_joins, fjms_service, mock_meta_mgr):
+        """When both PGP and FJMS return the same fragment, the entry has sources: ['PGP', 'FJMS']."""
+        mock_get_joins.return_value = []  # No user joins
+        mock_state.meta_mgr = mock_meta_mgr
+
+        # PGP returns T-S 12.200 as a fragment of pgpid 999
+        mock_doc_for_frag.return_value = {'pgpid': 999}
+        mock_get_frags.return_value = [
+            {'shelfmark': 'T-S 12.100', 'sys_id': 'SYS001'},
+            {'shelfmark': 'T-S 12.200', 'sys_id': 'SYS002'},
+        ]
+
+        # FJMS also returns T-S 12.200 (SYS002 is in join groups with SYS001)
+        mock_get_fjms.return_value = fjms_service
+
+        from web.components.joins_panel import fetch_connected_fragments
+
+        result = fetch_connected_fragments(
+            shelfmark="T-S 12.100",
+            document_id="SYS001",
+            force_refresh=True,
+        )
+
+        joins = result.get("joins", [])
+
+        # T-S 12.200 should have exactly ONE join entry with BOTH sources
+        join_200 = [j for j in joins if j.get("fragment_b", "").upper() == "T-S 12.200"]
+        assert len(join_200) == 1, f"Expected 1 entry for T-S 12.200, got {len(join_200)}"
+        assert 'PGP' in join_200[0].get('sources', [])
+        assert 'FJMS' in join_200[0].get('sources', [])
+
+        # T-S 12.300 should be FJMS only (not in PGP)
+        join_300 = [j for j in joins if j.get("fragment_b", "").upper() == "T-S 12.300"]
+        assert len(join_300) == 1
+        assert join_300[0].get('sources') == ['FJMS']
+
+    @patch("web.components.joins_panel.get_fragment_joins")
+    @patch("web.components.joins_panel.state")
+    @patch("web.document_service.get_fragments_for_document")
+    @patch("web.document_service.get_document_for_fragment")
+    @patch("web.fjms_service.get_fjms_service")
+    def test_single_source_unchanged(self, mock_get_fjms, mock_doc_for_frag, mock_get_frags, mock_state, mock_get_joins, fjms_service, mock_meta_mgr):
+        """Fragments only in PGP have sources: ['PGP'], fragments only in FJMS have sources: ['FJMS']."""
+        mock_get_joins.return_value = []  # No user joins
+        mock_state.meta_mgr = mock_meta_mgr
+
+        # PGP returns T-S 12.200 only (not T-S 12.300)
+        mock_doc_for_frag.return_value = {'pgpid': 999}
+        mock_get_frags.return_value = [
+            {'shelfmark': 'T-S 12.100', 'sys_id': 'SYS001'},
+            {'shelfmark': 'T-S 12.200', 'sys_id': 'SYS002'},
+        ]
+
+        # Mock FJMS to return only T-S 12.300 (not T-S 12.200) by using a custom service
+        custom_fjms = MagicMock()
+        custom_fjms.is_available.return_value = True
+        custom_fjms.get_join_group.return_value = [
+            {
+                'alma_id': 'SYS003',
+                'scholar_names': ['Gil'],
+                'join_types': ['Codex Join'],
+                'join_group_ids': [100],
+            }
+        ]
+        mock_get_fjms.return_value = custom_fjms
+
+        from web.components.joins_panel import fetch_connected_fragments
+
+        result = fetch_connected_fragments(
+            shelfmark="T-S 12.100",
+            document_id="SYS001",
+            force_refresh=True,
+        )
+
+        joins = result.get("joins", [])
+
+        # T-S 12.200 should be PGP only
+        join_200 = [j for j in joins if j.get("fragment_b", "").upper() == "T-S 12.200"]
+        assert len(join_200) == 1
+        assert join_200[0].get('sources') == ['PGP']
+
+        # T-S 12.300 should be FJMS only
+        join_300 = [j for j in joins if j.get("fragment_b", "").upper() == "T-S 12.300"]
+        assert len(join_300) == 1
+        assert join_300[0].get('sources') == ['FJMS']
 
 
 # ── Desktop app integration tests ─────────────────────────────────
@@ -358,7 +463,7 @@ class TestFjmsMultiGroupWeb:
             force_refresh=True,
         )
 
-        fjms_joins = [j for j in result.get("joins", []) if j.get("source") == "FJMS"]
+        fjms_joins = [j for j in result.get("joins", []) if 'FJMS' in j.get('sources', [])]
 
         # SYS002 should appear exactly once
         sys002_joins = [j for j in fjms_joins if j["fragment_b"] == "T-S 12.200"]

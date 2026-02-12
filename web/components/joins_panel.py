@@ -99,7 +99,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                 'fragment_a': frag_a,
                 'fragment_b': frag_b,
                 'relationship_type': j.get('join_type'),
-                'source': 'user',
+                'sources': ['user'],
                 'notes': j.get('notes', '')
             })
 
@@ -164,7 +164,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                         'fragment_a': shelfmark or '',
                         'fragment_b': pf_shelfmark,
                         'relationship_type': 'same_composition',
-                        'source': 'PGP',
+                        'sources': ['PGP'],
                         'notes': f'PGP Document #{resolved_pgpid}'
                     })
 
@@ -190,8 +190,24 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                     if not resolved_shelfmark or resolved_shelfmark == 'Unknown':
                         continue
 
-                    # Deduplicate against user/PGP joins
+                    # Check if this fragment already exists from user/PGP joins
                     if resolved_shelfmark.upper() in fragments_upper:
+                        # Merge FJMS source into existing entry instead of dropping
+                        for existing_join in formatted_joins:
+                            if existing_join.get('fragment_b', '').upper() == resolved_shelfmark.upper():
+                                existing_sources = existing_join.get('sources', [existing_join.get('source', 'user')])
+                                if 'FJMS' not in existing_sources:
+                                    existing_sources.append('FJMS')
+                                existing_join['sources'] = existing_sources
+                                # Merge scholar name if existing entry lacks one
+                                fjms_scholar = ', '.join(member.get('scholar_names', [])) if member.get('scholar_names') else ''
+                                if fjms_scholar and not existing_join.get('scholar_name'):
+                                    existing_join['scholar_name'] = fjms_scholar
+                                # Merge relationship type if existing entry lacks one
+                                fjms_rel_type = ', '.join(member.get('join_types', [])) if member.get('join_types') else ''
+                                if fjms_rel_type and not existing_join.get('relationship_type'):
+                                    existing_join['relationship_type'] = fjms_rel_type
+                                break
                         continue
 
                     fragments_set.add(resolved_shelfmark)
@@ -209,7 +225,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                         'fragment_a': shelfmark or '',
                         'fragment_b': resolved_shelfmark,
                         'relationship_type': ', '.join(member.get('join_types', [])) if member.get('join_types') else '',
-                        'source': 'FJMS',
+                        'sources': ['FJMS'],
                         'notes': '',
                         'scholar_name': ', '.join(member.get('scholar_names', [])) if member.get('scholar_names') else '',
                         'join_group_id': member.get('join_group_ids', []),
@@ -435,16 +451,24 @@ def create_joins_dialog(
                         frag_a = join.get('fragment_a', '')
                         frag_b = join.get('fragment_b', '')
                         rel_type = join.get('relationship_type')
-                        source = join.get('source', 'user')
+                        sources = join.get('sources', [join.get('source', 'user')])
                         join_id = join.get('id')
 
                         scholar_name = join.get('scholar_name', '')
 
-                        # Map each fragment to its relationship info
-                        if frag_a not in relationship_map:
-                            relationship_map[frag_a] = {'type': rel_type, 'source': source, 'scholar_name': scholar_name}
-                        if frag_b not in relationship_map:
-                            relationship_map[frag_b] = {'type': rel_type, 'source': source, 'scholar_name': scholar_name}
+                        # Map each fragment to its relationship info, aggregating sources
+                        for frag_key in [frag_a, frag_b]:
+                            if frag_key not in relationship_map:
+                                relationship_map[frag_key] = {'type': rel_type, 'sources': list(sources), 'scholar_name': scholar_name}
+                            else:
+                                existing = relationship_map[frag_key]
+                                existing_sources = existing.get('sources', [existing.get('source', 'user')])
+                                for s in sources:
+                                    if s not in existing_sources:
+                                        existing_sources.append(s)
+                                existing['sources'] = existing_sources
+                                if scholar_name and not existing.get('scholar_name'):
+                                    existing['scholar_name'] = scholar_name
 
                         # Track DIRECT joins to current shelfmark only
                         if frag_a.upper() == shelfmark.upper():
@@ -523,7 +547,6 @@ def create_joins_dialog(
                                 # Show relationship type if known
                                 rel_info = relationship_map.get(frag, {})
                                 rel_type = rel_info.get('type')
-                                source = rel_info.get('source', 'user')
 
                                 # Check if this is a DIRECT join to current fragment
                                 direct_join_id = direct_joins.get(frag)
@@ -536,10 +559,12 @@ def create_joins_dialog(
                                         }.get(rel_type, rel_type)
                                         ui.label(rel_label).classes('text-xs text-gray-500')
 
-                                    if source == 'FJMS':
-                                        ui.badge('FJMS').props('color=purple outline dense').classes('text-xs')
-                                    elif source and source != 'user':
-                                        ui.badge(source).props('color=blue outline dense').classes('text-xs')
+                                    sources = rel_info.get('sources', [rel_info.get('source', 'user')])
+                                    for src in sources:
+                                        if src == 'FJMS':
+                                            ui.badge('FJMS').props('color=purple outline dense').classes('text-xs')
+                                        elif src and src != 'user':
+                                            ui.badge(src).props('color=blue outline dense').classes('text-xs')
 
                                     scholar = rel_info.get('scholar_name', '')
                                     if scholar:

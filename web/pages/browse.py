@@ -1989,18 +1989,25 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Build relationship/source lookup from joins data
                         current_shelfmark_upper = (page.shelfmark or '').upper()
                         joins_list = joins_data.get('joins', [])
-                        frag_info_map = {}  # shelfmark_upper -> {source, relationship_type, scholar_name}
+                        frag_info_map = {}  # shelfmark_upper -> {sources, relationship_type, scholar_name}
                         for join_entry in joins_list:
                             fa = join_entry.get('fragment_a', '')
                             fb = join_entry.get('fragment_b', '')
-                            src = join_entry.get('source', 'user')
+                            sources = join_entry.get('sources', [join_entry.get('source', 'user')])
                             rel = join_entry.get('relationship_type', '')
                             scholar = join_entry.get('scholar_name', '')
-                            # Map the OTHER fragment in each join pair
-                            if fa.upper() == current_shelfmark_upper and fb:
-                                frag_info_map[fb.upper()] = {'source': src, 'relationship_type': rel, 'scholar_name': scholar}
-                            elif fb.upper() == current_shelfmark_upper and fa:
-                                frag_info_map[fa.upper()] = {'source': src, 'relationship_type': rel, 'scholar_name': scholar}
+                            # Map the OTHER fragment in each join pair, aggregating sources
+                            for target_key, check_key in [(fb.upper(), fa.upper()), (fa.upper(), fb.upper())]:
+                                if check_key == current_shelfmark_upper and target_key:
+                                    if target_key in frag_info_map:
+                                        existing = frag_info_map[target_key]
+                                        for s in sources:
+                                            if s not in existing['sources']:
+                                                existing['sources'].append(s)
+                                        if scholar and not existing.get('scholar_name'):
+                                            existing['scholar_name'] = scholar
+                                    else:
+                                        frag_info_map[target_key] = {'sources': list(sources), 'relationship_type': rel, 'scholar_name': scholar}
 
                         # Clickable fragment rows (skip current fragment)
                         for frag_shelfmark in joins_data.get('fragments', []):
@@ -2008,7 +2015,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 continue
 
                             info = frag_info_map.get(frag_shelfmark.upper(), {})
-                            frag_source = info.get('source', 'user')
+                            frag_sources = info.get('sources', [info.get('source', 'user')])
                             frag_rel_type = info.get('relationship_type', '')
 
                             # Navigation handler using search_shelfmark pattern
@@ -2023,10 +2030,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ).on('click', make_nav_to()):
                                 ui.icon('description').classes('text-gray-500').style('font-size: 1.1rem;')
                                 ui.label(frag_shelfmark).classes('text-sm font-medium')
-                                if frag_source == 'FJMS':
-                                    ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
-                                elif frag_source == 'PGP':
-                                    ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
+                                for frag_src in frag_sources:
+                                    if frag_src == 'FJMS':
+                                        ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+                                    elif frag_src and frag_src != 'user':
+                                        ui.badge(frag_src, color='blue').props('outline dense').classes('text-xs')
                                 if frag_rel_type:
                                     rel_label = {
                                         'physical_join': tr('Physical join'),
