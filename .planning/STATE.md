@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 26 of 28 (Scientific Joins) -- second of 4 in v5.8.0 -- COMPLETE
-Plan: 2 of 2 in current phase (all complete)
-Status: Phase 26 fully complete (gap closure done), ready for Phase 27
-Last activity: 2026-02-12 -- Completed 26-02 (Join Deduplication)
+Plan: 3 of 3 in current phase (all complete, including gap closure)
+Status: Phase 26 fully complete (gap closure 26-03 done), ready for Phase 27
+Last activity: 2026-02-12 -- Completed 26-03 (Dual Badge Display)
 
-Progress: [██████░░░░] 67% (4/6 plans)
+Progress: [███████░░░] 71% (5/7 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 75 (across all milestones)
+- Total plans completed: 76 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~8.5 hours
 
@@ -32,7 +32,7 @@ Progress: [██████░░░░] 67% (4/6 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 4/6 | 17 min |
+| v5.8.0 | 25-28 | 5/7 | 23 min |
 
 ## Accumulated Context
 
@@ -51,6 +51,8 @@ Progress: [██████░░░░] 67% (4/6 plans)
 - Purple badge for FJMS source distinction (user=none, PGP=blue, FJMS=purple)
 - Three-way join merge pipeline: user -> PGP -> FJMS with dedup at each stage
 - GROUP BY + GROUP_CONCAT(DISTINCT) for multi-group join dedup at SQL level (not Python post-processing)
+- Sources stored as list ('sources') instead of string ('source') in formatted_joins for multi-source badge support
+- Merge-on-collision dedup: append source to existing entry instead of dropping overlapping FJMS entries
 
 ### Blockers/Concerns
 
@@ -67,6 +69,6 @@ Progress: [██████░░░░] 67% (4/6 plans)
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Completed 26-02-PLAN.md (Join Deduplication) -- Phase 26 fully complete
+Stopped at: Completed 26-03-PLAN.md (Dual Badge Display) -- Phase 26 gap closure complete
 Resume file: None
-Notes: Phase 26 fully complete (2/2 plans). FJMS joins deduplicated at SQL level with aggregated scholars and join types. 507 passed (6 new tests). Next: Phase 27 (Domain Classification).
+Notes: Phase 26 fully complete (3/3 plans including gap closure). Dual PGP+FJMS badges in web, "PGP, FJMS" in desktop. 510 passed (3 new tests). Next: Phase 27 (Domain Classification).
