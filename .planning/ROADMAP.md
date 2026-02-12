@@ -108,11 +108,12 @@ Plans:
   2. Each join entry shows who identified the join (scholar name) and the join type (Physical Join, Codex Join, etc.)
   3. The user can click a join group member to navigate to that fragment's browse page
   4. FJMS join information appears in the Related Fragments panel in both web and desktop apps
-**Plans**: 2 plans in 1 wave
+**Plans**: 3 plans
 
 Plans:
 - [x] 26-01-PLAN.md -- FJMS joins integration in Related Fragments panel (both apps)
 - [x] 26-02-PLAN.md -- Gap closure: deduplicate get_join_group() for multi-group membership (Wave 1)
+- [ ] 26-03-PLAN.md -- Gap closure: dual-badge display for fragments in both PGP and FJMS sources
 
 ### Phase 27: Domain Classifications
 **Goal**: Users can see what subject a manuscript belongs to and filter search results by domain
@@ -158,10 +159,10 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
 | 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
-| 26. Scientific Joins | v5.8.0 | 2/2 | Complete | 2026-02-12 |
+| 26. Scientific Joins | v5.8.0 | 2/3 | In progress | - |
 | 27. Domain Classifications | v5.8.0 | 0/2 | Not started | - |
 | 28. Catalog Enrichment | v5.8.0 | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-12 after Phase 26 complete (gap closure executed)*
+*Last updated: 2026-02-12 after Phase 26 gap closure plan 03 created*
