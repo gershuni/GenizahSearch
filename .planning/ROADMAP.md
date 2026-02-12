@@ -77,7 +77,7 @@ Shared corrections service, amber styling (web), emoji labels (desktop).
 **Milestone Goal:** Integrate FJMS scholarly metadata (domain classifications, scientific joins, catalog records) into GenizahSearch via a SQLite sidecar database, enabling subject-based filtering and enriched manuscript display in both apps.
 
 - [x] **Phase 25: Data Infrastructure** - Export FIST.db into SQLite sidecar with shared service layer (completed 2026-02-12)
-- [ ] **Phase 26: Scientific Joins** - FJMS join groups with scholar attribution in both apps (gap closure in progress)
+- [x] **Phase 26: Scientific Joins** - FJMS join groups with scholar attribution in both apps (completed 2026-02-12)
 - [ ] **Phase 27: Domain Classifications** - Domain badges and search filtering in both apps
 - [ ] **Phase 28: Catalog Enrichment** - FJMS titles, authors, dates on browse page in both apps
 
@@ -112,7 +112,7 @@ Plans:
 
 Plans:
 - [x] 26-01-PLAN.md -- FJMS joins integration in Related Fragments panel (both apps)
-- [ ] 26-02-PLAN.md -- Gap closure: deduplicate get_join_group() for multi-group membership (Wave 1)
+- [x] 26-02-PLAN.md -- Gap closure: deduplicate get_join_group() for multi-group membership (Wave 1)
 
 ### Phase 27: Domain Classifications
 **Goal**: Users can see what subject a manuscript belongs to and filter search results by domain
@@ -158,10 +158,10 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
 | 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
-| 26. Scientific Joins | v5.8.0 | 1/2 | Gap closure | - |
+| 26. Scientific Joins | v5.8.0 | 2/2 | Complete | 2026-02-12 |
 | 27. Domain Classifications | v5.8.0 | 0/2 | Not started | - |
 | 28. Catalog Enrichment | v5.8.0 | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-12 after Phase 26 gap closure plan created*
+*Last updated: 2026-02-12 after Phase 26 complete (gap closure executed)*
