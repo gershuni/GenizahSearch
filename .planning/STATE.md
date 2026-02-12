@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.8.0 FJMS Integration -- Phase 25 (Data Infrastructure)
+**Current focus:** v5.8.0 FJMS Integration -- Phase 26 (Scientific Joins)
 
 ## Current Position
 
-Phase: 25 of 28 (Data Infrastructure) -- first of 4 in v5.8.0 -- COMPLETE
-Plan: 2 of 2 in current phase (all complete)
-Status: Phase 25 complete, ready for Phase 26
-Last activity: 2026-02-12 -- Completed 25-02 (Loader Service)
+Phase: 26 of 28 (Scientific Joins) -- second of 4 in v5.8.0 -- COMPLETE
+Plan: 1 of 1 in current phase (all complete)
+Status: Phase 26 complete, ready for Phase 27
+Last activity: 2026-02-12 -- Completed 26-01 (Joins Integration)
 
-Progress: [███░░░░░░░] 33% (2/6 plans)
+Progress: [█████░░░░░] 50% (3/6 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 73 (across all milestones)
+- Total plans completed: 74 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~8.5 hours
 
@@ -32,7 +32,7 @@ Progress: [███░░░░░░░] 33% (2/6 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 2/6 | 6 min |
+| v5.8.0 | 25-28 | 3/6 | 14 min |
 
 ## Accumulated Context
 
@@ -47,6 +47,9 @@ Progress: [███░░░░░░░] 33% (2/6 plans)
 - Read-only SQLite via URI mode (file:path?mode=ro) enforces immutability at database level
 - Module-level singleton pattern (get_fjms_service) matches existing shared service conventions
 - Column names mapped to snake_case keys in returned dicts for Python convention
+- FJMS joins merged as third source after user and PGP in fetch_connected_fragments
+- Purple badge for FJMS source distinction (user=none, PGP=blue, FJMS=purple)
+- Three-way join merge pipeline: user -> PGP -> FJMS with dedup at each stage
 
 ### Blockers/Concerns
 
@@ -63,6 +66,6 @@ Progress: [███░░░░░░░] 33% (2/6 plans)
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Completed 25-02-PLAN.md (Loader Service) -- Phase 25 complete
+Stopped at: Completed 26-01-PLAN.md (Joins Integration) -- Phase 26 complete
 Resume file: None
-Notes: Phase 25 complete (2/2 plans). FjmsService ready with 8 query methods and 27 tests. Next: Phase 26 (Joins Integration).
+Notes: Phase 26 complete (1/1 plan). FJMS joins visible in both web and desktop apps with scholar attribution and deduplication. 501 tests passing (7 new integration tests). Next: Phase 27 (Domain Classification).
