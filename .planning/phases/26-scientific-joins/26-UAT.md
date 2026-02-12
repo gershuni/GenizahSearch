@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 26-scientific-joins
 source: 26-01-SUMMARY.md
 started: 2026-02-12T04:15:00Z
@@ -53,7 +53,15 @@ skipped: 0
   reason: "User reported: In web, only entries without type info shown (first-encountered wins dedup). In desktop, duplicates shown (two without type, two with type) for same partners across join groups."
   severity: major
   test: 3
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "get_join_group() in shared/fjms_service.py returns raw duplicate rows when manuscript belongs to multiple join groups. SQL query selects ALL members from ALL groups without deduplication. Web dedup keeps first entry (losing richer metadata), desktop has no intra-FJMS dedup at all."
+  artifacts:
+    - path: "shared/fjms_service.py"
+      issue: "get_join_group() SQL lacks GROUP BY or DISTINCT on AlmaId — returns duplicates across groups"
+    - path: "web/components/joins_panel.py"
+      issue: "Lines 171-218: first-encountered-wins dedup drops join_type from later groups"
+    - path: "corrections_ui.py"
+      issue: "_get_fjms_joins() (line 3490): no intra-FJMS dedup, all duplicates passed through"
+  missing:
+    - "Deduplicate in get_join_group() at service level: return each unique partner AlmaId once, preferring rows with non-NULL join_type"
+    - "Add test coverage for multi-group membership deduplication"
+  debug_session: ".planning/debug/fjms-join-deduplication.md"
