@@ -6483,7 +6483,50 @@ class GenizahGUI(QMainWindow):
                 except Exception as e:
                     logger.debug("PGP joins dropdown fallback error: %s", e)
 
-            # No user or PGP joins
+            # Check FJMS scholarly joins as additional fallback
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms_svc = get_fjms_service()
+                if fjms_svc.is_available():
+                    fjms_members = fjms_svc.get_join_group(document_id)
+                    if fjms_members:
+                        # Filter to valid, non-self members
+                        valid_members = []
+                        for member in fjms_members:
+                            alma_id = member.get('alma_id', '')
+                            if not alma_id or alma_id == document_id:
+                                continue
+                            shelf = None
+                            if self.meta_mgr:
+                                try:
+                                    shelf, _ = self.meta_mgr.get_meta_for_id(alma_id)
+                                except Exception:
+                                    pass
+                            if not shelf or shelf == 'Unknown':
+                                continue
+                            valid_members.append((shelf, member))
+                        if valid_members:
+                            self.btn_b_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
+                            header_action = self.joins_menu.addAction(
+                                tr("{} connected fragments").format(len(valid_members) + 1) + " [FJMS]"
+                            )
+                            header_action.setEnabled(False)
+                            self.joins_menu.addSeparator()
+                            for shelf, member in valid_members:
+                                join_type = member.get('join_type', '')
+                                scholar_name = member.get('scholar_name', '')
+                                label = f"[FJMS] {shelf}"
+                                if join_type:
+                                    label += f" \u2014 {join_type}"
+                                if scholar_name:
+                                    label += f" ({scholar_name})"
+                                action = self.joins_menu.addAction(label)
+                                action.triggered.connect(lambda checked, sh=shelf: self._navigate_to_joined_fragment(sh))
+                            return
+            except Exception as e:
+                logger.debug("FJMS joins dropdown fallback error: %s", e)
+
+            # No user, PGP, or FJMS joins
             action = self.joins_menu.addAction(tr("No joined fragments"))
             action.setEnabled(False)
             self.btn_b_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
@@ -6561,6 +6604,48 @@ class GenizahGUI(QMainWindow):
                 action = self.joins_menu.addAction(label)
                 action.setData(frag)
                 action.triggered.connect(lambda checked, f=frag: self._navigate_to_joined_fragment(f))
+
+        # Merge FJMS scholarly joins into existing dropdown
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms_svc = get_fjms_service()
+            if fjms_svc.is_available():
+                fjms_members = fjms_svc.get_join_group(document_id)
+                fjms_valid = []
+                existing_upper = set(f.upper() for f in connected.get('fragments', []))
+                for member in fjms_members:
+                    alma_id = member.get('alma_id', '')
+                    if not alma_id or alma_id == document_id:
+                        continue
+                    shelf = None
+                    if self.meta_mgr:
+                        try:
+                            shelf, _ = self.meta_mgr.get_meta_for_id(alma_id)
+                        except Exception:
+                            pass
+                    if not shelf or shelf == 'Unknown':
+                        continue
+                    # Deduplicate against existing fragments
+                    if shelf.upper() in existing_upper:
+                        continue
+                    existing_upper.add(shelf.upper())
+                    fjms_valid.append((shelf, member))
+                if fjms_valid:
+                    self.joins_menu.addSeparator()
+                    fjms_header = self.joins_menu.addAction("[FJMS Scholarly Joins]")
+                    fjms_header.setEnabled(False)
+                    for shelf, member in fjms_valid:
+                        join_type = member.get('join_type', '')
+                        scholar_name = member.get('scholar_name', '')
+                        label = f"[FJMS] {shelf}"
+                        if join_type:
+                            label += f" \u2014 {join_type}"
+                        if scholar_name:
+                            label += f" ({scholar_name})"
+                        action = self.joins_menu.addAction(label)
+                        action.triggered.connect(lambda checked, sh=shelf: self._navigate_to_joined_fragment(sh))
+        except Exception as e:
+            logger.debug("FJMS joins merge error: %s", e)
 
         # Add separator and "View All" / "Open in Reading Desk" actions
         self.joins_menu.addSeparator()

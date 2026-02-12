@@ -3487,6 +3487,160 @@ class JoinsDialog(QDialog):
         completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
         line_edit.setCompleter(completer)
 
+    def _get_fjms_joins(self):
+        """Get FJMS scholarly joins for the current document.
+
+        Returns:
+            tuple: (fjms_fragment_shelfmarks, fjms_joins, fjms_fragment_details)
+        """
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms_svc = get_fjms_service()
+            if not fjms_svc.is_available() or not self.document_id:
+                return [], [], []
+
+            fjms_members = fjms_svc.get_join_group(self.document_id)
+            if not fjms_members:
+                return [], [], []
+
+            plain_shelfmark = self.shelfmark
+            if plain_shelfmark and ' | ' in plain_shelfmark:
+                plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+            current_upper = plain_shelfmark.upper() if plain_shelfmark else ''
+
+            fjms_shelfmarks = []
+            fjms_joins = []
+            fjms_details = []
+
+            for member in fjms_members:
+                alma_id = member.get('alma_id', '')
+                # Resolve shelfmark from metadata manager
+                shelf = None
+                if self.meta_mgr and alma_id:
+                    try:
+                        shelf, _ = self.meta_mgr.get_meta_for_id(alma_id)
+                    except Exception:
+                        pass
+                if not shelf or shelf == 'Unknown':
+                    shelf = alma_id  # Fallback to raw alma_id
+
+                fjms_shelfmarks.append(shelf)
+                fjms_details.append({'shelfmark': shelf, 'document_id': alma_id})
+
+                # Skip self-join
+                if shelf.upper() == current_upper:
+                    continue
+
+                fjms_joins.append({
+                    'id': None,
+                    'fragment_a': plain_shelfmark or '',
+                    'fragment_b': shelf,
+                    'relationship_type': member.get('join_type', ''),
+                    'source': 'FJMS',
+                    'created_by_username': member.get('scholar_name', ''),
+                    'created_at': '',
+                    'notes': '',
+                })
+
+            return fjms_shelfmarks, fjms_joins, fjms_details
+        except Exception as e:
+            print(f"Error getting FJMS joins: {e}")
+            return [], [], []
+
+    def _merge_fjms_joins_into_display(self, existing_fragments_upper):
+        """Merge FJMS scholarly joins into an already-populated display.
+
+        Args:
+            existing_fragments_upper: Set of uppercased shelfmark strings already in fragments list
+
+        Returns the count of FJMS joins added.
+        """
+        fjms_frags, fjms_joins, fjms_details = self._get_fjms_joins()
+        if not fjms_joins:
+            return 0
+
+        # Extract plain shelfmark
+        plain_shelfmark = self.shelfmark
+        if plain_shelfmark and ' | ' in plain_shelfmark:
+            plain_shelfmark = plain_shelfmark.split(' | ')[-1]
+
+        # Add new FJMS fragments not already displayed (deduplicate)
+        for frag in fjms_frags:
+            if frag.upper() in existing_fragments_upper:
+                continue
+            existing_fragments_upper.add(frag.upper())
+
+            title = ""
+            # Try to get title from details
+            doc_id = None
+            for fd in fjms_details:
+                if fd.get('shelfmark', '').upper() == frag.upper():
+                    doc_id = fd.get('document_id')
+                    break
+            if doc_id and self.meta_mgr:
+                try:
+                    _, title = self.meta_mgr.get_meta_for_id(doc_id)
+                    if title and len(title) > 35:
+                        title = title[:35] + "..."
+                except Exception:
+                    pass
+
+            display_text = f"{frag} - {title}" if title else frag
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, frag)
+            if plain_shelfmark and frag.upper() == plain_shelfmark.upper():
+                item.setForeground(QColor('#27ae60'))
+                item.setText(f"{display_text} ({tr('current')})")
+            self.fragments_list.addItem(item)
+
+        # Deduplicate FJMS joins against existing joins in the table
+        existing_pairs = set()
+        for r in range(self.table.rowCount()):
+            fa = self.table.item(r, 0).text().upper() if self.table.item(r, 0) else ''
+            fb = self.table.item(r, 1).text().upper() if self.table.item(r, 1) else ''
+            if fa and fb:
+                existing_pairs.add((fa, fb))
+                existing_pairs.add((fb, fa))
+
+        deduped_fjms_joins = []
+        for fj in fjms_joins:
+            pair = (fj.get('fragment_a', '').upper(), fj.get('fragment_b', '').upper())
+            if pair not in existing_pairs:
+                deduped_fjms_joins.append(fj)
+                existing_pairs.add(pair)
+                existing_pairs.add((pair[1], pair[0]))
+
+        # Add FJMS join rows (reuse _add_pgp_join_rows pattern with FJMS styling)
+        for join in deduped_fjms_joins:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            frag_a = join.get('fragment_a', '')
+            frag_b = join.get('fragment_b', '')
+
+            self.table.setItem(row, 0, QTableWidgetItem(frag_a))
+            self.table.setItem(row, 1, QTableWidgetItem(frag_b))
+
+            rel_type = join.get('relationship_type')
+            rel_display = {
+                'physical_join': tr('Physical join'),
+                'same_composition': tr('Same composition')
+            }.get(rel_type, rel_type or tr('Unknown'))
+            self.table.setItem(row, 2, QTableWidgetItem(rel_display))
+
+            # FJMS source label with purple color
+            source_item = QTableWidgetItem('FJMS')
+            source_item.setForeground(QColor('#7e22ce'))
+            self.table.setItem(row, 3, source_item)
+
+            self.table.setItem(row, 4, QTableWidgetItem(join.get('created_by_username', '')))
+            self.table.setItem(row, 5, QTableWidgetItem(''))
+
+            # Store None as join ID (prevents deletion)
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, None)
+
+        return len(deduped_fjms_joins)
+
     def _get_pgp_joins(self):
         """Get PGP multi-fragment joins for the current document, if any.
 
@@ -3607,12 +3761,17 @@ class JoinsDialog(QDialog):
             if cached and (cached.get('total_joins', 0) > 0 or cached.get('total_fragments', 0) > 1):
                 self._display_cached_joins(cached)
             else:
-                # No user joins in cache - still check PGP joins (requires Supabase, not user server)
+                # No user joins in cache - still check PGP and FJMS joins
                 pgp_frags, pgp_joins, pgp_details = self._get_pgp_joins()
                 if pgp_joins:
                     self._display_pgp_only_joins(pgp_frags, pgp_joins, pgp_details)
                 else:
-                    self.cluster_info.setText(tr("No joins found (offline)"))
+                    # Try FJMS joins as last resort
+                    fjms_frags, fjms_joins, fjms_details = self._get_fjms_joins()
+                    if fjms_joins:
+                        self._display_pgp_only_joins(fjms_frags, fjms_joins, fjms_details)
+                    else:
+                        self.cluster_info.setText(tr("No joins found (offline)"))
             return
 
         # Server is available
@@ -3630,12 +3789,17 @@ class JoinsDialog(QDialog):
             self.connected_data = self.client.get_connected_fragments(plain_shelfmark or self.shelfmark)
 
         if not self.connected_data:
-            # No user joins from API - still check PGP joins
+            # No user joins from API - still check PGP and FJMS joins
             pgp_frags, pgp_joins, pgp_details = self._get_pgp_joins()
             if pgp_joins:
                 self._display_pgp_only_joins(pgp_frags, pgp_joins, pgp_details)
             else:
-                self.cluster_info.setText(tr("No joins found"))
+                # Try FJMS joins as last resort
+                fjms_frags, fjms_joins, fjms_details = self._get_fjms_joins()
+                if fjms_joins:
+                    self._display_pgp_only_joins(fjms_frags, fjms_joins, fjms_details)
+                else:
+                    self.cluster_info.setText(tr("No joins found"))
             return
 
         # Update local cache with fetched data
@@ -3773,6 +3937,17 @@ class JoinsDialog(QDialog):
 
         # Populate joins table with PGP joins
         self._add_pgp_join_rows(pgp_joins, plain_shelfmark)
+
+        # Also merge FJMS joins
+        existing_frags_upper = set(f.upper() for f in pgp_frags)
+        fjms_count = self._merge_fjms_joins_into_display(existing_frags_upper)
+        if fjms_count > 0:
+            new_total_joins = total_joins + fjms_count
+            new_total_frags = self.fragments_list.count()
+            self.cluster_info.setText(
+                tr("{} fragments in cluster, {} joins").format(new_total_frags, new_total_joins)
+            )
+
         self.table.resizeColumnsToContents()
 
     def _add_pgp_join_rows(self, pgp_joins, plain_shelfmark):
@@ -4006,8 +4181,13 @@ class JoinsDialog(QDialog):
         # Merge PGP joins into display
         existing_frags_upper = set(f.upper() for f in fragments)
         pgp_count = self._merge_pgp_joins_into_display(existing_frags_upper)
-        if pgp_count > 0:
-            new_total_joins = total_joins + pgp_count
+
+        # Merge FJMS scholarly joins into display
+        fjms_count = self._merge_fjms_joins_into_display(existing_frags_upper)
+
+        extra_count = pgp_count + fjms_count
+        if extra_count > 0:
+            new_total_joins = total_joins + extra_count
             new_total_frags = self.fragments_list.count()
             self.cluster_info.setText(
                 tr("{} fragments in cluster, {} joins").format(new_total_frags, new_total_joins)
@@ -4116,8 +4296,13 @@ class JoinsDialog(QDialog):
         # Merge PGP joins into display
         existing_frags_upper = set(f.upper() for f in data.fragments)
         pgp_count = self._merge_pgp_joins_into_display(existing_frags_upper)
-        if pgp_count > 0:
-            new_total_joins = total_joins + pgp_count
+
+        # Merge FJMS scholarly joins into display
+        fjms_count = self._merge_fjms_joins_into_display(existing_frags_upper)
+
+        extra_count = pgp_count + fjms_count
+        if extra_count > 0:
+            new_total_joins = total_joins + extra_count
             new_total_frags = self.fragments_list.count()
             self.cluster_info.setText(
                 tr("{} fragments in cluster, {} joins").format(new_total_frags, new_total_joins)
