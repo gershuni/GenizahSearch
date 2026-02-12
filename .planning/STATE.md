@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 26 of 28 (Scientific Joins) -- second of 4 in v5.8.0 -- COMPLETE
-Plan: 1 of 1 in current phase (all complete)
-Status: Phase 26 complete, ready for Phase 27
-Last activity: 2026-02-12 -- Completed 26-01 (Joins Integration)
+Plan: 2 of 2 in current phase (all complete)
+Status: Phase 26 fully complete (gap closure done), ready for Phase 27
+Last activity: 2026-02-12 -- Completed 26-02 (Join Deduplication)
 
-Progress: [█████░░░░░] 50% (3/6 plans)
+Progress: [██████░░░░] 67% (4/6 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 74 (across all milestones)
+- Total plans completed: 75 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~8.5 hours
 
@@ -32,7 +32,7 @@ Progress: [█████░░░░░] 50% (3/6 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 3/6 | 14 min |
+| v5.8.0 | 25-28 | 4/6 | 17 min |
 
 ## Accumulated Context
 
@@ -50,6 +50,7 @@ Progress: [█████░░░░░] 50% (3/6 plans)
 - FJMS joins merged as third source after user and PGP in fetch_connected_fragments
 - Purple badge for FJMS source distinction (user=none, PGP=blue, FJMS=purple)
 - Three-way join merge pipeline: user -> PGP -> FJMS with dedup at each stage
+- GROUP BY + GROUP_CONCAT(DISTINCT) for multi-group join dedup at SQL level (not Python post-processing)
 
 ### Blockers/Concerns
 
@@ -66,6 +67,6 @@ Progress: [█████░░░░░] 50% (3/6 plans)
 ## Session Continuity
 
 Last session: 2026-02-12
-Stopped at: Completed 26-01-PLAN.md (Joins Integration) -- Phase 26 complete
+Stopped at: Completed 26-02-PLAN.md (Join Deduplication) -- Phase 26 fully complete
 Resume file: None
-Notes: Phase 26 complete (1/1 plan). FJMS joins visible in both web and desktop apps with scholar attribution and deduplication. 501 tests passing (7 new integration tests). Next: Phase 27 (Domain Classification).
+Notes: Phase 26 fully complete (2/2 plans). FJMS joins deduplicated at SQL level with aggregated scholars and join types. 507 passed (6 new tests). Next: Phase 27 (Domain Classification).
