@@ -193,40 +193,60 @@ class FjmsService:
             logger.error(f"FjmsService.get_all_domains error: {e}")
             return []
 
+    @staticmethod
+    def _split_concat(val):
+        """Split GROUP_CONCAT result into list of non-empty strings."""
+        if not val:
+            return []
+        return [v.strip() for v in val.split(',') if v.strip()]
+
     def get_join_group(self, sys_id: str) -> list[dict]:
         """
         Get other manuscripts in the same join group(s) as the given manuscript.
 
-        A manuscript may belong to multiple join groups. This returns all other
-        members across all groups, excluding the queried manuscript itself.
+        A manuscript may belong to multiple join groups. If the same partner
+        appears in multiple groups, it is returned once with all distinct
+        scholar names and join types aggregated into lists.
 
         Args:
             sys_id: The Alma/system ID for the manuscript.
 
         Returns:
-            List of dicts with keys: alma_id, join_group_id, scholar_name, comment, join_type.
+            List of dicts with keys:
+                - alma_id (str): Partner manuscript ID
+                - join_group_ids (list[int]): All join group IDs containing this partner
+                - scholar_names (list[str]): All distinct scholars who identified this join
+                - join_types (list[str]): All distinct non-NULL join types across groups
+                - comment (str or None): Comments joined with '; ' if multiple
             Returns [] if conn is None or no joins found.
         """
         if self._conn is None:
             return []
         try:
             cursor = self._conn.execute(
-                "SELECT AlmaId, JoinGroupId, ScholarName, Comment, JoinType "
+                "SELECT AlmaId, "
+                "       GROUP_CONCAT(DISTINCT JoinGroupId) as JoinGroupIds, "
+                "       GROUP_CONCAT(DISTINCT ScholarName) as ScholarNames, "
+                "       GROUP_CONCAT(DISTINCT Comment) as Comments, "
+                "       GROUP_CONCAT(DISTINCT JoinType) as JoinTypes "
                 "FROM joins "
                 "WHERE JoinGroupId IN (SELECT JoinGroupId FROM joins WHERE AlmaId = ?) "
-                "AND AlmaId != ?",
+                "  AND AlmaId != ? "
+                "GROUP BY AlmaId",
                 (sys_id, sys_id),
             )
-            return [
-                {
+            results = []
+            for row in cursor:
+                group_ids = self._split_concat(row["JoinGroupIds"])
+                comments = self._split_concat(row["Comments"])
+                results.append({
                     "alma_id": row["AlmaId"],
-                    "join_group_id": row["JoinGroupId"],
-                    "scholar_name": row["ScholarName"],
-                    "comment": row["Comment"],
-                    "join_type": row["JoinType"],
-                }
-                for row in cursor
-            ]
+                    "join_group_ids": [int(g) for g in group_ids],
+                    "scholar_names": self._split_concat(row["ScholarNames"]),
+                    "join_types": self._split_concat(row["JoinTypes"]),
+                    "comment": '; '.join(comments) if comments else None,
+                })
+            return results
         except Exception as e:
             logger.error(f"FjmsService.get_join_group error for {sys_id}: {e}")
             return []

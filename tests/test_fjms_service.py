@@ -78,6 +78,10 @@ def test_db(tmp_path):
             ("990004", 100, "Goitein", "Fragment B", "Physical"),
             ("990005", 100, "Goitein", "Fragment C", "Physical"),
             ("990006", 200, "Gil", "Separate group", "Content"),
+            # Group 200: overlapping members with group 100 but different metadata
+            ("990004", 200, "Gil", "Also in group 200", "Codex Join"),
+            ("990001", 200, "Gil", "Also in group 200", None),
+            ("990006", 200, "Gil", None, "Scribe Join"),
         ],
     )
 
@@ -265,7 +269,7 @@ def test_get_all_domains_piyyut_count(service):
 def test_get_join_group(service):
     """get_join_group returns other members of the join group."""
     joins = service.get_join_group("990001")
-    # Group 100 has 990001, 990004, 990005 -- should return 990004 and 990005
+    # Groups 100 and 200 have 990001 -- should return unique partners
     alma_ids = {j["alma_id"] for j in joins}
     assert "990004" in alma_ids
     assert "990005" in alma_ids
@@ -274,15 +278,19 @@ def test_get_join_group(service):
 
 
 def test_get_join_group_has_correct_keys(service):
-    """Each join group member dict has expected keys."""
+    """Each join group member dict has expected aggregated keys."""
     joins = service.get_join_group("990001")
     assert len(joins) > 0
     for j in joins:
         assert "alma_id" in j
-        assert "join_group_id" in j
-        assert "scholar_name" in j
+        assert "join_group_ids" in j
+        assert "scholar_names" in j
         assert "comment" in j
-        assert "join_type" in j
+        assert "join_types" in j
+        # New format: lists not scalars
+        assert isinstance(j["join_group_ids"], list)
+        assert isinstance(j["scholar_names"], list)
+        assert isinstance(j["join_types"], list)
 
 
 def test_get_join_group_not_found(service):
@@ -298,6 +306,54 @@ def test_get_join_group_excludes_self(service):
     # But should include other group members
     assert "990001" in alma_ids
     assert "990005" in alma_ids
+
+
+# ── Multi-group deduplication tests ──────────────────────────────
+
+
+def test_get_join_group_deduplicates_across_groups(service):
+    """Partners appearing in multiple groups are returned exactly once."""
+    # 990006 is in group 200. 990004 and 990001 are also in group 200.
+    joins = service.get_join_group("990006")
+    alma_ids = [j["alma_id"] for j in joins]
+    # Each partner should appear exactly once
+    assert len(alma_ids) == len(set(alma_ids)), f"Duplicate alma_ids found: {alma_ids}"
+    assert "990004" in alma_ids
+    assert "990001" in alma_ids
+    assert len(joins) == 2
+
+
+def test_get_join_group_aggregates_scholars(service):
+    """Partners in multiple groups with different scholars aggregate all scholar names."""
+    # 990004 is in groups 100 (Goitein) and 200 (Gil).
+    # Query for 990004: 990001 appears in both groups with different scholars.
+    joins = service.get_join_group("990004")
+    join_990001 = next(j for j in joins if j["alma_id"] == "990001")
+    # 990001 in group 100 has scholar "Goitein", in group 200 has scholar "Gil"
+    assert "Goitein" in join_990001["scholar_names"]
+    assert "Gil" in join_990001["scholar_names"]
+
+
+def test_get_join_group_aggregates_join_types(service):
+    """Partners in multiple groups with different join types aggregate all types."""
+    # 990001 is in groups 100 and 200.
+    # Query for 990001: 990004 is in group 100 (JoinType="Physical") and group 200 (JoinType="Codex Join")
+    joins = service.get_join_group("990001")
+    join_990004 = next(j for j in joins if j["alma_id"] == "990004")
+    assert "Physical" in join_990004["join_types"]
+    assert "Codex Join" in join_990004["join_types"]
+
+
+def test_get_join_group_filters_null_from_aggregation(service):
+    """NULL values are not included in aggregated lists."""
+    # 990001 is in groups 100 and 200.
+    # In group 200, 990001 has JoinType=None.
+    # Query for 990004: 990001 in group 100 has JoinType="Physical", in group 200 has JoinType=None
+    joins = service.get_join_group("990004")
+    join_990001 = next(j for j in joins if j["alma_id"] == "990001")
+    # join_types should contain "Physical" but NOT None or empty string
+    assert all(jt for jt in join_990001["join_types"]), "NULL/empty values found in join_types"
+    assert "Physical" in join_990001["join_types"]
 
 
 # ── Catalog tests ────────────────────────────────────────────────
