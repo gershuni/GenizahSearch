@@ -67,6 +67,9 @@ def fjms_test_db(tmp_path):
             ("SYS001", 100, "Goitein", "Fragment A", "Physical Join"),
             ("SYS002", 100, "Goitein", "Fragment B", "Physical Join"),
             ("SYS003", 100, "Gil", "Fragment C", "Codex Join"),
+            # Group 200: overlapping members for multi-group tests
+            ("SYS001", 200, "Ben-Sasson", "Another group", "Codex Join"),
+            ("SYS002", 200, "Ben-Sasson", "Also in group 200", None),
         ],
     )
     conn.execute("INSERT INTO meta (key, value) VALUES ('version', '1.0.0')")
@@ -124,7 +127,7 @@ class TestFjmsJoinsMergeIntoFetchConnectedFragments:
             force_refresh=True,
         )
 
-        # Should have FJMS joins (SYS002, SYS003 are in group 100 with SYS001)
+        # Should have FJMS joins (SYS002, SYS003 are in groups with SYS001)
         fjms_joins = [j for j in result.get("joins", []) if j.get("source") == "FJMS"]
         assert len(fjms_joins) == 2
 
@@ -136,10 +139,10 @@ class TestFjmsJoinsMergeIntoFetchConnectedFragments:
             assert "join_group_id" in j
             assert j["fragment_a"] == "T-S 12.100"
 
-        # Check scholar names
-        scholar_names = {j["scholar_name"] for j in fjms_joins}
-        assert "Goitein" in scholar_names
-        assert "Gil" in scholar_names
+        # Check scholar names (aggregated: SYS002 has Goitein+Ben-Sasson, SYS003 has Gil)
+        all_scholars = ' '.join(j["scholar_name"] for j in fjms_joins)
+        assert "Goitein" in all_scholars
+        assert "Gil" in all_scholars
 
 
 class TestFjmsJoinsDeduplication:
@@ -205,15 +208,15 @@ class TestFjmsJoinsScholarAttribution:
         )
 
         fjms_joins = [j for j in result.get("joins", []) if j.get("source") == "FJMS"]
-        # Goitein join for SYS002
-        goitein_joins = [j for j in fjms_joins if j["scholar_name"] == "Goitein"]
-        assert len(goitein_joins) == 1
-        assert goitein_joins[0]["fragment_b"] == "T-S 12.200"
+        # SYS002 join -- has scholars from both groups (Goitein, Ben-Sasson)
+        sys002_joins = [j for j in fjms_joins if j["fragment_b"] == "T-S 12.200"]
+        assert len(sys002_joins) == 1
+        assert "Goitein" in sys002_joins[0]["scholar_name"]
 
-        # Gil join for SYS003
-        gil_joins = [j for j in fjms_joins if j["scholar_name"] == "Gil"]
-        assert len(gil_joins) == 1
-        assert gil_joins[0]["fragment_b"] == "T-S 12.300"
+        # SYS003 join -- only in group 100 (Gil)
+        sys003_joins = [j for j in fjms_joins if j["fragment_b"] == "T-S 12.300"]
+        assert len(sys003_joins) == 1
+        assert "Gil" in sys003_joins[0]["scholar_name"]
 
 
 class TestFjmsJoinsGracefulDegradation:
@@ -284,10 +287,10 @@ class TestFjmsJoinsDesktopDialog:
             assert "created_by_username" in j  # scholar_name stored here
             assert j["fragment_a"] == "T-S 12.100"
 
-        # Check scholar names in joins
-        scholars = {j["created_by_username"] for j in fjms_joins}
-        assert "Goitein" in scholars
-        assert "Gil" in scholars
+        # Check scholar names in joins (aggregated as comma-separated strings)
+        all_scholars = ' '.join(j["created_by_username"] for j in fjms_joins)
+        assert "Goitein" in all_scholars
+        assert "Gil" in all_scholars
 
     def test_get_fjms_joins_graceful_degradation(self):
         """_get_fjms_joins returns empty tuples when service unavailable."""
@@ -313,3 +316,59 @@ class TestFjmsJoinsDesktopDialog:
         # None of the joins should have fragment_b == current shelfmark
         for j in fjms_joins:
             assert j["fragment_b"].upper() != "T-S 12.100"
+
+    def test_get_fjms_joins_multi_group_aggregated(self, fjms_service, mock_meta_mgr):
+        """Multi-group partners appear once with all scholars aggregated in desktop."""
+        dialog = self._make_dialog_stub("SYS001", "T-S 12.100", mock_meta_mgr)
+
+        with patch("shared.fjms_service.get_fjms_service", return_value=fjms_service):
+            fjms_frags, fjms_joins, fjms_details = dialog._get_fjms_joins()
+
+        # Each fragment_b should appear at most once
+        fragment_bs = [j["fragment_b"] for j in fjms_joins]
+        assert len(fragment_bs) == len(set(fragment_bs)), f"Duplicate fragment_b: {fragment_bs}"
+
+        # SYS002 is in groups 100 (Goitein) and 200 (Ben-Sasson)
+        sys002_join = next(j for j in fjms_joins if j["fragment_b"] == "T-S 12.200")
+        assert "Goitein" in sys002_join["created_by_username"]
+        assert "Ben-Sasson" in sys002_join["created_by_username"]
+
+
+# ── Web multi-group integration test ────────────────────────────────
+
+
+class TestFjmsMultiGroupWeb:
+    """Test multi-group deduplication in web app fetch_connected_fragments."""
+
+    @patch("web.components.joins_panel.get_fragment_joins")
+    @patch("web.components.joins_panel.state")
+    @patch("web.document_service.get_document_for_fragment", return_value=None)
+    @patch("web.fjms_service.get_fjms_service")
+    def test_fjms_multi_group_shows_all_scholars(self, mock_get_fjms, mock_doc_for_frag, mock_state, mock_get_joins, fjms_service, mock_meta_mgr):
+        """Multi-group partners show all contributing scholars in web app."""
+        mock_get_joins.return_value = []  # No user joins
+        mock_state.meta_mgr = mock_meta_mgr
+        mock_get_fjms.return_value = fjms_service
+
+        from web.components.joins_panel import fetch_connected_fragments
+
+        result = fetch_connected_fragments(
+            shelfmark="T-S 12.100",
+            document_id="SYS001",
+            force_refresh=True,
+        )
+
+        fjms_joins = [j for j in result.get("joins", []) if j.get("source") == "FJMS"]
+
+        # SYS002 should appear exactly once
+        sys002_joins = [j for j in fjms_joins if j["fragment_b"] == "T-S 12.200"]
+        assert len(sys002_joins) == 1
+
+        # Scholar names should contain both scholars (comma-separated)
+        scholar_str = sys002_joins[0]["scholar_name"]
+        assert "Goitein" in scholar_str
+        assert "Ben-Sasson" in scholar_str
+
+        # Relationship type should contain the non-NULL join type
+        rel_type = sys002_joins[0]["relationship_type"]
+        assert "Physical Join" in rel_type

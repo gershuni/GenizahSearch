@@ -3535,9 +3535,9 @@ class JoinsDialog(QDialog):
                     'id': None,
                     'fragment_a': plain_shelfmark or '',
                     'fragment_b': shelf,
-                    'relationship_type': member.get('join_type', ''),
+                    'relationship_type': ', '.join(member.get('join_types', [])) if member.get('join_types') else '',
                     'source': 'FJMS',
-                    'created_by_username': member.get('scholar_name', ''),
+                    'created_by_username': ', '.join(member.get('scholar_names', [])) if member.get('scholar_names') else '',
                     'created_at': '',
                     'notes': '',
                 })

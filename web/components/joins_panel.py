@@ -208,11 +208,11 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                         'id': None,  # Not user-created
                         'fragment_a': shelfmark or '',
                         'fragment_b': resolved_shelfmark,
-                        'relationship_type': member.get('join_type', ''),
+                        'relationship_type': ', '.join(member.get('join_types', [])) if member.get('join_types') else '',
                         'source': 'FJMS',
                         'notes': '',
-                        'scholar_name': member.get('scholar_name', ''),
-                        'join_group_id': member.get('join_group_id'),
+                        'scholar_name': ', '.join(member.get('scholar_names', [])) if member.get('scholar_names') else '',
+                        'join_group_id': member.get('join_group_ids', []),
                     })
         except Exception as e:
             print(f"FJMS joins merge error: {e}")
