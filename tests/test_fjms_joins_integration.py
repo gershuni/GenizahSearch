@@ -439,6 +439,138 @@ class TestFjmsJoinsDesktopDialog:
         assert "Ben-Sasson" in sys002_join["created_by_username"]
 
 
+# ── Desktop dual-source merge test ───────────────────────────────────
+
+
+class MockTableItem:
+    """Lightweight mock for QTableWidgetItem to test table cell operations."""
+
+    def __init__(self, text=''):
+        self._text = text
+        self._foreground = None
+        self._background = None
+        self._data = {}
+
+    def text(self):
+        return self._text
+
+    def setText(self, text):
+        self._text = text
+
+    def setForeground(self, color):
+        self._foreground = color
+
+    def setBackground(self, color):
+        self._background = color
+
+    def setData(self, role, value):
+        self._data[role] = value
+
+
+class MockTable:
+    """Lightweight mock for QTableWidget to test _merge_fjms_joins_into_display."""
+
+    def __init__(self):
+        self._rows = []  # list of lists of MockTableItem
+
+    def rowCount(self):
+        return len(self._rows)
+
+    def item(self, row, col):
+        if row < len(self._rows) and col < len(self._rows[row]):
+            return self._rows[row][col]
+        return None
+
+    def setItem(self, row, col, item):
+        while len(self._rows) <= row:
+            self._rows.append([None] * 6)
+        while len(self._rows[row]) <= col:
+            self._rows[row].append(None)
+        self._rows[row][col] = item
+
+    def insertRow(self, row):
+        while len(self._rows) <= row:
+            self._rows.append([None] * 6)
+
+
+class TestDesktopDualSourceMerge:
+    """Test dual-source merge in desktop JoinsDialog _merge_fjms_joins_into_display."""
+
+    def test_desktop_dual_source_merge(self, fjms_service, mock_meta_mgr):
+        """When both PGP and FJMS return the same fragment pair, source column shows 'PGP, FJMS'."""
+        from corrections_ui import JoinsDialog
+
+        stub = MagicMock()
+        stub.document_id = "SYS001"
+        stub.shelfmark = "T-S 12.100"
+        stub.meta_mgr = mock_meta_mgr
+
+        # Create mock table with one existing PGP row: T-S 12.100 + T-S 12.200
+        mock_table = MockTable()
+        mock_table.insertRow(0)
+        mock_table.setItem(0, 0, MockTableItem("T-S 12.100"))
+        mock_table.setItem(0, 1, MockTableItem("T-S 12.200"))
+        mock_table.setItem(0, 2, MockTableItem("Same composition"))
+        mock_table.setItem(0, 3, MockTableItem("PGP"))
+        mock_table.setItem(0, 4, MockTableItem(""))
+        mock_table.setItem(0, 5, MockTableItem(""))
+
+        stub.table = mock_table
+        stub.fragments_list = MagicMock()
+        stub.fragments_list.addItem = MagicMock()
+
+        # Mock _get_fjms_joins to return T-S 12.200 (overlap) and T-S 12.300 (new)
+        stub._get_fjms_joins = MagicMock(return_value=(
+            ["T-S 12.200", "T-S 12.300"],
+            [
+                {
+                    "fragment_a": "T-S 12.100",
+                    "fragment_b": "T-S 12.200",
+                    "relationship_type": "Physical Join",
+                    "source": "FJMS",
+                    "id": None,
+                    "created_by_username": "Goitein",
+                },
+                {
+                    "fragment_a": "T-S 12.100",
+                    "fragment_b": "T-S 12.300",
+                    "relationship_type": "Codex Join",
+                    "source": "FJMS",
+                    "id": None,
+                    "created_by_username": "Gil",
+                },
+            ],
+            [
+                {"shelfmark": "T-S 12.200", "document_id": "SYS002"},
+                {"shelfmark": "T-S 12.300", "document_id": "SYS003"},
+            ],
+        ))
+
+        # Bind the real method to the stub
+        bound_method = JoinsDialog._merge_fjms_joins_into_display.__get__(stub, type(stub))
+
+        existing_upper = {"T-S 12.100", "T-S 12.200"}
+        new_count = bound_method(existing_upper)
+
+        # Only T-S 12.300 should be counted as new (T-S 12.200 was merged)
+        assert new_count == 1
+
+        # Row 0 (the PGP row for T-S 12.200) should now show "PGP, FJMS"
+        source_text = mock_table.item(0, 3).text()
+        assert "PGP" in source_text
+        assert "FJMS" in source_text
+        assert source_text == "PGP, FJMS"
+
+        # Row 0 scholar column should be populated (was empty, merged from FJMS)
+        scholar_text = mock_table.item(0, 4).text()
+        assert scholar_text == "Goitein"
+
+        # Row 1 should be the new FJMS-only entry for T-S 12.300
+        assert mock_table.rowCount() == 2
+        assert mock_table.item(1, 1).text() == "T-S 12.300"
+        assert mock_table.item(1, 3).text() == "FJMS"
+
+
 # ── Web multi-group integration test ────────────────────────────────
 
 

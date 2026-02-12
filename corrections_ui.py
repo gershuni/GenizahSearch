@@ -3593,24 +3593,63 @@ class JoinsDialog(QDialog):
                 item.setText(f"{display_text} ({tr('current')})")
             self.fragments_list.addItem(item)
 
-        # Deduplicate FJMS joins against existing joins in the table
-        existing_pairs = set()
+        # Build lookup: pair -> row index for existing joins in the table
+        existing_pair_rows = {}  # (fa_upper, fb_upper) -> row_index
         for r in range(self.table.rowCount()):
             fa = self.table.item(r, 0).text().upper() if self.table.item(r, 0) else ''
             fb = self.table.item(r, 1).text().upper() if self.table.item(r, 1) else ''
             if fa and fb:
-                existing_pairs.add((fa, fb))
-                existing_pairs.add((fb, fa))
+                existing_pair_rows[(fa, fb)] = r
+                existing_pair_rows[(fb, fa)] = r
 
         deduped_fjms_joins = []
         for fj in fjms_joins:
             pair = (fj.get('fragment_a', '').upper(), fj.get('fragment_b', '').upper())
-            if pair not in existing_pairs:
-                deduped_fjms_joins.append(fj)
-                existing_pairs.add(pair)
-                existing_pairs.add((pair[1], pair[0]))
+            if pair in existing_pair_rows:
+                # Merge FJMS source into existing row instead of dropping
+                existing_row = existing_pair_rows[pair]
 
-        # Add FJMS join rows (reuse _add_pgp_join_rows pattern with FJMS styling)
+                # Update source column (col 3) to show dual source
+                source_item = self.table.item(existing_row, 3)
+                if source_item:
+                    current_source = source_item.text()
+                    if 'FJMS' not in current_source:
+                        new_source = f"{current_source}, FJMS" if current_source else "FJMS"
+                        source_item.setText(new_source)
+                        source_item.setForeground(QColor('#555555'))  # Neutral color for dual-source
+
+                # Merge scholar name (col 4) if existing is empty
+                fjms_scholar = fj.get('created_by_username', '')
+                existing_scholar = self.table.item(existing_row, 4)
+                if fjms_scholar and existing_scholar and not existing_scholar.text():
+                    existing_scholar.setText(fjms_scholar)
+
+                # Merge relationship type (col 2) if existing is empty or Unknown
+                fjms_rel = fj.get('relationship_type', '')
+                if fjms_rel:
+                    existing_rel = self.table.item(existing_row, 2)
+                    if existing_rel:
+                        existing_rel_text = existing_rel.text()
+                        unknown_label = tr('Unknown')
+                        if not existing_rel_text or existing_rel_text == unknown_label:
+                            rel_display = {
+                                'physical_join': tr('Physical join'),
+                                'same_composition': tr('Same composition')
+                            }.get(fjms_rel, fjms_rel)
+                            existing_rel.setText(rel_display)
+                        elif fjms_rel not in existing_rel_text:
+                            fjms_rel_display = {
+                                'physical_join': tr('Physical join'),
+                                'same_composition': tr('Same composition')
+                            }.get(fjms_rel, fjms_rel)
+                            if fjms_rel_display not in existing_rel_text:
+                                existing_rel.setText(f"{existing_rel_text}, {fjms_rel_display}")
+            else:
+                deduped_fjms_joins.append(fj)
+                existing_pair_rows[pair] = None  # Mark as seen (no row to update)
+                existing_pair_rows[(pair[1], pair[0])] = None
+
+        # Add truly new FJMS join rows (reuse _add_pgp_join_rows pattern with FJMS styling)
         for join in deduped_fjms_joins:
             row = self.table.rowCount()
             self.table.insertRow(row)
