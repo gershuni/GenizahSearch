@@ -168,11 +168,60 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                         'notes': f'PGP Document #{resolved_pgpid}'
                     })
 
+        # --- Merge FJMS scholarly joins ---
+        try:
+            from web.fjms_service import get_fjms_service
+            fjms_svc = get_fjms_service(thread_safe=True)
+            if fjms_svc.is_available() and document_id is not None:
+                fjms_joins = fjms_svc.get_join_group(document_id)
+                for member in fjms_joins:
+                    alma_id = member.get('alma_id', '')
+                    if not alma_id or alma_id == document_id:
+                        continue
+
+                    # Resolve shelfmark from metadata
+                    resolved_shelfmark = None
+                    if state.meta_mgr:
+                        try:
+                            resolved_shelfmark, _ = state.meta_mgr.get_meta_for_id(alma_id)
+                        except Exception:
+                            pass
+
+                    if not resolved_shelfmark or resolved_shelfmark == 'Unknown':
+                        continue
+
+                    # Deduplicate against user/PGP joins
+                    if resolved_shelfmark.upper() in fragments_upper:
+                        continue
+
+                    fragments_set.add(resolved_shelfmark)
+                    fragments_upper.add(resolved_shelfmark.upper())
+
+                    if resolved_shelfmark.upper() not in details_upper:
+                        fragment_details.append({
+                            'shelfmark': resolved_shelfmark,
+                            'document_id': alma_id
+                        })
+                        details_upper.add(resolved_shelfmark.upper())
+
+                    formatted_joins.append({
+                        'id': None,  # Not user-created
+                        'fragment_a': shelfmark or '',
+                        'fragment_b': resolved_shelfmark,
+                        'relationship_type': member.get('join_type', ''),
+                        'source': 'FJMS',
+                        'notes': '',
+                        'scholar_name': member.get('scholar_name', ''),
+                        'join_group_id': member.get('join_group_id'),
+                    })
+        except Exception as e:
+            print(f"FJMS joins merge error: {e}")
+
         # Ensure current shelfmark is in fragments_set
         if shelfmark and shelfmark.upper() not in fragments_upper:
             fragments_set.add(shelfmark)
 
-        # If no joins at all (no user joins, no PGP joins), return empty
+        # If no joins at all (no user joins, no PGP joins, no FJMS joins), return empty
         if not formatted_joins:
             result = {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0, "fragment_details": fragment_details}
             with _joins_cache_lock:
@@ -389,11 +438,13 @@ def create_joins_dialog(
                         source = join.get('source', 'user')
                         join_id = join.get('id')
 
+                        scholar_name = join.get('scholar_name', '')
+
                         # Map each fragment to its relationship info
                         if frag_a not in relationship_map:
-                            relationship_map[frag_a] = {'type': rel_type, 'source': source}
+                            relationship_map[frag_a] = {'type': rel_type, 'source': source, 'scholar_name': scholar_name}
                         if frag_b not in relationship_map:
-                            relationship_map[frag_b] = {'type': rel_type, 'source': source}
+                            relationship_map[frag_b] = {'type': rel_type, 'source': source, 'scholar_name': scholar_name}
 
                         # Track DIRECT joins to current shelfmark only
                         if frag_a.upper() == shelfmark.upper():
@@ -485,8 +536,14 @@ def create_joins_dialog(
                                         }.get(rel_type, rel_type)
                                         ui.label(rel_label).classes('text-xs text-gray-500')
 
-                                    if source and source != 'user':
+                                    if source == 'FJMS':
+                                        ui.badge('FJMS').props('color=purple outline dense').classes('text-xs')
+                                    elif source and source != 'user':
                                         ui.badge(source).props('color=blue outline dense').classes('text-xs')
+
+                                    scholar = rel_info.get('scholar_name', '')
+                                    if scholar:
+                                        ui.label(f"({scholar})").classes('text-xs text-gray-400 italic')
 
                                     # Show "direct" badge for directly joined fragments
                                     if direct_join_id:

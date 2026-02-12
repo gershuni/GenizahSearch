@@ -1989,17 +1989,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Build relationship/source lookup from joins data
                         current_shelfmark_upper = (page.shelfmark or '').upper()
                         joins_list = joins_data.get('joins', [])
-                        frag_info_map = {}  # shelfmark_upper -> {source, relationship_type}
+                        frag_info_map = {}  # shelfmark_upper -> {source, relationship_type, scholar_name}
                         for join_entry in joins_list:
                             fa = join_entry.get('fragment_a', '')
                             fb = join_entry.get('fragment_b', '')
                             src = join_entry.get('source', 'user')
                             rel = join_entry.get('relationship_type', '')
+                            scholar = join_entry.get('scholar_name', '')
                             # Map the OTHER fragment in each join pair
                             if fa.upper() == current_shelfmark_upper and fb:
-                                frag_info_map[fb.upper()] = {'source': src, 'relationship_type': rel}
+                                frag_info_map[fb.upper()] = {'source': src, 'relationship_type': rel, 'scholar_name': scholar}
                             elif fb.upper() == current_shelfmark_upper and fa:
-                                frag_info_map[fa.upper()] = {'source': src, 'relationship_type': rel}
+                                frag_info_map[fa.upper()] = {'source': src, 'relationship_type': rel, 'scholar_name': scholar}
 
                         # Clickable fragment rows (skip current fragment)
                         for frag_shelfmark in joins_data.get('fragments', []):
@@ -2022,7 +2023,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ).on('click', make_nav_to()):
                                 ui.icon('description').classes('text-gray-500').style('font-size: 1.1rem;')
                                 ui.label(frag_shelfmark).classes('text-sm font-medium')
-                                if frag_source == 'PGP':
+                                if frag_source == 'FJMS':
+                                    ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+                                elif frag_source == 'PGP':
                                     ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
                                 if frag_rel_type:
                                     rel_label = {
@@ -2030,6 +2033,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         'same_composition': tr('Same composition'),
                                     }.get(frag_rel_type, frag_rel_type)
                                     ui.label(rel_label).classes('text-xs text-gray-500')
+                                scholar = info.get('scholar_name', '')
+                                if scholar:
+                                    ui.label(f"({scholar})").classes('text-xs text-gray-400 italic')
                                 ui.element('div').classes('flex-grow')
                                 ui.icon('arrow_back' if is_rtl() else 'arrow_forward').classes('text-gray-400')
 
