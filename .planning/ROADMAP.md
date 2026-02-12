@@ -108,10 +108,10 @@ Plans:
   2. Each join entry shows who identified the join (scholar name) and the join type (Physical Join, Codex Join, etc.)
   3. The user can click a join group member to navigate to that fragment's browse page
   4. FJMS join information appears in the Related Fragments panel in both web and desktop apps
-**Plans**: TBD
+**Plans**: 1 plan in 1 wave
 
 Plans:
-- [ ] 26-01: Join data integration and UI (both apps)
+- [ ] 26-01-PLAN.md -- FJMS joins integration in Related Fragments panel (both apps)
 
 ### Phase 27: Domain Classifications
 **Goal**: Users can see what subject a manuscript belongs to and filter search results by domain
