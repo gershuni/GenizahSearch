@@ -78,7 +78,7 @@ Shared corrections service, amber styling (web), emoji labels (desktop).
 
 - [x] **Phase 25: Data Infrastructure** - Export FIST.db into SQLite sidecar with shared service layer (completed 2026-02-12)
 - [x] **Phase 26: Scientific Joins** - FJMS join groups with scholar attribution in both apps (completed 2026-02-12)
-- [x] **Phase 27: Domain Classifications** - Domain badges and search filtering in both apps (completed 2026-02-13)
+- [ ] **Phase 27: Domain Classifications** - Domain badges and search filtering in both apps (UAT gap closure in progress)
 - [ ] **Phase 28: Catalog Enrichment** - FJMS titles, authors, dates on browse page in both apps
 
 ## Phase Details
@@ -124,11 +124,13 @@ Plans:
   2. When searching, the user can select a domain filter and see only results from manuscripts classified under that domain
   3. Domain badges show hierarchy when applicable (e.g., "Piyyut > Kedushtaot" or parent alongside child)
   4. Domain display and search filtering work identically in both web and desktop apps
-**Plans**: 2 plans in 2 waves
+**Plans**: 4 plans in 2 waves
 
 Plans:
 - [x] 27-01-PLAN.md -- Domain display on browse page + FjmsService hierarchy method (Wave 1)
 - [x] 27-02-PLAN.md -- Domain filtering in search with hierarchical tree, type-ahead, standalone browse (Wave 2, depends on 27-01)
+- [ ] 27-03-PLAN.md -- Gap closure: Web post-search dynamic domain filter with button+dialog (Wave 1)
+- [ ] 27-04-PLAN.md -- Gap closure: Desktop post-search dynamic domain filter with exclude pattern (Wave 2, depends on 27-03)
 
 ### Phase 28: Catalog Enrichment
 **Goal**: Users see FJMS catalog metadata alongside existing PGP metadata when browsing manuscripts
@@ -160,9 +162,9 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
 | 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
 | 26. Scientific Joins | v5.8.0 | 3/3 | Complete | 2026-02-12 |
-| 27. Domain Classifications | v5.8.0 | 2/2 | Complete | 2026-02-13 |
+| 27. Domain Classifications | v5.8.0 | 2/4 | Gap closure | 2026-02-13 |
 | 28. Catalog Enrichment | v5.8.0 | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-13 after Phase 27 complete (2/2 plans, verification passed)*
+*Last updated: 2026-02-13 after Phase 27 UAT gap closure plans created (2 new plans: 27-03, 27-04)*
