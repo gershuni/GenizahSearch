@@ -1649,8 +1649,151 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         builder_dialog.open()
 
     def _open_domain_filter_dialog():
-        """Open modal dialog with checkbox tree of domains from current results (Task 2)."""
-        pass
+        """Open modal dialog with checkbox tree of domains from current results."""
+        if not search_state.has_domain_data:
+            return
+
+        # Build domain hierarchy from all_result_domains
+        # We need parent/child info - re-fetch raw domain dicts for hierarchy building
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service(thread_safe=True)
+        hierarchy = fjms.get_domain_hierarchy() if fjms.is_available() else {}
+
+        # Count results per domain from all_result_domains
+        domain_counts = {}  # domain_name -> count of results
+        for sys_id, domain_names in search_state.all_result_domains.items():
+            for d in domain_names:
+                domain_counts[d] = domain_counts.get(d, 0) + 1
+
+        # Build filtered hierarchy: only domains present in current results
+        result_hierarchy = {}  # parent_name -> {children: [{domain, count}], count}
+        for parent_name, info in hierarchy.items():
+            parent_in_results = parent_name in domain_counts
+            children_in_results = []
+            for child in info.get('children', []):
+                if child['domain'] in domain_counts:
+                    children_in_results.append({
+                        'domain': child['domain'],
+                        'domain_heb': child.get('domain_heb', child['domain']),
+                        'count': domain_counts[child['domain']],
+                    })
+            if parent_in_results or children_in_results:
+                parent_count = domain_counts.get(parent_name, 0)
+                # If parent has children in results, sum their counts for the parent total
+                if children_in_results and parent_count == 0:
+                    parent_count = sum(c['count'] for c in children_in_results)
+                result_hierarchy[parent_name] = {
+                    'parent_domain_heb': info.get('parent_domain_heb', parent_name),
+                    'count': parent_count,
+                    'children': children_in_results,
+                }
+
+        # Also handle domains in results that are NOT in the hierarchy (orphans)
+        known_domains = set()
+        for parent_name, info in result_hierarchy.items():
+            known_domains.add(parent_name)
+            for c in info['children']:
+                known_domains.add(c['domain'])
+        for domain_name, count in domain_counts.items():
+            if domain_name not in known_domains:
+                result_hierarchy[domain_name] = {
+                    'parent_domain_heb': domain_name,
+                    'count': count,
+                    'children': [],
+                }
+
+        total_results = len(search_state.results)
+
+        # Track checkbox states: domain_name -> ui.checkbox reference
+        checkboxes = {}
+        current_exclusions = search_state.domain_exclusions.copy()
+
+        with ui.dialog() as dialog, ui.card().classes('w-[600px] max-h-[80vh]'):
+            with ui.column().classes('w-full gap-2'):
+                ui.label(tr('Filter by Domain')).classes('text-lg font-bold')
+
+                # Summary line
+                def calc_visible():
+                    excluded = {name for name, cb in checkboxes.items() if not cb.value}
+                    visible = 0
+                    for r in search_state.results:
+                        sys_id = r.get('display', {}).get('id')
+                        doms = search_state.all_result_domains.get(sys_id, [])
+                        if not doms or not all(d in excluded for d in doms):
+                            visible += 1
+                    return visible
+
+                summary_label = ui.label(f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}").classes('text-sm text-gray-500')
+
+                # Scrollable checkbox tree
+                with ui.scroll_area().classes('w-full').style('max-height: 50vh;'):
+                    with ui.column().classes('w-full gap-0'):
+                        for parent_name, info in sorted(result_hierarchy.items(), key=lambda x: -x[1]['count']):
+                            children = info.get('children', [])
+
+                            # Parent checkbox
+                            def make_parent_handler(pname, child_domains):
+                                def handler(e):
+                                    for cd in child_domains:
+                                        if cd in checkboxes:
+                                            checkboxes[cd].value = e.value
+                                    visible = calc_visible()
+                                    summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
+                                return handler
+
+                            child_domain_names = [c['domain'] for c in children]
+                            parent_checked = parent_name not in current_exclusions
+                            parent_label = f"{parent_name} ({info['count']})"
+
+                            parent_cb = ui.checkbox(parent_label, value=parent_checked).classes('font-bold')
+                            checkboxes[parent_name] = parent_cb
+                            parent_cb.on_value_change(make_parent_handler(parent_name, child_domain_names))
+
+                            # Children checkboxes (indented)
+                            for child in sorted(children, key=lambda c: -c['count']):
+                                child_checked = child['domain'] not in current_exclusions
+                                child_label = f"{child['domain']} ({child['count']})"
+
+                                def make_child_handler():
+                                    def handler(e):
+                                        visible = calc_visible()
+                                        summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
+                                    return handler
+
+                                child_cb = ui.checkbox(child_label, value=child_checked).classes('ml-6')
+                                checkboxes[child['domain']] = child_cb
+                                child_cb.on_value_change(make_child_handler())
+
+                # Buttons
+                with ui.row().classes('w-full justify-between'):
+                    def check_all():
+                        for cb in checkboxes.values():
+                            cb.value = True
+                        summary_label.text = f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}"
+
+                    ui.button(tr('Check All'), on_click=check_all).props('flat dense no-caps')
+
+                    with ui.row().classes('gap-2'):
+                        def apply_filter():
+                            excluded = {name for name, cb in checkboxes.items() if not cb.value}
+                            search_state.domain_exclusions = excluded
+                            # Persist to storage
+                            app.storage.user['domain_exclusions'] = list(excluded)
+                            _apply_domain_exclusions()
+                            # Update button text
+                            if excluded:
+                                domain_filter_btn.text = f"{tr('Domains')} ({len(excluded)} {tr('excluded')})"
+                            else:
+                                domain_filter_btn.text = tr('Domains')
+                            dialog.close()
+
+                        def cancel_dialog():
+                            dialog.close()
+
+                        ui.button(tr('Apply'), on_click=apply_filter).props('dense no-caps color=primary')
+                        ui.button(tr('Cancel'), on_click=cancel_dialog).props('flat dense no-caps')
+
+        dialog.open()
 
     def _apply_domain_exclusions():
         """Filter displayed results based on domain exclusions without re-searching (Task 3)."""
