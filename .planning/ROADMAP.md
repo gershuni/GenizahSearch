@@ -113,7 +113,7 @@ Plans:
 Plans:
 - [x] 26-01-PLAN.md -- FJMS joins integration in Related Fragments panel (both apps)
 - [x] 26-02-PLAN.md -- Gap closure: deduplicate get_join_group() for multi-group membership (Wave 1)
-- [ ] 26-03-PLAN.md -- Gap closure: dual-badge display for fragments in both PGP and FJMS sources
+- [x] 26-03-PLAN.md -- Gap closure: dual-badge display for fragments in both PGP and FJMS sources (completed 2026-02-12)
 
 ### Phase 27: Domain Classifications
 **Goal**: Users can see what subject a manuscript belongs to and filter search results by domain
@@ -124,11 +124,11 @@ Plans:
   2. When searching, the user can select a domain filter and see only results from manuscripts classified under that domain
   3. Domain badges show hierarchy when applicable (e.g., "Piyyut > Kedushtaot" or parent alongside child)
   4. Domain display and search filtering work identically in both web and desktop apps
-**Plans**: TBD
+**Plans**: 2 plans in 2 waves
 
 Plans:
-- [ ] 27-01: Domain display on browse page (both apps)
-- [ ] 27-02: Domain filtering in search (both apps)
+- [ ] 27-01-PLAN.md -- Domain display on browse page + FjmsService hierarchy method (Wave 1)
+- [ ] 27-02-PLAN.md -- Domain filtering in search with hierarchical tree, type-ahead, standalone browse (Wave 2, depends on 27-01)
 
 ### Phase 28: Catalog Enrichment
 **Goal**: Users see FJMS catalog metadata alongside existing PGP metadata when browsing manuscripts
@@ -159,10 +159,10 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
 | 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
-| 26. Scientific Joins | v5.8.0 | 2/3 | In progress | - |
-| 27. Domain Classifications | v5.8.0 | 0/2 | Not started | - |
+| 26. Scientific Joins | v5.8.0 | 3/3 | Complete | 2026-02-12 |
+| 27. Domain Classifications | v5.8.0 | 0/2 | Planned | - |
 | 28. Catalog Enrichment | v5.8.0 | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-12 after Phase 26 gap closure plan 03 created*
+*Last updated: 2026-02-12 after Phase 26 complete (3/3 plans, verification passed)*
