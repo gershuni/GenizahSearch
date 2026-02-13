@@ -4385,6 +4385,186 @@ def _set_label_with_tooltip(label, text, max_chars=100):
     label.setToolTip(full or '')
 
 
+class DomainFilterDialog(QDialog):
+    """Hierarchical domain filter dialog with checkboxes and type-ahead search."""
+
+    def __init__(self, parent=None, selected_domains=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Filter by Subject Domain"))
+        self.setMinimumSize(550, 650)
+        self.selected_domains = selected_domains or []
+        self._updating_checks = False  # Guard for programmatic checkbox changes
+
+        layout = QVBoxLayout(self)
+
+        # Search input for type-ahead filtering
+        search_label = QLabel(tr("Search domains:"))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(tr("Type to filter..."))
+        self.search_input.textChanged.connect(self._filter_tree)
+        layout.addWidget(search_label)
+        layout.addWidget(self.search_input)
+
+        # Tree widget with checkboxes
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels([tr("Domain"), tr("Manuscripts")])
+        self.tree.setColumnWidth(0, 380)
+        self.tree.itemChanged.connect(self._handle_item_changed)
+        layout.addWidget(self.tree)
+
+        # Selection summary
+        self.summary_label = QLabel(tr("No domains selected"))
+        layout.addWidget(self.summary_label)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        clear_btn = QPushButton(tr("Clear All"))
+        clear_btn.clicked.connect(self._clear_all)
+        btn_layout.addWidget(clear_btn)
+        btn_layout.addStretch()
+
+        ok_btn = QPushButton(tr("OK"))
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton(tr("Cancel"))
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        self._populate_tree()
+        self._restore_selections()
+        self._update_summary()
+
+    def _populate_tree(self):
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return
+
+        hierarchy = fjms.get_domain_hierarchy()
+        self.tree.blockSignals(True)
+
+        for parent_name, info in hierarchy.items():
+            parent_count = info['count']
+            parent_item = QTreeWidgetItem([parent_name, f"{parent_count:,}"])
+            parent_item.setFlags(parent_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            parent_item.setCheckState(0, Qt.CheckState.Unchecked)
+            parent_item.setData(0, Qt.ItemDataRole.UserRole, parent_name)
+            self.tree.addTopLevelItem(parent_item)
+
+            for child in info.get('children', []):
+                child_item = QTreeWidgetItem([child['domain'], f"{child['count']:,}"])
+                child_item.setFlags(child_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                child_item.setCheckState(0, Qt.CheckState.Unchecked)
+                child_item.setData(0, Qt.ItemDataRole.UserRole, child['domain'])
+                parent_item.addChild(child_item)
+
+        self.tree.blockSignals(False)
+        self.tree.expandAll()
+
+    def _filter_tree(self):
+        """Filter tree items by search text."""
+        search_text = self.search_input.text().lower()
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent_item = root.child(i)
+            parent_text = parent_item.text(0).lower()
+            parent_match = search_text in parent_text
+            any_child_match = False
+
+            for j in range(parent_item.childCount()):
+                child_item = parent_item.child(j)
+                child_text = child_item.text(0).lower()
+                child_match = search_text in child_text
+                child_item.setHidden(not child_match and search_text)
+                if child_match:
+                    any_child_match = True
+
+            parent_item.setHidden(not (parent_match or any_child_match) and search_text)
+
+    def _handle_item_changed(self, item, column):
+        """Handle checkbox state changes with parent-child propagation."""
+        if self._updating_checks or column != 0:
+            return
+
+        self._updating_checks = True
+        check_state = item.checkState(0)
+
+        # If parent changed, update all visible children
+        if item.parent() is None:
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if not child.isHidden():
+                    child.setCheckState(0, check_state)
+
+        self._updating_checks = False
+        self._update_summary()
+
+    def _clear_all(self):
+        """Uncheck all items."""
+        self.tree.blockSignals(True)
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent_item = root.child(i)
+            parent_item.setCheckState(0, Qt.CheckState.Unchecked)
+            for j in range(parent_item.childCount()):
+                parent_item.child(j).setCheckState(0, Qt.CheckState.Unchecked)
+        self.tree.blockSignals(False)
+        self._update_summary()
+
+    def _restore_selections(self):
+        """Restore previously selected domains."""
+        if not self.selected_domains:
+            return
+
+        self.tree.blockSignals(True)
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent_item = root.child(i)
+            parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
+            if parent_domain in self.selected_domains:
+                parent_item.setCheckState(0, Qt.CheckState.Checked)
+
+            for j in range(parent_item.childCount()):
+                child_item = parent_item.child(j)
+                child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
+                if child_domain in self.selected_domains:
+                    child_item.setCheckState(0, Qt.CheckState.Checked)
+
+        self.tree.blockSignals(False)
+        self._update_summary()
+
+    def get_selected_domains(self):
+        """Return list of selected domain names."""
+        selected = []
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent_item = root.child(i)
+            if parent_item.checkState(0) == Qt.CheckState.Checked:
+                parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
+                selected.append(parent_domain)
+
+            for j in range(parent_item.childCount()):
+                child_item = parent_item.child(j)
+                if child_item.checkState(0) == Qt.CheckState.Checked:
+                    child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
+                    selected.append(child_domain)
+
+        return selected
+
+    def _update_summary(self):
+        """Update selection summary label."""
+        selected = self.get_selected_domains()
+        count = len(selected)
+        if count == 0:
+            self.summary_label.setText(tr("No domains selected"))
+        elif count == 1:
+            self.summary_label.setText(f"{tr('Selected')}: {selected[0]}")
+        else:
+            self.summary_label.setText(f"{tr('Selected')}: {count} {tr('domains')}")
+
+
 class TabularQueryBuilderDialog(QDialog):
     """Tabular Query Builder for Responsa syntax composition.
 
@@ -7006,11 +7186,27 @@ class GenizahGUI(QMainWindow):
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
+        # Domain filter button and label
+        self.btn_domain_filter = QPushButton(tr("Domains"))
+        self.btn_domain_filter.setToolTip(tr("Filter results by subject domain"))
+        self.btn_domain_filter.setStyleSheet("padding: 2px 8px;")
+        self.btn_domain_filter.clicked.connect(self._open_domain_filter_dialog)
+
+        self.lbl_domain_filter = QLabel("")
+        self.lbl_domain_filter.setStyleSheet("color: #9b59b6; font-size: 11px;")
+        self.lbl_domain_filter.setVisible(False)
+
+        # Store selected domains
+        self._selected_domains = []
+        self._pending_domain_filter = None  # Set by browse page domain click
+
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
         row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
         row2.addWidget(self.search_params_container)
+        row2.addWidget(self.btn_domain_filter)
+        row2.addWidget(self.lbl_domain_filter)
 
         row2.addStretch()
         row2.addWidget(btn_help)
@@ -13474,6 +13670,37 @@ class GenizahGUI(QMainWindow):
 
         self.update_lab_ui_state(checked)
 
+    def _open_domain_filter_dialog(self):
+        """Open the domain filter dialog."""
+        # Check for pending domain from browse page click
+        initial = self._selected_domains[:]
+        if self._pending_domain_filter:
+            if self._pending_domain_filter not in initial:
+                initial.append(self._pending_domain_filter)
+            self._pending_domain_filter = None
+
+        dlg = DomainFilterDialog(self, selected_domains=initial)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._selected_domains = dlg.get_selected_domains()
+            self._update_domain_filter_label()
+
+    def _update_domain_filter_label(self):
+        """Update the domain filter label badge."""
+        if self._selected_domains:
+            if len(self._selected_domains) == 1:
+                self.lbl_domain_filter.setText(f"[{self._selected_domains[0]}]")
+            else:
+                self.lbl_domain_filter.setText(f"[{len(self._selected_domains)} domains]")
+            self.lbl_domain_filter.setVisible(True)
+        else:
+            self.lbl_domain_filter.setVisible(False)
+
+    def _navigate_to_search_with_domain(self, domain_name):
+        """Navigate to search tab with pre-selected domain filter."""
+        self._selected_domains = [domain_name]
+        self._update_domain_filter_label()
+        self.tabs.setCurrentWidget(self.search_tab)
+
     def _open_query_builder(self):
         """Open the tabular query builder dialog."""
         # Dismiss tabular button glow on first use
@@ -13519,6 +13746,10 @@ class GenizahGUI(QMainWindow):
 
     def start_search(self):
         query = self.query_input.text().strip()
+        # Allow standalone domain browsing (no text query required)
+        if not query and self._selected_domains:
+            self._execute_domain_browse()
+            return
         if not query: return
 
         # Detect query prefix (?, ??, ???, ~, /) - Delegated to Core
@@ -13786,6 +14017,26 @@ class GenizahGUI(QMainWindow):
             self.title_items_by_sid = {}
             return
 
+        # Apply domain filter if active
+        if self._selected_domains:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service()
+            if fjms.is_available():
+                domain_sys_ids = set()
+                for domain_name in self._selected_domains:
+                    domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
+                results = [r for r in results if r.get('display', {}).get('id') in domain_sys_ids]
+
+                if not results:
+                    self.status_label.setText(tr("No results matching domain filter."))
+                    self.last_results = []
+                    for b in self.export_buttons: b.setEnabled(False)
+                    self.results_table.setRowCount(0)
+                    self.result_row_by_sys_id = {}
+                    self.shelfmark_items_by_sid = {}
+                    self.title_items_by_sid = {}
+                    return
+
         self.last_results = results
         self.results_loaded = 0
         self.results_table.setRowCount(0)
@@ -14038,15 +14289,38 @@ class GenizahGUI(QMainWindow):
         self.load_next_batch()
         self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
 
-    def _navigate_to_search_with_domain(self, domain_name):
-        """Switch to search tab with domain filter pending.
+    def _execute_domain_browse(self):
+        """Browse manuscripts by domain without a text query."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return
 
-        The domain filter dialog (Plan 02) will check self._pending_domain_filter
-        and apply it on next search.
-        """
-        self._pending_domain_filter = domain_name
-        self.tabs.setCurrentWidget(self.search_tab)
-        # Domain filter will be applied by Plan 02's filter dialog
+        domain_sys_ids = set()
+        for domain_name in self._selected_domains:
+            domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
+
+        results = []
+        for sys_id in list(domain_sys_ids)[:500]:
+            shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id) if self.meta_mgr else ('Unknown', '')
+            if shelfmark == 'Unknown':
+                continue
+            library_code = self.meta_mgr.get_library_for_id(sys_id) if self.meta_mgr else ''
+            results.append({
+                'display': {
+                    'id': sys_id,
+                    'shelfmark': shelfmark,
+                    'title': title or '',
+                    'library_code': library_code or '',
+                },
+                'snippet': '',
+            })
+
+        self.on_search_finished(results)
+        if len(domain_sys_ids) > 500:
+            self.status_label.setText(
+                tr("Showing 500 of {} manuscripts. Add a text query to refine.").format(len(domain_sys_ids))
+            )
 
     def _search_by_pgp_tag(self, tag):
         """Entry point for searching by PGP tag (from browse/result dialog links)."""
