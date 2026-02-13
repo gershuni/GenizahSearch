@@ -21,7 +21,7 @@ Progress: [██████████] 100% (11/11 plans)
 **Velocity:**
 - Total plans completed: 81 (across all milestones)
 - Average duration: ~8 min
-- Total execution time: ~9.0 hours
+- Total execution time: ~9.1 hours
 
 **By Milestone:**
 
@@ -32,8 +32,7 @@ Progress: [██████████] 100% (11/11 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 11/11 | 40 min |
-| Phase 27 P05 | 6 | 1 tasks | 1 files |
+| v5.8.0 | 25-28 | 11/11 | 47 min |
 
 ## Accumulated Context
 
@@ -60,7 +59,9 @@ Progress: [██████████] 100% (11/11 plans)
 - Standalone domain browsing capped at 500 results for performance
 - Domain indicators show primary + "+N more" pattern on result cards
 - Batch domain lookup method (get_domains_for_sys_ids) for efficient post-search collection (500-item batches)
-- [Phase 27]: Post-search dynamic domain filtering with exclude-by-unchecking pattern in desktop app
+- [Phase 27]: Post-search dynamic domain filtering with exclude-by-unchecking pattern in both web and desktop apps
+- Web domain filter: post-search Domains button with checkbox tree dialog, client-side exclusion filtering
+- Desktop domain filter: post-search button with hierarchical tree, setRowHidden() for instant filtering
 
 ### Blockers/Concerns
 
@@ -77,6 +78,6 @@ Progress: [██████████] 100% (11/11 plans)
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 27-05-PLAN.md (desktop post-search domain filter)
+Stopped at: Completed 27-04-PLAN.md (web post-search domain filter)
 Resume file: None
-Notes: Phase 27 complete (5 of 5 plans). Desktop domain filter redesigned as post-search dynamic exclude filter matching web app pattern. All domain classification features fully integrated in both web and desktop apps. Phase 28 (Catalog Search) is next.
+Notes: Phase 27 complete (5 of 5 plans). Web domain filter redesigned as post-search dynamic exclude filter with checkbox tree dialog. Desktop domain filter also redesigned (27-05, completed earlier). All domain classification features fully integrated in both web and desktop apps. Phase 28 (Catalog Search) is next.
