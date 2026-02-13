@@ -4386,13 +4386,18 @@ def _set_label_with_tooltip(label, text, max_chars=100):
 
 
 class DomainFilterDialog(QDialog):
-    """Hierarchical domain filter dialog with checkboxes and type-ahead search."""
+    """Hierarchical domain filter dialog with checkboxes and type-ahead search.
 
-    def __init__(self, parent=None, selected_domains=None):
+    Post-search dynamic filter: Shows only domains from current results,
+    all checked by default. Unchecking excludes domains.
+    """
+
+    def __init__(self, parent=None, result_domains: dict = None, excluded_domains: set = None):
         super().__init__(parent)
         self.setWindowTitle(tr("Filter by Subject Domain"))
         self.setMinimumSize(550, 650)
-        self.selected_domains = selected_domains or []
+        self.result_domains = result_domains or {}  # domain_name -> count
+        self.excluded_domains = excluded_domains or set()
         self._updating_checks = False  # Guard for programmatic checkbox changes
 
         layout = QVBoxLayout(self)
@@ -4413,14 +4418,17 @@ class DomainFilterDialog(QDialog):
         layout.addWidget(self.tree)
 
         # Selection summary
-        self.summary_label = QLabel(tr("No domains selected"))
+        self.summary_label = QLabel(tr("Showing all domains"))
         layout.addWidget(self.summary_label)
 
         # Buttons
         btn_layout = QHBoxLayout()
-        clear_btn = QPushButton(tr("Clear All"))
-        clear_btn.clicked.connect(self._clear_all)
-        btn_layout.addWidget(clear_btn)
+        check_all_btn = QPushButton(tr("Check All"))
+        check_all_btn.clicked.connect(self._check_all)
+        btn_layout.addWidget(check_all_btn)
+        uncheck_all_btn = QPushButton(tr("Uncheck All"))
+        uncheck_all_btn.clicked.connect(self._uncheck_all)
+        btn_layout.addWidget(uncheck_all_btn)
         btn_layout.addStretch()
 
         ok_btn = QPushButton(tr("OK"))
@@ -4433,31 +4441,48 @@ class DomainFilterDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._populate_tree()
-        self._restore_selections()
+        self._restore_exclusions()
         self._update_summary()
 
     def _populate_tree(self):
+        """Populate tree with domains from current search results only."""
         from shared.fjms_service import get_fjms_service
         fjms = get_fjms_service()
-        if not fjms.is_available():
+        if not fjms.is_available() or not self.result_domains:
             return
 
+        # Get full hierarchy to maintain parent/child structure
         hierarchy = fjms.get_domain_hierarchy()
         self.tree.blockSignals(True)
 
+        # Only show domains that appear in result_domains
         for parent_name, info in hierarchy.items():
-            parent_count = info['count']
+            # Show parent if it or any of its children are in result_domains
+            parent_in_results = parent_name in self.result_domains
+            children_in_results = [
+                child for child in info.get('children', [])
+                if child['domain'] in self.result_domains
+            ]
+
+            if not parent_in_results and not children_in_results:
+                continue  # Skip this parent entirely
+
+            # Add parent item
+            parent_count = self.result_domains.get(parent_name, 0)
             parent_item = QTreeWidgetItem([parent_name, f"{parent_count:,}"])
             parent_item.setFlags(parent_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            parent_item.setCheckState(0, Qt.CheckState.Unchecked)
+            parent_item.setCheckState(0, Qt.CheckState.Checked)  # All checked by default
             parent_item.setData(0, Qt.ItemDataRole.UserRole, parent_name)
             self.tree.addTopLevelItem(parent_item)
 
-            for child in info.get('children', []):
-                child_item = QTreeWidgetItem([child['domain'], f"{child['count']:,}"])
+            # Add children that are in results
+            for child in children_in_results:
+                child_domain = child['domain']
+                child_count = self.result_domains.get(child_domain, 0)
+                child_item = QTreeWidgetItem([child_domain, f"{child_count:,}"])
                 child_item.setFlags(child_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                child_item.setCheckState(0, Qt.CheckState.Unchecked)
-                child_item.setData(0, Qt.ItemDataRole.UserRole, child['domain'])
+                child_item.setCheckState(0, Qt.CheckState.Checked)  # All checked by default
+                child_item.setData(0, Qt.ItemDataRole.UserRole, child_domain)
                 parent_item.addChild(child_item)
 
         self.tree.blockSignals(False)
@@ -4501,8 +4526,20 @@ class DomainFilterDialog(QDialog):
         self._updating_checks = False
         self._update_summary()
 
-    def _clear_all(self):
-        """Uncheck all items."""
+    def _check_all(self):
+        """Check all items (no filtering)."""
+        self.tree.blockSignals(True)
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent_item = root.child(i)
+            parent_item.setCheckState(0, Qt.CheckState.Checked)
+            for j in range(parent_item.childCount()):
+                parent_item.child(j).setCheckState(0, Qt.CheckState.Checked)
+        self.tree.blockSignals(False)
+        self._update_summary()
+
+    def _uncheck_all(self):
+        """Uncheck all items (exclude all domains)."""
         self.tree.blockSignals(True)
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
@@ -4513,9 +4550,9 @@ class DomainFilterDialog(QDialog):
         self.tree.blockSignals(False)
         self._update_summary()
 
-    def _restore_selections(self):
-        """Restore previously selected domains."""
-        if not self.selected_domains:
+    def _restore_exclusions(self):
+        """Restore previously excluded domains by unchecking them."""
+        if not self.excluded_domains:
             return
 
         self.tree.blockSignals(True)
@@ -4523,46 +4560,46 @@ class DomainFilterDialog(QDialog):
         for i in range(root.childCount()):
             parent_item = root.child(i)
             parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            if parent_domain in self.selected_domains:
-                parent_item.setCheckState(0, Qt.CheckState.Checked)
+            if parent_domain in self.excluded_domains:
+                parent_item.setCheckState(0, Qt.CheckState.Unchecked)
 
             for j in range(parent_item.childCount()):
                 child_item = parent_item.child(j)
                 child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
-                if child_domain in self.selected_domains:
-                    child_item.setCheckState(0, Qt.CheckState.Checked)
+                if child_domain in self.excluded_domains:
+                    child_item.setCheckState(0, Qt.CheckState.Unchecked)
 
         self.tree.blockSignals(False)
-        self._update_summary()
 
-    def get_selected_domains(self):
-        """Return list of selected domain names."""
-        selected = []
+    def get_excluded_domains(self):
+        """Return set of excluded (unchecked) domain names."""
+        excluded = set()
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
             parent_item = root.child(i)
-            if parent_item.checkState(0) == Qt.CheckState.Checked:
+            if parent_item.checkState(0) == Qt.CheckState.Unchecked:
                 parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
-                selected.append(parent_domain)
+                excluded.add(parent_domain)
 
             for j in range(parent_item.childCount()):
                 child_item = parent_item.child(j)
-                if child_item.checkState(0) == Qt.CheckState.Checked:
+                if child_item.checkState(0) == Qt.CheckState.Unchecked:
                     child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
-                    selected.append(child_domain)
+                    excluded.add(child_domain)
 
-        return selected
+        return excluded
 
     def _update_summary(self):
-        """Update selection summary label."""
-        selected = self.get_selected_domains()
-        count = len(selected)
+        """Update exclusion summary label."""
+        excluded = self.get_excluded_domains()
+        count = len(excluded)
         if count == 0:
-            self.summary_label.setText(tr("No domains selected"))
+            self.summary_label.setText(tr("Showing all domains"))
         elif count == 1:
-            self.summary_label.setText(f"{tr('Selected')}: {selected[0]}")
+            domain_name = next(iter(excluded))
+            self.summary_label.setText(f"{tr('Excluding')}: {domain_name}")
         else:
-            self.summary_label.setText(f"{tr('Selected')}: {count} {tr('domains')}")
+            self.summary_label.setText(f"{tr('Excluding')} {count} {tr('domains')}")
 
 
 class TabularQueryBuilderDialog(QDialog):
@@ -7188,17 +7225,20 @@ class GenizahGUI(QMainWindow):
 
         # Domain filter button and label
         self.btn_domain_filter = QPushButton(tr("Domains"))
-        self.btn_domain_filter.setToolTip(tr("Filter results by subject domain"))
+        self.btn_domain_filter.setToolTip(tr("Filter results by subject domain (post-search)"))
         self.btn_domain_filter.setStyleSheet("padding: 2px 8px;")
         self.btn_domain_filter.clicked.connect(self._open_domain_filter_dialog)
+        self.btn_domain_filter.setEnabled(False)  # Enabled after search with domain data
 
         self.lbl_domain_filter = QLabel("")
         self.lbl_domain_filter.setStyleSheet("color: #9b59b6; font-size: 11px;")
         self.lbl_domain_filter.setVisible(False)
 
-        # Store selected domains
-        self._selected_domains = []
-        self._pending_domain_filter = None  # Set by browse page domain click
+        # Store domain exclusions and result-specific domain data
+        self._domain_exclusions = set()
+        self._result_domain_counts = {}  # domain_name -> count in current results
+        self._result_domain_map = {}  # sys_id -> list of domain names
+        self._has_result_domains = False
 
         row2.addWidget(QLabel(tr("Mode:")))
         row2.addWidget(self.mode_combo)
@@ -13671,35 +13711,79 @@ class GenizahGUI(QMainWindow):
         self.update_lab_ui_state(checked)
 
     def _open_domain_filter_dialog(self):
-        """Open the domain filter dialog."""
-        # Check for pending domain from browse page click
-        initial = self._selected_domains[:]
-        if self._pending_domain_filter:
-            if self._pending_domain_filter not in initial:
-                initial.append(self._pending_domain_filter)
-            self._pending_domain_filter = None
+        """Open the domain filter dialog for post-search dynamic filtering."""
+        if not self._result_domain_counts:
+            return
 
-        dlg = DomainFilterDialog(self, selected_domains=initial)
+        dlg = DomainFilterDialog(self, result_domains=self._result_domain_counts, excluded_domains=self._domain_exclusions.copy())
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._selected_domains = dlg.get_selected_domains()
+            self._domain_exclusions = dlg.get_excluded_domains()
             self._update_domain_filter_label()
+            self._apply_domain_exclusions()
 
     def _update_domain_filter_label(self):
-        """Update the domain filter label badge."""
-        if self._selected_domains:
-            if len(self._selected_domains) == 1:
-                self.lbl_domain_filter.setText(f"[{self._selected_domains[0]}]")
+        """Update the domain filter label badge to show exclusion state."""
+        if self._domain_exclusions:
+            count = len(self._domain_exclusions)
+            if count == 1:
+                name = next(iter(self._domain_exclusions))
+                self.lbl_domain_filter.setText(f"[-{name}]")
             else:
-                self.lbl_domain_filter.setText(f"[{len(self._selected_domains)} domains]")
+                self.lbl_domain_filter.setText(f"[{count} excluded]")
+            self.lbl_domain_filter.setStyleSheet("color: #e74c3c; font-size: 11px;")  # Red for exclusion
             self.lbl_domain_filter.setVisible(True)
         else:
             self.lbl_domain_filter.setVisible(False)
+            self.lbl_domain_filter.setStyleSheet("color: #9b59b6; font-size: 11px;")
+
+    def _apply_domain_exclusions(self):
+        """Apply domain exclusions by hiding/showing table rows."""
+        row_to_sid = {v: k for k, v in self.result_row_by_sys_id.items()}
+
+        if not self._domain_exclusions:
+            # No exclusions -- show all rows
+            for row in range(self.results_table.rowCount()):
+                self.results_table.setRowHidden(row, False)
+            visible = self.results_table.rowCount()
+        else:
+            visible = 0
+            for row in range(self.results_table.rowCount()):
+                sys_id = row_to_sid.get(row)
+                if sys_id is None:
+                    self.results_table.setRowHidden(row, False)
+                    visible += 1
+                    continue
+                # Get domains for this result
+                result_domains = self._result_domain_map.get(sys_id, [])
+                if not result_domains:
+                    # No domain data -- always show
+                    self.results_table.setRowHidden(row, False)
+                    visible += 1
+                elif all(d in self._domain_exclusions for d in result_domains):
+                    # ALL domains excluded -- hide
+                    self.results_table.setRowHidden(row, True)
+                else:
+                    # At least one domain not excluded -- show
+                    self.results_table.setRowHidden(row, False)
+                    visible += 1
+        total = len(self.last_results) if self.last_results else 0
+        if self._domain_exclusions:
+            self.status_label.setText(
+                tr("Showing {} of {} results (filtering {} domains)").format(visible, total, len(self._domain_exclusions))
+            )
+        else:
+            self.status_label.setText(
+                tr("Showing {} of {} results").format(
+                    min(self.results_loaded, total), total
+                )
+            )
 
     def _navigate_to_search_with_domain(self, domain_name):
-        """Navigate to search tab with pre-selected domain filter."""
-        self._selected_domains = [domain_name]
+        """Navigate to search tab with domain context (exclusions cleared)."""
+        self._domain_exclusions = set()  # Clear exclusions when navigating from browse
         self._update_domain_filter_label()
         self.tabs.setCurrentWidget(self.search_tab)
+        # Note: domain will appear in post-search filter after user runs a search
 
     def _open_query_builder(self):
         """Open the tabular query builder dialog."""
@@ -13746,10 +13830,6 @@ class GenizahGUI(QMainWindow):
 
     def start_search(self):
         query = self.query_input.text().strip()
-        # Allow standalone domain browsing (no text query required)
-        if not query and self._selected_domains:
-            self._execute_domain_browse()
-            return
         if not query: return
 
         # Detect query prefix (?, ??, ???, ~, /) - Delegated to Core
@@ -14015,27 +14095,12 @@ class GenizahGUI(QMainWindow):
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
+            # Disable domain filter button when no results
+            self.btn_domain_filter.setEnabled(False)
+            self._has_result_domains = False
+            self._result_domain_counts = {}
+            self._result_domain_map = {}
             return
-
-        # Apply domain filter if active
-        if self._selected_domains:
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service()
-            if fjms.is_available():
-                domain_sys_ids = set()
-                for domain_name in self._selected_domains:
-                    domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
-                results = [r for r in results if r.get('display', {}).get('id') in domain_sys_ids]
-
-                if not results:
-                    self.status_label.setText(tr("No results matching domain filter."))
-                    self.last_results = []
-                    for b in self.export_buttons: b.setEnabled(False)
-                    self.results_table.setRowCount(0)
-                    self.result_row_by_sys_id = {}
-                    self.shelfmark_items_by_sid = {}
-                    self.title_items_by_sid = {}
-                    return
 
         self.last_results = results
         self.results_loaded = 0
@@ -14070,7 +14135,39 @@ class GenizahGUI(QMainWindow):
         has_multiple_sources = os.path.exists(Config.FILE_V7) and os.path.getsize(Config.FILE_V7) > 0
         self.results_table.setColumnHidden(self.COL_SRC, not has_multiple_sources)
 
+        # Collect domain data for post-search filtering
+        def _collect_result_domains():
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service()
+            if not fjms.is_available():
+                return {}
+            all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+            return fjms.get_domains_for_sys_ids(all_sys_ids)
+
+        # Run domain collection (blocking is OK here since on_search_finished is already on main thread
+        # and the batch lookup is fast for typical result sets)
+        raw_domains = _collect_result_domains()
+
+        # Process into domain name lists per sys_id (with parent/child dedup)
+        self._result_domain_map = {}
+        domain_counts = {}  # domain_name -> count of results
+        for sys_id, doms in raw_domains.items():
+            child_names = {d['domain'] for d in doms}
+            filtered = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            if filtered:
+                self._result_domain_map[sys_id] = filtered
+                for d in filtered:
+                    domain_counts[d] = domain_counts.get(d, 0) + 1
+
+        self._result_domain_counts = domain_counts
+        self._has_result_domains = bool(domain_counts)
+        self.btn_domain_filter.setEnabled(self._has_result_domains)
+
         self.load_next_batch()
+
+        # Apply any remembered domain exclusions after rows are loaded
+        if self._domain_exclusions and self._has_result_domains:
+            self._apply_domain_exclusions()
 
         # Launch PGP badge worker to mark results with transcriptions
         sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
@@ -14289,38 +14386,6 @@ class GenizahGUI(QMainWindow):
         self.load_next_batch()
         self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
 
-    def _execute_domain_browse(self):
-        """Browse manuscripts by domain without a text query."""
-        from shared.fjms_service import get_fjms_service
-        fjms = get_fjms_service()
-        if not fjms.is_available():
-            return
-
-        domain_sys_ids = set()
-        for domain_name in self._selected_domains:
-            domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
-
-        results = []
-        for sys_id in list(domain_sys_ids)[:500]:
-            shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id) if self.meta_mgr else ('Unknown', '')
-            if shelfmark == 'Unknown':
-                continue
-            library_code = self.meta_mgr.get_library_for_id(sys_id) if self.meta_mgr else ''
-            results.append({
-                'display': {
-                    'id': sys_id,
-                    'shelfmark': shelfmark,
-                    'title': title or '',
-                    'library_code': library_code or '',
-                },
-                'snippet': '',
-            })
-
-        self.on_search_finished(results)
-        if len(domain_sys_ids) > 500:
-            self.status_label.setText(
-                tr("Showing 500 of {} manuscripts. Add a text query to refine.").format(len(domain_sys_ids))
-            )
 
     def _search_by_pgp_tag(self, tag):
         """Entry point for searching by PGP tag (from browse/result dialog links)."""
