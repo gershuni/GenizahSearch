@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 
 ## Current Position
 
-Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- Gap closure in progress
-Plan: 3 of 5 in current phase (initial 2 complete, gap closure 3/5 in progress)
-Status: Phase 27 gap closure plans executing (batch lookup complete, web+desktop filters pending)
-Last activity: 2026-02-13 -- Completed 27-03 batch domain lookup
+Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- Gap closure complete
+Plan: 5 of 5 in current phase (all plans complete)
+Status: Phase 27 complete -- domain classifications fully integrated in both apps
+Last activity: 2026-02-13 -- Completed 27-05 desktop post-search domain filter
 
-Progress: [█████████░] 90% (10/11 plans)
+Progress: [██████████] 100% (11/11 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 78 (across all milestones)
+- Total plans completed: 81 (across all milestones)
 - Average duration: ~8 min
-- Total execution time: ~8.8 hours
+- Total execution time: ~9.0 hours
 
 **By Milestone:**
 
@@ -32,7 +32,8 @@ Progress: [█████████░] 90% (10/11 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 8/11 | 34 min |
+| v5.8.0 | 25-28 | 11/11 | 40 min |
+| Phase 27 P05 | 6 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -59,6 +60,7 @@ Progress: [█████████░] 90% (10/11 plans)
 - Standalone domain browsing capped at 500 results for performance
 - Domain indicators show primary + "+N more" pattern on result cards
 - Batch domain lookup method (get_domains_for_sys_ids) for efficient post-search collection (500-item batches)
+- [Phase 27]: Post-search dynamic domain filtering with exclude-by-unchecking pattern in desktop app
 
 ### Blockers/Concerns
 
@@ -75,6 +77,6 @@ Progress: [█████████░] 90% (10/11 plans)
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 27-03-PLAN.md (batch domain lookup)
+Stopped at: Completed 27-05-PLAN.md (desktop post-search domain filter)
 Resume file: None
-Notes: Phase 27 gap closure in progress (3 of 5 plans complete). Batch domain lookup method added to FjmsService for efficient post-search domain collection. Next: 27-04 (web post-search domain filter) and 27-05 (desktop post-search domain filter).
+Notes: Phase 27 complete (5 of 5 plans). Desktop domain filter redesigned as post-search dynamic exclude filter matching web app pattern. All domain classification features fully integrated in both web and desktop apps. Phase 28 (Catalog Search) is next.
