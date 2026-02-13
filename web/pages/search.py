@@ -25,10 +25,27 @@ import re
 import html
 
 
+# Cache domain hierarchy for filter (module-level, built once)
+_domain_hierarchy_cache = None
+
+def _get_domain_hierarchy_cached():
+    """Get cached domain hierarchy for domain filter dropdown."""
+    global _domain_hierarchy_cache
+    if _domain_hierarchy_cache is not None:
+        return _domain_hierarchy_cache
+    from shared.fjms_service import get_fjms_service
+    fjms = get_fjms_service(thread_safe=True)
+    if not fjms.is_available():
+        _domain_hierarchy_cache = {}
+        return _domain_hierarchy_cache
+    _domain_hierarchy_cache = fjms.get_domain_hierarchy()
+    return _domain_hierarchy_cache
+
+
 def create_search_page(initial_query: str = None, initial_tag: str = None,
                        initial_mode: str = None, initial_variants: int = None,
                        initial_ja: int = None, initial_flex_spaces: int = None,
-                       initial_bidirectional: int = None):
+                       initial_bidirectional: int = None, initial_domain: str = None):
     """Create the advanced search page."""
 
     # === State Management ===
@@ -49,6 +66,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions
             self.displayed_results = []  # Currently rendered subset (may be filtered)
             self.builder_negated_words: list = []  # Words negated via Query Builder
+            self.result_domains: dict = {}  # Domain classification map for result indicators
 
     search_state = SearchUIState()
 
@@ -472,6 +490,48 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         app.storage.user['search_preset'] = level_value
                         if state.var_mgr:
                             state.var_mgr.set_variant_level(level_value)
+
+                    # Domain Filter (multi-select with type-ahead)
+                    with ui.column().classes('gap-1'):
+                        h3(tr('Domain'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+
+                        hierarchy = _get_domain_hierarchy_cached()
+                        if hierarchy:
+                            from web.translations import get_language
+                            lang = get_language()
+
+                            # Build options dict with parent headers and child items
+                            # NiceGUI ui.select: keys are values, vals are display labels
+                            domain_options = {}
+                            for parent_name, info in hierarchy.items():
+                                parent_display = info.get('parent_domain_heb', parent_name) if lang == 'he' else parent_name
+                                parent_count = info['count']
+                                # Parent as selectable option (selecting includes all children)
+                                domain_options[parent_name] = f"{parent_display} ({parent_count:,})"
+                                # Children indented with count
+                                for child in info.get('children', []):
+                                    child_display = child['domain_heb'] if lang == 'he' else child['domain']
+                                    domain_options[child['domain']] = f"  {child_display} ({child['count']:,})"
+
+                            # Pre-select from URL parameter or storage
+                            initial_domains = []
+                            if initial_domain:
+                                initial_domains = [initial_domain]
+                            elif app.storage.user.get('search_domains'):
+                                initial_domains = app.storage.user.get('search_domains', [])
+
+                            domain_select = ui.select(
+                                domain_options,
+                                multiple=True,
+                                value=initial_domains
+                            ).classes('w-64').props('outlined dense use-chips clearable use-input input-debounce="200"')
+                            domain_select.props(f'popup-content-class="max-h-96" label="{tr("Filter domains...")}"')
+
+                            def save_domains():
+                                app.storage.user['search_domains'] = domain_select.value or []
+                            domain_select.on('update:model-value', save_domains)
+                        else:
+                            domain_select = None
 
                     # Gap Control - restore from storage
                     with ui.column().classes('gap-1'):
@@ -1627,6 +1687,63 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         builder_dialog.open()
 
+    def _apply_domain_filter(results, selected_domains):
+        """Filter search results by domain classifications (OR logic)."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service(thread_safe=True)
+        if not fjms.is_available():
+            return results
+
+        # Build combined set of sys_ids matching ANY selected domain
+        domain_sys_ids = set()
+        for domain_name in selected_domains:
+            domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
+
+        return [r for r in results if r.get('display', {}).get('id') in domain_sys_ids]
+
+    async def _execute_domain_browse(selected_domains):
+        """Browse all manuscripts in selected domains without a text query."""
+        search_state.is_running = True
+        render_results([])  # Show loading spinner
+
+        def fetch_domain_results():
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if not fjms.is_available():
+                return []
+
+            domain_sys_ids = set()
+            for domain_name in selected_domains:
+                domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
+
+            # Build result dicts from sys_ids (use metadata manager)
+            results = []
+            for sys_id in list(domain_sys_ids)[:500]:  # Cap at 500 for performance
+                shelfmark, title = state.searcher.meta_mgr.get_meta_for_id(sys_id) if state.searcher else ('Unknown', '')
+                if shelfmark == 'Unknown':
+                    continue
+                library_code = state.searcher.meta_mgr.get_library_for_id(sys_id) if state.searcher else ''
+                results.append({
+                    'display': {
+                        'id': sys_id,
+                        'shelfmark': shelfmark,
+                        'title': title or '',
+                        'library_code': library_code or '',
+                    },
+                    'snippet': '',
+                })
+            return results
+
+        results = await run.io_bound(fetch_domain_results)
+
+        search_state.is_running = False
+        search_state.results = results
+        results_count.text = f"{len(results)} {tr('Results')}"
+        if len(results) >= 500:
+            ui.notify(tr("Showing first 500 results. Add a text query to refine."), type='info')
+
+        render_results(results[:200])
+
     async def execute_search():
         # Handle PGP tag search mode — navigate to tag results page
         if mode_select.value == 'pgp_tags':
@@ -1636,7 +1753,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return
 
         query = query_input.value.strip() if query_input.value else ""
-        if not query:
+        selected_domains = domain_select.value if domain_select else []
+
+        if not query and not selected_domains:
+            return
+
+        if not query and selected_domains:
+            # Standalone domain browsing -- show all manuscripts in selected domains
+            await _execute_domain_browse(selected_domains)
             return
 
         if not state.is_ready():
@@ -1752,15 +1876,40 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results([])
             return
 
-        # Batch lookup for transcription availability (cap to displayed results)
+        # Apply domain filter if selected
+        if selected_domains:
+            results = await run.io_bound(
+                _apply_domain_filter, results, selected_domains
+            )
+
+        # Batch lookup for transcription availability and domains (cap to displayed results)
         displayed_results = results[:200]
         result_sys_ids = [
             r.get('display', {}).get('id')
             for r in displayed_results
             if r.get('display', {}).get('id')
         ]
+
+        def fetch_result_domains(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if not fjms.is_available():
+                return {}
+            domain_map = {}
+            for sys_id in sys_ids:
+                doms = fjms.get_domains(sys_id)
+                if doms:
+                    # Deduplicate: children first, skip parent if child shown
+                    child_names = {d['domain'] for d in doms}
+                    filtered = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+                    domain_map[sys_id] = filtered
+            return domain_map
+
         search_state.transcription_sys_ids = await run.io_bound(
             get_sys_ids_with_transcriptions, result_sys_ids
+        )
+        search_state.result_domains = await run.io_bound(
+            fetch_result_domains, result_sys_ids
         )
 
         # Check if search was cancelled before resetting
@@ -1820,6 +1969,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if responsa_ja_cb.value: params += '&ja=1'
                 if responsa_flex_cb.value: params += '&flex_spaces=1'
                 if bidirectional_cb.value: params += '&bidirectional=1'
+            if selected_domains:
+                for d in selected_domains:
+                    params += f'&domain={quote(d)}'
             ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
         except Exception:
             pass  # URL update is best-effort
@@ -1900,6 +2052,26 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                 'background: var(--success-100); color: var(--success-700); font-weight: 600;'
                             ).tooltip(tr('Has PGP Transcription'))
+                        # Domain indicator
+                        if sys_id and search_state.result_domains:
+                            domains_for_result = search_state.result_domains.get(sys_id, [])
+                            if domains_for_result:
+                                primary_domain = domains_for_result[0]  # Most specific (child)
+                                domain_text = primary_domain
+                                if len(domains_for_result) > 1:
+                                    extra = len(domains_for_result) - 1
+                                    tooltip_text = ', '.join(domains_for_result)
+                                    with ui.row().classes('items-center gap-0'):
+                                        ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                            'background: #f3e8ff; color: #7c3aed;'  # Purple tones for FJMS
+                                        )
+                                        ui.label(f'+{extra}').classes('text-xs px-1 py-0.5 rounded shrink-0 cursor-help').style(
+                                            'background: #ede9fe; color: #7c3aed;'
+                                        ).tooltip(tooltip_text)
+                                else:
+                                    ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                        'background: #f3e8ff; color: #7c3aed;'
+                                    )
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     if title_short:
                         ui.label(title_short).classes('text-xs').style(
