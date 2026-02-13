@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- IN PROGRESS
-Plan: 2 of 3 in current phase
-Status: Plan 01 complete (domain browse display), ready for Plan 02 (domain search filter)
-Last activity: 2026-02-13 -- Completed 27-01 (Domain Browse Display)
+Plan: 3 of 3 in current phase
+Status: Plans 01-02 complete (domain browse display + search filter), ready for Plan 03 if exists
+Last activity: 2026-02-13 -- Completed 27-02 (Domain Search Filter)
 
-Progress: [████████░░] 80% (6/7 plans)
+Progress: [█████████░] 100% (7/7 plans)
 
 ## Performance Metrics
 
@@ -32,7 +32,7 @@ Progress: [████████░░] 80% (6/7 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 6/7 | 26 min |
+| v5.8.0 | 25-28 | 7/7 | 32 min |
 
 ## Accumulated Context
 
@@ -55,6 +55,9 @@ Progress: [████████░░] 80% (6/7 plans)
 - Merge-on-collision dedup: append source to existing entry instead of dropping overlapping FJMS entries
 - Domain parent/child deduplication at display time (skip parent if child already shown)
 - English domain names in URLs, Hebrew for display (language-aware UI)
+- Domain filter uses multi-select with type-ahead, OR logic for filtering
+- Standalone domain browsing capped at 500 results for performance
+- Domain indicators show primary + "+N more" pattern on result cards
 
 ### Blockers/Concerns
 
@@ -71,6 +74,6 @@ Progress: [████████░░] 80% (6/7 plans)
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 27-01-PLAN.md (Domain Browse Display) -- Phase 27 Plan 01 complete
+Stopped at: Completed 27-02-PLAN.md (Domain Search Filter) -- Phase 27 complete
 Resume file: None
-Notes: Phase 27 Plan 01 complete. Domain classifications visible on browse pages in both apps. Purple styling (#9b59b6) consistent with FJMS badges. Hierarchy method ready for Plan 02 filter dialog. Next: 27-02 (Domain Search Filter).
+Notes: Phase 27 Plans 01-02 complete. Domain classifications fully integrated: browse display, search filter with multi-select, type-ahead, OR logic, standalone browsing, and result indicators. Both web and desktop apps feature complete domain navigation. Phase 27 ready for verification before Phase 28.
