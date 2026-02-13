@@ -25,21 +25,6 @@ import re
 import html
 
 
-# Cache domain hierarchy for filter (module-level, built once)
-_domain_hierarchy_cache = None
-
-def _get_domain_hierarchy_cached():
-    """Get cached domain hierarchy for domain filter dropdown."""
-    global _domain_hierarchy_cache
-    if _domain_hierarchy_cache is not None:
-        return _domain_hierarchy_cache
-    from shared.fjms_service import get_fjms_service
-    fjms = get_fjms_service(thread_safe=True)
-    if not fjms.is_available():
-        _domain_hierarchy_cache = {}
-        return _domain_hierarchy_cache
-    _domain_hierarchy_cache = fjms.get_domain_hierarchy()
-    return _domain_hierarchy_cache
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -67,8 +52,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.displayed_results = []  # Currently rendered subset (may be filtered)
             self.builder_negated_words: list = []  # Words negated via Query Builder
             self.result_domains: dict = {}  # Domain classification map for result indicators
+            self.all_result_domains: dict = {}  # sys_id -> list of domain names (deduped)
+            self.domain_exclusions: set = set()  # domain names user has excluded
+            self.has_domain_data: bool = False  # whether any results have domain data
 
     search_state = SearchUIState()
+
+    # Restore domain exclusions from storage
+    search_state.domain_exclusions = set(app.storage.user.get('domain_exclusions', []))
+
+    # Clear exclusions if initial_domain provided (from browse page navigation)
+    if initial_domain:
+        search_state.domain_exclusions = set()
+        app.storage.user['domain_exclusions'] = []
 
     # State for Advanced View dialog (used for in-place updates)
     class AdvancedViewState:
@@ -491,47 +487,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if state.var_mgr:
                             state.var_mgr.set_variant_level(level_value)
 
-                    # Domain Filter (multi-select with type-ahead)
-                    with ui.column().classes('gap-1'):
-                        h3(tr('Domain'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-
-                        hierarchy = _get_domain_hierarchy_cached()
-                        if hierarchy:
-                            from web.translations import get_language
-                            lang = get_language()
-
-                            # Build options dict with parent headers and child items
-                            # NiceGUI ui.select: keys are values, vals are display labels
-                            domain_options = {}
-                            for parent_name, info in hierarchy.items():
-                                parent_display = info.get('parent_domain_heb', parent_name) if lang == 'he' else parent_name
-                                parent_count = info['count']
-                                # Parent as selectable option (selecting includes all children)
-                                domain_options[parent_name] = f"{parent_display} ({parent_count:,})"
-                                # Children indented with count
-                                for child in info.get('children', []):
-                                    child_display = child['domain_heb'] if lang == 'he' else child['domain']
-                                    domain_options[child['domain']] = f"  {child_display} ({child['count']:,})"
-
-                            # Pre-select from URL parameter or storage
-                            initial_domains = []
-                            if initial_domain:
-                                initial_domains = [initial_domain]
-                            elif app.storage.user.get('search_domains'):
-                                initial_domains = app.storage.user.get('search_domains', [])
-
-                            domain_select = ui.select(
-                                domain_options,
-                                multiple=True,
-                                value=initial_domains
-                            ).classes('w-64').props('outlined dense use-chips clearable use-input input-debounce="200"')
-                            domain_select.props(f'popup-content-class="max-h-96" label="{tr("Filter domains...")}"')
-
-                            def save_domains():
-                                app.storage.user['search_domains'] = domain_select.value or []
-                            domain_select.on('update:model-value', save_domains)
-                        else:
-                            domain_select = None
 
                     # Gap Control - restore from storage
                     with ui.column().classes('gap-1'):
@@ -714,6 +669,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
                         # Selection counter (initially hidden)
                         selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
+                        # Domain filter button (hidden until search with domain data)
+                        domain_filter_btn = ui.button(
+                            tr('Domains'), icon='category',
+                            on_click=lambda: _open_domain_filter_dialog()
+                        ).classes('text-sm').props('flat dense no-caps')
+                        domain_filter_btn.set_visibility(False)
 
                     with ui.row().classes('gap-2'):
                         # Bulk actions (initially hidden)
@@ -1687,62 +1648,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         builder_dialog.open()
 
-    def _apply_domain_filter(results, selected_domains):
-        """Filter search results by domain classifications (OR logic)."""
-        from shared.fjms_service import get_fjms_service
-        fjms = get_fjms_service(thread_safe=True)
-        if not fjms.is_available():
-            return results
+    def _open_domain_filter_dialog():
+        """Open modal dialog with checkbox tree of domains from current results (Task 2)."""
+        pass
 
-        # Build combined set of sys_ids matching ANY selected domain
-        domain_sys_ids = set()
-        for domain_name in selected_domains:
-            domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
-
-        return [r for r in results if r.get('display', {}).get('id') in domain_sys_ids]
-
-    async def _execute_domain_browse(selected_domains):
-        """Browse all manuscripts in selected domains without a text query."""
-        search_state.is_running = True
-        render_results([])  # Show loading spinner
-
-        def fetch_domain_results():
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            if not fjms.is_available():
-                return []
-
-            domain_sys_ids = set()
-            for domain_name in selected_domains:
-                domain_sys_ids.update(fjms.get_manuscripts_by_domain(domain_name))
-
-            # Build result dicts from sys_ids (use metadata manager)
-            results = []
-            for sys_id in list(domain_sys_ids)[:500]:  # Cap at 500 for performance
-                shelfmark, title = state.searcher.meta_mgr.get_meta_for_id(sys_id) if state.searcher else ('Unknown', '')
-                if shelfmark == 'Unknown':
-                    continue
-                library_code = state.searcher.meta_mgr.get_library_for_id(sys_id) if state.searcher else ''
-                results.append({
-                    'display': {
-                        'id': sys_id,
-                        'shelfmark': shelfmark,
-                        'title': title or '',
-                        'library_code': library_code or '',
-                    },
-                    'snippet': '',
-                })
-            return results
-
-        results = await run.io_bound(fetch_domain_results)
-
-        search_state.is_running = False
-        search_state.results = results
-        results_count.text = f"{len(results)} {tr('Results')}"
-        if len(results) >= 500:
-            ui.notify(tr("Showing first 500 results. Add a text query to refine."), type='info')
-
-        render_results(results[:200])
+    def _apply_domain_exclusions():
+        """Filter displayed results based on domain exclusions without re-searching (Task 3)."""
+        pass
 
     async def execute_search():
         # Handle PGP tag search mode — navigate to tag results page
@@ -1753,14 +1665,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return
 
         query = query_input.value.strip() if query_input.value else ""
-        selected_domains = domain_select.value if domain_select else []
 
-        if not query and not selected_domains:
-            return
-
-        if not query and selected_domains:
-            # Standalone domain browsing -- show all manuscripts in selected domains
-            await _execute_domain_browse(selected_domains)
+        if not query:
             return
 
         if not state.is_ready():
@@ -1876,41 +1782,46 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results([])
             return
 
-        # Apply domain filter if selected
-        if selected_domains:
-            results = await run.io_bound(
-                _apply_domain_filter, results, selected_domains
-            )
+        # Collect domain data for ALL results (not just displayed 200)
+        all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
 
-        # Batch lookup for transcription availability and domains (cap to displayed results)
-        displayed_results = results[:200]
-        result_sys_ids = [
-            r.get('display', {}).get('id')
-            for r in displayed_results
-            if r.get('display', {}).get('id')
-        ]
-
-        def fetch_result_domains(sys_ids):
+        def collect_all_domains(sys_ids):
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=True)
-            if not fjms.is_available():
-                return {}
-            domain_map = {}
-            for sys_id in sys_ids:
-                doms = fjms.get_domains(sys_id)
-                if doms:
-                    # Deduplicate: children first, skip parent if child shown
-                    child_names = {d['domain'] for d in doms}
-                    filtered = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
-                    domain_map[sys_id] = filtered
-            return domain_map
+            return fjms.get_domains_for_sys_ids(sys_ids) if fjms.is_available() else {}
+
+        raw_domains = await run.io_bound(collect_all_domains, all_sys_ids)
+
+        # Process into deduplicated domain names per sys_id
+        search_state.all_result_domains = {}
+        for sys_id, doms in raw_domains.items():
+            child_names = {d['domain'] for d in doms}
+            filtered = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            if filtered:
+                search_state.all_result_domains[sys_id] = filtered
+        search_state.has_domain_data = bool(search_state.all_result_domains)
+
+        # Batch lookup for transcription availability
+        result_sys_ids = [
+            r.get('display', {}).get('id')
+            for r in results[:200]
+            if r.get('display', {}).get('id')
+        ]
 
         search_state.transcription_sys_ids = await run.io_bound(
             get_sys_ids_with_transcriptions, result_sys_ids
         )
-        search_state.result_domains = await run.io_bound(
-            fetch_result_domains, result_sys_ids
-        )
+
+        # Slice result_domains from all_result_domains for badge rendering
+        search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
+
+        # Show/hide domain filter button
+        domain_filter_btn.set_visibility(search_state.has_domain_data)
+        if search_state.has_domain_data and search_state.domain_exclusions:
+            n_excl = len(search_state.domain_exclusions)
+            domain_filter_btn.text = f"{tr('Domains')} ({n_excl} {tr('excluded')})"
+        else:
+            domain_filter_btn.text = tr('Domains')
 
         # Check if search was cancelled before resetting
         was_cancelled = search_state.is_cancelled
@@ -1969,9 +1880,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if responsa_ja_cb.value: params += '&ja=1'
                 if responsa_flex_cb.value: params += '&flex_spaces=1'
                 if bidirectional_cb.value: params += '&bidirectional=1'
-            if selected_domains:
-                for d in selected_domains:
-                    params += f'&domain={quote(d)}'
             ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
         except Exception:
             pass  # URL update is best-effort
