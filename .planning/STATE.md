@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 
 ## Current Position
 
-Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- COMPLETE
-Plan: 2 of 2 in current phase (all complete, verification passed)
-Status: Phase 27 fully complete (15/15 must-haves verified), ready for Phase 28
-Last activity: 2026-02-13 -- Completed Phase 27 verification
+Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- Gap closure in progress
+Plan: 3 of 5 in current phase (initial 2 complete, gap closure 3/5 in progress)
+Status: Phase 27 gap closure plans executing (batch lookup complete, web+desktop filters pending)
+Last activity: 2026-02-13 -- Completed 27-03 batch domain lookup
 
-Progress: [█████████░] 88% (7/8 plans)
+Progress: [█████████░] 90% (10/11 plans)
 
 ## Performance Metrics
 
@@ -32,7 +32,7 @@ Progress: [█████████░] 88% (7/8 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 7/7 | 32 min |
+| v5.8.0 | 25-28 | 8/11 | 34 min |
 
 ## Accumulated Context
 
@@ -58,6 +58,7 @@ Progress: [█████████░] 88% (7/8 plans)
 - Domain filter uses multi-select with type-ahead, OR logic for filtering
 - Standalone domain browsing capped at 500 results for performance
 - Domain indicators show primary + "+N more" pattern on result cards
+- Batch domain lookup method (get_domains_for_sys_ids) for efficient post-search collection (500-item batches)
 
 ### Blockers/Concerns
 
@@ -74,6 +75,6 @@ Progress: [█████████░] 88% (7/8 plans)
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Phase 27 complete (verification passed 15/15)
+Stopped at: Completed 27-03-PLAN.md (batch domain lookup)
 Resume file: None
-Notes: Phase 27 fully complete. Domain classifications integrated: browse display with clickable links, search filter with hierarchical multi-select, type-ahead, OR logic, standalone browsing, result indicators. Both web and desktop apps have full domain navigation. Next: Phase 28 (Catalog Enrichment).
+Notes: Phase 27 gap closure in progress (3 of 5 plans complete). Batch domain lookup method added to FjmsService for efficient post-search domain collection. Next: 27-04 (web post-search domain filter) and 27-05 (desktop post-search domain filter).
