@@ -17,7 +17,7 @@ import html as html_module
 from urllib.parse import quote
 
 from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
-from web.translations import tr, is_rtl
+from web.translations import tr, is_rtl, get_language
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
@@ -1967,6 +1967,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # Rationale (with translate button)
                                 if date_rationale:
                                     create_translatable_text(date_rationale, container_style='color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
+
+                    # === FJMS Domain Classifications ===
+                    from shared.fjms_service import get_fjms_service
+                    fjms = get_fjms_service(thread_safe=True)
+                    if fjms.is_available():
+                        domains = fjms.get_domains(page.sys_id)
+                        if domains:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Subject Domains')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                with ui.row().classes('gap-2 flex-wrap'):
+                                    lang = get_language()
+                                    # Deduplicate: skip parent if child already shown
+                                    all_domain_names = {d['domain'] for d in domains}
+                                    for dom in domains:
+                                        parent = dom.get('parent_domain')
+                                        if parent and parent in all_domain_names and parent != dom['domain']:
+                                            continue
+                                        display_name = dom['domain_heb'] if lang == 'he' else dom['domain']
+                                        ui.link(
+                                            display_name,
+                                            f'/search?domain={quote(dom["domain"])}'
+                                        ).classes('text-sm').style('color: var(--primary-600);')
 
                     # === Related Fragments Section ===
                     pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None

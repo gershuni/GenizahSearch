@@ -193,6 +193,79 @@ class FjmsService:
             logger.error(f"FjmsService.get_all_domains error: {e}")
             return []
 
+    def get_domain_hierarchy(self) -> dict:
+        """
+        Get domain hierarchy with counts, grouped by parent domain.
+
+        Returns:
+            Dict mapping parent_domain -> {
+                'parent_domain_heb': str,
+                'count': int,  # total manuscripts under this parent (including children)
+                'children': [{'domain': str, 'domain_heb': str, 'count': int}, ...]
+            }
+            Sorted by parent count descending, children by count descending within each parent.
+            Returns {} if conn is None.
+        """
+        if self._conn is None:
+            return {}
+        try:
+            # Query all domain entries with counts
+            cursor = self._conn.execute(
+                "SELECT Domain, DomainHeb, ParentDomain, ParentDomainHeb, "
+                "COUNT(DISTINCT AlmaId) as count "
+                "FROM domains GROUP BY Domain, ParentDomain ORDER BY count DESC"
+            )
+            rows = cursor.fetchall()
+
+            # Build hierarchy: map parent -> {parent_domain_heb, count, children[]}
+            hierarchy = {}
+            parent_counts = {}  # Track total counts per parent
+
+            for row in rows:
+                domain = row["Domain"]
+                domain_heb = row["DomainHeb"]
+                parent = row["ParentDomain"]
+                parent_heb = row["ParentDomainHeb"]
+                count = row["count"]
+
+                # If this domain HAS a parent (not a root domain)
+                if parent and parent != domain:
+                    if parent not in hierarchy:
+                        hierarchy[parent] = {
+                            'parent_domain_heb': parent_heb,
+                            'count': 0,
+                            'children': []
+                        }
+                    hierarchy[parent]['children'].append({
+                        'domain': domain,
+                        'domain_heb': domain_heb,
+                        'count': count
+                    })
+                    hierarchy[parent]['count'] += count
+                    parent_counts[parent] = parent_counts.get(parent, 0) + count
+                else:
+                    # Root-level domain (Domain == ParentDomain or no parent)
+                    if domain not in hierarchy:
+                        hierarchy[domain] = {
+                            'parent_domain_heb': domain_heb,
+                            'count': count,
+                            'children': []
+                        }
+                    else:
+                        # Already exists as parent, just update count
+                        hierarchy[domain]['count'] += count
+                    parent_counts[domain] = parent_counts.get(domain, 0) + count
+
+            # Sort children within each parent by count descending
+            for parent in hierarchy:
+                hierarchy[parent]['children'].sort(key=lambda x: x['count'], reverse=True)
+
+            # Return sorted by parent count
+            return dict(sorted(hierarchy.items(), key=lambda x: parent_counts.get(x[0], 0), reverse=True))
+        except Exception as e:
+            logger.error(f"FjmsService.get_domain_hierarchy error: {e}")
+            return {}
+
     @staticmethod
     def _split_concat(val):
         """Split GROUP_CONCAT result into list of non-empty strings."""
