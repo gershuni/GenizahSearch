@@ -1796,8 +1796,39 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         dialog.open()
 
     def _apply_domain_exclusions():
-        """Filter displayed results based on domain exclusions without re-searching (Task 3)."""
-        pass
+        """Filter displayed results based on domain exclusions without re-searching."""
+        if not search_state.domain_exclusions:
+            # No exclusions -- show all results
+            filtered = search_state.results
+        else:
+            filtered = []
+            for r in search_state.results:
+                sys_id = r.get('display', {}).get('id')
+                result_domains = search_state.all_result_domains.get(sys_id, []) if sys_id else []
+                if not result_domains:
+                    # No domain data -- always keep (not filtered out)
+                    filtered.append(r)
+                elif all(d in search_state.domain_exclusions for d in result_domains):
+                    # ALL domains excluded -- hide this result
+                    continue
+                else:
+                    # At least one domain not excluded -- keep
+                    filtered.append(r)
+
+        # Update count display
+        total = len(search_state.results)
+        showing = len(filtered)
+        if search_state.domain_exclusions:
+            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({len(search_state.domain_exclusions)} {tr('domains excluded')})"
+        else:
+            results_count.text = f"{total} {tr('Results')}"
+
+        # Update result_domains for badge rendering (slice from all_result_domains for displayed results)
+        result_sys_ids = [r.get('display', {}).get('id') for r in filtered[:200] if r.get('display', {}).get('id')]
+        search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
+
+        # Re-render with filtered results
+        render_results(filtered[:200])
 
     async def execute_search():
         # Handle PGP tag search mode — navigate to tag results page
@@ -2027,10 +2058,27 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass  # URL update is best-effort
 
-        # Render results
-        render_results(results[:200])
-        if len(results) > 200:
-            ui.notify(tr("Showing first 200 results. Refine search."), type='info')
+        # Render results (apply remembered exclusions if active)
+        if search_state.domain_exclusions and search_state.has_domain_data:
+            # Apply remembered exclusions before first render
+            filtered = []
+            for r in results:
+                sys_id = r.get('display', {}).get('id')
+                result_domains = search_state.all_result_domains.get(sys_id, []) if sys_id else []
+                if not result_domains or not all(d in search_state.domain_exclusions for d in result_domains):
+                    filtered.append(r)
+            n_excl = len(search_state.domain_exclusions)
+            results_count.text = f"{len(filtered)} {tr('of')} {len(results)} {tr('Results')} ({n_excl} {tr('domains excluded')})"
+            # Update result_domains for badge rendering
+            result_sys_ids = [r.get('display', {}).get('id') for r in filtered[:200] if r.get('display', {}).get('id')]
+            search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
+            render_results(filtered[:200])
+            if len(filtered) > 200:
+                ui.notify(tr("Showing first 200 results. Refine search."), type='info')
+        else:
+            render_results(results[:200])
+            if len(results) > 200:
+                ui.notify(tr("Showing first 200 results. Refine search."), type='info')
 
     def render_results(results):
         results_container.clear()
