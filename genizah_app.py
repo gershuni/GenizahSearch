@@ -8171,6 +8171,11 @@ class GenizahGUI(QMainWindow):
         enriched_html = self._build_browse_enriched_html(
             marc, part_id_for_ext, part_meta_ext, external_meta, text_color, base_color
         )
+
+        # Build FJMS domain HTML and prepend to enriched HTML
+        fjms_domain_html = self._build_fjms_domain_html(sid, text_color)
+        enriched_html = fjms_domain_html + enriched_html
+
         self._browse_enriched_html = enriched_html
 
         if enriched_html.strip():
@@ -8326,6 +8331,48 @@ class GenizahGUI(QMainWindow):
         pgp_html += "</div>"
         return pgp_html
 
+    def _build_fjms_domain_html(self, sys_id, text_color):
+        """Build HTML for FJMS domain classifications in extended info."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return ""
+
+        domains = fjms.get_domains(sys_id)
+        if not domains:
+            return ""
+
+        # Deduplicate: skip parent if child already shown
+        all_domain_names = {d['domain'] for d in domains}
+        filtered = []
+        for dom in domains:
+            parent = dom.get('parent_domain')
+            if parent and parent in all_domain_names and parent != dom['domain']:
+                continue
+            filtered.append(dom)
+
+        if not filtered:
+            return ""
+
+        html = (
+            f"<div style='color:{text_color}; padding: 5px 0; margin-bottom: 8px; "
+            "border-left: 3px solid #9b59b6;' dir='ltr'>"
+            f"<p style='margin: 0 0 4px 10px;'><b>{tr('Subject Domains')}</b></p>"
+            "<p style='margin: 0 0 0 10px;'>"
+        )
+
+        links = []
+        for dom in filtered:
+            domain_name = dom['domain']
+            # Clickable link that navigates to search with domain filter
+            links.append(
+                f"<a href='domain:{domain_name}' style='color: #9b59b6; "
+                f"text-decoration: underline;'>{domain_name}</a>"
+            )
+        html += ", ".join(links)
+        html += "</p></div>"
+        return html
+
     def _build_browse_enriched_html(self, marc, part_id, part_meta, external_meta, text_color, base_color):
         """Build HTML for KTI/Oxford/Cambridge enrichment data in Browse extended info.
 
@@ -8462,6 +8509,9 @@ class GenizahGUI(QMainWindow):
         if url_str.startswith('tag:'):
             tag = url_str[4:]
             self._search_by_pgp_tag(tag)
+        elif url_str.startswith('domain:'):
+            domain = url_str[7:]
+            self._navigate_to_search_with_domain(domain)
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
 
@@ -13987,6 +14037,16 @@ class GenizahGUI(QMainWindow):
 
         self.load_next_batch()
         self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
+
+    def _navigate_to_search_with_domain(self, domain_name):
+        """Switch to search tab with domain filter pending.
+
+        The domain filter dialog (Plan 02) will check self._pending_domain_filter
+        and apply it on next search.
+        """
+        self._pending_domain_filter = domain_name
+        self.tabs.setCurrentWidget(self.search_tab)
+        # Domain filter will be applied by Plan 02's filter dialog
 
     def _search_by_pgp_tag(self, tag):
         """Entry point for searching by PGP tag (from browse/result dialog links)."""
