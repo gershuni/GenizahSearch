@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.8.0 FJMS Integration -- Phase 26 (Scientific Joins)
+**Current focus:** v5.8.0 FJMS Integration -- Phase 26 complete, ready for Phase 27
 
 ## Current Position
 
-Phase: 26 of 28 (Scientific Joins) -- second of 4 in v5.8.0 -- COMPLETE
-Plan: 3 of 3 in current phase (all complete, including gap closure)
-Status: Phase 26 fully complete (gap closure 26-03 done), ready for Phase 27
-Last activity: 2026-02-12 -- Completed 26-03 (Dual Badge Display)
+Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- IN PROGRESS
+Plan: 2 of 3 in current phase
+Status: Plan 01 complete (domain browse display), ready for Plan 02 (domain search filter)
+Last activity: 2026-02-13 -- Completed 27-01 (Domain Browse Display)
 
-Progress: [███████░░░] 71% (5/7 plans)
+Progress: [████████░░] 80% (6/7 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 76 (across all milestones)
+- Total plans completed: 77 (across all milestones)
 - Average duration: ~8 min
-- Total execution time: ~8.5 hours
+- Total execution time: ~8.7 hours
 
 **By Milestone:**
 
@@ -32,7 +32,7 @@ Progress: [███████░░░] 71% (5/7 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 5/7 | 23 min |
+| v5.8.0 | 25-28 | 6/7 | 26 min |
 
 ## Accumulated Context
 
@@ -53,6 +53,8 @@ Progress: [███████░░░] 71% (5/7 plans)
 - GROUP BY + GROUP_CONCAT(DISTINCT) for multi-group join dedup at SQL level (not Python post-processing)
 - Sources stored as list ('sources') instead of string ('source') in formatted_joins for multi-source badge support
 - Merge-on-collision dedup: append source to existing entry instead of dropping overlapping FJMS entries
+- Domain parent/child deduplication at display time (skip parent if child already shown)
+- English domain names in URLs, Hebrew for display (language-aware UI)
 
 ### Blockers/Concerns
 
@@ -68,7 +70,7 @@ Progress: [███████░░░] 71% (5/7 plans)
 
 ## Session Continuity
 
-Last session: 2026-02-12
-Stopped at: Completed 26-03-PLAN.md (Dual Badge Display) -- Phase 26 gap closure complete
+Last session: 2026-02-13
+Stopped at: Completed 27-01-PLAN.md (Domain Browse Display) -- Phase 27 Plan 01 complete
 Resume file: None
-Notes: Phase 26 fully complete (3/3 plans including gap closure). Dual PGP+FJMS badges in web, "PGP, FJMS" in desktop. 510 passed (3 new tests). Next: Phase 27 (Domain Classification).
+Notes: Phase 27 Plan 01 complete. Domain classifications visible on browse pages in both apps. Purple styling (#9b59b6) consistent with FJMS badges. Hierarchy method ready for Plan 02 filter dialog. Next: 27-02 (Domain Search Filter).
