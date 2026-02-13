@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.8.0 FJMS Integration -- Phase 26 complete, ready for Phase 27
+**Current focus:** v5.8.0 FJMS Integration -- Phase 27 complete, ready for Phase 28
 
 ## Current Position
 
-Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- IN PROGRESS
-Plan: 3 of 3 in current phase
-Status: Plans 01-02 complete (domain browse display + search filter), ready for Plan 03 if exists
-Last activity: 2026-02-13 -- Completed 27-02 (Domain Search Filter)
+Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- COMPLETE
+Plan: 2 of 2 in current phase (all complete, verification passed)
+Status: Phase 27 fully complete (15/15 must-haves verified), ready for Phase 28
+Last activity: 2026-02-13 -- Completed Phase 27 verification
 
-Progress: [█████████░] 100% (7/7 plans)
+Progress: [█████████░] 88% (7/8 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 77 (across all milestones)
+- Total plans completed: 78 (across all milestones)
 - Average duration: ~8 min
-- Total execution time: ~8.7 hours
+- Total execution time: ~8.8 hours
 
 **By Milestone:**
 
@@ -74,6 +74,6 @@ Progress: [█████████░] 100% (7/7 plans)
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 27-02-PLAN.md (Domain Search Filter) -- Phase 27 complete
+Stopped at: Phase 27 complete (verification passed 15/15)
 Resume file: None
-Notes: Phase 27 Plans 01-02 complete. Domain classifications fully integrated: browse display, search filter with multi-select, type-ahead, OR logic, standalone browsing, and result indicators. Both web and desktop apps feature complete domain navigation. Phase 27 ready for verification before Phase 28.
+Notes: Phase 27 fully complete. Domain classifications integrated: browse display with clickable links, search filter with hierarchical multi-select, type-ahead, OR logic, standalone browsing, result indicators. Both web and desktop apps have full domain navigation. Next: Phase 28 (Catalog Enrichment).
