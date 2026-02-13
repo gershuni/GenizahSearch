@@ -164,6 +164,49 @@ class FjmsService:
             logger.error(f"FjmsService.get_manuscripts_by_domain error for {domain}: {e}")
             return set()
 
+    def get_domains_for_sys_ids(self, sys_ids: list[str]) -> dict:
+        """
+        Get domain classifications for multiple manuscripts in batch.
+
+        More efficient than calling get_domains() per sys_id when processing
+        search results. Uses batched IN queries to stay within SQLite limits.
+
+        Args:
+            sys_ids: List of Alma/system IDs.
+
+        Returns:
+            Dict mapping sys_id -> list of domain dicts.
+            Each domain dict has keys: domain, domain_heb, parent_domain, parent_domain_heb.
+        """
+        if not self._conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            # Batch to stay under SQLite variable limit (999)
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT AlmaId, Domain, DomainHeb, ParentDomain, ParentDomainHeb "
+                    f"FROM domains WHERE AlmaId IN ({placeholders})",
+                    batch,
+                )
+                for row in cursor:
+                    sid = row["AlmaId"]
+                    if sid not in result:
+                        result[sid] = []
+                    result[sid].append({
+                        "domain": row["Domain"],
+                        "domain_heb": row["DomainHeb"],
+                        "parent_domain": row["ParentDomain"],
+                        "parent_domain_heb": row["ParentDomainHeb"],
+                    })
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_domains_for_sys_ids error: {e}")
+            return {}
+
     def get_all_domains(self) -> list[dict]:
         """
         Get all unique domain names with manuscript counts.
