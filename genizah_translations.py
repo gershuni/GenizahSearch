@@ -516,11 +516,13 @@ TRANSLATIONS = {
 
     # --- Result Dialog ---
     "Manuscript Viewer": "צפייה בכתב יד",
-    "Result {} of {}": "תוצאה {} מתוך {}", 
-    "Go to Ktiv": "עיון בכתיב", 
-    "Sys": "מס' מערכת", 
-    "FL": "מס' קובץ", 
-    "Image:": "תמונה:", 
+    "Result {} of {}": "תוצאה {} מתוך {}",
+    "Go to Ktiv": "עיון בכתיב",
+    "Sys": "מס' מערכת",
+    "FL": "מס' קובץ",
+    "Image:": "תמונה:",
+    "Compact": "תצוגה מצומצמת",
+    "Show More": "הצג עוד", 
     "Manuscript Text": "טקסט כתב היד", 
 
     "◀ Prev Result": "▶ לתוצאה קודמת",

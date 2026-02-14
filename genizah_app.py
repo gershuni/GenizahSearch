@@ -2396,18 +2396,13 @@ class ResultDialog(QDialog):
         self.btn_external_link.clicked.connect(self.open_external_link)
         self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px;"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
-        
-        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
-        # Domain info row
-        domain_info_row = QHBoxLayout()
+        # Domain info (inlined on info_row)
         self.lbl_rd_domains = QLabel("")
         self.lbl_rd_domains.setStyleSheet("color: #8e44ad; font-size: 11px;")
         self.lbl_rd_domains.setVisible(False)
-        domain_info_row.addWidget(QLabel(tr("Domain") + ":"))
-        domain_info_row.addWidget(self.lbl_rd_domains)
-        domain_info_row.addStretch()
-        self.rd_domain_label_row = domain_info_row
+
+        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
@@ -2547,12 +2542,13 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setOpenLinks(False)
         self.txt_extended_info.anchorClicked.connect(self._on_rd_ext_link_clicked)
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(domain_info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row); meta_col.addWidget(self.txt_extended_info)
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row); meta_col.addWidget(self.txt_extended_info)
 
-        # Right: Thumbnail
-        self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
+        # Thumbnail (kept as hidden dummy for compatibility with existing methods)
+        self.lbl_thumb = QLabel()
+        self.lbl_thumb.setVisible(False)
 
-        header_layout.addLayout(meta_col, 1); header_layout.addWidget(self.lbl_thumb)
+        header_layout.addLayout(meta_col, 1)
         main_layout.addWidget(header_widget)
         
         # --- SPLIT VIEW (Manuscript | Source | External) ---
@@ -3892,7 +3888,7 @@ class ResultDialog(QDialog):
         domain_names = parent._result_domain_map.get(self.current_sys_id, [])
         if domain_names:
             display_names = [parent._domain_display_name(d) for d in domain_names] if hasattr(parent, '_domain_display_name') else domain_names
-            self.lbl_rd_domains.setText(", ".join(display_names))
+            self.lbl_rd_domains.setText(" | " + tr("Domain") + ": " + ", ".join(display_names))
             self.lbl_rd_domains.setVisible(True)
         else:
             self.lbl_rd_domains.setVisible(False)
