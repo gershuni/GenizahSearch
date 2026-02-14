@@ -2399,6 +2399,16 @@ class ResultDialog(QDialog):
         
         info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
+        # Domain info row
+        domain_info_row = QHBoxLayout()
+        self.lbl_rd_domains = QLabel("")
+        self.lbl_rd_domains.setStyleSheet("color: #8e44ad; font-size: 11px;")
+        self.lbl_rd_domains.setVisible(False)
+        domain_info_row.addWidget(QLabel(tr("Domain") + ":"))
+        domain_info_row.addWidget(self.lbl_rd_domains)
+        domain_info_row.addStretch()
+        self.rd_domain_label_row = domain_info_row
+
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
 
@@ -2537,7 +2547,7 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setOpenLinks(False)
         self.txt_extended_info.anchorClicked.connect(self._on_rd_ext_link_clicked)
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row); meta_col.addWidget(self.txt_extended_info)
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(domain_info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row); meta_col.addWidget(self.txt_extended_info)
 
         # Right: Thumbnail
         self.lbl_thumb = QLabel(tr("No Preview")); self.lbl_thumb.setFixedSize(120, 120); self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_thumb.setStyleSheet("border: 1px solid #7f8c8d;"); self.lbl_thumb.setScaledContents(True)
@@ -3820,7 +3830,10 @@ class ResultDialog(QDialog):
         # Update Info Label
         info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
         self.lbl_info.setText(info_html)
-        
+
+        # Update Domain info
+        self._update_rd_domain_label()
+
         # Update Page Controls
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
@@ -3868,6 +3881,21 @@ class ResultDialog(QDialog):
 
         # Update joins menu
         self._rd_update_joins_menu()
+
+    def _update_rd_domain_label(self):
+        """Update domain info label for the current result in ResultDialog."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, '_result_domain_map'):
+            self.lbl_rd_domains.setVisible(False)
+            return
+
+        domain_names = parent._result_domain_map.get(self.current_sys_id, [])
+        if domain_names:
+            display_names = [parent._domain_display_name(d) for d in domain_names] if hasattr(parent, '_domain_display_name') else domain_names
+            self.lbl_rd_domains.setText(", ".join(display_names))
+            self.lbl_rd_domains.setVisible(True)
+        else:
+            self.lbl_rd_domains.setVisible(False)
 
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
@@ -4392,12 +4420,13 @@ class DomainFilterDialog(QDialog):
     all checked by default. Unchecking excludes domains.
     """
 
-    def __init__(self, parent=None, result_domains: dict = None, excluded_domains: set = None):
+    def __init__(self, parent=None, result_domains: dict = None, excluded_domains: set = None, uncategorized_count: int = 0):
         super().__init__(parent)
         self.setWindowTitle(tr("Filter by Subject Domain"))
         self.setMinimumSize(550, 650)
         self.result_domains = result_domains or {}  # domain_name -> count
         self.excluded_domains = excluded_domains or set()
+        self.uncategorized_count = uncategorized_count
         self._updating_checks = False  # Guard for programmatic checkbox changes
 
         layout = QVBoxLayout(self)
@@ -4423,10 +4452,10 @@ class DomainFilterDialog(QDialog):
 
         # Buttons
         btn_layout = QHBoxLayout()
-        check_all_btn = QPushButton(tr("Check All"))
+        check_all_btn = QPushButton(tr("Select All"))
         check_all_btn.clicked.connect(self._check_all)
         btn_layout.addWidget(check_all_btn)
-        uncheck_all_btn = QPushButton(tr("Uncheck All"))
+        uncheck_all_btn = QPushButton(tr("Select None"))
         uncheck_all_btn.clicked.connect(self._uncheck_all)
         btn_layout.addWidget(uncheck_all_btn)
         btn_layout.addStretch()
@@ -4467,9 +4496,13 @@ class DomainFilterDialog(QDialog):
             if not parent_in_results and not children_in_results:
                 continue  # Skip this parent entirely
 
-            # Add parent item
+            # Add parent item (display Hebrew name when available, store English as UserRole key)
             parent_count = self.result_domains.get(parent_name, 0)
-            parent_item = QTreeWidgetItem([parent_name, f"{parent_count:,}"])
+            # If parent count is 0 but has children in results, sum their counts
+            if children_in_results and parent_count == 0:
+                parent_count = sum(self.result_domains.get(c['domain'], 0) for c in children_in_results)
+            parent_display = info.get('parent_domain_heb', parent_name) if CURRENT_LANG == 'he' else parent_name
+            parent_item = QTreeWidgetItem([parent_display, f"{parent_count:,}"])
             parent_item.setFlags(parent_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             parent_item.setCheckState(0, Qt.CheckState.Checked)  # All checked by default
             parent_item.setData(0, Qt.ItemDataRole.UserRole, parent_name)
@@ -4479,11 +4512,21 @@ class DomainFilterDialog(QDialog):
             for child in children_in_results:
                 child_domain = child['domain']
                 child_count = self.result_domains.get(child_domain, 0)
-                child_item = QTreeWidgetItem([child_domain, f"{child_count:,}"])
+                child_display = child.get('domain_heb', child_domain) if CURRENT_LANG == 'he' else child_domain
+                child_item = QTreeWidgetItem([child_display, f"{child_count:,}"])
                 child_item.setFlags(child_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 child_item.setCheckState(0, Qt.CheckState.Checked)  # All checked by default
                 child_item.setData(0, Qt.ItemDataRole.UserRole, child_domain)
                 parent_item.addChild(child_item)
+
+        # Add "Uncategorized" node for results without domain data
+        if self.uncategorized_count > 0:
+            uncat_display = tr("Uncategorized")
+            uncat_item = QTreeWidgetItem([uncat_display, f"{self.uncategorized_count:,}"])
+            uncat_item.setFlags(uncat_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            uncat_item.setCheckState(0, Qt.CheckState.Checked)
+            uncat_item.setData(0, Qt.ItemDataRole.UserRole, "Uncategorized")
+            self.tree.addTopLevelItem(uncat_item)
 
         self.tree.blockSignals(False)
         self.tree.expandAll()
@@ -7224,7 +7267,7 @@ class GenizahGUI(QMainWindow):
         btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
         # Domain filter button and label
-        self.btn_domain_filter = QPushButton(tr("Domains"))
+        self.btn_domain_filter = QPushButton(tr("Filter by domains"))
         self.btn_domain_filter.setToolTip(tr("Filter results by subject domain (post-search)"))
         self.btn_domain_filter.setStyleSheet("padding: 2px 8px;")
         self.btn_domain_filter.clicked.connect(self._open_domain_filter_dialog)
@@ -7328,9 +7371,10 @@ class GenizahGUI(QMainWindow):
         self.COL_SNIPPET = 7
         self.COL_SRC = 8
         self.COL_PGP = 9
+        self.COL_DOMAIN = 10
 
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(10)
-        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP")])
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(11)
+        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP"), tr("Domain")])
         # Tooltip for PGP column header
         self.results_table.horizontalHeaderItem(self.COL_PGP).setToolTip(tr("Scholarly transcriptions/data available from the Princeton Geniza Project"))
 
@@ -7339,7 +7383,7 @@ class GenizahGUI(QMainWindow):
         self.chk_search_header = CheckBoxHeader(
             self.results_table,
             non_sortable_cols=[0, 1, self.COL_IMG],
-            filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET],
+            filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET, self.COL_DOMAIN],
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
             star_callback=self.toggle_list_filter,
@@ -7355,6 +7399,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnWidth(self.COL_SHELF, 175)
         self.results_table.setColumnWidth(self.COL_LIBRARY, 90)  # Library column
         self.results_table.setColumnWidth(self.COL_PGP, 40)  # PGP badge column
+        self.results_table.setColumnWidth(self.COL_DOMAIN, 130)  # Domain column
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PGP, QHeaderView.ResizeMode.Fixed)
         # Ensure column 0 is not sortable to avoid confusion with check action
@@ -7364,6 +7409,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.setMouseTracking(True)
         self.results_table.cellEntered.connect(self.on_table_cell_entered)
         self.results_table.installEventFilter(self)
+        self.results_table.viewport().installEventFilter(self)
 
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
@@ -7467,7 +7513,26 @@ class GenizahGUI(QMainWindow):
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
         self.lbl_comp_status = QLabel("")
 
+        # Domain filter button for composition results
+        self.btn_comp_domain_filter = QPushButton(tr("Filter by domains"))
+        self.btn_comp_domain_filter.setToolTip(tr("Filter results by subject domain (post-search)"))
+        self.btn_comp_domain_filter.setStyleSheet("padding: 2px 8px;")
+        self.btn_comp_domain_filter.clicked.connect(self._open_comp_domain_filter_dialog)
+        self.btn_comp_domain_filter.setEnabled(False)
+
+        self.lbl_comp_domain_filter = QLabel("")
+        self.lbl_comp_domain_filter.setStyleSheet("color: #9b59b6; font-size: 11px;")
+        self.lbl_comp_domain_filter.setVisible(False)
+
+        # Composition domain state
+        self._comp_domain_exclusions = set()
+        self._comp_result_domain_counts = {}
+        self._comp_result_domain_map = {}
+        self._comp_has_result_domains = False
+
         top_row.addWidget(btn_exclude); top_row.addWidget(btn_filter_text)
+        top_row.addWidget(self.btn_comp_domain_filter)
+        top_row.addWidget(self.lbl_comp_domain_filter)
         top_row.addWidget(self.lbl_exclude_status)
         top_row.addWidget(self.lbl_comp_status)
 
@@ -8600,10 +8665,11 @@ class GenizahGUI(QMainWindow):
         links = []
         for dom in filtered:
             domain_name = dom['domain']
+            display_name = dom.get('domain_heb', domain_name) if CURRENT_LANG == 'he' else domain_name
             # Clickable link that navigates to search with domain filter
             links.append(
                 f"<a href='domain:{domain_name}' style='color: #9b59b6; "
-                f"text-decoration: underline;'>{domain_name}</a>"
+                f"text-decoration: underline;'>{display_name}</a>"
             )
         html += ", ".join(links)
         html += "</p></div>"
@@ -13715,7 +13781,17 @@ class GenizahGUI(QMainWindow):
         if not self._result_domain_counts:
             return
 
-        dlg = DomainFilterDialog(self, result_domains=self._result_domain_counts, excluded_domains=self._domain_exclusions.copy())
+        # Count results with no domain data
+        uncategorized_count = sum(
+            1 for sid in self.result_row_by_sys_id.keys()
+            if sid not in self._result_domain_map or not self._result_domain_map[sid]
+        )
+
+        dlg = DomainFilterDialog(
+            self, result_domains=self._result_domain_counts,
+            excluded_domains=self._domain_exclusions.copy(),
+            uncategorized_count=uncategorized_count,
+        )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._domain_exclusions = dlg.get_excluded_domains()
             self._update_domain_filter_label()
@@ -13726,7 +13802,7 @@ class GenizahGUI(QMainWindow):
         if self._domain_exclusions:
             count = len(self._domain_exclusions)
             if count == 1:
-                name = next(iter(self._domain_exclusions))
+                name = self._domain_display_name(next(iter(self._domain_exclusions)))
                 self.lbl_domain_filter.setText(f"[-{name}]")
             else:
                 self.lbl_domain_filter.setText(f"[{count} excluded]")
@@ -13736,9 +13812,19 @@ class GenizahGUI(QMainWindow):
             self.lbl_domain_filter.setVisible(False)
             self.lbl_domain_filter.setStyleSheet("color: #9b59b6; font-size: 11px;")
 
+    def _domain_display_name(self, en_name):
+        """Get display name for a domain (Hebrew if UI is Hebrew, else English)."""
+        if CURRENT_LANG == 'he':
+            if hasattr(self, '_domain_name_map') and en_name in self._domain_name_map:
+                return self._domain_name_map[en_name]
+            translated = tr(en_name)
+            if translated != en_name:
+                return translated
+        return en_name
+
     def _apply_domain_exclusions(self):
         """Apply domain exclusions by hiding/showing table rows."""
-        row_to_sid = {v: k for k, v in self.result_row_by_sys_id.items()}
+        hide_uncategorized = "Uncategorized" in self._domain_exclusions
 
         if not self._domain_exclusions:
             # No exclusions -- show all rows
@@ -13748,17 +13834,16 @@ class GenizahGUI(QMainWindow):
         else:
             visible = 0
             for row in range(self.results_table.rowCount()):
-                sys_id = row_to_sid.get(row)
-                if sys_id is None:
-                    self.results_table.setRowHidden(row, False)
-                    visible += 1
-                    continue
+                # Read sys_id directly from table cell (survives sorting)
+                item = self.results_table.item(row, self.COL_SYS_ID)
+                sys_id = item.text().strip() if item else None
                 # Get domains for this result
-                result_domains = self._result_domain_map.get(sys_id, [])
+                result_domains = self._result_domain_map.get(sys_id, []) if sys_id else []
                 if not result_domains:
-                    # No domain data -- always show
-                    self.results_table.setRowHidden(row, False)
-                    visible += 1
+                    # No domain data -- hide if Uncategorized is excluded
+                    self.results_table.setRowHidden(row, hide_uncategorized)
+                    if not hide_uncategorized:
+                        visible += 1
                 elif all(d in self._domain_exclusions for d in result_domains):
                     # ALL domains excluded -- hide
                     self.results_table.setRowHidden(row, True)
@@ -13784,6 +13869,148 @@ class GenizahGUI(QMainWindow):
         self._update_domain_filter_label()
         self.tabs.setCurrentWidget(self.search_tab)
         # Note: domain will appear in post-search filter after user runs a search
+
+    # --- Composition Domain Filter ---
+
+    def _collect_comp_domain_data(self, main, appx, filtered, filt_appx):
+        """Collect domain data for composition results."""
+        all_sys_ids = set()
+        for item in main:
+            sid = item.get('sys_id')
+            if not sid:
+                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+            if sid:
+                all_sys_ids.add(sid)
+        for items in appx.values():
+            for item in items:
+                sid = item.get('sys_id')
+                if not sid:
+                    sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+                if sid:
+                    all_sys_ids.add(sid)
+        for item in filtered:
+            sid = item.get('sys_id')
+            if not sid:
+                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+            if sid:
+                all_sys_ids.add(sid)
+        for items in filt_appx.values():
+            for item in items:
+                sid = item.get('sys_id')
+                if not sid:
+                    sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+                if sid:
+                    all_sys_ids.add(sid)
+
+        if not all_sys_ids:
+            self._comp_result_domain_map = {}
+            self._comp_result_domain_counts = {}
+            self._comp_has_result_domains = False
+            self.btn_comp_domain_filter.setEnabled(False)
+            return
+
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            self.btn_comp_domain_filter.setEnabled(False)
+            return
+
+        raw_domains = fjms.get_domains_for_sys_ids(list(all_sys_ids))
+        self._comp_result_domain_map = {}
+        if not hasattr(self, '_domain_name_map'):
+            self._domain_name_map = {}
+        for sys_id, doms in raw_domains.items():
+            child_names = {d['domain'] for d in doms}
+            filtered_doms = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            if filtered_doms:
+                self._comp_result_domain_map[sys_id] = filtered_doms
+            for d in doms:
+                if d.get('domain_heb') and d['domain'] not in self._domain_name_map:
+                    self._domain_name_map[d['domain']] = d['domain_heb']
+                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in self._domain_name_map:
+                    self._domain_name_map[d['parent_domain']] = d['parent_domain_heb']
+
+        self._comp_result_domain_counts = {}
+        for sys_id, domain_names in self._comp_result_domain_map.items():
+            for d in domain_names:
+                self._comp_result_domain_counts[d] = self._comp_result_domain_counts.get(d, 0) + 1
+
+        self._comp_has_result_domains = bool(self._comp_result_domain_counts)
+        self.btn_comp_domain_filter.setEnabled(self._comp_has_result_domains)
+
+    def _open_comp_domain_filter_dialog(self):
+        """Open the domain filter dialog for composition results."""
+        if not self._comp_result_domain_counts:
+            return
+
+        # Count uncategorized items
+        all_comp_sids = set()
+        for item in getattr(self, 'comp_main', []):
+            sid = item.get('sys_id')
+            if not sid:
+                sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
+            if sid:
+                all_comp_sids.add(sid)
+        uncategorized_count = sum(
+            1 for sid in all_comp_sids
+            if sid not in self._comp_result_domain_map or not self._comp_result_domain_map[sid]
+        )
+
+        dlg = DomainFilterDialog(
+            self, result_domains=self._comp_result_domain_counts,
+            excluded_domains=self._comp_domain_exclusions.copy(),
+            uncategorized_count=uncategorized_count,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._comp_domain_exclusions = dlg.get_excluded_domains()
+            self._update_comp_domain_filter_label()
+            self._apply_comp_domain_exclusions()
+
+    def _update_comp_domain_filter_label(self):
+        """Update the composition domain filter label."""
+        if self._comp_domain_exclusions:
+            count = len(self._comp_domain_exclusions)
+            if count == 1:
+                name = self._domain_display_name(next(iter(self._comp_domain_exclusions)))
+                self.lbl_comp_domain_filter.setText(f"[-{name}]")
+            else:
+                self.lbl_comp_domain_filter.setText(f"[{count} {tr('excluded')}]")
+            self.lbl_comp_domain_filter.setStyleSheet("color: #e74c3c; font-size: 11px;")
+            self.lbl_comp_domain_filter.setVisible(True)
+        else:
+            self.lbl_comp_domain_filter.setVisible(False)
+            self.lbl_comp_domain_filter.setStyleSheet("color: #9b59b6; font-size: 11px;")
+
+    def _apply_comp_domain_exclusions(self):
+        """Apply domain exclusions by hiding/showing composition tree items."""
+        if not self._comp_domain_exclusions:
+            # Show all items
+            root = self.comp_tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                section = root.child(i)
+                for j in range(section.childCount()):
+                    section.child(j).setHidden(False)
+            return
+
+        hide_uncategorized = "Uncategorized" in self._comp_domain_exclusions
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            section = root.child(i)
+            for j in range(section.childCount()):
+                node = section.child(j)
+                item_data = node.data(0, Qt.ItemDataRole.UserRole)
+                if not item_data or not isinstance(item_data, dict):
+                    continue
+                sid = item_data.get('sys_id')
+                if not sid:
+                    sid, _ = self.meta_mgr.parse_header_smart(item_data.get('raw_header', ''))
+                result_domains = self._comp_result_domain_map.get(sid, []) if sid else []
+                if not result_domains:
+                    node.setHidden(hide_uncategorized)
+                elif all(d in self._comp_domain_exclusions for d in result_domains):
+                    node.setHidden(True)
+                else:
+                    node.setHidden(False)
 
     def _open_query_builder(self):
         """Open the tabular query builder dialog."""
@@ -14061,6 +14288,15 @@ class GenizahGUI(QMainWindow):
                 self.results_table.setItem(row_idx, self.COL_PGP, pgp_item)
             else:
                 self.results_table.setItem(row_idx, self.COL_PGP, QTableWidgetItem(""))
+
+            # Domain column
+            domain_names = self._result_domain_map.get(sid, [])
+            domain_text = ", ".join(self._domain_display_name(d) for d in domain_names) if domain_names else ""
+            domain_item = QTableWidgetItem(domain_text)
+            if domain_names:
+                domain_item.setForeground(QColor("#8e44ad"))
+            self.results_table.setItem(row_idx, self.COL_DOMAIN, domain_item)
+
             self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
@@ -14149,7 +14385,9 @@ class GenizahGUI(QMainWindow):
         raw_domains = _collect_result_domains()
 
         # Process into domain name lists per sys_id (with parent/child dedup)
+        # Also build English->Hebrew display name map
         self._result_domain_map = {}
+        self._domain_name_map = {}  # English name -> Hebrew name
         domain_counts = {}  # domain_name -> count of results
         for sys_id, doms in raw_domains.items():
             child_names = {d['domain'] for d in doms}
@@ -14158,12 +14396,21 @@ class GenizahGUI(QMainWindow):
                 self._result_domain_map[sys_id] = filtered
                 for d in filtered:
                     domain_counts[d] = domain_counts.get(d, 0) + 1
+            for d in doms:
+                if d.get('domain_heb') and d['domain'] not in self._domain_name_map:
+                    self._domain_name_map[d['domain']] = d['domain_heb']
+                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in self._domain_name_map:
+                    self._domain_name_map[d['parent_domain']] = d['parent_domain_heb']
 
         self._result_domain_counts = domain_counts
         self._has_result_domains = bool(domain_counts)
         self.btn_domain_filter.setEnabled(self._has_result_domains)
 
         self.load_next_batch()
+
+        # Auto-fit columns to content (like double-clicking the column border)
+        for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
+            self.results_table.resizeColumnToContents(col)
 
         # Apply any remembered domain exclusions after rows are loaded
         if self._domain_exclusions and self._has_result_domains:
@@ -14201,8 +14448,9 @@ class GenizahGUI(QMainWindow):
             self._update_results_filter_indicators()
             self._apply_results_table_filters()
 
+
     def _update_results_filter_indicators(self):
-        for column in (self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET):
+        for column in (self.COL_SHELF, self.COL_TITLE, self.COL_SNIPPET, self.COL_DOMAIN):
             self.chk_search_header.set_filter_active(column, column in self.results_filters)
 
     def _results_filter_text_for_row(self, row, column):
@@ -14226,7 +14474,11 @@ class GenizahGUI(QMainWindow):
         # Use cached IDs if available, or empty set (will be populated on first activation via update_cache)
         target_sys_ids = self.list_filter_state.get('cached_ids', set())
 
-        if not self.results_filters and not list_active:
+        # Domain exclusion state
+        has_domain_exclusions = bool(self._domain_exclusions) and self._has_result_domains
+        hide_uncategorized = "Uncategorized" in self._domain_exclusions if has_domain_exclusions else False
+
+        if not self.results_filters and not list_active and not has_domain_exclusions:
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
@@ -14257,6 +14509,17 @@ class GenizahGUI(QMainWindow):
                     if not in_list: visible = False
                 elif list_mode == 'not_in':
                     if in_list: visible = False
+
+            # C. Check Domain Exclusions
+            if visible and has_domain_exclusions:
+                item = self.results_table.item(row, self.COL_SYS_ID)
+                sys_id = item.text().strip() if item else None
+                result_domains = self._result_domain_map.get(sys_id, []) if sys_id else []
+                if not result_domains:
+                    if hide_uncategorized:
+                        visible = False
+                elif all(d in self._domain_exclusions for d in result_domains):
+                    visible = False
 
             self.results_table.setRowHidden(row, not visible)
 
@@ -14686,6 +14949,24 @@ class GenizahGUI(QMainWindow):
             w.set_buttons_visible(True)
 
     def eventFilter(self, source, event):
+        # Smart tooltips for truncated cell text in results table
+        if source == self.results_table.viewport() and event.type() == QEvent.Type.ToolTip:
+            pos = event.pos()
+            index = self.results_table.indexAt(pos)
+            if index.isValid():
+                col = index.column()
+                # Skip checkbox and actions columns
+                if col not in (self.COL_CHECKBOX, self.COL_ACTIONS, self.COL_IMG):
+                    item = self.results_table.item(index.row(), col)
+                    if item and item.text():
+                        rect = self.results_table.visualRect(index)
+                        fm = self.results_table.fontMetrics()
+                        text_width = fm.horizontalAdvance(item.text())
+                        if text_width > rect.width() - 8:
+                            QToolTip.showText(event.globalPos(), item.text())
+                            return True
+            QToolTip.hideText()
+            return True
         if source == self.results_table and event.type() == QEvent.Type.Leave:
             if self.hovered_row != -1:
                 w = self.results_table.cellWidget(self.hovered_row, self.COL_ACTIONS)
@@ -16950,6 +17231,9 @@ class GenizahGUI(QMainWindow):
                 sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
             if sid and sid not in self.meta_mgr.nli_cache:
                  ids_to_fetch.add(sid)
+
+        # Collect domain data for composition results
+        self._collect_comp_domain_data(clean_main, clean_appx, clean_filt, clean_filt_appx)
 
         # Block itemChanged signal during tree population to prevent O(n²) updates
         self.comp_tree_updating = True

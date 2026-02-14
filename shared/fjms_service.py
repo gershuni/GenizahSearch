@@ -299,9 +299,44 @@ class FjmsService:
                         hierarchy[domain]['count'] += count
                     parent_counts[domain] = parent_counts.get(domain, 0) + count
 
+            # Deduplicate: if a domain appears as both a child and a standalone
+            # root (e.g., "Piyyut" with ParentDomain=NULL AND ParentDomain="Piyut and its Interpretation"),
+            # merge the root count into the child entry and remove the standalone root.
+            child_domains = set()
+            for info in hierarchy.values():
+                for child in info.get('children', []):
+                    child_domains.add(child['domain'])
+            for child_name in child_domains:
+                if child_name in hierarchy:
+                    # Merge root count into child entry
+                    root_count = hierarchy[child_name].get('count', 0)
+                    # Find and update the child entry in its parent
+                    for info in hierarchy.values():
+                        for child in info.get('children', []):
+                            if child['domain'] == child_name:
+                                child['count'] += root_count
+                                break
+                    # Also move any children of the standalone root under the parent
+                    orphan_children = hierarchy[child_name].get('children', [])
+                    if orphan_children:
+                        for info in hierarchy.values():
+                            for child in info.get('children', []):
+                                if child['domain'] == child_name:
+                                    # Can't nest deeper, so promote orphans to same parent level
+                                    info['children'].extend(orphan_children)
+                                    break
+                    del hierarchy[child_name]
+
             # Sort children within each parent by count descending
             for parent in hierarchy:
                 hierarchy[parent]['children'].sort(key=lambda x: x['count'], reverse=True)
+
+            # Recalculate parent counts after dedup
+            for parent_name, info in hierarchy.items():
+                child_total = sum(c['count'] for c in info.get('children', []))
+                if child_total > info.get('count', 0):
+                    info['count'] = child_total
+                    parent_counts[parent_name] = child_total
 
             # Return sorted by parent count
             return dict(sorted(hierarchy.items(), key=lambda x: parent_counts.get(x[0], 0), reverse=True))

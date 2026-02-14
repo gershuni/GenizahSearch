@@ -2307,4 +2307,25 @@ TRANSLATIONS = {
     # --- Feature discovery hints ---
     "Try the Responsa-style search mode!": "נסו את מצב חיפוש בסגנון השו\"ת!",
     "Try the Tabular Search!": "נסו את החיפוש הטבלאי!",
+
+    # --- Domain Filter ---
+    "Filter by domains": "סנן לפי תחומים",
+    "Filter by Domain": "סנן לפי תחום",
+    "Domains": "תחומים",
+    "domains excluded": "תחומים הוחרגו",
+    "Search domains:": "חפש תחומים:",
+    "Type to filter...": "הקלד לסינון...",
+    "Domain": "תחום",
+    "Uncheck All": "בטל הכל",
+    "Select None": "בטל בחירה",
+    "Showing all domains": "מציג את כל התחומים",
+    "Excluding": "מחריג",
+    "domains": "תחומים",
+    "Uncategorized": "ללא סיווג",
+    "Subject Domains": "תחומי נושא",
+    "Filter results by subject domain": "סנן תוצאות לפי תחום נושא",
+    "excluded": "מוחרגים",
+    "Filter results by subject domain (post-search)": "סנן תוצאות לפי תחום (לאחר חיפוש)",
+    "Filter by Subject Domain": "סנן לפי תחום נושא",
+    "Run a search first to see domain options.": "בצע חיפוש תחילה כדי לראות אפשרויות תחום.",
 }

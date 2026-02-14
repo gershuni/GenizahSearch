@@ -55,6 +55,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.all_result_domains: dict = {}  # sys_id -> list of domain names (deduped)
             self.domain_exclusions: set = set()  # domain names user has excluded
             self.has_domain_data: bool = False  # whether any results have domain data
+            self.domain_name_map: dict = {}  # English domain name -> Hebrew name
 
     search_state = SearchUIState()
 
@@ -65,6 +66,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     if initial_domain:
         search_state.domain_exclusions = set()
         app.storage.user['domain_exclusions'] = []
+
+    def _domain_display_name(en_name: str) -> str:
+        """Get display name for a domain (Hebrew if UI is Hebrew, else English)."""
+        from web.translations import get_language
+        if get_language() == 'he':
+            if en_name in search_state.domain_name_map:
+                return search_state.domain_name_map[en_name]
+            # Fall back to tr() for non-FJMS labels like 'Uncategorized'
+            translated = tr(en_name)
+            if translated != en_name:
+                return translated
+        return en_name
 
     # State for Advanced View dialog (used for in-place updates)
     class AdvancedViewState:
@@ -671,10 +684,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
                         # Domain filter button (hidden until search with domain data)
                         domain_filter_btn = ui.button(
-                            tr('Domains'), icon='category',
+                            tr('Filter by domains'), icon='category',
                             on_click=lambda: _open_domain_filter_dialog()
-                        ).classes('text-sm').props('flat dense no-caps')
+                        ).classes('text-sm').props('outline dense no-caps')
                         domain_filter_btn.set_visibility(False)
+
+                        # Restore visibility if stored exclusions exist (persistence across navigation)
+                        if search_state.domain_exclusions:
+                            domain_filter_btn.set_visibility(True)
+                            n_excl = len(search_state.domain_exclusions)
+                            domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
+                            domain_filter_btn.props('outline dense no-caps color=red')
 
                     with ui.row().classes('gap-2'):
                         # Bulk actions (initially hidden)
@@ -1648,9 +1668,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         builder_dialog.open()
 
+    def _update_domain_filter_btn():
+        """Update domain filter button text and styling based on exclusion state."""
+        if search_state.domain_exclusions:
+            n = len(search_state.domain_exclusions)
+            domain_filter_btn.text = f"{tr('Filter by domains')} ({n} {tr('excluded')})"
+            domain_filter_btn.props('outline dense no-caps color=red')
+        else:
+            domain_filter_btn.text = tr('Filter by domains')
+            domain_filter_btn.props('outline dense no-caps color=primary')
+
     def _open_domain_filter_dialog():
         """Open modal dialog with checkbox tree of domains from current results."""
         if not search_state.has_domain_data:
+            if search_state.domain_exclusions:
+                ui.notify(tr('Run a search first to see domain options.'), type='info', timeout=3000)
             return
 
         # Build domain hierarchy from all_result_domains
@@ -1702,6 +1734,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     'children': [],
                 }
 
+        # Count results with NO domain data ("Uncategorized")
+        uncategorized_count = sum(
+            1 for sys_id in [r.get('display', {}).get('id') for r in search_state.results]
+            if sys_id and sys_id not in search_state.all_result_domains
+        )
+        if uncategorized_count > 0:
+            result_hierarchy['Uncategorized'] = {
+                'parent_domain_heb': tr('Uncategorized'),
+                'count': uncategorized_count,
+                'children': [],
+            }
+
         total_results = len(search_state.results)
 
         # Track checkbox states: domain_name -> ui.checkbox reference
@@ -1715,11 +1759,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Summary line
                 def calc_visible():
                     excluded = {name for name, cb in checkboxes.items() if not cb.value}
+                    hide_uncategorized = 'Uncategorized' in excluded
                     visible = 0
                     for r in search_state.results:
                         sys_id = r.get('display', {}).get('id')
                         doms = search_state.all_result_domains.get(sys_id, [])
-                        if not doms or not all(d in excluded for d in doms):
+                        if not doms:
+                            if not hide_uncategorized:
+                                visible += 1
+                        elif not all(d in excluded for d in doms):
                             visible += 1
                     return visible
 
@@ -1743,7 +1791,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                             child_domain_names = [c['domain'] for c in children]
                             parent_checked = parent_name not in current_exclusions
-                            parent_label = f"{parent_name} ({info['count']})"
+                            parent_label = f"{_domain_display_name(parent_name)} ({info['count']})"
 
                             parent_cb = ui.checkbox(parent_label, value=parent_checked).classes('font-bold')
                             checkboxes[parent_name] = parent_cb
@@ -1752,7 +1800,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # Children checkboxes (indented)
                             for child in sorted(children, key=lambda c: -c['count']):
                                 child_checked = child['domain'] not in current_exclusions
-                                child_label = f"{child['domain']} ({child['count']})"
+                                child_label = f"{_domain_display_name(child['domain'])} ({child['count']})"
 
                                 def make_child_handler():
                                     def handler(e):
@@ -1760,7 +1808,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
                                     return handler
 
-                                child_cb = ui.checkbox(child_label, value=child_checked).classes('ml-6')
+                                child_cb = ui.checkbox(child_label, value=child_checked).style('margin-inline-start: 2rem')
                                 checkboxes[child['domain']] = child_cb
                                 child_cb.on_value_change(make_child_handler())
 
@@ -1769,9 +1817,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     def check_all():
                         for cb in checkboxes.values():
                             cb.value = True
+                        for cb in checkboxes.values():
+                            cb.update()
                         summary_label.text = f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}"
 
-                    ui.button(tr('Check All'), on_click=check_all).props('flat dense no-caps')
+                    def uncheck_all():
+                        for cb in checkboxes.values():
+                            cb.value = False
+                        for cb in checkboxes.values():
+                            cb.update()
+                        visible = calc_visible()
+                        summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
+
+                    with ui.row().classes('gap-2'):
+                        ui.button(tr('Select All'), on_click=check_all).props('flat dense no-caps')
+                        ui.button(tr('Select None'), on_click=uncheck_all).props('flat dense no-caps')
 
                     with ui.row().classes('gap-2'):
                         def apply_filter():
@@ -1780,11 +1840,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # Persist to storage
                             app.storage.user['domain_exclusions'] = list(excluded)
                             _apply_domain_exclusions()
-                            # Update button text
-                            if excluded:
-                                domain_filter_btn.text = f"{tr('Domains')} ({len(excluded)} {tr('excluded')})"
-                            else:
-                                domain_filter_btn.text = tr('Domains')
+                            # Update button text and styling
+                            _update_domain_filter_btn()
                             dialog.close()
 
                         def cancel_dialog():
@@ -1801,13 +1858,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # No exclusions -- show all results
             filtered = search_state.results
         else:
+            hide_uncategorized = 'Uncategorized' in search_state.domain_exclusions
             filtered = []
             for r in search_state.results:
                 sys_id = r.get('display', {}).get('id')
                 result_domains = search_state.all_result_domains.get(sys_id, []) if sys_id else []
                 if not result_domains:
-                    # No domain data -- always keep (not filtered out)
-                    filtered.append(r)
+                    # No domain data -- hide if Uncategorized is excluded
+                    if not hide_uncategorized:
+                        filtered.append(r)
+                    continue
                 elif all(d in search_state.domain_exclusions for d in result_domains):
                     # ALL domains excluded -- hide this result
                     continue
@@ -1967,12 +2027,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         raw_domains = await run.io_bound(collect_all_domains, all_sys_ids)
 
         # Process into deduplicated domain names per sys_id
+        # Also build English->Hebrew display name map
         search_state.all_result_domains = {}
+        search_state.domain_name_map = {}  # English name -> Hebrew name
         for sys_id, doms in raw_domains.items():
             child_names = {d['domain'] for d in doms}
             filtered = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
             if filtered:
                 search_state.all_result_domains[sys_id] = filtered
+            for d in doms:
+                if d.get('domain_heb') and d['domain'] not in search_state.domain_name_map:
+                    search_state.domain_name_map[d['domain']] = d['domain_heb']
+                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
+                    search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
         search_state.has_domain_data = bool(search_state.all_result_domains)
 
         # Batch lookup for transcription availability
@@ -1989,13 +2056,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Slice result_domains from all_result_domains for badge rendering
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
 
-        # Show/hide domain filter button
+        # Show/hide domain filter button and update styling
         domain_filter_btn.set_visibility(search_state.has_domain_data)
-        if search_state.has_domain_data and search_state.domain_exclusions:
-            n_excl = len(search_state.domain_exclusions)
-            domain_filter_btn.text = f"{tr('Domains')} ({n_excl} {tr('excluded')})"
-        else:
-            domain_filter_btn.text = tr('Domains')
+        _update_domain_filter_btn()
 
         # Check if search was cancelled before resetting
         was_cancelled = search_state.is_cancelled
@@ -2061,11 +2124,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Render results (apply remembered exclusions if active)
         if search_state.domain_exclusions and search_state.has_domain_data:
             # Apply remembered exclusions before first render
+            hide_uncategorized = 'Uncategorized' in search_state.domain_exclusions
             filtered = []
             for r in results:
                 sys_id = r.get('display', {}).get('id')
                 result_domains = search_state.all_result_domains.get(sys_id, []) if sys_id else []
-                if not result_domains or not all(d in search_state.domain_exclusions for d in result_domains):
+                if not result_domains:
+                    if not hide_uncategorized:
+                        filtered.append(r)
+                elif not all(d in search_state.domain_exclusions for d in result_domains):
                     filtered.append(r)
             n_excl = len(search_state.domain_exclusions)
             results_count.text = f"{len(filtered)} {tr('of')} {len(results)} {tr('Results')} ({n_excl} {tr('domains excluded')})"
@@ -2156,10 +2223,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             domains_for_result = search_state.result_domains.get(sys_id, [])
                             if domains_for_result:
                                 primary_domain = domains_for_result[0]  # Most specific (child)
-                                domain_text = primary_domain
+                                domain_text = _domain_display_name(primary_domain)
                                 if len(domains_for_result) > 1:
                                     extra = len(domains_for_result) - 1
-                                    tooltip_text = ', '.join(domains_for_result)
+                                    tooltip_text = ', '.join(_domain_display_name(d) for d in domains_for_result)
                                     with ui.row().classes('items-center gap-0'):
                                         ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                             'background: #f3e8ff; color: #7c3aed;'  # Purple tones for FJMS

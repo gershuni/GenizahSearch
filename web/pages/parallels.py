@@ -146,10 +146,19 @@ def create_parallels_page(initial_text: str = None):
             self.progress = 0
             self.status = ""
             self.results = []
+            self.filtered_results = []
             self.finished_animation_shown = False
             self.update_timer = None  # Track timer to prevent duplicates
+            # Domain filter state
+            self.all_result_domains: dict = {}  # sys_id -> list of domain names
+            self.domain_exclusions: set = set()
+            self.has_domain_data: bool = False
+            self.domain_name_map: dict = {}  # English domain name -> Hebrew name
 
     p_state = ParallelsState()
+
+    # Restore domain exclusions for parallels
+    p_state.domain_exclusions = set(app.storage.user.get('parallels_domain_exclusions', []))
 
     # Restore previous results
     if 'parallels_results' in app.storage.user:
@@ -564,6 +573,20 @@ def create_parallels_page(initial_text: str = None):
                 results_header = h2(tr('Results'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
                 with ui.row().classes('gap-2'):
+                    # Domain filter button (hidden until search with domain data)
+                    p_domain_filter_btn = ui.button(
+                        tr('Filter by domains'), icon='category',
+                        on_click=lambda: _open_parallels_domain_filter_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    p_domain_filter_btn.set_visibility(False)
+
+                    # Restore visibility if stored exclusions exist
+                    if p_state.domain_exclusions:
+                        p_domain_filter_btn.set_visibility(True)
+                        n_excl = len(p_state.domain_exclusions)
+                        p_domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
+                        p_domain_filter_btn.props('outline dense no-caps color=red')
+
                     # Sort options
                     sort_select = ui.select(
                         {
@@ -1252,10 +1275,51 @@ def create_parallels_page(initial_text: str = None):
                 except Exception:
                     pass
 
+                # Collect domain data for parallels results
+                all_sys_ids = []
+                for item in main_results:
+                    raw_header = item.get('raw_header', '')
+                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    if sys_match:
+                        all_sys_ids.append(sys_match.group(1))
+
+                if all_sys_ids:
+                    def collect_parallels_domains(sys_ids):
+                        from shared.fjms_service import get_fjms_service
+                        fjms = get_fjms_service(thread_safe=True)
+                        return fjms.get_domains_for_sys_ids(sys_ids) if fjms.is_available() else {}
+
+                    raw_domains = await run.io_bound(collect_parallels_domains, all_sys_ids)
+                    p_state.all_result_domains = {}
+                    p_state.domain_name_map = {}
+                    for sys_id, doms in raw_domains.items():
+                        child_names = {d['domain'] for d in doms}
+                        filtered_doms = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+                        if filtered_doms:
+                            p_state.all_result_domains[sys_id] = filtered_doms
+                        for d in doms:
+                            if d.get('domain_heb') and d['domain'] not in p_state.domain_name_map:
+                                p_state.domain_name_map[d['domain']] = d['domain_heb']
+                            if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in p_state.domain_name_map:
+                                p_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
+                    p_state.has_domain_data = bool(p_state.all_result_domains)
+                else:
+                    p_state.all_result_domains = {}
+                    p_state.has_domain_data = False
+
+                # Show/hide domain filter button
+                p_domain_filter_btn.set_visibility(p_state.has_domain_data)
+                _update_parallels_domain_filter_btn()
+
                 # Show message if results are partial (search was cancelled)
                 if is_partial:
                     p_state.status = tr('Partial results (search cancelled)')
                     ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+
+                # Apply domain exclusions if any
+                if p_state.domain_exclusions and p_state.has_domain_data:
+                    main_results = _filter_parallels_by_domain(main_results)
+                    filtered_results = _filter_parallels_by_domain(filtered_results) if filtered_results else filtered_results
 
                 render_results(main_results, filtered_results, is_partial=is_partial)
             else:
@@ -1268,6 +1332,216 @@ def create_parallels_page(initial_text: str = None):
             results_header.text = tr('No results')
             with results_container:
                 show_empty_state()
+
+    def _update_parallels_domain_filter_btn():
+        """Update parallels domain filter button text and styling."""
+        if p_state.domain_exclusions:
+            n = len(p_state.domain_exclusions)
+            p_domain_filter_btn.text = f"{tr('Filter by domains')} ({n} {tr('excluded')})"
+            p_domain_filter_btn.props('outline dense no-caps color=red')
+        else:
+            p_domain_filter_btn.text = tr('Filter by domains')
+            p_domain_filter_btn.props('outline dense no-caps color=primary')
+
+    def _get_sys_id_from_parallels_item(item):
+        """Extract sys_id from a parallels result item."""
+        raw_header = item.get('raw_header', '')
+        sys_match = re.search(r'(99\d{8,})', raw_header)
+        return sys_match.group(1) if sys_match else None
+
+    def _filter_parallels_by_domain(results):
+        """Filter parallels results based on domain exclusions."""
+        if not p_state.domain_exclusions:
+            return results
+        hide_uncategorized = 'Uncategorized' in p_state.domain_exclusions
+        filtered = []
+        for item in results:
+            sys_id = _get_sys_id_from_parallels_item(item)
+            result_domains = p_state.all_result_domains.get(sys_id, []) if sys_id else []
+            if not result_domains:
+                if not hide_uncategorized:
+                    filtered.append(item)
+                continue
+            elif all(d in p_state.domain_exclusions for d in result_domains):
+                continue
+            else:
+                filtered.append(item)
+        return filtered
+
+    def _parallels_domain_display(en_name: str) -> str:
+        """Get display name for a domain (Hebrew if UI is Hebrew, else English)."""
+        from web.translations import get_language
+        if get_language() == 'he':
+            if en_name in p_state.domain_name_map:
+                return p_state.domain_name_map[en_name]
+            translated = tr(en_name)
+            if translated != en_name:
+                return translated
+        return en_name
+
+    def _open_parallels_domain_filter_dialog():
+        """Open modal dialog with checkbox tree of domains from parallels results."""
+        if not p_state.has_domain_data:
+            if p_state.domain_exclusions:
+                ui.notify(tr('Run a search first to see domain options.'), type='info', timeout=3000)
+            return
+
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service(thread_safe=True)
+        hierarchy = fjms.get_domain_hierarchy() if fjms.is_available() else {}
+
+        # Count results per domain
+        domain_counts = {}
+        for sys_id, domain_names in p_state.all_result_domains.items():
+            for d in domain_names:
+                domain_counts[d] = domain_counts.get(d, 0) + 1
+
+        # Build filtered hierarchy
+        result_hierarchy = {}
+        for parent_name, info in hierarchy.items():
+            parent_in_results = parent_name in domain_counts
+            children_in_results = []
+            for child in info.get('children', []):
+                if child['domain'] in domain_counts:
+                    children_in_results.append({
+                        'domain': child['domain'],
+                        'domain_heb': child.get('domain_heb', child['domain']),
+                        'count': domain_counts[child['domain']],
+                    })
+            if parent_in_results or children_in_results:
+                parent_count = domain_counts.get(parent_name, 0)
+                if children_in_results and parent_count == 0:
+                    parent_count = sum(c['count'] for c in children_in_results)
+                result_hierarchy[parent_name] = {
+                    'parent_domain_heb': info.get('parent_domain_heb', parent_name),
+                    'count': parent_count,
+                    'children': children_in_results,
+                }
+
+        # Orphans
+        known_domains = set()
+        for parent_name, info in result_hierarchy.items():
+            known_domains.add(parent_name)
+            for c in info['children']:
+                known_domains.add(c['domain'])
+        for domain_name, count in domain_counts.items():
+            if domain_name not in known_domains:
+                result_hierarchy[domain_name] = {
+                    'parent_domain_heb': domain_name,
+                    'count': count,
+                    'children': [],
+                }
+
+        # Uncategorized
+        all_sys_ids_in_results = set()
+        for item in p_state.results:
+            sid = _get_sys_id_from_parallels_item(item)
+            if sid:
+                all_sys_ids_in_results.add(sid)
+        uncategorized_count = sum(1 for sid in all_sys_ids_in_results if sid not in p_state.all_result_domains)
+        if uncategorized_count > 0:
+            result_hierarchy['Uncategorized'] = {
+                'parent_domain_heb': tr('Uncategorized'),
+                'count': uncategorized_count,
+                'children': [],
+            }
+
+        total_results = len(p_state.results)
+        checkboxes = {}
+        current_exclusions = p_state.domain_exclusions.copy()
+
+        with ui.dialog() as dialog, ui.card().classes('w-[600px] max-h-[80vh]'):
+            with ui.column().classes('w-full gap-2'):
+                ui.label(tr('Filter by Domain')).classes('text-lg font-bold')
+
+                def calc_visible():
+                    excluded = {name for name, cb in checkboxes.items() if not cb.value}
+                    hide_uncat = 'Uncategorized' in excluded
+                    visible = 0
+                    for item in p_state.results:
+                        sys_id = _get_sys_id_from_parallels_item(item)
+                        doms = p_state.all_result_domains.get(sys_id, []) if sys_id else []
+                        if not doms:
+                            if not hide_uncat:
+                                visible += 1
+                        elif not all(d in excluded for d in doms):
+                            visible += 1
+                    return visible
+
+                summary_label = ui.label(f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}").classes('text-sm text-gray-500')
+
+                with ui.scroll_area().classes('w-full').style('max-height: 50vh;'):
+                    with ui.column().classes('w-full gap-0'):
+                        for parent_name, info in sorted(result_hierarchy.items(), key=lambda x: -x[1]['count']):
+                            children = info.get('children', [])
+
+                            def make_parent_handler(pname, child_domains):
+                                def handler(e):
+                                    for cd in child_domains:
+                                        if cd in checkboxes:
+                                            checkboxes[cd].value = e.value
+                                    visible = calc_visible()
+                                    summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
+                                return handler
+
+                            child_domain_names = [c['domain'] for c in children]
+                            parent_checked = parent_name not in current_exclusions
+                            parent_label = f"{_parallels_domain_display(parent_name)} ({info['count']})"
+
+                            parent_cb = ui.checkbox(parent_label, value=parent_checked).classes('font-bold')
+                            checkboxes[parent_name] = parent_cb
+                            parent_cb.on_value_change(make_parent_handler(parent_name, child_domain_names))
+
+                            for child in sorted(children, key=lambda c: -c['count']):
+                                child_checked = child['domain'] not in current_exclusions
+                                child_label = f"{_parallels_domain_display(child['domain'])} ({child['count']})"
+
+                                def make_child_handler():
+                                    def handler(e):
+                                        visible = calc_visible()
+                                        summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
+                                    return handler
+
+                                child_cb = ui.checkbox(child_label, value=child_checked).style('margin-inline-start: 2rem')
+                                checkboxes[child['domain']] = child_cb
+                                child_cb.on_value_change(make_child_handler())
+
+                with ui.row().classes('w-full justify-between'):
+                    def check_all():
+                        for cb in checkboxes.values():
+                            cb.value = True
+                        for cb in checkboxes.values():
+                            cb.update()
+                        summary_label.text = f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}"
+
+                    def uncheck_all():
+                        for cb in checkboxes.values():
+                            cb.value = False
+                        for cb in checkboxes.values():
+                            cb.update()
+                        visible = calc_visible()
+                        summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
+
+                    with ui.row().classes('gap-2'):
+                        ui.button(tr('Select All'), on_click=check_all).props('flat dense no-caps')
+                        ui.button(tr('Select None'), on_click=uncheck_all).props('flat dense no-caps')
+
+                    with ui.row().classes('gap-2'):
+                        def apply_filter():
+                            excluded = {name for name, cb in checkboxes.items() if not cb.value}
+                            p_state.domain_exclusions = excluded
+                            app.storage.user['parallels_domain_exclusions'] = list(excluded)
+                            _update_parallels_domain_filter_btn()
+                            # Re-render results with exclusions applied
+                            main_filtered = _filter_parallels_by_domain(p_state.results)
+                            filt_filtered = _filter_parallels_by_domain(p_state.filtered_results) if p_state.filtered_results else p_state.filtered_results
+                            render_results(main_filtered, filt_filtered)
+                            dialog.close()
+
+                        ui.button(tr('Apply'), on_click=apply_filter).props('dense no-caps color=primary')
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
+
+        dialog.open()
 
     def show_empty_state():
         with ui.column().classes('w-full items-center py-12'):
