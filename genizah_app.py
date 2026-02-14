@@ -2373,11 +2373,91 @@ class ResultDialog(QDialog):
         top_bar = QHBoxLayout()
         self.btn_res_prev = QPushButton(tr("◀ Prev Result")); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
         self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.btn_compact_toggle = QPushButton(tr("Compact"))
+        self.btn_compact_toggle.setCheckable(True)
+        self.btn_compact_toggle.setChecked(False)
+        self.btn_compact_toggle.setFixedWidth(70)
+        self.btn_compact_toggle.clicked.connect(lambda checked: self._toggle_compact_mode(checked))
         self.btn_res_next = QPushButton(tr("Next Result ▶")); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
-        top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_res_next)
+        top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_compact_toggle); top_bar.addWidget(self.btn_res_next)
         main_layout.addLayout(top_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
-        
+
+        # --- Compact Bar (initially hidden, shown in compact mode) ---
+        self.compact_bar = QWidget()
+        self.compact_bar.setVisible(False)
+        compact_layout = QHBoxLayout(self.compact_bar)
+        compact_layout.setContentsMargins(4, 2, 4, 2)
+        compact_layout.setSpacing(6)
+
+        # Prev result
+        self.btn_compact_prev = QPushButton(tr("Prev Result"))
+        self.btn_compact_prev.setFixedWidth(80)
+        self.btn_compact_prev.clicked.connect(lambda: self.navigate_results(-1))
+        compact_layout.addWidget(self.btn_compact_prev)
+
+        # Shelfmark (compact)
+        self.lbl_compact_shelf = QLabel()
+        self.lbl_compact_shelf.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        self.lbl_compact_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        compact_layout.addWidget(self.lbl_compact_shelf)
+
+        compact_layout.addWidget(QLabel(" | "))
+
+        # Image navigation (compact)
+        compact_layout.addWidget(QLabel(tr("Image:")))
+        self.btn_compact_pg_prev = QPushButton("<")
+        self.btn_compact_pg_prev.setFixedWidth(25)
+        self.btn_compact_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+        compact_layout.addWidget(self.btn_compact_pg_prev)
+
+        self.lbl_compact_page = QLabel("1 / ?")
+        self.lbl_compact_page.setMinimumWidth(50)
+        self.lbl_compact_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        compact_layout.addWidget(self.lbl_compact_page)
+
+        self.btn_compact_pg_next = QPushButton(">")
+        self.btn_compact_pg_next.setFixedWidth(25)
+        self.btn_compact_pg_next.clicked.connect(lambda: self.load_page(offset=1))
+        compact_layout.addWidget(self.btn_compact_pg_next)
+
+        compact_layout.addWidget(QLabel(" | "))
+
+        # Add to List (compact)
+        self.btn_compact_add_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_compact_add_list.clicked.connect(self.add_current_to_list)
+        compact_layout.addWidget(self.btn_compact_add_list)
+
+        # Extended Info (compact)
+        self.btn_compact_ext_info = QPushButton(tr("Show Extended Info"))
+        self.btn_compact_ext_info.setCheckable(True)
+        self.btn_compact_ext_info.setVisible(False)  # shown when extended info available
+        self.btn_compact_ext_info.toggled.connect(self.toggle_extended_info)
+        compact_layout.addWidget(self.btn_compact_ext_info)
+
+        # Joins (compact)
+        self.btn_compact_joins = QToolButton()
+        self.btn_compact_joins.setText("Joins")
+        self.btn_compact_joins.setToolTip(tr("View joined fragments"))
+        self.btn_compact_joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.btn_compact_joins.clicked.connect(self._rd_view_joins)
+        compact_layout.addWidget(self.btn_compact_joins)
+
+        compact_layout.addStretch()
+
+        # Show More button
+        self.btn_show_more = QPushButton(tr("Show More") + " ...")
+        self.btn_show_more.clicked.connect(lambda: self._toggle_compact_mode(False))
+        compact_layout.addWidget(self.btn_show_more)
+
+        # Next result
+        self.btn_compact_next = QPushButton(tr("Next Result"))
+        self.btn_compact_next.setFixedWidth(80)
+        self.btn_compact_next.clicked.connect(lambda: self.navigate_results(1))
+        compact_layout.addWidget(self.btn_compact_next)
+
+        main_layout.addWidget(self.compact_bar)
+
         # --- Header ---
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget); header_layout.setContentsMargins(0, 5, 0, 10)
@@ -2542,14 +2622,21 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setOpenLinks(False)
         self.txt_extended_info.anchorClicked.connect(self._on_rd_ext_link_clicked)
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row); meta_col.addWidget(self.txt_extended_info)
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row)
 
         # Thumbnail (kept as hidden dummy for compatibility with existing methods)
         self.lbl_thumb = QLabel()
         self.lbl_thumb.setVisible(False)
 
         header_layout.addLayout(meta_col, 1)
+        self.header_widget = header_widget
         main_layout.addWidget(header_widget)
+
+        # Extended info (moved outside header to remain visible in compact mode)
+        main_layout.addWidget(self.txt_extended_info)
+
+        # Set compact joins button menu (now that rd_joins_menu is created)
+        self.btn_compact_joins.setMenu(self.rd_joins_menu)
         
         # --- SPLIT VIEW (Manuscript | Source | External) ---
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -2621,7 +2708,27 @@ class ResultDialog(QDialog):
         # Footer
         btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
         self.setLayout(main_layout)
-        
+
+    def _toggle_compact_mode(self, compact):
+        """Toggle between compact and full header mode."""
+        self.compact_bar.setVisible(compact)
+        self.header_widget.setVisible(not compact)
+        self.btn_compact_toggle.setChecked(compact)
+
+        if compact:
+            # Sync compact bar state from full header
+            self.lbl_compact_shelf.setText(self.lbl_shelf.text())
+            page_num = self.spin_page.value()
+            total_text = self.lbl_total.text()  # "/ N"
+            self.lbl_compact_page.setText(f"{page_num} {total_text}")
+
+            # Sync extended info button state
+            self.btn_compact_ext_info.setVisible(self.btn_ext_info.isVisible())
+            self.btn_compact_ext_info.blockSignals(True)
+            self.btn_compact_ext_info.setChecked(self.btn_ext_info.isChecked())
+            self.btn_compact_ext_info.blockSignals(False)
+            self.btn_compact_ext_info.setText(self.btn_ext_info.text())
+
     def navigate_results(self, direction):
         new_idx = self.current_result_idx + direction
         if 0 <= new_idx < len(self.all_results):
@@ -2692,7 +2799,10 @@ class ResultDialog(QDialog):
             img=self.current_p_num,
             fl_id=parent._normalize_fl_id(self.current_fl_id),
         )
-        self.btn_add_to_list.setText(_format_add_to_list_label(in_list))
+        label = _format_add_to_list_label(in_list)
+        self.btn_add_to_list.setText(label)
+        if hasattr(self, 'btn_compact_add_list'):
+            self.btn_compact_add_list.setText(label)
 
     def add_comment(self):
         """Open comment dialog for current document."""
@@ -3305,6 +3415,8 @@ class ResultDialog(QDialog):
                         h = f"<div style='font-family:Arial; color:{tc}; background-color:{bc};'>{ph}</div>"
                         self.txt_extended_info.setHtml(h)
                         self.btn_ext_info.setVisible(True)
+                        if hasattr(self, 'btn_compact_ext_info'):
+                            self.btn_compact_ext_info.setVisible(True)
 
         if not sources:
             return
@@ -3373,6 +3485,8 @@ class ResultDialog(QDialog):
             # Fallback: just append
             self.txt_extended_info.setHtml(current_html + pgp_html)
         self.btn_ext_info.setVisible(True)
+        if hasattr(self, 'btn_compact_ext_info'):
+            self.btn_compact_ext_info.setVisible(True)
 
     def _rd_toggle_edit_mode(self):
         """Toggle edit mode in ResultDialog."""
@@ -3834,6 +3948,10 @@ class ResultDialog(QDialog):
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
 
+        # Sync compact bar page label
+        if hasattr(self, 'lbl_compact_page') and self.compact_bar.isVisible():
+            self.lbl_compact_page.setText(f"{self.current_p_num} {self.lbl_total.text()}")
+
         # 2. Sync Image (Non-Blocking)
         if self.btn_external_view.isChecked():
             QTimer.singleShot(0, self.sync_external_view)
@@ -3931,6 +4049,8 @@ class ResultDialog(QDialog):
             library = get_library_display(library_code, short=False)
             shelf = f"{library} | {shelf}"
         self.lbl_shelf.setText(shelf)
+        if hasattr(self, 'lbl_compact_shelf'):
+            self.lbl_compact_shelf.setText(shelf)
         _set_label_with_tooltip(self.lbl_title, meta.get('title', ''))
         self.lbl_meta_loading.setVisible(False)
 
@@ -3941,7 +4061,13 @@ class ResultDialog(QDialog):
     def toggle_extended_info(self, checked):
         self.extended_info_visible = checked
         self.txt_extended_info.setVisible(checked)
-        self.btn_ext_info.setText(tr("Hide Extended Info") if checked else tr("Show Extended Info"))
+        label = tr("Hide Extended Info") if checked else tr("Show Extended Info")
+        self.btn_ext_info.setText(label)
+        if hasattr(self, 'btn_compact_ext_info'):
+            self.btn_compact_ext_info.blockSignals(True)
+            self.btn_compact_ext_info.setChecked(checked)
+            self.btn_compact_ext_info.setText(label)
+            self.btn_compact_ext_info.blockSignals(False)
 
     def _on_rd_ext_link_clicked(self, url):
         """Handle clicks on links in ResultDialog extended info."""
@@ -4033,6 +4159,8 @@ class ResultDialog(QDialog):
         has_pgp = bool(getattr(self, '_rd_pgp_doc', None))
         if not marc and not meta.get('physical_desc') and not part_meta and not external_meta and not has_pgp:
             self.btn_ext_info.setVisible(False)
+            if hasattr(self, 'btn_compact_ext_info'):
+                self.btn_compact_ext_info.setVisible(False)
             return
 
         palette = self.txt_extended_info.palette()
@@ -4151,6 +4279,8 @@ class ResultDialog(QDialog):
         html += "</div>"
         self.txt_extended_info.setHtml(html)
         self.btn_ext_info.setVisible(True)
+        if hasattr(self, 'btn_compact_ext_info'):
+            self.btn_compact_ext_info.setVisible(True)
         # Store flag so PGP late-arrival handler knows enriched data was processed
         self._rd_enriched_data_loaded = True
 
@@ -4171,6 +4301,8 @@ class ResultDialog(QDialog):
                 if part_label:
                     shelf = f"{shelf} [{part_label}]"
             self.lbl_shelf.setText(shelf)
+            if hasattr(self, 'lbl_compact_shelf'):
+                self.lbl_compact_shelf.setText(shelf)
 
         thumb_url = meta.get('thumb_url')
         if thumb_url and thumb_url != getattr(self, 'current_thumb_url', None):
