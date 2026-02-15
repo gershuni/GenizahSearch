@@ -706,6 +706,8 @@ class BrowseState:
         self.reading_desk_entries: list = []
         # Each entry: {sys_id, shelfmark, pages: [{p_num, text, full_header, fl_id}], sources: [], pgp_doc: {}}
         self.reading_desk_selected_sources: dict = {}  # sys_id -> selected source index
+        # Source switching state: 'nli' (default) or 'cambridge'
+        self.active_source: str = 'nli'
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -3125,6 +3127,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{cache_bust}"
                     fallback_url = None
 
+                # Cambridge source override: if user switched to Cambridge and images are available
+                _has_cambridge_images = bool(page.cambridge_images)
+                if state.active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
+                    has_image = True
+                    img_url = f"/api/cambridge_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    fallback_url = None
 
                 # Header bar with folio info, navigation, controls
                 # Determine effective image count and folio data
@@ -3161,16 +3169,60 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.label(source_text).classes(f'source-badge {source_class}')
 
                             # Source indicator chips (NLI, CUDL, Oxford)
+                            # Source switching: when both NLI and Cambridge available, chips toggle active source
+                            _both_sources = _has_nli and _has_cambridge_images
+                            _is_nli_active = state.active_source == 'nli' or not _has_cambridge_images
+                            _is_cambridge_active = state.active_source == 'cambridge' and _has_cambridge_images
+
+                            # Source switching handlers
+                            def switch_to_nli():
+                                state.active_source = 'nli'
+                                load_page(direction=0)
+
+                            def switch_to_cambridge():
+                                state.active_source = 'cambridge'
+                                load_page(direction=0)
+
+                            # NLI chip styles (filled when active, outlined when inactive)
+                            nli_style = (
+                                'background: #4caf50; color: white; border: 1.5px solid #4caf50; border-radius: 12px; min-height: 24px; font-weight: 600;'
+                                if _is_nli_active else
+                                'border: 1.5px solid #4caf50; border-radius: 12px; min-height: 24px; color: #4caf50; font-weight: 600;'
+                            )
+                            # CUDL chip styles (filled when active, outlined when inactive)
+                            cudl_style = (
+                                'background: #2196f3; color: white; border: 1.5px solid #2196f3; border-radius: 12px; min-height: 24px; font-weight: 600;'
+                                if _is_cambridge_active else
+                                'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 24px; color: #2196f3; font-weight: 600;'
+                            )
+
                             if _has_nli:
                                 nli_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={page.sys_id}"
-                                ui.button(
-                                    'NLI',
-                                    on_click=lambda u=nli_url: ui.run_javascript(f'window.open("{u}", "_blank")')
-                                ).props('flat dense size=sm no-caps').classes(
-                                    'text-xs px-2 py-0'
-                                ).style(
-                                    'border: 1.5px solid #4caf50; border-radius: 12px; min-height: 24px; color: #4caf50; font-weight: 600;'
-                                ).tooltip(tr('Open in NLI KTIV'))
+                                with ui.row().classes('items-center gap-0'):
+                                    # NLI chip: toggle if both sources, else open external
+                                    if _both_sources:
+                                        ui.button(
+                                            'NLI',
+                                            on_click=switch_to_nli
+                                        ).props('flat dense size=sm no-caps').classes(
+                                            'text-xs px-2 py-0'
+                                        ).style(nli_style).tooltip(
+                                            tr('View NLI images') if not _is_nli_active else tr('Viewing NLI images')
+                                        )
+                                    else:
+                                        ui.button(
+                                            'NLI',
+                                            on_click=lambda u=nli_url: ui.run_javascript(f'window.open("{u}", "_blank")')
+                                        ).props('flat dense size=sm no-caps').classes(
+                                            'text-xs px-2 py-0'
+                                        ).style(nli_style).tooltip(tr('Open in NLI KTIV'))
+                                    # External link icon (always available)
+                                    ui.button(
+                                        icon='open_in_new',
+                                        on_click=lambda u=nli_url: ui.run_javascript(f'window.open("{u}", "_blank")')
+                                    ).props('flat round dense size=xs').classes(
+                                        'ml-0'
+                                    ).style('min-width: 20px; min-height: 20px; color: #4caf50;').tooltip(tr('Open in NLI KTIV'))
 
                             if _has_cambridge:
                                 # Build CUDL viewer URL
@@ -3179,14 +3231,31 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     # Fallback: construct from shelfmark
                                     cudl_url = f"https://cudl.lib.cam.ac.uk/view/{page.shelfmark.replace(' ', '-')}"
                                 if cudl_url:
-                                    ui.button(
-                                        'CUDL',
-                                        on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')
-                                    ).props('flat dense size=sm no-caps').classes(
-                                        'text-xs px-2 py-0'
-                                    ).style(
-                                        'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 24px; color: #2196f3; font-weight: 600;'
-                                    ).tooltip(tr('Open in Cambridge Digital Library'))
+                                    with ui.row().classes('items-center gap-0'):
+                                        # CUDL chip: toggle if both sources, else open external
+                                        if _both_sources:
+                                            ui.button(
+                                                'CUDL',
+                                                on_click=switch_to_cambridge
+                                            ).props('flat dense size=sm no-caps').classes(
+                                                'text-xs px-2 py-0'
+                                            ).style(cudl_style).tooltip(
+                                                tr('View Cambridge images') if not _is_cambridge_active else tr('Viewing Cambridge images')
+                                            )
+                                        else:
+                                            ui.button(
+                                                'CUDL',
+                                                on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')
+                                            ).props('flat dense size=sm no-caps').classes(
+                                                'text-xs px-2 py-0'
+                                            ).style(cudl_style).tooltip(tr('Open in Cambridge Digital Library'))
+                                        # External link icon (always available)
+                                        ui.button(
+                                            icon='open_in_new',
+                                            on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')
+                                        ).props('flat round dense size=xs').classes(
+                                            'ml-0'
+                                        ).style('min-width: 20px; min-height: 20px; color: #2196f3;').tooltip(tr('Open in Cambridge Digital Library'))
 
                             if page.is_oxford and page.external_url:
                                 ui.button(
