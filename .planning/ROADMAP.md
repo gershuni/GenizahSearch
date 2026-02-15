@@ -102,7 +102,9 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   2. Cambridge IIIF manifest URLs (141K records) are stored in the sidecar with normalized shelfmarks that match libraries.csv call_numbers
   3. A shared NliCrossrefService provides image lookup, metadata queries, and relationship queries callable from both web and desktop apps
   4. The service is thread-safe for NiceGUI concurrent access and gracefully returns empty results when sidecar is missing
-**Plans**: TBD
+**Plans:** 2 plans
+  - [ ] 29-01-PLAN.md -- Import NLI crossref CSV and Cambridge IIIF JSON into SQLite sidecar
+  - [ ] 29-02-PLAN.md -- NliCrossrefService shared service layer, web shim, and unit tests
 
 ### Phase 30: Direct Image Access
 **Goal**: Users see manuscript images load faster because image URLs are resolved locally instead of fetching NLI IIIF manifests at runtime
