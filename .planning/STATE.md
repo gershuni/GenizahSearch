@@ -75,10 +75,12 @@ Progress: [████████████████████] 100% (1
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - FIST.db is 13 GB; export script completed in ~20 seconds with batched inserts
 - Thread-safe SQLite for NiceGUI web app (concurrent requests) -- RESOLVED in 25-02 (FjmsService thread_safe=True)
+- FIST catalogs at unit (codex) level, not individual leaf level -- all content identifications for a codex are broadcast to every constituent AlmaId. A single leaf may show piyyut identifications inherited from sibling leaves in the same unit. This is upstream FIST data design, not a GenizahSearch bug.
 
 ### Future Improvements
 
 - FTS5 catalog search UI (schema ready, deferred to future milestone)
+- FJMS structured metadata search -- leverage TextualFrame [$Category$] tags (Piyyut, Bible, Mishneh Torah, Letters, etc.) with incipits, sub-types, and scholar attributions via FTS5 sidecar for content-aware search and filtering across all domains
 - NLI joins import (~424K PartOf relationships)
 - Transcription search (Phase 13, needs server-side index architecture)
 

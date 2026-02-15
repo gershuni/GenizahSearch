@@ -6901,8 +6901,8 @@ class GenizahGUI(QMainWindow):
                             header_action.setEnabled(False)
                             self.joins_menu.addSeparator()
                             for shelf, member in valid_members:
-                                join_type = member.get('join_type', '')
-                                scholar_name = member.get('scholar_name', '')
+                                join_type = ', '.join(member.get('join_types', []))
+                                scholar_name = ', '.join(member.get('scholar_names', []))
                                 label = f"[FJMS] {shelf}"
                                 if join_type:
                                     label += f" \u2014 {join_type}"
@@ -7023,8 +7023,8 @@ class GenizahGUI(QMainWindow):
                     fjms_header = self.joins_menu.addAction("[FJMS Scholarly Joins]")
                     fjms_header.setEnabled(False)
                     for shelf, member in fjms_valid:
-                        join_type = member.get('join_type', '')
-                        scholar_name = member.get('scholar_name', '')
+                        join_type = ', '.join(member.get('join_types', []))
+                        scholar_name = ', '.join(member.get('scholar_names', []))
                         label = f"[FJMS] {shelf}"
                         if join_type:
                             label += f" \u2014 {join_type}"
