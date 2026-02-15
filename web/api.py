@@ -55,28 +55,10 @@ def init_api_routes():
             if cache_age < NLI_CACHE_TTL:
                 return _cache[system_id]
 
-        # Try local sidecar resolution first (Phase 30 - IMG-01)
-        # This avoids a network round-trip for ~766K manuscripts with pre-resolved FL IDs
-        if nli_svc.is_available():
-            try:
-                local_images = nli_svc.get_images(system_id)
-                if local_images:
-                    # Extract fgp_image_number_id values -- these ARE the FL IDs
-                    # Filter out empty strings (some records have empty FGPImageNumberId)
-                    fl_ids = [
-                        img["fgp_image_number_id"]
-                        for img in local_images
-                        if img.get("fgp_image_number_id")
-                    ]
-                    if fl_ids:
-                        _cache[system_id] = fl_ids
-                        _cache_time[system_id] = _time.time()
-                        print(f"Resolved {len(fl_ids)} FL IDs for {system_id} from local sidecar")
-                        return fl_ids
-            except Exception as e:
-                print(f"Local sidecar lookup failed for {system_id}: {e}")
+        # NOTE: Crossref FGPImageNumberId != IIIF FL number. Cannot use sidecar for image URLs.
+        # Always use IIIF manifest for canonical FL IDs.
 
-        # Fallback: Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
+        # Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

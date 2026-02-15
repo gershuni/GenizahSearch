@@ -3197,7 +3197,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             )
 
                             if _has_nli:
-                                nli_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={page.sys_id}"
+                                nli_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid=PNX_MANUSCRIPTS{page.sys_id}-1"
                                 with ui.row().classes('items-center gap-0'):
                                     # NLI chip: toggle if both sources, else open external
                                     if _both_sources:

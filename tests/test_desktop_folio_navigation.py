@@ -98,8 +98,10 @@ def test_msviewer_ktiv_button_exists(genizah_app_source):
     assert ktiv_method, "_open_ktiv_viewer method not found"
     assert 'nli.org.il' in ktiv_method, \
         "_open_ktiv_viewer should open NLI website"
-    assert 'ItemID' in ktiv_method, \
-        "_open_ktiv_viewer URL should include ItemID parameter"
+    assert 'PNX_MANUSCRIPTS' in ktiv_method, \
+        "_open_ktiv_viewer URL should include PNX_MANUSCRIPTS docId parameter"
+    assert 'viewerpage' in ktiv_method, \
+        "_open_ktiv_viewer should open the KTIV viewer page (not catalog)"
 
     # Check KTIV button has styled chip appearance
     assert 'border: 1.5px solid #4caf50' in genizah_app_source, \

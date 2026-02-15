@@ -15,7 +15,7 @@ Import NLI crossreference data (815K image-level records) and Cambridge IIIF man
 
 ### Image Access
 
-- [ ] **IMG-01**: Image URLs constructed directly from crossref FGPImageNumberId, skipping NLI manifest fetch for 766K records across all 75 libraries
+- [x] **IMG-01**: ~~Image URLs constructed directly from crossref FGPImageNumberId~~ INVALID — FGPImageNumberId is a Friedberg photo number, NOT an NLI IIIF FL ID. NLI IIIF manifest fetch remains required for image URLs. Crossref used for metadata only.
 - [ ] **IMG-02**: Cambridge manuscripts load images via local CUDL IIIF manifest URLs (bypass NLI entirely for 141K records)
 - [ ] **IMG-03**: Image availability indicator on browse page showing which digital image sources exist for the current manuscript (both apps)
 - [ ] **IMG-04**: Page-level image navigation using crossref ImageName ordering (leaf/folio/side sequences)

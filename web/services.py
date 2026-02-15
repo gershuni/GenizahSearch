@@ -312,7 +312,8 @@ class GenizahService:
                 ext_link = marc_data.get('external_iiif_link')
                 if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
                     is_cambridge = True
-                    external_url = ext_link
+                    # Transform IIIF manifest URL to viewer URL
+                    external_url = ext_link.replace("/iiif/", "/view/")
 
             # 3. NLI crossref: folio images and source indicators
             folio_label = ''
@@ -457,7 +458,8 @@ class GenizahService:
                 ext_link = marc_data.get('external_iiif_link')
                 if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
                     is_cambridge = True
-                    external_url = ext_link
+                    # Transform IIIF manifest URL to viewer URL
+                    external_url = ext_link.replace("/iiif/", "/view/")
 
             # 3. NLI crossref: folio images and source indicators
             folio_label = ''

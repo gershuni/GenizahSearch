@@ -2707,7 +2707,7 @@ def _get_crossref_service():
     if _nli_crossref_svc is None:
         try:
             from shared.nli_crossref_service import NliCrossrefService
-            _nli_crossref_svc = NliCrossrefService()
+            _nli_crossref_svc = NliCrossrefService(thread_safe=True)
         except Exception:
             pass
     return _nli_crossref_svc
@@ -3276,44 +3276,34 @@ class MetadataManager:
                     current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
                     current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
 
-        # 2b. Try local crossref sidecar for NLI images (skips IIIF manifest network fetch)
-        local_images = []
+        # 2b. Fetch NLI IIIF manifest for image FL IDs (crossref FGPImageNumberId != IIIF FL number)
+        # Crossref is used for metadata (folio labels, image count) but NOT for image URLs.
+        crossref_labels = {}
         if crossref_svc and crossref_svc.is_available():
             crossref_images = crossref_svc.get_images(system_id)
             if crossref_images:
                 for img in crossref_images:
-                    fgp_id = img.get('fgp_image_number_id', '')
-                    if fgp_id:
-                        label = img.get('image_name', f'FL{fgp_id}')
-                        url = f"{Config.NLI_IIIF_BASE}/FL{fgp_id}"
-                        local_images.append({'label': label, 'url': url, 'fl_id': fgp_id})
+                    name = img.get('image_name', '')
+                    if name:
+                        crossref_labels[name] = name
 
-        if local_images:
-            images_nli = local_images
-            LOGGER.info(f"Using {len(local_images)} pre-resolved images for {system_id} (crossref sidecar)")
-            canvas_map = {}
-            for img in local_images:
-                canvas_map[img['fl_id']] = img['label']
-            current_meta['canvas_map'] = canvas_map
-        else:
-            # Fallback: fetch NLI IIIF manifest over network (existing logic)
-            nli_iiif_data = self.fetch_iiif_manifest(system_id)
-            if nli_iiif_data.get('canvas_map'):
-                sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
-                for fl_id, label in sorted_map:
-                    url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
-                    images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
+        nli_iiif_data = self.fetch_iiif_manifest(system_id)
+        if nli_iiif_data.get('canvas_map'):
+            sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
+            for fl_id, label in sorted_map:
+                url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
+                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
 
-            if not current_meta.get('physical_desc'):
-                current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
+        if not current_meta.get('physical_desc'):
+            current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
-            if marc_attribution:
-                current_meta['attribution'] = marc_attribution
-            elif not current_meta.get('attribution'):
-                current_meta['attribution'] = nli_iiif_data.get('attribution', '')
+        if marc_attribution:
+            current_meta['attribution'] = marc_attribution
+        elif not current_meta.get('attribution'):
+            current_meta['attribution'] = nli_iiif_data.get('attribution', '')
 
-            if nli_iiif_data.get('canvas_map'):
-                current_meta['canvas_map'] = nli_iiif_data['canvas_map']
+        if nli_iiif_data.get('canvas_map'):
+            current_meta['canvas_map'] = nli_iiif_data['canvas_map']
 
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli
@@ -3536,12 +3526,13 @@ class MetadataManager:
 
     @staticmethod
     def get_rosetta_fallback_url(fl_id):
-        """Construct a fallback URL for Rosetta if IIIF fails."""
+        """Construct a fallback URL for Rosetta stream if IIIF fails.
+        Returns full-resolution image (TIFF) from Rosetta delivery."""
         if not fl_id: return None
         raw_str = str(fl_id)
         digits = re.sub(r"\D", "", raw_str)
         if not digits: return None
-        return f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
+        return f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
 
     def _fetch_fl_ids(self, system_id):
         url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
@@ -8196,7 +8187,7 @@ class ListsManager:
                 lines.append(f"{tr('Title:')} {title}")
             lines.append(f"{tr('System ID:')} {sys_id}")
             # Add Ktiv link
-            ktiv_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={sys_id}"
+            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
             lines.append(f"{tr('Link:')} {ktiv_url}")
             return '\n'.join(lines)
 

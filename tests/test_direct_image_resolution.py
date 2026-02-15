@@ -51,17 +51,16 @@ class TestLocalImageResolution:
         assert images[0]["image_name"] < images[1]["image_name"]
         svc.close()
 
-    def test_fl_ids_construct_valid_iiif_urls(self, mock_crossref_db):
-        """FGPImageNumberId values can construct valid NLI IIIF image URLs."""
+    def test_fgp_ids_are_not_fl_ids(self, mock_crossref_db):
+        """FGPImageNumberId is a Friedberg photo number, NOT an NLI IIIF FL ID.
+        Crossref data is for metadata only; IIIF manifest provides actual FL IDs."""
         from shared.nli_crossref_service import NliCrossrefService
         svc = NliCrossrefService(db_path=mock_crossref_db)
         images = svc.get_images("990001234")
-        NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+        # FGP IDs are returned but should NOT be used to construct NLI IIIF URLs
         for img in images:
-            fgp_id = img["fgp_image_number_id"]
-            url = f"{NLI_IIIF_BASE}/FL{fgp_id}/full/max/0/default.jpg"
-            assert url.startswith("https://iiif.nli.org.il/IIIFv21/FL")
-            assert fgp_id in url
+            assert img["fgp_image_number_id"]  # Non-empty
+            assert img["image_name"]  # Has label for metadata use
         svc.close()
 
     def test_missing_sys_id_returns_empty(self, mock_crossref_db):

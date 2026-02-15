@@ -1519,7 +1519,9 @@ class ManuscriptViewerWidget(QWidget):
         self.active_list = []
         self.current_idx = 0
         self.loader_thread = None
+        self.preload_worker = None
         self.external_provider = None
+        self._closing = False
         self._thumbnail_ready.connect(self._on_thumbnail_ready)
         self.init_ui()
 
@@ -1634,7 +1636,7 @@ class ManuscriptViewerWidget(QWidget):
         if not digits:
             return False
 
-        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/600,/0/default.jpg"
+        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/max/0/default.jpg"
         self.images_nli = [{'label': f"FL{digits}", 'url': fallback_url, 'fl_id': digits}]
         self.images_ext = []
         self.active_list = self.images_nli
@@ -1724,9 +1726,9 @@ class ManuscriptViewerWidget(QWidget):
         self.external_url = meta.get('external_url') or marc.get('external_iiif_link')
         if self.external_url:
             if self.external_provider == "cambridge":
-                btn_label = tr("Cambridge Website")
+                btn_label = "Cambridge"
             elif self.external_provider == "oxford":
-                btn_label = tr("Oxford Website")
+                btn_label = "Oxford"
             else:
                 btn_label = tr("External Website")
             self.btn_external.setText(btn_label)
@@ -1769,7 +1771,7 @@ class ManuscriptViewerWidget(QWidget):
     def _resolve_url(self, base_url):
         if not base_url: return None
         if base_url.endswith('.jpg'): return base_url
-        return f"{base_url}/full/600,/0/default.jpg"
+        return f"{base_url}/full/max/0/default.jpg"
 
     def _preload(self, index):
         if index < 0 or index >= len(self.active_list): return
@@ -1781,8 +1783,20 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
+    def stop_threads(self):
+        """Stop all running image loading threads. Call before destroying widget."""
+        self._closing = True
+        if self.loader_thread and self.loader_thread.isRunning():
+            self.loader_thread.cancel()
+            self.loader_thread.wait(2000)
+        if self.preload_worker and self.preload_worker.isRunning():
+            self.preload_worker.cancel()
+            self.preload_worker.wait(1000)
+
     def _on_thumbnail_ready(self, pix, page_idx):
         """Handle thumbnail loaded signal - only display if still on same page."""
+        if self._closing:
+            return
         if self.current_idx == page_idx and pix and not pix.isNull():
             self.scroll_area.set_image(pix)
 
@@ -1790,14 +1804,17 @@ class ManuscriptViewerWidget(QWidget):
         """Load thumbnail asynchronously for quick display while full image loads."""
         current_idx = self.current_idx  # Capture current state
         signal = self._thumbnail_ready  # Capture signal reference for thread
+        closing_ref = lambda: self._closing  # Capture closing flag check
 
         def fetch_and_emit():
             try:
+                if closing_ref():
+                    return
                 import urllib.request
                 req = urllib.request.Request(thumb_url, headers=Config.HTTP_HEADERS)
                 with urllib.request.urlopen(req, timeout=3) as response:
                     data = response.read()
-                    if data:
+                    if data and not closing_ref():
                         image = QImage()
                         if image.loadFromData(data):
                             pix = QPixmap.fromImage(image)
@@ -1824,6 +1841,9 @@ class ManuscriptViewerWidget(QWidget):
 
         # Check for thumbnail URL (Oxford images have this)
         thumb_url = img_data.get('thumb_url', '')
+        # For NLI IIIF images, auto-generate a fast preview URL (400px)
+        if not thumb_url and 'iiif.nli.org.il' in base_url:
+            thumb_url = f"{base_url}/full/400,/0/default.jpg"
 
         self.scroll_area.set_status_message(tr("Loading..."))
 
@@ -1832,7 +1852,7 @@ class ManuscriptViewerWidget(QWidget):
             # Use short timeout to avoid blocking UI - thread will finish in background
             self.loader_thread.wait(500)
 
-        # Load thumbnail asynchronously if available (for quick display)
+        # Load low-res preview first for instant display, then high-res replaces it
         if thumb_url:
             self._load_thumbnail_async(thumb_url)
 
@@ -1840,25 +1860,38 @@ class ManuscriptViewerWidget(QWidget):
 
         self.loader_thread = ImageLoaderThread(final_url)
         self.loader_thread.image_loaded.connect(self.display_image)
-        self.loader_thread.load_failed.connect(lambda: self.scroll_area.set_status_message(tr("No Image")))
+        self.loader_thread.load_failed.connect(lambda: None if self._closing else self.scroll_area.set_status_message(tr("No Image")))
         self.loader_thread.start()
 
         # Preload next image
         self._preload(index + 1)
 
     def display_image(self, image):
+        if self._closing:
+            return
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
         self.slider_rotation.setValue(0)
 
     def open_external(self):
         if self.external_url:
-            QDesktopServices.openUrl(QUrl(self.external_url))
+            url = self.external_url
+            # Transform CUDL IIIF manifest URL to viewer URL
+            if "cudl.lib.cam.ac.uk/iiif/" in url:
+                url = url.replace("/iiif/", "/view/")
+            QDesktopServices.openUrl(QUrl(url))
 
     def _open_ktiv_viewer(self):
-        """Open the NLI KTIV manuscript viewer in the default browser."""
+        """Open the NLI KTIV manuscript viewer at the current page."""
         if self._ktiv_sys_id:
-            url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={self._ktiv_sys_id}"
+            # Use docid query param (not hash fragment) — hash-based URLs fail on direct navigation
+            docid = f"PNX_MANUSCRIPTS{self._ktiv_sys_id}-1"
+            # Append FL ID to navigate to the current page
+            if self.active_list and self.current_source == "nli" and 0 <= self.current_idx < len(self.active_list):
+                fl_id = self.active_list[self.current_idx].get('fl_id')
+                if fl_id:
+                    docid += f",FL{fl_id}"
+            url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid={docid}"
             QDesktopServices.openUrl(QUrl(url))
 
     def adjust_rotation(self, delta):
@@ -1983,8 +2016,9 @@ class ImageLoaderThread(QThread):
         
         if fl_match:
             fl_id = fl_match.group(1)
-            local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"FL{fl_id}.jpg")
-            
+            # v2 cache: full resolution (max). Old v1 cache was 600px.
+            local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"FL{fl_id}_v2.jpg")
+
             # --- CHECK LOCAL CACHE ---
             if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
                 img = QImage(local_path)
@@ -2020,16 +2054,15 @@ class ImageLoaderThread(QThread):
             img = QImage.fromData(data)
             if not img.isNull():
                 self.image_loaded.emit(img)
-                
-                # --- SAVE TO LOCAL CACHE ---
+
+                # --- SAVE TO LOCAL CACHE (always as JPEG for compact storage) ---
                 if local_path and not self._cancelled:
                     try:
-                        with open(local_path, 'wb') as f:
-                            f.write(data)
-                        logger.debug("Saved thumbnail cache to %s", local_path)
+                        img.save(local_path, "JPEG", 85)
+                        logger.debug("Saved image cache to %s", local_path)
                     except Exception as e:
                         logger.warning(
-                            "Failed to write thumbnail cache for %s: %s; future loads will re-download.",
+                            "Failed to write image cache for %s: %s; future loads will re-download.",
                             local_path,
                             e,
                         )
@@ -2041,7 +2074,9 @@ class ImageLoaderThread(QThread):
     def _download_bytes(self, target_url, headers):
         """Helper to download bytes safely."""
         try:
-            resp = requests.get(target_url, headers=headers, timeout=10, stream=True, verify=False)
+            # Rosetta stream returns large TIFF files (7-15MB) — allow longer timeout
+            timeout = 30 if 'rosetta.nli.org.il' in target_url else 10
+            resp = requests.get(target_url, headers=headers, timeout=timeout, stream=True, verify=False)
             if self._cancelled: return None
             if resp.status_code == 200:
                 return resp.content
@@ -3741,7 +3776,11 @@ class ResultDialog(QDialog):
 
     def open_external_link(self):
         if self.external_url:
-            QDesktopServices.openUrl(QUrl(self.external_url))
+            url = self.external_url
+            # Transform CUDL IIIF manifest URL to viewer URL
+            if "cudl.lib.cam.ac.uk/iiif/" in url:
+                url = url.replace("/iiif/", "/view/")
+            QDesktopServices.openUrl(QUrl(url))
 
     def _htmlify(self, text):
         if not text: return ""
@@ -4181,9 +4220,9 @@ class ResultDialog(QDialog):
         self.external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
         if self.external_url:
             if oxford_part_id:
-                btn_label = tr("Oxford Website")
+                btn_label = "Oxford"
             elif "cudl.lib.cam.ac.uk" in (self.external_url or "").lower():
-                btn_label = tr("Cambridge Website")
+                btn_label = "Cambridge"
             else:
                 btn_label = tr("External Website")
             self.btn_external_link.setText(btn_label)
@@ -4506,7 +4545,11 @@ class ResultDialog(QDialog):
             if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
                 self.browse_img_thread.cancel()
                 self.browse_img_thread.wait()
-                
+
+            # Stop manuscript viewer image threads
+            if getattr(self, 'ms_viewer', None):
+                self.ms_viewer.stop_threads()
+
         finally:
             super().closeEvent(event)
 
@@ -4514,7 +4557,12 @@ class ResultDialog(QDialog):
         if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
 
     def open_viewer(self):
-        if self.current_sys_id and self.current_fl_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPT&docId=PNX_MANUSCRIPTS{self.current_sys_id}#d=[[PNX_MANUSCRIPTS{self.current_sys_id}-1,FL{self.current_fl_id}]]"))
+        if self.current_sys_id:
+            # Use docid query param (not hash fragment) — hash-based URLs fail on direct navigation
+            docid = f"PNX_MANUSCRIPTS{self.current_sys_id}-1"
+            if self.current_fl_id:
+                docid += f",FL{self.current_fl_id}"
+            QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid={docid}"))
 
 class ActionsHoverWidget(QWidget):
     def __init__(self, parent=None, alignment=Qt.AlignmentFlag.AlignCenter):
@@ -9674,7 +9722,7 @@ class GenizahGUI(QMainWindow):
                 for fl in fl_ids or []:
                     digits = re.sub(r"\D", "", str(fl or ""))
                     if digits:
-                        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/600,/0/default.jpg"
+                        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/max/0/default.jpg"
                         image_list = [{'label': f"FL{digits}", 'url': fallback_url}]
                         break
 
@@ -9738,7 +9786,7 @@ class GenizahGUI(QMainWindow):
                 viewer.set_status_message(tr("Loading..."))
                 final_url = base_url
                 if final_url and not final_url.endswith('.jpg'):
-                    final_url = f"{final_url}/full/600,/0/default.jpg"
+                    final_url = f"{final_url}/full/max/0/default.jpg"
 
                 loader = ImageLoaderThread(final_url)
                 loader.image_loaded.connect(
@@ -11828,7 +11876,7 @@ class GenizahGUI(QMainWindow):
                 if title:
                     lines.append(f"כותרת: {title}")
                 lines.append(f"מספר מערכת: {sys_id}")
-                ktiv_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={sys_id}"
+                ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
                 lines.append(f"קישור: {ktiv_url}")
                 text = '\n'.join(lines)
 
@@ -19267,9 +19315,13 @@ class GenizahGUI(QMainWindow):
                 if self.group_thread.isRunning():
                     self.group_thread.terminate()
                     self.group_thread.wait()
+
+            # Stop browse tab viewer image threads
+            if getattr(self, 'browse_viewer', None):
+                self.browse_viewer.stop_threads()
         finally:
             super().closeEvent(event)
-    
+
     def _add_single_comp_node(self, parent, ms_item):
         """Adds a node to the composition tree with parent/child logic."""
         item_type = ms_item.get('type', 'manuscript')
