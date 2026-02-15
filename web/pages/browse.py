@@ -3197,7 +3197,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             )
 
                             if _has_nli:
-                                nli_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid=PNX_MANUSCRIPTS{page.sys_id}-1"
+                                # Build NLI viewer URL with page-specific FL ID
+                                _nli_docid = f"PNX_MANUSCRIPTS{page.sys_id}-1"
+                                if fl_id:
+                                    _fl_digits = re.sub(r"\D", "", str(fl_id))
+                                    if _fl_digits:
+                                        _nli_docid += f",FL{_fl_digits}"
+                                nli_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid={_nli_docid}"
                                 with ui.row().classes('items-center gap-0'):
                                     # NLI chip: toggle if both sources, else open external
                                     if _both_sources:
@@ -3222,7 +3228,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         on_click=lambda u=nli_url: ui.run_javascript(f'window.open("{u}", "_blank")')
                                     ).props('flat round dense size=xs').classes(
                                         'ml-0'
-                                    ).style('min-width: 20px; min-height: 20px; color: #4caf50;').tooltip(tr('Open in NLI KTIV'))
+                                    ).style('min-width: 20px; min-height: 20px; color: inherit; opacity: 0.7;').tooltip(tr('Open in NLI KTIV'))
 
                             if _has_cambridge:
                                 # Build CUDL viewer URL
@@ -3255,7 +3261,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')
                                         ).props('flat round dense size=xs').classes(
                                             'ml-0'
-                                        ).style('min-width: 20px; min-height: 20px; color: #2196f3;').tooltip(tr('Open in Cambridge Digital Library'))
+                                        ).style('min-width: 20px; min-height: 20px; color: inherit; opacity: 0.7;').tooltip(tr('Open in Cambridge Digital Library'))
 
                             if page.is_oxford and page.external_url:
                                 ui.button(
