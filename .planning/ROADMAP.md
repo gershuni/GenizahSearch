@@ -85,7 +85,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 **Milestone Goal:** Import NLI crossreference data (815K image-level records) and Cambridge IIIF manifests (141K URLs) into the SQLite sidecar, enabling direct image access for 75+ libraries without runtime manifest fetching, physical metadata display, fragment relationship surfacing, and library-specific viewer links in both apps.
 
 - [x] **Phase 29: Data Infrastructure** - Import NLI crossref and Cambridge IIIF into sidecar with shared service layer (completed 2026-02-15)
-- [ ] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL
+- [x] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL (completed 2026-02-15)
 - [ ] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators
 - [ ] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page
 - [ ] **Phase 33: Fragment Relationships** - NLI PartOf and See cross-references in Related Fragments panel
@@ -115,8 +115,8 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   2. When viewing a Cambridge manuscript, images load via locally stored CUDL IIIF manifest URLs without contacting NLI
   3. Image loading is observably faster than the current NLI manifest fetch path (no network round-trip for URL resolution)
 **Plans:** 2 plans
-  - [ ] 30-01-PLAN.md -- Web API local image resolution (FL IDs from crossref sidecar)
-  - [ ] 30-02-PLAN.md -- Desktop enrich_metadata local image resolution + tests
+  - [x] 30-01-PLAN.md -- Web API local image resolution (FL IDs from crossref sidecar)
+  - [x] 30-02-PLAN.md -- Desktop enrich_metadata local image resolution + tests
 
 ### Phase 31: Image Navigation & Indicators
 **Goal**: Users can navigate between individual pages/folios of a manuscript and see at a glance which digital image sources are available
@@ -177,7 +177,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
 | 25-28 | v5.8.0 | 12/12 | Complete | 2026-02-15 |
 | 29. Data Infrastructure | v5.9.0 | 2/2 | Complete | 2026-02-15 |
-| 30. Direct Image Access | v5.9.0 | 0/TBD | Not started | - |
+| 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 31. Image Nav & Indicators | v5.9.0 | 0/TBD | Not started | - |
 | 32. Metadata Display | v5.9.0 | 0/TBD | Not started | - |
 | 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
@@ -185,4 +185,4 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-15 after Phase 29 complete*
+*Last updated: 2026-02-15 after Phase 30 complete*
