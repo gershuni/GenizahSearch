@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 29 of 34 (Data Infrastructure)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-15 -- Roadmap created for v5.9.0
+Plan: 1 of 2 in current phase
+Status: Executing
+Last activity: 2026-02-15 -- Completed 29-01 (NLI crossref + Cambridge IIIF import)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 7%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 84 (across all milestones)
+- Total plans completed: 85 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.5 hours
 
@@ -33,12 +33,17 @@ Progress: [░░░░░░░░░░] 0%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
+| v5.9.0 | 29-34 | 1 | 4 min |
 
 ## Accumulated Context
 
 ### Decisions
 
 See PROJECT.md Key Decisions table for full history.
+
+- 29-01: Separate sidecar file (nli_crossref.db) rather than adding to fjms_enrichment.db -- different provenance and update cycles
+- 29-01: All 25 NLI CSV columns stored as TEXT -- no filtering per user decision
+- 29-01: CUDL label normalization: strip MS- prefix, split by dash, strip leading zeros, rejoin with dots between numerics
 
 ### Blockers/Concerns
 
@@ -55,6 +60,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: v5.9.0 roadmap created, ready to plan Phase 29
+Stopped at: Completed 29-01-PLAN.md
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements, 0% complete.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Plan 29-01 complete.
