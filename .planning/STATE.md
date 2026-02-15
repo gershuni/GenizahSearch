@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.8.0 FJMS Integration -- Phase 27 complete, ready for Phase 28
+**Current focus:** v5.8.0 FJMS Integration -- Phase 28 in progress
 
 ## Current Position
 
-Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- Gap closure complete
-Plan: 5 of 5 in current phase (all plans complete)
-Status: Phase 27 complete -- domain classifications fully integrated in both apps
-Last activity: 2026-02-14 -- Completed quick task 13: ResultDialog compact mode
+Phase: 28 of 28 (Catalog Enrichment) -- fourth of 4 in v5.8.0
+Plan: 1 of 2 in current phase (plan 01 complete)
+Status: Plan 01 complete -- data foundation ready, Plan 02 (UI integration) next
+Last activity: 2026-02-15 -- Completed 28-01-PLAN.md (catalog data foundation)
 
-Progress: [██████████] 100% (11/11 plans)
+Progress: [████████████████████] 100% (12/13 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 81 (across all milestones)
+- Total plans completed: 82 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.1 hours
 
@@ -32,7 +32,7 @@ Progress: [██████████] 100% (11/11 plans)
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 11/11 | 47 min |
+| v5.8.0 | 25-28 | 12/13 | 53 min |
 
 ## Accumulated Context
 
@@ -62,6 +62,10 @@ Progress: [██████████] 100% (11/11 plans)
 - [Phase 27]: Post-search dynamic domain filtering with exclude-by-unchecking pattern in both web and desktop apps
 - Web domain filter: post-search Domains button with checkbox tree dialog, client-side exclusion filtering
 - Desktop domain filter: post-search button with hierarchical tree, setRowHidden() for instant filtering
+- [Phase 28]: SourceName join via LEFT JOIN dbo_CodeSource for per-record scholarly source attribution
+- [Phase 28]: Sentinel CopyDate values (0, -99, -1) normalized to None in catalog retrieval
+- [Phase 28]: Catalog dedup by (textual_frame_eng, copy_date, title) tuple; empty records filtered out
+- [Phase 28]: Sidecar re-exported at v1.1.0 with 500K catalog rows, 466K with SourceName data
 
 ### Blockers/Concerns
 
@@ -83,7 +87,7 @@ Progress: [██████████] 100% (11/11 plans)
 
 ## Session Continuity
 
-Last session: 2026-02-13
-Stopped at: Completed 27-04-PLAN.md (web post-search domain filter)
+Last session: 2026-02-15
+Stopped at: Completed 28-01-PLAN.md (catalog data foundation)
 Resume file: None
-Notes: Phase 27 complete (5 of 5 plans). Web domain filter redesigned as post-search dynamic exclude filter with checkbox tree dialog. Desktop domain filter also redesigned (27-05, completed earlier). All domain classification features fully integrated in both web and desktop apps. Phase 28 (Catalog Search) is next.
+Notes: Plan 01 complete (2/2 tasks). Sidecar re-exported with SourceName columns (v1.1.0). Three new FjmsService functions: get_catalog_records(), merge_catalog_records(), parse_textual_frame(). Plan 02 (UI integration in web and desktop) is next.
