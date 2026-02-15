@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 30 of 34 (Image Resolution)
-Plan: 2 of 2 in current phase
-Status: 30-01 complete, ready for 30-02
-Last activity: 2026-02-15 -- Completed 30-01 (NLI local FL ID resolution)
+Plan: 2 of 2 in current phase (COMPLETE)
+Status: Phase 30 complete, ready for Phase 31
+Last activity: 2026-02-15 -- Completed 30-02 (Desktop direct image resolution)
 
-Progress: [██░░░░░░░░] 20%
+Progress: [███░░░░░░░] 27%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 87 (across all milestones)
+- Total plans completed: 88 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.5 hours
 
@@ -33,7 +33,7 @@ Progress: [██░░░░░░░░] 20%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
-| v5.9.0 | 29-34 | 3 | 9 min |
+| v5.9.0 | 29-34 | 4 | 12 min |
 
 ## Accumulated Context
 
@@ -48,6 +48,8 @@ See PROJECT.md Key Decisions table for full history.
 - 29-02: get_image_sources combines NLI FGP and Cambridge checks in single call for efficient UI badge rendering
 - 30-01: FGPImageNumberId values used directly as FL IDs (no transformation needed)
 - 30-01: Local sidecar resolution added as first-try path, all existing network fallback logic preserved unchanged
+- 30-02: Single crossref_svc initialization in enrich_metadata serves both Cambridge supplement and NLI FL ID paths
+- 30-02: Cambridge supplement sets external_url on current_meta when found from sidecar, feeding into existing CUDL fetch logic
 
 ### Blockers/Concerns
 
@@ -64,6 +66,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 30-01-PLAN.md
+Stopped at: Completed 30-02-PLAN.md (Phase 30 complete)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 29 complete, Phase 30 plan 1 of 2 done.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-30 complete -- 4 plans delivered.
