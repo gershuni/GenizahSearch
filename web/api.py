@@ -113,6 +113,12 @@ def init_api_routes():
 
         return []
 
+    @app.get('/api/fl_ids/{sys_id}')
+    def get_fl_ids(sys_id: str):
+        """Return manifest FL IDs for a sys_id (cached). Used by NLI viewer deep links."""
+        fl_ids = fetch_fl_ids_from_nli(sys_id)
+        return fl_ids
+
     @app.get('/api/nli_image/{fl_id}')
     def nli_image(fl_id: str):
         """
@@ -129,7 +135,7 @@ def init_api_routes():
         }
 
         # Try IIIF first (works for valid FL IDs, returns real images)
-        iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/max/0/default.jpg"
+        iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/2000,/0/default.jpg"
         try:
             resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
@@ -192,7 +198,7 @@ def init_api_routes():
         # If page index specified, try that specific FL ID first
         if 0 <= page < len(fl_ids):
             fl_id = fl_ids[page]
-            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
+            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/2000,/0/default.jpg"
             try:
                 resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
                 if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
@@ -209,7 +215,7 @@ def init_api_routes():
 
         # Fallback: try each FL ID until one works
         for fl_id in fl_ids:
-            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/max/0/default.jpg"
+            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/2000,/0/default.jpg"
             try:
                 resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
                 if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
@@ -269,7 +275,7 @@ def init_api_routes():
             return Response(content="No canvas URL for this page", status_code=404)
 
         # Build IIIF Image API URL from canvas base URL
-        img_url = f"{canvas_url}/full/max/0/default.jpg"
+        img_url = f"{canvas_url}/full/2000,/0/default.jpg"
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

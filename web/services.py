@@ -124,12 +124,12 @@ def get_full_image_url(fl_id: str) -> str:
     if not fl_id: return ''
     digits = re.sub(r"\D", "", str(fl_id))
     if not digits: return ''
-    return f"{NLI_IIIF_BASE}/FL{digits}/full/max/0/default.jpg"
+    return f"{NLI_IIIF_BASE}/FL{digits}/full/2000,/0/default.jpg"
 
 def build_iiif_image_url(base_url: str, size: str = 'full') -> str:
     if not base_url: return ''
     if size == 'thumb': size_param = '400,'
-    elif size == 'full': size_param = 'max'
+    elif size == 'full': size_param = '2000,'
     else: size_param = size
     return f"{base_url}/full/{size_param}/0/default.jpg"
 

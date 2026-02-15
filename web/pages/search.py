@@ -155,7 +155,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             const flIds = await advFetchFlIdsFromManifest(sysId);
             if (flIds.length > 0) {
                 const idx = Math.min(pageIdx || 0, flIds.length - 1);
-                img.src = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/max/0/default.jpg`;
+                img.src = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/2000,/0/default.jpg`;
                 img.onload = function() { if(window.advViewer) window.advViewer.init(); };
                 return;
             }

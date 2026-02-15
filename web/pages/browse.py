@@ -125,7 +125,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford = false) {
         const flIds = await fetchFlIdsFromManifest(sysId);
         if (flIds.length > 0) {
             const idx = Math.min(pageIdx || 0, flIds.length - 1);
-            const newUrl = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/max/0/default.jpg`;
+            const newUrl = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/2000,/0/default.jpg`;
             console.log(`Trying FL ID from manifest: ${flIds[idx]}`);
             img.src = newUrl;
             img.onload = function() {
@@ -3143,159 +3143,133 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _has_nli = _src_info.get('nli_fgp', False)
                 _has_cambridge = _src_info.get('cambridge', False) or page.is_cambridge
 
+                # Source switching setup
+                _both_sources = _has_nli and _has_cambridge_images
+                _is_nli_active = state.active_source == 'nli' or not _has_cambridge_images
+                _is_cambridge_active = state.active_source == 'cambridge' and _has_cambridge_images
+
+                def switch_to_nli():
+                    state.active_source = 'nli'
+                    load_page(direction=0)
+
+                def switch_to_cambridge():
+                    state.active_source = 'cambridge'
+                    load_page(direction=0)
+
+                # NLI viewer deep link handler
+                if _has_nli:
+                    _nli_sys_id = page.sys_id
+                    _nli_page_idx = page_idx
+
+                    async def open_nli_viewer(sys_id=_nli_sys_id, pidx=_nli_page_idx):
+                        js = f'''
+                        (async () => {{
+                            let docid = "PNX_MANUSCRIPTS{sys_id}-1";
+                            try {{
+                                const resp = await fetch("/api/fl_ids/{sys_id}");
+                                if (resp.ok) {{
+                                    const flIds = await resp.json();
+                                    if (flIds.length > {pidx}) docid += ",FL" + flIds[{pidx}];
+                                }}
+                            }} catch(e) {{}}
+                            window.open("https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid=" + docid, "_blank");
+                        }})()
+                        '''
+                        await ui.run_javascript(js)
+
                 with ui.card().classes('w-full mb-2').style('background: var(--bg-tertiary);'):
-                    with ui.row().classes('w-full items-center justify-between p-3'):
-                        with ui.row().classes('items-center gap-4'):
-                            # Folio/Page info -- prefer NLI crossref folio label
+                    with ui.row().classes('w-full items-center flex-wrap gap-2 px-3 py-2'):
+                        # -- Left group: folio label, page count, version badge, source chips --
+                        with ui.row().classes('items-center gap-2'):
+                            # Folio/Page label
                             if page.folio_label:
-                                h2(f"{tr('Folio')} {page.folio_label}", classes='font-bold text-lg')
+                                ui.label(f"{tr('Folio')} {page.folio_label}").classes('text-sm font-bold')
                             else:
                                 folio = extract_folio_number(page.full_header)
                                 if folio:
-                                    h2(f"{tr('Folio')} {folio}", classes='font-bold text-lg')
+                                    ui.label(f"{tr('Folio')} {folio}").classes('text-sm font-bold')
                                 else:
-                                    h2(f"{tr('Page')} {page.p_num}", classes='font-bold text-lg')
+                                    ui.label(f"{tr('Page')} {page.p_num}").classes('text-sm font-bold')
 
-                            # Page count display
-                            _display_count = _effective_count if _effective_count > 0 else page.total_pages
-                            if _display_count > 0:
-                                ui.label(
-                                    f"{tr('of')} {_display_count} {tr('pages')}"
-                                ).classes('text-sm').style('color: var(--text-secondary);')
-
-                            # Source badge - default to V0.8 unless explicitly V0.7
+                            # Source badge
                             source_class = get_source_badge_class(page.full_header)
                             source_text = 'V0.7' if 'V0.7' in page.full_header else 'V0.8'
                             ui.label(source_text).classes(f'source-badge {source_class}')
 
-                            # Source indicator chips (NLI, CUDL, Oxford)
-                            # Source switching: when both NLI and Cambridge available, chips toggle active source
-                            _both_sources = _has_nli and _has_cambridge_images
-                            _is_nli_active = state.active_source == 'nli' or not _has_cambridge_images
-                            _is_cambridge_active = state.active_source == 'cambridge' and _has_cambridge_images
-
-                            # Source switching handlers
-                            def switch_to_nli():
-                                state.active_source = 'nli'
-                                load_page(direction=0)
-
-                            def switch_to_cambridge():
-                                state.active_source = 'cambridge'
-                                load_page(direction=0)
-
-                            # NLI chip styles (filled when active, outlined when inactive)
-                            nli_style = (
-                                'background: #4caf50; color: white; border: 1.5px solid #4caf50; border-radius: 12px; min-height: 24px; font-weight: 600;'
-                                if _is_nli_active else
-                                'border: 1.5px solid #4caf50; border-radius: 12px; min-height: 24px; color: #4caf50; font-weight: 600;'
-                            )
-                            # CUDL chip styles (filled when active, outlined when inactive)
-                            cudl_style = (
-                                'background: #2196f3; color: white; border: 1.5px solid #2196f3; border-radius: 12px; min-height: 24px; font-weight: 600;'
-                                if _is_cambridge_active else
-                                'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 24px; color: #2196f3; font-weight: 600;'
-                            )
-
+                            # Source chips with matching external link icon colors
                             if _has_nli:
-                                # Build NLI viewer URL with page-specific FL ID
-                                _nli_docid = f"PNX_MANUSCRIPTS{page.sys_id}-1"
-                                if fl_id:
-                                    _fl_digits = re.sub(r"\D", "", str(fl_id))
-                                    if _fl_digits:
-                                        _nli_docid += f",FL{_fl_digits}"
-                                nli_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid={_nli_docid}"
-                                with ui.row().classes('items-center gap-0'):
-                                    # NLI chip: toggle if both sources, else open external
-                                    if _both_sources:
-                                        ui.button(
-                                            'NLI',
-                                            on_click=switch_to_nli
-                                        ).props('flat dense size=sm no-caps').classes(
-                                            'text-xs px-2 py-0'
-                                        ).style(nli_style).tooltip(
-                                            tr('View NLI images') if not _is_nli_active else tr('Viewing NLI images')
-                                        )
-                                    else:
-                                        ui.button(
-                                            'NLI',
-                                            on_click=lambda u=nli_url: ui.run_javascript(f'window.open("{u}", "_blank")')
-                                        ).props('flat dense size=sm no-caps').classes(
-                                            'text-xs px-2 py-0'
-                                        ).style(nli_style).tooltip(tr('Open in NLI KTIV'))
-                                    # External link icon (always available)
-                                    ui.button(
-                                        icon='open_in_new',
-                                        on_click=lambda u=nli_url: ui.run_javascript(f'window.open("{u}", "_blank")')
-                                    ).props('flat round dense size=xs').classes(
-                                        'ml-0'
-                                    ).style('min-width: 20px; min-height: 20px; color: inherit; opacity: 0.7;').tooltip(tr('Open in NLI KTIV'))
+                                nli_style = (
+                                    'background: #4caf50; color: white; border: 1.5px solid #4caf50; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_nli_active else
+                                    'border: 1.5px solid #4caf50; border-radius: 12px; min-height: 22px; color: #4caf50; font-weight: 600;'
+                                )
+                                if _both_sources:
+                                    ui.button('NLI', on_click=switch_to_nli).props(
+                                        'flat dense size=sm no-caps'
+                                    ).classes('text-xs px-2 py-0').style(nli_style).tooltip(
+                                        tr('View NLI images') if not _is_nli_active else tr('Viewing NLI images')
+                                    )
+                                else:
+                                    ui.button('NLI', on_click=open_nli_viewer).props(
+                                        'flat dense size=sm no-caps'
+                                    ).classes('text-xs px-2 py-0').style(nli_style).tooltip(tr('Open in NLI KTIV'))
+                                ui.button(icon='open_in_new', on_click=open_nli_viewer).props(
+                                    'flat round dense size=xs'
+                                ).style('min-width: 20px; min-height: 20px; color: #4caf50; opacity: 0.8;').tooltip(tr('Open in NLI KTIV'))
 
                             if _has_cambridge:
-                                # Build CUDL viewer URL
                                 cudl_url = page.external_url or ''
                                 if not cudl_url and page.shelfmark:
-                                    # Fallback: construct from shelfmark
                                     cudl_url = f"https://cudl.lib.cam.ac.uk/view/{page.shelfmark.replace(' ', '-')}"
                                 if cudl_url:
-                                    with ui.row().classes('items-center gap-0'):
-                                        # CUDL chip: toggle if both sources, else open external
-                                        if _both_sources:
-                                            ui.button(
-                                                'CUDL',
-                                                on_click=switch_to_cambridge
-                                            ).props('flat dense size=sm no-caps').classes(
-                                                'text-xs px-2 py-0'
-                                            ).style(cudl_style).tooltip(
-                                                tr('View Cambridge images') if not _is_cambridge_active else tr('Viewing Cambridge images')
-                                            )
-                                        else:
-                                            ui.button(
-                                                'CUDL',
-                                                on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')
-                                            ).props('flat dense size=sm no-caps').classes(
-                                                'text-xs px-2 py-0'
-                                            ).style(cudl_style).tooltip(tr('Open in Cambridge Digital Library'))
-                                        # External link icon (always available)
-                                        ui.button(
-                                            icon='open_in_new',
-                                            on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')
-                                        ).props('flat round dense size=xs').classes(
-                                            'ml-0'
-                                        ).style('min-width: 20px; min-height: 20px; color: inherit; opacity: 0.7;').tooltip(tr('Open in Cambridge Digital Library'))
+                                    cudl_style = (
+                                        'background: #2196f3; color: white; border: 1.5px solid #2196f3; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                        if _is_cambridge_active else
+                                        'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 22px; color: #2196f3; font-weight: 600;'
+                                    )
+                                    if _both_sources:
+                                        ui.button('Cambridge', on_click=switch_to_cambridge).props(
+                                            'flat dense size=sm no-caps'
+                                        ).classes('text-xs px-2 py-0').style(cudl_style).tooltip(
+                                            tr('View Cambridge images') if not _is_cambridge_active else tr('Viewing Cambridge images')
+                                        )
+                                    else:
+                                        ui.button('Cambridge', on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                            'flat dense size=sm no-caps'
+                                        ).classes('text-xs px-2 py-0').style(cudl_style).tooltip(tr('Open in Cambridge Digital Library'))
+                                    ui.button(icon='open_in_new', on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                        'flat round dense size=xs'
+                                    ).style('min-width: 20px; min-height: 20px; color: #2196f3; opacity: 0.8;').tooltip(tr('Open in Cambridge Digital Library'))
 
                             if page.is_oxford and page.external_url:
-                                ui.button(
-                                    'Oxford',
-                                    on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')
-                                ).props('flat dense size=sm no-caps').classes(
-                                    'text-xs px-2 py-0'
-                                ).style(
-                                    'border: 1.5px solid #ff9800; border-radius: 12px; min-height: 24px; color: #ff9800; font-weight: 600;'
+                                ui.button('Oxford', on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                    'flat dense size=sm no-caps'
+                                ).classes('text-xs px-2 py-0').style(
+                                    'border: 1.5px solid #ff9800; border-radius: 12px; min-height: 22px; color: #ff9800; font-weight: 600;'
                                 ).tooltip(tr('Open in Bodleian Libraries'))
 
-                        # Navigation and controls
-                        with ui.row().classes('items-center gap-2'):
-                            # Previous page button (arrow pointing back)
+                        # Spacer
+                        ui.element('div').classes('flex-grow')
+
+                        # -- Right group: navigation, full manuscript, star --
+                        with ui.row().classes('items-center gap-1'):
                             prev_disabled = _is_single_page or page.current_idx <= 1
                             ui.button(
                                 icon='chevron_right' if is_rtl() else 'chevron_left',
                                 on_click=lambda: load_page(direction=-1)
-                            ).props(f'flat round dense {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
+                            ).props(f'flat round dense size=sm {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
 
-                            # Folio dropdown or page input
                             if _folio_images and len(_folio_images) > 1:
-                                # Build folio options: {p_num: label}
                                 folio_options = {
-                                    str(i + 1): f"{img.get('folio_label', str(i + 1))}"
+                                    str(i + 1): img.get('folio_label', str(i + 1))
                                     for i, img in enumerate(_folio_images)
                                 }
 
                                 def handle_folio_select(e):
                                     try:
-                                        selected_p = int(e.value) if e.value is not None else 1
-                                        go_to_page(selected_p)
+                                        go_to_page(int(e.value) if e.value is not None else 1)
                                     except (ValueError, TypeError):
                                         pass
 
@@ -3303,45 +3277,35 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     options=folio_options,
                                     value=str(page.p_num),
                                     on_change=handle_folio_select
-                                ).classes('w-24').props('dense outlined')
+                                ).classes('w-20').props('dense outlined')
                             else:
-                                # Fallback: standard page number input
                                 page_input = ui.number(
-                                    value=page.p_num,
-                                    min=1,
-                                    max=page.total_pages
-                                ).classes('w-16').props('dense outlined')
+                                    value=page.p_num, min=1, max=page.total_pages
+                                ).classes('w-14').props('dense outlined')
 
-                                # Go button
                                 def handle_go_click():
                                     try:
-                                        page_num = int(page_input.value) if page_input.value is not None else 1
-                                        go_to_page(page_num)
+                                        go_to_page(int(page_input.value) if page_input.value is not None else 1)
                                     except (ValueError, TypeError):
                                         go_to_page(1)
 
-                                ui.button(
-                                    tr('Go'),
-                                    on_click=handle_go_click
-                                ).props('flat dense color=green')
+                                ui.button(tr('Go'), on_click=handle_go_click).props('flat dense color=green size=sm')
 
-                            ui.label(f"/ {page.total_pages}").classes('text-sm').style('color: var(--text-secondary);')
+                            ui.label(f"/ {page.total_pages}").classes('text-xs').style('color: var(--text-secondary);')
 
-                            # Next page button (arrow pointing forward)
                             next_disabled = _is_single_page or page.current_idx >= page.total_pages
                             ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
                                 on_click=lambda: load_page(direction=1)
-                            ).props(f'flat round dense {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
+                            ).props(f'flat round dense size=sm {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
                             )
 
-                            # Show Full Manuscript button
                             ui.button(
                                 tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
                                 icon='view_agenda' if not state.view_all else 'view_day',
                                 on_click=toggle_view_all
-                            ).props(f'flat dense color=green aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"')
+                            ).props(f'flat dense color=green size=sm aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"')
 
                             # Add page to list (star button)
                             from web.state import state as app_state

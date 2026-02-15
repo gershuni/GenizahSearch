@@ -1636,7 +1636,7 @@ class ManuscriptViewerWidget(QWidget):
         if not digits:
             return False
 
-        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/max/0/default.jpg"
+        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/2000,/0/default.jpg"
         self.images_nli = [{'label': f"FL{digits}", 'url': fallback_url, 'fl_id': digits}]
         self.images_ext = []
         self.active_list = self.images_nli
@@ -1771,7 +1771,7 @@ class ManuscriptViewerWidget(QWidget):
     def _resolve_url(self, base_url):
         if not base_url: return None
         if base_url.endswith('.jpg'): return base_url
-        return f"{base_url}/full/max/0/default.jpg"
+        return f"{base_url}/full/2000,/0/default.jpg"
 
     def _preload(self, index):
         if index < 0 or index >= len(self.active_list): return
@@ -2016,7 +2016,7 @@ class ImageLoaderThread(QThread):
         
         if fl_match:
             fl_id = fl_match.group(1)
-            # v2 cache: full resolution (max). Old v1 cache was 600px.
+            # v2 cache: high resolution (2000px). Old v1 cache was 600px.
             local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"FL{fl_id}_v2.jpg")
 
             # --- CHECK LOCAL CACHE ---
@@ -2041,13 +2041,20 @@ class ImageLoaderThread(QThread):
         # Attempt A: Original URL
         data = self._download_bytes(self.url, headers)
         
-        # Attempt B: Fallback to Rosetta if Attempt A failed and we have an FL ID
+        # Attempt B: Fallback to Rosetta stream if IIIF failed (full-res TIFF)
         if data is None and fl_match and not self._cancelled:
             fl_digits = fl_match.group(1)
-            logger.info("Cache miss & IIIF failed. Trying Rosetta fallback for FL%s...", fl_digits)
+            logger.info("IIIF failed for FL%s. Trying Rosetta stream fallback...", fl_digits)
             fallback_url = MetadataManager.get_rosetta_fallback_url(fl_digits)
             if fallback_url:
                 data = self._download_bytes(fallback_url, headers)
+
+        # Attempt C: Rosetta thumbnail if stream also failed (e.g. 401 for some libraries)
+        if data is None and fl_match and not self._cancelled:
+            fl_digits = fl_match.group(1)
+            logger.info("Rosetta stream failed for FL%s. Trying thumbnail fallback...", fl_digits)
+            thumb_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{fl_digits}"
+            data = self._download_bytes(thumb_url, headers)
 
         # 3. Process Result
         if data:
@@ -9722,7 +9729,7 @@ class GenizahGUI(QMainWindow):
                 for fl in fl_ids or []:
                     digits = re.sub(r"\D", "", str(fl or ""))
                     if digits:
-                        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/max/0/default.jpg"
+                        fallback_url = f"{Config.NLI_IIIF_BASE}/FL{digits}/full/2000,/0/default.jpg"
                         image_list = [{'label': f"FL{digits}", 'url': fallback_url}]
                         break
 
@@ -9786,7 +9793,7 @@ class GenizahGUI(QMainWindow):
                 viewer.set_status_message(tr("Loading..."))
                 final_url = base_url
                 if final_url and not final_url.endswith('.jpg'):
-                    final_url = f"{final_url}/full/max/0/default.jpg"
+                    final_url = f"{final_url}/full/2000,/0/default.jpg"
 
                 loader = ImageLoaderThread(final_url)
                 loader.image_loaded.connect(

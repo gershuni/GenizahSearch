@@ -210,7 +210,7 @@ def create_edit_text_dialog(
                                 if "/api/nli_image/" in image_url:
                                     fl_match = re.search(r'/api/nli_image/(\d+)', image_url)
                                     if fl_match:
-                                        direct_url = f"{NLI_IIIF_BASE}/FL{fl_match.group(1)}/full/max/0/default.jpg"
+                                        direct_url = f"{NLI_IIIF_BASE}/FL{fl_match.group(1)}/full/2000,/0/default.jpg"
 
                                 # Use json.dumps for proper JS string escaping (handles backticks, backslashes, etc.)
                                 safe_url = json.dumps(direct_url)[1:-1]  # Remove surrounding quotes
@@ -242,7 +242,7 @@ def create_edit_text_dialog(
                                             }
                                             if (flIds.length > 0) {
                                                 const idx = Math.min(pageIdx || 0, flIds.length - 1);
-                                                img.src = `https://iiif.nli.org.il/IIIFv21/FL${flIds[idx]}/full/max/0/default.jpg`;
+                                                img.src = `https://iiif.nli.org.il/IIIFv21/FL${flIds[idx]}/full/2000,/0/default.jpg`;
                                                 return;
                                             }
                                         } catch(e) { console.error('Manifest fetch failed:', e); }
