@@ -7,7 +7,7 @@
 - ✅ **v5.7.0 Responsa Search** -- Phases 14-17 (shipped 2026-02-10)
 - ✅ **v5.7.2 Cleanup, Normalization & Sections** -- Phases 18-21 (shipped 2026-02-11)
 - ✅ **v5.7.3 Pending Corrections Visibility** -- Phases 22-24 (shipped 2026-02-11)
-- 🚧 **v5.8.0 FJMS Integration** -- Phases 25-28 (in progress)
+- ✅ **v5.8.0 FJMS Integration** -- Phases 25-28 (shipped 2026-02-15)
 
 ## Phases
 
@@ -72,14 +72,14 @@ Shared corrections service, amber styling (web), emoji labels (desktop).
 
 </details>
 
-### 🚧 v5.8.0 FJMS Integration (In Progress)
+### ✅ v5.8.0 FJMS Integration (Shipped 2026-02-15)
 
 **Milestone Goal:** Integrate FJMS scholarly metadata (domain classifications, scientific joins, catalog records) into GenizahSearch via a SQLite sidecar database, enabling subject-based filtering and enriched manuscript display in both apps.
 
 - [x] **Phase 25: Data Infrastructure** - Export FIST.db into SQLite sidecar with shared service layer (completed 2026-02-12)
 - [x] **Phase 26: Scientific Joins** - FJMS join groups with scholar attribution in both apps (completed 2026-02-12)
 - [x] **Phase 27: Domain Classifications** - Domain badges and search filtering in both apps (completed 2026-02-13)
-- [ ] **Phase 28: Catalog Enrichment** - FJMS titles, authors, dates on browse page in both apps
+- [x] **Phase 28: Catalog Enrichment** - FJMS titles, authors, dates on browse page in both apps (completed 2026-02-15)
 
 ## Phase Details
 
@@ -146,8 +146,8 @@ Plans:
 **Plans**: 2 plans in 2 waves
 
 Plans:
-- [ ] 28-01-PLAN.md -- Export re-run with SourceName columns + FjmsService catalog helpers (Wave 1)
-- [ ] 28-02-PLAN.md -- FJMS catalog display in web browse page and desktop extended info (Wave 2, depends on 28-01)
+- [x] 28-01-PLAN.md -- Export re-run with SourceName columns + FjmsService catalog helpers (Wave 1)
+- [x] 28-02-PLAN.md -- FJMS catalog display in web browse page and desktop extended info (Wave 2, depends on 28-01)
 
 ## Progress
 
@@ -165,8 +165,8 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
 | 26. Scientific Joins | v5.8.0 | 3/3 | Complete | 2026-02-12 |
 | 27. Domain Classifications | v5.8.0 | 5/5 | Complete | 2026-02-13 |
-| 28. Catalog Enrichment | v5.8.0 | 0/2 | Not started | - |
+| 28. Catalog Enrichment | v5.8.0 | 2/2 | Complete | 2026-02-15 |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-15 after Phase 28 planning (2 plans in 2 waves)*
+*Last updated: 2026-02-15 after Phase 28 execution complete — v5.8.0 milestone shipped*
