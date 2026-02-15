@@ -2330,4 +2330,8 @@ TRANSLATIONS = {
     "Filter results by subject domain (post-search)": "סנן תוצאות לפי תחום (לאחר חיפוש)",
     "Filter by Subject Domain": "סנן לפי תחום נושא",
     "Run a search first to see domain options.": "בצע חיפוש תחילה כדי לראות אפשרויות תחום.",
+
+    # --- Compact Mode ---
+    "Compact": "צמצם",
+    "Expand": "הרחב",
 }

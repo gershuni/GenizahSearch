@@ -2373,10 +2373,11 @@ class ResultDialog(QDialog):
         top_bar = QHBoxLayout()
         self.btn_res_prev = QPushButton(tr("◀ Prev Result")); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
         self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_compact_toggle = QPushButton(tr("Compact"))
+        self.btn_compact_toggle = QPushButton("⏶")
+        self.btn_compact_toggle.setToolTip(tr("Compact"))
         self.btn_compact_toggle.setCheckable(True)
         self.btn_compact_toggle.setChecked(False)
-        self.btn_compact_toggle.setFixedWidth(70)
+        self.btn_compact_toggle.setFixedWidth(36)
         self.btn_compact_toggle.clicked.connect(lambda checked: self._toggle_compact_mode(checked))
         self.btn_res_next = QPushButton(tr("Next Result ▶")); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
         top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_compact_toggle); top_bar.addWidget(self.btn_res_next)
@@ -2389,12 +2390,6 @@ class ResultDialog(QDialog):
         compact_layout = QHBoxLayout(self.compact_bar)
         compact_layout.setContentsMargins(4, 2, 4, 2)
         compact_layout.setSpacing(6)
-
-        # Prev result
-        self.btn_compact_prev = QPushButton(tr("Prev Result"))
-        self.btn_compact_prev.setFixedWidth(80)
-        self.btn_compact_prev.clicked.connect(lambda: self.navigate_results(-1))
-        compact_layout.addWidget(self.btn_compact_prev)
 
         # Shelfmark (compact)
         self.lbl_compact_shelf = QLabel()
@@ -2435,26 +2430,17 @@ class ResultDialog(QDialog):
         self.btn_compact_ext_info.toggled.connect(self.toggle_extended_info)
         compact_layout.addWidget(self.btn_compact_ext_info)
 
-        # Joins (compact)
+        # Joins (compact) - chain icon like normal mode
         self.btn_compact_joins = QToolButton()
-        self.btn_compact_joins.setText("Joins")
+        self.btn_compact_joins.setText("🔗")
         self.btn_compact_joins.setToolTip(tr("View joined fragments"))
+        self.btn_compact_joins.setFixedSize(40, 32)
+        self.btn_compact_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
         self.btn_compact_joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.btn_compact_joins.clicked.connect(self._rd_view_joins)
         compact_layout.addWidget(self.btn_compact_joins)
 
         compact_layout.addStretch()
-
-        # Show More button
-        self.btn_show_more = QPushButton(tr("Show More") + " ...")
-        self.btn_show_more.clicked.connect(lambda: self._toggle_compact_mode(False))
-        compact_layout.addWidget(self.btn_show_more)
-
-        # Next result
-        self.btn_compact_next = QPushButton(tr("Next Result"))
-        self.btn_compact_next.setFixedWidth(80)
-        self.btn_compact_next.clicked.connect(lambda: self.navigate_results(1))
-        compact_layout.addWidget(self.btn_compact_next)
 
         main_layout.addWidget(self.compact_bar)
 
@@ -2714,6 +2700,8 @@ class ResultDialog(QDialog):
         self.compact_bar.setVisible(compact)
         self.header_widget.setVisible(not compact)
         self.btn_compact_toggle.setChecked(compact)
+        self.btn_compact_toggle.setText("⏷" if compact else "⏶")
+        self.btn_compact_toggle.setToolTip(tr("Expand") if compact else tr("Compact"))
 
         if compact:
             # Sync compact bar state from full header
@@ -2926,6 +2914,8 @@ class ResultDialog(QDialog):
                     pgp_frags = get_fragments_for_document(pgp_doc.get('pgpid'))
                     if pgp_frags and len(pgp_frags) > 1:
                         self.btn_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
+                        if hasattr(self, 'btn_compact_joins'):
+                            self.btn_compact_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
                         header_action = self.rd_joins_menu.addAction(
                             tr("{} connected fragments").format(len(pgp_frags)) + " [PGP]"
                         )
@@ -2945,10 +2935,14 @@ class ResultDialog(QDialog):
             action = self.rd_joins_menu.addAction(tr("No joined fragments"))
             action.setEnabled(False)
             self.btn_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
+            if hasattr(self, 'btn_compact_joins'):
+                self.btn_compact_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
             return
 
         # Has joins - update button style
         self.btn_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
+        if hasattr(self, 'btn_compact_joins'):
+            self.btn_compact_joins.setStyleSheet("background-color: #27ae60; color: white; border-radius: 4px;")
 
         header_action = self.rd_joins_menu.addAction(
             tr("{} connected fragments").format(connected.get('total_fragments', 0))
