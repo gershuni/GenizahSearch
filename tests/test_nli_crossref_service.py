@@ -10,7 +10,7 @@ graceful degradation, and edge cases.
 import sqlite3
 import pytest
 
-from shared.nli_crossref_service import NliCrossrefService, get_nli_crossref_service
+from shared.nli_crossref_service import NliCrossrefService, get_nli_crossref_service, parse_folio_label
 
 
 @pytest.fixture
@@ -51,37 +51,38 @@ def test_db(tmp_path):
     """)
 
     # Insert test NLI image data - multiple AlmaIds with varying data
+    # ImageName values use NLI pattern: {prefix}__L{leaf}F{folio}B{bifolio}S{side}
     nli_rows = [
         # AlmaId "A001" - has FGP images, PartOf, BifolioWith, physical metadata
         ("Cambridge UL", "CUL", "Cambridge", "ספריית קיימברידג'", "Taylor-Schechter",
          "T-S 12.123", "INV001", "", "", "", "A001", "CAT1", "1",
-         "FGP001", "1234", "T-S 12.123 1r", "NLI", "T-S NS 321.5", "",
+         "FGP001", "1234", "T_S_12_123__L1F0B0S1", "NLI", "T-S NS 321.5", "",
          "T-S 12.124 leaf 2", "4", "2", "Paper", "15x20", ""),
         ("Cambridge UL", "CUL", "Cambridge", "ספריית קיימברידג'", "Taylor-Schechter",
          "T-S 12.123", "INV001", "", "", "", "A001", "CAT1", "1",
-         "FGP002", "1235", "T-S 12.123 1v", "NLI", "", "",
+         "FGP002", "1235", "T_S_12_123__L1F0B0S2", "NLI", "", "",
          "", "4", "2", "Paper", "15x20", ""),
         ("Cambridge UL", "CUL", "Cambridge", "ספריית קיימברידג'", "Taylor-Schechter",
          "T-S 12.123", "INV001", "", "", "", "A001", "CAT1", "1",
-         "FGP003", "1236", "T-S 12.123 2r", "NLI", "T-S NS 321.5", "",
+         "FGP003", "1236", "T_S_12_123__L2F0B0S1", "NLI", "T-S NS 321.5", "",
          "T-S 12.125 leaf 1", "4", "2", "Paper", "15x20", ""),
 
         # AlmaId "A002" - has FGP images, no relationships
         ("JTS", "JTS", "New York", "בית המדרש לרבנים", "ENA",
          "ENA 2345.1", "INV002", "", "", "", "A002", "CAT2", "5",
-         "FGP010", "5678", "ENA 2345 1r", "NLI", "", "", "",
+         "FGP010", "5678", "ENA_2345__L1F0B0S1", "NLI", "", "", "",
          "2", "", "Vellum", "10x12", ""),
 
         # AlmaId "A003" - NO FGP images (empty FGPImageNumberId), has metadata
         ("BL", "BL", "London", "הספריה הבריטית", "Or.",
          "Or. 5557B", "INV003", "", "", "", "A003", "CAT3", "10",
-         "", "", "Or 5557B 1r", "BL", "", "", "",
+         "", "", "Or_5557B_missing_pattern", "BL", "", "", "",
          "1", "", "Parchment", "25x30", ""),
 
         # AlmaId "A004" - all metadata fields empty (should be skipped by get_physical_metadata)
         ("RNL", "RNL", "St Petersburg", "הספריה הלאומית של רוסיה", "Firk.",
          "Firk. I 100", "INV004", "", "", "", "A004", "CAT4", "20",
-         "FGP020", "9999", "Firk I 100 1r", "NLI", "", "", "",
+         "FGP020", "9999", "Firk_I_100__L1F0B0S1", "NLI", "", "", "",
          "", "", "", "", ""),
     ]
     conn.executemany(
@@ -307,6 +308,61 @@ def test_get_image_sources_no_data(service):
     assert sources["image_count"] == 0
 
 
+# ── Folio label parsing tests ──────────────────────────────────────
+
+
+def test_parse_folio_label_standard():
+    """Standard recto pattern: L1F0B0S1 -> 1r."""
+    assert parse_folio_label("T_S_12_1__L1F0B0S1") == "1r"
+    assert parse_folio_label("I_C_71__L3F0B0S1") == "3r"
+
+
+def test_parse_folio_label_verso():
+    """Verso pattern: S2 -> v."""
+    assert parse_folio_label("T_S_12_1__L1F0B0S2") == "1v"
+    assert parse_folio_label("577_7_6__L1F0B1S2") == "1v"
+
+
+def test_parse_folio_label_missing():
+    """Fallback on unrecognized patterns returns empty string."""
+    assert parse_folio_label("Missing1") == ""
+    assert parse_folio_label("") == ""
+    assert parse_folio_label("no_match_here") == ""
+
+
+def test_parse_folio_label_high_leaf():
+    """High leaf numbers (L10+) parse correctly."""
+    assert parse_folio_label("Yevr_III_B_1093__L7F0B0S1") == "7r"
+    assert parse_folio_label("Test__L10F0B0S2") == "10v"
+    assert parse_folio_label("Test__L25F0B0S1") == "25r"
+
+
+def test_get_folio_images(service):
+    """get_folio_images returns enriched dicts with folio_label key."""
+    images = service.get_folio_images("A001")
+    assert len(images) == 3
+    # All images should have folio_label key
+    for img in images:
+        assert "folio_label" in img
+    # Check specific labels based on test data ImageNames
+    assert images[0]["folio_label"] == "1r"  # L1...S1
+    assert images[1]["folio_label"] == "1v"  # L1...S2
+    assert images[2]["folio_label"] == "2r"  # L2...S1
+
+
+def test_get_folio_images_fallback_label(service):
+    """Images with unrecognized ImageName patterns get sequential fallback labels."""
+    images = service.get_folio_images("A003")
+    assert len(images) == 1
+    # A003 has "Or_5557B_missing_pattern" -- no L/S pattern
+    assert images[0]["folio_label"] == "1"  # sequential fallback
+
+
+def test_get_folio_images_empty(service):
+    """Unknown sys_id returns empty list."""
+    assert service.get_folio_images("UNKNOWN") == []
+
+
 # ── Graceful degradation tests ─────────────────────────────────────
 
 
@@ -316,6 +372,7 @@ def test_all_methods_return_empty_when_unavailable():
     assert svc.is_available() is False
     assert svc.get_version() is None
     assert svc.get_images("x") == []
+    assert svc.get_folio_images("x") == []
     assert svc.get_images_batch(["x"]) == {}
     assert svc.get_cambridge_manifest("x") is None
     assert svc.get_cambridge_manifest_by_label("x") is None
