@@ -3208,6 +3208,7 @@ class MetadataManager:
             self.fetch_nli_data(system_id)
 
         current_meta = self.nli_cache.get(system_id, {})
+        current_meta['sys_id'] = system_id  # Store for downstream consumers
 
         # 1. Fetch MARC (Bibliographic Data)
         marc_data = self.fetch_marc_data(system_id)
@@ -3319,6 +3320,18 @@ class MetadataManager:
         current_meta['images_nli'] = images_nli
         current_meta['images_ext'] = images_ext
         current_meta['external_meta'] = external_meta
+
+        # 3. Enrich with image source info and folio labels (Phase 31: IMG-04)
+        if crossref_svc and crossref_svc.is_available():
+            try:
+                shelfmark = current_meta.get('shelfmark', '')
+                norm_sm = normalize_shelfmark(shelfmark) if shelfmark else ''
+                current_meta['image_source_info'] = crossref_svc.get_image_sources(
+                    system_id, normalized_shelfmark=norm_sm
+                )
+                current_meta['folio_images'] = crossref_svc.get_folio_images(system_id)
+            except Exception as e:
+                LOGGER.debug(f"Folio enrichment error for {system_id}: {e}")
 
         # Update cache precedence (Enrichment overrides basic placeholders)
         if marc_data.get('english_title') and not current_meta.get('title'):

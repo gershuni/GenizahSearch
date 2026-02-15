@@ -61,6 +61,13 @@ from list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 
+# NLI crossref service for folio labels and source indicators (Phase 31)
+try:
+    from shared.nli_crossref_service import parse_folio_label, get_nli_crossref_service
+    _HAS_NLI_CROSSREF = True
+except ImportError:
+    _HAS_NLI_CROSSREF = False
+
 # Community features - corrections, comments, discoveries
 from corrections_client import get_corrections_client
 from corrections_ui import (
@@ -1566,8 +1573,21 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_external.setVisible(False)
         self.btn_external.clicked.connect(self.open_external)
 
+        # KTIV / NLI Viewer button (Phase 31)
+        self.btn_ktiv = QPushButton("KTIV")
+        self.btn_ktiv.setToolTip(tr("Open in NLI KTIV"))
+        self.btn_ktiv.setVisible(False)
+        self.btn_ktiv.setStyleSheet(
+            "QPushButton { border: 1.5px solid #4caf50; border-radius: 12px; "
+            "color: #4caf50; font-weight: 600; padding: 2px 8px; min-height: 24px; } "
+            "QPushButton:hover { background-color: #e8f5e9; }"
+        )
+        self.btn_ktiv.clicked.connect(self._open_ktiv_viewer)
+        self._ktiv_sys_id = None
+
         top_bar.addWidget(self.combo_source)
         top_bar.addStretch()
+        top_bar.addWidget(self.btn_ktiv)
         top_bar.addWidget(self.btn_external)
         top_bar.addWidget(btn_rot_left)
         top_bar.addWidget(self.slider_rotation)
@@ -1620,8 +1640,10 @@ class ManuscriptViewerWidget(QWidget):
         self.active_list = self.images_nli
         self.current_source = "nli"
         self.combo_source.clear()
-        self.combo_source.addItem(f"NLI (1)", "nli")
+        self.combo_source.addItem(f"NLI (1 page)", "nli")
         self.combo_source.setVisible(False)
+        self.btn_ktiv.setVisible(False)
+        self._ktiv_sys_id = None
         return True
 
     def load_images(self, meta, initial_idx=0, target_folio=None):
@@ -1673,13 +1695,13 @@ class ManuscriptViewerWidget(QWidget):
                 ext_label = "Oxford"
             else:
                 ext_label = "External"
-            self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)})", "ext")
+            self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)} pages)", "ext")
             if self.images_nli:
-                self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
+                self.combo_source.addItem(f"NLI ({len(self.images_nli)} pages)", "nli")
             self.active_list = self.images_ext
             self.current_source = "ext"
         elif self.images_nli:
-            self.combo_source.addItem(f"NLI ({len(self.images_nli)})", "nli")
+            self.combo_source.addItem(f"NLI ({len(self.images_nli)} pages)", "nli")
             self.active_list = self.images_nli
             self.current_source = "nli"
         else:
@@ -1708,7 +1730,23 @@ class ManuscriptViewerWidget(QWidget):
             else:
                 btn_label = tr("External Website")
             self.btn_external.setText(btn_label)
-        self.btn_external.setVisible(False)
+        self.btn_external.setVisible(bool(self.external_url))
+
+        # KTIV button: show when NLI FGP images available (Phase 31)
+        image_source_info = meta.get('image_source_info', {})
+        if image_source_info.get('nli_fgp'):
+            # Use sys_id from meta or try fl_id-based detection
+            sys_id = meta.get('sys_id', '')
+            if not sys_id:
+                # Try to get sys_id from the fl_ids
+                fl_ids = meta.get('fl_ids', [])
+                if isinstance(fl_ids, str):
+                    fl_ids = [fl_ids]
+            self._ktiv_sys_id = sys_id
+            self.btn_ktiv.setVisible(bool(sys_id))
+        else:
+            self._ktiv_sys_id = None
+            self.btn_ktiv.setVisible(False)
 
         # Set Page
         self.set_page(initial_idx)
@@ -1816,6 +1854,12 @@ class ManuscriptViewerWidget(QWidget):
     def open_external(self):
         if self.external_url:
             QDesktopServices.openUrl(QUrl(self.external_url))
+
+    def _open_ktiv_viewer(self):
+        """Open the NLI KTIV manuscript viewer in the default browser."""
+        if self._ktiv_sys_id:
+            url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={self._ktiv_sys_id}"
+            QDesktopServices.openUrl(QUrl(url))
 
     def adjust_rotation(self, delta):
         """Adjust rotation via slider to keep controls in sync."""
@@ -8074,6 +8118,19 @@ class GenizahGUI(QMainWindow):
         self.combo_browse_page.setFixedWidth(100)
         self.combo_browse_page.currentIndexChanged.connect(self.on_browse_page_combo_changed)
 
+        # Folio label (Phase 31: shows "Folio 1r" or empty when no folio data)
+        self.lbl_browse_folio = QLabel("")
+        self.lbl_browse_folio.setStyleSheet("font-weight: bold; font-size: 12px; margin-left: 4px;")
+        self.lbl_browse_folio.setVisible(False)
+
+        # Page count label (Phase 31: "of N pages")
+        self.lbl_browse_page_count = QLabel("")
+        self.lbl_browse_page_count.setStyleSheet("font-size: 11px; color: #7f8c8d; margin-left: 4px;")
+        self.lbl_browse_page_count.setVisible(False)
+
+        # Folio images cache for the current manuscript
+        self._browse_folio_images = []
+
         # Image Toggle
         self.btn_b_toggle_img = QPushButton()
         self.btn_b_toggle_img.setText("🖼️")
@@ -8083,9 +8140,11 @@ class GenizahGUI(QMainWindow):
         self.btn_b_toggle_img.clicked.connect(self.toggle_browse_image)
         self.btn_b_toggle_img.setEnabled(False)
 
-        # Layout: [< Prev] [Page Combo] [Next >] [View All] [Save] [Image Toggle]
+        # Layout: [< Prev] [Folio Label] [Page Combo] [of N pages] [Next >] [View All] [Save] [Image Toggle]
         nav_bar.addWidget(self.btn_b_prev)
+        nav_bar.addWidget(self.lbl_browse_folio)
         nav_bar.addWidget(self.combo_browse_page)
+        nav_bar.addWidget(self.lbl_browse_page_count)
         nav_bar.addWidget(self.btn_b_next)
         nav_bar.addWidget(self.btn_b_all)
         nav_bar.addWidget(self.btn_b_save)
@@ -8497,6 +8556,9 @@ class GenizahGUI(QMainWindow):
         self.btn_b_ext_info.setChecked(False)
         self.txt_b_extended_info.setVisible(False)
         self.txt_b_extended_info.setHtml("")
+
+        # Store folio images for page combo labels (Phase 31)
+        self._browse_folio_images = meta.get('folio_images', [])
 
         # 1. Update Info Label (Top Bar)
         marc = meta.get('marc', {})
@@ -18864,19 +18926,50 @@ class GenizahGUI(QMainWindow):
         if input_shelf:
             self.browse_shelf_input.setText(input_shelf)
 
-        # Update Combo
+        # Update Combo with folio labels when available (Phase 31)
         total = pd['total_pages']
         curr_idx = pd['current_idx'] # 1-based index
+
+        # Get folio images from enriched metadata (if available)
+        folio_images = self._browse_folio_images
+        has_folio_labels = bool(folio_images) and len(folio_images) > 0
 
         self.combo_browse_page.blockSignals(True)
         if self.combo_browse_page.count() != total:
             self.combo_browse_page.clear()
-            items = [str(i) for i in range(1, total + 1)]
-            self.combo_browse_page.addItems(items)
+            if has_folio_labels:
+                # Use folio labels from crossref service
+                for i, img in enumerate(folio_images):
+                    label = img.get('folio_label', str(i + 1))
+                    self.combo_browse_page.addItem(label)
+                # If there are more pages than folio images, fill rest with numbers
+                for i in range(len(folio_images), total):
+                    self.combo_browse_page.addItem(str(i + 1))
+            else:
+                items = [str(i) for i in range(1, total + 1)]
+                self.combo_browse_page.addItems(items)
 
         if 0 < curr_idx <= total:
             self.combo_browse_page.setCurrentIndex(curr_idx - 1)
         self.combo_browse_page.blockSignals(False)
+
+        # Update folio label display (Phase 31)
+        folio_label_text = ''
+        if has_folio_labels and 0 < curr_idx <= len(folio_images):
+            folio_label_text = folio_images[curr_idx - 1].get('folio_label', '')
+        if folio_label_text:
+            self.lbl_browse_folio.setText(f"{tr('Folio')} {folio_label_text}")
+            self.lbl_browse_folio.setVisible(True)
+        else:
+            self.lbl_browse_folio.setVisible(False)
+
+        # Update page count label (Phase 31)
+        effective_count = len(folio_images) if has_folio_labels else total
+        if effective_count > 0:
+            self.lbl_browse_page_count.setText(f"{tr('of')} {effective_count} {tr('pages')}")
+            self.lbl_browse_page_count.setVisible(True)
+        else:
+            self.lbl_browse_page_count.setVisible(False)
 
         self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
         self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
