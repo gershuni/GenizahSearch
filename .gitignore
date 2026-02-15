@@ -14,6 +14,7 @@ Genizah_Tantivy_Index/
 *.pkl
 config.pkl
 fist_data/
+nli_data/
 FIST_DB_BACKUP/
 
 # Build artifacts
