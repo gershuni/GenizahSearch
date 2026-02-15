@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 ## Current Position
 
-Phase: 30 of 34 (Image Resolution)
-Plan: 2 of 2 in current phase (COMPLETE)
-Status: Phase 30 complete, ready for Phase 31
-Last activity: 2026-02-15 -- Completed 30-02 (Desktop direct image resolution)
+Phase: 31 of 34 (Image Navigation & Indicators)
+Plan: 1 of 2 in current phase
+Status: Plan 31-01 complete, ready for Plan 31-02
+Last activity: 2026-02-15 -- Completed 31-01 (Folio navigation bar and source indicators)
 
 Progress: [███░░░░░░░] 27%
 
@@ -34,6 +34,7 @@ Progress: [███░░░░░░░] 27%
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 4 | 12 min |
+| Phase 31 P01 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -50,6 +51,8 @@ See PROJECT.md Key Decisions table for full history.
 - 30-01: Local sidecar resolution added as first-try path, all existing network fallback logic preserved unchanged
 - 30-02: Single crossref_svc initialization in enrich_metadata serves both Cambridge supplement and NLI FL ID paths
 - 30-02: Cambridge supplement sets external_url on current_meta when found from sidecar, feeding into existing CUDL fetch logic
+- [Phase 31]: Folio label falls back: crossref folio_label -> extract_folio_number -> Page N
+- [Phase 31]: Source indicator chips are styled flat buttons with colored borders, not NiceGUI chip component
 
 ### Blockers/Concerns
 
@@ -66,6 +69,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 30-02-PLAN.md (Phase 30 complete)
+Stopped at: Completed 31-01-PLAN.md
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-30 complete -- 4 plans delivered.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-30 complete, Phase 31 Plan 01 done -- 5 plans delivered.
