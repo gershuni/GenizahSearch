@@ -71,6 +71,9 @@ class BrowsePage:
     oxford_part_metadata: Dict[str, str] = field(default_factory=dict) # Oxford Part metadata
     library_code: str = ''  # Library code (e.g., 'CUL', 'JTS')
     library_name: str = ''  # Full library name for display
+    folio_label: str = ''  # Current folio label (e.g., '1r', '2v')
+    image_source_info: Dict = field(default_factory=dict)  # {nli_fgp: bool, cambridge: bool, image_count: int}
+    folio_images: List[Dict] = field(default_factory=list)  # Folio sequence from NliCrossrefService
 
 @dataclass
 class DocumentPage:
@@ -297,18 +300,49 @@ class GenizahService:
                 marc_data = {}
                 if hasattr(state.meta_mgr, 'nli_cache') and actual_sys_id in state.meta_mgr.nli_cache:
                      marc_data = state.meta_mgr.nli_cache[actual_sys_id].get('marc', {})
-                
-                # If we didn't mock/cache it fully, we might miss it. 
-                # In GenizahSearch desktop, it lazily fetches. 
+
+                # If we didn't mock/cache it fully, we might miss it.
+                # In GenizahSearch desktop, it lazily fetches.
                 # Here, let's check if we can get `external_iiif_link` from cached meta.
-                
-                # If we don't have it, we might simply check if shelfmark implies Cambridge (T-S ...) 
+
+                # If we don't have it, we might simply check if shelfmark implies Cambridge (T-S ...)
                 # AND we want to call the API.
                 # But cleaner is:
                 ext_link = marc_data.get('external_iiif_link')
                 if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
                     is_cambridge = True
                     external_url = ext_link
+
+            # 3. NLI crossref: folio images and source indicators
+            folio_label = ''
+            image_source_info = {}
+            folio_images = []
+            try:
+                from shared.nli_crossref_service import get_nli_crossref_service
+                crossref_svc = get_nli_crossref_service(thread_safe=True)
+                if crossref_svc.is_available() and actual_sys_id:
+                    # Get normalized shelfmark for Cambridge lookup
+                    from genizah_core import normalize_shelfmark
+                    norm_shelf = normalize_shelfmark(shelfmark) if shelfmark else None
+
+                    # Image source indicators
+                    image_source_info = crossref_svc.get_image_sources(
+                        actual_sys_id, normalized_shelfmark=norm_shelf
+                    )
+
+                    # Update is_cambridge from sidecar if not already set
+                    if not is_cambridge and image_source_info.get('cambridge'):
+                        is_cambridge = True
+
+                    # Folio images with labels
+                    folio_images = crossref_svc.get_folio_images(actual_sys_id)
+
+                    # Extract current folio label from page number
+                    current_p = result.get('p_num', 0)
+                    if folio_images and 0 < current_p <= len(folio_images):
+                        folio_label = folio_images[current_p - 1].get('folio_label', '')
+            except Exception as crossref_err:
+                print(f"NLI crossref enrichment error: {crossref_err}")
 
             return BrowsePage(
                 uid=result.get('uid', ''),
@@ -333,6 +367,9 @@ class GenizahService:
                 oxford_part_metadata=oxford_part_metadata,
                 library_code=library_code,
                 library_name=library_name,
+                folio_label=folio_label,
+                image_source_info=image_source_info,
+                folio_images=folio_images,
             )
         except Exception as e:
             print(f"Browse page error: {e}")
@@ -408,11 +445,37 @@ class GenizahService:
                 marc_data = {}
                 if hasattr(state.meta_mgr, 'nli_cache') and actual_sys_id in state.meta_mgr.nli_cache:
                      marc_data = state.meta_mgr.nli_cache[actual_sys_id].get('marc', {})
-                
+
                 ext_link = marc_data.get('external_iiif_link')
                 if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
                     is_cambridge = True
                     external_url = ext_link
+
+            # 3. NLI crossref: folio images and source indicators
+            folio_label = ''
+            image_source_info = {}
+            folio_images = []
+            try:
+                from shared.nli_crossref_service import get_nli_crossref_service
+                crossref_svc = get_nli_crossref_service(thread_safe=True)
+                if crossref_svc.is_available() and actual_sys_id:
+                    from genizah_core import normalize_shelfmark
+                    norm_shelf = normalize_shelfmark(shelfmark) if shelfmark else None
+
+                    image_source_info = crossref_svc.get_image_sources(
+                        actual_sys_id, normalized_shelfmark=norm_shelf
+                    )
+
+                    if not is_cambridge and image_source_info.get('cambridge'):
+                        is_cambridge = True
+
+                    folio_images = crossref_svc.get_folio_images(actual_sys_id)
+
+                    current_p = result.get('p_num', 0)
+                    if folio_images and 0 < current_p <= len(folio_images):
+                        folio_label = folio_images[current_p - 1].get('folio_label', '')
+            except Exception as crossref_err:
+                print(f"NLI crossref enrichment error (by_fl): {crossref_err}")
 
             return BrowsePage(
                 uid=result.get('uid', ''),
@@ -437,6 +500,9 @@ class GenizahService:
                 oxford_part_metadata=oxford_part_metadata,
                 library_code=library_code,
                 library_name=library_name,
+                folio_label=folio_label,
+                image_source_info=image_source_info,
+                folio_images=folio_images,
             )
         except Exception as e:
             print(f"Browse page by FL error: {e}")

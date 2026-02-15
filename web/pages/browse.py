@@ -3127,27 +3127,81 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
 
                 # Header bar with folio info, navigation, controls
+                # Determine effective image count and folio data
+                _src_info = page.image_source_info or {}
+                _folio_images = page.folio_images or []
+                _effective_count = _src_info.get('image_count', 0) or page.total_pages
+                _is_single_page = _effective_count <= 1 and page.total_pages <= 1
+                _has_nli = _src_info.get('nli_fgp', False)
+                _has_cambridge = _src_info.get('cambridge', False) or page.is_cambridge
+
                 with ui.card().classes('w-full mb-2').style('background: var(--bg-tertiary);'):
                     with ui.row().classes('w-full items-center justify-between p-3'):
                         with ui.row().classes('items-center gap-4'):
-                            # Folio/Page info
-                            folio = extract_folio_number(page.full_header)
-                            if folio:
-                                # Changed to H2
-                                h2(f"{tr('Folio')} {folio}", classes='font-bold text-lg')
+                            # Folio/Page info -- prefer NLI crossref folio label
+                            if page.folio_label:
+                                h2(f"{tr('Folio')} {page.folio_label}", classes='font-bold text-lg')
                             else:
-                                # Changed to H2
-                                h2(f"{tr('Page')} {page.p_num}", classes='font-bold text-lg')
+                                folio = extract_folio_number(page.full_header)
+                                if folio:
+                                    h2(f"{tr('Folio')} {folio}", classes='font-bold text-lg')
+                                else:
+                                    h2(f"{tr('Page')} {page.p_num}", classes='font-bold text-lg')
+
+                            # Page count display
+                            _display_count = _effective_count if _effective_count > 0 else page.total_pages
+                            if _display_count > 0:
+                                ui.label(
+                                    f"{tr('of')} {_display_count} {tr('pages')}"
+                                ).classes('text-sm').style('color: var(--text-secondary);')
 
                             # Source badge - default to V0.8 unless explicitly V0.7
                             source_class = get_source_badge_class(page.full_header)
                             source_text = 'V0.7' if 'V0.7' in page.full_header else 'V0.8'
                             ui.label(source_text).classes(f'source-badge {source_class}')
 
+                            # Source indicator chips (NLI, CUDL, Oxford)
+                            if _has_nli:
+                                nli_url = f"https://web.nli.org.il/sites/NLIS/he/ManuScript/Pages/Item.aspx?ItemID={page.sys_id}"
+                                ui.button(
+                                    'NLI',
+                                    on_click=lambda u=nli_url: ui.run_javascript(f'window.open("{u}", "_blank")')
+                                ).props('flat dense size=sm no-caps').classes(
+                                    'text-xs px-2 py-0'
+                                ).style(
+                                    'border: 1.5px solid #4caf50; border-radius: 12px; min-height: 24px; color: #4caf50; font-weight: 600;'
+                                ).tooltip(tr('Open in NLI KTIV'))
+
+                            if _has_cambridge:
+                                # Build CUDL viewer URL
+                                cudl_url = page.external_url or ''
+                                if not cudl_url and page.shelfmark:
+                                    # Fallback: construct from shelfmark
+                                    cudl_url = f"https://cudl.lib.cam.ac.uk/view/{page.shelfmark.replace(' ', '-')}"
+                                if cudl_url:
+                                    ui.button(
+                                        'CUDL',
+                                        on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')
+                                    ).props('flat dense size=sm no-caps').classes(
+                                        'text-xs px-2 py-0'
+                                    ).style(
+                                        'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 24px; color: #2196f3; font-weight: 600;'
+                                    ).tooltip(tr('Open in Cambridge Digital Library'))
+
+                            if page.is_oxford and page.external_url:
+                                ui.button(
+                                    'Oxford',
+                                    on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')
+                                ).props('flat dense size=sm no-caps').classes(
+                                    'text-xs px-2 py-0'
+                                ).style(
+                                    'border: 1.5px solid #ff9800; border-radius: 12px; min-height: 24px; color: #ff9800; font-weight: 600;'
+                                ).tooltip(tr('Open in Bodleian Libraries'))
+
                         # Navigation and controls
                         with ui.row().classes('items-center gap-2'):
                             # Previous page button (arrow pointing back)
-                            prev_disabled = page.current_idx <= 1
+                            prev_disabled = _is_single_page or page.current_idx <= 1
                             ui.button(
                                 icon='chevron_right' if is_rtl() else 'chevron_left',
                                 on_click=lambda: load_page(direction=-1)
@@ -3155,30 +3209,51 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
 
-                            # Page input
-                            page_input = ui.number(
-                                value=page.p_num,
-                                min=1,
-                                max=page.total_pages
-                            ).classes('w-16').props('dense outlined')
+                            # Folio dropdown or page input
+                            if _folio_images and len(_folio_images) > 1:
+                                # Build folio options: {p_num: label}
+                                folio_options = {
+                                    str(i + 1): f"{img.get('folio_label', str(i + 1))}"
+                                    for i, img in enumerate(_folio_images)
+                                }
+
+                                def handle_folio_select(e):
+                                    try:
+                                        selected_p = int(e.value) if e.value is not None else 1
+                                        go_to_page(selected_p)
+                                    except (ValueError, TypeError):
+                                        pass
+
+                                ui.select(
+                                    options=folio_options,
+                                    value=str(page.p_num),
+                                    on_change=handle_folio_select
+                                ).classes('w-24').props('dense outlined')
+                            else:
+                                # Fallback: standard page number input
+                                page_input = ui.number(
+                                    value=page.p_num,
+                                    min=1,
+                                    max=page.total_pages
+                                ).classes('w-16').props('dense outlined')
+
+                                # Go button
+                                def handle_go_click():
+                                    try:
+                                        page_num = int(page_input.value) if page_input.value is not None else 1
+                                        go_to_page(page_num)
+                                    except (ValueError, TypeError):
+                                        go_to_page(1)
+
+                                ui.button(
+                                    tr('Go'),
+                                    on_click=handle_go_click
+                                ).props('flat dense color=green')
 
                             ui.label(f"/ {page.total_pages}").classes('text-sm').style('color: var(--text-secondary);')
 
-                            # Go button
-                            def handle_go_click():
-                                try:
-                                    page_num = int(page_input.value) if page_input.value is not None else 1
-                                    go_to_page(page_num)
-                                except (ValueError, TypeError):
-                                    go_to_page(1)
-
-                            ui.button(
-                                tr('Go'),
-                                on_click=handle_go_click
-                            ).props('flat dense color=green')
-
                             # Next page button (arrow pointing forward)
-                            next_disabled = page.current_idx >= page.total_pages
+                            next_disabled = _is_single_page or page.current_idx >= page.total_pages
                             ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
                                 on_click=lambda: load_page(direction=1)
