@@ -8848,11 +8848,8 @@ class GenizahGUI(QMainWindow):
         if frames:
             html += f"<p style='margin-bottom:4px;'><b>{tr('Content Identification')}:</b></p>"
 
-            max_initial = 10
-            show_frames = frames[:max_initial] if len(frames) > max_initial else frames
-
             html += "<ul style='margin-top:2px; padding-left:20px;'>"
-            for frame in show_frames:
+            for frame in frames:
                 text = frame.get('heb') if CURRENT_LANG == 'he' else frame.get('eng')
                 if not text or not text.strip():
                     text = frame.get('eng') if CURRENT_LANG == 'he' else frame.get('heb')
@@ -8867,27 +8864,6 @@ class GenizahGUI(QMainWindow):
                         li += f" <span style='color:gray; font-size:0.85em;'>({source})</span>"
                     html += f"<li>{li}</li>"
             html += "</ul>"
-
-            # If more than max_initial, show remaining with a note
-            if len(frames) > max_initial:
-                remaining = frames[max_initial:]
-                html += f"<details><summary style='color:#9b59b6; cursor:pointer;'>{tr('Show all')} {len(frames)} {tr('identifications')}</summary>"
-                html += "<ul style='padding-left:20px;'>"
-                for frame in remaining:
-                    text = frame.get('heb') if CURRENT_LANG == 'he' else frame.get('eng')
-                    if not text or not text.strip():
-                        text = frame.get('eng') if CURRENT_LANG == 'he' else frame.get('heb')
-                    if text and text.strip():
-                        category, content = parse_textual_frame(text)
-                        source = frame.get('source_name_heb') if CURRENT_LANG == 'he' else frame.get('source_name')
-                        if category:
-                            li = f"<b style='color:#9b59b6;'>{category}:</b> {content}"
-                        else:
-                            li = text
-                        if source and source.strip():
-                            li += f" <span style='color:gray; font-size:0.85em;'>({source})</span>"
-                        html += f"<li>{li}</li>"
-                html += "</ul></details>"
 
         html += "</div>"
         return html
