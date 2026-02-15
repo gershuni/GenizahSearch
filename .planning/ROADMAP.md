@@ -140,7 +140,9 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   2. A clickable NLI catalog link (constructed from NLI_AlmaId) on the browse page opens the NLI KTIV viewer for the manuscript
   3. A clickable link to the manuscript's holding library digital collection (CUDL, Princeton DPUL, Manchester LUNA, BL viewer) appears on the browse page
   4. All metadata and links display in both web and desktop apps
-**Plans**: TBD
+**Plans:** 2 plans
+  - [ ] 32-01-PLAN.md -- Service layer additions (library viewer URL, physical metadata enrichment) + web browse metadata display
+  - [ ] 32-02-PLAN.md -- Desktop browse extended info panel with physical metadata and library links
 
 ### Phase 33: Fragment Relationships
 **Goal**: Users discover related manuscripts through NLI PartOf groupings and See cross-references alongside existing PGP and FJMS joins
