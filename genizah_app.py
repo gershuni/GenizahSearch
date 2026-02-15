@@ -4261,10 +4261,16 @@ class ResultDialog(QDialog):
         else:
             html += kti_html
 
+        # Append FJMS catalog section
+        parent = self.parent()
+        if parent and hasattr(parent, '_build_fjms_catalog_html'):
+            fjms_catalog = parent._build_fjms_catalog_html(self.current_sys_id, text_color)
+            if fjms_catalog:
+                html += fjms_catalog
+
         # Append PGP metadata section if available
         pgp_doc = getattr(self, '_rd_pgp_doc', None)
         if pgp_doc:
-            parent = self.parent()
             if parent and hasattr(parent, '_build_pgp_extended_info_html'):
                 pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette)
                 if pgp_html:
@@ -8595,9 +8601,10 @@ class GenizahGUI(QMainWindow):
             marc, part_id_for_ext, part_meta_ext, external_meta, text_color, base_color
         )
 
-        # Build FJMS domain HTML and prepend to enriched HTML
+        # Build FJMS domain and catalog HTML and prepend to enriched HTML
+        fjms_catalog_html = self._build_fjms_catalog_html(sid, text_color)
         fjms_domain_html = self._build_fjms_domain_html(sid, text_color)
-        enriched_html = fjms_domain_html + enriched_html
+        enriched_html = fjms_domain_html + fjms_catalog_html + enriched_html
 
         self._browse_enriched_html = enriched_html
 
@@ -8795,6 +8802,94 @@ class GenizahGUI(QMainWindow):
             )
         html += ", ".join(links)
         html += "</p></div>"
+        return html
+
+    def _build_fjms_catalog_html(self, sys_id, text_color):
+        """Build HTML for FJMS catalog metadata in extended info."""
+        from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return ""
+
+        records = fjms.get_catalog_records(sys_id)
+        if not records:
+            return ""
+
+        merged = merge_catalog_records(records)
+
+        html = (
+            f"<div style='color:{text_color}; padding: 10px; margin-bottom: 10px; "
+            "border-left: 3px solid #9b59b6; text-align: left;' dir='ltr'>"
+            f"<p style='margin-top:0;'><b>{tr('FJMS Catalog')}</b></p>"
+        )
+
+        # Title (language-aware)
+        title = merged.get('title_heb') if CURRENT_LANG == 'he' else merged.get('title')
+        if title and title.strip():
+            html += f"<p><b>{tr('Title')}:</b> {title}</p>"
+
+        # Author
+        if merged.get('author_text') and merged['author_text'].strip():
+            html += f"<p><b>{tr('Author')}:</b> {merged['author_text']}</p>"
+
+        # Date and Place
+        date = merged.get('copy_date')
+        place = merged.get('copy_place')
+        if date or place:
+            parts = []
+            if date:
+                parts.append(f"<b>{tr('Copy Date')}:</b> {date}")
+            if place:
+                parts.append(f"<b>{tr('Place')}:</b> {place}")
+            html += f"<p>{' &nbsp;|&nbsp; '.join(parts)}</p>"
+
+        # Content Identifications (TextualFrames)
+        frames = merged.get('textual_frames', [])
+        if frames:
+            html += f"<p style='margin-bottom:4px;'><b>{tr('Content Identification')}:</b></p>"
+
+            max_initial = 10
+            show_frames = frames[:max_initial] if len(frames) > max_initial else frames
+
+            html += "<ul style='margin-top:2px; padding-left:20px;'>"
+            for frame in show_frames:
+                text = frame.get('heb') if CURRENT_LANG == 'he' else frame.get('eng')
+                if not text or not text.strip():
+                    text = frame.get('eng') if CURRENT_LANG == 'he' else frame.get('heb')
+                if text and text.strip():
+                    category, content = parse_textual_frame(text)
+                    source = frame.get('source_name_heb') if CURRENT_LANG == 'he' else frame.get('source_name')
+                    if category:
+                        li = f"<b style='color:#9b59b6;'>{category}:</b> {content}"
+                    else:
+                        li = text
+                    if source and source.strip():
+                        li += f" <span style='color:gray; font-size:0.85em;'>({source})</span>"
+                    html += f"<li>{li}</li>"
+            html += "</ul>"
+
+            # If more than max_initial, show remaining with a note
+            if len(frames) > max_initial:
+                remaining = frames[max_initial:]
+                html += f"<details><summary style='color:#9b59b6; cursor:pointer;'>{tr('Show all')} {len(frames)} {tr('identifications')}</summary>"
+                html += "<ul style='padding-left:20px;'>"
+                for frame in remaining:
+                    text = frame.get('heb') if CURRENT_LANG == 'he' else frame.get('eng')
+                    if not text or not text.strip():
+                        text = frame.get('eng') if CURRENT_LANG == 'he' else frame.get('heb')
+                    if text and text.strip():
+                        category, content = parse_textual_frame(text)
+                        source = frame.get('source_name_heb') if CURRENT_LANG == 'he' else frame.get('source_name')
+                        if category:
+                            li = f"<b style='color:#9b59b6;'>{category}:</b> {content}"
+                        else:
+                            li = text
+                        if source and source.strip():
+                            li += f" <span style='color:gray; font-size:0.85em;'>({source})</span>"
+                        html += f"<li>{li}</li>"
+                html += "</ul></details>"
+
+        html += "</div>"
         return html
 
     def _build_browse_enriched_html(self, marc, part_id, part_meta, external_meta, text_color, base_color):
