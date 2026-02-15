@@ -358,7 +358,7 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul style='font-size: 14px; line-height: 1.8;'>"
-            f"<li><b>{tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Fragment of the Jewish Manuscript Studies database')}</b></li>"
+            f"<li><b>{tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Friedberg Genizah Project')}</b></li>"
             f"<li><b>{tr('Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection')}</b></li>"
             "</ul>"
         )

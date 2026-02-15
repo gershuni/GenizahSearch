@@ -1670,7 +1670,7 @@ def create_layout():
                         with ui.column().classes('gap-1'):
                             with ui.row().classes('items-start gap-2'):
                                 ui.label('•').style('color: var(--text-secondary);')
-                                ui.label(tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Fragment of the Jewish Manuscript Studies database')).classes('text-sm').style('color: var(--text-secondary);')
+                                ui.label(tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Friedberg Genizah Project')).classes('text-sm').style('color: var(--text-secondary);')
                             with ui.row().classes('items-start gap-2'):
                                 ui.label('•').style('color: var(--text-secondary);')
                                 ui.label(tr('Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection')).classes('text-sm').style('color: var(--text-secondary);')
