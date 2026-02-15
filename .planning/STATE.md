@@ -9,10 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-15 — Milestone v5.9.0 started
+Phase: 29 of 34 (Data Infrastructure)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-02-15 -- Roadmap created for v5.9.0
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -40,24 +42,19 @@ See PROJECT.md Key Decisions table for full history.
 
 ### Blockers/Concerns
 
-- Phase 13 (Transcription Search) still deferred — needs server-side index architecture
-- FIST catalogs at unit (codex) level, not individual leaf level — upstream FIST data design
+- Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
+- FIST catalogs at unit (codex) level, not individual leaf level -- upstream FIST data design
+- IMG-05 (library IIIF fallback) depends on discovering external IIIF endpoints for JTS/Manchester/BL -- may need research during planning
 
 ### Future Improvements
 
 - FTS5 catalog search UI (schema ready in sidecar, deferred to future milestone)
-- FJMS structured metadata search — leverage TextualFrame tags with FTS5
+- FJMS structured metadata search -- leverage TextualFrame tags with FTS5
 - Transcription search (Phase 13, needs server-side index architecture)
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 13 | ResultDialog compact mode: remove preview image, inline domain, add collapse toggle | 2026-02-14 | f18f4ca | [13-resultdialog-compact-mode-remove-preview](./quick/13-resultdialog-compact-mode-remove-preview/) |
 
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Starting v5.9.0 milestone — defining requirements
+Stopped at: v5.9.0 roadmap created, ready to plan Phase 29
 Resume file: None
-Notes: 6 milestones shipped. Starting v5.9.0 Multi-Source Image & Metadata Integration.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements, 0% complete.

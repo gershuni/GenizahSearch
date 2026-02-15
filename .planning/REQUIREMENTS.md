@@ -43,7 +43,7 @@ Deferred to subsequent milestones:
 
 ### Relationships
 - **REL-03**: NLI BifolioWith pairs (23K non-zero records) as codicological information
-- **REL-04**: NLI joins file import (when received from NLI — cleaner structured data)
+- **REL-04**: NLI joins file import (when received from NLI -- cleaner structured data)
 
 ### Advanced Features
 - **ADV-01**: FTS5 catalog search UI (schema already in FJMS sidecar)
@@ -64,30 +64,28 @@ Deferred to subsequent milestones:
 
 ## Traceability
 
-Updated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | — | Pending |
-| DATA-02 | — | Pending |
-| DATA-03 | — | Pending |
-| IMG-01 | — | Pending |
-| IMG-02 | — | Pending |
-| IMG-03 | — | Pending |
-| IMG-04 | — | Pending |
-| IMG-05 | — | Pending |
-| META-01 | — | Pending |
-| META-02 | — | Pending |
-| META-03 | — | Pending |
-| META-04 | — | Pending |
-| REL-01 | — | Pending |
-| REL-02 | — | Pending |
+| DATA-01 | Phase 29 | Pending |
+| DATA-02 | Phase 29 | Pending |
+| DATA-03 | Phase 29 | Pending |
+| IMG-01 | Phase 30 | Pending |
+| IMG-02 | Phase 30 | Pending |
+| IMG-03 | Phase 31 | Pending |
+| IMG-04 | Phase 31 | Pending |
+| IMG-05 | Phase 34 | Pending |
+| META-01 | Phase 32 | Pending |
+| META-02 | Phase 32 | Pending |
+| META-03 | Phase 32 | Pending |
+| META-04 | Phase 32 | Pending |
+| REL-01 | Phase 33 | Pending |
+| REL-02 | Phase 33 | Pending |
 
 **Coverage:**
-- v5.9.0 requirements: 15 total
-- Mapped to phases: 0
-- Unmapped: 15 (pending roadmap)
+- v5.9.0 requirements: 14 total
+- Mapped to phases: 14/14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-15*
-*Last updated: 2026-02-15 after initial definition*
+*Last updated: 2026-02-15 after roadmap creation*
