@@ -114,7 +114,9 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   1. When viewing any manuscript with NLI crossref coverage (766K records across 75 libraries), images load using FGPImageNumberId-constructed URLs without making an NLI manifest API call
   2. When viewing a Cambridge manuscript, images load via locally stored CUDL IIIF manifest URLs without contacting NLI
   3. Image loading is observably faster than the current NLI manifest fetch path (no network round-trip for URL resolution)
-**Plans**: TBD
+**Plans:** 2 plans
+  - [ ] 30-01-PLAN.md -- Web API local image resolution (FL IDs from crossref sidecar)
+  - [ ] 30-02-PLAN.md -- Desktop enrich_metadata local image resolution + tests
 
 ### Phase 31: Image Navigation & Indicators
 **Goal**: Users can navigate between individual pages/folios of a manuscript and see at a glance which digital image sources are available
