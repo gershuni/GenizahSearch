@@ -15,6 +15,7 @@ web app which serves concurrent requests from multiple threads.
 """
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -439,6 +440,79 @@ class FjmsService:
             logger.error(f"FjmsService.get_catalog error for {sys_id}: {e}")
             return None
 
+    # Sentinel CopyDate values that should be treated as None
+    _SENTINEL_DATES = frozenset(('0', '-99', '-1', '0.0', '-99.0', '-1.0', ''))
+
+    def get_catalog_records(self, sys_id: str) -> list[dict]:
+        """Get all non-empty catalog records for a manuscript.
+
+        Returns list of dicts. Filters out completely empty records and
+        deduplicates by (textual_frame_eng, copy_date, title) tuple.
+        Sentinel CopyDate values (0, -99, -1) are normalized to None.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM catalog WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            results = []
+            seen = set()
+            col_names = None
+
+            for row in cursor:
+                if col_names is None:
+                    col_names = row.keys()
+
+                # Normalize CopyDate sentinel values
+                copy_date = row["CopyDate"]
+                if copy_date is not None and str(copy_date).strip() in self._SENTINEL_DATES:
+                    copy_date = None
+
+                # Handle SourceName columns gracefully (may not exist in old sidecars)
+                has_source = "SourceName" in col_names
+                source_name = row["SourceName"] if has_source else None
+                source_name_heb = row["SourceNameHeb"] if has_source else None
+
+                record = {
+                    "title": row["Title"],
+                    "title_heb": row["TitleHeb"],
+                    "author_text": row["AuthorText"],
+                    "copy_date": copy_date,
+                    "copy_place": row["CopyPlace"],
+                    "textual_frame_heb": row["TextualFrameHeb"],
+                    "textual_frame_eng": row["TextualFrameEng"],
+                    "source_name": source_name,
+                    "source_name_heb": source_name_heb,
+                }
+
+                # Filter completely empty records (source fields don't count)
+                content_fields = (
+                    record["title"], record["title_heb"], record["author_text"],
+                    record["copy_date"], record["copy_place"],
+                    record["textual_frame_heb"], record["textual_frame_eng"],
+                )
+                if not any(v and str(v).strip() for v in content_fields):
+                    continue
+
+                # Deduplicate by key tuple
+                key = (
+                    record["textual_frame_eng"] or '',
+                    record["copy_date"] or '',
+                    record["title"] or '',
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                results.append(record)
+
+            return results
+        except Exception as e:
+            logger.error(f"FjmsService.get_catalog_records error for {sys_id}: {e}")
+            return []
+
     def close(self):
         """Close the database connection if open."""
         if self._conn is not None:
@@ -449,6 +523,86 @@ class FjmsService:
                 logger.error(f"FjmsService.close error: {e}")
             finally:
                 self._conn = None
+
+
+def merge_catalog_records(records: list[dict]) -> dict:
+    """Merge multiple catalog records into a display-ready structure.
+
+    Metadata fields (title, author, date, place) are merged by taking
+    the first non-empty value. TextualFrame entries are collected as
+    a list of distinct values with their source attribution.
+
+    Args:
+        records: List of catalog record dicts from get_catalog_records().
+
+    Returns:
+        Dict with keys: title, title_heb, author_text, copy_date, copy_place,
+        textual_frames (list of dicts), record_count (int).
+    """
+    if not records:
+        return {
+            "title": None, "title_heb": None, "author_text": None,
+            "copy_date": None, "copy_place": None,
+            "textual_frames": [], "record_count": 0,
+        }
+
+    result = {
+        "title": None,
+        "title_heb": None,
+        "author_text": None,
+        "copy_date": None,
+        "copy_place": None,
+    }
+
+    # Take first non-empty value for each metadata field
+    for rec in records:
+        for key in ("title", "title_heb", "author_text", "copy_date", "copy_place"):
+            if result[key] is None and rec.get(key) and str(rec[key]).strip():
+                result[key] = rec[key]
+
+    # Collect distinct TextualFrame entries with source attribution
+    frames = []
+    seen_frames = set()
+    for rec in records:
+        eng = rec.get("textual_frame_eng") or ''
+        heb = rec.get("textual_frame_heb") or ''
+        if not eng.strip() and not heb.strip():
+            continue
+        frame_key = (eng.strip(), heb.strip())
+        if frame_key in seen_frames:
+            continue
+        seen_frames.add(frame_key)
+        frames.append({
+            "eng": eng.strip() if eng.strip() else None,
+            "heb": heb.strip() if heb.strip() else None,
+            "source_name": rec.get("source_name"),
+            "source_name_heb": rec.get("source_name_heb"),
+        })
+
+    result["textual_frames"] = frames
+    result["record_count"] = len(records)
+
+    return result
+
+
+def parse_textual_frame(text: str) -> tuple[str, str]:
+    """Parse '[$Category$]: Content' notation into (category, content).
+
+    Strips optional @ prefix. Returns ('', full_text) if no pattern match.
+
+    Args:
+        text: The textual frame string (e.g., '[$Bible$]: Leviticus 23:40 - 41').
+
+    Returns:
+        Tuple of (category, content). Category is '' if no pattern match.
+    """
+    if not text:
+        return ('', '')
+    text = text.strip().lstrip('@')
+    match = re.match(r'\[\$(.+?)\$\]\s*:\s*(.*)', text, re.DOTALL)
+    if match:
+        return (match.group(1).strip(), match.group(2).strip())
+    return ('', text)
 
 
 # Module-level singleton pattern
