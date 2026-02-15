@@ -20,7 +20,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 BATCH_SIZE = 10_000
 
 
@@ -168,7 +168,9 @@ def export_catalog(source, target):
             DescriptionEng TEXT,
             DescriptionHeb TEXT,
             TextualFrameHeb TEXT,
-            TextualFrameEng TEXT
+            TextualFrameEng TEXT,
+            SourceName TEXT,
+            SourceNameHeb TEXT
         )
     """)
 
@@ -183,12 +185,15 @@ def export_catalog(source, target):
             cat.IdentificationTextEng as DescriptionEng,
             cat.IdentificationTextHeb as DescriptionHeb,
             cat.BI_TextualFrameHeb as TextualFrameHeb,
-            cat.BI_TextualFrameEng as TextualFrameEng
+            cat.BI_TextualFrameEng as TextualFrameEng,
+            cs.EngDesc as SourceName,
+            cs.HebDesc as SourceNameHeb
         FROM dbo_InventoryAlma alma
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
     """)
 
     batch = []
@@ -198,12 +203,13 @@ def export_catalog(source, target):
         cleaned = (
             row[0], row[1], row[2], row[3],
             clean_copy_date(row[4]),
-            row[5], row[6], row[7], row[8], row[9]
+            row[5], row[6], row[7], row[8], row[9],
+            row[10], row[11]  # SourceName, SourceNameHeb
         )
         batch.append(cleaned)
         if len(batch) >= BATCH_SIZE:
             target.executemany(
-                "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 batch,
             )
             total += len(batch)
@@ -211,7 +217,7 @@ def export_catalog(source, target):
 
     if batch:
         target.executemany(
-            "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             batch,
         )
         total += len(batch)
