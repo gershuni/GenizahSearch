@@ -30,8 +30,23 @@ def init_api_routes():
     # NOTE: Backend database and routers removed - using Supabase now
     print("API routes initialized (Supabase mode)")
 
+    # Initialize NLI crossref service for local FL ID resolution (Phase 30)
+    from shared.nli_crossref_service import get_nli_crossref_service
+    nli_svc = get_nli_crossref_service(thread_safe=True)
+    if nli_svc.is_available():
+        print(f"NLI crossref sidecar loaded (local FL ID resolution enabled)")
+    else:
+        print("NLI crossref sidecar not available (will use network manifest fetch)")
+
     def fetch_fl_ids_from_nli(system_id: str, _cache={}, _cache_time={}) -> list:
-        """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached."""
+        """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached.
+
+        Resolution order:
+        1. In-memory cache (fastest)
+        2. Local SQLite sidecar via NliCrossrefService (no network, ~815K pre-resolved records)
+        3. NLI IIIF manifest network fetch (all pages)
+        4. NLI MARC API fallback (typically 1 FL ID)
+        """
         import time as _time
 
         # Check cache first
@@ -40,7 +55,28 @@ def init_api_routes():
             if cache_age < NLI_CACHE_TTL:
                 return _cache[system_id]
 
-        # Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
+        # Try local sidecar resolution first (Phase 30 - IMG-01)
+        # This avoids a network round-trip for ~766K manuscripts with pre-resolved FL IDs
+        if nli_svc.is_available():
+            try:
+                local_images = nli_svc.get_images(system_id)
+                if local_images:
+                    # Extract fgp_image_number_id values -- these ARE the FL IDs
+                    # Filter out empty strings (some records have empty FGPImageNumberId)
+                    fl_ids = [
+                        img["fgp_image_number_id"]
+                        for img in local_images
+                        if img.get("fgp_image_number_id")
+                    ]
+                    if fl_ids:
+                        _cache[system_id] = fl_ids
+                        _cache_time[system_id] = _time.time()
+                        print(f"Resolved {len(fl_ids)} FL IDs for {system_id} from local sidecar")
+                        return fl_ids
+            except Exception as e:
+                print(f"Local sidecar lookup failed for {system_id}: {e}")
+
+        # Fallback: Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -68,7 +104,7 @@ def init_api_routes():
                     # Cache successful result
                     _cache[system_id] = fl_ids
                     _cache_time[system_id] = _time.time()
-                    print(f"Cached {len(fl_ids)} FL IDs for {system_id} from IIIF manifest")
+                    print(f"Resolved {len(fl_ids)} FL IDs for {system_id} from network IIIF manifest")
                     return fl_ids
         except Exception as e:
             print(f"Failed to fetch FL IDs from IIIF manifest for {system_id}: {e}")
