@@ -84,7 +84,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 
 **Milestone Goal:** Import NLI crossreference data (815K image-level records) and Cambridge IIIF manifests (141K URLs) into the SQLite sidecar, enabling direct image access for 75+ libraries without runtime manifest fetching, physical metadata display, fragment relationship surfacing, and library-specific viewer links in both apps.
 
-- [ ] **Phase 29: Data Infrastructure** - Import NLI crossref and Cambridge IIIF into sidecar with shared service layer
+- [x] **Phase 29: Data Infrastructure** - Import NLI crossref and Cambridge IIIF into sidecar with shared service layer (completed 2026-02-15)
 - [ ] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL
 - [ ] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators
 - [ ] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page
@@ -103,8 +103,8 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   3. A shared NliCrossrefService provides image lookup, metadata queries, and relationship queries callable from both web and desktop apps
   4. The service is thread-safe for NiceGUI concurrent access and gracefully returns empty results when sidecar is missing
 **Plans:** 2 plans
-  - [ ] 29-01-PLAN.md -- Import NLI crossref CSV and Cambridge IIIF JSON into SQLite sidecar
-  - [ ] 29-02-PLAN.md -- NliCrossrefService shared service layer, web shim, and unit tests
+  - [x] 29-01-PLAN.md -- Import NLI crossref CSV and Cambridge IIIF JSON into SQLite sidecar
+  - [x] 29-02-PLAN.md -- NliCrossrefService shared service layer, web shim, and unit tests
 
 ### Phase 30: Direct Image Access
 **Goal**: Users see manuscript images load faster because image URLs are resolved locally instead of fetching NLI IIIF manifests at runtime
@@ -174,7 +174,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
 | 25-28 | v5.8.0 | 12/12 | Complete | 2026-02-15 |
-| 29. Data Infrastructure | v5.9.0 | 0/TBD | Not started | - |
+| 29. Data Infrastructure | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 30. Direct Image Access | v5.9.0 | 0/TBD | Not started | - |
 | 31. Image Nav & Indicators | v5.9.0 | 0/TBD | Not started | - |
 | 32. Metadata Display | v5.9.0 | 0/TBD | Not started | - |
@@ -183,4 +183,4 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-15 after v5.9.0 roadmap created*
+*Last updated: 2026-02-15 after Phase 29 complete*
