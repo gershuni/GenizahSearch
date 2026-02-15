@@ -1670,10 +1670,13 @@ def create_layout():
                         with ui.column().classes('gap-1'):
                             with ui.row().classes('items-start gap-2'):
                                 ui.label('•').style('color: var(--text-secondary);')
-                                ui.label(tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Friedberg Genizah Project')).classes('text-sm').style('color: var(--text-secondary);')
+                                ui.label(tr('Responsa-Project style Search: advanced syntax parsing with grammatical expansion, Judeo-Arabic support, and tabular query builder')).classes('text-sm').style('color: var(--text-secondary);')
                             with ui.row().classes('items-start gap-2'):
                                 ui.label('•').style('color: var(--text-secondary);')
-                                ui.label(tr('Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection')).classes('text-sm').style('color: var(--text-secondary);')
+                                ui.label(tr('PGP Integration: 35,000 documents from the Princeton Geniza Project with editions, translations, and more information')).classes('text-sm').style('color: var(--text-secondary);')
+                            with ui.row().classes('items-start gap-2'):
+                                ui.label('•').style('color: var(--text-secondary);')
+                                ui.label(tr('FJMS scholarly metadata: 390K domain classifications, 48K scientific joins, and 500K catalog records from the Friedberg Genizah Project')).classes('text-sm').style('color: var(--text-secondary);')
                     def dismiss_whats_new():
                         app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                         whats_new_banner.delete()

@@ -167,7 +167,7 @@ TRANSLATIONS = {
     # --- Responsa Mode ---
     "Responsa": "פרויקט השו\"ת",
     "Responsa (R)": "פרויקט השו\"ת (R)",
-    "Responsa-style grammatical expansion for Hebrew search": "הרחבה דקדוקית בסגנון פרויקט השו\"ת לחיפוש עברי",
+    "Responsa-Project style grammatical expansion for Hebrew search": "הרחבה דקדוקית בסגנון פרויקט השו\"ת לחיפוש עברי",
     "Judeo-Arabic": "ערבית-יהודית",
     "Flex Spacing": "רווח גמיש",
     "Bidirectional Gap": "פער דו-כיווני",
@@ -2297,21 +2297,19 @@ TRANSLATIONS = {
 
     # --- What's New notifications ---
     "New Features!": "תכונות חדשות!",
-    "Responsa-style search: advanced search with operators and an intuitive tabular query builder":
-        "חיפוש בסגנון פרויקט השו\"ת: חיפוש מתקדם עם אופרטורים וחיפוש טבלאי אינטואיטיבי",
-    "Princeton Geniza Project (PGP) integration: information, transcriptions, and translations for over 35,000 documents":
-        "שילוב מידע מפרויקט הגניזה של פרינסטון (PGP) - מידע, תעתיקים ותרגומים למעל 35,000 מסמכים",
-    "FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Friedberg Genizah Project":
-        "מטא-דאטה מדעי מ-FJMS: סיווגי תחום, צירופים מדעיים ורשומות קטלוג מפרויקט הגניזה של פרידברג",
-    "Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection":
-        "סינון לפי תחום: סינון תוצאות חיפוש לפי נושא (פיוט, מקרא, מכתבים ועוד) עם בחירה היררכית",
-    "New: FJMS scholarly metadata — domains, scientific joins & catalog records":
-        "חדש: מטא-דאטה מדעי מ-FJMS — תחומים, צירופים מדעיים ורשומות קטלוג",
+    "Responsa-Project style Search: advanced syntax parsing with grammatical expansion, Judeo-Arabic support, and tabular query builder":
+        "חיפוש בסגנון פרויקט השו\"ת: פענוח תחביר מתקדם עם הרחבה דקדוקית, תמיכה בערבית-יהודית ובונה שאילתות טבלאי",
+    "PGP Integration: 35,000 documents from the Princeton Geniza Project with editions, translations, and more information":
+        "שילוב PGP: 35,000 מסמכים מפרויקט הגניזה של פרינסטון עם מהדורות, תרגומים ומידע נוסף",
+    "FJMS scholarly metadata: 390K domain classifications, 48K scientific joins, and 500K catalog records from the Friedberg Genizah Project":
+        "מטא-דאטה מדעי מ-FJMS: 390K סיווגי תחום, 48K צירופי קטעים ו-500K רשומות קטלוג מפרויקט הגניזה של פרידברג",
+    "New: Responsa-Project style search, PGP corpus (35K documents), and FJMS scholarly metadata":
+        "חדש: חיפוש בסגנון פרויקט השו\"ת, מאגר PGP (35K מסמכים) ונתונים מפרויקט הגנזיה של פרידברג",
     "Got it!": "הבנתי!",
     "Learn More": "למידע נוסף",
 
     # --- Feature discovery hints ---
-    "Try the Responsa-style search mode!": "נסו את מצב חיפוש בסגנון השו\"ת!",
+    "Try the Responsa-project style search mode!": "נסו את מצב חיפוש בסגנון פרויקט השו\"ת!",
     "Try the Tabular Search!": "נסו את החיפוש הטבלאי!",
 
     # --- Domain Filter ---

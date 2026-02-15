@@ -74,7 +74,7 @@ Integration of scholarly metadata from the Fragment of the Jewish Manuscript Stu
 
 ### Milestone: Responsa Search
 
-Advanced search capabilities inspired by the Responsa Project, available in both web and desktop apps. Researchers can now use Responsa-style syntax, grammatical expansion, Judeo-Arabic support, and a visual query builder to search the Genizah corpus with fine-grained control.
+Advanced search capabilities inspired by the Responsa Project, available in both web and desktop apps. Researchers can now use Responsa-Project style syntax, grammatical expansion, Judeo-Arabic support, and a visual query builder to search the Genizah corpus with fine-grained control.
 
 #### Responsa Core Engine (Phase 14)
 - **Responsa syntax**: `#word` (prefix expansion), `word#` (suffix expansion), `#word#` (both), `*word`/`word*` (wildcards), `%word` (plene/defective variants), `(a/b)` (OR alternatives), `[N]` (gap notation)

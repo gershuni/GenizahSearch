@@ -463,7 +463,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             mode_select.classes('feature-glow')
                             mode_select.style('position: relative;')
                             with mode_select:
-                                ui.label(tr('Try the Responsa-style search mode!')).classes('feature-hint')
+                                ui.label(tr('Try the Responsa-project style search mode!')).classes('feature-hint')
 
                     # Track current preset level based on mode
                     def get_level_from_mode(mode):

@@ -326,7 +326,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: FJMS scholarly metadata — domains, scientific joins & catalog records"))
+        self.lbl_msg.setText(tr("New: Responsa-Project style search, PGP corpus (35K documents), and FJMS scholarly metadata"))
         self.show()
 
     def on_learn_more(self):
@@ -344,7 +344,7 @@ class WhatsNewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("New Features!"))
         self.setModal(True)
-        self.setFixedSize(500, 300)
+        self.setFixedSize(500, 380)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         layout = QVBoxLayout(self)
@@ -357,15 +357,16 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         features_html = (
-            "<ul style='font-size: 14px; line-height: 1.8;'>"
-            f"<li><b>{tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Friedberg Genizah Project')}</b></li>"
-            f"<li><b>{tr('Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection')}</b></li>"
+            "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
+            f"<li><b>{tr('Responsa-Project style Search: advanced syntax parsing with grammatical expansion, Judeo-Arabic support, and tabular query builder')}</b></li>"
+            f"<li><b>{tr('PGP Integration: 35,000 documents from the Princeton Geniza Project with editions, translations, and more information')}</b></li>"
+            f"<li><b>{tr('FJMS scholarly metadata: 390K domain classifications, 48K scientific joins, and 500K catalog records from the Friedberg Genizah Project')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)
         features_label.setWordWrap(True)
         features_label.setTextFormat(Qt.TextFormat.RichText)
-        features_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        features_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         layout.addWidget(features_label)
 
         layout.addStretch()
@@ -7224,7 +7225,7 @@ class GenizahGUI(QMainWindow):
         if not cfg.get('hint_responsa_seen'):
             self._mode_glow_active = True
             self._mode_glow_on = True
-            self.mode_combo.setToolTip(tr("Try the Responsa-style search mode!"))
+            self.mode_combo.setToolTip(tr("Try the Responsa-project style search mode!"))
             self._mode_glow_timer = QTimer(self)
             self._mode_glow_timer.timeout.connect(self._pulse_mode_glow)
             self._mode_glow_timer.start(800)
@@ -7236,7 +7237,7 @@ class GenizahGUI(QMainWindow):
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
-        self.mode_combo.setItemData(2, tr("Responsa-style grammatical expansion for Hebrew search"))
+        self.mode_combo.setItemData(2, tr("Responsa-Project style grammatical expansion for Hebrew search"))
         self.mode_combo.setItemData(3, tr("Fuzzy search: Levenshtein distance"))
         self.mode_combo.setItemData(4, tr("Regex: Advanced pattern matching"))
         self.mode_combo.setItemData(5, tr("Search in Title metadata"))
@@ -13627,7 +13628,7 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, '_mode_glow_timer'):
             self._mode_glow_timer.stop()
         self.mode_combo.setStyleSheet("")
-        self.mode_combo.setToolTip(tr("Responsa-style grammatical expansion for Hebrew search"))
+        self.mode_combo.setToolTip(tr("Responsa-Project style grammatical expansion for Hebrew search"))
         # Clear the green background and sparkle from the Responsa item
         from PyQt6.QtGui import QBrush
         self.mode_combo.model().item(self.MODE_RESPONSA).setBackground(QBrush())

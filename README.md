@@ -22,7 +22,7 @@ Integration of scholarly metadata from the **Fragment of the Jewish Manuscript S
 
 ### Previous Features (v5.0–v5.7)
 
-* **Responsa Search:** Advanced search with Responsa-style syntax, grammatical expansion, Judeo-Arabic support, and tabular query builder
+* **Responsa Search:** Advanced search with Responsa-Project style syntax, grammatical expansion, Judeo-Arabic support, and tabular query builder
 * **Princeton Geniza Project (PGP):** 35,839 curated documents with transcriptions, translations, and metadata
 * **Virtual Reading Desk:** Multi-manuscript synchronized viewer for related fragments
 * **PGP Tag Search:** 251 tags in 16 categories for thematic browsing

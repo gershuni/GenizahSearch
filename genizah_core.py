@@ -4107,7 +4107,7 @@ class ResponsaComponent:
 
 
 def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
-    """Parse a Responsa-style query string into a list of ResponsaComponent objects.
+    """Parse a Responsa-Project style query string into a list of ResponsaComponent objects.
 
     Supported syntax:
     - Plain words: "שלום" -> single component
