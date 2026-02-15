@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 31 of 34 (Image Navigation & Indicators) -- COMPLETE
-Plan: 2 of 2 in current phase -- ALL DONE
-Status: Phase 31 complete, ready for Phase 32
-Last activity: 2026-02-15 -- Completed 31-02 (Desktop folio navigation & source indicators)
+Plan: 3 of 3 in current phase -- ALL DONE
+Status: Phase 31 complete (including gap closure), ready for Phase 32
+Last activity: 2026-02-15 -- Completed 31-03 (Web source switching gap closure)
 
 Progress: [████░░░░░░] 33%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 89 (across all milestones)
+- Total plans completed: 90 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.6 hours
 
@@ -33,9 +33,10 @@ Progress: [████░░░░░░] 33%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
-| v5.9.0 | 29-34 | 6 | 19 min |
+| v5.9.0 | 29-34 | 7 | 22 min |
 | Phase 31 P01 | 5min | 2 tasks | 5 files |
 | Phase 31 P02 | 7min | 2 tasks | 4 files |
+| Phase 31 P03 | 3min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -57,6 +58,8 @@ See PROJECT.md Key Decisions table for full history.
 - 31-02: KTIV button uses QPushButton with green chip styling matching web NLI indicator
 - 31-02: image_source_info and folio_images added to enrich_metadata for both web and desktop
 - 31-02: btn_external visibility fixed (was always hidden, now shows for Cambridge/Oxford)
+- 31-03: Cambridge proxy fetches images_ext from nli_cache -- no new canvas discovery needed
+- 31-03: Source chips toggle only when both NLI and Cambridge available; single-source keeps external-link behavior
 
 ### Blockers/Concerns
 
@@ -73,6 +76,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 31-02-PLAN.md (Phase 31 complete)
+Stopped at: Completed 31-03-PLAN.md (Phase 31 gap closure complete)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-31 complete -- 6 plans delivered. Ready for Phase 32 (Metadata Display).
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-31 complete -- 7 plans delivered. Ready for Phase 32 (Metadata Display).

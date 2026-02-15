@@ -86,7 +86,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 
 - [x] **Phase 29: Data Infrastructure** - Import NLI crossref and Cambridge IIIF into sidecar with shared service layer (completed 2026-02-15)
 - [x] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL (completed 2026-02-15)
-- [ ] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators
+- [x] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators (completed 2026-02-15)
 - [ ] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page
 - [ ] **Phase 33: Fragment Relationships** - NLI PartOf and See cross-references in Related Fragments panel
 - [ ] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources
@@ -126,7 +126,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   1. On the browse page, an indicator shows which digital image sources exist for the current manuscript (e.g., NLI/FGP, Cambridge CUDL, library-specific)
   2. The image availability indicator appears in both web and desktop apps
   3. Users can navigate between individual pages (recto/verso, folios) using the crossref ImageName ordering to step through leaf/folio/side sequences
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
   - [x] 31-01-PLAN.md -- Folio label parsing in service layer + web browse page folio navigation and source indicators
   - [x] 31-02-PLAN.md -- Desktop browse tab folio navigation and source indicators
   - [ ] 31-03-PLAN.md -- Gap closure: web source switching between NLI and Cambridge images
@@ -181,7 +181,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 25-28 | v5.8.0 | 12/12 | Complete | 2026-02-15 |
 | 29. Data Infrastructure | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
-| 31. Image Nav & Indicators | v5.9.0 | 0/2 | Planned | - |
+| 31. Image Nav & Indicators | 3/3 | Complete   | 2026-02-15 | - |
 | 32. Metadata Display | v5.9.0 | 0/TBD | Not started | - |
 | 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
 | 34. Library IIIF Fallback | v5.9.0 | 0/TBD | Not started | - |
