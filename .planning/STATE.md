@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 Phase: 27 of 28 (Domain Classifications) -- third of 4 in v5.8.0 -- Gap closure complete
 Plan: 5 of 5 in current phase (all plans complete)
 Status: Phase 27 complete -- domain classifications fully integrated in both apps
-Last activity: 2026-02-13 -- Completed 27-05 desktop post-search domain filter
+Last activity: 2026-02-14 -- Completed quick task 13: ResultDialog compact mode
 
 Progress: [██████████] 100% (11/11 plans)
 
@@ -74,6 +74,12 @@ Progress: [██████████] 100% (11/11 plans)
 - FTS5 catalog search UI (schema ready, deferred to future milestone)
 - NLI joins import (~424K PartOf relationships)
 - Transcription search (Phase 13, needs server-side index architecture)
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 13 | ResultDialog compact mode: remove preview image, inline domain, add collapse toggle | 2026-02-14 | f18f4ca | [13-resultdialog-compact-mode-remove-preview](./quick/13-resultdialog-compact-mode-remove-preview/) |
 
 ## Session Continuity
 
