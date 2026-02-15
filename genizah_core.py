@@ -3227,6 +3227,20 @@ class MetadataManager:
         images_nli = []
         images_ext = []
 
+        # Initialize crossref service once (used for both Cambridge supplement and NLI FL IDs)
+        crossref_svc = _get_crossref_service()
+
+        # 2a-supplement: if MARC didn't provide a CUDL link, try crossref sidecar
+        if not ext_link and crossref_svc and crossref_svc.is_available():
+            shelfmark = current_meta.get('shelfmark', '')
+            if shelfmark:
+                norm_sm = normalize_shelfmark(shelfmark)
+                cam_manifest_url = crossref_svc.get_cambridge_manifest(norm_sm)
+                if cam_manifest_url:
+                    ext_link = cam_manifest_url
+                    current_meta['external_url'] = ext_link
+                    LOGGER.info(f"Using local Cambridge manifest for {system_id} from crossref sidecar")
+
         # 2a. Fetch External IIIF (Cambridge)
         if ext_link:
             ext_data = self.fetch_external_iiif_data(ext_link)
@@ -3262,7 +3276,6 @@ class MetadataManager:
                     current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
 
         # 2b. Try local crossref sidecar for NLI images (skips IIIF manifest network fetch)
-        crossref_svc = _get_crossref_service()
         local_images = []
         if crossref_svc and crossref_svc.is_available():
             crossref_images = crossref_svc.get_images(system_id)
