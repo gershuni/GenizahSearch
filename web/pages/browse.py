@@ -1968,9 +1968,96 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 if date_rationale:
                                     create_translatable_text(date_rationale, container_style='color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
 
-                    # === FJMS Domain Classifications ===
-                    from shared.fjms_service import get_fjms_service
+                    # === FJMS Catalog Metadata ===
+                    from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
                     fjms = get_fjms_service(thread_safe=True)
+                    if fjms.is_available():
+                        catalog_records = fjms.get_catalog_records(page.sys_id)
+                        if catalog_records:
+                            ui.separator().classes('my-3')
+                            # Section header with purple FJMS badge
+                            with ui.row().classes('items-center gap-2 mb-2'):
+                                h3(tr('FJMS Catalog'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                                ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+
+                            merged = merge_catalog_records(catalog_records)
+                            lang = get_language()
+
+                            # Title (language-aware)
+                            title = merged.get('title_heb') if lang == 'he' else merged.get('title')
+                            if title and title.strip():
+                                with ui.column().classes('gap-1 mb-2'):
+                                    ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(title).classes('text-sm').style('color: var(--text-primary);')
+
+                            # Author (prominent)
+                            if merged.get('author_text') and merged['author_text'].strip():
+                                with ui.column().classes('gap-1 mb-2'):
+                                    ui.label(tr('Author')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(merged['author_text']).classes('text-sm').style('color: var(--text-primary);')
+
+                            # Copy Date and Place (inline row)
+                            date = merged.get('copy_date')
+                            place = merged.get('copy_place')
+                            if date or place:
+                                with ui.row().classes('gap-6 mb-2'):
+                                    if date:
+                                        with ui.column().classes('gap-1'):
+                                            ui.label(tr('Copy Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                            ui.label(str(date)).classes('text-sm').style('color: var(--text-primary);')
+                                    if place:
+                                        with ui.column().classes('gap-1'):
+                                            ui.label(tr('Place')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                            ui.label(place).classes('text-sm').style('color: var(--text-primary);')
+
+                            # Content Identifications (TextualFrames)
+                            frames = merged.get('textual_frames', [])
+                            if frames:
+                                with ui.column().classes('gap-1 mb-2'):
+                                    ui.label(tr('Content Identification')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+
+                                    # Determine how many to show initially
+                                    max_initial = 10
+                                    show_frames = frames[:max_initial] if len(frames) > max_initial else frames
+
+                                    for frame in show_frames:
+                                        text = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                        if not text or not text.strip():
+                                            # Fallback to other language if preferred is empty
+                                            text = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                        if text and text.strip():
+                                            category, content = parse_textual_frame(text)
+                                            source = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                            with ui.row().classes('gap-1 items-baseline'):
+                                                if category:
+                                                    ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                                    ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                                else:
+                                                    ui.label(text).classes('text-sm').style('color: var(--text-primary);')
+                                                if source and source.strip():
+                                                    ui.label(f'({source})').classes('text-xs').style('color: var(--text-tertiary);')
+
+                                    # "Show all N identifications" expansion for 10+ frames
+                                    if len(frames) > max_initial:
+                                        remaining = frames[max_initial:]
+                                        with ui.expansion(f'{tr("Show all")} {len(frames)} {tr("identifications")}').classes('text-xs'):
+                                            for frame in remaining:
+                                                text = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                                if not text or not text.strip():
+                                                    text = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                                if text and text.strip():
+                                                    category, content = parse_textual_frame(text)
+                                                    source = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                                    with ui.row().classes('gap-1 items-baseline'):
+                                                        if category:
+                                                            ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                                            ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                                        else:
+                                                            ui.label(text).classes('text-sm').style('color: var(--text-primary);')
+                                                        if source and source.strip():
+                                                            ui.label(f'({source})').classes('text-xs').style('color: var(--text-tertiary);')
+
+                    # === FJMS Domain Classifications ===
                     if fjms.is_available():
                         domains = fjms.get_domains(page.sys_id)
                         if domains:

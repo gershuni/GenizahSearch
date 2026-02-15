@@ -2331,6 +2331,14 @@ TRANSLATIONS = {
     "Filter by Subject Domain": "סנן לפי תחום נושא",
     "Run a search first to see domain options.": "בצע חיפוש תחילה כדי לראות אפשרויות תחום.",
 
+    # --- FJMS Catalog ---
+    "FJMS Catalog": "קטלוג FJMS",
+    "Content Identification": "זיהוי תוכן",
+    "Copy Date": "תאריך העתקה",
+    "Place": "מקום",
+    "Show all": "הצג הכל",
+    "identifications": "זיהויים",
+
     # --- Compact Mode ---
     "Compact": "צמצם",
     "Expand": "הרחב",
