@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 
 ## Current Position
 
-Phase: 28 of 28 (Catalog Enrichment) -- fourth of 4 in v5.8.0
-Plan: 1 of 2 in current phase (plan 01 complete)
-Status: Plan 01 complete -- data foundation ready, Plan 02 (UI integration) next
-Last activity: 2026-02-15 -- Completed 28-01-PLAN.md (catalog data foundation)
+Phase: 28 of 28 (Catalog Enrichment) -- fourth of 4 in v5.8.0 -- COMPLETE
+Plan: 2 of 2 in current phase (all plans complete)
+Status: Phase 28 complete -- v5.8.0 FJMS Integration milestone complete (13/13 plans)
+Last activity: 2026-02-15 -- Completed 28-02-PLAN.md (catalog UI integration)
 
-Progress: [████████████████████] 100% (12/13 plans)
+Progress: [████████████████████] 100% (13/13 plans)
 
 ## Performance Metrics
 
@@ -32,7 +32,7 @@ Progress: [████████████████████] 100% (1
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 12/13 | 53 min |
+| v5.8.0 | 25-28 | 13/13 | 57 min |
 
 ## Accumulated Context
 
@@ -66,6 +66,9 @@ Progress: [████████████████████] 100% (1
 - [Phase 28]: Sentinel CopyDate values (0, -99, -1) normalized to None in catalog retrieval
 - [Phase 28]: Catalog dedup by (textual_frame_eng, copy_date, title) tuple; empty records filtered out
 - [Phase 28]: Sidecar re-exported at v1.1.0 with 500K catalog rows, 466K with SourceName data
+- [Phase 28]: FJMS Catalog section between PGP metadata and Domain Classifications on web browse page
+- [Phase 28]: Desktop catalog placed between domains and KTI enrichment in extended info panel
+- [Phase 28]: 10-item initial display with expansion for overflow content identifications
 
 ### Blockers/Concerns
 
@@ -88,6 +91,6 @@ Progress: [████████████████████] 100% (1
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 28-01-PLAN.md (catalog data foundation)
+Stopped at: Completed 28-02-PLAN.md (catalog UI integration) -- Phase 28 complete, v5.8.0 milestone complete
 Resume file: None
-Notes: Plan 01 complete (2/2 tasks). Sidecar re-exported with SourceName columns (v1.1.0). Three new FjmsService functions: get_catalog_records(), merge_catalog_records(), parse_textual_frame(). Plan 02 (UI integration in web and desktop) is next.
+Notes: Plan 02 complete (2/2 tasks). FJMS catalog section added to web browse page (NiceGUI), desktop Browse tab, and ResultDialog. Translation keys added. All 5 CAT requirements covered. v5.8.0 FJMS Integration milestone complete (13/13 plans across phases 25-28).
