@@ -53,9 +53,19 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Catalog enrichment display (titles, authors, dates) on browse page (both apps) -- v5.8.0
 - FTS5 schema in sidecar (UI deferred) -- v5.8.0
 
-### Active
+### Active (v5.9.0 Multi-Source Image & Metadata Integration)
 
-<!-- No active milestone — ready for /gsd:new-milestone -->
+- [ ] **DATA-01**: NLI crossreference data (815K records) imported into SQLite sidecar with sys_id join key
+- [ ] **DATA-02**: Cambridge IIIF manifest (141K URLs) imported into SQLite sidecar with shelfmark lookup
+- [ ] **DATA-03**: Shared CrossRefService providing image, metadata, and relationship queries for both apps
+- [ ] **IMG-01**: Cambridge manuscripts load images via local IIIF lookup (no NLI manifest fetch)
+- [ ] **IMG-02**: Pre-resolved FL IDs from crossref used for faster image loading across all libraries
+- [ ] **META-01**: Material type (paper/parchment) displayed on browse page (both apps)
+- [ ] **META-02**: Folio count displayed on browse page (both apps)
+- [ ] **META-03**: Image availability indicator showing which sources have digitized images (both apps)
+- [ ] **REL-01**: NLI PartOf relationships surfaced in Related Fragments panel (both apps)
+- [ ] **REL-02**: BifolioWith pairs surfaced in Related Fragments panel (both apps)
+- [ ] **REL-03**: See cross-references surfaced in Related Fragments panel (both apps)
 
 ### Out of Scope
 
@@ -81,7 +91,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ## Context
 
-### Current State (after v5.8.0)
+### Current State (after v5.9.0 start)
 
 **Shipped:** v5.8.0 FJMS Integration (2026-02-15, git tag v5.8.0)
 - SQLite sidecar database (762K rows) from FIST.db with domains, joins, catalog + FTS5 index
@@ -162,4 +172,4 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Sentinel CopyDate values normalized to None | Clean display, no meaningless 0/-99/-1 dates shown | Good |
 
 ---
-*Last updated: 2026-02-15 after v5.8.0 milestone complete*
+*Last updated: 2026-02-15 after v5.9.0 milestone started*

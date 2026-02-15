@@ -5,13 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Planning next milestone
+**Current focus:** v5.9.0 Multi-Source Image & Metadata Integration
 
 ## Current Position
 
-Phase: None active -- v5.8.0 milestone archived
-Status: Ready for /gsd:new-milestone
-Last activity: 2026-02-15 -- Archived v5.8.0 FJMS Integration milestone
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-15 — Milestone v5.9.0 started
 
 ## Performance Metrics
 
@@ -39,14 +40,13 @@ See PROJECT.md Key Decisions table for full history.
 
 ### Blockers/Concerns
 
-- Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
-- FIST catalogs at unit (codex) level, not individual leaf level -- upstream FIST data design
+- Phase 13 (Transcription Search) still deferred — needs server-side index architecture
+- FIST catalogs at unit (codex) level, not individual leaf level — upstream FIST data design
 
 ### Future Improvements
 
 - FTS5 catalog search UI (schema ready in sidecar, deferred to future milestone)
-- FJMS structured metadata search -- leverage TextualFrame tags with FTS5
-- NLI joins import (~424K PartOf relationships)
+- FJMS structured metadata search — leverage TextualFrame tags with FTS5
 - Transcription search (Phase 13, needs server-side index architecture)
 
 ### Quick Tasks Completed
@@ -58,6 +58,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: v5.8.0 FJMS Integration milestone archived, git tagged
+Stopped at: Starting v5.9.0 milestone — defining requirements
 Resume file: None
-Notes: All 6 milestones shipped (v1, v5.6.0, v5.7.0, v5.7.2, v5.7.3, v5.8.0). 84 plans across 28 phases. Ready for next milestone.
+Notes: 6 milestones shipped. Starting v5.9.0 Multi-Source Image & Metadata Integration.
