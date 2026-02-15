@@ -181,11 +181,11 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 25-28 | v5.8.0 | 12/12 | Complete | 2026-02-15 |
 | 29. Data Infrastructure | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
-| 31. Image Nav & Indicators | 3/3 | Complete   | 2026-02-15 | - |
+| 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
 | 32. Metadata Display | v5.9.0 | 0/TBD | Not started | - |
 | 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
 | 34. Library IIIF Fallback | v5.9.0 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-15 after Phase 30 complete*
+*Last updated: 2026-02-15 after Phase 31 complete*
