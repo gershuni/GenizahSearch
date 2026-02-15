@@ -126,7 +126,9 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   1. On the browse page, an indicator shows which digital image sources exist for the current manuscript (e.g., NLI/FGP, Cambridge CUDL, library-specific)
   2. The image availability indicator appears in both web and desktop apps
   3. Users can navigate between individual pages (recto/verso, folios) using the crossref ImageName ordering to step through leaf/folio/side sequences
-**Plans**: TBD
+**Plans:** 2 plans
+  - [ ] 31-01-PLAN.md -- Folio label parsing in service layer + web browse page folio navigation and source indicators
+  - [ ] 31-02-PLAN.md -- Desktop browse tab folio navigation and source indicators
 
 ### Phase 32: Metadata Display
 **Goal**: Users see physical manuscript metadata and can navigate to external catalog pages for the manuscripts they are viewing
@@ -178,7 +180,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 25-28 | v5.8.0 | 12/12 | Complete | 2026-02-15 |
 | 29. Data Infrastructure | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
-| 31. Image Nav & Indicators | v5.9.0 | 0/TBD | Not started | - |
+| 31. Image Nav & Indicators | v5.9.0 | 0/2 | Planned | - |
 | 32. Metadata Display | v5.9.0 | 0/TBD | Not started | - |
 | 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
 | 34. Library IIIF Fallback | v5.9.0 | 0/TBD | Not started | - |
