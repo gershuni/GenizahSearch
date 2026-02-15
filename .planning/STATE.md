@@ -9,17 +9,17 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 ## Current Position
 
-Phase: 29 of 34 (Data Infrastructure)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-02-15 -- Completed 29-01 (NLI crossref + Cambridge IIIF import)
+Phase: 30 of 34 (Image Resolution)
+Plan: 1 of ? in current phase
+Status: Phase 29 complete, ready for Phase 30
+Last activity: 2026-02-15 -- Completed 29-02 (NLI crossref service layer)
 
-Progress: [█░░░░░░░░░] 7%
+Progress: [██░░░░░░░░] 13%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 85 (across all milestones)
+- Total plans completed: 86 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.5 hours
 
@@ -33,7 +33,7 @@ Progress: [█░░░░░░░░░] 7%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
-| v5.9.0 | 29-34 | 1 | 4 min |
+| v5.9.0 | 29-34 | 2 | 7 min |
 
 ## Accumulated Context
 
@@ -44,6 +44,8 @@ See PROJECT.md Key Decisions table for full history.
 - 29-01: Separate sidecar file (nli_crossref.db) rather than adding to fjms_enrichment.db -- different provenance and update cycles
 - 29-01: All 25 NLI CSV columns stored as TEXT -- no filtering per user decision
 - 29-01: CUDL label normalization: strip MS- prefix, split by dash, strip leading zeros, rejoin with dots between numerics
+- 29-02: Followed FJMS service pattern exactly for NliCrossrefService -- same _find_project_root(), URI read-only mode, thread_safe param, singleton
+- 29-02: get_image_sources combines NLI FGP and Cambridge checks in single call for efficient UI badge rendering
 
 ### Blockers/Concerns
 
@@ -60,6 +62,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 29-01-PLAN.md
+Stopped at: Completed 29-02-PLAN.md (Phase 29 complete)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Plan 29-01 complete.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 29 (Data Infrastructure) complete -- 2 plans delivered.
