@@ -143,10 +143,11 @@ Plans:
   3. Copy date and copy place from the FJMS catalog are displayed when available
   4. FJMS description appears alongside PGP description (not replacing it) so the user can see both scholarly perspectives
   5. All catalog enrichment fields display in both web and desktop apps
-**Plans**: TBD
+**Plans**: 2 plans in 2 waves
 
 Plans:
-- [ ] 28-01: Catalog enrichment display (both apps)
+- [ ] 28-01-PLAN.md -- Export re-run with SourceName columns + FjmsService catalog helpers (Wave 1)
+- [ ] 28-02-PLAN.md -- FJMS catalog display in web browse page and desktop extended info (Wave 2, depends on 28-01)
 
 ## Progress
 
@@ -164,8 +165,8 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
 | 26. Scientific Joins | v5.8.0 | 3/3 | Complete | 2026-02-12 |
 | 27. Domain Classifications | v5.8.0 | 5/5 | Complete | 2026-02-13 |
-| 28. Catalog Enrichment | v5.8.0 | 0/1 | Not started | - |
+| 28. Catalog Enrichment | v5.8.0 | 0/2 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-13 after Phase 27 complete (5/5 plans, verification passed 21/21)*
+*Last updated: 2026-02-15 after Phase 28 planning (2 plans in 2 waves)*
