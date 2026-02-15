@@ -88,6 +88,9 @@ async function fetchFlIdsFromManifest(sysId) {
 }
 
 // Global function for handling image errors with fallback
+// Note: Server-side /api/nli_image_by_sysid now resolves FL IDs locally from
+// crossref sidecar (815K pre-resolved records). Client-side manifest fetch
+// is a last-resort fallback for uncovered manuscripts.
 async function handleImageError(img, sysId, pageIdx, isOxford = false) {
     const currentSrc = img.src || '';
     const isOxfordApiUrl = currentSrc.includes('/api/oxford_image/');
@@ -112,7 +115,9 @@ async function handleImageError(img, sysId, pageIdx, isOxford = false) {
         img.dataset.triedOxford = 'true';
     }
 
-    // Try 2: Fetch FL IDs from NLI IIIF manifest
+    // Try 2: Fetch FL IDs from NLI IIIF manifest (client-side fallback)
+    // Since Phase 30, the server resolves FL IDs locally from the crossref sidecar,
+    // so this client-side manifest fetch should rarely be needed.
     if (sysId && !img.dataset.triedManifest) {
         img.dataset.triedManifest = 'true';
         console.log(`Trying NLI manifest for sysId: ${sysId}, page: ${pageIdx}`);
