@@ -246,6 +246,69 @@ def init_api_routes():
     # Oxford image cache: (sys_id, page) -> (content, content_type, timestamp)
     _oxford_image_cache = {}
 
+    # Cambridge image cache: (sys_id, page) -> (content, content_type, timestamp)
+    _cambridge_image_cache = {}
+
+    @app.get('/api/cambridge_image/{sys_id}')
+    def cambridge_image(sys_id: str, page: int = 0):
+        """
+        Fetch Cambridge IIIF image by System ID.
+        Looks up images_ext from nli_cache and fetches the canvas image via IIIF.
+        """
+        import time as _time
+        cache_key = (sys_id, page)
+
+        # Check image cache first
+        if cache_key in _cambridge_image_cache:
+            content, content_type, cached_at = _cambridge_image_cache[cache_key]
+            if _time.time() - cached_at < IMAGE_CACHE_TTL:
+                return Response(
+                    content=content,
+                    media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=600"}
+                )
+
+        # Look up Cambridge images from nli_cache
+        if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
+            return Response(content="Metadata not available", status_code=503)
+
+        cached = state.meta_mgr.nli_cache.get(sys_id, {})
+        images_ext = cached.get('images_ext', [])
+
+        if not images_ext:
+            return Response(content="No Cambridge images available", status_code=404)
+
+        if page < 0 or page >= len(images_ext):
+            return Response(content="Page out of range", status_code=404)
+
+        canvas_entry = images_ext[page]
+        canvas_url = canvas_entry.get('url', '')
+        if not canvas_url:
+            return Response(content="No canvas URL for this page", status_code=404)
+
+        # Build IIIF Image API URL from canvas base URL
+        img_url = f"{canvas_url}/full/max/0/default.jpg"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://cudl.lib.cam.ac.uk/',
+        }
+
+        try:
+            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
+                content_type = resp.headers.get('Content-Type', 'image/jpeg')
+                _cambridge_image_cache[cache_key] = (resp.content, content_type, _time.time())
+                return Response(
+                    content=resp.content,
+                    media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=600"}
+                )
+            else:
+                return Response(content=f"Failed to fetch Cambridge image: {resp.status_code}", status_code=resp.status_code)
+        except Exception as e:
+            return Response(content=f"Error fetching Cambridge image: {e}", status_code=500)
+
     def _extract_folio_number(shelfmark: str) -> int:
         """Extract folio number from Oxford shelfmark like 'MS heb. f.21/21' -> 21"""
         # Pattern: MS heb. X.YY/ZZ where ZZ is the folio number

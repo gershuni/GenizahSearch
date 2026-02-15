@@ -74,6 +74,7 @@ class BrowsePage:
     folio_label: str = ''  # Current folio label (e.g., '1r', '2v')
     image_source_info: Dict = field(default_factory=dict)  # {nli_fgp: bool, cambridge: bool, image_count: int}
     folio_images: List[Dict] = field(default_factory=list)  # Folio sequence from NliCrossrefService
+    cambridge_images: List[Dict] = field(default_factory=list)  # Cambridge IIIF canvas URLs from nli_cache images_ext
 
 @dataclass
 class DocumentPage:
@@ -344,6 +345,12 @@ class GenizahService:
             except Exception as crossref_err:
                 print(f"NLI crossref enrichment error: {crossref_err}")
 
+            # Cambridge images from nli_cache (populated by enrich_metadata)
+            cambridge_images = []
+            if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                cached = state.meta_mgr.nli_cache.get(actual_sys_id, {})
+                cambridge_images = cached.get('images_ext', [])
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -370,6 +377,7 @@ class GenizahService:
                 folio_label=folio_label,
                 image_source_info=image_source_info,
                 folio_images=folio_images,
+                cambridge_images=cambridge_images,
             )
         except Exception as e:
             print(f"Browse page error: {e}")
@@ -477,6 +485,12 @@ class GenizahService:
             except Exception as crossref_err:
                 print(f"NLI crossref enrichment error (by_fl): {crossref_err}")
 
+            # Cambridge images from nli_cache (populated by enrich_metadata)
+            cambridge_images = []
+            if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                cached = state.meta_mgr.nli_cache.get(actual_sys_id, {})
+                cambridge_images = cached.get('images_ext', [])
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -503,6 +517,7 @@ class GenizahService:
                 folio_label=folio_label,
                 image_source_info=image_source_info,
                 folio_images=folio_images,
+                cambridge_images=cambridge_images,
             )
         except Exception as e:
             print(f"Browse page by FL error: {e}")
