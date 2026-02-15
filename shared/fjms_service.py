@@ -561,23 +561,37 @@ def merge_catalog_records(records: list[dict]) -> dict:
                 result[key] = rec[key]
 
     # Collect distinct TextualFrame entries with source attribution
+    # TextualFrame fields can contain multiple entries separated by '; @[$'
     frames = []
     seen_frames = set()
     for rec in records:
-        eng = rec.get("textual_frame_eng") or ''
-        heb = rec.get("textual_frame_heb") or ''
-        if not eng.strip() and not heb.strip():
+        eng_text = rec.get("textual_frame_eng") or ''
+        heb_text = rec.get("textual_frame_heb") or ''
+        if not eng_text.strip() and not heb_text.strip():
             continue
-        frame_key = (eng.strip(), heb.strip())
-        if frame_key in seen_frames:
-            continue
-        seen_frames.add(frame_key)
-        frames.append({
-            "eng": eng.strip() if eng.strip() else None,
-            "heb": heb.strip() if heb.strip() else None,
-            "source_name": rec.get("source_name"),
-            "source_name_heb": rec.get("source_name_heb"),
-        })
+        eng_parts = split_textual_frames(eng_text)
+        heb_parts = split_textual_frames(heb_text)
+        max_len = max(len(eng_parts), len(heb_parts), 1)
+        # If no parts from split (plain text without [$...$]), use original
+        if not eng_parts and not heb_parts:
+            eng_parts = [eng_text.strip()] if eng_text.strip() else []
+            heb_parts = [heb_text.strip()] if heb_text.strip() else []
+            max_len = max(len(eng_parts), len(heb_parts))
+        for i in range(max_len):
+            eng = eng_parts[i].strip() if i < len(eng_parts) else None
+            heb = heb_parts[i].strip() if i < len(heb_parts) else None
+            if not (eng or heb):
+                continue
+            frame_key = (eng or '', heb or '')
+            if frame_key in seen_frames:
+                continue
+            seen_frames.add(frame_key)
+            frames.append({
+                "eng": eng if eng else None,
+                "heb": heb if heb else None,
+                "source_name": rec.get("source_name"),
+                "source_name_heb": rec.get("source_name_heb"),
+            })
 
     result["textual_frames"] = frames
     result["record_count"] = len(records)
@@ -585,13 +599,30 @@ def merge_catalog_records(records: list[dict]) -> dict:
     return result
 
 
+def split_textual_frames(text: str) -> list[str]:
+    """Split a compound TextualFrame string into individual entries.
+
+    FJMS TextualFrame fields can contain multiple entries separated by '; '
+    where each entry starts with @[$Category$] or [$Category$] notation.
+    E.g.: '@[$Piyyut$]: "poem1"; @[$Piyyut$] (Yotzer): "poem2"'
+    """
+    if not text or not text.strip():
+        return []
+    # Split on '; ' followed by optional @ then [$
+    parts = re.split(r';\s*(?=@?\[\$)', text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
 def parse_textual_frame(text: str) -> tuple[str, str]:
     """Parse '[$Category$]: Content' notation into (category, content).
 
-    Strips optional @ prefix. Returns ('', full_text) if no pattern match.
+    Strips optional @ prefix. Captures parenthetical sub-type as part of
+    category (e.g., '[$Piyyut$] (Yotzer)' -> category='Piyyut (Yotzer)').
+    Returns ('', full_text) if no pattern match.
 
     Args:
-        text: The textual frame string (e.g., '[$Bible$]: Leviticus 23:40 - 41').
+        text: A single textual frame entry (use split_textual_frames first
+              to split compound strings).
 
     Returns:
         Tuple of (category, content). Category is '' if no pattern match.
@@ -599,9 +630,14 @@ def parse_textual_frame(text: str) -> tuple[str, str]:
     if not text:
         return ('', '')
     text = text.strip().lstrip('@')
-    match = re.match(r'\[\$(.+?)\$\]\s*:\s*(.*)', text, re.DOTALL)
+    match = re.match(r'\[\$(.+?)\$\]\s*(\([^)]+\))?\s*:?\s*(.*)', text, re.DOTALL)
     if match:
-        return (match.group(1).strip(), match.group(2).strip())
+        category = match.group(1).strip()
+        sub_type = match.group(2)
+        content = match.group(3).strip()
+        if sub_type:
+            category = f"{category} {sub_type}"
+        return (category, content)
     return ('', text)
 
 
