@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 ## Current Position
 
-Phase: 31 of 34 (Image Navigation & Indicators)
-Plan: 1 of 2 in current phase
-Status: Plan 31-01 complete, ready for Plan 31-02
-Last activity: 2026-02-15 -- Completed 31-01 (Folio navigation bar and source indicators)
+Phase: 31 of 34 (Image Navigation & Indicators) -- COMPLETE
+Plan: 2 of 2 in current phase -- ALL DONE
+Status: Phase 31 complete, ready for Phase 32
+Last activity: 2026-02-15 -- Completed 31-02 (Desktop folio navigation & source indicators)
 
-Progress: [███░░░░░░░] 27%
+Progress: [████░░░░░░] 33%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 88 (across all milestones)
+- Total plans completed: 89 (across all milestones)
 - Average duration: ~8 min
-- Total execution time: ~9.5 hours
+- Total execution time: ~9.6 hours
 
 **By Milestone:**
 
@@ -33,8 +33,9 @@ Progress: [███░░░░░░░] 27%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
-| v5.9.0 | 29-34 | 4 | 12 min |
+| v5.9.0 | 29-34 | 6 | 19 min |
 | Phase 31 P01 | 5min | 2 tasks | 5 files |
+| Phase 31 P02 | 7min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -53,6 +54,9 @@ See PROJECT.md Key Decisions table for full history.
 - 30-02: Cambridge supplement sets external_url on current_meta when found from sidecar, feeding into existing CUDL fetch logic
 - [Phase 31]: Folio label falls back: crossref folio_label -> extract_folio_number -> Page N
 - [Phase 31]: Source indicator chips are styled flat buttons with colored borders, not NiceGUI chip component
+- 31-02: KTIV button uses QPushButton with green chip styling matching web NLI indicator
+- 31-02: image_source_info and folio_images added to enrich_metadata for both web and desktop
+- 31-02: btn_external visibility fixed (was always hidden, now shows for Cambridge/Oxford)
 
 ### Blockers/Concerns
 
@@ -69,6 +73,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 31-01-PLAN.md
+Stopped at: Completed 31-02-PLAN.md (Phase 31 complete)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-30 complete, Phase 31 Plan 01 done -- 5 plans delivered.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-31 complete -- 6 plans delivered. Ready for Phase 32 (Metadata Display).
