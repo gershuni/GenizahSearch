@@ -4,6 +4,41 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.8.0] - 2026-02-15
+
+### Milestone: FJMS Integration
+
+Integration of scholarly metadata from the Fragment of the Jewish Manuscript Studies (FJMS) database into both web and desktop apps via a SQLite sidecar database. Adds subject-based filtering, scientific join groups, and catalog enrichment for manuscripts.
+
+#### Data Infrastructure (Phase 25)
+- **SQLite sidecar database** (`fjms_enrichment.db`): 762K rows exported from 13GB FIST.db with domains, joins, catalog tables, and FTS5 full-text index
+- **Shared FjmsService**: 8 query methods accessible from both web and desktop apps
+- **Thread-safe SQLite**: Read-only URI mode with thread safety for NiceGUI concurrent requests
+- **Graceful degradation**: All methods return empty results when sidecar is missing
+
+#### Scientific Joins (Phase 26)
+- **FJMS join groups** in Related Fragments panel: scholarly join identification with scholar name and join type (Physical Join, Codex Join, etc.)
+- **Three-source merge**: FJMS joins merged as third source after user and PGP joins with full deduplication
+- **Purple badge** for FJMS source visual distinction (user=none, PGP=blue, FJMS=purple)
+- **Navigation**: Click join group members to navigate to that fragment in both apps
+
+#### Domain Classifications (Phase 27)
+- **Domain badges** on browse page: clickable subject classification links (e.g., Piyyut, Bible, Letters)
+- **Domain search filtering**: hierarchical multi-select with type-ahead, OR logic for multi-domain queries
+- **Standalone domain browsing**: browse manuscripts by domain without text query (capped at 500)
+- **Post-search dynamic filtering**: Domains button with checkbox tree dialog for excluding domains from results
+- **Domain indicators** on result cards: primary domain + "+N more" pattern with tooltip
+
+#### Catalog Enrichment (Phase 28)
+- **FJMS catalog titles**: Hebrew and English titles with language-aware display
+- **Author information**: Scholar/author attribution from FJMS catalog records
+- **Copy date and place**: Manuscript dating and origin information with sentinel value filtering
+- **Content identifications**: Parsed TextualFrame entries with category and source attribution
+- **FJMS description alongside PGP**: Separate sections, not replacing existing PGP metadata
+- **Cross-app parity**: All catalog fields display in both web and desktop (Browse tab + ResultDialog)
+
+---
+
 ## [5.7.2] - 2026-02-11
 
 ### Cleanup & Polish

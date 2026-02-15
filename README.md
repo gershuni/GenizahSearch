@@ -1,4 +1,4 @@
-# Genizah Search Pro 5.7.2
+# Genizah Search Pro 5.8.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,38 +8,21 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 5.7.2?
+## What's New in Version 5.8.0?
 
-### v5.7.2: Cleanup, Normalization & Sections
+### v5.8.0: FJMS Integration
 
-* **AI Search removed:** Deprecated AI feature code fully removed from both apps
-* **Unicode search normalization:** Diacritical marks, geresh, and apostrophe variants stripped at query time with mark-tolerant highlighting
-* **Full green test suite:** 447 tests passing, 0 failures
-* **Structured PGP sections:** Recto/verso/margin sections parsed from HTML and stored as JSONB, displayed alongside manuscript images
+Integration of scholarly metadata from the **Fragment of the Jewish Manuscript Studies (FJMS)** database — domain classifications, scientific joins, and catalog records — into both web and desktop apps.
 
-### Responsa Search
+* **Domain classifications:** Subject badges (Piyyut, Bible, Letters, etc.) on browse pages with hierarchical search filtering
+* **Scientific joins:** FJMS scholarly join groups with scholar attribution in Related Fragments panel
+* **Catalog enrichment:** FJMS titles, authors, dates, and content identifications alongside PGP metadata
+* **Domain filtering:** Post-search dynamic filtering with hierarchical checkbox tree dialog
+* **SQLite sidecar:** 762K rows from FIST.db with FTS5 full-text index for future catalog search
 
-Advanced search inspired by the Responsa Project, with Responsa-style syntax, grammatical expansion, Judeo-Arabic support, and a visual query builder — in both web and desktop apps.
+### Previous Features (v5.0–v5.7)
 
-* **Responsa syntax:** `#word` prefix expansion, `word#` suffix expansion, `*word`/`word*` wildcards, `%word` plene/defective variants, `(a/b)` OR alternatives, `[N]` gap notation
-* **Hebrew grammatical expansion:** 24 prefix forms + 25 suffix forms per word, with sofit letter conversion
-* **Judeo-Arabic article expansion:** 8 forms per word using simplified al- model
-* **Flexible spacing:** Tolerates OCR-introduced space errors in manuscripts
-* **Bidirectional gap:** Search for words in either order
-* **Explosion guard:** Smart downgrade cascade when queries expand beyond 500 terms
-* **"Responsa (R)" mode:** First-class option in the Mode dropdown with sub-option checkboxes (Variants, JA, Flex Spacing, Bidirectional)
-
-### Tabular Query Builder
-
-A visual interface for building Responsa queries without memorizing syntax.
-
-* **2-4 component columns:** Each with word inputs and per-word modifier checkboxes
-* **Per-word modifiers:** Prefix (#), suffix (#), wildcard (*), plene (%), negation
-* **Distance control:** Gap spinners between components with [N] notation
-* **Live preview:** See the generated Responsa syntax update in real time
-
-### Previous Features (v5.0–v5.6)
-
+* **Responsa Search:** Advanced search with Responsa-style syntax, grammatical expansion, Judeo-Arabic support, and tabular query builder
 * **Princeton Geniza Project (PGP):** 35,839 curated documents with transcriptions, translations, and metadata
 * **Virtual Reading Desk:** Multi-manuscript synchronized viewer for related fragments
 * **PGP Tag Search:** 251 tags in 16 categories for thematic browsing
@@ -96,7 +79,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V5.7.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V5.8.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
@@ -121,6 +104,7 @@ For detailed documentation, see the [docs/](docs/DOCUMENTATION_INDEX.md) directo
 * **Data Sources:**
   - Stoekl Ben Ezra et al. (2025). *MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments*. ([doi.org/10.5281/zenodo.17734473](https://doi.org/10.5281/zenodo.17734473))
   - [Princeton Geniza Project (PGP)](https://geniza.princeton.edu/) — Curated transcriptions, translations, and metadata for Cairo Genizah documents
+  - Fragment of the Jewish Manuscript Studies (FJMS) — Domain classifications, scientific joins, and catalog records
 * **Lab Mode Algorithm:** Based on [Shmidman, Koppel, and Porat (2016)](https://arxiv.org/abs/1602.08715)
 
 **Acknowledgments:**
@@ -132,41 +116,31 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 5.7.2 | אתר הגניזה של דיקטה
+# Genizah Search Pro 5.8.0 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
-גרסה 5.7 כוללת **חיפוש פרויקט השו"ת** — חיפוש מתקדם בסגנון פרויקט השו"ת עם תחביר ייעודי, הרחבה דקדוקית, תמיכה בערבית-יהודית, ובונה שאילתות טבלאי.
+גרסה 5.8 כוללת **שילוב FJMS** — מטא-דאטה מדעי מבסיס הנתונים לחקר כתבי יד יהודיים: סיווגי תחום, צירופים מדעיים ורשומות קטלוג.
 
 > **גישה מהאינטרנט:** [genizahsearch.com](https://genizahsearch.com) - חיפוש, עיון ושיתוף פעולה מכל דפדפן
 
 ---
 
-## מה חדש בגרסה 5.7?
+## מה חדש בגרסה 5.8?
 
-### חיפוש פרויקט השו"ת
+### שילוב FJMS
 
-חיפוש מתקדם בהשראת פרויקט השו"ת, עם תחביר ייעודי, הרחבה דקדוקית, תמיכה בערבית-יהודית ובונה שאילתות חזותי — בווב ובאפליקציית שולחן העבודה.
+שילוב מטא-דאטה מדעי מבסיס הנתונים **Fragment of the Jewish Manuscript Studies (FJMS)** — סיווגי תחום, צירופים מדעיים ורשומות קטלוג — בווב ובאפליקציית שולחן העבודה.
 
-* **תחביר פרויקט השו"ת:** `word#` הרחבת תחיליות, `#word` הרחבת סיומות, `*word`/`word*` תווים כלליים, `%word` מלא/חסר, `(a/b)` חלופות, `[N]` מרווח
-* **הרחבה דקדוקית עברית:** 24 צורות תחילית + 25 צורות סיומת למילה, עם המרת אותיות סופיות
-* **הרחבת ערבית-יהודית:** 8 צורות למילה עם מודל אל- מפושט
-* **רווח גמיש:** סבילות לשגיאות רווח מ-OCR בכתבי היד
-* **חיפוש דו-כיווני:** חיפוש מילים בכל סדר
-* **מגן פיצוץ:** שרשרת הורדה חכמה כשהשאילתות מתרחבות מעל 500 מונחים
-* **מצב "פרויקט השו"ת (R)":** אפשרות מלאה בתפריט Mode עם תת-אפשרויות (וריאנטים, ע"י, רווח גמיש, דו-כיווני)
+* **סיווגי תחום:** תגיות נושא (פיוט, מקרא, מכתבים ועוד) בדפי עיון עם סינון היררכי בחיפוש
+* **צירופים מדעיים:** קבוצות צירוף מדעיות מ-FJMS עם ייחוס לחוקר בפאנל הקטעים הקשורים
+* **העשרת קטלוג:** כותרות, מחברים, תאריכים וזיהויי תוכן מ-FJMS לצד מטא-דאטה של PGP
+* **סינון תחומים:** סינון דינמי לאחר חיפוש עם דיאלוג עץ היררכי
+* **בסיס נתונים SQLite:** 762 אלף שורות מ-FIST.db עם אינדקס FTS5 לחיפוש קטלוגי עתידי
 
-### חיפוש טבלאי
+### תכונות מגרסאות קודמות (5.0–5.7)
 
-ממשק טבלאי לבניית שאילתות בסגנון פרויקט השו"ת.
-
-* **2-4 עמודות רכיבים:** כל אחת עם שדות מילים ותיבות סימון למשתני מילה
-* **משתנים למילה:** תחילית (#), סיומת (#), תו כללי (*), מלא וחסר (%), שלילה
-* **בקרת מרחק:** ספינרים למרחק בין רכיבים עם סימון [N]
-* **תצוגה מקדימה חיה:** צפייה בתחביר שנוצר בזמן אמת
-
-### תכונות מגרסאות קודמות (5.0–5.6)
-
+* **חיפוש פרויקט השו"ת:** חיפוש מתקדם עם תחביר ייעודי, הרחבה דקדוקית, ערבית-יהודית, ובונה שאילתות טבלאי
 * **פרויקט הגניזה של פרינסטון (PGP):** 35,839 מסמכים אצורים עם תעתיקים, תרגומים ומטא-דאטה
 * **שולחן קריאה וירטואלי:** צפיין מסונכרן לקטעים קשורים זה לצד זה
 * **חיפוש תגיות PGP:** 251 תגיות ב-16 קטגוריות לעיון נושאי
@@ -223,7 +197,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### התקנה לשולחן העבודה
 
-1. **הורדה:** הורידו את `GenizahSearchPro_V5.7.0_Setup.exe` מאזור ה-**Assets**
+1. **הורדה:** הורידו את `GenizahSearchPro_V5.8.0_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
 
@@ -237,6 +211,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 * **מקורות נתונים:**
   - Stoekl Ben Ezra et al. (2025). *MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments*.
   - [פרויקט הגניזה של פרינסטון (PGP)](https://geniza.princeton.edu/) — תעתיקים, תרגומים ומטא-דאטה אצורים למסמכי הגניזה הקהירית
+  - Fragment of the Jewish Manuscript Studies (FJMS) — סיווגי תחום, צירופים מדעיים ורשומות קטלוג
 * **אלגוריתם מצב מעבדה:** מבוסס על [Shmidman, Koppel, and Porat (2016)](https://arxiv.org/abs/1602.08715)
 
 **תודות:**

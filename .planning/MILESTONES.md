@@ -122,3 +122,29 @@
 
 ---
 
+
+## v5.8.0 FJMS Integration (Shipped: 2026-02-15)
+
+**Delivered:** Integrated FJMS scholarly metadata (domain classifications, scientific joins, catalog records) into GenizahSearch via a SQLite sidecar database, enabling subject-based filtering and enriched manuscript display in both web and desktop apps.
+
+**Phases completed:** 25-28 (12 plans total, including 5 gap closure plans)
+
+**Key accomplishments:**
+- SQLite sidecar database (762K rows) exported from 13GB FIST.db with domains, joins, catalog tables, and FTS5 index
+- Shared FjmsService with 8 query methods, thread-safe SQLite for web, graceful degradation when sidecar missing
+- FJMS scholarly join groups with scholar attribution merged into Related Fragments panel (purple badge, three-source dedup)
+- Domain classification badges on browse page with hierarchical search filtering and standalone domain browsing
+- Post-search dynamic domain filter with checkbox tree dialog in both apps (exclude-by-unchecking pattern)
+- FJMS catalog enrichment: titles, authors, dates, content identifications alongside PGP metadata in both apps
+
+**Stats:**
+- 22 source files modified
+- +6,323 / -69 lines (Python)
+- 4 phases (25-28), 12 plans, 44 commits
+- 3 days (Feb 12 -> Feb 15, 2026)
+- 19/19 requirements satisfied (audit passed)
+
+**Git tag:** v5.8.0
+
+---
+

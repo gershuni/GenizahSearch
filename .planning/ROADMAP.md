@@ -66,94 +66,21 @@ Pending corrections visible as selectable version in web and desktop version sel
 Shared corrections service, amber styling (web), emoji labels (desktop).
 6/6 requirements satisfied. 20 milestone-specific tests.
 
-- [x] Phase 22: Pending Corrections Data Layer -- shared service function + tests
-- [x] Phase 23: Web Pending Corrections Display -- amber-styled entries in version selector
-- [x] Phase 24: Desktop Pending Corrections Display -- verified in Browse tab and Reading Desk
+</details>
+
+<details>
+<summary>✅ v5.8.0 FJMS Integration (Phases 25-28) -- SHIPPED 2026-02-15</summary>
+
+See: .planning/milestones/v5.8.0-ROADMAP.md
+
+4 phases, 12 plans.
+FJMS scholarly metadata (domains, joins, catalog) integrated via SQLite sidecar.
+Domain filtering, scientific joins with scholar attribution, catalog enrichment in both apps.
+19/19 requirements satisfied. 38+ tests covering service layer and integration.
 
 </details>
 
-### ✅ v5.8.0 FJMS Integration (Shipped 2026-02-15)
-
-**Milestone Goal:** Integrate FJMS scholarly metadata (domain classifications, scientific joins, catalog records) into GenizahSearch via a SQLite sidecar database, enabling subject-based filtering and enriched manuscript display in both apps.
-
-- [x] **Phase 25: Data Infrastructure** - Export FIST.db into SQLite sidecar with shared service layer (completed 2026-02-12)
-- [x] **Phase 26: Scientific Joins** - FJMS join groups with scholar attribution in both apps (completed 2026-02-12)
-- [x] **Phase 27: Domain Classifications** - Domain badges and search filtering in both apps (completed 2026-02-13)
-- [x] **Phase 28: Catalog Enrichment** - FJMS titles, authors, dates on browse page in both apps (completed 2026-02-15)
-
-## Phase Details
-
-### Phase 25: Data Infrastructure
-**Goal**: Both apps can access FJMS enrichment data through a shared service backed by a SQLite sidecar database
-**Depends on**: Nothing (first phase of milestone)
-**Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05
-**Success Criteria** (what must be TRUE):
-  1. Running the export script against FIST.db produces `fjms_enrichment.db` with populated domains, joins, and catalog tables
-  2. The sidecar includes an FTS5 virtual table over catalog descriptions (queryable via SQL, no UI yet)
-  3. A meta table exists in the sidecar with a version number that can be checked programmatically
-  4. Both web and desktop apps can import and use `FjmsService` to query domain, join, and catalog data for a given sys_id
-  5. The web app's SQLite connection is thread-safe and read-only (no write errors under concurrent NiceGUI requests)
-**Plans**: 2 plans in 2 waves
-
-Plans:
-- [x] 25-01-PLAN.md -- Export script and sidecar schema (Wave 1)
-- [x] 25-02-PLAN.md -- Shared FjmsService class with web shim and tests (Wave 2, depends on 25-01)
-
-### Phase 26: Scientific Joins
-**Goal**: Users can see scholarly join groups with attribution and navigate between related fragments
-**Depends on**: Phase 25
-**Requirements**: JOIN-01, JOIN-02, JOIN-03, JOIN-04, JOIN-05
-**Success Criteria** (what must be TRUE):
-  1. When viewing a manuscript that belongs to an FJMS join group, the user sees the other group members listed in the Related Fragments panel
-  2. Each join entry shows who identified the join (scholar name) and the join type (Physical Join, Codex Join, etc.)
-  3. The user can click a join group member to navigate to that fragment's browse page
-  4. FJMS join information appears in the Related Fragments panel in both web and desktop apps
-**Plans**: 3 plans
-
-Plans:
-- [x] 26-01-PLAN.md -- FJMS joins integration in Related Fragments panel (both apps)
-- [x] 26-02-PLAN.md -- Gap closure: deduplicate get_join_group() for multi-group membership (Wave 1)
-- [x] 26-03-PLAN.md -- Gap closure: dual-badge display for fragments in both PGP and FJMS sources (completed 2026-02-12)
-
-### Phase 27: Domain Classifications
-**Goal**: Users can see what subject a manuscript belongs to and filter search results by domain
-**Depends on**: Phase 25
-**Requirements**: DOM-01, DOM-02, DOM-03, DOM-04
-**Success Criteria** (what must be TRUE):
-  1. When viewing a manuscript on the browse page, the user sees domain classification badges (e.g., "Piyyut", "Bible Texts", "Letters")
-  2. When searching, the user can select a domain filter and see only results from manuscripts classified under that domain
-  3. Domain badges show hierarchy when applicable (e.g., "Piyyut > Kedushtaot" or parent alongside child)
-  4. Domain display and search filtering work identically in both web and desktop apps
-**Plans**: 5 plans in 2 waves
-
-Plans:
-- [x] 27-01-PLAN.md -- Domain display on browse page + FjmsService hierarchy method (Wave 1)
-- [x] 27-02-PLAN.md -- Domain filtering in search with hierarchical tree, type-ahead, standalone browse (Wave 2, depends on 27-01)
-- [x] 27-03-PLAN.md -- Gap closure: Batch domain lookup method for post-search collection (Wave 1)
-- [x] 27-04-PLAN.md -- Gap closure: Web post-search dynamic domain filter with button+dialog (Wave 2, depends on 27-03)
-- [x] 27-05-PLAN.md -- Gap closure: Desktop post-search dynamic domain filter with exclude pattern (Wave 2, depends on 27-03)
-
-### Phase 28: Catalog Enrichment
-**Goal**: Users see FJMS catalog metadata alongside existing PGP metadata when browsing manuscripts
-**Depends on**: Phase 25
-**Requirements**: CAT-01, CAT-02, CAT-03, CAT-04, CAT-05
-**Success Criteria** (what must be TRUE):
-  1. When viewing a manuscript with FJMS catalog data, the user sees the Hebrew and/or English catalog title on the browse page
-  2. Author information from the FJMS catalog is displayed when available
-  3. Copy date and copy place from the FJMS catalog are displayed when available
-  4. FJMS description appears alongside PGP description (not replacing it) so the user can see both scholarly perspectives
-  5. All catalog enrichment fields display in both web and desktop apps
-**Plans**: 2 plans in 2 waves
-
-Plans:
-- [x] 28-01-PLAN.md -- Export re-run with SourceName columns + FjmsService catalog helpers (Wave 1)
-- [x] 28-02-PLAN.md -- FJMS catalog display in web browse page and desktop extended info (Wave 2, depends on 28-01)
-
 ## Progress
-
-**Execution Order:**
-Phases execute in numeric order: 25 -> 26 -> 27 -> 28
-(Phases 26, 27, 28 all depend on 25 but are sequenced per user priority: Joins -> Domains -> Catalog)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -162,11 +89,8 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28
 | 14-17 | v5.7.0 | 14/14 | Complete | 2026-02-10 |
 | 18-21 | v5.7.2 | 11/11 | Complete | 2026-02-11 |
 | 22-24 | v5.7.3 | 3/3 | Complete | 2026-02-11 |
-| 25. Data Infrastructure | v5.8.0 | 2/2 | Complete | 2026-02-12 |
-| 26. Scientific Joins | v5.8.0 | 3/3 | Complete | 2026-02-12 |
-| 27. Domain Classifications | v5.8.0 | 5/5 | Complete | 2026-02-13 |
-| 28. Catalog Enrichment | v5.8.0 | 2/2 | Complete | 2026-02-15 |
+| 25-28 | v5.8.0 | 12/12 | Complete | 2026-02-15 |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-15 after Phase 28 execution complete — v5.8.0 milestone shipped*
+*Last updated: 2026-02-15 after v5.8.0 milestone archived*

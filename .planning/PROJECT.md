@@ -2,11 +2,11 @@
 
 ## What This Is
 
-A research platform for the Cairo Genizah that combines manuscript image browsing with scholarly data from Princeton Geniza Project (PGP). Users can view human-curated transcriptions from multiple scholars, browse rich document metadata, navigate fragment relationships, search across ~217,000 manuscript records, and perform advanced Responsa-style searches with grammatical expansion, Judeo-Arabic support, and a visual query builder. Available as both a NiceGUI web app and a PyQt6 desktop app.
+A research platform for the Cairo Genizah that combines manuscript image browsing with scholarly data from Princeton Geniza Project (PGP) and Fragment of the Jewish Manuscript Studies (FJMS). Users can view human-curated transcriptions from multiple scholars, browse rich document metadata with domain classifications and catalog enrichment, navigate fragment relationships including scientific joins, search across ~217,000 manuscript records with domain-based filtering, and perform advanced Responsa-style searches with grammatical expansion, Judeo-Arabic support, and a visual query builder. Available as both a NiceGUI web app and a PyQt6 desktop app.
 
 ## Core Value
 
-**Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, and powerful search tools -- from simple keyword search to Responsa-style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
+**Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
 ## Requirements
 
@@ -46,28 +46,16 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Pending corrections visible as selectable version in web version selector (amber styling, schedule icon) -- v5.7.3
 - Pending corrections visible in desktop Browse tab and Reading Desk (emoji labels) -- v5.7.3
 - Shared corrections service with auth-filtered pending corrections (only submitter sees own) -- v5.7.3
+- Export FJMS domain classifications, scientific joins, and catalog records into SQLite sidecar -- v5.8.0
+- Domain-based filtering in search results (both apps) -- v5.8.0
+- Domain display on browse page (both apps) -- v5.8.0
+- FJMS join group display with scholar attribution on browse page (both apps) -- v5.8.0
+- Catalog enrichment display (titles, authors, dates) on browse page (both apps) -- v5.8.0
+- FTS5 schema in sidecar (UI deferred) -- v5.8.0
 
 ### Active
 
-<!-- Current milestone: v5.8.0 FJMS Integration -->
-
-- [ ] Export FJMS domain classifications, scientific joins, and catalog records into SQLite sidecar
-- [ ] Domain-based filtering in search results (both apps)
-- [ ] Domain display on browse page (both apps)
-- [ ] FJMS join group display with scholar attribution on browse page (both apps)
-- [ ] Catalog enrichment display (titles, authors, dates) on browse page (both apps)
-- [ ] FTS5 schema in sidecar (UI deferred)
-
-## Current Milestone: v5.8.0 FJMS Integration
-
-**Goal:** Integrate FJMS scholarly metadata (domain classifications, scientific joins, catalog records) into GenizahSearch via a SQLite sidecar database, enabling subject-based filtering and enriched manuscript display in both apps.
-
-**Target features:**
-- SQLite sidecar (`fjms_enrichment.db`) with domains, joins, catalog tables + FTS5 index
-- Domain filtering in search (filter results by Piyyut, Bible, Letters, etc.)
-- Domain badges on browse page
-- Join group display with scholar attribution and links to related fragments
-- Catalog enrichment: FJMS titles, authors, dates, descriptions alongside PGP metadata
+<!-- No active milestone — ready for /gsd:new-milestone -->
 
 ### Out of Scope
 
@@ -86,24 +74,31 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Desktop Responsa checkbox persistence between sessions -- defaults on startup
 - `##` double-hash syntax -- checkbox approach preferred
 - Query preview line -- user explicitly excluded
+- FTS5 catalog search UI -- schema included in v5.8.0, UI deferred to future milestone
+- FJMS full texts (65K transcriptions) -- storage/deduplication complexity, lower priority
+- FJMS bibliography (733K references) -- large volume, unclear UX, defer
+- Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
 
 ## Context
 
-### Current State (after v5.7.3)
+### Current State (after v5.8.0)
 
-**Shipped:** v5.7.3 Pending Corrections Visibility (2026-02-11, git tag v5.7.3)
-- Shared pending corrections data layer with dual-app service pattern
-- Web version selector shows pending corrections with amber/orange styling
-- Desktop pending corrections verified in Browse tab and Reading Desk
-- Fixed NiceGUI timer parent_slot RuntimeError (ui.timer -> asyncio.call_later)
-- 467 tests passing, 5 skipped
+**Shipped:** v5.8.0 FJMS Integration (2026-02-15, git tag v5.8.0)
+- SQLite sidecar database (762K rows) from FIST.db with domains, joins, catalog + FTS5 index
+- Shared FjmsService with 8 query methods, thread-safe for web
+- FJMS scholarly joins with scholar attribution in Related Fragments panel (both apps)
+- Domain classification badges and hierarchical search filtering (both apps)
+- Post-search dynamic domain filter with checkbox tree dialog (both apps)
+- FJMS catalog enrichment: titles, authors, dates, content identifications (both apps)
+- 19/19 requirements satisfied, 12 plans across 4 phases
 
 **Architecture:**
-- Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index)
-- Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index)
+- Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index) + SQLite sidecar (FJMS data)
+- Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index) + SQLite sidecar (FJMS data)
 - Shared: genizah_core.py (~8,200 lines -- search engine, metadata, variants, Responsa)
 - Shared: shared/document_service.py (PGP data access)
 - Shared: shared/corrections_service.py (corrections data access)
+- Shared: shared/fjms_service.py (FJMS domain, join, catalog queries)
 
 **Data:**
 - documents: 35,839 records (full PGP corpus)
@@ -111,6 +106,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - document_footnotes: 22,757 records
 - document_fragments: 36,155 links
 - manuscripts (libraries.csv): ~217,000 records
+- fjms_enrichment.db: 390K domain rows, 48K join rows, 500K catalog rows (v1.1.0)
 
 ### Search Engine (Two-Phase Architecture)
 
@@ -157,8 +153,13 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Client-as-parameter for corrections service | Enables both web and desktop to pass their own authenticated client | Good |
 | Shared+shim pattern for corrections (like document_service) | Consistent import pattern, backward-compatible | Good |
 | asyncio.call_later replaces ui.timer for one-shot loads | Avoids NiceGUI parent_slot crash on container clear | Good |
-| SQLite sidecar for FJMS data (not CSV+dict or Supabase) | Read-only reference data, reverse lookups for domain filtering, no memory overhead, both apps | -- |
-| FTS5 schema now, UI deferred | Low-cost to include in schema, catalog search UI needs separate UX design | -- |
+| SQLite sidecar for FJMS data (not CSV+dict or Supabase) | Read-only reference data, reverse lookups for domain filtering, no memory overhead, both apps | Good |
+| FTS5 schema now, UI deferred | Low-cost to include in schema, catalog search UI needs separate UX design | Good |
+| Three-source join merge (user -> PGP -> FJMS) | Consistent pipeline, dedup at each stage, purple badge for FJMS | Good |
+| Post-search domain filtering (not pre-search) | Users see all results first, then narrow by domain | Good |
+| Batch domain lookup (get_domains_for_sys_ids) | Efficient post-search collection in 500-item batches | Good |
+| SourceName join via LEFT JOIN dbo_CodeSource | Per-record scholarly source attribution in catalog | Good |
+| Sentinel CopyDate values normalized to None | Clean display, no meaningless 0/-99/-1 dates shown | Good |
 
 ---
-*Last updated: 2026-02-12 after v5.8.0 milestone start*
+*Last updated: 2026-02-15 after v5.8.0 milestone complete*

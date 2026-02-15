@@ -2,26 +2,23 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-12)
+See: .planning/PROJECT.md (updated 2026-02-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v5.8.0 FJMS Integration -- Phase 28 in progress
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 28 of 28 (Catalog Enrichment) -- fourth of 4 in v5.8.0 -- COMPLETE
-Plan: 2 of 2 in current phase (all plans complete)
-Status: Phase 28 complete -- v5.8.0 FJMS Integration milestone complete (13/13 plans)
-Last activity: 2026-02-15 -- Completed 28-02-PLAN.md (catalog UI integration)
-
-Progress: [████████████████████] 100% (13/13 plans)
+Phase: None active -- v5.8.0 milestone archived
+Status: Ready for /gsd:new-milestone
+Last activity: 2026-02-15 -- Archived v5.8.0 FJMS Integration milestone
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 82 (across all milestones)
+- Total plans completed: 84 (across all milestones)
 - Average duration: ~8 min
-- Total execution time: ~9.1 hours
+- Total execution time: ~9.5 hours
 
 **By Milestone:**
 
@@ -32,55 +29,23 @@ Progress: [████████████████████] 100% (1
 | v5.7.0 | 14-17 | 14 | ~140 min |
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
-| v5.8.0 | 25-28 | 13/13 | 57 min |
+| v5.8.0 | 25-28 | 12 | 57 min |
 
 ## Accumulated Context
 
 ### Decisions
 
-- SQLite sidecar (`fjms_enrichment.db`) chosen over CSV+dict, Supabase, Tantivy (see FIST_STORAGE_ARCHITECTURE_DECISION.md)
-- FTS5 schema included in sidecar now, UI deferred to future milestone
-- Phase ordering: Data infra -> Joins -> Domains -> Catalog (user priority)
-- AlmaId maps directly to libraries.csv system_number (no normalization needed)
-- Catalog table has 322K rows (vs 243K estimated) due to richer join paths; more data is better
-- fist_data/ and FIST_DB_BACKUP/ added to .gitignore (large binary files)
-- Read-only SQLite via URI mode (file:path?mode=ro) enforces immutability at database level
-- Module-level singleton pattern (get_fjms_service) matches existing shared service conventions
-- Column names mapped to snake_case keys in returned dicts for Python convention
-- FJMS joins merged as third source after user and PGP in fetch_connected_fragments
-- Purple badge for FJMS source distinction (user=none, PGP=blue, FJMS=purple)
-- Three-way join merge pipeline: user -> PGP -> FJMS with dedup at each stage
-- GROUP BY + GROUP_CONCAT(DISTINCT) for multi-group join dedup at SQL level (not Python post-processing)
-- Sources stored as list ('sources') instead of string ('source') in formatted_joins for multi-source badge support
-- Merge-on-collision dedup: append source to existing entry instead of dropping overlapping FJMS entries
-- Domain parent/child deduplication at display time (skip parent if child already shown)
-- English domain names in URLs, Hebrew for display (language-aware UI)
-- Domain filter uses multi-select with type-ahead, OR logic for filtering
-- Standalone domain browsing capped at 500 results for performance
-- Domain indicators show primary + "+N more" pattern on result cards
-- Batch domain lookup method (get_domains_for_sys_ids) for efficient post-search collection (500-item batches)
-- [Phase 27]: Post-search dynamic domain filtering with exclude-by-unchecking pattern in both web and desktop apps
-- Web domain filter: post-search Domains button with checkbox tree dialog, client-side exclusion filtering
-- Desktop domain filter: post-search button with hierarchical tree, setRowHidden() for instant filtering
-- [Phase 28]: SourceName join via LEFT JOIN dbo_CodeSource for per-record scholarly source attribution
-- [Phase 28]: Sentinel CopyDate values (0, -99, -1) normalized to None in catalog retrieval
-- [Phase 28]: Catalog dedup by (textual_frame_eng, copy_date, title) tuple; empty records filtered out
-- [Phase 28]: Sidecar re-exported at v1.1.0 with 500K catalog rows, 466K with SourceName data
-- [Phase 28]: FJMS Catalog section between PGP metadata and Domain Classifications on web browse page
-- [Phase 28]: Desktop catalog placed between domains and KTI enrichment in extended info panel
-- [Phase 28]: 10-item initial display with expansion for overflow content identifications
+See PROJECT.md Key Decisions table for full history.
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
-- FIST.db is 13 GB; export script completed in ~20 seconds with batched inserts
-- Thread-safe SQLite for NiceGUI web app (concurrent requests) -- RESOLVED in 25-02 (FjmsService thread_safe=True)
-- FIST catalogs at unit (codex) level, not individual leaf level -- all content identifications for a codex are broadcast to every constituent AlmaId. A single leaf may show piyyut identifications inherited from sibling leaves in the same unit. This is upstream FIST data design, not a GenizahSearch bug.
+- FIST catalogs at unit (codex) level, not individual leaf level -- upstream FIST data design
 
 ### Future Improvements
 
-- FTS5 catalog search UI (schema ready, deferred to future milestone)
-- FJMS structured metadata search -- leverage TextualFrame [$Category$] tags (Piyyut, Bible, Mishneh Torah, Letters, etc.) with incipits, sub-types, and scholar attributions via FTS5 sidecar for content-aware search and filtering across all domains
+- FTS5 catalog search UI (schema ready in sidecar, deferred to future milestone)
+- FJMS structured metadata search -- leverage TextualFrame tags with FTS5
 - NLI joins import (~424K PartOf relationships)
 - Transcription search (Phase 13, needs server-side index architecture)
 
@@ -93,6 +58,6 @@ Progress: [████████████████████] 100% (1
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 28-02-PLAN.md (catalog UI integration) -- Phase 28 complete, v5.8.0 milestone complete
+Stopped at: v5.8.0 FJMS Integration milestone archived, git tagged
 Resume file: None
-Notes: Plan 02 complete (2/2 tasks). FJMS catalog section added to web browse page (NiceGUI), desktop Browse tab, and ResultDialog. Translation keys added. All 5 CAT requirements covered. v5.8.0 FJMS Integration milestone complete (13/13 plans across phases 25-28).
+Notes: All 6 milestones shipped (v1, v5.6.0, v5.7.0, v5.7.2, v5.7.3, v5.8.0). 84 plans across 28 phases. Ready for next milestone.

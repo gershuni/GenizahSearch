@@ -2301,9 +2301,13 @@ TRANSLATIONS = {
         "חיפוש בסגנון פרויקט השו\"ת: חיפוש מתקדם עם אופרטורים וחיפוש טבלאי אינטואיטיבי",
     "Princeton Geniza Project (PGP) integration: information, transcriptions, and translations for over 35,000 documents":
         "שילוב מידע מפרויקט הגניזה של פרינסטון (PGP) - מידע, תעתיקים ותרגומים למעל 35,000 מסמכים",
+    "FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Fragment of the Jewish Manuscript Studies database":
+        "מטא-דאטה מדעי מ-FJMS: סיווגי תחום, צירופים מדעיים ורשומות קטלוג ממסד הנתונים לחקר כתבי יד יהודיים",
+    "Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection":
+        "סינון לפי תחום: סינון תוצאות חיפוש לפי נושא (פיוט, מקרא, מכתבים ועוד) עם בחירה היררכית",
+    "New: FJMS scholarly metadata — domains, scientific joins & catalog records":
+        "חדש: מטא-דאטה מדעי מ-FJMS — תחומים, צירופים מדעיים ורשומות קטלוג",
     "Got it!": "הבנתי!",
-    "New: Responsa-style Search & 35,000+ PGP Documents":
-        "חדש: חיפוש בסגנון פרויקט השו\"ת ו-35,000+ מסמכי PGP",
     "Learn More": "למידע נוסף",
 
     # --- Feature discovery hints ---

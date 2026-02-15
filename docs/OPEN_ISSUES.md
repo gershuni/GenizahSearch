@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-11 (v5.7.2 milestone closed — cleanup, normalization, sections)
+> **Last Updated:** 2026-02-15 (v5.8.0 milestone closed — FJMS integration)
 > **Status:** Active working document
 
 ---
@@ -196,6 +196,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-15 | Closed v5.8.0 milestone — FJMS integration (domains, scientific joins, catalog enrichment), version bump to 5.8.0 | Claude |
 | 2026-02-11 | Closed v5.7.2 milestone — version bump to 5.7.2, AI code removed, search normalization, full green test suite, structural sections | Claude |
 | 2026-02-09 | Closed v5.6.0 milestone — version bump to 5.6.0, updated CHANGELOG.md and STATE.md | Claude |
 | 2026-02-09 | Created `pgp_tag_translations.py` — 251 PGP tags with curated Hebrew translations in 16 categories | Claude |

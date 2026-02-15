@@ -29,8 +29,8 @@ from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngin
 
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
-APP_VERSION = "5.7"
-WHATS_NEW_VERSION = "5.7"  # Bump when adding new "What's New" content
+APP_VERSION = "5.8"
+WHATS_NEW_VERSION = "5.8"  # Bump when adding new "What's New" content
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1670,10 +1670,10 @@ def create_layout():
                         with ui.column().classes('gap-1'):
                             with ui.row().classes('items-start gap-2'):
                                 ui.label('•').style('color: var(--text-secondary);')
-                                ui.label(tr('Responsa-style search: advanced search with operators and an intuitive tabular query builder')).classes('text-sm').style('color: var(--text-secondary);')
+                                ui.label(tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Fragment of the Jewish Manuscript Studies database')).classes('text-sm').style('color: var(--text-secondary);')
                             with ui.row().classes('items-start gap-2'):
                                 ui.label('•').style('color: var(--text-secondary);')
-                                ui.label(tr('Princeton Geniza Project (PGP) integration: information, transcriptions, and translations for over 35,000 documents')).classes('text-sm').style('color: var(--text-secondary);')
+                                ui.label(tr('Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection')).classes('text-sm').style('color: var(--text-secondary);')
                     def dismiss_whats_new():
                         app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                         whats_new_banner.delete()

@@ -326,7 +326,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Responsa-style Search & 35,000+ PGP Documents"))
+        self.lbl_msg.setText(tr("New: FJMS scholarly metadata — domains, scientific joins & catalog records"))
         self.show()
 
     def on_learn_more(self):
@@ -358,8 +358,8 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul style='font-size: 14px; line-height: 1.8;'>"
-            f"<li><b>{tr('Responsa-style search: advanced search with operators and an intuitive tabular query builder')}</b></li>"
-            f"<li><b>{tr('Princeton Geniza Project (PGP) integration: information, transcriptions, and translations for over 35,000 documents')}</b></li>"
+            f"<li><b>{tr('FJMS scholarly metadata: domain classifications, scientific joins, and catalog records from the Fragment of the Jewish Manuscript Studies database')}</b></li>"
+            f"<li><b>{tr('Domain-based filtering: filter search results by subject (Piyyut, Bible, Letters, etc.) with hierarchical tree selection')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)
