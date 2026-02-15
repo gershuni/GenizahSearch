@@ -2697,6 +2697,23 @@ class CodicologicalManager:
 
 
 # ==============================================================================
+#  NLI CROSSREF SIDECAR (lazy accessor for local image resolution)
+# ==============================================================================
+_nli_crossref_svc = None
+
+def _get_crossref_service():
+    """Lazy accessor for the NLI crossref sidecar service (desktop use)."""
+    global _nli_crossref_svc
+    if _nli_crossref_svc is None:
+        try:
+            from shared.nli_crossref_service import NliCrossrefService
+            _nli_crossref_svc = NliCrossrefService()
+        except Exception:
+            pass
+    return _nli_crossref_svc
+
+
+# ==============================================================================
 #  METADATA MANAGER
 # ==============================================================================
 class MetadataManager:
@@ -3244,24 +3261,45 @@ class MetadataManager:
                     current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
                     current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
 
-        # 2b. Always Fetch NLI IIIF (for fallback or toggle)
-        nli_iiif_data = self.fetch_iiif_manifest(system_id)
-        if nli_iiif_data.get('canvas_map'):
-            sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
-            for fl_id, label in sorted_map:
-                url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
-                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
+        # 2b. Try local crossref sidecar for NLI images (skips IIIF manifest network fetch)
+        crossref_svc = _get_crossref_service()
+        local_images = []
+        if crossref_svc and crossref_svc.is_available():
+            crossref_images = crossref_svc.get_images(system_id)
+            if crossref_images:
+                for img in crossref_images:
+                    fgp_id = img.get('fgp_image_number_id', '')
+                    if fgp_id:
+                        label = img.get('image_name', f'FL{fgp_id}')
+                        url = f"{Config.NLI_IIIF_BASE}/FL{fgp_id}"
+                        local_images.append({'label': label, 'url': url, 'fl_id': fgp_id})
 
-        if not current_meta.get('physical_desc'):
-            current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
+        if local_images:
+            images_nli = local_images
+            LOGGER.info(f"Using {len(local_images)} pre-resolved images for {system_id} (crossref sidecar)")
+            canvas_map = {}
+            for img in local_images:
+                canvas_map[img['fl_id']] = img['label']
+            current_meta['canvas_map'] = canvas_map
+        else:
+            # Fallback: fetch NLI IIIF manifest over network (existing logic)
+            nli_iiif_data = self.fetch_iiif_manifest(system_id)
+            if nli_iiif_data.get('canvas_map'):
+                sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
+                for fl_id, label in sorted_map:
+                    url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
+                    images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
 
-        if marc_attribution:
-            current_meta['attribution'] = marc_attribution
-        elif not current_meta.get('attribution'):
-            current_meta['attribution'] = nli_iiif_data.get('attribution', '')
+            if not current_meta.get('physical_desc'):
+                current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
-        if nli_iiif_data.get('canvas_map'):
-            current_meta['canvas_map'] = nli_iiif_data['canvas_map']
+            if marc_attribution:
+                current_meta['attribution'] = marc_attribution
+            elif not current_meta.get('attribution'):
+                current_meta['attribution'] = nli_iiif_data.get('attribution', '')
+
+            if nli_iiif_data.get('canvas_map'):
+                current_meta['canvas_map'] = nli_iiif_data['canvas_map']
 
         # Prioritize External if available, but keep both sets
         current_meta['images'] = images_ext if images_ext else images_nli
