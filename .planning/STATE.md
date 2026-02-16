@@ -5,14 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.0.0 Local Data Architecture — defining requirements
+**Current focus:** v6.0.0 Local Data Architecture -- Phase 35 (PGP Sidecar Export)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-16 — Milestone v6.0.0 started
+Phase: 35 of 38 (PGP Sidecar Export)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-02-16 -- Roadmap created for v6.0.0
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -32,27 +34,27 @@ Last activity: 2026-02-16 — Milestone v6.0.0 started
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
+| v6.0.0 | 35-38 | TBD | — |
 
 ## Accumulated Context
 
 ### Decisions
 
 See PROJECT.md Key Decisions table for full history.
+Recent decisions affecting current work:
+
+- v6.0.0: New pgp.db sidecar (not extending existing sidecars) -- distinct domain boundary
+- v6.0.0: Tags stored as TEXT JSON, queried with json_each() -- start simple, optimize if >100ms
+- v6.0.0: FJMS descriptions in browse metadata panel button (NOT version selector) -- catalog descriptions, not transcriptions
+- v6.0.0: Supabase PGP tables kept (legacy desktop users) -- cutover deferred to future milestone
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
+- Tags json_each() performance on 35K rows needs benchmarking during Phase 36
+- FJMS/PGP overlap extent unknown -- affects dedup strategy in Phase 38
 
-### Future Improvements
-
-- FTS5 catalog search UI (schema ready in sidecar, deferred to future milestone)
-- FJMS structured metadata search -- leverage TextualFrame tags with FTS5
-- Transcription search (Phase 13, needs server-side index architecture)
-- NLI PartOf relationships UI (424K records) -- service method exists
-- NLI See cross-references UI (19K records) -- service method exists
-- NLI BifolioWith pairs UI (23K records) -- service method exists
-
-## Pending Todos
+### Pending Todos
 
 - JA diacritic dots normalization in search
 - Migrate desktop corrections fetch to shared corrections_service
@@ -62,6 +64,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Starting v6.0.0 milestone
+Stopped at: Roadmap created for v6.0.0 milestone
 Resume file: None
-Notes: 8th milestone. PGP to SQLite sidecar + FJMS full texts.
+Notes: 8th milestone. 4 phases (35-38), 14 requirements. Phase 37 can run parallel to Phase 36.

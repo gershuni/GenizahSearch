@@ -57,7 +57,7 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ## Constraints
 
-- **Legacy Compatibility**: Supabase PGP tables must NOT be removed — previous desktop app versions depend on them
+- **Legacy Compatibility**: Supabase PGP tables must NOT be removed -- previous desktop app versions depend on them
 - **Dual App Maintenance**: All features must work in both NiceGUI web and PyQt6 desktop
 - **Shared Core**: All search logic in genizah_core.py, UI-only code in app-specific files
 
@@ -67,26 +67,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MIGR-01 | — | Pending |
-| MIGR-02 | — | Pending |
-| MIGR-03 | — | Pending |
-| MIGR-04 | — | Pending |
-| MIGR-05 | — | Pending |
-| MIGR-06 | — | Pending |
-| MIGR-07 | — | Pending |
-| MIGR-08 | — | Pending |
-| FJMS-01 | — | Pending |
-| FJMS-02 | — | Pending |
-| FJMS-03 | — | Pending |
-| DIST-01 | — | Pending |
-| DIST-02 | — | Pending |
-| PERF-01 | — | Pending |
+| MIGR-01 | Phase 35 | Pending |
+| MIGR-02 | Phase 36 | Pending |
+| MIGR-03 | Phase 36 | Pending |
+| MIGR-04 | Phase 35 | Pending |
+| MIGR-05 | Phase 36 | Pending |
+| MIGR-06 | Phase 36 | Pending |
+| MIGR-07 | Phase 36 | Pending |
+| MIGR-08 | Phase 35 | Pending |
+| FJMS-01 | Phase 37 | Pending |
+| FJMS-02 | Phase 37 | Pending |
+| FJMS-03 | Phase 37 | Pending |
+| DIST-01 | Phase 38 | Pending |
+| DIST-02 | Phase 38 | Pending |
+| PERF-01 | Phase 38 | Pending |
 
 **Coverage:**
 - v6.0.0 requirements: 14 total
-- Mapped to phases: 0
-- Unmapped: 14
+- Mapped to phases: 14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-16*
-*Last updated: 2026-02-16 after initial definition*
+*Last updated: 2026-02-16 after roadmap creation (traceability populated)*
