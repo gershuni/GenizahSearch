@@ -386,23 +386,25 @@ class NliCrossrefService:
                 url = f"https://cudl.lib.cam.ac.uk/search?keyword={url_quote(shelfmark)}"
                 label = "Cambridge Digital Library"
             elif abbrev == "JTS":
-                # JTS / Princeton Geniza: search-based URL
+                # JTS / Princeton Geniza: correct collection slug is cairo_geniza
                 url = (
-                    f"https://dpul.princeton.edu/geniza/catalog"
+                    f"https://dpul.princeton.edu/cairo_geniza/catalog"
                     f"?search_field=all_fields&q={url_quote(shelfmark)}"
                 )
                 label = "Princeton Digital Library"
             elif abbrev == "Manchester":
+                # Manchester LUNA: search URL (servlet/s/ path is non-functional)
                 url = (
-                    f"https://luna.manchester.ac.uk/luna/servlet/s/"
-                    f"{url_quote(shelfmark)}"
+                    f"https://luna.manchester.ac.uk/luna/servlet/view/search"
+                    f"?q={url_quote(shelfmark)}&search=Go&QuickSearchA=QuickSearchA"
                 )
                 label = "Manchester LUNA"
             elif abbrev == "BL":
-                url = (
-                    f"https://www.bl.uk/manuscripts/FullDisplay.aspx"
-                    f"?ref={url_quote(shelfmark)}"
-                )
+                # Strip leaf suffix: "OR 10110.1" -> "OR 10110", "GASTER 1201.5" -> "GASTER 1201"
+                # NOTE: Do NOT convert spaces to underscores -- searcharchives.bl.uk search
+                # requires URL-encoded spaces (verified: underscores return zero results).
+                bl_shelfmark = re.sub(r'\.\d+$', '', shelfmark)
+                url = f"https://searcharchives.bl.uk/?q={url_quote(bl_shelfmark)}"
                 label = "British Library"
             else:
                 # Oxford and others: no known URL pattern
