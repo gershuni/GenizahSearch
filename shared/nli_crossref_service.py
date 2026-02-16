@@ -386,18 +386,38 @@ class NliCrossrefService:
                 url = f"https://cudl.lib.cam.ac.uk/search?keyword={url_quote(shelfmark)}"
                 label = "Cambridge Digital Library"
             elif abbrev == "JTS":
-                # JTS / Princeton Geniza: correct collection slug is cairo_geniza
-                url = (
-                    f"https://dpul.princeton.edu/cairo_geniza/catalog"
-                    f"?search_field=all_fields&q={url_quote(shelfmark)}"
-                )
+                # JTS / Princeton: try detail catalog page from sidecar, fall back to search
+                dpul_url = self.get_jts_dpul_url(shelfmark)
+                if dpul_url:
+                    url = dpul_url
+                else:
+                    url = (
+                        f"https://dpul.princeton.edu/cairo_geniza/catalog"
+                        f"?search_field=all_fields&q={url_quote(shelfmark)}"
+                    )
                 label = "Princeton Digital Library"
             elif abbrev == "Manchester":
-                # Manchester LUNA: search URL (servlet/s/ path is non-functional)
-                url = (
-                    f"https://luna.manchester.ac.uk/luna/servlet/view/search"
-                    f"?q={url_quote(shelfmark)}&search=Go&QuickSearchA=QuickSearchA"
-                )
+                # Manchester LUNA: try detail page from sidecar, fall back to search
+                # Get first image's ImageSourceName to look up luna_id
+                try:
+                    img_cursor = self._conn.execute(
+                        "SELECT ImageSourceName FROM nli_images "
+                        "WHERE NLI_AlmaId = ? AND ImageSourceName != '' LIMIT 1",
+                        (sys_id,),
+                    )
+                    img_row = img_cursor.fetchone()
+                    img_source = (img_row["ImageSourceName"] or "").lower() if img_row else ""
+                except Exception:
+                    img_source = ""
+
+                luna_id = self.get_manchester_luna_id(img_source) if img_source else None
+                if luna_id:
+                    url = f"https://luna.manchester.ac.uk/luna/servlet/detail/{luna_id}"
+                else:
+                    url = (
+                        f"https://luna.manchester.ac.uk/luna/servlet/view/search"
+                        f"?q={url_quote(shelfmark)}&search=Go&QuickSearchA=QuickSearchA"
+                    )
                 label = "Manchester LUNA"
             elif abbrev == "BL":
                 # Strip leaf suffix: "OR 10110.1" -> "OR 10110", "GASTER 1201.5" -> "GASTER 1201"
@@ -418,6 +438,129 @@ class NliCrossrefService:
             }
         except Exception as e:
             logger.error(f"NliCrossrefService.get_library_viewer_url error for {sys_id}: {e}")
+            return None
+
+    # ── Manchester LUNA (Phase 34: IMG-05) ──────────────────────────
+
+    def get_manchester_luna_id(self, image_source_name: str) -> Optional[str]:
+        """
+        Get Manchester LUNA internal ID for an image source name (JRL filename).
+
+        Args:
+            image_source_name: Lowercased JRL filename (e.g., 'rylands_jrl1379735').
+
+        Returns:
+            LUNA ID string or None if not found / table missing.
+        """
+        if self._conn is None or not image_source_name:
+            return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT luna_id FROM manchester_luna WHERE image_source_name = ?",
+                (image_source_name,),
+            )
+            row = cursor.fetchone()
+            return row["luna_id"] if row else None
+        except Exception as e:
+            logger.debug(f"NliCrossrefService.get_manchester_luna_id error: {e}")
+            return None
+
+    def get_manchester_manifest_url(self, image_source_name: str) -> Optional[str]:
+        """
+        Get Manchester LUNA IIIF manifest URL for an image source name.
+
+        Args:
+            image_source_name: Lowercased JRL filename (e.g., 'rylands_jrl1379735').
+
+        Returns:
+            IIIF manifest URL string or None if not found / table missing.
+        """
+        luna_id = self.get_manchester_luna_id(image_source_name)
+        if luna_id:
+            return f"https://luna.manchester.ac.uk/luna/servlet/iiif/m/{luna_id}/manifest"
+        return None
+
+    # ── JTS/Princeton DPUL (Phase 34: IMG-05) ────────────────────────
+
+    def get_jts_manifest_url(self, shelfmark: str) -> Optional[str]:
+        """
+        Get JTS Figgy IIIF manifest URL for a shelfmark.
+
+        Tries the full shelfmark first, then strips any trailing leaf suffix
+        (e.g., '.1', '.2') and retries with the base shelfmark.
+
+        Args:
+            shelfmark: JTS shelfmark (e.g., 'ENA 2573.1' or 'ENA 2573').
+
+        Returns:
+            Figgy manifest URL string or None if not found / table missing.
+        """
+        if self._conn is None or not shelfmark:
+            return None
+        try:
+            # Try full shelfmark first
+            cursor = self._conn.execute(
+                "SELECT manifest_url FROM jts_dpul WHERE shelfmark = ?",
+                (shelfmark,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return row["manifest_url"]
+
+            # Try base shelfmark (strip trailing .N leaf suffix)
+            base = re.sub(r'\.\d+$', '', shelfmark)
+            if base != shelfmark:
+                cursor = self._conn.execute(
+                    "SELECT manifest_url FROM jts_dpul WHERE shelfmark = ?",
+                    (base,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row["manifest_url"]
+
+            return None
+        except Exception as e:
+            logger.debug(f"NliCrossrefService.get_jts_manifest_url error: {e}")
+            return None
+
+    def get_jts_dpul_url(self, shelfmark: str) -> Optional[str]:
+        """
+        Get JTS/Princeton DPUL catalog page URL for a shelfmark.
+
+        Same base/full shelfmark logic as get_jts_manifest_url.
+
+        Args:
+            shelfmark: JTS shelfmark (e.g., 'ENA 2573.1' or 'ENA 2573').
+
+        Returns:
+            DPUL catalog URL string or None if not found / table missing.
+        """
+        if self._conn is None or not shelfmark:
+            return None
+        try:
+            # Try full shelfmark first
+            cursor = self._conn.execute(
+                "SELECT dpul_url FROM jts_dpul WHERE shelfmark = ?",
+                (shelfmark,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return row["dpul_url"]
+
+            # Try base shelfmark (strip trailing .N leaf suffix)
+            base = re.sub(r'\.\d+$', '', shelfmark)
+            if base != shelfmark:
+                cursor = self._conn.execute(
+                    "SELECT dpul_url FROM jts_dpul WHERE shelfmark = ?",
+                    (base,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row["dpul_url"]
+
+            return None
+        except Exception as e:
+            logger.debug(f"NliCrossrefService.get_jts_dpul_url error: {e}")
             return None
 
     # ── Relationships (Phase 33: REL-01, REL-02) ────────────────────
@@ -517,7 +660,11 @@ class NliCrossrefService:
                 - cambridge (bool): True if normalized_shelfmark has a Cambridge manifest
                 - image_count (int): Count of rows with non-empty FGPImageNumberId
         """
-        result = {"nli_fgp": False, "cambridge": False, "image_count": 0}
+        result = {
+            "nli_fgp": False, "cambridge": False,
+            "manchester": False, "jts": False,
+            "image_count": 0,
+        }
 
         if self._conn is None:
             return result
@@ -547,6 +694,41 @@ class NliCrossrefService:
 
         except Exception as e:
             logger.error(f"NliCrossrefService.get_image_sources error for {sys_id}: {e}")
+
+        # Check Manchester LUNA (table may not exist)
+        try:
+            man_cursor = self._conn.execute(
+                "SELECT COUNT(*) as cnt FROM manchester_luna m "
+                "JOIN nli_images i ON LOWER(i.ImageSourceName) = m.image_source_name "
+                "WHERE i.NLI_AlmaId = ?",
+                (sys_id,),
+            )
+            man_row = man_cursor.fetchone()
+            if man_row and man_row["cnt"] > 0:
+                result["manchester"] = True
+        except Exception:
+            pass  # table may not exist
+
+        # Check JTS DPUL (table may not exist)
+        try:
+            if normalized_shelfmark:
+                # Use the original shelfmark from nli_images for JTS lookup
+                sm_cursor = self._conn.execute(
+                    "SELECT DISTINCT Shelfmark FROM nli_images WHERE NLI_AlmaId = ? LIMIT 1",
+                    (sys_id,),
+                )
+                sm_row = sm_cursor.fetchone()
+                if sm_row and sm_row["Shelfmark"]:
+                    jts_shelfmark = sm_row["Shelfmark"]
+                    jts_cursor = self._conn.execute(
+                        "SELECT COUNT(*) as cnt FROM jts_dpul WHERE shelfmark = ?",
+                        (jts_shelfmark,),
+                    )
+                    jts_row = jts_cursor.fetchone()
+                    if jts_row and jts_row["cnt"] > 0:
+                        result["jts"] = True
+        except Exception:
+            pass  # table may not exist
 
         return result
 

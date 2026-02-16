@@ -111,12 +111,50 @@ def test_db(tmp_path):
         cam_rows,
     )
 
+    # Create manchester_luna table (Phase 34)
+    conn.execute("""
+        CREATE TABLE manchester_luna (
+            image_source_name TEXT PRIMARY KEY,
+            luna_id TEXT NOT NULL,
+            jrl_filename TEXT
+        )
+    """)
+    conn.executemany(
+        "INSERT INTO manchester_luna (image_source_name, luna_id, jrl_filename) VALUES (?, ?, ?)",
+        [
+            ("rylands_jrl1379735", "UoMUoML~95~2~95~268773~95~268800", "rylands_jrl1379735"),
+            ("rylands_jrl1400001", "UoMUoML~95~2~95~300000~95~300001", "rylands_jrl1400001"),
+        ],
+    )
+
+    # Create jts_dpul table (Phase 34)
+    conn.execute("""
+        CREATE TABLE jts_dpul (
+            shelfmark TEXT PRIMARY KEY,
+            ark_suffix TEXT,
+            manifest_url TEXT,
+            dpul_url TEXT,
+            thumbnail_url TEXT
+        )
+    """)
+    conn.executemany(
+        "INSERT INTO jts_dpul (shelfmark, ark_suffix, manifest_url, dpul_url, thumbnail_url) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("ENA 2345.1", "abc123", "https://figgy.princeton.edu/concern/scanned_resources/abc123/manifest",
+             "https://dpul.princeton.edu/cairo_geniza/catalog/abc123", "https://iiif-cloud.princeton.edu/iiif/2/abc123/thumb"),
+            ("ENA 9999", "def456", "https://figgy.princeton.edu/concern/scanned_resources/def456/manifest",
+             "https://dpul.princeton.edu/cairo_geniza/catalog/def456", "https://iiif-cloud.princeton.edu/iiif/2/def456/thumb"),
+        ],
+    )
+
     # Create indexes (matching import script)
     conn.execute("CREATE INDEX idx_nli_alma ON nli_images(NLI_AlmaId)")
     conn.execute("CREATE INDEX idx_nli_fgp ON nli_images(FGPImageNumberId)")
     conn.execute("CREATE INDEX idx_nli_shelfmark ON nli_images(Shelfmark)")
     conn.execute("CREATE INDEX idx_cam_shelfmark ON cambridge_manifests(normalized_shelfmark)")
     conn.execute("CREATE INDEX idx_cam_label ON cambridge_manifests(label)")
+    conn.execute("CREATE INDEX idx_man_luna ON manchester_luna(image_source_name)")
+    conn.execute("CREATE INDEX idx_jts_shelfmark ON jts_dpul(shelfmark)")
 
     conn.commit()
     conn.close()
@@ -376,15 +414,15 @@ def test_get_library_viewer_url_cul(service):
     assert result["library_name_eng"] == "Cambridge UL"
 
 
-def test_get_library_viewer_url_manchester(test_db):
-    """Manchester library returns LUNA search URL."""
-    # Insert a Manchester row
+def test_get_library_viewer_url_manchester_with_luna(test_db):
+    """Manchester library returns LUNA detail page URL when luna_id found in sidecar."""
+    # Insert a Manchester row whose ImageSourceName matches manchester_luna
     conn = sqlite3.connect(test_db)
     conn.execute(
         "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
          "Gaster 756", "INV_M", "", "", "", "M001", "CAT_M", "1",
-         "FGP_M", "1111", "Gaster_756__L1F0B0S1", "NLI", "", "", "",
+         "FGP_M", "1111", "Gaster_756__L1F0B0S1", "rylands_jrl1379735", "", "", "",
          "1", "", "Paper", "10x15", ""),
     )
     conn.commit()
@@ -392,10 +430,65 @@ def test_get_library_viewer_url_manchester(test_db):
     svc = NliCrossrefService(db_path=test_db)
     result = svc.get_library_viewer_url("M001")
     assert result is not None
+    assert "luna.manchester.ac.uk/luna/servlet/detail/" in result["url"]
+    assert "UoMUoML" in result["url"]
+    assert result["library_abbrev"] == "Manchester"
+    assert result["label"] == "Manchester LUNA"
+    svc.close()
+
+
+def test_get_library_viewer_url_manchester_fallback(test_db):
+    """Manchester library falls back to search URL when luna_id not in sidecar."""
+    # Insert a Manchester row whose ImageSourceName does NOT match manchester_luna
+    conn = sqlite3.connect(test_db)
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+         "Gaster 999", "INV_M2", "", "", "", "M002", "CAT_M2", "1",
+         "FGP_M2", "2222", "Gaster_999__L1F0B0S1", "unknown_source", "", "", "",
+         "1", "", "Paper", "10x15", ""),
+    )
+    conn.commit()
+    conn.close()
+    svc = NliCrossrefService(db_path=test_db)
+    result = svc.get_library_viewer_url("M002")
+    assert result is not None
     assert "luna.manchester.ac.uk/luna/servlet/view/search" in result["url"]
     assert "q=Gaster" in result["url"]
     assert result["library_abbrev"] == "Manchester"
     assert result["label"] == "Manchester LUNA"
+    svc.close()
+
+
+def test_get_library_viewer_url_jts_with_dpul(service):
+    """JTS library returns DPUL catalog page URL when shelfmark found in sidecar."""
+    # A002 has JTS abbrev with shelfmark "ENA 2345.1" which is in jts_dpul
+    result = service.get_library_viewer_url("A002")
+    assert result is not None
+    assert "dpul.princeton.edu/cairo_geniza/catalog/abc123" in result["url"]
+    assert result["library_abbrev"] == "JTS"
+    assert result["label"] == "Princeton Digital Library"
+
+
+def test_get_library_viewer_url_jts_fallback(test_db):
+    """JTS library falls back to search URL when shelfmark not in jts_dpul."""
+    conn = sqlite3.connect(test_db)
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("JTS", "JTS", "New York", "בית המדרש לרבנים", "ENA",
+         "ENA 0001.99", "INV_J2", "", "", "", "J002", "CAT_J2", "1",
+         "FGP_J2", "3333", "ENA_0001__L1F0B0S1", "NLI", "", "", "",
+         "1", "", "Paper", "10x15", ""),
+    )
+    conn.commit()
+    conn.close()
+    svc = NliCrossrefService(db_path=test_db)
+    result = svc.get_library_viewer_url("J002")
+    assert result is not None
+    assert "dpul.princeton.edu/cairo_geniza/catalog?" in result["url"]
+    assert "q=ENA" in result["url"]
+    assert result["library_abbrev"] == "JTS"
+    assert result["label"] == "Princeton Digital Library"
     svc.close()
 
 
@@ -449,6 +542,110 @@ def test_get_library_viewer_url_missing(service):
     assert result is None
 
 
+# ── Manchester LUNA tests ─────────────────────────────────────────
+
+
+def test_get_manchester_luna_id_found(service):
+    """Returns luna_id for known image source name."""
+    luna_id = service.get_manchester_luna_id("rylands_jrl1379735")
+    assert luna_id == "UoMUoML~95~2~95~268773~95~268800"
+
+
+def test_get_manchester_luna_id_not_found(service):
+    """Returns None for unknown image source name."""
+    assert service.get_manchester_luna_id("unknown_source") is None
+
+
+def test_get_manchester_manifest_url_found(service):
+    """Returns IIIF manifest URL for known image source name."""
+    url = service.get_manchester_manifest_url("rylands_jrl1379735")
+    assert url == "https://luna.manchester.ac.uk/luna/servlet/iiif/m/UoMUoML~95~2~95~268773~95~268800/manifest"
+
+
+def test_get_manchester_manifest_url_not_found(service):
+    """Returns None for unknown image source name."""
+    assert service.get_manchester_manifest_url("unknown_source") is None
+
+
+# ── JTS/Princeton DPUL tests ─────────────────────────────────────
+
+
+def test_get_jts_manifest_url_found(service):
+    """Returns Figgy manifest URL for known shelfmark."""
+    url = service.get_jts_manifest_url("ENA 2345.1")
+    assert url == "https://figgy.princeton.edu/concern/scanned_resources/abc123/manifest"
+
+
+def test_get_jts_manifest_url_base_fallback(service):
+    """Falls back to base shelfmark when leaf suffix not found directly."""
+    # "ENA 9999.5" is not in jts_dpul, but "ENA 9999" is
+    url = service.get_jts_manifest_url("ENA 9999.5")
+    assert url == "https://figgy.princeton.edu/concern/scanned_resources/def456/manifest"
+
+
+def test_get_jts_manifest_url_not_found(service):
+    """Returns None for unknown shelfmark."""
+    assert service.get_jts_manifest_url("UNKNOWN 000") is None
+
+
+def test_get_jts_dpul_url_found(service):
+    """Returns DPUL catalog URL for known shelfmark."""
+    url = service.get_jts_dpul_url("ENA 2345.1")
+    assert url == "https://dpul.princeton.edu/cairo_geniza/catalog/abc123"
+
+
+def test_get_jts_dpul_url_base_fallback(service):
+    """Falls back to base shelfmark when leaf suffix not found directly."""
+    url = service.get_jts_dpul_url("ENA 9999.5")
+    assert url == "https://dpul.princeton.edu/cairo_geniza/catalog/def456"
+
+
+def test_get_jts_dpul_url_not_found(service):
+    """Returns None for unknown shelfmark."""
+    assert service.get_jts_dpul_url("UNKNOWN 000") is None
+
+
+# ── Image sources (Manchester + JTS) tests ────────────────────────
+
+
+def test_get_image_sources_with_manchester(test_db):
+    """Returns manchester=True when Manchester LUNA data exists in sidecar."""
+    # Insert a Manchester row with ImageSourceName matching manchester_luna
+    conn = sqlite3.connect(test_db)
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+         "Gaster 756", "INV_MS", "", "", "", "MS001", "CAT_MS", "1",
+         "FGP_MS", "4444", "Gaster_756__L1F0B0S1", "rylands_jrl1379735", "", "", "",
+         "1", "", "Paper", "10x15", ""),
+    )
+    conn.commit()
+    conn.close()
+    svc = NliCrossrefService(db_path=test_db)
+    sources = svc.get_image_sources("MS001", normalized_shelfmark="gaster756")
+    assert sources["manchester"] is True
+    svc.close()
+
+
+def test_get_image_sources_manchester_false(service):
+    """Returns manchester=False when no Manchester LUNA data for sys_id."""
+    sources = service.get_image_sources("A001", normalized_shelfmark="ts12123")
+    assert sources["manchester"] is False
+
+
+def test_get_image_sources_with_jts(service):
+    """Returns jts=True when JTS DPUL data exists for the shelfmark."""
+    # A002 has JTS library with shelfmark "ENA 2345.1" which is in jts_dpul
+    sources = service.get_image_sources("A002", normalized_shelfmark="ena23451")
+    assert sources["jts"] is True
+
+
+def test_get_image_sources_jts_false(service):
+    """Returns jts=False when no JTS DPUL data for the shelfmark."""
+    sources = service.get_image_sources("A001", normalized_shelfmark="ts12123")
+    assert sources["jts"] is False
+
+
 # ── Graceful degradation tests ─────────────────────────────────────
 
 
@@ -467,8 +664,17 @@ def test_all_methods_return_empty_when_unavailable():
     assert svc.get_part_of("x") == []
     assert svc.get_see_references("x") == []
     assert svc.get_bifolio_partners("x") == []
+    # Manchester and JTS methods
+    assert svc.get_manchester_luna_id("x") is None
+    assert svc.get_manchester_manifest_url("x") is None
+    assert svc.get_jts_manifest_url("x") is None
+    assert svc.get_jts_dpul_url("x") is None
     sources = svc.get_image_sources("x", "y")
-    assert sources == {"nli_fgp": False, "cambridge": False, "image_count": 0}
+    assert sources == {
+        "nli_fgp": False, "cambridge": False,
+        "manchester": False, "jts": False,
+        "image_count": 0,
+    }
     # close() should not raise
     svc.close()
 
