@@ -19039,6 +19039,18 @@ class GenizahGUI(QMainWindow):
         self.btn_find_parallels.setEnabled(True)
         self.btn_browse_add_to_list.setEnabled(True)
 
+        # Start metadata enrichment for Oxford Part manuscript (Phase 33 gap closure)
+        # Without this, on_browse_enriched_loaded never fires and metadata
+        # (IsNotGenizah badge, Neubauer-Cowley, bibliography, catalog refs) is never displayed.
+        target_sid_for_enrich = self.current_browse_sid
+        cached_meta = self.meta_mgr.nli_cache.get(target_sid_for_enrich)
+        if cached_meta:
+            self.on_browse_enriched_loaded(target_sid_for_enrich, cached_meta)
+        else:
+            self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, target_sid_for_enrich)
+            self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+            self.enrich_browse_worker.start()
+
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
 
