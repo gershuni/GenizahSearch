@@ -88,7 +88,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 - [x] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL (completed 2026-02-15)
 - [x] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators (completed 2026-02-15)
 - [x] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page (completed 2026-02-16)
-- [ ] **Phase 33: Metadata Enrichment** - FIST bibliography/catalog export + NLI/FJMS metadata display in both apps
+- [x] **Phase 33: Metadata Enrichment** - FIST bibliography/catalog export + NLI/FJMS metadata display in both apps (completed 2026-02-16)
 - [x] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources (completed 2026-02-16)
 
 ## Phase Details
@@ -156,7 +156,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   4. NLI IsNotGenizah flag shows as a visual badge for the 29,081 flagged items in our corpus
   5. FJMS SourceName, NLI CollectionName, and physical storage references (OBBox/Volume/Folio) are displayed as secondary metadata
   6. All metadata displays in both web and desktop apps
-**Plans:** 4 plans
+**Plans:** 4/4 plans complete
 Plans:
 - [ ] 33-01-PLAN.md -- FIST bibliography, catalog cross-refs, and reference tables export to sidecar
 - [ ] 33-02-PLAN.md -- Service layer methods + enrich_metadata wiring + tests
@@ -210,7 +210,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
 | 32. Metadata Display | v5.9.0 | Complete    | 2026-02-16 | - |
-| 33. Metadata Enrichment | v5.9.0 | 0/4 | Planned | - |
+| 33. Metadata Enrichment | v5.9.0 | Complete    | 2026-02-16 | - |
 | 34. Library IIIF Fallback | v5.9.0 | Complete    | 2026-02-16 | - |
 
 ---
