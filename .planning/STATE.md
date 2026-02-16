@@ -43,6 +43,7 @@ Progress: [████████████████████] 100%
 | Phase 34 P01 | 7min | 2 tasks | 1 file |
 | Phase 34 P02 | 19min | 2 tasks | 1 file |
 | Phase 34 P03 | 3min | 2 tasks | 3 files |
+| Phase 34 P04 | 4min | 2 tasks | 3 files |
 | Phase 34 P05 | 2min | 2 tasks | 1 file |
 
 ## Accumulated Context
@@ -83,6 +84,8 @@ See PROJECT.md Key Decisions table for full history.
 - 34-03: Manchester detail URL via luna.manchester.ac.uk/luna/servlet/detail/{luna_id}, JTS via dpul_url from sidecar
 - 34-03: external_provider key ('manchester'/'jts') set in enrich_metadata for UI labeling
 - 34-03: JTS shelfmark lookup tries full then base (strip .N suffix); Manchester uses ImageSourceName JOIN
+- 34-04: Reuse cambridge_images (images_ext) for all external providers, external_provider key differentiates proxy endpoint
+- 34-04: Manchester pink (#e91e63), JTS orange (#ff9800) chip colors; toggle when NLI + external, link-only when single source
 - 34-05: library_viewer_url preferred over raw manifest URL for Manchester/JTS external button in desktop
 - 34-05: external_provider explicit key checked first in _detect_external_provider, URL patterns as fallback
 
