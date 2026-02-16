@@ -156,7 +156,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   4. NLI IsNotGenizah flag shows as a visual badge for the 29,081 flagged items in our corpus
   5. FJMS SourceName, NLI CollectionName, and physical storage references (OBBox/Volume/Folio) are displayed as secondary metadata
   6. All metadata displays in both web and desktop apps
-**Plans:** 5 plans
+**Plans:** 5/5 plans complete
 Plans:
 - [x] 33-01-PLAN.md -- FIST bibliography, catalog cross-refs, and reference tables export to sidecar
 - [x] 33-02-PLAN.md -- Service layer methods + enrich_metadata wiring + tests
@@ -211,7 +211,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
 | 32. Metadata Display | v5.9.0 | 3/3 | Complete | 2026-02-16 |
-| 33. Metadata Enrichment | v5.9.0 | 4/5 | Gap closure | 2026-02-16 |
+| 33. Metadata Enrichment | v5.9.0 | Complete    | 2026-02-16 | 2026-02-16 |
 | 34. Library IIIF Fallback | v5.9.0 | 5/5 | Complete | 2026-02-16 |
 
 ---
