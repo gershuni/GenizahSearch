@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 33 of 34 (Metadata Enrichment)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: Executing Phase 33 plans
-Last activity: 2026-02-16 -- Completed 33-01 (FIST data export: bibliography 542K, catalog_refs 64K, 3 ref tables)
+Last activity: 2026-02-16 -- Completed 33-02 (service layer: bibliography, catalog refs, metadata enrichment wiring)
 
 Progress: [██████████████████░░] 92%
 
@@ -46,6 +46,7 @@ Progress: [██████████████████░░] 92%
 | Phase 34 P04 | 4min | 2 tasks | 3 files |
 | Phase 34 P05 | 2min | 2 tasks | 1 file |
 | Phase 33 P01 | 8min | 1 task | 1 file |
+| Phase 33 P02 | 6min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,9 @@ See PROJECT.md Key Decisions table for full history.
 - 33-01: All bibliography JOINs denormalized at export time -- 542K rows with resolved authors, titles, mention types for single-table lookups
 - 33-01: ABS(MentionTypeCode) handles negative FIST codes; SELECT DISTINCT deduplicates join chain (542K actual vs 733K raw)
 - 33-01: Graceful locked-DB: skip delete, overwrite tables in-place when web app holds sidecar open
+- 33-02: Bibliography CASE ordering (Discussion > Mentioned > others), generic source names filtered (Catalogs/Institution/Collection/Other)
+- 33-02: _get_fjms_service() lazy accessor with thread_safe=True matches _get_crossref_service() pattern
+- 33-02: NLI crossref metadata added inside existing crossref try block; FJMS metadata in separate block after it
 
 ### Blockers/Concerns
 
@@ -108,6 +112,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 33-01-PLAN.md (FIST data export)
+Stopped at: Completed 33-02-PLAN.md (service layer + enrich_metadata wiring)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 plan 01 complete -- fjms_enrichment.db v2.0.0 with bibliography, catalog_refs, ref_catalogs, ref_titles, ref_authors tables. Next: 33-02 (service layer).
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 plans 01-02 complete -- service methods and enrich_metadata wiring done. Next: 33-03 (web UI).
