@@ -87,7 +87,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 - [x] **Phase 29: Data Infrastructure** - Import NLI crossref and Cambridge IIIF into sidecar with shared service layer (completed 2026-02-15)
 - [x] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL (completed 2026-02-15)
 - [x] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators (completed 2026-02-15)
-- [ ] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page
+- [x] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page (completed 2026-02-16)
 - [ ] **Phase 33: Fragment Relationships** - NLI PartOf and See cross-references in Related Fragments panel
 - [ ] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources
 
@@ -140,7 +140,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   2. A clickable NLI catalog link (constructed from NLI_AlmaId) on the browse page opens the NLI KTIV viewer for the manuscript
   3. A clickable link to the manuscript's holding library digital collection (CUDL, Princeton DPUL, Manchester LUNA, BL viewer) appears on the browse page
   4. All metadata and links display in both web and desktop apps
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
   - [ ] 32-01-PLAN.md -- Service layer additions (library viewer URL, physical metadata enrichment) + web browse metadata display
   - [ ] 32-02-PLAN.md -- Desktop browse extended info panel with physical metadata and library links
 
@@ -184,7 +184,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 29. Data Infrastructure | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
-| 32. Metadata Display | v5.9.0 | 0/TBD | Not started | - |
+| 32. Metadata Display | v5.9.0 | Complete    | 2026-02-16 | - |
 | 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
 | 34. Library IIIF Fallback | v5.9.0 | 0/TBD | Not started | - |
 
