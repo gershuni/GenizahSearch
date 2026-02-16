@@ -2540,6 +2540,16 @@ class ResultDialog(QDialog):
         self.btn_compact_ext_info.toggled.connect(self.toggle_extended_info)
         compact_layout.addWidget(self.btn_compact_ext_info)
 
+        # Bib buttons (compact)
+        self.btn_compact_bib_fjms = QPushButton()
+        self.btn_compact_bib_fjms.setVisible(False)
+        self.btn_compact_bib_fjms.clicked.connect(self._show_rd_fjms_bib)
+        compact_layout.addWidget(self.btn_compact_bib_fjms)
+        self.btn_compact_bib_nli = QPushButton()
+        self.btn_compact_bib_nli.setVisible(False)
+        self.btn_compact_bib_nli.clicked.connect(self._show_rd_nli_bib)
+        compact_layout.addWidget(self.btn_compact_bib_nli)
+
         # Joins (compact) - chain icon like normal mode
         self.btn_compact_joins = QToolButton()
         self.btn_compact_joins.setText("🔗")
@@ -2623,10 +2633,21 @@ class ResultDialog(QDialog):
         # Deprecated: btn_external_view replaced/merged logic
         self.btn_external_view = self.btn_toggle_image
 
+        self.btn_rd_bib_fjms = QPushButton()
+        self.btn_rd_bib_fjms.setVisible(False)
+        self.btn_rd_bib_fjms.clicked.connect(self._show_rd_fjms_bib)
+        self.btn_rd_bib_nli = QPushButton()
+        self.btn_rd_bib_nli.setVisible(False)
+        self.btn_rd_bib_nli.clicked.connect(self._show_rd_nli_bib)
+        self._rd_fjms_bib = []
+        self._rd_marc_bib = []
+
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_add_to_list)
         action_row.addWidget(self.btn_ext_info)
+        action_row.addWidget(self.btn_rd_bib_fjms)
+        action_row.addWidget(self.btn_rd_bib_nli)
         action_row.addWidget(self.btn_toggle_image)
 
         action_row.addStretch()
@@ -4049,9 +4070,6 @@ class ResultDialog(QDialog):
         info_html = f"<b>{tr('Sys')}:</b> {self.current_sys_id} | <b>{tr('FL')}:</b> {self.current_fl_id or '?'}"
         self.lbl_info.setText(info_html)
 
-        # Update Domain info
-        self._update_rd_domain_label()
-
         # Update Page Controls
         self.spin_page.blockSignals(True); self.spin_page.setValue(self.current_p_num); self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {page_data['total_pages']}")
@@ -4087,6 +4105,13 @@ class ResultDialog(QDialog):
         self._rd_pgp_doc = None
         self._rd_pgp_sources = []
         self._rd_enriched_data_loaded = False
+        self._rd_fjms_bib = []
+        self._rd_marc_bib = []
+        self.btn_rd_bib_fjms.setVisible(False)
+        self.btn_rd_bib_nli.setVisible(False)
+        if hasattr(self, 'btn_compact_bib_fjms'):
+            self.btn_compact_bib_fjms.setVisible(False)
+            self.btn_compact_bib_nli.setVisible(False)
         parent = self.parent()
         if parent:
             # Disconnect old worker signals first to prevent stale results
@@ -4103,6 +4128,9 @@ class ResultDialog(QDialog):
 
         # Update joins menu
         self._rd_update_joins_menu()
+
+        # Update Domain info + start enrichment (AFTER reset so buttons aren't wiped)
+        self._update_rd_domain_label()
 
     def _update_rd_domain_label(self):
         """Update domain info label for the current result in ResultDialog."""
@@ -4142,6 +4170,12 @@ class ResultDialog(QDialog):
             threading.Thread(target=worker, daemon=True).start()
 
         if not cached_meta or 'marc' not in cached_meta:
+            # Disconnect old enrich worker to prevent stale signals and GC crash
+            if hasattr(self, 'enrich_worker') and self.enrich_worker is not None:
+                try:
+                    self.enrich_worker.finished_signal.disconnect(self.on_enriched_data_loaded)
+                except (TypeError, RuntimeError):
+                    pass
             self.enrich_worker = EnrichMetadataThread(self.meta_mgr, self.current_sys_id)
             self.enrich_worker.finished_signal.connect(self.on_enriched_data_loaded)
             self.enrich_worker.start()
@@ -4188,6 +4222,32 @@ class ResultDialog(QDialog):
                 parent._search_by_pgp_tag(tag)
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
+
+    def _show_rd_fjms_bib(self):
+        """Open FJMS bibliography dialog from ResultDialog."""
+        if not self._rd_fjms_bib:
+            return
+        shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
+        dlg = FjmsBibliographyDialog(
+            self._rd_fjms_bib,
+            sys_id=self.current_sys_id or '',
+            shelfmark=shelf,
+            parent=self,
+        )
+        dlg.exec()
+
+    def _show_rd_nli_bib(self):
+        """Open NLI bibliography dialog from ResultDialog."""
+        if not self._rd_marc_bib:
+            return
+        shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
+        dlg = NliBibliographyDialog(
+            self._rd_marc_bib,
+            sys_id=self.current_sys_id or '',
+            shelfmark=shelf,
+            parent=self,
+        )
+        dlg.exec()
 
     def toggle_external_viewer(self, checked):
         self.external_pane.setVisible(checked)
@@ -4260,9 +4320,28 @@ class ResultDialog(QDialog):
         else:
             self.btn_external_link.setVisible(False)
 
-        # 3. Build Extended Info HTML (Text)
+        # 3. Populate bibliography buttons (before early-return guard)
         marc = meta.get('marc', {})
+        fjms_bib = meta.get('bibliography', [])
+        marc_bib = marc.get('bibliography', [])
+        if fjms_bib:
+            self._rd_fjms_bib = fjms_bib
+            lbl = f"{tr('Bibliography FJMS')} ({len(fjms_bib)})"
+            self.btn_rd_bib_fjms.setText(lbl)
+            self.btn_rd_bib_fjms.setVisible(True)
+            if hasattr(self, 'btn_compact_bib_fjms'):
+                self.btn_compact_bib_fjms.setText(lbl)
+                self.btn_compact_bib_fjms.setVisible(True)
+        if marc_bib:
+            self._rd_marc_bib = marc_bib
+            lbl = f"{tr('Bibliography Ktiv')} ({len(marc_bib)})"
+            self.btn_rd_bib_nli.setText(lbl)
+            self.btn_rd_bib_nli.setVisible(True)
+            if hasattr(self, 'btn_compact_bib_nli'):
+                self.btn_compact_bib_nli.setText(lbl)
+                self.btn_compact_bib_nli.setVisible(True)
 
+        # 4. Build Extended Info HTML (Text)
         external_meta = meta.get('external_meta', {})
         has_pgp = bool(getattr(self, '_rd_pgp_doc', None))
         if not marc and not meta.get('physical_desc') and not part_meta and not external_meta and not has_pgp:
@@ -4303,13 +4382,6 @@ class ResultDialog(QDialog):
         people = marc.get('people', [])
         if people:
             kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
-
-        bib = marc.get('bibliography', [])
-        if bib:
-            kti_html += f"<p><b>{tr('Bibliography')}:</b><ul>"
-            for b in bib:
-                kti_html += f"<li>{b}</li>"
-            kti_html += "</ul></p>"
 
         external_html = ""
         if part_meta:
@@ -4894,6 +4966,340 @@ class DomainFilterDialog(QDialog):
             self.summary_label.setText(f"{tr('Excluding')}: {domain_name}")
         else:
             self.summary_label.setText(f"{tr('Excluding')} {count} {tr('domains')}")
+
+
+class FjmsBibliographyDialog(QDialog):
+    """FJMS bibliography dialog with structured table."""
+
+    def __init__(self, fjms_entries, sys_id='', shelfmark='', parent=None):
+        super().__init__(parent)
+        from shared.fjms_service import format_page_ref, _ts_symbol
+        self.entries = fjms_entries
+        self.sys_id = sys_id
+        self._format_page_ref = format_page_ref
+        self._ts_symbol = _ts_symbol
+        self.setWindowTitle(f"{tr('Bibliography FJMS')} \u2014 {shelfmark}" if shelfmark else tr('Bibliography FJMS'))
+        self.setMinimumSize(900, 500)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Filter row 1: text + type
+        filter_row = QHBoxLayout()
+        self.text_filter = QLineEdit()
+        self.text_filter.setPlaceholderText(tr('Filter by author, title...'))
+        self.text_filter.textChanged.connect(self._filter_rows)
+        filter_row.addWidget(self.text_filter, 1)
+        self.type_combo = QComboBox()
+        for label, val in [(tr('All'), 'All'), (tr('Discussion'), 'Discussion'),
+                           (tr('Mentioned'), 'Mentioned'), (tr('Index'), 'Index')]:
+            self.type_combo.addItem(label, val)
+        self.type_combo.currentIndexChanged.connect(lambda _: self._filter_rows())
+        filter_row.addWidget(QLabel(tr('Type') + ':'))
+        filter_row.addWidget(self.type_combo)
+        layout.addLayout(filter_row)
+
+        # Filter row 2: checkboxes
+        check_row = QHBoxLayout()
+        self.chk_transcription = QCheckBox(tr('Has Transcription'))
+        self.chk_transcription.toggled.connect(self._filter_rows)
+        check_row.addWidget(self.chk_transcription)
+        self.chk_translation = QCheckBox(tr('Has Translation'))
+        self.chk_translation.toggled.connect(self._filter_rows)
+        check_row.addWidget(self.chk_translation)
+        check_row.addStretch()
+        layout.addLayout(check_row)
+
+        # Table: Author, Article/Title, Year, Vol., Pages, Type, T, S
+        headers = [tr('Author'), tr('Article/Title'), tr('Year'), tr('Vol.'),
+                    tr('Pages'), tr('Type'), tr('col_T'), tr('col_S')]
+        self.table = QTableWidget(len(fjms_entries), len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        self.table.horizontalHeader().model().setHeaderData(6, Qt.Orientation.Horizontal, tr('Transcription'), Qt.ItemDataRole.ToolTipRole)
+        self.table.horizontalHeader().model().setHeaderData(7, Qt.Orientation.Horizontal, tr('Translation'), Qt.ItemDataRole.ToolTipRole)
+        self.table.setSortingEnabled(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        for col_idx in (6, 7):
+            self.table.setColumnWidth(col_idx, 36)
+
+        for row, e in enumerate(fjms_entries):
+            author = (e.get('article_author_eng') or e.get('article_author_heb') or '').strip()
+            item0 = QTableWidgetItem(author)
+            item0.setData(Qt.ItemDataRole.UserRole, row)
+            self.table.setItem(row, 0, item0)
+            article_name = (e.get('article_name') or '').strip()
+            running_title = (e.get('running_title') or e.get('title_acronym') or '').strip()
+            self.table.setItem(row, 1, QTableWidgetItem(article_name if article_name else running_title))
+            year = str(e.get('title_year') or '').strip()
+            self.table.setItem(row, 2, QTableWidgetItem(year if year and year != 'None' else ''))
+            vol = str(e.get('volume') or '').strip()
+            self.table.setItem(row, 3, QTableWidgetItem(vol if vol and vol != 'None' else ''))
+            self.table.setItem(row, 4, QTableWidgetItem(format_page_ref(e)))
+            mt = (e.get('mention_type') or '').strip()
+            self.table.setItem(row, 5, QTableWidgetItem(tr(mt) if mt and mt != 'None' else ''))
+            self.table.setItem(row, 6, QTableWidgetItem(_ts_symbol(e.get('transcription_type'))))
+            self.table.setItem(row, 7, QTableWidgetItem(_ts_symbol(e.get('translation_type'))))
+
+        self.table.resizeColumnsToContents()
+        for col_idx in (6, 7):
+            self.table.setColumnWidth(col_idx, 36)
+        self.table.setSortingEnabled(True)
+        self.table.currentCellChanged.connect(self._on_row_selected)
+        layout.addWidget(self.table, 1)
+
+        # Detail panel
+        self.detail_panel = QTextBrowser()
+        self.detail_panel.setMaximumHeight(80)
+        self.detail_panel.setVisible(False)
+        self.detail_panel.setStyleSheet("border: 1px solid #ccc; padding: 4px; font-size: 12px;")
+        layout.addWidget(self.detail_panel)
+
+        # Bottom row
+        bottom_row = QHBoxLayout()
+        if sys_id:
+            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+            btn_ktiv = QPushButton(tr('Open in KTIV'))
+            btn_ktiv.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ktiv_url)))
+            bottom_row.addWidget(btn_ktiv)
+        bottom_row.addStretch()
+        btn_close = QPushButton(tr('Close'))
+        btn_close.clicked.connect(self.close)
+        bottom_row.addWidget(btn_close)
+        layout.addLayout(bottom_row)
+
+    def _filter_rows(self):
+        text_val = self.text_filter.text().strip().lower()
+        type_val = self.type_combo.currentData() or 'All'
+        need_trans = self.chk_transcription.isChecked()
+        need_transl = self.chk_translation.isChecked()
+        skip_vals = ('', 'None', 'Unknown')
+
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            orig_idx = item.data(Qt.ItemDataRole.UserRole) if item else -1
+            if not isinstance(orig_idx, int) or orig_idx < 0 or orig_idx >= len(self.entries):
+                continue
+            e = self.entries[orig_idx]
+            show = True
+            mt = (e.get('mention_type') or '').strip()
+            if type_val != 'All' and mt != type_val:
+                show = False
+            if show and need_trans:
+                tt = (e.get('transcription_type') or '').strip()
+                if not tt or tt in skip_vals:
+                    show = False
+            if show and need_transl:
+                tl = (e.get('translation_type') or '').strip()
+                if not tl or tl in skip_vals:
+                    show = False
+            if show and text_val:
+                searchable = ' '.join([
+                    e.get('article_author_eng') or '', e.get('article_author_heb') or '',
+                    e.get('article_name') or '', e.get('running_title') or '',
+                    e.get('title_acronym') or '',
+                ]).lower()
+                if text_val not in searchable:
+                    show = False
+            self.table.setRowHidden(row, not show)
+
+    def _on_row_selected(self, row, col, prev_row, prev_col):
+        item = self.table.item(row, 0)
+        orig_idx = item.data(Qt.ItemDataRole.UserRole) if item else -1
+        if isinstance(orig_idx, int) and 0 <= orig_idx < len(self.entries):
+            e = self.entries[orig_idx]
+            parts = []
+            article = (e.get('article_name') or '').strip()
+            if article:
+                parts.append(f"{tr('Article')}: {article}")
+            author_heb = (e.get('article_author_heb') or '').strip()
+            if author_heb:
+                parts.append(f"{tr('Author')}: {author_heb}")
+            tt = (e.get('transcription_type') or '').strip()
+            if tt and tt not in ('', 'None'):
+                parts.append(f"{tr('Transcription')}: {tr(tt)}")
+            tl = (e.get('translation_type') or '').strip()
+            if tl and tl not in ('', 'None'):
+                parts.append(f"{tr('Translation')}: {tr(tl)}")
+            cat = (e.get('catalog_acronym') or '').strip()
+            if cat and cat != 'None':
+                parts.append(f"{tr('Catalog')}: {cat}")
+            if parts:
+                self.detail_panel.setPlainText('\n'.join(parts))
+                self.detail_panel.setVisible(True)
+            else:
+                self.detail_panel.setVisible(False)
+        else:
+            self.detail_panel.setVisible(False)
+
+
+class NliBibliographyDialog(QDialog):
+    """NLI bibliography dialog with MARC 581 reference strings."""
+
+    def __init__(self, marc_strings, sys_id='', shelfmark='', parent=None):
+        super().__init__(parent)
+        from shared.fjms_service import _parse_marc_annotations, strip_marc_annotation_suffix, _ts_symbol
+        self.marc_strings = marc_strings
+        self.sys_id = sys_id
+        self._ts_symbol = _ts_symbol
+        self.setWindowTitle(f"{tr('Bibliography Ktiv')} \u2014 {shelfmark}" if shelfmark else tr('Bibliography Ktiv'))
+        self.setMinimumSize(900, 500)
+
+        # Pre-parse all MARC strings
+        self.parsed = []
+        for ms in marc_strings:
+            ann = _parse_marc_annotations(ms)
+            ref = strip_marc_annotation_suffix(ms)
+            self.parsed.append({
+                'reference': ref,
+                'raw': ms,
+                'mention_type': ann.get('mention_type', ''),
+                'has_image': ann.get('has_image', False),
+                'transcription': ann.get('transcription', ''),
+                'translation': ann.get('translation', ''),
+            })
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Filter row
+        filter_row = QHBoxLayout()
+        self.text_filter = QLineEdit()
+        self.text_filter.setPlaceholderText(tr('Filter references...'))
+        self.text_filter.textChanged.connect(self._filter_rows)
+        filter_row.addWidget(self.text_filter, 1)
+        self.type_combo = QComboBox()
+        for label, val in [(tr('All'), 'All'), (tr('Discussion'), 'Discussion'),
+                           (tr('Mentioned'), 'Mentioned'), (tr('Index'), 'Index')]:
+            self.type_combo.addItem(label, val)
+        self.type_combo.currentIndexChanged.connect(lambda _: self._filter_rows())
+        filter_row.addWidget(QLabel(tr('Type') + ':'))
+        filter_row.addWidget(self.type_combo)
+        layout.addLayout(filter_row)
+
+        check_row = QHBoxLayout()
+        self.chk_transcription = QCheckBox(tr('Has Transcription'))
+        self.chk_transcription.toggled.connect(self._filter_rows)
+        check_row.addWidget(self.chk_transcription)
+        self.chk_translation = QCheckBox(tr('Has Translation'))
+        self.chk_translation.toggled.connect(self._filter_rows)
+        check_row.addWidget(self.chk_translation)
+        self.chk_image = QCheckBox(tr('Has Image'))
+        self.chk_image.toggled.connect(self._filter_rows)
+        check_row.addWidget(self.chk_image)
+        check_row.addStretch()
+        layout.addLayout(check_row)
+
+        # Table: Reference, D, T, S, I
+        headers = [tr('Reference'), tr('col_D'), tr('col_T'), tr('col_S'), tr('col_I')]
+        self.table = QTableWidget(len(self.parsed), len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        hdr_model = self.table.horizontalHeader().model()
+        for col_idx, tooltip in [(1, tr('Discussion')), (2, tr('Transcription')),
+                                  (3, tr('Translation')), (4, tr('Image'))]:
+            hdr_model.setHeaderData(col_idx, Qt.Orientation.Horizontal, tooltip, Qt.ItemDataRole.ToolTipRole)
+        self.table.setSortingEnabled(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        for col_idx in (1, 2, 3, 4):
+            self.table.setColumnWidth(col_idx, 36)
+
+        for row, pe in enumerate(self.parsed):
+            item0 = QTableWidgetItem(pe['reference'])
+            item0.setData(Qt.ItemDataRole.UserRole, row)
+            self.table.setItem(row, 0, item0)
+            self.table.setItem(row, 1, QTableWidgetItem('\u2713' if pe['mention_type'] == 'Discussion' else ''))
+            self.table.setItem(row, 2, QTableWidgetItem(_ts_symbol(pe['transcription'])))
+            self.table.setItem(row, 3, QTableWidgetItem(_ts_symbol(pe['translation'])))
+            self.table.setItem(row, 4, QTableWidgetItem('\u2713' if pe['has_image'] else ''))
+
+        self.table.resizeColumnsToContents()
+        for col_idx in (1, 2, 3, 4):
+            self.table.setColumnWidth(col_idx, 36)
+        self.table.setSortingEnabled(True)
+        self.table.currentCellChanged.connect(self._on_row_selected)
+        layout.addWidget(self.table, 1)
+
+        # Detail panel
+        self.detail_panel = QTextBrowser()
+        self.detail_panel.setMaximumHeight(80)
+        self.detail_panel.setVisible(False)
+        self.detail_panel.setStyleSheet("border: 1px solid #ccc; padding: 4px; font-size: 12px;")
+        layout.addWidget(self.detail_panel)
+
+        # Bottom row
+        bottom_row = QHBoxLayout()
+        if sys_id:
+            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+            btn_ktiv = QPushButton(tr('Open in KTIV'))
+            btn_ktiv.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ktiv_url)))
+            bottom_row.addWidget(btn_ktiv)
+        bottom_row.addStretch()
+        btn_close = QPushButton(tr('Close'))
+        btn_close.clicked.connect(self.close)
+        bottom_row.addWidget(btn_close)
+        layout.addLayout(bottom_row)
+
+    def _filter_rows(self):
+        text_val = self.text_filter.text().strip().lower()
+        type_val = self.type_combo.currentData() or 'All'
+        need_trans = self.chk_transcription.isChecked()
+        need_transl = self.chk_translation.isChecked()
+        need_image = self.chk_image.isChecked()
+        skip_vals = ('', 'None', 'Unknown')
+
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            orig_idx = item.data(Qt.ItemDataRole.UserRole) if item else -1
+            if not isinstance(orig_idx, int) or orig_idx < 0 or orig_idx >= len(self.parsed):
+                continue
+            pe = self.parsed[orig_idx]
+            show = True
+            if type_val != 'All' and pe['mention_type'] != type_val:
+                show = False
+            if show and need_trans:
+                if not pe['transcription'] or pe['transcription'] in skip_vals:
+                    show = False
+            if show and need_transl:
+                if not pe['translation'] or pe['translation'] in skip_vals:
+                    show = False
+            if show and need_image:
+                if not pe['has_image']:
+                    show = False
+            if show and text_val:
+                if text_val not in pe['reference'].lower() and text_val not in pe['raw'].lower():
+                    show = False
+            self.table.setRowHidden(row, not show)
+
+    def _on_row_selected(self, row, col, prev_row, prev_col):
+        item = self.table.item(row, 0)
+        orig_idx = item.data(Qt.ItemDataRole.UserRole) if item else -1
+        if isinstance(orig_idx, int) and 0 <= orig_idx < len(self.parsed):
+            pe = self.parsed[orig_idx]
+            parts = [pe['raw']]
+            details = []
+            if pe['mention_type']:
+                details.append(tr(pe['mention_type']))
+            if pe['transcription']:
+                details.append(f"{tr('Transcription')}: {tr(pe['transcription'])}")
+            if pe['translation']:
+                details.append(f"{tr('Translation')}: {tr(pe['translation'])}")
+            if pe['has_image']:
+                details.append(tr('Has Image'))
+            if details:
+                parts.append(', '.join(details))
+            self.detail_panel.setPlainText('\n'.join(parts))
+            self.detail_panel.setVisible(True)
+        else:
+            self.detail_panel.setVisible(False)
 
 
 class TabularQueryBuilderDialog(QDialog):
@@ -8130,12 +8536,25 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
 
-        # Extended Info button and panel (PGP metadata)
+        # Extended Info button + Bibliography buttons (shared row)
+        ext_info_row = QHBoxLayout()
         self.btn_b_ext_info = QPushButton(tr("Show Extended Info"))
         self.btn_b_ext_info.setCheckable(True)
         self.btn_b_ext_info.toggled.connect(self._browse_toggle_extended_info)
         self.btn_b_ext_info.setVisible(False)
-        top_layout.addWidget(self.btn_b_ext_info)
+        ext_info_row.addWidget(self.btn_b_ext_info)
+        ext_info_row.addStretch()
+        self.btn_b_bibliography_fjms = QPushButton()
+        self.btn_b_bibliography_fjms.setVisible(False)
+        self.btn_b_bibliography_fjms.clicked.connect(self._show_fjms_bibliography_dialog)
+        ext_info_row.addWidget(self.btn_b_bibliography_fjms)
+        self.btn_b_bibliography_nli = QPushButton()
+        self.btn_b_bibliography_nli.setVisible(False)
+        self.btn_b_bibliography_nli.clicked.connect(self._show_nli_bibliography_dialog)
+        ext_info_row.addWidget(self.btn_b_bibliography_nli)
+        top_layout.addLayout(ext_info_row)
+        self._browse_fjms_bib = []
+        self._browse_marc_bib = []
 
         self.txt_b_extended_info = QTextBrowser()
         self.txt_b_extended_info.setVisible(False)
@@ -8634,6 +9053,10 @@ class GenizahGUI(QMainWindow):
         self.btn_b_ext_info.setChecked(False)
         self.txt_b_extended_info.setVisible(False)
         self.txt_b_extended_info.setHtml("")
+        self.btn_b_bibliography_fjms.setVisible(False)
+        self.btn_b_bibliography_nli.setVisible(False)
+        self._browse_fjms_bib = []
+        self._browse_marc_bib = []
 
         # Store folio images for page combo labels (Phase 31)
         self._browse_folio_images = meta.get('folio_images', [])
@@ -8763,12 +9186,29 @@ class GenizahGUI(QMainWindow):
         fjms_catalog_html = self._build_fjms_catalog_html(sid, text_color)
         fjms_domain_html = self._build_fjms_domain_html(sid, text_color)
 
-        # Build Phase 33 metadata HTML (bibliography, catalog refs, secondary metadata)
-        bibliography_html = self._build_bibliography_html(meta, text_color)
+        # Build Phase 33 metadata HTML (catalog refs, secondary metadata)
         catalog_refs_html = self._build_catalog_refs_html(meta, text_color)
         secondary_meta_html = self._build_secondary_metadata_html(meta, text_color)
 
-        enriched_html = fjms_domain_html + fjms_catalog_html + bibliography_html + catalog_refs_html + secondary_meta_html + enriched_html
+        # Separate bibliography buttons (FJMS / NLI)
+        fjms_bib = meta.get('bibliography', [])
+        marc_bib = marc.get('bibliography', [])
+        if fjms_bib:
+            self._browse_fjms_bib = fjms_bib
+            self.btn_b_bibliography_fjms.setText(f"{tr('Bibliography FJMS')} ({len(fjms_bib)})")
+            self.btn_b_bibliography_fjms.setVisible(True)
+        else:
+            self._browse_fjms_bib = []
+            self.btn_b_bibliography_fjms.setVisible(False)
+        if marc_bib:
+            self._browse_marc_bib = marc_bib
+            self.btn_b_bibliography_nli.setText(f"{tr('Bibliography Ktiv')} ({len(marc_bib)})")
+            self.btn_b_bibliography_nli.setVisible(True)
+        else:
+            self._browse_marc_bib = []
+            self.btn_b_bibliography_nli.setVisible(False)
+
+        enriched_html = fjms_domain_html + fjms_catalog_html + catalog_refs_html + secondary_meta_html + enriched_html
 
         self._browse_enriched_html = enriched_html
 
@@ -9032,77 +9472,6 @@ class GenizahGUI(QMainWindow):
         html += "</div>"
         return html
 
-    def _build_bibliography_html(self, meta, text_color):
-        """Build HTML for FIST bibliography references in extended info."""
-        bib_entries = meta.get('bibliography', [])
-        if not bib_entries:
-            return ""
-
-        html = (
-            f"<div style='color:{text_color}; padding: 10px; margin-bottom: 10px; "
-            "border-left: 3px solid #e67e22; text-align: left;' dir='ltr'>"
-            f"<p style='margin-top:0;'><b>{tr('Bibliography References')}</b>"
-            f" <span style='color:gray; font-size:0.85em;'>({len(bib_entries)})</span></p>"
-        )
-
-        html += "<ul style='margin-top:2px; padding-left:20px;'>"
-        for entry in bib_entries[:20]:  # Limit to 20 in desktop (no expansion widget)
-            # Format entry line
-            parts = []
-            author = entry.get('article_author_eng', '')
-            if author:
-                parts.append(f"<b>{author}</b>")
-            title = entry.get('running_title', '') or ''
-            year = entry.get('title_year', '') or ''
-            if title:
-                title_str = title
-                if year:
-                    title_str += f' ({year})'
-                parts.append(title_str)
-            # Page reference
-            page_parts = []
-            vol = entry.get('volume', '')
-            if vol and str(vol).strip():
-                page_parts.append(f'vol. {vol}')
-            mention_page = entry.get('mention_page', '')
-            from_page = entry.get('from_page', '')
-            to_page = entry.get('to_page', '')
-            if mention_page and str(mention_page).strip():
-                page_parts.append(f'p. {mention_page}')
-            elif from_page and str(from_page).strip():
-                if to_page and str(to_page).strip() and to_page != from_page:
-                    page_parts.append(f'pp. {from_page}-{to_page}')
-                else:
-                    page_parts.append(f'p. {from_page}')
-            if page_parts:
-                parts.append(', '.join(page_parts))
-
-            line = ', '.join(parts) if parts else '(Unknown reference)'
-
-            # Badges as inline spans
-            badges = []
-            mt = entry.get('mention_type', '')
-            if mt and mt != 'None':
-                color = '#9b59b6' if mt == 'Discussion' else '#3498db' if mt == 'Index' else '#95a5a6'
-                badges.append(f"<span style='color:{color}; font-size:0.85em;'>[{mt}]</span>")
-            tt = entry.get('transcription_type', '')
-            if tt and tt not in ('None', ''):
-                badges.append(f"<span style='color:#1abc9c; font-size:0.85em;'>[{tt}]</span>")
-            tl = entry.get('translation_type', '')
-            if tl and tl not in ('None', ''):
-                badges.append(f"<span style='color:#00bcd4; font-size:0.85em;'>[{tr('Translation')}]</span>")
-
-            badge_str = ' '.join(badges)
-            html += f"<li>{line} {badge_str}</li>"
-
-        html += "</ul>"
-
-        if len(bib_entries) > 20:
-            html += f"<p style='color:gray; font-size:0.85em;'>... and {len(bib_entries) - 20} more references</p>"
-
-        html += "</div>"
-        return html
-
     def _build_catalog_refs_html(self, meta, text_color):
         """Build HTML for FIST catalog cross-references in extended info."""
         cat_refs = meta.get('catalog_refs', [])
@@ -9245,13 +9614,6 @@ class GenizahGUI(QMainWindow):
         if people:
             kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
 
-        bib = marc.get('bibliography', [])
-        if bib:
-            kti_html += f"<p><b>{tr('Bibliography')}:</b><ul>"
-            for b in bib:
-                kti_html += f"<li>{b}</li>"
-            kti_html += "</ul></p>"
-
         external_html = ""
         if part_meta:
             part_display = self.meta_mgr.codico_mgr.get_part_display_name(part_id) if hasattr(self.meta_mgr, 'codico_mgr') else part_id
@@ -9324,6 +9686,32 @@ class GenizahGUI(QMainWindow):
         self.btn_b_ext_info.setText(
             tr("Hide Extended Info") if checked else tr("Show Extended Info")
         )
+
+    def _show_fjms_bibliography_dialog(self):
+        """Open the FJMS bibliography dialog."""
+        if not self._browse_fjms_bib:
+            return
+        shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
+        dlg = FjmsBibliographyDialog(
+            self._browse_fjms_bib,
+            sys_id=self.current_browse_sid or '',
+            shelfmark=shelf,
+            parent=self,
+        )
+        dlg.exec()
+
+    def _show_nli_bibliography_dialog(self):
+        """Open the NLI bibliography dialog."""
+        if not self._browse_marc_bib:
+            return
+        shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
+        dlg = NliBibliographyDialog(
+            self._browse_marc_bib,
+            sys_id=self.current_browse_sid or '',
+            shelfmark=shelf,
+            parent=self,
+        )
+        dlg.exec()
 
     def _on_browse_ext_link_clicked(self, url):
         """Handle clicks on links in browse tab extended info."""
@@ -18890,6 +19278,12 @@ class GenizahGUI(QMainWindow):
         self.btn_b_toggle_img.setEnabled(False)
 
         # Trigger Unified Enrichment (Meta + Images)
+        # Disconnect old worker to prevent stale signals and GC crash
+        if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
+            try:
+                self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
+            except (TypeError, RuntimeError):
+                pass
         self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
         self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
         self.enrich_browse_worker.start()
@@ -19047,6 +19441,11 @@ class GenizahGUI(QMainWindow):
         if cached_meta:
             self.on_browse_enriched_loaded(target_sid_for_enrich, cached_meta)
         else:
+            if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
+                try:
+                    self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
+                except (TypeError, RuntimeError):
+                    pass
             self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, target_sid_for_enrich)
             self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
             self.enrich_browse_worker.start()
@@ -19093,6 +19492,11 @@ class GenizahGUI(QMainWindow):
             if cached_meta:
                 self.on_browse_enriched_loaded(new_sid, cached_meta)
             else:
+                if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
+                    try:
+                        self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
+                    except (TypeError, RuntimeError):
+                        pass
                 self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
                 self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
                 self.enrich_browse_worker.start()
@@ -19196,6 +19600,18 @@ class GenizahGUI(QMainWindow):
                 truncated, full = _truncate_title(title)
                 info_text += f"<br/>{truncated}"
                 if full: tooltip_parts.append(full)
+
+        # Append enrichment metadata from nli_cache (survives re-render)
+        cached_meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {})
+        catalog_entry = cached_meta.get('catalog_entry')
+        if catalog_entry:
+            info_text += f" | {catalog_entry}"
+        if cached_meta.get('is_not_genizah', False):
+            info_text += (
+                f" <span style='background:#fff3e0; color:#e65100; "
+                f"padding:1px 4px; border-radius:3px; font-size:10px;'>"
+                f"{tr('Not Genizah')}</span>"
+            )
 
         self.browse_info_lbl.setText(info_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
