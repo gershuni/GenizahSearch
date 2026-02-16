@@ -168,7 +168,13 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   5. Manchester IIIF manifests (from LUNA) available as image source in both apps' viewers alongside NLI
   6. JTS/Princeton IIIF manifests (from Figgy) available as image source in both apps' viewers alongside NLI
   7. BL links remain as searcharchives.bl.uk search (BL IIIF API still down from cyber attack -- revisit when recovered)
-**Plans**: TBD
+**Plans:** 5 plans
+Plans:
+- [ ] 34-01-PLAN.md -- Manchester LUNA bulk import script + sidecar table
+- [ ] 34-02-PLAN.md -- JTS/Princeton DPUL import script + sidecar table
+- [ ] 34-03-PLAN.md -- Service layer + enrich_metadata + library URLs + tests
+- [ ] 34-04-PLAN.md -- Web proxy endpoints + browse source chips
+- [ ] 34-05-PLAN.md -- Desktop ManuscriptViewer source switching
 
 **API Discovery (confirmed live 2026-02-16):**
 - Manchester LUNA: `luna.manchester.ac.uk/luna/servlet/as/fetchMediaSearch?fullData=false&q={ImageSourceName}&lc=ManchesterDev~95~2` → returns `identity` field = LUNA ID
