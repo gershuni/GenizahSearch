@@ -1613,6 +1613,10 @@ class ManuscriptViewerWidget(QWidget):
         layout.addWidget(self.scroll_area, 1)
 
     def _detect_external_provider(self, meta):
+        # Check explicit provider from enrich_metadata (set by Plan 03 for Manchester/JTS)
+        if meta.get('external_provider'):
+            return meta['external_provider']
+
         marc = meta.get('marc', {}) if meta else {}
         url = (marc.get('external_iiif_link') or "").lower()
         if "cudl.lib.cam.ac.uk" in url:
@@ -1624,6 +1628,10 @@ class ManuscriptViewerWidget(QWidget):
                 return "cambridge"
             if "bodleian.ox.ac.uk" in img_url or "hebrew.bodleian" in img_url:
                 return "oxford"
+            if "luna.manchester.ac.uk" in img_url:
+                return "manchester"
+            if "iiif-cloud.princeton.edu" in img_url or "figgy.princeton.edu" in img_url:
+                return "jts"
 
         # Check for Oxford Part ID
         if meta.get('oxford_part_id'):
@@ -1695,6 +1703,10 @@ class ManuscriptViewerWidget(QWidget):
                 ext_label = "Cambridge"
             elif self.external_provider == "oxford":
                 ext_label = "Oxford"
+            elif self.external_provider == "manchester":
+                ext_label = "Manchester"
+            elif self.external_provider == "jts":
+                ext_label = "JTS/Princeton"
             else:
                 ext_label = "External"
             self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)} pages)", "ext")
@@ -1724,11 +1736,22 @@ class ManuscriptViewerWidget(QWidget):
         # External Link
         marc = meta.get('marc', {})
         self.external_url = meta.get('external_url') or marc.get('external_iiif_link')
+
+        # Prefer library_viewer_url when available (detail page > generic manifest URL)
+        lib_viewer = meta.get('library_viewer_url')
+        if lib_viewer and lib_viewer.get('url'):
+            if self.external_provider in ('manchester', 'jts'):
+                self.external_url = lib_viewer['url']
+
         if self.external_url:
             if self.external_provider == "cambridge":
                 btn_label = "Cambridge"
             elif self.external_provider == "oxford":
                 btn_label = "Oxford"
+            elif self.external_provider == "manchester":
+                btn_label = "Manchester LUNA"
+            elif self.external_provider == "jts":
+                btn_label = "Princeton Digital Library"
             else:
                 btn_label = tr("External Website")
             self.btn_external.setText(btn_label)
