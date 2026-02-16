@@ -1853,10 +1853,31 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label(tr('Library')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                                 ui.label(page.library_name).classes('text-sm').style('color: var(--text-primary);')
 
-                        # Shelfmark
+                        # Shelfmark (with IsNotGenizah badge and Neubauer-Cowley catalog entry)
+                        # Fetch Phase 33 crossref metadata for this manuscript
+                        _is_not_genizah = False
+                        _catalog_entry_str = ''
+                        _collection_storage = None
+                        try:
+                            from shared.nli_crossref_service import get_nli_crossref_service
+                            _crossref_svc = get_nli_crossref_service(thread_safe=True)
+                            if _crossref_svc.is_available() and page.sys_id:
+                                _is_not_genizah = _crossref_svc.get_is_not_genizah(page.sys_id)
+                                _catalog_entry_str = _crossref_svc.get_catalog_entry(page.sys_id) or ''
+                                _collection_storage = _crossref_svc.get_collection_storage(page.sys_id)
+                        except Exception:
+                            pass
+
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Shelfmark')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                            ui.label(page.shelfmark or 'N/A').classes('text-sm').style('color: var(--text-primary);')
+                            with ui.row().classes('items-center gap-2'):
+                                ui.label(page.shelfmark or 'N/A').classes('text-sm').style('color: var(--text-primary);')
+                                if _is_not_genizah:
+                                    ui.badge(tr('Not Genizah'), color='orange').props('outline dense').classes('text-xs').tooltip(
+                                        tr('This item may not be from the Cairo Genizah')
+                                    )
+                            if _catalog_entry_str:
+                                ui.label(_catalog_entry_str).classes('text-xs text-gray-500').style('color: var(--text-tertiary);')
 
                         # System ID
                         with ui.column().classes('gap-1'):
