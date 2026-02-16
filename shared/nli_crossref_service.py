@@ -19,6 +19,7 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote as url_quote
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +341,81 @@ class NliCrossrefService:
             }
         except Exception as e:
             logger.error(f"NliCrossrefService.get_physical_metadata error for {sys_id}: {e}")
+            return None
+
+    def get_library_viewer_url(self, sys_id: str) -> Optional[dict]:
+        """
+        Get holding library digital collection URL for a manuscript.
+
+        Constructs a URL to the library's digital collection based on the
+        LibraryAbbrev from the NLI crossref data. Supports CUL (Cambridge),
+        JTS/Princeton, Manchester, and BL (British Library).
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            Dict with keys: url, label, library_abbrev, library_name_eng.
+            Returns None if no URL can be constructed (unknown library,
+            missing data, or Oxford which uses a separate path).
+        """
+        if self._conn is None:
+            return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT LibraryAbbrev, LibraryNameEng, Shelfmark "
+                "FROM nli_images WHERE NLI_AlmaId = ? LIMIT 1",
+                (sys_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+            abbrev = (row["LibraryAbbrev"] or "").strip()
+            name_eng = (row["LibraryNameEng"] or "").strip()
+            shelfmark = (row["Shelfmark"] or "").strip()
+
+            if not abbrev or not shelfmark:
+                return None
+
+            url = None
+            label = None
+
+            if abbrev == "CUL":
+                # Cambridge: search-based fallback URL
+                url = f"https://cudl.lib.cam.ac.uk/search?keyword={url_quote(shelfmark)}"
+                label = "Cambridge Digital Library"
+            elif abbrev == "JTS":
+                # JTS / Princeton Geniza: search-based URL
+                url = (
+                    f"https://dpul.princeton.edu/geniza/catalog"
+                    f"?search_field=all_fields&q={url_quote(shelfmark)}"
+                )
+                label = "Princeton Digital Library"
+            elif abbrev == "Manchester":
+                url = (
+                    f"https://luna.manchester.ac.uk/luna/servlet/s/"
+                    f"{url_quote(shelfmark)}"
+                )
+                label = "Manchester LUNA"
+            elif abbrev == "BL":
+                url = (
+                    f"https://www.bl.uk/manuscripts/FullDisplay.aspx"
+                    f"?ref={url_quote(shelfmark)}"
+                )
+                label = "British Library"
+            else:
+                # Oxford and others: no known URL pattern
+                return None
+
+            return {
+                "url": url,
+                "label": label,
+                "library_abbrev": abbrev,
+                "library_name_eng": name_eng,
+            }
+        except Exception as e:
+            logger.error(f"NliCrossrefService.get_library_viewer_url error for {sys_id}: {e}")
             return None
 
     # ── Relationships (Phase 33: REL-01, REL-02) ────────────────────

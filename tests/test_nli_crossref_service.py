@@ -363,6 +363,66 @@ def test_get_folio_images_empty(service):
     assert service.get_folio_images("UNKNOWN") == []
 
 
+# ── Library viewer URL tests ──────────────────────────────────────
+
+
+def test_get_library_viewer_url_cul(service):
+    """CUL library returns Cambridge Digital Library search URL."""
+    result = service.get_library_viewer_url("A001")
+    assert result is not None
+    assert "cudl.lib.cam.ac.uk" in result["url"]
+    assert result["library_abbrev"] == "CUL"
+    assert result["label"] == "Cambridge Digital Library"
+    assert result["library_name_eng"] == "Cambridge UL"
+
+
+def test_get_library_viewer_url_manchester(test_db):
+    """Manchester library returns LUNA search URL."""
+    # Insert a Manchester row
+    conn = sqlite3.connect(test_db)
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+         "Gaster 756", "INV_M", "", "", "", "M001", "CAT_M", "1",
+         "FGP_M", "1111", "Gaster_756__L1F0B0S1", "NLI", "", "", "",
+         "1", "", "Paper", "10x15", ""),
+    )
+    conn.commit()
+    conn.close()
+    svc = NliCrossrefService(db_path=test_db)
+    result = svc.get_library_viewer_url("M001")
+    assert result is not None
+    assert "luna.manchester.ac.uk" in result["url"]
+    assert result["library_abbrev"] == "Manchester"
+    assert result["label"] == "Manchester LUNA"
+    svc.close()
+
+
+def test_get_library_viewer_url_bl(test_db):
+    """BL library returns British Library URL."""
+    # A003 has BL library in fixture
+    svc = NliCrossrefService(db_path=test_db)
+    result = svc.get_library_viewer_url("A003")
+    assert result is not None
+    assert "bl.uk/manuscripts" in result["url"]
+    assert result["library_abbrev"] == "BL"
+    assert result["label"] == "British Library"
+    svc.close()
+
+
+def test_get_library_viewer_url_unknown(service):
+    """Unknown library abbreviation returns None."""
+    # A004 has RNL (not in the URL map)
+    result = service.get_library_viewer_url("A004")
+    assert result is None
+
+
+def test_get_library_viewer_url_missing(service):
+    """Missing sys_id returns None."""
+    result = service.get_library_viewer_url("NONEXISTENT")
+    assert result is None
+
+
 # ── Graceful degradation tests ─────────────────────────────────────
 
 
@@ -377,6 +437,7 @@ def test_all_methods_return_empty_when_unavailable():
     assert svc.get_cambridge_manifest("x") is None
     assert svc.get_cambridge_manifest_by_label("x") is None
     assert svc.get_physical_metadata("x") is None
+    assert svc.get_library_viewer_url("x") is None
     assert svc.get_part_of("x") == []
     assert svc.get_see_references("x") == []
     assert svc.get_bifolio_partners("x") == []

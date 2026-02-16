@@ -75,6 +75,8 @@ class BrowsePage:
     image_source_info: Dict = field(default_factory=dict)  # {nli_fgp: bool, cambridge: bool, image_count: int}
     folio_images: List[Dict] = field(default_factory=list)  # Folio sequence from NliCrossrefService
     cambridge_images: List[Dict] = field(default_factory=list)  # Cambridge IIIF canvas URLs from nli_cache images_ext
+    physical_metadata: Optional[Dict] = None  # {material, num_folio, num_bifolio, size} from NLI crossref
+    library_viewer_url: Optional[Dict] = None  # {url, label, library_abbrev} for holding library link
 
 @dataclass
 class DocumentPage:
@@ -315,10 +317,12 @@ class GenizahService:
                     # Transform IIIF manifest URL to viewer URL
                     external_url = ext_link.replace("/iiif/", "/view/")
 
-            # 3. NLI crossref: folio images and source indicators
+            # 3. NLI crossref: folio images, source indicators, physical metadata
             folio_label = ''
             image_source_info = {}
             folio_images = []
+            physical_metadata = None
+            library_viewer_url = None
             try:
                 from shared.nli_crossref_service import get_nli_crossref_service
                 crossref_svc = get_nli_crossref_service(thread_safe=True)
@@ -343,6 +347,12 @@ class GenizahService:
                     current_p = result.get('p_num', 0)
                     if folio_images and 0 < current_p <= len(folio_images):
                         folio_label = folio_images[current_p - 1].get('folio_label', '')
+
+                    # Physical metadata (material, folio counts)
+                    physical_metadata = crossref_svc.get_physical_metadata(actual_sys_id)
+
+                    # Library digital collection URL
+                    library_viewer_url = crossref_svc.get_library_viewer_url(actual_sys_id)
             except Exception as crossref_err:
                 print(f"NLI crossref enrichment error: {crossref_err}")
 
@@ -379,6 +389,8 @@ class GenizahService:
                 image_source_info=image_source_info,
                 folio_images=folio_images,
                 cambridge_images=cambridge_images,
+                physical_metadata=physical_metadata,
+                library_viewer_url=library_viewer_url,
             )
         except Exception as e:
             print(f"Browse page error: {e}")
@@ -461,10 +473,12 @@ class GenizahService:
                     # Transform IIIF manifest URL to viewer URL
                     external_url = ext_link.replace("/iiif/", "/view/")
 
-            # 3. NLI crossref: folio images and source indicators
+            # 3. NLI crossref: folio images, source indicators, physical metadata
             folio_label = ''
             image_source_info = {}
             folio_images = []
+            physical_metadata = None
+            library_viewer_url = None
             try:
                 from shared.nli_crossref_service import get_nli_crossref_service
                 crossref_svc = get_nli_crossref_service(thread_safe=True)
@@ -484,6 +498,12 @@ class GenizahService:
                     current_p = result.get('p_num', 0)
                     if folio_images and 0 < current_p <= len(folio_images):
                         folio_label = folio_images[current_p - 1].get('folio_label', '')
+
+                    # Physical metadata (material, folio counts)
+                    physical_metadata = crossref_svc.get_physical_metadata(actual_sys_id)
+
+                    # Library digital collection URL
+                    library_viewer_url = crossref_svc.get_library_viewer_url(actual_sys_id)
             except Exception as crossref_err:
                 print(f"NLI crossref enrichment error (by_fl): {crossref_err}")
 
@@ -520,6 +540,8 @@ class GenizahService:
                 image_source_info=image_source_info,
                 folio_images=folio_images,
                 cambridge_images=cambridge_images,
+                physical_metadata=physical_metadata,
+                library_viewer_url=library_viewer_url,
             )
         except Exception as e:
             print(f"Browse page by FL error: {e}")
