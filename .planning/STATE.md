@@ -9,17 +9,17 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 ## Current Position
 
-Phase: 32 of 34 (Metadata Display)
-Plan: 3 of 3 in current phase
-Status: Phase 32 complete (including gap closure), ready for Phase 33
-Last activity: 2026-02-16 -- Completed 32-03 (Fix broken library URL patterns)
+Phase: 34 of 34 (Library IIIF Integration)
+Plan: 1 of 5 in current phase
+Status: Executing Phase 34 -- Plan 01 complete
+Last activity: 2026-02-16 -- Completed 34-01 (Manchester LUNA bulk import)
 
-Progress: [██████████] 100%
+Progress: [██████████████░░░░░░] 70%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 92 (across all milestones)
+- Total plans completed: 93 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.6 hours
 
@@ -40,6 +40,7 @@ Progress: [██████████] 100%
 | Phase 32 P01 | 3min | 2 tasks | 5 files |
 | Phase 32 P02 | 2min | 2 tasks | 2 files |
 | Phase 32 P03 | 1min | 2 tasks | 2 files |
+| Phase 34 P01 | 7min | 2 tasks | 1 file |
 
 ## Accumulated Context
 
@@ -70,6 +71,9 @@ See PROJECT.md Key Decisions table for full history.
 - 32-02: phys_html prepended before KTI table in desktop extended info for consistent top-of-panel display
 - 32-03: Manchester servlet/view/search path (servlet/s/ non-functional), BL searcharchives.bl.uk with leaf stripping (manuscripts site down), JTS cairo_geniza slug (geniza returned 404)
 - 32-03: BL spaces URL-encoded not underscored -- verified underscores return zero results on searcharchives
+- 34-01: LUNA id and identity fields are identical; JRL filename from urlSize0 lowercased matches crossref ImageSourceName
+- 34-01: Sidecar extension pattern: new table in existing nli_crossref.db, version bumped to 1.1.0
+- 34-01: 27,940 LUNA items imported, 83.9% manuscript match rate (11,321/13,496)
 
 ### Blockers/Concerns
 
@@ -86,6 +90,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 32-03-PLAN.md (Fix broken library URL patterns) -- Phase 32 gap closure complete
+Stopped at: Completed 34-01-PLAN.md (Manchester LUNA bulk import)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-32 complete -- 11 plans delivered. Ready for Phase 33.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-32 complete, Phase 34 Plan 01 complete. 12 plans delivered. Ready for 34-02.
