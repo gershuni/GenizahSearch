@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 32 of 34 (Metadata Display)
-Plan: 1 of 2 in current phase
-Status: Plan 32-01 complete, ready for 32-02
-Last activity: 2026-02-16 -- Completed 32-01 (Physical metadata and library links)
+Plan: 2 of 2 in current phase
+Status: Phase 32 complete, ready for Phase 33
+Last activity: 2026-02-16 -- Completed 32-02 (Desktop metadata display)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -33,11 +33,12 @@ Progress: [█████░░░░░] 50%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
-| v5.9.0 | 29-34 | 8 | 25 min |
+| v5.9.0 | 29-34 | 10 | 27 min |
 | Phase 31 P01 | 5min | 2 tasks | 5 files |
 | Phase 31 P02 | 7min | 2 tasks | 4 files |
 | Phase 31 P03 | 3min | 2 tasks | 3 files |
 | Phase 32 P01 | 3min | 2 tasks | 5 files |
+| Phase 32 P02 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,8 @@ See PROJECT.md Key Decisions table for full history.
 - 32-01: Search-based fallback URLs for CUL, JTS, Manchester, BL (no reliable direct-link patterns)
 - 32-01: Guard against duplicate links when Oxford/Cambridge already shown via existing external_url path
 - 32-01: Material value passed through tr() for Hebrew translation of Paper/Parchment/Vellum
+- 32-02: Physical metadata and library URL added to enrich_metadata crossref block for unified desktop/web enrichment
+- 32-02: phys_html prepended before KTI table in desktop extended info for consistent top-of-panel display
 
 ### Blockers/Concerns
 
@@ -80,6 +83,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 32-01-PLAN.md (Physical metadata and library links)
+Stopped at: Completed 32-02-PLAN.md (Desktop metadata display) -- Phase 32 complete
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-31 complete, Phase 32 plan 01 done -- 8 plans delivered. Ready for 32-02 (Desktop metadata display).
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-32 complete -- 10 plans delivered. Ready for Phase 33.
