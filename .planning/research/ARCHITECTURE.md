@@ -1,641 +1,486 @@
-# Architecture Patterns: Shared Service Layer Extraction
+# Architecture Patterns
 
-**Domain:** Cairo Genizah manuscript research platform
-**Researched:** February 7, 2026
-**Focus:** Extracting document_service to a shared location consumable by both NiceGUI web and PyQt6 desktop apps
-**Confidence:** HIGH (based entirely on direct codebase analysis -- no external sources needed)
+**Domain:** PGP sidecar migration + FJMS full text integration
+**Researched:** 2026-02-16
+**Confidence:** HIGH (evidence-based from full codebase analysis)
 
----
-
-## Executive Summary
-
-The PGP document service (`web/document_service.py`, 507 lines) currently lives inside the `web/` package and depends on `web/supabase_client.py`'s `get_client()` function. The desktop app has its own entirely separate Supabase client (`supabase_corrections_client.py`, 1834 lines) that creates its own `create_client()` instance with the same URL and anon key. Both apps also have a third Supabase-consuming module -- `lists_sync.py` -- that creates yet another independent client instance.
-
-The fundamental architectural challenge is **not async vs sync** (both apps use the synchronous `supabase-py` client). It is **client instance management**: three separate modules each create their own Supabase `Client` singleton. Extracting the shared service requires a unified client provider that all three can consume.
-
-The recommended approach is a **two-phase extraction**:
-1. Create a `shared/` package at the project root with `supabase_provider.py` (client factory) and `document_service.py` (moved from web/)
-2. Wire both apps to import from `shared/` instead of their current locations
-
-This is a **refactoring-heavy, risk-low** change. No new external dependencies. No schema changes. No API changes. The existing tests for `web.document_service` can be adapted with minimal changes.
-
----
-
-## Current Architecture: What Exists Today
-
-### Three Independent Supabase Client Instances
+## Current Architecture (Before)
 
 ```
-Web App (NiceGUI)                Desktop App (PyQt6)
-==================               ====================
-web/supabase_client.py           supabase_corrections_client.py
-  - _client singleton              - self._client instance
-  - get_client() function           - _get_client() method
-  - SUPABASE_URL (hardcoded)        - SUPABASE_URL (hardcoded, same value)
-  - SUPABASE_ANON_KEY (hardcoded)   - SUPABASE_ANON_KEY (hardcoded, same value)
-  - Auth: sign_up/in/out            - Auth: login/register/logout
-  - Community: corrections,         - Community: same operations,
-    comments, discoveries,            different API (returns dataclasses
-    joins (returns dicts)             instead of dicts)
-  - Lists: CRUD operations          [Lists handled separately]
-       |                                    |
-       v                                    |
-web/document_service.py            lists_sync.py (3rd client!)
-  - get_document_for_fragment()       - ANOTHER create_client()
-  - get_fragments_for_document()      - SUPABASE_URL (hardcoded, same)
-  - get_transcription_for_document()  - SUPABASE_ANON_KEY (hardcoded, same)
-  - get_sources_for_document()
-  - get_sys_ids_with_transcriptions()
-  - get_fragments_by_tag()
-  - parse_transcription_sections()
-  - get_section_for_page()
+Web App (NiceGUI)
+  |
+  +-- web/pages/search.py        --> from web.document_service import ...  (shim)
+  +-- web/pages/browse.py        --> from shared.document_service import ...
+  +-- web/services.py            --> from shared.nli_crossref_service import ...
+  +-- web/components/joins_panel  --> from web.fjms_service import ...  (shim)
+  |
+  +-- Supabase (PostgreSQL)  <---- PGP data (documents, sources, footnotes, fragments)
+  |     via shared/supabase_provider.py -> get_client()
+  |
+  +-- Tantivy Index (local)  <---- Full-text search
+  +-- fist_data/fjms_enrichment.db  <---- FJMS enrichment (SQLite sidecar)
+  +-- nli_data/nli_crossref.db      <---- NLI crossref (SQLite sidecar)
+
+Desktop App (PyQt6)
+  |
+  +-- genizah_app.py             --> from shared.document_service import ...  (lazy)
+  +-- genizah_app.py             --> from shared.fjms_service import ...
+  |
+  +-- Supabase (PostgreSQL)  <---- Same PGP data + community features
+  +-- Tantivy Index (local)
+  +-- fist_data/fjms_enrichment.db
+  +-- nli_data/nli_crossref.db
 ```
 
-### Key Observations
+### Current document_service.py API Surface
 
-1. **All synchronous.** The supabase-py library used is the sync version. The web app calls document_service functions directly (no `await`). NiceGUI uses `run.io_bound()` for heavy operations in search.py, but document_service calls are made synchronously from UI event handlers.
+All functions use `from shared.supabase_provider import get_client`:
 
-2. **Same credentials, three places.** The exact same SUPABASE_URL and SUPABASE_ANON_KEY string are hardcoded in:
-   - `web/supabase_client.py` (line 26-27)
-   - `supabase_corrections_client.py` (line 63-64)
-   - `lists_sync.py` (line 29-30)
+| Function | Callers | Tables Hit |
+|----------|---------|------------|
+| `get_document_for_fragment(sys_id, page_num)` | web search, web browse, desktop (3 sites) | document_fragments, documents |
+| `get_fragments_for_document(pgpid)` | web browse, desktop (3 sites) | document_fragments |
+| `get_transcription_for_document(pgpid)` | (unused in current code) | documents |
+| `get_document_metadata(pgpid)` | (unused in current code) | documents |
+| `get_sources_for_document(pgpid)` | web browse | document_sources |
+| `get_all_sources_for_fragment(sys_id)` | web search, web browse | document_fragments, document_sources |
+| `get_editions_for_document(pgpid)` | (unused in current code) | document_sources |
+| `get_translations_for_document(pgpid)` | (unused in current code) | document_sources |
+| `get_sys_ids_with_transcriptions(sys_ids)` | web search, desktop gui_threads | document_fragments |
+| `get_fragments_by_tag(tag)` | web search | documents, document_fragments |
+| `get_all_distinct_tags()` | web search | documents |
+| `parse_transcription_sections(text)` | web browse | (pure function, no DB) |
+| `get_section_for_page(text, page, sections)` | web search, web browse | (pure function, no DB) |
+| `parse_html_sections(html)` | (import/test only) | (pure function, no DB) |
 
-3. **document_service has exactly one coupling point.** The only import is `from web.supabase_client import get_client` (line 18). Every function calls `get_client()` to obtain a Supabase Client, then uses it for table queries. The service itself is stateless -- no singletons, no class instances, just pure functions.
+**Critical observation:** 4 functions are unused, 3 are pure (no DB). The actual DB-calling surface is 7 functions that need migration.
 
-4. **Desktop app has NO PGP access today.** The desktop app (`genizah_app.py`) imports only `corrections_client.get_corrections_client()` (line 64), which delegates to `SupabaseCorrectionsClient`. There is zero PGP/document functionality in the desktop path.
+### Callers in Each App
 
-5. **Auth sessions differ between apps.** Web app manages auth via browser cookies + Supabase session in `web/supabase_client.py`. Desktop app manages auth via keyring + local credentials file in `supabase_corrections_client.py`. PGP document queries do NOT require auth (anon key is sufficient for read access via RLS).
+**Web app (imports via shim or direct):**
+- `web/pages/search.py:19` -- import via `web.document_service` shim (6 functions)
+- `web/pages/browse.py` -- import via `shared.document_service` directly (5 sites)
 
-### Current Consumers of document_service
+**Desktop app (lazy imports inside methods):**
+- `genizah_app.py:3037` -- `get_document_for_fragment, get_fragments_for_document`
+- `genizah_app.py:7379` -- `get_fragments_for_document`
+- `genizah_app.py:10146` -- `get_document_for_fragment`
+- `genizah_app.py:10162` -- `get_fragments_for_document`
 
-| Consumer | Import | Functions Used |
-|----------|--------|----------------|
-| `web/pages/browse.py` | `from web.document_service import ...` | `get_document_for_fragment`, `get_section_for_page`, `get_sources_for_document`, `get_all_sources_for_fragment` |
-| `web/pages/search.py` | `from web.document_service import ...` | `get_sys_ids_with_transcriptions`, `get_all_sources_for_fragment`, `get_document_for_fragment`, `get_section_for_page`, `get_fragments_by_tag` |
-| `tests/test_document_service.py` | `from web.document_service import ...` | All functions, via `@patch('web.document_service.get_client')` |
+**gui_threads.py:531** -- `get_sys_ids_with_transcriptions` (batch check)
 
-### Current Consumers of supabase_client (web)
-
-20+ files import from `web.supabase_client`. The critical ones:
-
-| Consumer | Key Imports |
-|----------|-------------|
-| `web/document_service.py` | `get_client` |
-| `web/auth_state.py` | Auth functions |
-| `web/pages/browse.py` | `create_correction`, `update_correction`, `get_corrections` |
-| `web/pages/discoveries.py` | Discovery CRUD |
-| `web/components/joins_panel.py` | `get_fragment_joins`, `create_fragment_join`, `get_client` |
-| `web/user_lists.py` | List CRUD functions |
-| `web/main.py` | `set_session_from_url`, `get_profile` |
-| `web/api.py` | `set_session_from_url`, `get_profile` |
-
----
-
-## Recommended Architecture: Shared Service Layer
-
-### Module Structure
+## Target Architecture (After)
 
 ```
-GenizahSearch/
-  shared/                          <-- NEW PACKAGE
-    __init__.py                    <-- Package marker
-    supabase_provider.py           <-- Unified client factory
-    document_service.py            <-- Moved from web/document_service.py
-  web/
-    supabase_client.py             <-- MODIFIED: delegates to shared.supabase_provider
-    document_service.py            <-- MODIFIED: re-export shim for backward compatibility
-    pages/
-      browse.py                    <-- No change needed (re-export shim handles it)
-      search.py                    <-- No change needed
-  supabase_corrections_client.py   <-- MODIFIED: uses shared.supabase_provider
-  lists_sync.py                    <-- MODIFIED: uses shared.supabase_provider
-  genizah_app.py                   <-- MODIFIED: can now import shared.document_service
+Web App (NiceGUI)
+  |
+  +-- web/pages/search.py        --> from web.document_service import ...  (shim, UNCHANGED)
+  +-- web/pages/browse.py        --> from shared.document_service import ...  (UNCHANGED)
+  |
+  +-- Supabase (PostgreSQL)  <---- Community ONLY (auth, corrections, lists, comments)
+  |     via web/supabase_client.py (community)
+  |
+  +-- Tantivy Index (local)
+  +-- pgp_data/pgp.db               <---- NEW: PGP sidecar (SQLite)
+  +-- fist_data/fjms_enrichment.db   <---- UPDATED: + full_texts table
+  +-- nli_data/nli_crossref.db
+
+Desktop App (PyQt6)
+  |
+  +-- genizah_app.py             --> from shared.document_service import ...  (UNCHANGED)
+  |
+  +-- Supabase                   <---- Community ONLY
+  +-- Tantivy Index (local)
+  +-- pgp_data/pgp.db
+  +-- fist_data/fjms_enrichment.db
+  +-- nli_data/nli_crossref.db
 ```
 
-### Why `shared/` at the Project Root
+### Key Change: document_service.py Internal Switch
 
-1. **Both `web/` and root-level modules need it.** Placing it inside `web/` means root-level modules (like `supabase_corrections_client.py`) need `sys.path` hacks to reach it. Placing it at root means both can do `from shared.X import Y`.
+```
+BEFORE:                                   AFTER:
+shared/document_service.py                shared/document_service.py
+  |                                         |
+  +-- from shared.supabase_provider         +-- from shared.pgp_service import get_pgp_service
+  |     import get_client                   |
+  +-- client.table('documents')...          +-- pgp_svc.get_document(pgpid)
+                                            +-- pgp_svc.get_fragments_for_sys_id(sys_id)
+```
 
-2. **`genizah_core.py` is the precedent.** The project already has a shared module at the root (`genizah_core.py`) that both apps import. `shared/` follows this pattern but as a package (multiple files).
+**The shim pattern (web/document_service.py) and ALL callers remain untouched.** The migration is entirely inside `shared/document_service.py`, swapping Supabase calls for PgpService calls.
 
-3. **No restructuring of `web/`.** The web package stays intact. A re-export shim in `web/document_service.py` means zero changes to web page imports.
+## Recommended Architecture
 
-4. **Clear naming convention.** `shared/` is self-documenting. It contains code shared between web and desktop.
+### New Component: PgpService (shared/pgp_service.py)
 
-### Alternative Considered: `services/` Package
-
-A `services/` package was considered but rejected because:
-- Ambiguous with `web/services.py` (which wraps genizah_core for web)
-- `shared/` is more explicit about the cross-app purpose
-
-### Alternative Considered: Move Everything to `genizah_core.py`
-
-Rejected because:
-- `genizah_core.py` is already 7K lines and focused on search/metadata
-- PGP document access is a Supabase concern, not a search concern
-- Would create a dependency from the core engine on Supabase (currently independent)
-
----
-
-## Component Design
-
-### 1. `shared/supabase_provider.py` -- Unified Client Factory
+Follows the exact pattern established by FjmsService and NliCrossrefService:
 
 ```python
-"""
-Unified Supabase client provider for GenizahSearch.
+class PgpService:
+    """Service for accessing PGP reference data from the SQLite sidecar."""
 
-All Supabase consumers (web, desktop, scripts) should obtain their
-client from this module instead of creating their own instances.
-"""
+    def __init__(self, db_path: str = None, thread_safe: bool = False):
+        # Same pattern as FjmsService/NliCrossrefService:
+        # - Auto-detect from project root
+        # - Read-only URI mode
+        # - thread_safe for NiceGUI web
+        # - sqlite3.Row row factory
+        pass
 
-import os
-from typing import Optional
-from supabase import create_client, Client
+    def is_available(self) -> bool: ...
+    def get_version(self) -> Optional[str]: ...
 
-# Configuration (single source of truth)
-SUPABASE_URL = os.environ.get(
-    'SUPABASE_URL',
-    'https://ylcpglwxompwjcufdemz.supabase.co'
-)
-SUPABASE_ANON_KEY = os.environ.get(
-    'SUPABASE_ANON_KEY',
-    'eyJ...'  # Default anon key
-)
+    # Core queries (replacing Supabase calls):
+    def get_document(self, pgpid: int) -> Optional[dict]: ...
+    def get_fragments_for_sys_id(self, sys_id: str) -> list[dict]: ...
+    def get_fragments_for_document(self, pgpid: int) -> list[dict]: ...
+    def get_sources_for_document(self, pgpid: int) -> list[dict]: ...
+    def get_sys_ids_with_documents(self, sys_ids: list[str]) -> set[str]: ...
+    def get_documents_by_tag(self, tag: str) -> list[dict]: ...
+    def get_all_distinct_tags(self) -> list[str]: ...
+    def get_footnotes_for_document(self, pgpid: int) -> list[dict]: ...
 
-# Module-level singleton
-_client: Optional[Client] = None
+    def close(self): ...
 
-
-def get_client() -> Client:
-    """Get or create the Supabase client singleton.
-
-    This client uses the anon key and is suitable for:
-    - Reading public data (documents, fragments, sources)
-    - Operations that rely on RLS policies
-
-    For authenticated operations, the caller should set the session
-    on this client instance.
-    """
-    global _client
-    if _client is None:
-        if not SUPABASE_ANON_KEY:
-            raise ValueError("SUPABASE_ANON_KEY not set")
-        _client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-    return _client
-
-
-def reset_client():
-    """Reset the client singleton (for testing or re-auth)."""
-    global _client
-    _client = None
+# Singleton
+_default_service = None
+def get_pgp_service(thread_safe: bool = False) -> PgpService: ...
 ```
 
-**Critical design decision: single client instance or multiple?**
+### Component Boundaries
 
-The supabase-py `Client` object holds auth state (session tokens). If web and desktop share the same singleton, auth operations in one app could affect the other. However, since these apps run in **separate processes** (web server vs desktop executable), a module-level singleton is safe -- each process gets its own instance.
+| Component | Responsibility | Communicates With |
+|-----------|---------------|-------------------|
+| `shared/pgp_service.py` (NEW) | PGP data access from pgp.db | document_service.py |
+| `shared/document_service.py` (MODIFIED) | PGP business logic, section parsing | pgp_service.py (was: supabase_provider) |
+| `shared/fjms_service.py` (MODIFIED) | FJMS enrichment + NEW full texts | document_service.py (for source merging) |
+| `shared/supabase_provider.py` (REMOVED) | Was: Supabase client factory | Nothing after migration |
+| `web/supabase_client.py` (KEPT) | Community features (auth, lists, corrections) | Web app community pages |
+| `supabase_corrections_client.py` (KEPT) | Desktop community features | Desktop app corrections |
+| `scripts/export_pgp_sidecar.py` (NEW) | Export Supabase -> pgp.db | Run once during migration |
+| `scripts/export_fist_texts.py` (NEW) | Export FIST TextualFrame -> fjms_enrichment.db | Run once to add texts |
 
-For the desktop app's `SupabaseCorrectionsClient`, which manages auth separately (keyring, saved credentials), the recommendation is:
-- Use `shared.supabase_provider.get_client()` for **read-only PGP queries** (no auth needed)
-- Keep the desktop's own `_client` instance for **authenticated community operations** (corrections, comments, etc.)
+### Data Flow
 
-This means the desktop app will have **two** Supabase client references, but this is intentional and correct:
-- One for anonymous PGP reads (from shared provider)
-- One for authenticated writes (from SupabaseCorrectionsClient)
+**Before (search result enrichment):**
+```
+User searches -> Tantivy -> result sys_ids
+  -> get_sys_ids_with_transcriptions(sys_ids)
+     -> Supabase HTTP: document_fragments.select().in_(sys_ids)
+     -> Returns set of sys_ids with PGP links
+```
 
-### 2. `shared/document_service.py` -- Extracted PGP Service
+**After:**
+```
+User searches -> Tantivy -> result sys_ids
+  -> get_sys_ids_with_transcriptions(sys_ids)
+     -> pgp_service.get_sys_ids_with_documents(sys_ids)
+        -> SQLite: SELECT DISTINCT sys_id FROM document_fragments WHERE sys_id IN (...)
+     -> Returns set of sys_ids with PGP links
+```
+
+**Before (browse page source display):**
+```
+User opens manuscript -> get_all_sources_for_fragment(sys_id)
+  -> Supabase HTTP: document_fragments.select().eq(sys_id)
+  -> For each pgpid: Supabase HTTP: document_sources.select().eq(pgpid)
+  -> Returns list of source dicts
+```
+
+**After:**
+```
+User opens manuscript -> get_all_sources_for_fragment(sys_id)
+  -> pgp_service.get_fragments_for_sys_id(sys_id)
+     -> SQLite: SELECT * FROM document_fragments WHERE sys_id = ?
+  -> pgp_service.get_sources_for_document(pgpid)
+     -> SQLite: SELECT * FROM document_sources WHERE pgpid = ?
+  -> OPTIONAL: fjms_service.get_full_texts(sys_id)
+     -> SQLite: SELECT * FROM full_texts WHERE AlmaId = ?
+  -> Merge PGP + FJMS sources, deduplicate
+  -> Returns combined list of source dicts
+```
+
+## pgp.db Schema Design
+
+### Table: documents
+
+```sql
+CREATE TABLE documents (
+    pgpid INTEGER PRIMARY KEY,
+    shelfmark_combined TEXT,
+    document_type TEXT,
+    tags TEXT,                       -- JSON array string: '["communal","marriage"]'
+    doc_date_original TEXT,
+    doc_date_standard TEXT,
+    doc_date_calendar TEXT,
+    inferred_date_display TEXT,
+    inferred_date_standard TEXT,
+    inferred_date_rationale TEXT,
+    inferred_date_notes TEXT,
+    description TEXT,
+    transcription TEXT,
+    transcription_source TEXT,
+    doc_relation TEXT,
+    languages_primary TEXT,
+    languages_secondary TEXT,
+    language_note TEXT,
+    scholarship_records TEXT,
+    shelfmarks_historic TEXT,
+    has_transcription INTEGER,       -- 0/1 (SQLite boolean)
+    has_translation INTEGER,         -- 0/1
+    input_by TEXT
+);
+-- pgp_url is computed: no need to store, generate in service layer
+```
+
+**Rationale for tags as TEXT:** Supabase uses JSONB but SQLite has no native JSONB. Store as JSON string, parse with `json.loads()` in the service layer. The json1 extension is available but for read-only tag queries, Python-side parsing is simpler and more portable.
+
+### Table: document_fragments
+
+```sql
+CREATE TABLE document_fragments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(pgpid),
+    sys_id TEXT NOT NULL,
+    shelfmark TEXT,
+    sequence_order INTEGER DEFAULT 1,
+    page_info TEXT,                   -- 'recto' or 'verso'
+    collection TEXT,
+    library TEXT,
+    library_abbrev TEXT,
+    fragment_url TEXT,
+    iiif_url TEXT,
+    UNIQUE(document_id, sys_id)
+);
+
+CREATE INDEX idx_fragments_sys_id ON document_fragments(sys_id);
+CREATE INDEX idx_fragments_document_id ON document_fragments(document_id);
+```
+
+### Table: document_sources
+
+```sql
+CREATE TABLE document_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pgpid INTEGER NOT NULL REFERENCES documents(pgpid),
+    source_scholar TEXT NOT NULL,
+    doc_relation TEXT NOT NULL,
+    language TEXT,
+    content TEXT NOT NULL,
+    content_length INTEGER,
+    source_url TEXT,
+    notes TEXT,
+    sections TEXT,                    -- JSON string (was JSONB in Supabase)
+    source_language TEXT,
+    source_direction TEXT,
+    sequence_order INTEGER DEFAULT 1
+);
+
+CREATE INDEX idx_sources_pgpid ON document_sources(pgpid);
+CREATE INDEX idx_sources_relation ON document_sources(pgpid, doc_relation);
+```
+
+### Table: document_footnotes
+
+```sql
+CREATE TABLE document_footnotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pgpid INTEGER NOT NULL REFERENCES documents(pgpid),
+    source TEXT NOT NULL,
+    source_slug TEXT,
+    doc_relation TEXT NOT NULL,
+    location TEXT,
+    url TEXT,
+    notes TEXT,
+    content TEXT,
+    content_length INTEGER
+);
+
+CREATE INDEX idx_footnotes_pgpid ON document_footnotes(pgpid);
+CREATE INDEX idx_footnotes_relation ON document_footnotes(pgpid, doc_relation);
+```
+
+### Table: meta
+
+```sql
+CREATE TABLE meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- Stores: version, created, source
+```
+
+### Indexes
+
+The indexes above directly mirror the Supabase indexes. Key queries to optimize:
+
+1. `SELECT * FROM document_fragments WHERE sys_id = ?` -- most common (every browse/search)
+2. `SELECT DISTINCT sys_id FROM document_fragments WHERE sys_id IN (...)` -- batch check
+3. `SELECT * FROM documents WHERE pgpid = ?` -- document lookup
+4. `SELECT * FROM document_sources WHERE pgpid = ?` -- source listing
+5. Tag search via `json_each()` or LIKE pattern
+
+For tag search, two options:
+- **Option A:** `json_each()` with json1 extension (cleaner but requires extension)
+- **Option B:** Tags as separate normalized table
+- **Recommendation:** Option A with json1. SQLite's json1 is built-in since Python 3.9+ and `json_each()` with a simple JOIN is fast enough for 35K documents. But if performance is an issue, a normalized tags table can be added later.
+
+### Estimated Sizes
+
+| Table | Rows | Est. Size |
+|-------|------|-----------|
+| documents | 35,839 | ~50 MB (transcription TEXT is bulk) |
+| document_fragments | 36,155 | ~3 MB |
+| document_sources | 9,364 | ~40 MB (content TEXT is bulk) |
+| document_footnotes | 22,757 | ~15 MB |
+| meta | 3 | <1 KB |
+| **Total** | **104,118** | **~110 MB** |
+
+This is small enough to ship as a single file with the desktop app.
+
+## FJMS Full Texts Integration
+
+### New Table in fjms_enrichment.db: full_texts
+
+```sql
+CREATE TABLE full_texts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    AlmaId TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_length INTEGER,
+    source_name TEXT,            -- Scholar/source attribution from FIST
+    source_name_heb TEXT,
+    language TEXT,               -- Detected language
+    UNIQUE(AlmaId, content_length)   -- Dedup by content length per AlmaId
+);
+
+CREATE INDEX idx_full_texts_alma ON full_texts(AlmaId);
+```
+
+### Source Merging Strategy
+
+FJMS full texts appear alongside PGP sources in the version selector. The merge order:
+
+```
+1. PGP Digital Editions (primary scholarly transcriptions)
+2. PGP Digital Translations
+3. FJMS Full Texts (marked with "FJMS" badge, distinct from PGP)
+4. MiDRASH auto-transcriptions (existing V0.8/V0.7)
+5. User corrections (pending, shown to submitter only)
+```
+
+### Deduplication
+
+Many FJMS texts may overlap with PGP transcriptions. Dedup approach:
 
 ```python
-"""
-Document Service for PGP document-fragment relationships.
+def merge_sources(pgp_sources: list, fjms_texts: list) -> list:
+    """Merge PGP and FJMS sources, deduplicating overlaps."""
+    # Track PGP content fingerprints
+    pgp_fingerprints = set()
+    for src in pgp_sources:
+        if src.get('content'):
+            # Normalize: strip whitespace, collapse spaces
+            fp = normalize_for_dedup(src['content'])
+            pgp_fingerprints.add(fp)
 
-Shared between web and desktop apps.
-Provides read-only access to PGP documents, fragments, and sources.
-"""
-
-import re
-import json
-from typing import Optional, List, Dict, Any, Set
-from shared.supabase_provider import get_client
-
-# All existing functions from web/document_service.py, unchanged:
-# - get_document_for_fragment(sys_id, page_num) -> dict | None
-# - get_fragments_for_document(pgpid) -> list[dict]
-# - get_transcription_for_document(pgpid) -> str | None
-# - get_document_metadata(pgpid) -> dict | None
-# - parse_transcription_sections(transcription) -> dict
-# - get_section_for_page(transcription, page_num) -> str | None
-# - get_sources_for_document(pgpid) -> list[dict]
-# - get_all_sources_for_fragment(sys_id) -> list[dict]
-# - get_editions_for_document(pgpid) -> list[dict]
-# - get_translations_for_document(pgpid) -> list[dict]
-# - get_sys_ids_with_transcriptions(sys_ids) -> set[str]
-# - get_fragments_by_tag(tag) -> list[dict]
+    merged = list(pgp_sources)  # PGP first
+    for text in fjms_texts:
+        fp = normalize_for_dedup(text['content'])
+        if fp not in pgp_fingerprints:
+            merged.append({
+                'source_scholar': text.get('source_name', 'FJMS'),
+                'doc_relation': 'FJMS Edition',
+                'content': text['content'],
+                'content_length': text.get('content_length'),
+                'language': text.get('language'),
+                'source': 'fjms',  # Marker for UI badge
+            })
+    return merged
 ```
 
-The ONLY change: line 18 changes from `from web.supabase_client import get_client` to `from shared.supabase_provider import get_client`.
+**Fingerprint approach:** Normalize whitespace + strip diacritics + lowercase. If the first 200 chars match, consider it a duplicate. This handles minor formatting differences between PGP and FJMS versions of the same text.
 
-### 3. `web/document_service.py` -- Re-export Shim
+## Patterns to Follow
+
+### Pattern 1: Sidecar Service (Established)
+
+**What:** SQLite read-only service with singleton, thread-safety toggle, auto-detect
+**When:** Any new reference data source
+**Example:** FjmsService, NliCrossrefService -- PgpService follows identically
 
 ```python
-"""
-Backward-compatibility shim.
-
-All document_service functions have moved to shared.document_service.
-This module re-exports them so existing web imports continue to work.
-"""
-
-from shared.document_service import (
-    get_document_for_fragment,
-    get_fragments_for_document,
-    get_transcription_for_document,
-    get_document_metadata,
-    parse_transcription_sections,
-    get_section_for_page,
-    get_sources_for_document,
-    get_all_sources_for_fragment,
-    get_editions_for_document,
-    get_translations_for_document,
-    get_sys_ids_with_transcriptions,
-    get_fragments_by_tag,
-)
+class PgpService:
+    def __init__(self, db_path=None, thread_safe=False):
+        # Auto-detect: project_root / pgp_data / pgp.db
+        # Read-only URI: file:{path}?mode=ro
+        # check_same_thread=not thread_safe
+        # row_factory = sqlite3.Row
 ```
 
-This means **zero changes** to any file in `web/pages/` or `web/components/`. Their `from web.document_service import X` continues to work.
+### Pattern 2: Shim Re-export (Established)
 
-### 4. `web/supabase_client.py` -- Modified to Use Shared Provider
+**What:** web/document_service.py re-exports from shared/document_service.py
+**When:** Maintaining backward compatibility during migration
+**Why:** Zero changes to web/pages/search.py import line
 
-The web supabase client keeps all its auth, community, and list functions unchanged. Only the `get_client()` function delegates:
+### Pattern 3: Lazy Import in Desktop (Established)
 
-```python
-# BEFORE (lines 26-43):
-SUPABASE_URL = os.environ.get('SUPABASE_URL', '...')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', '...')
-_client: Optional[Client] = None
+**What:** Desktop app uses `from shared.X import Y` inside methods, not at module level
+**When:** Desktop features that may not always need the service
+**Example:** `genizah_app.py:3037` -- import inside try block
 
-def get_client() -> Client:
-    global _client
-    if _client is None:
-        _client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-    return _client
+### Pattern 4: Graceful Degradation (Established)
 
-# AFTER:
-from shared.supabase_provider import get_client  # Re-exported
-from shared.supabase_provider import SUPABASE_URL, SUPABASE_ANON_KEY
-# ... rest of file unchanged
-```
-
-**Important:** `web/supabase_client.py` also exports `get_client` by name, and many web modules import it: `from web.supabase_client import get_client`. By re-exporting from shared, these imports continue to work.
-
-### 5. Desktop Integration Path
-
-The desktop app (`genizah_app.py`) can import PGP functions directly:
-
-```python
-# In genizah_app.py or a new desktop PGP panel:
-from shared.document_service import (
-    get_document_for_fragment,
-    get_sources_for_document,
-    get_section_for_page,
-)
-```
-
-No `sys.path` manipulation needed because `shared/` is at the project root alongside `genizah_app.py`.
-
----
-
-## Data Flow After Extraction
-
-### Web App Data Flow (unchanged behavior)
-
-```
-web/pages/browse.py
-    |
-    |-- from web.document_service import get_document_for_fragment
-    |   (re-export shim)
-    |       |
-    |       v
-    |   shared/document_service.py
-    |       |
-    |       |-- from shared.supabase_provider import get_client
-    |       |       |
-    |       |       v
-    |       |   Supabase Client (singleton, same instance as web auth)
-    |       |
-    |       v
-    |   Supabase tables: documents, document_fragments, document_sources
-    |
-    |-- from web.supabase_client import create_correction
-    |   (uses same shared.supabase_provider.get_client under the hood)
-    |       |
-    |       v
-    |   Supabase tables: corrections, comments, etc.
-```
-
-### Desktop App Data Flow (new capability)
-
-```
-genizah_app.py
-    |
-    |-- from shared.document_service import get_document_for_fragment
-    |       |
-    |       v
-    |   shared/document_service.py
-    |       |
-    |       |-- from shared.supabase_provider import get_client
-    |       |       |
-    |       |       v
-    |       |   Supabase Client (singleton, process-level, anon key only)
-    |       |
-    |       v
-    |   Supabase tables: documents, document_fragments, document_sources
-    |
-    |-- from corrections_client import get_corrections_client
-    |   (SupabaseCorrectionsClient with its own auth'd client)
-    |       |
-    |       v
-    |   Supabase tables: corrections, comments, discoveries, joins
-```
-
----
-
-## Dependency Graph (Import Hierarchy)
-
-```
-                  shared/
-                  supabase_provider.py    <-- FOUNDATION (no internal deps)
-                  /         |         \
-                 /          |          \
-                v           v           v
-     shared/           web/             supabase_
-     document_         supabase_        corrections_
-     service.py        client.py        client.py
-         |                |
-         v                v
-     web/             web/pages/*
-     document_         web/components/*
-     service.py
-     (re-export)
-         |
-         v
-     web/pages/browse.py
-     web/pages/search.py
-```
-
-**No circular dependencies.** The dependency graph is a clean DAG:
-- `shared/supabase_provider.py` depends on nothing internal
-- `shared/document_service.py` depends only on `shared/supabase_provider`
-- `web/document_service.py` (shim) depends only on `shared/document_service`
-- `web/supabase_client.py` depends only on `shared/supabase_provider`
-- No module depends on both `web/supabase_client` and `shared/document_service` directly (the shim handles indirection)
-
----
-
-## What Changes vs What Stays
-
-### Files to CREATE (2 new files)
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `shared/__init__.py` | 1 | Package marker |
-| `shared/supabase_provider.py` | ~40 | Unified client factory |
-
-### Files to MOVE (1 file, with shim left behind)
-
-| From | To | Notes |
-|------|-----|-------|
-| `web/document_service.py` (507 lines) | `shared/document_service.py` | Change one import line |
-
-### Files to MODIFY (3 files, minimal changes)
-
-| File | Change | Scope |
-|------|--------|-------|
-| `web/document_service.py` | Replace with re-export shim | ~15 lines total |
-| `web/supabase_client.py` | Replace `get_client()`/config with import from shared | ~10 lines changed |
-| `supabase_corrections_client.py` | Import URL/key from shared instead of hardcoding | ~5 lines changed |
-
-### Files with ZERO changes
-
-| File | Why No Change |
-|------|---------------|
-| `web/pages/browse.py` | Re-export shim handles it |
-| `web/pages/search.py` | Re-export shim handles it |
-| `web/components/*.py` | Import from `web.supabase_client` unchanged |
-| `web/auth_state.py` | Imports from `web.supabase_client` unchanged |
-| `web/main.py` | Imports from `web.supabase_client` unchanged |
-| `genizah_core.py` | No Supabase dependency |
-| `genizah_app.py` | Modified ONLY when adding PGP features (later phase) |
-| `corrections_client.py` | Delegates to `supabase_corrections_client` unchanged |
-
----
-
-## Handling Auth State: The Nuance
-
-### Problem
-
-The Supabase `Client` object holds auth state in its `auth` attribute. When a user signs in via `client.auth.sign_in_with_password()`, the client stores access/refresh tokens. All subsequent queries from that client are authenticated.
-
-If both `web/supabase_client.py` (auth management) and `shared/document_service.py` (PGP queries) use the same `get_client()` singleton, then:
-- PGP queries will be authenticated when a user is logged in
-- PGP queries will be unauthenticated when no user is logged in
-- **This is fine** because the `documents`, `document_fragments`, and `document_sources` tables have RLS policies allowing anonymous reads
-
-### Web App (no issue)
-
-The web app already uses a single client instance for everything (auth + data). Sharing the singleton from `shared.supabase_provider` changes nothing.
-
-### Desktop App (intentional separation)
-
-The desktop app's `SupabaseCorrectionsClient` creates its own client and manages auth independently (keyring, saved credentials). For PGP reads, the desktop app will use `shared.supabase_provider.get_client()` which returns a **separate** singleton (same process, but the corrections client's instance is stored as `self._client`, not in the shared module's `_client`).
-
-This means:
-- Desktop PGP queries use the shared singleton (anon key, no auth session)
-- Desktop community operations use the corrections client's instance (with auth)
-- These are two separate `Client` objects in the same process
-- **This is correct** -- PGP data is public, community operations need auth
-
-### Future Convergence (Optional, Not Required for This Milestone)
-
-Eventually, `supabase_corrections_client.py` could be refactored to use `shared.supabase_provider.get_client()` for its underlying client and add auth on top. This would reduce to one client per process. But this is a larger refactor that should be deferred -- it works correctly with two instances.
-
----
-
-## Build Order
-
-### Phase 1: Create shared/ Package (Foundation)
-
-**Goal:** Establish the shared package without breaking anything.
-
-1. Create `shared/__init__.py`
-2. Create `shared/supabase_provider.py` -- extract `get_client()` and config constants
-3. **Verify:** Both `from shared.supabase_provider import get_client` and `from web.supabase_client import get_client` work
-
-**Risk:** LOW. Adding a new package. Nothing depends on it yet.
-
-### Phase 2: Extract document_service (Core Migration)
-
-**Goal:** Move PGP service to shared/ with backward-compatible shim.
-
-1. Copy `web/document_service.py` to `shared/document_service.py`
-2. Change the import in `shared/document_service.py`: `from shared.supabase_provider import get_client`
-3. Replace `web/document_service.py` with a re-export shim
-4. **Verify:** All existing web pages work unchanged. Run `tests/test_document_service.py`.
-
-**Risk:** LOW. The re-export shim preserves all import paths. If anything breaks, it is a typo in the shim.
-
-### Phase 3: Wire web/supabase_client.py to Shared Provider
-
-**Goal:** Eliminate duplicated config constants.
-
-1. Modify `web/supabase_client.py` to import `get_client`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` from `shared.supabase_provider`
-2. Remove the duplicated constant definitions and local `_client` singleton
-3. **Verify:** All web auth, community features, lists continue to work
-
-**Risk:** MEDIUM. The web supabase_client re-exports `get_client` and many web modules import it. Need to verify the re-export works. However, `web/supabase_client.py` has ~50 other functions that are unaffected.
-
-### Phase 4: Wire Desktop to Shared Provider (Config Convergence)
-
-**Goal:** Desktop uses shared config constants, retains its own auth client.
-
-1. Modify `supabase_corrections_client.py` to import `SUPABASE_URL`, `SUPABASE_ANON_KEY` from `shared.supabase_provider`
-2. Remove hardcoded config from `supabase_corrections_client.py`
-3. Optionally modify `lists_sync.py` similarly
-4. **Verify:** Desktop login/community features still work
-
-**Risk:** LOW. Only changing where constants come from, not changing values.
-
-### Phase 5: Add PGP Features to Desktop (New Functionality)
-
-**Goal:** Desktop app can display PGP transcriptions and document metadata.
-
-1. Import `shared.document_service` in desktop UI code
-2. Add PGP transcription panel to desktop viewer
-3. Add document metadata display
-4. **Verify:** Desktop shows PGP data for linked fragments
-
-**Risk:** MEDIUM. New UI work in PyQt6. Requires designing desktop-specific UI panels.
-
----
-
-## Testing Strategy
-
-### Existing Tests
-
-`tests/test_document_service.py` patches `web.document_service.get_client`. After extraction:
-- The patch target changes to `shared.document_service.get_client`
-- OR keep patching `web.document_service.get_client` since the shim re-exports
-
-Recommendation: Update patch targets to `shared.document_service.get_client` for clarity, but both work.
-
-### New Tests Needed
-
-| Test | What It Verifies |
-|------|------------------|
-| `test_shared_provider_singleton` | `get_client()` returns same instance on repeated calls |
-| `test_shared_provider_reset` | `reset_client()` causes new instance creation |
-| `test_web_shim_reexports` | All functions accessible via `from web.document_service import X` |
-| `test_desktop_import_path` | `from shared.document_service import X` works from root |
-
----
+**What:** Service returns empty/None when .db file missing
+**When:** Always -- user may not have the sidecar file yet
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Passing Client as Parameter (Dependency Injection Overkill)
+### Anti-Pattern 1: Breaking the Shim Contract
 
-**What:** Refactoring every function to accept a `client` parameter: `get_document_for_fragment(sys_id, client=None)`
-**Why bad:** 12 functions would need signature changes. All callers would need updating. The codebase is a single-project monolith, not a library -- DI is overhead.
-**Instead:** Module-level singleton via `shared.supabase_provider.get_client()`. Tests use `@patch`.
+**What:** Changing function signatures in shared/document_service.py
+**Why bad:** web/pages/search.py imports 6 functions by name. If signatures change, both apps break.
+**Instead:** Keep all existing function signatures identical. Change only the internal implementation (Supabase -> SQLite).
 
-### Anti-Pattern 2: Abstract Base Class for Supabase Client
+### Anti-Pattern 2: Mixed Supabase+SQLite in Transition
 
-**What:** Creating `class SupabaseClientBase(ABC)` with `class WebSupabaseClient(SupabaseClientBase)` and `class DesktopSupabaseClient(SupabaseClientBase)`
-**Why bad:** Over-engineering. Both apps use the same `supabase-py` `Client` with the same API. The difference is auth management, not data access.
-**Instead:** One `get_client()` for data access. Auth is a separate concern per app.
+**What:** Having document_service.py call Supabase for some functions and SQLite for others
+**Why bad:** Two connection types, two failure modes, two test approaches
+**Instead:** Clean cutover. All functions switch to PgpService in one phase.
 
-### Anti-Pattern 3: Making document_service a Class
+### Anti-Pattern 3: Storing Computed pgp_url in SQLite
 
-**What:** Converting stateless functions to a `DocumentService` class with methods
-**Why bad:** The current functions are stateless and pure (take input, call Supabase, return result). A class would add `self` to every signature for no benefit. No shared state to manage.
-**Instead:** Keep as module-level functions. The module IS the namespace.
+**What:** Storing `https://geniza.princeton.edu/documents/{pgpid}/` as a column
+**Why bad:** Supabase had it as GENERATED ALWAYS, but it wastes space and is trivially computed
+**Instead:** Generate in PgpService: `def get_pgp_url(pgpid): return f"https://geniza.princeton.edu/documents/{pgpid}/"`
 
-### Anti-Pattern 4: Moving web/supabase_client.py to shared/
+### Anti-Pattern 4: Premature Normalization of Tags
 
-**What:** Moving the entire 1190-line `web/supabase_client.py` to `shared/`
-**Why bad:** The web supabase client has web-specific concerns (OAuth URL generation, session-from-URL handling, NiceGUI-specific auth state). The desktop doesn't need or want these. Only `get_client()` and the config constants are truly shared.
-**Instead:** Extract only the minimal shared parts (`get_client`, config) to `shared/supabase_provider.py`. Keep web-specific functions in `web/supabase_client.py`.
+**What:** Creating a normalized tags table before proving json_each is too slow
+**Why bad:** Extra complexity, extra export logic, extra join in queries -- for 35K rows, unnecessary
+**Instead:** Start with JSON text + json_each(). Add normalized table only if profiling shows a bottleneck.
 
-### Anti-Pattern 5: Premature Desktop Client Unification
+## Scalability Considerations
 
-**What:** Merging `supabase_corrections_client.py` into `shared/` now
-**Why bad:** The corrections client is 1834 lines with desktop-specific concerns (keyring, credential files, offline mode, dataclass conversions). Merging it is a major refactor that is not required for PGP access.
-**Instead:** Desktop keeps its corrections client. PGP access comes through `shared/document_service` with the shared provider. Unification is a future consideration.
+| Concern | Current (35K docs) | At 100K docs | At 500K docs |
+|---------|---------------------|--------------|-------------|
+| pgp.db file size | ~110 MB | ~300 MB | ~1.5 GB |
+| Batch sys_id check | <50ms (SQLite IN clause, 500 batch) | <100ms | Consider FTS or separate index |
+| Tag search | <100ms (json_each on 35K rows) | May need normalized tags table | Definitely need normalized table |
+| Desktop app startup | <1s (connection only) | Same | Same (lazy queries) |
+| Web concurrent reads | Thread-safe mode, read-only | Same | Same (read-only, no WAL needed) |
 
----
+**Note:** Since the database is read-only (opened with `?mode=ro`), WAL mode is not needed. Multiple readers can proceed without contention.
 
-## Scalability and Future Considerations
+## Sources
 
-### Adding More Shared Services
-
-The `shared/` package can grow:
-
-```
-shared/
-  __init__.py
-  supabase_provider.py      # Client factory (Phase 1)
-  document_service.py       # PGP documents (Phase 2)
-  fragment_service.py       # Future: shared fragment operations
-  search_enrichment.py      # Future: shared search result decoration
-```
-
-### NLI Integration
-
-When NLI crossreference data (815K records) is imported, it will likely need a similar service. It can follow the same pattern:
-
-```python
-# shared/nli_service.py
-from shared.supabase_provider import get_client
-
-def get_nli_record(sys_id: str) -> Optional[Dict]:
-    client = get_client()
-    ...
-```
-
-### Desktop App Modernization
-
-The desktop app's `SupabaseCorrectionsClient` could eventually be refactored to:
-1. Use `shared.supabase_provider.get_client()` as its underlying client
-2. Add auth management on top
-3. Keep desktop-specific concerns (keyring, offline mode)
-
-This is a separate milestone, not part of the current extraction.
-
----
-
-## Confidence Assessment
-
-| Area | Confidence | Reason |
-|------|------------|--------|
-| Module structure (`shared/`) | HIGH | Direct codebase analysis, follows existing patterns |
-| Re-export shim approach | HIGH | Standard Python pattern, zero consumer changes needed |
-| Client singleton safety | HIGH | Apps run in separate processes, no shared state |
-| Build order | HIGH | Each phase is independently testable |
-| Auth separation | HIGH | PGP data is public (anon key), community data needs auth |
-| Desktop integration path | MEDIUM | PyQt6 UI work not yet designed; the import path is clear but UI panels are TBD |
-
----
-
-## Summary for Roadmap
-
-**Recommended phase structure:**
-
-1. **Foundation** (shared/ package + supabase_provider) -- Low risk, enables everything else
-2. **Extract** (document_service to shared/ + web shim) -- Core migration, backward compatible
-3. **Converge** (web + desktop use shared config) -- Remove duplication
-4. **Desktop PGP** (add PGP features to desktop app) -- New user-facing functionality
-
-**Total scope:** ~2 new files, ~3 modified files, 0 breaking changes for web app
-**Critical path:** Phase 1 and 2 unblock desktop PGP access. Phase 3 is cleanup. Phase 4 is new features.
-
----
-
-*Research based on: direct analysis of web/document_service.py (507 lines), web/supabase_client.py (1190 lines), supabase_corrections_client.py (1834 lines), lists_sync.py, genizah_app.py, and all consumer modules. No external sources needed -- this is an internal architecture decision.*
+- `shared/document_service.py` -- 742 lines, 14 functions (7 DB-calling, 4 unused, 3 pure)
+- `shared/fjms_service.py` -- 961 lines, FjmsService pattern
+- `shared/nli_crossref_service.py` -- 845 lines, NliCrossrefService pattern
+- `shared/supabase_provider.py` -- 45 lines, will be removed
+- `scripts/import_pgp_full.py` -- Full Supabase schema and import logic
+- `migrations/*.sql` -- 9 migration files defining Supabase schema
+- `docs/plans/FIST_INTEGRATION_DESIGN.md` -- FIST data architecture
+- `.planning/PROJECT.md` -- v6.0.0 scope definition

@@ -1,404 +1,523 @@
 # Technology Stack
 
-**Project:** v5.6.0 Desktop Parity & Transcription Search
-**Researched:** 2026-02-07
-**Focus:** Stack additions/changes for shared service layer, Tantivy transcription search, PyQt6 async patterns
+**Project:** PGP Sidecar Migration + FJMS Full Texts
+**Researched:** 2026-02-16
+**Focus:** Stack additions/changes for migrating PGP reference data from Supabase to SQLite sidecar, adding FJMS full texts as scholarly sources
+**Overall confidence:** HIGH
 
 ## Executive Summary
 
-No new dependencies are required. The existing stack (supabase-py 2.27.2, tantivy-py 0.25.1, PyQt6) has all the capabilities needed for this milestone. The work is structural reorganization and schema extension, not technology adoption.
+No new Python dependencies are required. The migration from Supabase to SQLite sidecar for PGP reference data uses only Python's built-in `sqlite3` module and follows the proven pattern established by `fjms_enrichment.db` (246 MB) and `nli_crossref.db` (248 MB). The FJMS full text export extends the existing `export_fist_enrichment.py` script. The critical technical decisions are schema design and JSONB-to-TEXT conversion strategy, not library selection.
 
-## Existing Stack (Verified)
+## Existing Stack (No Changes Needed)
 
 | Technology | Version | Purpose | Status |
 |------------|---------|---------|--------|
-| Python | 3.11 | Runtime | Installed |
-| tantivy-py | 0.25.1 (Tantivy 0.25.0 core) | Full-text search index | Installed |
-| supabase-py | 2.27.2 | Cloud database client | Installed |
+| Python | 3.11.9 | Runtime | Installed |
+| sqlite3 (stdlib) | SQLite 3.45.1 | Local sidecar databases | Built-in, verified |
+| supabase-py | 2.27.2 | Cloud DB (auth, corrections, lists -- retains community features) | Installed |
+| tantivy-py | 0.25.1 | Full-text search index | Installed, unaffected |
 | PyQt6 | latest | Desktop GUI framework | Installed |
 | NiceGUI | latest | Web GUI framework | Installed |
-| gotrue | latest | Supabase auth helper | Installed |
-| keyring | latest | Secure credential storage (desktop) | Installed |
+| tqdm | latest | Progress bars for export scripts | Installed |
 
 ## New Dependencies
 
-**None required.** All capabilities needed are available in existing packages.
+**None required.** All capabilities needed are available in the existing Python standard library and installed packages.
 
 ---
 
-## Decision 1: Shared Service Layer Structure
+## Decision 1: PGP Data Target -- New `pgp.db` Sidecar (Not Extending Existing Sidecars)
 
-### Current State
+**Recommendation:** Create a new `pgp_data/pgp.db` sidecar file.
 
-`web/document_service.py` (507 lines) imports from `web.supabase_client` for the Supabase connection. It contains 12 functions for PGP data access. The desktop app has no equivalent -- it uses `supabase_corrections_client.py` for community features (corrections, comments, discoveries, joins) with a completely separate Supabase client singleton.
+**Why not extend fjms_enrichment.db or nli_crossref.db?**
+- Each sidecar has a clear domain boundary (FJMS scholarly metadata, NLI image crossrefs, PGP document data)
+- Each has an independent update cycle (FIST.db export vs. PGP CSV re-import vs. NLI crossref scrape)
+- Separation enables independent versioning via their `meta` tables
+- The fjms_enrichment.db is already 246 MB; adding PGP transcription content (~40-80 MB) would push it past 300 MB
 
-### Key Problem
+**Why not keep PGP data in Supabase?**
+- PGP reference data is read-only system data imported from CSV dumps, not user-generated
+- Every PGP lookup currently requires a network round-trip (~50-200ms) vs. SQLite (~0.1ms)
+- The desktop app needs offline access; Supabase requires internet
+- Supabase free tier has row limits and bandwidth quotas
+- The data access pattern is identical to what fjms_service.py and nli_crossref_service.py already do
 
-Both `web/supabase_client.py` and `supabase_corrections_client.py` create their own Supabase `Client` singletons with the same credentials. The web document_service is coupled to the web client via `from web.supabase_client import get_client`.
+**What stays in Supabase:**
+- User auth (login, registration)
+- User corrections (community-submitted corrections, approval workflow)
+- User lists (saved manuscript lists)
+- User comments/discoveries
+- Any data that is multi-user collaborative
 
-### Recommended Pattern: Dependency-Injected Client
-
-**Extract to:** `shared/document_service.py` (new top-level module)
-
-**Pattern:** Pass the Supabase client as a parameter rather than importing it from a specific location. This lets both apps provide their own client instance.
-
-```python
-# shared/document_service.py
-from typing import Optional, List, Dict, Any, Set
-
-def get_document_for_fragment(client, sys_id: str, page_num: int = None) -> Optional[Dict]:
-    """Get PGP document for a fragment. Client is injected by caller."""
-    if not sys_id:
-        return None
-    # ... same logic, but uses passed `client` instead of get_client()
-```
-
-**Why this pattern:**
-- The existing `web/document_service.py` functions are pure data-access -- they call `get_client()` at the top of each function, then use the client. Changing `get_client()` to a parameter is minimal refactoring.
-- Both apps already have Supabase client singletons. No need to unify them -- just pass whichever client each app uses.
-- Avoids circular imports and path manipulation (`sys.path.insert` hacks already present in `supabase_corrections_client.py`).
-
-**Alternative considered: Module-level client registration**
-
-```python
-# shared/document_service.py
-_client = None
-
-def set_client(client):
-    global _client
-    _client = client
-
-def get_document_for_fragment(sys_id, page_num=None):
-    client = _client  # uses registered client
-```
-
-This is also viable and requires fewer signature changes. **Use this if the caller-injection pattern feels too verbose.** The tradeoff is global mutable state vs explicit parameters.
-
-**Recommendation: Module-level registration** (set_client pattern) because:
-1. Minimizes signature changes from current code (12 functions keep same signatures)
-2. Each app calls `set_client()` once at startup
-3. Thread-safe for read-only access (both apps set once, read many times)
-4. Web app sets it in `web/main.py` startup; desktop sets it in `genizah_app.py` startup
-
-### Integration Points
-
-**Web app (NiceGUI):**
-```python
-# web/main.py (startup)
-from web.supabase_client import get_client
-from shared.document_service import set_client
-set_client(get_client())
-```
-
-**Desktop app (PyQt6):**
-```python
-# genizah_app.py (startup, after Supabase init)
-from supabase_corrections_client import get_supabase_corrections_client
-from shared.document_service import set_client
-client = get_supabase_corrections_client()._get_client()
-set_client(client)
-```
-
-### Web app backward compatibility
-
-After extraction, `web/document_service.py` becomes a thin re-export wrapper:
-```python
-# web/document_service.py (backward compat shim)
-from shared.document_service import *
-```
-
-This means existing `from web.document_service import get_document_for_fragment` calls in 5 web files continue working without changes.
+**Confidence:** HIGH -- follows proven pattern, two successful precedents in codebase
 
 ---
 
-## Decision 2: Tantivy Multi-Field Search with Transcription Filtering
+## Decision 2: JSONB Handling Strategy
 
-### Current Schema (Verified)
+**Problem:** The Supabase `documents.tags` column is PostgreSQL JSONB (`["communal", "marriage", "trade"]`). SQLite has no native JSONB type but has JSON1 extension functions.
 
-The main Tantivy index schema (`genizah_core.py`, line 3902-3909):
+**Recommendation:** Store tags as plain TEXT containing JSON strings. Query with `json_each()` when needed.
 
+**Rationale:**
+- SQLite 3.45.1 (our version) has full JSON1 support built-in (verified: `json_array()`, `json_type()` work)
+- `json_each()` enables efficient tag queries: `SELECT DISTINCT value FROM documents, json_each(tags)` for tag listing
+- For the common query "does this document have tag X?", a simpler `tags LIKE '%"communal"%'` works and is fast enough for 36K rows
+- The tag-based search (GIN index equivalent) can use `json_each()` as a table-valued function
+- No need for SQLite's newer JSONB blob format -- TEXT JSON is simpler, debuggable, and fast enough for this row count
+
+**Example migration pattern:**
 ```python
-builder.add_text_field("unique_id", stored=True)
-builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
-builder.add_text_field("source", stored=True)
-builder.add_text_field("full_header", stored=True)
-builder.add_text_field("shelfmark", stored=True)
-builder.add_text_field("scope", stored=True)
-builder.add_text_field("boundaries", stored=True)
+# PostgreSQL JSONB tags: ["communal", "marriage", "trade"]
+# -> SQLite TEXT: '["communal", "marriage", "trade"]'
+# Stored as-is, queried with json_each() or LIKE
+
+# Efficient tag search (replaces Supabase GIN @> query)
+cursor.execute("""
+    SELECT d.pgpid FROM documents d, json_each(d.tags) jt
+    WHERE jt.value = ?
+""", (tag,))
+
+# Or simpler LIKE for single-tag checks (adequate for 36K rows)
+cursor.execute("""
+    SELECT pgpid FROM documents WHERE tags LIKE ?
+""", (f'%"{tag}"%',))
 ```
 
-All fields use default tokenizer except `content` (whitespace). No transcription fields exist.
+**For `document_sources.sections` JSONB:** Store as TEXT JSON. The sections column contains structured arrays like `[{"canvas_url": "...", "canvas_num": 1, "label": null, "text": "..."}]`. In the service layer, parse with Python `json.loads()` on retrieval (same as how the Supabase client returns it -- the service already receives it as a Python list of dicts).
 
-### Verified Capabilities (Tested Locally)
-
-I tested tantivy-py 0.25.1 directly and confirmed:
-
-| Capability | Status | Notes |
-|------------|--------|-------|
-| `add_text_field` with `tokenizer_name='default'` | Works | For transcription text |
-| `add_text_field` with `tokenizer_name='raw'` | Works | For exact-match filter fields |
-| `add_boolean_field` with `fast=True` | Works | For has_transcription flag |
-| `add_integer_field` with `fast=True` | Works | Not needed but available |
-| Field-specific query (`transcription:word`) | Works | Standard Tantivy query syntax |
-| Multi-field default query | Works | `parse_query('word', default_field_names=['content', 'transcription'])` |
-| Boolean AND queries | Works | `source_type:pgp_edition AND content:word` |
-| Boolean field as indexed filter | Does NOT work | `has_transcription:true` fails ("not declared as indexed") |
-| Text field with `raw` tokenizer as filter | Works | `source_type:pgp_edition` is exact match |
-
-**Critical finding:** Boolean fields cannot be used in query strings. Use a text field with `raw` tokenizer for filter values instead.
-
-### Recommended Schema Extension
-
-Add two new fields to the existing schema:
-
-```python
-# In Indexer.create_index() - add after existing fields:
-builder.add_text_field("transcription", stored=True, tokenizer_name="default")
-builder.add_text_field("content_type", stored=True, tokenizer_name="raw")
-```
-
-**Field definitions:**
-
-| Field | Type | Tokenizer | Purpose |
-|-------|------|-----------|---------|
-| `transcription` | text, stored | `default` | PGP transcription text (searchable) |
-| `content_type` | text, stored | `raw` | Filter: `"htr"`, `"pgp_edition"`, `"pgp_translation"` |
-
-**Why `default` tokenizer for transcription:**
-- The `content` field currently uses `whitespace` tokenizer, which is optimized for Hebrew HTR text (no lowercasing, minimal processing).
-- PGP transcriptions contain mixed Hebrew/English with punctuation. The `default` tokenizer handles this better with Unicode-aware tokenization.
-- Field-specific queries (`transcription:word`) let users search specifically in scholarly transcriptions.
-
-**Why `content_type` instead of a boolean:**
-- Tantivy boolean fields are not queryable via the query parser (verified experimentally).
-- A text field with `raw` tokenizer gives exact-match filtering: `content_type:pgp_edition`.
-- More expressive than boolean: can distinguish HTR vs PGP edition vs PGP translation vs user correction.
-- Future-proof for additional content types.
-
-### Search Filter Implementation
-
-Three filter modes (matching PROJECT.md requirements):
-
-```python
-# Mode 1: Everything (default) - searches content + transcription
-query = index.parse_query(terms, default_field_names=["content", "transcription"])
-
-# Mode 2: Transcriptions only - searches only transcription field
-query = index.parse_query(f"content_type:pgp_edition AND ({terms})",
-                          default_field_names=["transcription"])
-
-# Mode 3: HTR only (exclude transcriptions)
-query = index.parse_query(f"content_type:htr AND ({terms})",
-                          default_field_names=["content"])
-```
-
-### Indexing PGP Transcriptions
-
-During index build, after indexing HTR pages, fetch PGP transcriptions from Supabase and add as additional documents:
-
-```python
-# Pseudo-code for PGP document indexing
-for pgp_doc in fetch_all_pgp_documents():
-    for source in pgp_doc.sources:
-        if source.doc_relation == 'Digital Edition':
-            content_type = 'pgp_edition'
-        else:
-            content_type = 'pgp_translation'
-
-        writer.add_document(tantivy.Document(
-            unique_id=f"pgp:{pgp_doc.pgpid}:{source.id}",
-            content="",  # no HTR content
-            transcription=source.content,
-            source=f"PGP ({source.source_scholar})",
-            full_header=pgp_doc.shelfmark_combined,
-            shelfmark=pgp_doc.shelfmark_combined,
-            scope="document",
-            boundaries="",
-            content_type=content_type
-        ))
-```
-
-Existing HTR documents get `content_type="htr"` and empty `transcription=""`.
-
-### Index Rebuild Approach
-
-The index must be fully rebuilt (not incrementally updated) because:
-1. Schema changes require a new index.
-2. The existing `create_index()` method already destroys and recreates the index directory.
-3. PGP transcriptions are added as new documents alongside existing HTR pages.
-
-No API changes needed -- `create_index()` just adds the new fields and documents.
+**Confidence:** HIGH -- JSON1 verified available in our SQLite version, pattern documented in official SQLite docs
 
 ---
 
-## Decision 3: PyQt6 Async Patterns for Supabase Calls
+## Decision 3: `document_sources.sections` JSONB Migration
 
-### Current Patterns (Verified)
+**Problem:** The `sections` column contains per-canvas section data as JSONB arrays. This is currently parsed by `get_section_for_page()` in `document_service.py`.
 
-The desktop app already uses two proven patterns for async work:
+**Recommendation:** Store sections as TEXT JSON in SQLite. Parse with `json.loads()` in the service layer on retrieval.
 
-**Pattern A: QThread subclass** (used in `gui_threads.py`)
-- 14 QThread subclasses for different operations (search, indexing, metadata fetch, etc.)
-- Each thread emits signals (`finished_signal`, `error_signal`, `progress_signal`)
-- Main thread connects signals to UI update slots
-- Example: `EnrichMetadataThread` fetches metadata in background, emits result
+**Why not normalize into a separate table?**
+- Sections are always read as a complete array for a given source (never queried individually)
+- The data is sparse (only ~7,300 PGPIDs have pgp-text HTML sections)
+- The current code already handles sections as Python lists -- `json.loads()` returns the same structure
+- Normalizing would add a JOIN for zero query benefit
 
-**Pattern B: `threading.Thread` with daemon flag** (used in `genizah_app.py`)
-- Used for fire-and-forget operations
-- Example: preloading next/prev pages in browse view
-
-### Supabase Client Threading Safety
-
-**Verified:** The supabase-py sync client (`Client`) uses `httpx` under the hood with synchronous HTTP calls. Each call to `client.table(...).select(...).execute()` is a blocking HTTP request.
-
-**Thread safety:** The sync client is safe to call from multiple threads because:
-1. Each `.execute()` call creates its own HTTP request
-2. No shared mutable state between requests
-3. The existing `supabase_corrections_client.py` already calls Supabase from QThread workers (via `corrections_ui.py` dialogs) without issues
-
-### Recommended Pattern for Desktop PGP Features
-
-**Use QThread subclass**, consistent with existing patterns. Create a single `PGPDataThread` for PGP data operations:
-
+**Implementation:**
 ```python
-# In gui_threads.py (or new shared_threads.py)
-class PGPDataThread(QThread):
-    """Fetch PGP document data in background."""
-    finished_signal = pyqtSignal(str, dict)  # sys_id, result_data
-    error_signal = pyqtSignal(str)
-
-    def __init__(self, operation: str, **kwargs):
-        super().__init__()
-        self.operation = operation
-        self.kwargs = kwargs
-
-    def run(self):
-        try:
-            from shared.document_service import (
-                get_document_for_fragment,
-                get_sources_for_document,
-                get_fragments_for_document
-            )
-            # Dispatch based on operation type
-            if self.operation == 'get_document':
-                result = get_document_for_fragment(
-                    self.kwargs['sys_id'],
-                    self.kwargs.get('page_num')
-                )
-                self.finished_signal.emit(self.kwargs['sys_id'],
-                    {'document': result})
-            # ... etc
-        except Exception as e:
-            self.error_signal.emit(str(e))
+# In the new PgpService, when fetching sources:
+def get_sources_for_document(self, pgpid: int) -> list[dict]:
+    cursor = self._conn.execute(
+        "SELECT * FROM document_sources WHERE pgpid = ? ORDER BY doc_relation, sequence_order",
+        (pgpid,)
+    )
+    results = []
+    for row in cursor:
+        source = dict(row)
+        # Parse JSON text back to Python list
+        if source.get('sections'):
+            source['sections'] = json.loads(source['sections'])
+        results.append(source)
+    return results
 ```
 
-**Why NOT use the async Supabase client:**
-- `supabase-py` 2.27.2 includes `create_async_client` and `AsyncClient` (verified).
-- However, NiceGUI runs its own async event loop. PyQt6 runs a Qt event loop. Mixing `asyncio` into PyQt6 requires `qasync` or similar libraries.
-- The existing codebase has zero async/await usage in the desktop app.
-- QThread with sync client is proven, understood, and used 14 times already.
-- Adding `asyncio` would be a major architectural change for minimal benefit (Supabase calls are HTTP round-trips, not CPU-bound).
+**Confidence:** HIGH -- same approach used by every JSON column consumer in the codebase
 
-**Why NOT use `concurrent.futures.ThreadPoolExecutor`:**
-- Would require a different signal mechanism to update the Qt UI.
-- QThread signals integrate naturally with Qt's event loop.
-- No benefit over QThread for this use case.
+---
 
-### Supabase Client Initialization Order
+## Decision 4: Schema Design for `pgp.db`
 
-The desktop app must initialize the Supabase client BEFORE using the shared document service. The current startup order in `genizah_app.py`:
+**Recommendation:** Mirror the Supabase schema closely, with JSONB columns converted to TEXT.
 
-1. Import `genizah_core` modules
-2. Import `gui_threads`
-3. Import `corrections_client` (which creates Supabase client)
-4. Application starts, user may or may not log in
+### Table: `documents` (~35,839 rows)
 
-**New startup addition:**
+```sql
+CREATE TABLE documents (
+    pgpid INTEGER PRIMARY KEY,
+    shelfmark_combined TEXT,
+    document_type TEXT,
+    tags TEXT DEFAULT '[]',           -- JSON array as TEXT (was JSONB)
+    doc_date_original TEXT,
+    doc_date_standard TEXT,
+    inferred_date_display TEXT,
+    description TEXT,
+    transcription TEXT,
+    transcription_source TEXT,
+    languages_primary TEXT,
+    languages_secondary TEXT,
+    inferred_date_standard TEXT,
+    inferred_date_rationale TEXT,
+    scholarship_records TEXT,
+    shelfmarks_historic TEXT,
+    language_note TEXT,
+    doc_date_calendar TEXT,
+    inferred_date_notes TEXT,
+    has_transcription INTEGER DEFAULT 0,  -- BOOLEAN -> INTEGER
+    has_translation INTEGER DEFAULT 0,
+    input_by TEXT
+);
+-- pgp_url is computed: omit from SQLite, compute in service layer
+```
+
+### Table: `document_fragments` (~36,155 rows)
+
+```sql
+CREATE TABLE document_fragments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(pgpid),
+    sys_id TEXT NOT NULL,
+    shelfmark TEXT,
+    sequence_order INTEGER DEFAULT 1,
+    page_info TEXT,
+    collection TEXT,
+    library TEXT,
+    library_abbrev TEXT,
+    fragment_url TEXT,
+    iiif_url TEXT,
+    UNIQUE(document_id, sys_id)
+);
+```
+
+### Table: `document_sources` (~9,364 rows)
+
+```sql
+CREATE TABLE document_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pgpid INTEGER NOT NULL REFERENCES documents(pgpid),
+    source_scholar TEXT NOT NULL,
+    doc_relation TEXT NOT NULL,
+    language TEXT,
+    content TEXT NOT NULL,
+    content_length INTEGER,
+    source_url TEXT,
+    notes TEXT,
+    sequence_order INTEGER DEFAULT 1,
+    sections TEXT,             -- JSON array as TEXT (was JSONB)
+    source_language TEXT,
+    source_direction TEXT,
+    UNIQUE(pgpid, source_scholar, doc_relation)
+);
+```
+
+### Table: `document_footnotes` (~22,757 rows)
+
+```sql
+CREATE TABLE document_footnotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pgpid INTEGER NOT NULL REFERENCES documents(pgpid),
+    source TEXT NOT NULL,
+    source_slug TEXT,
+    doc_relation TEXT NOT NULL,
+    location TEXT,
+    url TEXT,
+    notes TEXT,
+    content TEXT,
+    content_length INTEGER,
+    UNIQUE(pgpid, source_slug, doc_relation)
+);
+```
+
+### Indexes
+
+```sql
+-- Fragment lookups (most common: find document for a fragment)
+CREATE INDEX idx_fragments_sys_id ON document_fragments(sys_id);
+CREATE INDEX idx_fragments_document_id ON document_fragments(document_id);
+
+-- Source lookups
+CREATE INDEX idx_sources_pgpid ON document_sources(pgpid);
+CREATE INDEX idx_sources_relation ON document_sources(pgpid, doc_relation);
+
+-- Footnote lookups
+CREATE INDEX idx_footnotes_pgpid ON document_footnotes(pgpid);
+
+-- Document type filtering
+CREATE INDEX idx_documents_type ON documents(document_type);
+```
+
+### Table: `meta` (version tracking)
+
+```sql
+CREATE TABLE meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- Entries: version, created, source
+```
+
+**Estimated pgp.db size:** ~40-80 MB (transcription text is the bulk; 9,364 sources averaging ~2KB content each = ~19 MB of content alone, plus 35K document descriptions and footnotes).
+
+**Confidence:** HIGH -- directly mirrors working Supabase schema
+
+---
+
+## Decision 5: FJMS Full Text Export (UnitFullText)
+
+**Problem:** The milestone calls for "FJMS full texts (65K transcriptions)". Investigation reveals these are **scholarly catalog descriptions** from `dbo_UnitFullText` (65,332 rows), not machine transcriptions. They contain English-language catalog entries describing manuscript contents (author, content summary, physical description).
+
+**Data characteristics (verified from FIST.db):**
+- 65,332 total rows in `dbo_UnitFullText`
+- 64,946 linkable to AlmaId (99.4% coverage)
+- 85,313 distinct AlmaIds (many manuscripts have multiple entries)
+- Average content length: 240 characters
+- Max content length: 21,894 characters
+- 55,987 rows with content > 100 characters
+
+**Recommendation:** Add a `fulltext` table to `fjms_enrichment.db` (extend existing sidecar, since this is FJMS/FIST data).
+
+```sql
+CREATE TABLE fulltext (
+    AlmaId TEXT NOT NULL,
+    FullText TEXT NOT NULL,
+    Page TEXT
+);
+CREATE INDEX idx_fulltext_alma ON fulltext(AlmaId);
+```
+
+**Why extend fjms_enrichment.db (not pgp.db)?**
+- This is FIST-sourced data, same domain as domains/joins/catalog
+- Same update cycle (FIST.db re-export)
+- Same export script can be extended (`export_fist_enrichment.py`)
+- Keeps the domain boundary clean: FIST data = fjms_enrichment.db, PGP data = pgp.db
+
+**Export pattern:** Follow the established pattern in `export_fist_enrichment.py`:
 ```python
-# After step 3, register the shared service client
-from shared.document_service import set_client
-from supabase_corrections_client import get_supabase_corrections_client
-sbc = get_supabase_corrections_client()
-sb_client = sbc._get_client()
-if sb_client:
-    set_client(sb_client)
+def export_fulltext(source, target):
+    """Export UnitFullText catalog descriptions from FIST to sidecar."""
+    target.execute("DROP TABLE IF EXISTS fulltext")
+    target.execute("""
+        CREATE TABLE fulltext (
+            AlmaId TEXT NOT NULL,
+            FullText TEXT NOT NULL,
+            Page TEXT
+        )
+    """)
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            ft.FullText,
+            ft.Page
+        FROM dbo_UnitFullText ft
+        JOIN dbo_Signature sig ON ft.SignatureId = sig.SignatureId
+        JOIN dbo_InventorySignature isig ON sig.SetSignatureId = isig.SetSignatureId
+        JOIN dbo_Inventory inv ON isig.InventoryId = inv.InventoryId
+        JOIN dbo_InventoryAlma alma ON inv.InventoryId = alma.InventoryId
+        WHERE ft.FullText IS NOT NULL AND LENGTH(ft.FullText) > 10
+    """)
+    # ... batch insert pattern (same as other exports)
 ```
 
-Note: PGP data is read-only and uses the anon key (no auth required). The shared service client does not need user authentication -- it only reads from `documents`, `document_fragments`, and `document_sources` tables which have public read access via RLS.
+**Size estimate:** ~15-25 MB additional in fjms_enrichment.db (65K rows * avg 240 chars = ~15 MB text + indexes).
+
+**Confidence:** HIGH -- follows exact pattern of 8 existing export functions in same script
 
 ---
 
-## Decision 4: Module Layout
+## Decision 6: PGP Data Export Strategy (Supabase -> SQLite)
 
-### Recommended Structure
+**Problem:** Current PGP data lives in Supabase (cloud PostgreSQL). Need a one-time export + script for future re-runs.
 
+**Recommendation:** Write `scripts/export_pgp_sidecar.py` that reads from Supabase API and writes to `pgp_data/pgp.db`.
+
+**Why not export from the CSV source files?**
+- The CSV import scripts (`import_pgp_documents.py`, `import_pgp_sections.py`) already processed and enriched the data
+- Supabase has the canonical merged state (transcriptions + metadata + sections + footnotes)
+- Re-deriving from CSVs would duplicate complex normalization logic
+
+**Why not dump Supabase SQL directly?**
+- Supabase free tier does not expose `pg_dump`
+- The Supabase Python client (`supabase-py`) provides paginated REST access to all tables
+- The export script can fetch all rows in batches (same approach as `get_sys_ids_with_transcriptions` batching)
+
+**Export approach:**
+```python
+#!/usr/bin/env python3
+"""Export PGP reference data from Supabase to pgp.db sidecar."""
+
+from supabase import create_client
+import sqlite3
+import json
+from tqdm import tqdm
+
+def fetch_all_rows(client, table_name, page_size=1000):
+    """Paginated fetch of all rows from a Supabase table."""
+    all_rows = []
+    offset = 0
+    while True:
+        response = client.table(table_name).select('*').range(
+            offset, offset + page_size - 1
+        ).execute()
+        if not response.data:
+            break
+        all_rows.extend(response.data)
+        offset += page_size
+        if len(response.data) < page_size:
+            break
+    return all_rows
 ```
-GenizahSearch/
-  shared/                          # NEW: shared service modules
-    __init__.py
-    document_service.py            # Extracted from web/document_service.py
-  web/
-    document_service.py            # Becomes re-export shim
-    supabase_client.py             # Unchanged
-    ...
-  supabase_corrections_client.py   # Unchanged (desktop Supabase client)
-  gui_threads.py                   # Add PGPDataThread
-  genizah_core.py                  # Extend Indexer schema + PGP indexing
-  genizah_app.py                   # Add PGP UI features
-```
 
-**Why `shared/` at project root:**
-- Importable by both `web/` and root-level desktop files without path hacks.
-- Clear separation: `shared/` = business logic, `web/` = web UI, root = desktop.
-- Follows the existing pattern where `genizah_core.py` is at root and imported by both apps.
+**One-time vs. repeatable:** The script should be idempotent (DROP TABLE IF EXISTS + re-create), same as `export_fist_enrichment.py`. This supports re-running when PGP data updates.
 
-**Why NOT put it in `genizah_core.py`:**
-- `genizah_core.py` is 7K lines and handles search/indexing/metadata, not Supabase queries.
-- Different concerns: `genizah_core.py` = local operations, `shared/document_service.py` = cloud data access.
-- The service needs Supabase client dependency; `genizah_core.py` has no Supabase imports.
+**Confidence:** HIGH -- supabase-py pagination is documented and tested in existing codebase
 
 ---
 
-## What NOT to Add
+## Decision 7: Service Layer Architecture
 
-| Technology | Why Not |
-|------------|---------|
-| `qasync` / `asyncqt` | Adds async complexity to PyQt6 for no benefit. Sync QThread works fine. |
-| `supabase` async client | Would require event loop integration. Sync is simpler and proven. |
-| New search library | Tantivy handles multi-field search natively. No need for Elasticsearch/Meilisearch. |
-| Abstract factory pattern | Over-engineering. Simple module-level `set_client()` is sufficient. |
-| Protocol/ABC for service interface | Both apps use the same functions. No polymorphism needed. |
-| Caching layer (Redis, etc.) | Supabase calls are fast enough. Desktop already caches via SupabaseCorrectionsClient._cache. |
-| `postgrest-py` directly | Already wrapped by `supabase-py`. No reason to use raw PostgREST. |
-| New tokenizer for tantivy | The `default` tokenizer handles mixed Hebrew/English. Custom tokenizer adds build complexity. |
+**Recommendation:** Create `shared/pgp_service.py` as a `PgpService` class following the exact pattern of `FjmsService` and `NliCrossrefService`.
+
+**Pattern to follow (verified from codebase):**
+1. Class with `__init__(db_path, thread_safe)` -- same constructor signature
+2. `is_available()` method for graceful degradation
+3. `get_version()` via meta table
+4. Read-only connection via URI mode (`file:{path}?mode=ro`)
+5. `sqlite3.Row` row factory for dict-like access
+6. `check_same_thread=not thread_safe` for NiceGUI web app
+7. Module-level singleton via `get_pgp_service(thread_safe=False)`
+8. Batch methods using IN queries with 500-row chunks (SQLite variable limit = 999)
+
+**Methods to implement (direct mapping from current `document_service.py`):**
+
+| Current Function | New PgpService Method | Notes |
+|-----------------|----------------------|-------|
+| `get_document_for_fragment(sys_id, page_num)` | `get_document_for_fragment(sys_id, page_num)` | Two-step: fragments -> documents |
+| `get_fragments_for_document(pgpid)` | `get_fragments_for_document(pgpid)` | Direct SQL |
+| `get_transcription_for_document(pgpid)` | `get_transcription_for_document(pgpid)` | Direct SQL |
+| `get_document_metadata(pgpid)` | `get_document_metadata(pgpid)` | Direct SQL |
+| `get_sources_for_document(pgpid)` | `get_sources_for_document(pgpid)` | + json.loads(sections) |
+| `get_all_sources_for_fragment(sys_id)` | `get_all_sources_for_fragment(sys_id)` | Multi-step, same logic |
+| `get_editions_for_document(pgpid)` | `get_editions_for_document(pgpid)` | Filter by doc_relation |
+| `get_translations_for_document(pgpid)` | `get_translations_for_document(pgpid)` | Filter by doc_relation |
+| `get_sys_ids_with_transcriptions(sys_ids)` | `get_sys_ids_with_transcriptions(sys_ids)` | Batched IN query |
+| `get_fragments_by_tag(tag)` | `get_fragments_by_tag(tag)` | json_each() or LIKE |
+| `get_all_distinct_tags()` | `get_all_distinct_tags()` | json_each() aggregate |
+
+**Pure Python functions (no migration needed):**
+- `parse_transcription_sections()` -- regex parsing, no DB access
+- `get_section_for_page()` -- uses parsed sections, no DB access
+- `parse_html_sections()` -- HTML parser, no DB access
+- `PGPHTMLParser` class -- HTML parser, no DB access
+- `split_textual_frames()`, `parse_textual_frame()` -- text parsing, no DB access (these are in fjms_service.py)
+
+These pure functions stay in `shared/document_service.py` unchanged.
+
+**Confidence:** HIGH -- 1:1 mapping from existing Supabase queries to SQL equivalents
 
 ---
 
-## Installation
+## Decision 8: Deduplication Strategy for PGP/FJMS Overlap
 
-No changes to `requirements.txt` needed. Current dependencies are sufficient:
+**Problem:** Both PGP sources and FJMS catalog records describe the same manuscripts. Some overlap is expected.
 
+**Recommendation:** No deduplication needed at the database level. Handle at the UI level.
+
+**Why:**
+- PGP data is keyed by `pgpid` (PGP document ID), links to manuscripts via `document_fragments.sys_id`
+- FJMS data is keyed by `AlmaId` (NLI Alma system ID), which IS the sys_id
+- Different granularity: PGP is document-level (one document can span multiple fragments), FJMS is manuscript-level
+- Different content: PGP has transcription text and scholarly editions; FJMS has catalog descriptions and bibliographic references
+- The overlap enriches rather than duplicates: PGP gives you "what the document says", FJMS gives you "what scholars say about the manuscript"
+
+**UI deduplication approach:**
+- When displaying metadata for a manuscript, show PGP and FJMS data in separate sections (already the current UX pattern)
+- If both have date info, prefer PGP `doc_date_standard` (more structured) but show FJMS `CopyDate` as supplementary
+- If both have descriptions, show both with source attribution
+
+**Confidence:** HIGH -- PGP and FJMS serve complementary purposes, overlap is beneficial
+
+---
+
+## Decision 9: What NOT to Add
+
+| Technology/Library | Why Not |
+|--------------------|---------|
+| SQLAlchemy | Overkill for read-only SQLite. Built-in `sqlite3` with `Row` factory is sufficient. All three existing services use raw `sqlite3`. |
+| datasette | Useful for exploration but not needed in production. The sidecar is a data file, not a server. |
+| sqlite-utils | Nice CLI tool but adds a dependency for zero benefit. The export script uses raw `sqlite3` successfully. |
+| peewee/pony ORM | Same as SQLAlchemy -- unnecessary abstraction for read-only queries. |
+| FTS5 on pgp.db | Tantivy handles full-text search. PGP transcription search should go through Tantivy, not a second search engine. FTS5 is used on fjms_enrichment.db for catalog search only. |
+| Redis/memcached | Local SQLite is already fast enough (~0.1ms indexed lookups). No caching layer needed. |
+| Connection pooling | Single connection per service instance with thread-safe flag is the established pattern. Works for both desktop (single-threaded) and web (NiceGUI concurrent requests). |
+
+**Confidence:** HIGH -- consistent with architectural decisions across all existing services
+
+---
+
+## Migration Tooling Summary
+
+### New Scripts Needed
+
+| Script | Purpose | Pattern |
+|--------|---------|---------|
+| `scripts/export_pgp_sidecar.py` | Export PGP data from Supabase to `pgp_data/pgp.db` | Similar to `export_fist_enrichment.py` but reads from Supabase API |
+
+### Scripts to Extend
+
+| Script | Change | Pattern |
+|--------|--------|---------|
+| `scripts/export_fist_enrichment.py` | Add `export_fulltext()` function, bump VERSION to 3.0.0 | Same batch-insert pattern as existing 8 export functions |
+
+### New Service File
+
+| File | Purpose | Pattern |
+|------|---------|---------|
+| `shared/pgp_service.py` | SQLite-backed PGP data service (replaces Supabase calls in `document_service.py`) | Identical pattern to `FjmsService` and `NliCrossrefService` |
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `shared/document_service.py` | Swap Supabase client calls for PgpService calls. Keep pure Python functions unchanged. |
+| `web/document_service.py` | Shim stays, re-exports remain unchanged |
+| `gui_threads.py` | No changes needed (imports from shared/document_service.py) |
+| `web/pages/browse.py` | No changes needed (imports from shared/document_service.py) |
+| `web/pages/search.py` | No changes needed (imports from shared/document_service.py) |
+| `shared/fjms_service.py` | Add `get_fulltext()` method for FJMS catalog descriptions |
+
+### Files NOT to Modify
+
+| File | Why |
+|------|-----|
+| `shared/supabase_provider.py` | Still needed for auth, corrections, lists, comments |
+| `supabase_corrections_client.py` | Desktop Supabase client for community features |
+| `genizah_core.py` | Search engine, no PGP data access |
+| `genizah_app.py` | Uses gui_threads.py which imports from document_service.py -- chain unchanged |
+
+---
+
+## Environment Requirements
+
+### Build-Time (Export Script)
+
+```bash
+# Already installed
+pip install supabase tqdm python-dotenv
+
+# Environment variables needed for export:
+# SUPABASE_URL (or use default)
+# SUPABASE_ANON_KEY (for read-only export, anon key is sufficient)
 ```
-# Already in requirements.txt - no additions needed
-tantivy
-supabase
-gotrue
-PyQt6
-nicegui
-keyring
+
+### Runtime (Both Apps)
+
+```bash
+# No new packages needed
+# Python 3.11+ with built-in sqlite3 (SQLite 3.45.1)
 ```
+
+### Desktop Distribution
+
+The `pgp_data/pgp.db` file must be included in the desktop app distribution bundle alongside `fist_data/fjms_enrichment.db` and `nli_data/nli_crossref.db`. Update `build_app.bat` to include the new sidecar.
+
+---
 
 ## Sources
 
-- **tantivy-py 0.25.1**: Verified locally via `pip show tantivy` and direct API testing
-- **supabase-py 2.27.2**: Verified locally via `pip show supabase` and module inspection
-- **supabase async client**: Verified available via `from supabase import create_async_client` (but NOT recommended for use)
-- **Tantivy boolean field limitation**: Verified experimentally -- boolean fields with `fast=True` are NOT queryable via `parse_query()`, error: "not declared as indexed"
-- **Tantivy `raw` tokenizer for filtering**: Verified experimentally -- exact-match text fields work as query filters
-- **QThread patterns**: 14 existing QThread subclasses in `gui_threads.py` (lines 8-404)
-- **Supabase sync client thread safety**: `execute()` is not a coroutine (verified via `inspect.iscoroutinefunction`)
-- **Existing document_service.py**: 507 lines, 12 functions, all use `get_client()` pattern (verified by reading file)
-- **Existing supabase_corrections_client.py**: 1834 lines, separate singleton, already called from QThread workers
-
----
-*Confidence: HIGH -- all claims verified against installed packages and running code*
+- [SQLite JSON1 Functions and Operators](https://sqlite.org/json1.html) -- JSON1 built-in since SQLite 3.38.0, JSONB since 3.45.0 (HIGH confidence)
+- [SQLite JSONB Format](https://sqlite.org/jsonb.html) -- binary JSON storage format (not needed for our use case)
+- Codebase verification: `shared/fjms_service.py`, `shared/nli_crossref_service.py`, `shared/document_service.py` -- established service patterns (HIGH confidence)
+- Codebase verification: `scripts/export_fist_enrichment.py` -- established export pattern (HIGH confidence)
+- Codebase verification: `migrations/*.sql` -- full Supabase schema (HIGH confidence)
+- FIST.db direct inspection: `dbo_UnitFullText` table structure and row counts (HIGH confidence)
+- Python/SQLite version verification: Python 3.11.9, SQLite 3.45.1, JSON1 and FTS5 confirmed available (HIGH confidence)

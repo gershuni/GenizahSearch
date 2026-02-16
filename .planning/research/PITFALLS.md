@@ -1,524 +1,450 @@
-# Domain Pitfalls: Shared Service Extraction & Desktop PGP Integration
+# Domain Pitfalls: PGP Sidecar Migration + FJMS Full Texts
 
-**Domain:** Dual-app service extraction (NiceGUI web + PyQt6 desktop)
-**Researched:** 2026-02-07
-**Confidence:** HIGH (based on direct codebase analysis of all files involved)
+**Domain:** PostgreSQL-to-SQLite migration for reference data, FJMS transcription integration
+**Researched:** 2026-02-16
+**Confidence:** HIGH (based on direct codebase analysis of all 4 Supabase tables, 2 existing SQLite sidecars, and 15+ consumer call sites)
 
-This document supersedes the v1 External Data Integration pitfalls. Those pitfalls (Tantivy schema rebuild, granularity mismatch, shelfmark normalization, etc.) were addressed in the v1 milestone. This document covers pitfalls specific to the NEXT milestone: shared service extraction, desktop PGP integration, and transcription indexing.
+This document supersedes the v5.6.0 pitfalls (shared service extraction). Those pitfalls were addressed -- `shared/document_service.py` was extracted with a `web/document_service.py` shim (Phase 8), and `shared/supabase_provider.py` handles the client singleton. This document covers pitfalls specific to the NEXT milestone: migrating PGP data from Supabase to a SQLite sidecar, and adding 65K FJMS transcriptions as a scholarly source.
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause regressions, data corruption, or fundamental architecture problems.
+Mistakes that cause data loss, broken production deployments, or require rewrites.
 
 ---
 
-### Pitfall 1: Breaking Web App Import Chains During Service Extraction
+### Pitfall 1: JSONB-to-SQLite Data Loss on `tags` and `sections` Columns
 
-**What goes wrong:** Moving `web/document_service.py` out of the `web/` package breaks every `from web.document_service import ...` statement across at least 4 files (`web/pages/browse.py`, `web/pages/search.py`, `web/components/joins_panel.py`, and several lazy imports within those files). The web app stops working entirely.
+**What goes wrong:** The `documents.tags` column stores JSONB arrays (e.g., `["communal", "marriage", "trade"]`) and `document_sources.sections` stores JSONB arrays of objects (e.g., `[{"canvas_url": "...", "canvas_num": 1, "label": null, "text": "..."}]`). Migrating these to SQLite requires storing them as TEXT (JSON strings). If the export/import pipeline doesn't serialize properly, data is silently corrupted or lost.
 
-**Why it happens:** The service module currently lives inside `web/` and imports `from web.supabase_client import get_client` (line 18 of document_service.py). Moving it to a shared location like `services/document_service.py` or `shared/document_service.py` breaks two directions:
-1. The service's own import of `get_client` (it currently depends on `web.supabase_client`)
-2. All 15+ import sites in web pages that do `from web.document_service import get_document_for_fragment, get_section_for_page, ...`
+**Why it happens:**
+1. PostgreSQL JSONB is a binary format with O(1) lookup; SQLite stores JSON as TEXT with O(N) parsing. The formats are NOT binary-compatible despite SQLite 3.45+ calling its binary format "JSONB" too.
+2. Supabase PostgREST returns JSONB as Python dicts/lists, but inserting into SQLite requires explicit `json.dumps()`. Forgetting this produces `"{'key': 'value'}"` (Python repr, not JSON) which breaks `json_extract()`.
+3. NULL vs empty: PostgreSQL distinguishes `NULL` JSONB from empty array `[]`. If the migration normalizes both to `NULL`, queries like `get_all_distinct_tags()` break because they rely on `NOT NULL` filtering.
 
 **Consequences:**
-- Web app fails to start (ImportError at module load)
-- If fixed hastily with `sys.path` hacks, creates fragile import chains
-- Production deployment breaks if any import path is missed
+- `get_fragments_by_tag()` stops working entirely -- it uses `filter('tags', 'cs', json.dumps([tag]))` which translates to PostgreSQL's `@>` operator. The SQLite equivalent (`json_each` + `WHERE value = ?`) requires completely different SQL.
+- `get_section_for_page()` gets `None` for sections because `json.loads()` fails on malformed strings.
+- Tag search in both apps produces zero results with no error (silent failure).
 
 **Prevention:**
-1. Use dependency injection: The shared document_service should accept a `get_client` callable as a parameter rather than importing it directly. Both apps provide their own client getter.
-2. Create a compatibility shim: After moving, leave a thin `web/document_service.py` that re-exports from the new location:
-   ```python
-   # web/document_service.py (shim for backward compatibility)
-   from shared.document_service import *
+1. Serialize all JSONB columns with `json.dumps()` during export, verify round-trip with `json.loads()` on every row.
+2. Write a validation pass after SQLite import: `SELECT COUNT(*) FROM documents WHERE json_valid(tags) = 0` to catch any malformed JSON.
+3. For `tags`, store as JSON TEXT and query with `json_each()`:
+   ```sql
+   -- PostgreSQL: filter('tags', 'cs', '["communal"]')
+   -- SQLite equivalent:
+   SELECT d.* FROM documents d, json_each(d.tags) AS t WHERE t.value = ?
    ```
-3. Run all web imports as a smoke test before committing: `python -c "from web.pages.browse import *; from web.pages.search import *"`
-4. Audit every import site using grep before moving (there are at least 15 direct imports spread across lazy `from web.document_service import ...` inside functions)
+4. For `sections`, store as JSON TEXT and parse in Python after retrieval (as the current code already does -- `get_section_for_page` iterates the list in Python, not SQL).
+5. Preserve the distinction between `NULL` and `[]` in tags -- the `get_all_distinct_tags()` function filters with `.not_.is_('tags', 'null')`.
 
-**Detection:** Any `ImportError` at web app startup. Test with `python -m web.main` after every extraction step.
+**Detection:** Automated test: export all documents, import into SQLite, verify `json_valid()` on every JSON column, assert row counts match. Run `get_all_distinct_tags()` against both backends and compare output.
 
-**Which phase should address:** First phase (service extraction). This must be verified before any other work proceeds.
-
-**Severity:** BLOCKING -- web app will not start if this is wrong.
+**Which phase should address it:** The sidecar build script phase (likely Phase 1 or 2). The build script must include a JSON validation pass as part of its verification report, mirroring the pattern in `import_nli_crossref.py`.
 
 ---
 
-### Pitfall 2: Supabase Client Singleton Conflict Between Two Client Modules
+### Pitfall 2: PostgreSQL GIN Index Features Have No SQLite Equivalent
 
-**What goes wrong:** The project currently has THREE separate Supabase client initialization paths, each with its own singleton:
-1. `web/supabase_client.py` -- module-level `_client` singleton via `get_client()` (line 30-43)
-2. `supabase_corrections_client.py` -- class-level `self._client` within `SupabaseCorrectionsClient` (line 292-307)
-3. `lists_sync.py` -- its own `_get_client()` that can use an "external client" (line 78)
+**What goes wrong:** Three query patterns in `document_service.py` rely on PostgreSQL-specific features that have no direct SQLite equivalent:
 
-When extracting a shared service, connecting it to the wrong client instance means:
-- Auth tokens are not shared (user is "logged in" on one client but not the other)
-- Rate limiting hits because two clients make independent connections
-- Session refresh on one client does not propagate to the other
+| Query | PostgreSQL Feature | Current Code |
+|-------|-------------------|--------------|
+| Tag search | GIN index with `@>` operator | `filter('tags', 'cs', json.dumps([tag]))` |
+| Edition filter | `LIKE` on text column | `.like('doc_relation', '%Edition%')` |
+| Null JSON check | `IS NOT NULL` on JSONB | `.not_.is_('tags', 'null')` |
 
-**Why it happens:** Each module was developed independently. The web client assumes server-side auth (NiceGUI session), while the desktop client manages auth tokens on disk with keyring storage. These are fundamentally different auth models.
+**Why it happens:** The migration naturally translates Supabase PostgREST calls to SQLite queries, but developers assume 1:1 mapping. The GIN-indexed `@>` containment operator has no SQLite equivalent -- `json_each()` is a table-valued function that requires a subquery or join, and it cannot use an index.
 
 **Consequences:**
-- Desktop PGP queries fail with 401 because the shared service uses the unauthenticated web client instead of the desktop's authenticated client
-- Doubled connection overhead
-- Subtle bugs where data appears for logged-in web users but not logged-in desktop users
+- Tag-based search (`get_fragments_by_tag`) either crashes with SQL error or returns wrong results.
+- If the developer uses `LIKE '%tag%'` on the JSON TEXT column as a shortcut, it matches partial tag names (searching "war" matches "software").
+- Performance: scanning all 35K documents with `json_each()` on every tag search may be acceptable for reference data, but if the 65K FJMS records also have tags, the scan becomes slow.
 
 **Prevention:**
-1. Create a single `shared/supabase_provider.py` that defines the interface: `get_client() -> Client`
-2. Each app registers its client factory at startup:
-   ```python
-   # Desktop startup
-   from shared.supabase_provider import set_client_factory
-   set_client_factory(lambda: corrections_client._get_client())
-
-   # Web startup
-   from shared.supabase_provider import set_client_factory
-   set_client_factory(web.supabase_client.get_client)
+1. For tag search: either use `json_each()` join (correct but slower) or pre-compute a separate `document_tags` junction table:
+   ```sql
+   CREATE TABLE document_tags (pgpid INTEGER, tag TEXT);
+   CREATE INDEX idx_doc_tags ON document_tags(tag);
+   -- Populated during sidecar build from documents.tags JSON
    ```
-3. The shared document_service calls `get_client()` from the provider, not from any specific module
-4. **Key insight:** PGP document data (documents, document_sources, document_fragments tables) is public/read-only -- it does not require user auth. The shared service only needs an anon-key client, not an authenticated one. This simplifies the problem significantly: a simple anon client can be created anywhere without worrying about session state.
+   This gives indexed tag lookup matching the GIN index performance.
+2. For `LIKE` on `doc_relation`: this works identically in SQLite, no change needed.
+3. For null JSON check: SQLite's `IS NOT NULL` works on TEXT columns, but also need `AND tags != 'null'` to handle the string literal "null" that might appear.
+4. Benchmark the `json_each()` approach on 35K rows before deciding if a junction table is needed.
 
-**Detection:** After extraction, verify that `get_client()` returns a working client in both apps by running a simple query like `client.table('documents').select('pgpid').limit(1).execute()`.
+**Detection:** Run the full test suite against the SQLite backend. The `get_fragments_by_tag('Legal')` call must return the same set of sys_ids as the Supabase version.
 
-**Which phase should address:** Service extraction phase, before desktop integration begins.
-
-**Severity:** BLOCKING -- desktop PGP features will silently return empty results if the client is misconfigured.
+**Which phase should address it:** Schema design phase. The decision between `json_each()` and a junction table must be made before building the sidecar.
 
 ---
 
-### Pitfall 3: Blocking PyQt6 UI Thread with Synchronous Supabase Calls
+### Pitfall 3: Removing Supabase Read Paths While User-Data Writes Still Depend on It
 
-**What goes wrong:** All functions in `document_service.py` are synchronous (no async/await -- confirmed by grep). Calling `get_document_for_fragment()` or `get_all_sources_for_fragment()` from the desktop's main thread will freeze the UI for 100-500ms per call (network round-trip to Supabase). For batch operations like `get_sys_ids_with_transcriptions()` checking dozens of sys_ids, the freeze could be several seconds.
+**What goes wrong:** The migration moves READ-ONLY reference data (documents, document_fragments, document_sources, document_footnotes) from Supabase to SQLite. But Supabase still hosts user-generated data (corrections, comments, discoveries, fragment_joins, lists). If the developer removes the Supabase dependency entirely or accidentally breaks the Supabase client singleton during refactoring, all user features break.
 
-**Why it happens:** In the web app, NiceGUI handles this because page rendering is server-side and individual requests do not block other users. But PyQt6's event loop runs on the main thread. Any synchronous network call in the main thread blocks painting, input handling, and all user interaction.
+**Why it happens:** There are currently TWO Supabase client singletons:
+1. `shared/supabase_provider.py` -- used by `shared/document_service.py` (PGP data reads)
+2. `web/supabase_client.py` -- used for auth, lists, corrections, comments, discoveries
+
+When `shared/document_service.py` is refactored to use SQLite instead of Supabase, the developer may:
+- Remove `shared/supabase_provider.py` thinking it's no longer needed (but `supabase_corrections_client.py` for desktop also imports from Supabase)
+- Change `shared/document_service.py` to stop importing from `shared/supabase_provider.py`, then remove the provider, not realizing other desktop code uses it
+- Test only the web app and miss that the desktop `supabase_corrections_client.py` (1,800+ lines) still needs the Supabase client for corrections, discoveries, and joins
 
 **Consequences:**
-- Desktop app appears "frozen" or "not responding" when loading PGP data
-- Windows may show "Not Responding" title bar after ~5 seconds of blocking
-- Users cannot cancel operations or interact with other parts of the UI
-- Worst case: PyQt6 timers and animations stutter or skip frames
+- Desktop app: corrections, comments, discoveries, and join proposals all break with ImportError or connection failure.
+- Web app: auth still works (uses `web/supabase_client.py`), but if someone refactors to share the provider, it could break auth flow.
+- Partial deployment: web app works fine, desktop app silently fails on all user features.
 
 **Prevention:**
-1. Every Supabase call from the desktop must go through a QThread worker, following the existing pattern in `gui_threads.py`
-2. Create a `PGPDataThread(QThread)` worker class with signals:
-   ```python
-   class PGPDataThread(QThread):
-       document_loaded = pyqtSignal(dict)  # document dict or empty
-       sources_loaded = pyqtSignal(list)
-       error_occurred = pyqtSignal(str)
+1. Map every Supabase dependency BEFORE removing any:
+   - `shared/document_service.py` -> `shared/supabase_provider.py` (being migrated away)
+   - `supabase_corrections_client.py` -> direct Supabase client (KEEP)
+   - `web/supabase_client.py` -> direct Supabase client (KEEP)
+   - `lists_sync.py` -> Supabase client (KEEP)
+2. Do NOT remove `shared/supabase_provider.py` -- other code may depend on it. Instead, remove only the `document_service.py` import of it.
+3. Mark the refactoring as "remove Supabase from document reads" not "remove Supabase dependency."
+4. Run both apps end-to-end after migration: verify search, PGP display, AND corrections/lists.
 
-       def __init__(self, operation, *args):
-           super().__init__()
-           self.operation = operation
-           self.args = args
+**Detection:** `grep -r "supabase_provider\|get_client" shared/ web/ supabase_corrections_client.py` before and after migration. The count should decrease only for document_service.py references.
 
-       def run(self):
-           try:
-               result = self.operation(*self.args)
-               # emit appropriate signal based on return type
-           except Exception as e:
-               self.error_occurred.emit(str(e))
-   ```
-3. Do NOT try to make document_service async -- that would break the web app's current synchronous usage pattern and add unnecessary complexity
-4. Use the existing pattern: the desktop app already has `ImageLoaderThread` (line 1797), `ShelfmarkLoaderThread` (line 235 of gui_threads.py), `ExternalResourceThread`, and `AIWorkerThread` -- follow the same signal/slot pattern
-5. Cache aggressively: Once a PGP document is loaded for a sys_id, store it in a local dict. The data changes rarely (PGP imports are infrequent).
-
-**Detection:** Any call to `document_service.*` from `genizah_app.py` that is NOT inside a QThread `run()` method is a bug. Audit for this pattern.
-
-**Which phase should address:** Desktop integration phase (when adding PGP features to desktop).
-
-**Severity:** BLOCKING -- the desktop app will feel broken without this.
+**Which phase should address it:** Must be documented in the cutover phase. A dependency map should be produced before any Supabase read paths are removed.
 
 ---
 
-### Pitfall 4: Tantivy Index Rebuild Destroys Existing Index Without Rollback
+### Pitfall 4: Forgetting `check_same_thread=False` or Blocking the Async Event Loop
 
-**What goes wrong:** The current `Indexer.create_index()` method (genizah_core.py lines 3897-3899) does `shutil.rmtree(db_path)` followed by `os.makedirs(db_path)` before building the new index. If the rebuild fails midway (out of memory, corrupted source file, power loss), the user has NO index at all -- neither old nor new.
+**What goes wrong:** The NiceGUI web app runs async with uvicorn. SQLite calls are synchronous and will block the event loop if called directly. The existing sidecar services (`fjms_service.py`, `nli_crossref_service.py`) use `check_same_thread=False` for the web app's thread pool, but the new PGP sidecar service might not follow this pattern.
 
-Adding transcription fields to the schema requires a full rebuild (Tantivy does not support adding fields to an existing schema -- confirmed by [tantivy issue #301](https://github.com/quickwit-oss/tantivy/issues/301)). The rebuild processes ~217K records from HTR transcription files plus potentially ~9,364 PGP transcriptions. This takes minutes. A failure midway is a real risk.
-
-**Why it happens:** Tantivy requires a complete schema definition at index creation time. There is no `ALTER INDEX ADD FIELD` equivalent. The current code assumes rebuild always succeeds.
+**Why it happens:**
+1. Developer copies the `document_service.py` function signatures but implements them with direct SQLite calls inside `async` handlers, blocking the event loop.
+2. Developer forgets the `thread_safe: bool = False` constructor parameter that both existing services implement.
+3. The web app calls PGP functions via `await run.io_bound(...)` (see `web/pages/search.py:2005` and 15+ other sites). If the new service is NOT thread-safe, concurrent requests crash with `ProgrammingError: SQLite objects created in a thread can only be used in that same thread`.
 
 **Consequences:**
-- User's search is completely broken until they manually rebuild
-- Desktop app becomes unusable (search is the primary feature)
-- No way to recover without re-running the full rebuild process
-- If the new schema code has a bug, every user who rebuilds is stuck
+- Without `check_same_thread=False`: crash under concurrent load, intermittent `ProgrammingError` that only appears in production with multiple users.
+- Without `run.io_bound()`: UI freezes during SQLite queries, WebSocket timeouts, poor user experience.
+- Both are hard to catch in single-user development testing.
 
 **Prevention:**
-1. Build the new index in a temporary directory (`tantivy_db_new/`) alongside the existing one
-2. Only after successful commit and verification, swap directories:
+1. Follow the exact pattern from `fjms_service.py:43-79`:
    ```python
-   # Build in temp location
-   new_db_path = os.path.join(Config.INDEX_DIR, "tantivy_db_new")
-   # ... build index ...
-   writer.commit()
-
-   # Verify the new index opens and has expected doc count
-   test_index = tantivy.Index.open(new_db_path)
-   test_searcher = test_index.searcher()
-   if test_searcher.num_docs < expected_minimum:
-       raise RuntimeError("New index has too few documents")
-
-   # Atomic swap
-   old_db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
-   backup_path = os.path.join(Config.INDEX_DIR, "tantivy_db_old")
-   os.rename(old_db_path, backup_path)
-   os.rename(new_db_path, old_db_path)
-   shutil.rmtree(backup_path)
+   def __init__(self, db_path=None, thread_safe=False):
+       uri = f"file:{db_path}?mode=ro"
+       self._conn = sqlite3.connect(
+           uri, uri=True,
+           check_same_thread=not thread_safe,
+           timeout=10.0,
+       )
+       self._conn.row_factory = sqlite3.Row
    ```
-3. Keep the old index as a backup until the new one is verified
-4. Add a minimum document count assertion after rebuild
+2. Web app initialization MUST pass `thread_safe=True` (matches existing pattern in both sidecar services).
+3. All web page calls to the service MUST use `await run.io_bound(service.method, args)` to offload to the thread pool.
+4. Desktop app should leave `thread_safe=False` (single-threaded) and use QThread for background operations (matches existing `gui_threads.py` pattern).
 
-**Detection:** After any index rebuild, verify `searcher.num_docs` matches expected count before declaring success.
+**Detection:** Load test with 3+ concurrent browser tabs hitting search results with PGP data. If it crashes, thread safety is wrong.
 
-**Which phase should address:** Tantivy index rebuild phase. Must be implemented before shipping the new index schema.
-
-**Severity:** BLOCKING -- search is the primary feature; losing the index makes the app useless.
+**Which phase should address it:** Service implementation phase. The service constructor MUST be reviewed against the existing pattern before any web integration.
 
 ---
 
 ## Moderate Pitfalls
 
-Mistakes that cause delays, confusion, or technical debt.
+Issues that cause incorrect behavior, poor performance, or significant rework.
 
 ---
 
-### Pitfall 5: Two Incompatible Data Class Hierarchies for the Same Domain Objects
+### Pitfall 5: Deduplication Between PGP Editions and FJMS Transcriptions
 
-**What goes wrong:** The desktop's `supabase_corrections_client.py` defines its own `User`, `Correction`, `Comment`, `Discovery`, `FragmentJoin` dataclasses (lines 86-254) that are structurally different from the web's dict-based returns. The web's `document_service.py` returns raw dicts from Supabase. If a shared service returns dicts, the desktop code that expects dataclass objects will break. If it returns dataclasses, the web code that expects dicts will break.
+**What goes wrong:** Both PGP (via `document_sources`) and FJMS contain scholarly transcriptions of the same Genizah manuscripts. The same text -- e.g., a Goitein transcription of T-S 13J6.13 -- may appear in both sources with slight variations (different formatting, different section boundaries, different attribution strings). Without deduplication, the UI shows duplicate entries in the transcription selector.
 
-**Why it happens:** The desktop client was a "drop-in replacement" for an older REST API client (corrections_client.py) and preserved its dataclass interface. The web client was built later with a simpler dict-based approach. Neither was designed for sharing.
-
-**Prevention:**
-1. For PGP document data specifically (the scope of this milestone), define the shared return types clearly:
-   - `get_document_for_fragment()` returns `dict | None` -- keep this, it is simple and both apps can consume it
-   - Do NOT try to unify the corrections/comments/discoveries dataclasses yet -- that is a separate milestone
-2. The shared document_service should return plain dicts (matching current web behavior). The desktop adapter wraps these into whatever the desktop UI expects if needed.
-3. Add type annotations to the shared service so both consumers know the exact dict shape:
-   ```python
-   from typing import TypedDict
-
-   class DocumentDict(TypedDict, total=False):
-       pgpid: int
-       shelfmark_combined: str
-       document_type: str
-       tags: list
-       transcription: str
-       # ... etc
-   ```
-
-**Detection:** Type errors or `AttributeError` when desktop code tries to access `.attribute` on a dict, or web code tries to access `['key']` on a dataclass.
-
-**Which phase should address:** Service extraction phase. Define the contract clearly upfront.
-
-**Severity:** ANNOYING -- causes runtime errors but each one is easy to fix individually.
-
----
-
-### Pitfall 6: Duplicating UI Logic Instead of Sharing Display Logic
-
-**What goes wrong:** When adding PGP features to the desktop, the temptation is to copy-paste the web's transcription display logic (recto/verso section parsing, source selector, translation display) into PyQt6 widgets. This creates two independent implementations that drift apart over time.
-
-**Why it happens:** NiceGUI widgets (`ui.html`, `ui.label`, `ui.select`) have completely different APIs from PyQt6 widgets (`QTextBrowser`, `QLabel`, `QComboBox`). It feels easier to rewrite than to share.
+**Why it happens:**
+1. PGP organizes by `pgpid` (document ID), FJMS organizes by `AlmaId` (sys_id). The same manuscript has different identifiers in each system.
+2. PGP's `source_scholar` field (e.g., "S.D. Goitein") and FJMS's scholar attribution may not match exactly (name variants, initials vs full names).
+3. PGP's `doc_relation` uses "Digital Edition" while FJMS may use different terminology.
+4. The text content itself differs: PGP stores cleaned transcription text, FJMS may store the same text with different Unicode normalization, different line breaks, or different section markers.
 
 **Consequences:**
-- Bug fixes applied to one UI but not the other
-- Feature improvements only added to one app
-- The transcription section parser (`parse_transcription_sections`, `get_section_for_page`) gets duplicated or subtly modified
-- Recto/verso display bugs (already a known tech debt item from v1) get fixed in one place but not the other
+- User sees the same transcription twice with different labels, causing confusion.
+- If both are treated as independent sources, the "source count" badges are inflated.
+- If dedup is too aggressive, distinct scholarly editions are incorrectly merged (scholar A's reading vs scholar B's reading of the same manuscript).
 
 **Prevention:**
-1. The business logic is already properly separated in `document_service.py`: functions like `parse_transcription_sections()` and `get_section_for_page()` are pure functions that take strings and return strings/dicts. These MUST remain in the shared service.
-2. Only the UI rendering (how to display the result) should differ between apps.
-3. Pattern: `shared service (data) -> app-specific presenter (formatting) -> framework widget (display)`
-4. Specifically for transcription display:
-   - Shared: `get_section_for_page(transcription, page_num)` -- returns plain text
-   - Web: wraps in `ui.html()` with CSS styling
-   - Desktop: wraps in `QTextBrowser.setHtml()` with inline styling
+1. Dedup by (sys_id, normalized_scholar_name, relation_type) -- not by text content. Two different scholars' transcriptions of the same manuscript are legitimately different.
+2. Build a scholar name normalization map: "S.D. Goitein" = "Goitein, S. D." = "Goitein" for matching purposes.
+3. When overlap is detected, prefer PGP's version (it's more recently curated and has structured section data) but surface FJMS as an alternative if it has additional content (e.g., FJMS might have a fuller transcription or different sections).
+4. Add a `source_system` field to the unified data model: "pgp" or "fjms" so the UI can indicate provenance.
+5. Test with known-overlapping manuscripts: find 10 sys_ids that appear in both PGP `document_fragments` and FJMS, manually verify the dedup logic produces correct results.
 
-**Detection:** Any function in the desktop app that re-implements string parsing or data transformation already present in document_service.py.
+**Detection:** After sidecar build, query: `SELECT sys_id, COUNT(*) FROM (all sources) GROUP BY sys_id, scholar_normalized HAVING COUNT(*) > 1` -- any results indicate unresolved duplicates.
 
-**Which phase should address:** Desktop PGP integration phase.
-
-**Severity:** MODERATE -- creates maintenance burden that grows over time.
+**Which phase should address it:** Must be addressed in the sidecar build phase when combining data from both sources. The dedup logic must be part of the build script, not the runtime service.
 
 ---
 
-### Pitfall 7: Not Handling Offline/Timeout for Desktop PGP Features
+### Pitfall 6: `get_all_distinct_tags()` Full Table Scan on 35K Rows
 
-**What goes wrong:** The desktop app may run without internet connectivity (it is a local application). The web app always has internet (it runs on a server). When PGP features are added to the desktop, they will silently fail or hang if Supabase is unreachable.
+**What goes wrong:** The current `get_all_distinct_tags()` fetches ALL documents' `tags` column from Supabase and aggregates in Python. In Supabase, this is acceptable because PostgREST streams results. In SQLite, this requires reading 35K rows and parsing JSON for each. If additionally 65K FJMS documents have tags, this becomes 100K rows.
 
-**Why it happens:** `document_service.py` catches exceptions and returns `None` or `[]` (graceful degradation), but the desktop UI may not distinguish between "no PGP data exists for this fragment" and "network error prevented loading." The user sees nothing and assumes there is no transcription.
+**Why it happens:** The current implementation (line 561-575 of `document_service.py`) does:
+```python
+response = client.table('documents').select('tags').not_.is_('tags', 'null').execute()
+all_tags = set()
+for row in (response.data or []):
+    tags = row.get('tags', [])
+    for tag in tags:
+        all_tags.add(tag)
+return sorted(all_tags)
+```
+
+This pattern works with PostgREST (returns all rows as JSON array in HTTP response), but in SQLite it's better expressed as a single SQL query using `json_each()`.
+
+**Prevention:**
+1. Replace with a pure SQL query:
+   ```sql
+   SELECT DISTINCT t.value FROM documents, json_each(documents.tags) AS t
+   WHERE documents.tags IS NOT NULL AND documents.tags != '[]'
+   ORDER BY t.value
+   ```
+2. Or, if using the junction table from Pitfall 2: `SELECT DISTINCT tag FROM document_tags ORDER BY tag`
+3. Cache the result (tag list changes only when sidecar is rebuilt, not at runtime).
+
+**Detection:** Benchmark the `get_all_distinct_tags()` call. If > 100ms, optimize.
+
+**Which phase should address it:** Service implementation phase, when rewriting `document_service.py` queries.
+
+---
+
+### Pitfall 7: `document_sources.sections` JSONB Contains Nested Objects with Large Text
+
+**What goes wrong:** The `sections` column on `document_sources` stores arrays of objects, each containing a `text` field that can be hundreds of lines. In PostgreSQL, JSONB provides efficient storage. In SQLite, storing 9,364 rows where each row's `sections` field might be 10KB+ of JSON text dramatically increases the sidecar file size and memory usage.
+
+**Why it happens:** The `sections` column was designed for PostgreSQL JSONB which has binary compression. In SQLite TEXT storage, the JSON is uncompressed, and parsing it requires reading the entire string.
 
 **Consequences:**
-- Users on poor connections see blank PGP sections with no indication of why
-- Users offline see no error message, just missing features
-- The `is_server_available()` check in `supabase_corrections_client.py` (line 516-542) has a 0.5s socket timeout, but this is not used by `document_service.py`
+- The sidecar database could be 200MB+ instead of 50MB if sections are stored as JSON text.
+- Loading sections for a document requires parsing a potentially large JSON blob for every source row.
+- If the developer attempts to index into the JSON for canvas-based lookups, SQLite's O(N) JSON parsing makes each lookup slow.
 
 **Prevention:**
-1. Add a connectivity check before PGP data loads in the desktop app (reuse `is_server_available()` from the corrections client)
-2. Return a distinct sentinel from the shared service for errors vs. "not found":
-   ```python
-   # Option A: Exception-based (cleaner)
-   class PGPNetworkError(Exception): pass
-
-   def get_document_for_fragment(sys_id, page_num=None):
-       try:
-           # ... existing logic ...
-       except ConnectionError as e:
-           raise PGPNetworkError(f"Cannot reach Supabase: {e}")
-       except Exception as e:
-           print(f"Error: {e}")
-           return None  # Data error, not network
-
-   # Option B: Flag-based (simpler)
-   # Return (data, error_message) tuple
+1. Consider normalizing sections into a separate table:
+   ```sql
+   CREATE TABLE source_sections (
+       source_id INTEGER REFERENCES document_sources(id),
+       canvas_num INTEGER,
+       canvas_url TEXT,
+       label TEXT,
+       text TEXT,
+       PRIMARY KEY (source_id, canvas_num)
+   );
    ```
-3. Show a small indicator in the desktop UI: "PGP data unavailable (offline)" rather than silently hiding the feature
-4. Cache successfully loaded PGP data to a local dict or disk cache so it works offline after first load
+   This allows direct canvas-based lookup without parsing JSON, and SQLite handles large TEXT fields efficiently when they're individual rows.
+2. If keeping JSON: accept the size trade-off and parse in Python (current `get_section_for_page` already does this). The JSON parsing per-document is fast enough for single-document lookups.
+3. Profile the sidecar size with and without normalized sections before deciding.
 
-**Detection:** Run the desktop app with network disabled and verify PGP features show appropriate messages rather than empty sections.
+**Detection:** Check sidecar file size after build. If > 300MB, consider normalization.
 
-**Which phase should address:** Desktop PGP integration phase, as part of the UI implementation.
-
-**Severity:** MODERATE -- degrades UX silently but does not cause crashes.
+**Which phase should address it:** Schema design phase. Decision on sections storage format affects the entire data model.
 
 ---
 
-### Pitfall 8: Tantivy Schema Field Ordering and Query Compatibility
+### Pitfall 8: SQLite Variable Limit (999) with `IN` Queries for Batch Lookups
 
-**What goes wrong:** The current main index schema has these fields: `unique_id`, `content`, `source`, `full_header`, `shelfmark`, `scope`, `boundaries` (genizah_core.py lines 3902-3909). Adding a `transcription` field (or `pgp_transcription`) changes the schema. The `SearchEngine.build_tantivy_query()` method (line 4187) and all query construction assumes the current field set. If queries reference the old schema against the new index (or vice versa), tantivy will raise errors.
+**What goes wrong:** The existing batch lookup pattern uses `.in_()` for enriching search results (up to 500 IDs per batch). Both existing sidecar services (`fjms_service.py:188`, `nli_crossref_service.py:206`) handle this correctly with `batch_size = 500`. But the new PGP sidecar service must implement the same batching, and it must handle the additional dimension of multi-table lookups (documents + fragments + sources).
 
-**Why it happens:** Tantivy queries reference fields by name. If the index has a `transcription` field but the query code has not been updated to use it, the field exists but is never searched. Conversely, if query code references a field that does not exist in an older index (user has not rebuilt yet), the query fails.
+**Why it happens:** SQLite has a compile-time limit of 999 variables per query (SQLITE_MAX_VARIABLE_NUMBER). A query like `SELECT * FROM documents WHERE pgpid IN (?, ?, ..., ?)` with 1000 IDs fails. The existing services already know this (they use 500 as batch size), but the new service's batch lookups are more complex: one batch for documents, one for fragments, one for sources.
 
 **Consequences:**
-- Users who have not rebuilt their index get errors when new query code tries to access new fields
-- Transcription search does not work even though the data is indexed, because query code was not updated
-- Lab mode index (separate schema at lines 574-587) and main index (lines 3902-3909) schemas diverge further
+- `OperationalError: too many SQL variables` crashes search results when > 999 results.
+- If batch lookups aren't parallelized across tables, the enrichment step becomes 3x slower (serial document + fragment + source queries).
 
 **Prevention:**
-1. Add a schema version check: Store a version number in the index metadata or a file in the index directory. On startup, compare against expected version. If mismatch, prompt for rebuild.
+1. Copy the proven batch pattern from `fjms_service.py:186-209`:
    ```python
-   EXPECTED_SCHEMA_VERSION = 2  # Bump when schema changes
-   # Write during rebuild:
-   with open(os.path.join(db_path, "schema_version.txt"), "w") as f:
-       f.write(str(EXPECTED_SCHEMA_VERSION))
-   # Check on load:
-   if loaded_version < EXPECTED_SCHEMA_VERSION:
-       prompt_user_to_rebuild()
+   batch_size = 500
+   for i in range(0, len(sys_ids), batch_size):
+       batch = sys_ids[i:i + batch_size]
+       placeholders = ','.join('?' * len(batch))
+       cursor = self._conn.execute(
+           f"SELECT ... WHERE sys_id IN ({placeholders})", batch
+       )
    ```
-2. Make new field queries conditional / graceful:
-   ```python
-   # Graceful degradation for users with old index
-   available_fields = {f.name for f in schema.fields()}
-   if "transcription" in available_fields:
-       # Include transcription field in query
-   else:
-       # Old index, skip transcription search
-   ```
-3. Document the schema change in release notes so users know to rebuild
-4. The rebuild already happens via the desktop's "Rebuild Index" button (genizah_app.py line 948, `RebuildThread` class) -- make sure this builds the new schema
+2. For multi-table enrichment: do ONE batch query per table, then join in Python. Do NOT do nested queries (document -> fragments -> sources per document) as this causes N+1 query patterns.
+3. The `get_sys_ids_with_transcriptions()` function currently chunks at 200 for Supabase URL length limits. SQLite doesn't have URL limits, so the chunk size can increase to 500, matching the other services.
 
-**Detection:** Start the app with an old index and verify it does not crash. Start with a new index and verify transcription search works.
+**Detection:** Test with a search returning 1000+ results. If enrichment crashes or takes > 5 seconds, the batching is wrong.
 
-**Which phase should address:** Tantivy index rebuild phase.
-
-**Severity:** MODERATE -- causes errors for users who have not rebuilt, but is fixable by rebuilding.
+**Which phase should address it:** Service implementation phase. Each batch method must be reviewed for the 999-variable limit.
 
 ---
 
-### Pitfall 9: The `sys.path.insert(0, ...)` Hack in Desktop Supabase Client
+### Pitfall 9: `pgp_url` Generated Column Cannot Be Replicated in SQLite
 
-**What goes wrong:** `supabase_corrections_client.py` line 21 does `sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'web'))` to enable imports from the web package. This is a fragile hack that:
-- Pollutes the module namespace
-- Can cause unexpected imports if `web/` has modules that shadow stdlib or third-party packages
-- Breaks if the file is moved to a different location
-- Does not actually import anything from web (it creates its own client -- the path insert was likely a leftover from development)
+**What goes wrong:** The `documents` table has a generated column: `pgp_url TEXT GENERATED ALWAYS AS ('https://geniza.princeton.edu/documents/' || pgpid || '/') STORED`. SQLite supports generated columns (since 3.31.0), but the syntax differs slightly and some tools don't handle them well.
 
-**Why it happens:** During the Phase 5 desktop Supabase migration, the developer needed web-compatible imports but did not want to create a proper shared module.
+**Why it happens:** Developer copies the PostgreSQL schema directly, and either:
+1. SQLite accepts the `GENERATED ALWAYS AS` syntax but requires slightly different syntax for the expression.
+2. Or the developer forgets the generated column entirely and the `pgp_url` field is NULL everywhere.
+
+**Consequences:**
+- Links to PGP website don't work in the UI.
+- Minor but confusing: the URL is easy to compute in Python, so this is low-risk.
 
 **Prevention:**
-1. During service extraction, remove this `sys.path` hack entirely
-2. The shared service module should be importable without path manipulation
-3. Place shared code in a location that is naturally on Python's import path (e.g., project root level `shared/` package or simply root-level module)
-4. Audit for any other `sys.path` manipulations in the codebase
+1. Either define the generated column in SQLite (which DOES support it):
+   ```sql
+   pgp_url TEXT GENERATED ALWAYS AS ('https://geniza.princeton.edu/documents/' || pgpid || '/') STORED
+   ```
+2. Or compute it in the service layer (simpler, less surprising):
+   ```python
+   def _add_pgp_url(doc: dict) -> dict:
+       doc['pgp_url'] = f"https://geniza.princeton.edu/documents/{doc['pgpid']}/"
+       return doc
+   ```
+3. Prefer option 2 -- the service already transforms database rows into dicts, so adding one computed field is trivial.
 
-**Detection:** Grep for `sys.path.insert` and `sys.path.append` across the project.
+**Detection:** Check that PGP links work in both apps after migration.
 
-**Which phase should address:** Service extraction phase (cleanup).
+**Which phase should address it:** Schema design phase (trivial).
 
-**Severity:** MODERATE -- works today but creates import fragility and confusion.
+---
+
+### Pitfall 10: Data Staleness and Sidecar Update Strategy
+
+**What goes wrong:** Unlike Supabase (which can be updated in real-time via the import scripts), a SQLite sidecar is a static file distributed with the application. Once shipped, the PGP data is frozen until the next sidecar rebuild and distribution.
+
+**Why it happens:** The existing FJMS and NLI sidecars update infrequently (the underlying data changes rarely). But PGP data does change -- new transcriptions are added to the Princeton Geniza Project, new document links are created, tag corrections are made. If the sidecar is built from a snapshot and never updated, the data drifts from the PGP source.
+
+**Consequences:**
+- New PGP documents are invisible to GenizahSearch users until the next sidecar rebuild.
+- Corrections made on PGP's side don't propagate.
+- Users may report "stale data" or "missing documents."
+
+**Prevention:**
+1. Document the sidecar build frequency (e.g., "rebuilt monthly" or "rebuilt per release").
+2. Include a `meta` table with build date and source version (matching existing pattern in fjms_service and nli_crossref_service).
+3. Display the sidecar version/date in the UI (e.g., "PGP data: February 2026") so users understand the data currency.
+4. Keep the sidecar build script as a standalone tool that can be run by the maintainer to refresh data.
+5. Consider a future hybrid approach: SQLite for bulk reads, Supabase for "hot" updates -- but this adds complexity and should NOT be in v1 of the migration.
+
+**Detection:** Compare sidecar row counts against live PGP data periodically.
+
+**Which phase should address it:** Build script phase. The meta table and version display should be part of the initial implementation.
 
 ---
 
 ## Minor Pitfalls
 
-Mistakes that cause annoyance but are fixable.
+Issues that cause minor bugs, slight inefficiencies, or developer confusion.
 
 ---
 
-### Pitfall 10: Recto/Verso Section Header Tech Debt Carries Forward
+### Pitfall 11: `SERIAL`/`BIGSERIAL` Primary Keys Don't Exist in SQLite
 
-**What goes wrong:** The MEMORY.md notes "Recto/verso section headers stripped during parsing" as existing tech debt from v1. The `parse_transcription_sections()` function (document_service.py lines 181-233) strips section headers like "Recto" and "Verso - right margin" when extracting section text. If the desktop app displays transcriptions, users will see text without these contextual headers, which may confuse scholars who expect to see them.
+**What goes wrong:** The Supabase schema uses `SERIAL` and `BIGSERIAL` auto-increment types. SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT` (or just `INTEGER PRIMARY KEY` which auto-increments without the `AUTOINCREMENT` keyword).
 
-**Why it happens:** The regex pattern (line 199) matches header lines and `match.end()` skips past them. The header text is used for classification but discarded from the output.
+**Prevention:** Use `INTEGER PRIMARY KEY` in SQLite schema. For the `documents` table, `pgpid INTEGER PRIMARY KEY` is sufficient (it's a natural key, not auto-generated). For junction tables like `document_fragments`, use `INTEGER PRIMARY KEY AUTOINCREMENT` or omit the ID entirely if it's not needed (look up by composite key instead).
 
-**Prevention:**
-1. Fix during the service extraction phase: preserve section headers in the output
-2. Add a `include_headers=True` parameter to `get_section_for_page()`:
-   ```python
-   def get_section_for_page(transcription, page_num, include_headers=False):
-       sections = parse_transcription_sections(transcription)
-       # ... existing logic ...
-       if include_headers and section_header:
-           return f"{section_header}\n{section_text}"
-       return section_text
-   ```
-3. This is a good opportunity to fix this debt since the function is being extracted anyway
-
-**Detection:** Compare displayed transcription text with the raw `transcription` field in the database. If headers are missing, the bug persists.
-
-**Which phase should address:** Service extraction phase (fix while extracting).
-
-**Severity:** MINOR -- scholars may notice but it does not break functionality.
+**Which phase should address it:** Schema design phase (trivial).
 
 ---
 
-### Pitfall 11: Missing Integration Tests for Cross-App Data Flow
+### Pitfall 12: `TIMESTAMPTZ` Columns Don't Exist in SQLite
 
-**What goes wrong:** The MEMORY.md notes "No integration tests for E2E flows" as existing tech debt. When extracting a shared service consumed by two different apps, the lack of tests means regressions can only be caught by manual testing in both apps.
+**What goes wrong:** Supabase uses `TIMESTAMPTZ DEFAULT NOW()` for `created_at` columns. SQLite has no native timestamp type -- it stores text, real, or integer.
 
-**Prevention:**
-1. Before extracting, write a minimal test file that imports and calls every public function in `document_service.py` with mock data
-2. After extracting, run these tests from both the web and desktop import paths
-3. Minimum viable test:
-   ```python
-   def test_document_service_imports():
-       """Verify all public functions are importable from shared location."""
-       from shared.document_service import (
-           get_document_for_fragment,
-           get_fragments_for_document,
-           get_transcription_for_document,
-           get_document_metadata,
-           parse_transcription_sections,
-           get_section_for_page,
-           get_sources_for_document,
-           get_all_sources_for_fragment,
-           get_editions_for_document,
-           get_translations_for_document,
-           get_sys_ids_with_transcriptions,
-           get_fragments_by_tag,
-       )
+**Prevention:** For a read-only sidecar, `created_at` is informational only. Either:
+1. Store as TEXT in ISO 8601 format: `'2026-02-16T12:00:00Z'`
+2. Or omit entirely -- the sidecar is a snapshot, so creation timestamps are meaningless.
 
-   def test_web_shim_reexports():
-       """Verify the web compatibility shim works."""
-       from web.document_service import get_document_for_fragment
-
-   def test_parse_transcription_sections():
-       """Pure function test, no network needed."""
-       from shared.document_service import parse_transcription_sections
-       result = parse_transcription_sections("Recto\nline1\nVerso\nline2")
-       assert 'recto' in result
-       assert 'verso' in result
-   ```
-
-**Detection:** Run `pytest` after every extraction step.
-
-**Which phase should address:** Service extraction phase (write tests before extracting).
-
-**Severity:** MINOR -- absence of tests increases risk of regressions but does not directly cause them.
+**Which phase should address it:** Schema design phase (trivial).
 
 ---
 
-### Pitfall 12: PGP Data Enrichment in Search Results Could Create N+1 Query Problem
+### Pitfall 13: Foreign Key Enforcement Off by Default in SQLite
 
-**What goes wrong:** The web's `get_sys_ids_with_transcriptions()` function (document_service.py lines 426-450) does a batch `.in_()` query to check which sys_ids have PGP transcriptions. This works well. But if the desktop implements PGP enrichment naively (calling `get_document_for_fragment()` for each search result individually), it creates an N+1 query pattern: one query per result, potentially 50+ network calls for a single search page.
-
-**Why it happens:** The web already handles this correctly with batch lookup. But when porting to the desktop, developers may not notice the batch function exists and instead call the single-document function in a loop.
+**What goes wrong:** SQLite does not enforce foreign key constraints by default. The `document_fragments.document_id REFERENCES documents(pgpid)` constraint is parsed but not enforced unless `PRAGMA foreign_keys = ON` is set.
 
 **Prevention:**
-1. Make `get_sys_ids_with_transcriptions()` the primary entry point for search result enrichment in both apps
-2. Consider adding a batch function for loading multiple documents at once:
-   ```python
-   def get_documents_for_fragments(sys_ids: List[str]) -> Dict[str, dict]:
-       """Batch load PGP documents for multiple fragments."""
-       # Single query to document_fragments
-       # Single query to documents
-       # Return {sys_id: document_dict}
-   ```
-3. Document in the shared service's docstrings: "For search results, use `get_sys_ids_with_transcriptions()` for batch checking. Do NOT call `get_document_for_fragment()` in a loop."
+1. For a read-only sidecar, foreign keys are informational -- the data integrity was validated during the build process.
+2. If desired, add `PRAGMA foreign_keys = ON` in the build script to validate during import, then remove for runtime (slightly faster reads).
+3. The existing sidecar services do NOT enable foreign keys (they have flat tables), so this is consistent.
 
-**Detection:** Monitor Supabase query count during desktop search. If you see >5 sequential queries to `document_fragments` in rapid succession, you have an N+1 problem.
+**Which phase should address it:** Build script phase (optional, not critical).
 
-**Which phase should address:** Desktop PGP integration phase.
+---
 
-**Severity:** MINOR -- causes slowness but not breakage. Desktop users with slow connections will notice.
+### Pitfall 14: Desktop App File Locking on Windows
+
+**What goes wrong:** On Windows, the SQLite database file is locked while open. If the desktop app holds a connection and the user tries to update the sidecar file (e.g., replacing `pgp_data.db` with a new version), the file replacement fails with a "file in use" error.
+
+**Why it happens:** The existing sidecar services open a connection at startup and hold it for the app's lifetime (singleton pattern). On Windows NTFS, this prevents other processes from writing to the file.
+
+**Prevention:**
+1. Open the sidecar in read-only mode (already done: `?mode=ro` in URI). This allows concurrent readers on most platforms but still locks on Windows.
+2. Document the update procedure: close the desktop app, replace the sidecar file, restart.
+3. This is consistent with the existing FJMS and NLI sidecar behavior -- no special handling needed.
+
+**Which phase should address it:** Documentation phase (not a code change).
+
+---
+
+### Pitfall 15: Supabase PostgREST `.single()` Has No SQLite Equivalent
+
+**What goes wrong:** Several queries in `document_service.py` use `.single().execute()` which tells PostgREST to expect exactly one row and return it as a dict (not a list). In SQLite, `cursor.fetchone()` returns a single row, but if multiple rows exist, `.single()` throws an error while `fetchone()` silently returns only the first.
+
+**Prevention:**
+1. For queries that should return exactly one row (e.g., `get_document_metadata`), use `fetchone()` and accept that it silently returns the first match.
+2. Add a defensive check if needed: `rows = cursor.fetchall(); assert len(rows) <= 1`
+3. For `get_document_for_fragment()`, which navigates fragment -> document with potentially multiple matches (recto/verso), the existing logic already handles this by iterating results. No change needed.
+
+**Which phase should address it:** Service implementation phase (straightforward).
 
 ---
 
 ## Phase-Specific Warnings
 
 | Phase Topic | Likely Pitfall | Mitigation |
-|---|---|---|
-| Service extraction | Pitfall 1 (broken imports) | Shim + grep audit of all import sites |
-| Service extraction | Pitfall 2 (client singletons) | Client factory / dependency injection; note PGP is read-only |
-| Service extraction | Pitfall 9 (sys.path hack) | Remove hack, use proper package structure |
-| Service extraction | Pitfall 5 (dataclass mismatch) | Return dicts from shared service, let each app adapt |
-| Service extraction | Pitfall 10 (section headers) | Fix while extracting, add include_headers param |
-| Service extraction | Pitfall 11 (no tests) | Write minimal tests before moving any code |
-| Desktop PGP integration | Pitfall 3 (blocking UI) | QThread workers for ALL Supabase calls |
-| Desktop PGP integration | Pitfall 7 (offline handling) | Connectivity check + caching + user messaging |
-| Desktop PGP integration | Pitfall 6 (duplicated UI logic) | Share business logic, only differ on rendering |
-| Desktop PGP integration | Pitfall 12 (N+1 queries) | Use batch functions for search enrichment |
-| Tantivy index rebuild | Pitfall 4 (destructive rebuild) | Build-in-temp-then-swap pattern |
-| Tantivy index rebuild | Pitfall 8 (schema version) | Version check + graceful degradation for old indexes |
+|-------------|---------------|------------|
+| Schema design | JSONB columns need TEXT + json_each() (Pitfall 1, 2) | Design tag junction table early, validate JSON on import |
+| Sidecar build script | Data export from Supabase must handle pagination (> 1000 rows) | Use `.range()` pagination pattern from `import_pgp_sections.py:282` |
+| Sidecar build script | sections column bloats file size (Pitfall 7) | Profile both normalized and JSON approaches |
+| Service implementation | Thread safety for web app (Pitfall 4) | Copy constructor pattern from fjms_service.py exactly |
+| Service implementation | Batch lookups need 500-item chunking (Pitfall 8) | Copy batch pattern from existing services |
+| Service implementation | PostgREST-specific operators need SQL rewrite (Pitfall 2) | Map every Supabase call to SQL equivalent before coding |
+| FJMS integration | Deduplication between PGP and FJMS (Pitfall 5) | Build scholar name normalization, dedup by (sys_id, scholar, type) |
+| Cutover / migration | Supabase user data must remain untouched (Pitfall 3) | Dependency map before removing any Supabase imports |
+| Cutover / migration | Dual-read period needed for validation | Run both backends in parallel, compare results, then switch |
 
 ---
 
-## Risk Matrix
+## Supabase Query to SQLite Query Translation Guide
 
-| Risk Area | Severity | Likelihood | Mitigation Effort |
-|---|---|---|---|
-| Web app import breakage (P1) | Critical | Certain if not careful | Low (shim pattern) |
-| Client singleton mismatch (P2) | Critical | High | Medium (provider pattern) |
-| UI thread blocking (P3) | Critical | Certain if naive | Medium (QThread pattern exists) |
-| Destructive index rebuild (P4) | Critical | Medium (on failure) | Low (temp directory swap) |
-| Dataclass mismatch (P5) | Moderate | High | Low (keep dicts) |
-| Duplicated UI logic (P6) | Moderate | High | Low (discipline) |
-| Offline handling (P7) | Moderate | Medium | Medium (caching + UI) |
-| Schema version (P8) | Moderate | Certain for existing users | Low (version file) |
-| sys.path hack (P9) | Moderate | Already exists | Low (delete line) |
-| Section headers (P10) | Minor | Already exists | Low (small code change) |
-| Missing tests (P11) | Minor | Already exists | Low (write before moving) |
-| N+1 queries (P12) | Minor | Medium | Low (use existing batch fn) |
+This table maps every Supabase PostgREST pattern used in `document_service.py` to its SQLite equivalent. Useful as a reference during service implementation.
+
+| Supabase Pattern | SQLite Equivalent | Used In |
+|------------------|-------------------|---------|
+| `.select('*').eq('pgpid', v).single()` | `SELECT * FROM documents WHERE pgpid = ?` + `fetchone()` | `get_document_for_fragment`, `get_document_metadata` |
+| `.select('document_id, page_info').eq('sys_id', v)` | `SELECT document_id, page_info FROM document_fragments WHERE sys_id = ?` | `get_document_for_fragment` |
+| `.select('*').eq('document_id', v).order('sequence_order')` | `SELECT * FROM document_fragments WHERE document_id = ? ORDER BY sequence_order` | `get_fragments_for_document` |
+| `.select('transcription').eq('pgpid', v).single()` | `SELECT transcription FROM documents WHERE pgpid = ?` + `fetchone()` | `get_transcription_for_document` |
+| `.select('*').eq('pgpid', v).order('doc_relation').order('sequence_order')` | `SELECT * FROM document_sources WHERE pgpid = ? ORDER BY doc_relation, sequence_order` | `get_sources_for_document` |
+| `.like('doc_relation', '%Edition%')` | `WHERE doc_relation LIKE '%Edition%'` (identical) | `get_editions_for_document` |
+| `.like('doc_relation', '%Translation%')` | `WHERE doc_relation LIKE '%Translation%'` (identical) | `get_translations_for_document` |
+| `.in_('sys_id', chunk)` | `WHERE sys_id IN (?,?,...)` with batching | `get_sys_ids_with_transcriptions` |
+| `.filter('tags', 'cs', json.dumps([tag]))` | `FROM documents d, json_each(d.tags) t WHERE t.value = ?` | `get_fragments_by_tag` |
+| `.select('tags').not_.is_('tags', 'null')` | `SELECT tags FROM documents WHERE tags IS NOT NULL AND tags != '[]'` | `get_all_distinct_tags` |
 
 ---
 
 ## Sources
 
-**Codebase analysis (HIGH confidence):**
-- `web/document_service.py` -- 507 lines, all 12 public functions analyzed
-- `web/supabase_client.py` -- singleton pattern at line 30-43
-- `supabase_corrections_client.py` -- class-based client at line 261-307, sys.path hack at line 21
-- `lists_sync.py` -- third client pattern at line 78
-- `genizah_core.py` -- Indexer class at line 3882, schema at 3902-3909, SearchEngine at 4158+
-- `gui_threads.py` -- existing QThread patterns (IndexerThread, SearchThread, etc.)
-- `genizah_app.py` -- corrections_client usage, QThread patterns, RebuildThread at line 948
-- `corrections_client.py` -- factory function at line 1579, fallback chain
-
-**External references:**
-- [Tantivy Issue #301: No in-place schema changes](https://github.com/quickwit-oss/tantivy/issues/301)
-- [Real Python: PyQt QThread patterns](https://realpython.com/python-pyqt-qthread/)
-- [PythonGUIs: Multithreading PyQt6](https://www.pythonguis.com/tutorials/multithreading-pyqt6-applications-qthreadpool/)
-- [Python circular imports](https://www.datacamp.com/tutorial/python-circular-import)
-
-**Project memory (HIGH confidence -- actual experience):**
-- MEMORY.md: recto/verso headers stripped, no integration tests, TODO at document_service.py:253
-- MEMORY.md: "shared service layer (Option C)" -- user's chosen approach
-
----
-
-*Pitfalls audit: 2026-02-07*
-*Confidence: HIGH -- every pitfall verified against actual codebase line numbers*
+- [SQLite JSON Functions And Operators](https://sqlite.org/json1.html) -- official reference for json_each(), json_extract(), json_valid()
+- [SQLite JSONB Format](https://sqlite.org/jsonb.html) -- confirms SQLite JSONB is NOT binary-compatible with PostgreSQL JSONB
+- [Using SQLite In Multi-Threaded Applications](https://www.sqlite.org/threadsafe.html) -- official thread-safety documentation
+- [SQLite Write-Ahead Logging](https://sqlite.org/wal.html) -- WAL mode for concurrent reads
+- [SQLite json_each() Tutorial](https://www.sqlitetutorial.net/sqlite-json-functions/sqlite-json_each-function/) -- table-valued function for JSON array iteration
+- Codebase analysis: `shared/fjms_service.py` (proven SQLite sidecar pattern), `shared/nli_crossref_service.py` (proven thread-safe singleton), `shared/document_service.py` (all Supabase queries being migrated), `web/supabase_client.py` (user data -- NOT being migrated)

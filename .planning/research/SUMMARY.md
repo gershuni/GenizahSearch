@@ -1,266 +1,203 @@
 # Project Research Summary
 
-**Project:** v5.6.0 Desktop Parity & Transcription Search
-**Domain:** Dual-app manuscript research platform (NiceGUI web + PyQt6 desktop)
-**Researched:** 2026-02-07
+**Project:** PGP Sidecar Migration + FJMS Full Texts
+**Domain:** Database migration (cloud-to-local), SQLite sidecar architecture, scholarly text integration
+**Researched:** 2026-02-16
 **Confidence:** HIGH
 
 ## Executive Summary
 
-GenizahSearch is a mature dual-application project with a fully-featured web app (NiceGUI) that integrated 9,364 Princeton Geniza Project transcriptions in v1, and a powerful desktop app (PyQt6) that has zero PGP integration. The web's document service layer (`web/document_service.py`, 507 lines) is currently trapped inside the web package and cannot be consumed by the desktop app without extraction.
+This milestone migrates all PGP reference data (104K rows across 4 tables: documents, document_sources, document_fragments, document_footnotes) from Supabase PostgreSQL to a local SQLite sidecar, following the proven pattern established by fjms_enrichment.db and nli_crossref.db. Concurrently, it integrates 65K FJMS catalog descriptions (scholarly identification texts, not line-by-line transcriptions) as additional sources in the version selector. Together these changes eliminate cloud dependency for browsing, reduce query latency from 50-200ms to <1ms, enable offline desktop usage, and unify all reference data in local sidecars while preserving Supabase for community features (auth, corrections, lists, comments).
 
-**The recommended approach is a clean, low-risk extraction.** Create a `shared/` package at project root containing `supabase_provider.py` (unified Supabase client factory) and `document_service.py` (moved from web/). Leave a re-export shim at `web/document_service.py` so all existing web imports continue working. Both apps then use the shared service for PGP data access. No new external dependencies are required—the existing stack (supabase-py 2.27.2, tantivy-py 0.25.1, PyQt6) has all capabilities needed.
+The architecture is straightforward: create shared/pgp_service.py following the FjmsService/NliCrossrefService pattern, rewrite shared/document_service.py to swap Supabase calls for PgpService calls (preserving the API surface so all callers remain unchanged), and extend fjms_enrichment.db with a full_texts table. No new dependencies are required — Python's built-in sqlite3 module handles everything. The critical technical challenge is JSONB-to-TEXT conversion for the documents.tags and document_sources.sections columns, which requires careful JSON serialization and a query translation from PostgreSQL's GIN-indexed @> operator to SQLite's json_each() table function.
 
-**The key risk is breaking web imports during extraction.** The web has 15+ import sites for document_service functions across search.py, browse.py, joins_panel.py, and tests. The shim pattern prevents this entirely: `web/document_service.py` becomes a 15-line re-export that maintains backward compatibility while the real implementation moves to `shared/document_service.py`. Desktop integration requires QThread workers for all Supabase calls (UI thread blocking is certain without this), and the Tantivy index rebuild must use a build-in-temp-then-swap pattern to avoid destroying users' existing indexes on failure.
+The main risks are: (1) silently corrupting JSON data during migration, (2) accidentally breaking user-data features by removing Supabase imports needed by desktop corrections/lists, (3) poor thread-safety causing crashes under concurrent web load, and (4) duplicate sources appearing when both PGP and FJMS have overlapping content. All four are mitigatable with proven patterns from existing codebase migrations and strict adherence to the established sidecar service architecture.
 
 ## Key Findings
 
 ### Recommended Stack
 
-**No new dependencies required.** The existing stack is sufficient for all milestone goals.
+No new dependencies required. The migration uses Python 3.11's built-in sqlite3 module (SQLite 3.45.1) with JSON1 extension support verified available. The existing sidecar services (fjms_enrichment.db at 246 MB, nli_crossref.db at 248 MB) prove the pattern scales. The pgp.db sidecar will be ~110 MB (35,839 documents + 36,155 fragments + 9,364 sources + 22,757 footnotes). Supabase remains for community features only (auth, corrections, lists, comments).
 
 **Core technologies:**
-- **supabase-py 2.27.2**: Already handles all PGP queries; sync client is thread-safe and proven across web and desktop
-- **tantivy-py 0.25.1**: Multi-field search works natively; adding `transcription` field and `content_type` filter field extends existing schema cleanly
-- **PyQt6**: QThread pattern already used 14 times in `gui_threads.py`; same pattern applies to PGP data loading
+- **sqlite3 (stdlib)**: Read-only sidecar database — proven by 2 existing services, thread-safe mode for web, graceful degradation
+- **Supabase (retained)**: Community features only — auth, corrections, lists, comments (user-generated data requiring shared state)
+- **JSON1 extension**: Built-in json_each() for tag queries — replaces PostgreSQL GIN index with table-valued function
+- **Python json module**: Parse sections JSONB on retrieval — same pattern as Supabase client already returns dicts/lists
 
-**Critical findings from STACK.md:**
-- Tantivy boolean fields are NOT queryable via parse_query() (verified experimentally). Use text field with `raw` tokenizer for filter values instead: `content_type:pgp_edition`, `content_type:htr`.
-- The `default` tokenizer handles mixed Hebrew/English PGP transcriptions better than the `whitespace` tokenizer used for HTR content.
-- Async Supabase client exists but is NOT recommended—would require qasync integration into PyQt6's event loop, adding complexity for zero benefit since HTTP calls are the bottleneck, not async scheduling.
-- Module-level client registration pattern (`set_client()`) is simpler than dependency injection for this use case. Each app calls `set_client()` once at startup; the shared service reads from the registered singleton.
+**Critical decision from STACK.md:** New pgp_data/pgp.db sidecar (not extending existing sidecars) because each has distinct domain boundary (FJMS=scholarly metadata, NLI=image crossrefs, PGP=document data), independent update cycles, and independent versioning. The 110 MB size is manageable for distribution.
 
 ### Expected Features
 
-**Must have (table stakes for desktop parity):**
-- **TS-1: PGP transcription display** — when viewing a manuscript, show PGP edition as default if available (replaces V0.8)
-- **TS-2: Multi-source version selector** — dropdown showing PGP editions by scholar, translations by language, plus V0.8 and user corrections
-- **TS-3: PGP metadata display** — document type, tags, description, dates in a collapsible QGroupBox
-- **TS-4: Search result transcription indicators** — green icon in search results table for fragments with PGP transcriptions
-- **TS-5: Tag-based search** — search by PGP tags (marriage, commercial, letter, etc.); clickable tags in metadata panel
-- **TS-6: Related fragments/joins panel** — extend existing JoinsDialog to merge PGP multi-fragment joins with user joins
-- **TS-7: Shared document service layer** — prerequisite for all above; extract to shared/ package
+From FEATURES.md analysis, 9 table-stakes features and 4 differentiators identified:
 
-**Estimated effort for table stakes:** 20-27 hours total. TS-7 unlocks everything else.
+**Must have (table stakes):**
+- **TS-1: PGP Data in SQLite Sidecar** — All 4 Supabase tables exported to pgp.db, 104K rows, foundation for everything
+- **TS-2: document_service.py Rewritten for SQLite** — Same 12-function API, different backend (Supabase to PgpService), preserves shim contract
+- **TS-3: Version Selector Continues Working** — PGP editions/translations display unchanged if API surface preserved
+- **TS-4: Search Result PGP Indicators** — Batch lookup of sys_ids with transcriptions (currently Supabase IN, becomes SQLite IN with 500 batch)
+- **TS-5: Tag-Based Search** — documents.tags JSONB to TEXT, query with json_each() or normalized junction table
+- **TS-6: PGP Footnotes Display** — 22,757 bibliography footnotes (simple table migration)
+- **TS-7: Multi-Fragment Navigation** — Joined manuscripts (get_fragments_for_document with ORDER BY)
+- **TS-8: Graceful Degradation** — is_available() pattern when sidecar missing
+- **TS-9: Remove Supabase Tables** — After verification, drop 4 PGP tables from Supabase (keep user-data tables)
 
-**Should have (desktop differentiators):**
-- **D-2: Keyboard-driven version switching** — Ctrl+Shift+P for PGP, Ctrl+Shift+O for V0.8 (low effort, high value for researchers)
-- **D-3: Transcription search with filter toggles** — persistent filter panel with "Has PGP Transcription" checkbox, document type filter, date range
-- **D-1: Persistent PGP info panel** — QDockWidget for always-visible metadata (floatable, dockable, persists across navigation)
+**Should have (competitive):**
+- **D-1: FJMS Full Texts in Version Selector** — 65K catalog descriptions from dbo_UnitFullText as scholarly sources (NOT line-by-line transcriptions — clarification: these are English/Hebrew identification texts like "Contains Genesis 39:20-41:8 with vowel points")
+- **D-2: FJMS Source Badges** — Purple badge in version selector for FJMS content (consistent visual language)
+- **D-3: Offline Browsing** — Desktop app browses all PGP+FJMS data without internet (only images/community need network)
+- **D-4: Faster Queries** — SQLite <1ms vs Supabase 50-200ms latency (free benefit of migration)
 
 **Defer (v2+):**
-- **D-4: Side-by-side edition comparison** — diff highlighting between scholars' editions (medium-high complexity, niche use case)
-- **D-5: Offline PGP data cache** — SQLite cache for offline access (medium-high complexity, requires expiry logic)
-- **D-6: Tag cloud/tag browser** — frequency-weighted tag list (low value, discovery feature not core workflow)
-- Full-text search within PGP transcriptions (requires Tantivy index rebuild with PGP content; tag search provides 80% of discovery value at 20% of cost)
+- D-5: FJMS Bibliography Transcription Indicators (nice-to-have)
+- AF-7: FJMS Full-Text Search (separate milestone)
+
+**Anti-features (explicitly not building):**
+- AF-1: Line-by-Line FJMS Transcription Import (dbo_UnitTranscription has 56K external file references, copyright concerns)
+- AF-2: Real-Time Supabase-SQLite Sync (static exports sufficient for infrequent updates)
+- AF-6: Bidirectional Editing in Sidecar (sidecars are read-only, corrections go through Supabase)
 
 ### Architecture Approach
 
-**The core pattern is extraction with backward-compatible shimming.** The web's document_service imports from `web.supabase_client.get_client()`. The desktop has its own separate Supabase client in `supabase_corrections_client.py`. A third client exists in `lists_sync.py`. All three use the same hardcoded credentials. The solution is a unified provider pattern.
+From ARCHITECTURE.md: Migration is internal to shared/document_service.py — web/pages and desktop/genizah_app.py callers remain untouched. The shim pattern (web/document_service.py re-exports from shared/) ensures zero web import changes. Desktop already uses lazy imports inside methods.
 
 **Major components:**
-1. **shared/supabase_provider.py** (new) — Unified client factory with module-level singleton; single source of truth for SUPABASE_URL and SUPABASE_ANON_KEY
-2. **shared/document_service.py** (moved from web/) — All 12 PGP data access functions; changes one import line (`from shared.supabase_provider import get_client`)
-3. **web/document_service.py** (becomes shim) — Re-exports from shared/ to maintain backward compatibility for 15+ import sites
-4. **PGPDataThread(QThread)** (new in gui_threads.py) — Wraps all Supabase calls for desktop to avoid UI thread blocking
+1. **PgpService (NEW)** — SQLite accessor for pgp.db, 8 methods mirroring current Supabase queries (get_document, get_fragments_for_sys_id, get_sources_for_document, get_sys_ids_with_documents, etc.), handles JSON parsing for tags/sections
+2. **document_service.py (MODIFIED)** — Swap Supabase client calls for PgpService calls, pure functions (parse_transcription_sections, get_section_for_page, parse_html_sections) stay unchanged
+3. **fjms_service.py (EXTENDED)** — Add get_full_texts() method for FJMS catalog descriptions from new full_texts table
+4. **export_pgp_sidecar.py (NEW)** — Paginated export from Supabase to pgp.db with JSON serialization validation
+5. **export_fist_enrichment.py (EXTENDED)** — Add export_fulltext() for dbo_UnitFullText to fjms_enrichment.db
 
-**Dependency graph is a clean DAG:**
-```
-shared/supabase_provider.py  (foundation, no deps)
-    |
-    +---> shared/document_service.py
-    |         |
-    |         +---> web/document_service.py (shim)
-    |                   |
-    |                   +---> web/pages/browse.py, search.py
-    |
-    +---> web/supabase_client.py (re-exports get_client)
-    |
-    +---> supabase_corrections_client.py (uses shared config)
-```
+**Data flow change (from ARCHITECTURE.md):**
+- BEFORE: get_sys_ids_with_transcriptions to Supabase HTTP IN query to 50-200ms
+- AFTER: get_sys_ids_with_transcriptions to pgp_service to SQLite IN with 500 batch to <1ms
 
-**Critical design decisions from ARCHITECTURE.md:**
-- Place `shared/` at project root (not inside `web/`) so both root-level desktop modules and web/ modules can import it without sys.path hacks
-- Desktop will have TWO Supabase client instances by design: one from shared provider (anon key, PGP reads), one from SupabaseCorrectionsClient (authenticated, community operations). This separation is correct—PGP data is public, community data needs auth.
-- Pure functions remain in shared service (parse_transcription_sections, get_section_for_page). Only UI rendering differs between apps.
+**Schema design (from STACK.md Decision 4):**
+- documents: pgpid PK, tags as TEXT JSON, transcription as TEXT (~50 MB)
+- document_fragments: sys_id indexed, document_id FK (~3 MB)
+- document_sources: pgpid FK, sections as TEXT JSON, content as TEXT (~40 MB)
+- document_footnotes: pgpid FK (~15 MB)
+- meta: version tracking (matches existing sidecar pattern)
+- Total: ~110 MB pgp.db
+
+**JSONB handling (STACK.md Decision 2):** Store as TEXT JSON strings, parse with json.loads() in service layer (same as Supabase client returns), query tags with json_each() or LIKE for single checks. The sections column parsing already exists in get_section_for_page() — just changes source from Supabase JSON to SQLite TEXT JSON.
 
 ### Critical Pitfalls
 
-1. **Breaking web app import chains during service extraction** (P1) — Moving document_service.py breaks 15+ import sites. **Prevention:** Re-export shim at `web/document_service.py` maintains all existing imports. Smoke test: `python -c "from web.pages.browse import *"` after extraction.
+From PITFALLS.md, 5 critical issues identified with mitigations:
 
-2. **Supabase client singleton conflict** (P2) — Three separate client initialization paths exist today (web, desktop, lists_sync). If shared service connects to wrong client, auth tokens are not shared or PGP queries fail. **Prevention:** Single `shared/supabase_provider.py` with `get_client()`. Both apps use it for PGP reads (anon key sufficient—documents table has public RLS policy).
+1. **JSONB-to-TEXT Data Loss (tags, sections)** — PostgreSQL JSONB binary format NOT compatible with SQLite. Must serialize with json.dumps(), validate with json_valid() on every row post-import. Tags query requires json_each() table function (not GIN @> operator). Sections column is 10KB+ JSON per row, consider normalizing into separate table if file size > 300MB. PREVENTION: Validation pass after export, test round-trip on every JSONB column.
 
-3. **Blocking PyQt6 UI thread with synchronous Supabase calls** (P3) — All document_service functions are sync. Calling from desktop main thread freezes UI for 100-500ms per call. Windows shows "Not Responding" after ~5s. **Prevention:** QThread workers for ALL Supabase calls. Follow existing pattern: 14 QThread subclasses already in gui_threads.py. Create PGPDataThread with operation dispatch and signals.
+2. **Removing Supabase While User-Data Depends On It** — Two Supabase clients exist: shared/supabase_provider.py (document data, being migrated) and web/supabase_client.py + supabase_corrections_client.py (user data, MUST STAY). Desktop corrections (1,800+ lines), lists, joins, discoveries all use Supabase. PREVENTION: Dependency map before removing ANY imports, test both apps end-to-end for corrections/lists after migration.
 
-4. **Tantivy index rebuild destroys existing index without rollback** (P4) — Current `create_index()` does `shutil.rmtree(db_path)` before building new index. If rebuild fails midway (OOM, corrupted file, power loss), user has NO index. **Prevention:** Build in temp directory (`tantivy_db_new/`), verify doc count, atomic swap via `os.rename()`, keep backup until verified.
+3. **Thread Safety for NiceGUI Web** — Web app is async, SQLite calls are blocking. Requires check_same_thread=False in PgpService constructor and await run.io_bound() at all call sites (15+ in web/pages). Without this: ProgrammingError under concurrent load. PREVENTION: Copy fjms_service.py constructor pattern exactly, load test with 3+ concurrent tabs.
 
-5. **Duplicating UI logic instead of sharing display logic** (P6) — Temptation to copy-paste transcription parsing into desktop. Creates maintenance nightmare—bug fixes applied to one UI but not the other. **Prevention:** Business logic (parse_transcription_sections, get_section_for_page) stays in shared service as pure functions. Only rendering (QTextBrowser vs ui.html) differs.
+4. **PostgreSQL GIN Index to SQLite json_each()** — Tag search uses filter('tags', 'cs', [tag]) which is GIN @> operator. SQLite equivalent: SELECT FROM documents, json_each(tags) WHERE value = ? (table-valued function, no index). Consider normalized document_tags junction table if > 100ms. PREVENTION: Benchmark json_each() on 35K rows before deciding.
+
+5. **Deduplication Between PGP/FJMS Sources** — Same manuscript may have PGP edition + FJMS catalog description. Dedup by (sys_id, normalized_scholar_name, relation_type), NOT content similarity. Build scholar name normalization map (e.g., "S.D. Goitein" = "Goitein"). Prefer PGP for transcriptions, show FJMS as alternative. PREVENTION: Test with 10 known-overlapping sys_ids, verify version selector shows distinct sources correctly.
+
+Additional moderate pitfalls (PITFALLS.md Pitfall 6-10): full table scan for tags, sections storage size, SQLite 999 variable limit for batch IN queries, generated pgp_url column, data staleness strategy. All have documented mitigations.
 
 ## Implications for Roadmap
 
-Based on research, suggested phase structure:
+Based on research, suggested 4-phase structure with clear dependencies:
 
-### Phase 1: Foundation — Shared Service Extraction
-**Rationale:** Everything depends on extracting document_service to a shared location. This must come first. Zero new dependencies, low risk with shim pattern, enables all desktop PGP work.
+### Phase 1: PGP Sidecar Foundation
+**Rationale:** All features depend on the sidecar existing. Export script must be bulletproof — JSON validation, pagination, batch inserts. This establishes the data layer.
+**Delivers:** pgp_data/pgp.db with 104K rows, export_pgp_sidecar.py script, meta table with version tracking
+**Addresses:** TS-1 (PGP Sidecar), avoids Pitfall 1 (JSONB loss) via validation pass
+**Key decision:** Tags storage (json_each vs junction table) must be made here — affects schema and service queries
+**Research flag:** LOW — follows proven export_fist_enrichment.py pattern (8 existing export functions)
 
-**Delivers:**
-- `shared/supabase_provider.py` with unified client factory
-- `shared/document_service.py` with all 12 PGP functions
-- `web/document_service.py` shim for backward compatibility
-- Smoke tests confirming web app still works
+### Phase 2: PGP Service Layer
+**Rationale:** Service isolates SQLite access, enables parallel development of FJMS integration. Thread-safety and batch patterns must be correct here — testing is critical.
+**Delivers:** shared/pgp_service.py with 8 methods, thread_safe flag, singleton pattern, is_available() degradation
+**Addresses:** TS-2 (document_service rewrite), TS-8 (graceful degradation), avoids Pitfall 3 (thread safety) and Pitfall 4 (GIN index)
+**Uses:** sqlite3 (stdlib), json module for sections parsing
+**Implements:** Read-only sidecar service pattern (proven by FjmsService 961 lines, NliCrossrefService 845 lines)
+**Research flag:** MEDIUM — Query translation from Supabase to SQLite needs careful implementation (PITFALLS.md has translation guide)
 
-**Avoids:** Pitfall 1 (broken imports via shim), Pitfall 2 (client confusion via provider pattern), Pitfall 9 (removes sys.path hack)
+### Phase 3: FJMS Full Texts Integration (parallel with Phase 2)
+**Rationale:** Independent of PGP migration — extends existing fjms_enrichment.db. Can proceed in parallel with Phase 2 to speed delivery.
+**Delivers:** full_texts table in fjms_enrichment.db (65K rows, ~15-25 MB), export_fulltext() in export_fist_enrichment.py, get_full_texts() in fjms_service.py
+**Addresses:** D-1 (FJMS catalog descriptions), D-2 (purple badges in version selector)
+**Key clarification:** These are catalog identification texts (English/Hebrew descriptions of manuscript content), NOT line-by-line transcriptions
+**Research flag:** LOW — extends existing service, standard pattern
 
-**Risk:** LOW. Adding new package, leaving shim. If anything breaks, it's a typo in shim.
-
-**Research flag:** Skip research-phase. Pattern is clear from architecture analysis.
-
-### Phase 2: Desktop PGP Core — Transcription Display
-**Rationale:** Highest user value. Researchers want to see PGP transcriptions in desktop just like web. Extends existing ResultDialog and browse tab patterns.
-
-**Delivers:**
-- TS-1: PGP transcription display in manuscript viewer
-- TS-2: Multi-source version selector (extends existing rd_version_combo)
-- PGPDataThread in gui_threads.py for async loading
-
-**Uses:** shared/document_service functions via QThread workers
-
-**Implements:** QThread pattern (already proven 14 times in gui_threads.py)
-
-**Avoids:** Pitfall 3 (UI thread blocking via QThread), Pitfall 6 (duplicates logic—uses shared parser functions)
-
-**Risk:** MEDIUM. New UI work in PyQt6. QThread pattern is proven but requires careful signal/slot wiring.
-
-**Research flag:** Skip research-phase. Desktop patterns are well-established in codebase.
-
-### Phase 3: Desktop PGP Metadata — Enriched Viewer
-**Rationale:** Completes the viewer experience. Researchers need document type, tags, dates, description to understand what they're viewing. Enables tag-based discovery.
-
-**Delivers:**
-- TS-3: PGP metadata display (QGroupBox in viewer)
-- TS-5: Tag-based search (new search mode)
-- TS-6: Related fragments/joins (extends existing JoinsDialog)
-
-**Addresses:** Table stakes TS-3, TS-5, TS-6 from FEATURES.md
-
-**Avoids:** Pitfall 6 (reuses shared service functions), Pitfall 7 (offline handling—connectivity check before load)
-
-**Risk:** MEDIUM. Tag search is a new search code path. Joins extension touches existing JoinsDialog.
-
-**Research flag:** Skip research-phase. Tag search uses existing get_fragments_by_tag() from shared service.
-
-### Phase 4: Desktop PGP Discovery — Search Integration
-**Rationale:** Makes PGP data discoverable in search results. Low effort (batch API exists), high visibility (green indicators scannable in results table).
-
-**Delivers:**
-- TS-4: Search result transcription indicators (green icon in table)
-- D-2: Keyboard version switching (Ctrl+Shift+P shortcuts)
-
-**Uses:** Batch function get_sys_ids_with_transcriptions() from shared service
-
-**Avoids:** Pitfall 12 (N+1 queries—uses batch function, not loop)
-
-**Risk:** LOW. Batch API exists. QTableWidget column addition is straightforward.
-
-**Research flag:** Skip research-phase. Batch enrichment pattern proven in web search.py.
-
-### Phase 5: Tantivy Transcription Index — Full-Text Search
-**Rationale:** Extends search to include PGP transcription content. Requires schema change (full rebuild). Should come after desktop UI features are working so users have immediate value before triggering rebuild.
-
-**Delivers:**
-- Tantivy schema extension (transcription field + content_type field)
-- PGP transcription indexing during build
-- Search filter modes (Everything, Transcriptions Only, HTR Only)
-- D-3: Filter toggles in desktop search tab
-
-**Uses:** tantivy-py 0.25.1 multi-field search (verified working)
-
-**Implements:** Build-in-temp-then-swap pattern for safe rebuild
-
-**Avoids:** Pitfall 4 (destructive rebuild via temp dir), Pitfall 8 (schema version check for graceful degradation)
-
-**Risk:** MEDIUM. Index rebuild is minutes-long process. Schema version mismatch could confuse users with old indexes.
-
-**Research flag:** Skip research-phase. Tantivy patterns are verified experimentally in STACK.md.
+### Phase 4: Verification and Cutover
+**Rationale:** All table-stakes features must work before removing Supabase tables. Parallel reads validate correctness. Dependency map prevents breaking user-data features.
+**Delivers:** TS-3 through TS-7 verified (version selector, search indicators, tags, footnotes, navigation), TS-9 (Supabase table removal), documentation of offline capabilities
+**Addresses:** Avoids Pitfall 2 (user-data dependency) via explicit mapping, Pitfall 10 (staleness) via version display
+**Testing:** Both apps end-to-end (search, browse, corrections, lists), load test web concurrency, verify 10 overlapping PGP/FJMS sources
+**Research flag:** MEDIUM — Requires analysis of which Supabase tables can be safely removed (PITFALLS.md Pitfall 3 has dependency mapping guidance)
 
 ### Phase Ordering Rationale
 
-- **Phase 1 first:** Foundation. Nothing works without shared service extraction. Lowest risk, highest unblocking value.
-- **Phases 2-4 before Phase 5:** Desktop gets immediate PGP parity without waiting for index rebuild. Users can view transcriptions, metadata, and see indicators in search results using existing Supabase queries. Index rebuild (Phase 5) takes minutes and requires all users to rebuild—defer until desktop features prove valuable.
-- **Phase 3 after Phase 2:** Metadata display depends on transcription display working. Tag search depends on metadata panel (clickable tags).
-- **Phase 4 is independent:** Can happen anytime after Phase 1. Placed here because it is low effort and high visibility.
-- **Phase 5 last:** Full-text transcription search is nice-to-have. Tag search (Phase 3) provides 80% of discovery value. Index rebuild is risky (Pitfall 4) and should be validated thoroughly.
+- Phase 1 first: Sidecar is foundation, export script with validation prevents data corruption (PITFALLS.md Pitfall 1)
+- Phase 2 follows: Service isolates SQLite complexity, enables testing before UI integration
+- Phase 3 parallel: FJMS is independent data source, no PGP migration dependency (can run concurrently with Phase 2)
+- Phase 4 last: Verification phase prevents premature cutover, protects user-data features (PITFALLS.md Pitfall 2)
+
+**Critical path:** Phase 1 to Phase 2 to Phase 4 (PGP migration)
+**Parallel track:** Phase 3 (FJMS full texts, can start anytime after Phase 1 data pipeline established)
+
+**Dependencies identified:**
+- Tags storage decision (Phase 1) affects service queries (Phase 2)
+- Thread-safe constructor (Phase 2) required before web integration (Phase 4)
+- Supabase dependency map (Phase 4) required before table removal
+- FJMS export (Phase 1) required for Phase 3 UI integration
 
 ### Research Flags
 
-**Phases with standard patterns (skip research-phase):**
-- **Phase 1:** Python module extraction patterns are well-understood. Re-export shim is standard practice.
-- **Phase 2:** QThread pattern used 14 times already in gui_threads.py. Extending existing version combo and ResultDialog.
-- **Phase 3:** Tag search uses existing shared service function. JoinsDialog extension follows existing desktop patterns.
-- **Phase 4:** Batch enrichment proven in web search.py. QTableWidget manipulation is standard PyQt6.
-- **Phase 5:** Tantivy multi-field search verified experimentally. Schema fields tested locally.
+**Phases needing deeper research during planning:**
+- **Phase 2:** Query translation from Supabase PostgREST to SQLite — PITFALLS.md has full translation guide (Pitfall 4 for GIN index, table at end for all patterns). Needs careful implementation of json_each() for tags.
+- **Phase 4:** Dependency mapping to identify which Supabase imports can be safely removed — PITFALLS.md Pitfall 3 lists all current Supabase clients and their purposes.
 
-**No phases need research-phase.** All patterns are either proven in the existing codebase or experimentally verified during project research.
+**Phases with standard patterns (skip research-phase):**
+- **Phase 1:** Export script follows export_fist_enrichment.py pattern (8 existing export functions, proven pagination)
+- **Phase 3:** Service extension follows existing fjms_service.py pattern
+
+**Validation checkpoints during execution:**
+- Phase 1: JSON round-trip test, row count verification, json_valid() on all JSONB columns
+- Phase 2: Thread-safety load test (3+ concurrent web tabs), batch query correctness (500-item chunks)
+- Phase 4: Both apps end-to-end, corrections/lists still work, version selector shows PGP+FJMS correctly
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All capabilities verified against installed packages (supabase-py 2.27.2, tantivy-py 0.25.1). Tantivy boolean field limitation confirmed experimentally. |
-| Features | HIGH | Based on direct codebase analysis of web/document_service.py (507 lines), web/pages/browse.py, web/pages/search.py. Every web feature mapped to desktop equivalent. |
-| Architecture | HIGH | Import chains traced across 15+ files. Client singleton patterns analyzed in web/supabase_client.py, supabase_corrections_client.py, lists_sync.py. Dependency graph is clean DAG. |
-| Pitfalls | HIGH | Every pitfall verified against actual code with line numbers. QThread requirement verified by inspecting PyQt6 event loop. Index rebuild risk verified by reading Indexer.create_index() (genizah_core.py:3897-3899). |
+| Stack | HIGH | No new dependencies, sqlite3 built-in verified, JSON1 available, proven by 2 existing sidecars (246 MB, 248 MB) |
+| Features | HIGH | All 9 table-stakes mapped to existing Supabase queries (1:1 SQL translation documented), 4 differentiators are natural consequences |
+| Architecture | HIGH | PgpService pattern proven by FjmsService/NliCrossrefService (961 lines, 845 lines), shim pattern preserves all 11 consumer files |
+| Pitfalls | HIGH | Based on direct codebase analysis (all 4 Supabase tables, 15+ call sites, 2 existing sidecars), 15 pitfalls catalogued with proven mitigations |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-**Recto/verso section header stripping (known tech debt from v1):** The parse_transcription_sections() function strips section headers like "Recto" and "Verso - right margin". Noted in MEMORY.md as existing tech debt. **Handling:** Fix during Phase 1 extraction by adding include_headers parameter. Low effort, opportunistic fix.
+- **Tags query performance**: Benchmark json_each() on 35K rows before deciding between it and normalized junction table. Decision affects Phase 1 schema and Phase 2 service queries. Mitigation: Start with json_each() (simpler), add junction table in Phase 4 if profiling shows > 100ms.
 
-**No integration tests for E2E flows (known tech debt from v1):** No tests verify web imports work after extraction. **Handling:** Write minimal smoke tests in Phase 1 before moving any code. Test imports from both shared/ and web/ (shim).
+- **Sections storage size**: Profile pgp.db file size with sections as JSON TEXT vs normalized table. 9,364 sources * avg 2KB = ~19 MB of content, sections could add 10-50 MB depending on sparsity. Mitigation: Build with JSON first (STACK.md Decision 3 rationale: sections always read as complete array), normalize in Phase 4 only if > 300 MB total.
 
-**Desktop offline handling:** Desktop may run without internet. Supabase calls will fail silently. **Handling:** Add connectivity check in Phase 2 (reuse is_server_available() from corrections client). Show "PGP data unavailable (offline)" rather than empty sections. Cache successfully loaded data.
+- **FJMS/PGP overlap extent**: Unknown how many sys_ids have both PGP sources AND FJMS catalog descriptions. Affects deduplication complexity. Mitigation: Query both datasets during Phase 1 to get overlap count, design dedup strategy in Phase 4 based on actual numbers (PITFALLS.md Pitfall 5 has dedup approach).
 
-**Schema version mismatch during Tantivy rebuild:** Users with old indexes may not rebuild immediately. Query code referencing new fields will fail. **Handling:** Add schema version file in Phase 5. Check on startup, prompt for rebuild if mismatch. Graceful degradation: check available_fields before using transcription field.
+- **Supabase pagination for export**: 35,839 documents exceed single-page fetch. Must use .range() pagination (1000 rows/page pattern from import_pgp_sections.py:282). Mitigation: STACK.md Decision 6 documents exact pagination pattern.
+
+- **Desktop app file distribution**: pgp.db must be bundled with desktop installer. Update build_app.bat to include pgp_data/ alongside fist_data/ and nli_data/. Mitigation: Add to Phase 4 verification checklist (STACK.md Decision 6 notes distribution requirement).
 
 ## Sources
 
 ### Primary (HIGH confidence)
-
-**Direct codebase analysis (all verified 2026-02-07):**
-- `web/document_service.py` — 507 lines, 12 functions, all analyzed
-- `web/supabase_client.py` — 1190 lines, client singleton pattern at line 30-43
-- `supabase_corrections_client.py` — 1834 lines, separate client at line 292-307, sys.path hack at line 21
-- `lists_sync.py` — third client initialization at line 78
-- `genizah_core.py` — Indexer class at line 3882, schema at 3902-3909, SearchEngine at 4158+
-- `gui_threads.py` — 14 QThread subclasses analyzed (IndexerThread, SearchThread, EnrichMetadataThread, etc.)
-- `genizah_app.py` — 15,800 lines, ResultDialog, ManuscriptViewerWidget, corrections integration
-- `web/pages/browse.py` — PGP transcription display (lines 883-950), metadata panel (1753-1818)
-- `web/pages/search.py` — Tag search (2310-2404), transcription indicators (1212-1217)
-- `web/components/version_selector.py` — 376 lines, multi-source selection logic
-- `web/components/joins_panel.py` — 884 lines, PGP joins integration
-
-**Experimental verification:**
-- tantivy-py 0.25.1 installed locally via `pip show tantivy`
-- Tantivy boolean field limitation verified (boolean fields with fast=True are NOT queryable via parse_query())
-- Tantivy text field with raw tokenizer verified (exact-match filtering works)
-- Multi-field default query verified (parse_query with default_field_names=['content', 'transcription'])
-- supabase-py 2.27.2 sync client verified (Client.execute() is not a coroutine, no async/await needed)
-
-**Project memory:**
-- MEMORY.md: "shared service layer (Option C)" — user's chosen approach
-- MEMORY.md: Recto/verso headers stripped, no integration tests, TODO at document_service.py:253
+- **Codebase analysis**: shared/document_service.py (742 lines, 14 functions, 7 Supabase-calling), shared/fjms_service.py (961 lines, proven pattern), shared/nli_crossref_service.py (845 lines, thread-safe singleton), migrations/*.sql (9 files, full Supabase schema), web/components/version_selector.py (440 lines)
+- **Data verification**: Supabase table counts (35,839 documents, 36,155 fragments, 9,364 sources, 22,757 footnotes), FIST.db dbo_UnitFullText (65,332 rows, 85,313 AlmaIds, ~56K > 100 chars, avg 240 chars)
+- **Python/SQLite verification**: Python 3.11.9, SQLite 3.45.1, JSON1 functions (json_array, json_type, json_each) confirmed working
+- **SQLite documentation**: [sqlite.org/json1.html](https://sqlite.org/json1.html) (JSON1 functions), [sqlite.org/jsonb.html](https://sqlite.org/jsonb.html) (JSONB incompatibility with PostgreSQL), [sqlite.org/threadsafe.html](https://www.sqlite.org/threadsafe.html) (check_same_thread)
 
 ### Secondary (MEDIUM confidence)
-
-- [Tantivy Issue #301](https://github.com/quickwit-oss/tantivy/issues/301) — confirms no in-place schema changes
-- Qt QDockWidget documentation — desktop differentiator patterns
-- Real Python PyQt QThread patterns — confirms signal/slot async pattern
-
-### No tertiary sources needed
-
-All findings verified against installed packages or direct codebase analysis. No external research was required beyond confirming one Tantivy limitation via GitHub issue.
+- **Princeton Geniza Project**: [geniza.princeton.edu](https://geniza.princeton.edu/en/) — PGP handles multiple editions per document with scholar attribution, validates dedup approach
+- **Friedberg Research Platform**: Multiple transcription sources per manuscript (validates multi-source display pattern)
+- **Supabase offline discussion**: Real-time CDC complexity (PowerSync, RxDB) — confirms static export strategy appropriate for infrequent updates
 
 ---
-*Research completed: 2026-02-07*
+*Research completed: 2026-02-16*
 *Ready for roadmap: yes*
