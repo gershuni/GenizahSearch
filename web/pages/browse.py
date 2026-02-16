@@ -1782,6 +1782,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
                                 ui.label('PGP').classes('text-sm font-semibold').style('color: #ffffff !important;')
 
+                        # Library digital collection link (header)
+                        if page.library_viewer_url and page.library_viewer_url.get('url'):
+                            lib_info = page.library_viewer_url
+                            if not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
+                                with ui.link(target=lib_info['url'], new_tab=True).classes(
+                                    'flex items-center gap-1 px-2 py-1 rounded'
+                                ).style(
+                                    'text-decoration: none; '
+                                    'color: #ffffff !important; '
+                                    'background: rgba(255, 255, 255, 0.2);'
+                                ):
+                                    ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                                    ui.label(lib_info.get('label', tr('Library'))).classes('text-sm font-semibold').style('color: #ffffff !important;')
+
                         # Search for Parallels button
                         ui.button(
                             tr('Search for Parallels'),
@@ -1866,6 +1880,26 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label('FL ID').classes('text-xs font-bold').style('color: var(--text-secondary);')
                                 ui.label(f'FL{page.fl_id}').classes('text-sm font-mono').style('color: var(--text-primary);')
 
+                        # Material type (NLI crossref)
+                        if page.physical_metadata and page.physical_metadata.get('material'):
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Material')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(tr(page.physical_metadata['material'])).classes('text-sm').style('color: var(--text-primary);')
+
+                        # Folio count (NLI crossref)
+                        if page.physical_metadata:
+                            num_folio = page.physical_metadata.get('num_folio', '')
+                            num_bifolio = page.physical_metadata.get('num_bifolio', '')
+                            folio_parts = []
+                            if num_folio and num_folio != '0':
+                                folio_parts.append(f"{num_folio} {tr('Folios')}")
+                            if num_bifolio and num_bifolio != '0':
+                                folio_parts.append(f"{num_bifolio} {tr('Bifolios')}")
+                            if folio_parts:
+                                with ui.column().classes('gap-1'):
+                                    ui.label(tr('Folios')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(' + '.join(folio_parts)).classes('text-sm').style('color: var(--text-primary);')
+
                         # Oxford Metadata (Part Title, Contents, Provenance)
                         if page.oxford_part_metadata:
                             # Part Title
@@ -1907,6 +1941,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Princeton Geniza Project
                         if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
                             ui.link('Princeton Geniza Project', state.pgp_metadata['pgp_url'], new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+
+                        # Library digital collection (from NLI crossref)
+                        if page.library_viewer_url and page.library_viewer_url.get('url'):
+                            lib_url = page.library_viewer_url
+                            # Only show if not already covered by Oxford/Cambridge links above
+                            if not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
+                                ui.link(
+                                    lib_url.get('label', tr('View in Library Catalog')),
+                                    lib_url['url'], new_tab=True
+                                ).classes('text-sm').style('color: var(--primary-600);')
 
                     # === PGP Metadata Section ===
                     if state.pgp_metadata:
