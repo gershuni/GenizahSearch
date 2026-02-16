@@ -392,21 +392,47 @@ def test_get_library_viewer_url_manchester(test_db):
     svc = NliCrossrefService(db_path=test_db)
     result = svc.get_library_viewer_url("M001")
     assert result is not None
-    assert "luna.manchester.ac.uk" in result["url"]
+    assert "luna.manchester.ac.uk/luna/servlet/view/search" in result["url"]
+    assert "q=Gaster" in result["url"]
     assert result["library_abbrev"] == "Manchester"
     assert result["label"] == "Manchester LUNA"
     svc.close()
 
 
 def test_get_library_viewer_url_bl(test_db):
-    """BL library returns British Library URL."""
-    # A003 has BL library in fixture
+    """BL library returns searcharchives.bl.uk URL."""
+    # A003 has BL library in fixture with shelfmark "Or. 5557B" (no leaf suffix)
     svc = NliCrossrefService(db_path=test_db)
     result = svc.get_library_viewer_url("A003")
     assert result is not None
-    assert "bl.uk/manuscripts" in result["url"]
+    assert "searcharchives.bl.uk" in result["url"]
+    assert "q=Or.+5557B" in result["url"] or "q=Or.%205557B" in result["url"]
     assert result["library_abbrev"] == "BL"
     assert result["label"] == "British Library"
+    svc.close()
+
+
+def test_get_library_viewer_url_bl_strips_leaf(test_db):
+    """BL library strips leaf suffix (.N) from shelfmark for search."""
+    conn = sqlite3.connect(test_db)
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("BL", "BL", "London", "British Library", "Or.",
+         "OR 10110.1", "INV_BL2", "", "", "", "BL002", "CAT_BL", "1",
+         "FGP_BL2", "2222", "OR_10110__L1F0B0S1", "NLI", "", "", "",
+         "1", "", "Paper", "10x15", ""),
+    )
+    conn.commit()
+    conn.close()
+    svc = NliCrossrefService(db_path=test_db)
+    result = svc.get_library_viewer_url("BL002")
+    assert result is not None
+    assert "searcharchives.bl.uk" in result["url"]
+    # Leaf suffix ".1" should be stripped
+    assert "OR+10110" in result["url"] or "OR%2010110" in result["url"]
+    assert ".1" not in result["url"]
+    # Spaces must NOT be converted to underscores (searcharchives requires URL-encoded spaces)
+    assert "OR_10110" not in result["url"]
     svc.close()
 
 
