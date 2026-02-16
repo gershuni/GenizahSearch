@@ -156,14 +156,15 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   4. NLI IsNotGenizah flag shows as a visual badge for the 29,081 flagged items in our corpus
   5. FJMS SourceName, NLI CollectionName, and physical storage references (OBBox/Volume/Folio) are displayed as secondary metadata
   6. All metadata displays in both web and desktop apps
-**Plans:** 6/6 plans complete
+**Plans:** 7/7 plans complete
 Plans:
 - [x] 33-01-PLAN.md -- FIST bibliography, catalog cross-refs, and reference tables export to sidecar
 - [x] 33-02-PLAN.md -- Service layer methods + enrich_metadata wiring + tests
 - [x] 33-03-PLAN.md -- Web browse page metadata display (bibliography, catalog refs, badges)
 - [x] 33-04-PLAN.md -- Desktop browse extended info metadata display
 - [x] 33-05-PLAN.md -- Gap closure: fix Oxford Part enrichment thread for badge/catalog display
-- [ ] 33-06-PLAN.md -- Gap closure: fix browse_render_page overwriting enriched info label
+- [x] 33-06-PLAN.md -- Gap closure: fix browse_render_page overwriting enriched info label
+- [x] 33-07-PLAN.md -- Gap closure: remove cache-first short-circuit from enrichment thread startup
 
 ### Phase 34: Library IIIF Integration (Manchester + JTS/Princeton)
 **Goal**: Users see high-res images and rich metadata from Manchester LUNA and JTS/Princeton Figgy directly in the app, with detail page links instead of search links, by pre-importing library-specific identifiers into the sidecar

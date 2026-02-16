@@ -3,7 +3,7 @@ status: resolved
 phase: 33-metadata-enrichment
 source: 33-03-SUMMARY.md, 33-04-SUMMARY.md
 started: 2026-02-16T08:00:00Z
-updated: 2026-02-16T20:00:00Z
+updated: 2026-02-16T21:00:00Z
 ---
 
 ## Current Test
@@ -55,6 +55,9 @@ severity: major
 retest-1: issue
 retest-1-reported: "990053385780205171 - No label, also no bib buttons and no image. Allony Ms. 113 - No badge."
 retest-1-severity: major
+retest-2: partial
+retest-2-reported: "990000465700205171 - I see badge. Oxford - systematic problem. No image and no bib buttons. Navigating forward shows same image repeating and no Neubauer number. Also MS heb. e.100/15 (part 11: fol. 15) sys_id 990053635020205171 has no Neubauer number, no bib, no NLI info. Suspect NLI lookup uses long-form shelfmark which NLI doesn't know — should use sys_id instead."
+retest-2-severity: major
 
 ### 10. Desktop secondary metadata (sources + storage)
 expected: Desktop browse to Austrian H 1. Extended info shows grey-bordered section with "Scholarly Sources: Documentary Material (Goitein)" and "Collection & Storage: Vienna — Box H, Vol. 1".
@@ -76,20 +79,20 @@ skipped: 0
 
 - truth: "Desktop browse page shows IsNotGenizah badge near shelfmark for flagged manuscripts and Neubauer-Cowley catalog number for Oxford manuscripts"
   status: resolved
-  reason: "Retest: Oxford 990053385780205171 - no label, no bib buttons, no image. Allony Ms. 113 - no badge. Previous fix (33-05) did not resolve."
+  reason: "Retest-2: IsNotGenizah badge works (Allony). Oxford systematic failure — no Neubauer, no bib, no images, same image repeats on navigate. Also MS heb. e.100/15 (part 11) gets nothing."
   severity: major
   test: 9
-  root_cause: "browse_render_page() at line ~19604 overwrites the enriched info label set by on_browse_enriched_loaded(). browse_render_page() builds info_text from scratch WITHOUT catalog_entry or IsNotGenizah badge. The enrichment callback correctly sets the label at line 9137, then calls browse_load_page() at line 9240, which triggers browse_render_page() to overwrite it."
+  root_cause: "_browse_load_part (line ~19436) and browse_navigate (line ~19491) have flawed cache-check that short-circuits enrichment. When basic CSV meta is already cached (always true for Oxford), code calls on_browse_enriched_loaded with UN-ENRICHED data and never starts EnrichMetadataThread. NLI crossref data EXISTS (38K Oxford rows, CatalogEntry=2613.1 for sys_id 990053385780205171) but enrich_metadata is never invoked. Plans 33-05/06 added enrichment startup but used same cache-first pattern — which IS the bug."
   artifacts:
     - path: "genizah_app.py"
-      issue: "Line ~19604: browse_render_page() sets info label without catalog_entry or is_not_genizah badge"
+      issue: "Line ~19436-19451: _browse_load_part cache check is truthy from CSV meta, bypasses EnrichMetadataThread"
     - path: "genizah_app.py"
-      issue: "Line ~9240: on_browse_enriched_loaded() calls browse_load_page() which triggers the destructive overwrite"
+      issue: "Line ~19491-19502: browse_navigate same flawed cache-check pattern"
   missing:
-    - "Add catalog_entry lookup from nli_cache to browse_render_page() info_text construction"
-    - "Add is_not_genizah badge lookup from nli_cache to browse_render_page() info_text construction"
-    - "Use setHtml() instead of setText() in browse_render_page() for info label (to render HTML badge)"
-  debug_session: ".planning/debug/desktop-isnotgenizah-badge.md, .planning/debug/oxford-part-desktop-missing-data.md"
+    - "ALWAYS start EnrichMetadataThread unconditionally in _browse_load_part (match browse_load pattern at line ~19280)"
+    - "ALWAYS start EnrichMetadataThread unconditionally in browse_navigate"
+    - "Remove cache-first short-circuit that prevents enrichment from running"
+  debug_session: ".planning/debug/oxford-nli-crossref-enrichment.md"
   data_notes:
     - "No bibliography for Oxford MS heb. a.1/1: FJMS has no entries (data absence, not code bug)"
     - "No image for Oxford MS heb. a.1/1: oxford_full_db.json has empty images array for Part 1 (data absence)"
