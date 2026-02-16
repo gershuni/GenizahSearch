@@ -19433,22 +19433,18 @@ class GenizahGUI(QMainWindow):
         self.btn_find_parallels.setEnabled(True)
         self.btn_browse_add_to_list.setEnabled(True)
 
-        # Start metadata enrichment for Oxford Part manuscript (Phase 33 gap closure)
-        # Without this, on_browse_enriched_loaded never fires and metadata
-        # (IsNotGenizah badge, Neubauer-Cowley, bibliography, catalog refs) is never displayed.
+        # Trigger metadata enrichment for Oxford Part manuscript (Phase 33 gap closure)
+        # ALWAYS start thread unconditionally -- enrich_metadata handles cache internally
+        # and builds on top of basic CSV metadata with NLI crossref and FJMS data.
         target_sid_for_enrich = self.current_browse_sid
-        cached_meta = self.meta_mgr.nli_cache.get(target_sid_for_enrich)
-        if cached_meta:
-            self.on_browse_enriched_loaded(target_sid_for_enrich, cached_meta)
-        else:
-            if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
-                try:
-                    self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
-                except (TypeError, RuntimeError):
-                    pass
-            self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, target_sid_for_enrich)
-            self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
-            self.enrich_browse_worker.start()
+        if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
+            try:
+                self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
+            except (TypeError, RuntimeError):
+                pass
+        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, target_sid_for_enrich)
+        self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+        self.enrich_browse_worker.start()
 
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
@@ -19487,19 +19483,16 @@ class GenizahGUI(QMainWindow):
             self.browse_render_page(page_data)
             # Flag: page already rendered, skip browse_load_page in enriched callback
             self._browse_nav_rendered = True
-            # Kick off metadata enrichment for new manuscript
-            cached_meta = self.meta_mgr.nli_cache.get(new_sid)
-            if cached_meta:
-                self.on_browse_enriched_loaded(new_sid, cached_meta)
-            else:
-                if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
-                    try:
-                        self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
-                    except (TypeError, RuntimeError):
-                        pass
-                self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
-                self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
-                self.enrich_browse_worker.start()
+            # Trigger metadata enrichment for new manuscript
+            # ALWAYS start thread unconditionally -- enrich_metadata handles cache internally
+            if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
+                try:
+                    self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
+                except (TypeError, RuntimeError):
+                    pass
+            self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
+            self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
+            self.enrich_browse_worker.start()
         else:
             self.browse_render_page(page_data)
             # Re-fetch PGP for same-manuscript page navigation (new manuscript handled by enriched_loaded)
