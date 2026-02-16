@@ -706,7 +706,7 @@ class BrowseState:
         self.reading_desk_entries: list = []
         # Each entry: {sys_id, shelfmark, pages: [{p_num, text, full_header, fl_id}], sources: [], pgp_doc: {}}
         self.reading_desk_selected_sources: dict = {}  # sys_id -> selected source index
-        # Source switching state: 'nli' (default) or 'cambridge'
+        # Source switching state: 'nli' (default), 'cambridge', 'manchester', or 'jts'
         self.active_source: str = 'nli'
 
 
@@ -3171,11 +3171,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{cache_bust}"
                     fallback_url = None
 
-                # Cambridge source override: if user switched to Cambridge and images are available
-                _has_cambridge_images = bool(page.cambridge_images)
+                # External source override: if user switched to Cambridge/Manchester/JTS and images are available
+                _has_ext_images = bool(page.cambridge_images)
+                _has_cambridge_images = _has_ext_images and page.external_provider not in ('manchester', 'jts')
+                _has_manchester_images = _has_ext_images and page.external_provider == 'manchester'
+                _has_jts_images = _has_ext_images and page.external_provider == 'jts'
+
                 if state.active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
                     has_image = True
                     img_url = f"/api/cambridge_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    fallback_url = None
+
+                # Manchester source override
+                if state.active_source == 'manchester' and _has_manchester_images and not is_oxford:
+                    has_image = True
+                    img_url = f"/api/manchester_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    fallback_url = None
+
+                # JTS source override
+                if state.active_source == 'jts' and _has_jts_images and not is_oxford:
+                    has_image = True
+                    img_url = f"/api/jts_image/{page.sys_id}?page={page_idx}{cache_bust}"
                     fallback_url = None
 
                 # Header bar with folio info, navigation, controls
@@ -3186,11 +3202,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _is_single_page = _effective_count <= 1 and page.total_pages <= 1
                 _has_nli = _src_info.get('nli_fgp', False)
                 _has_cambridge = _src_info.get('cambridge', False) or page.is_cambridge
+                _has_manchester = _src_info.get('manchester', False)
+                _has_jts = _src_info.get('jts', False)
 
-                # Source switching setup
-                _both_sources = _has_nli and _has_cambridge_images
-                _is_nli_active = state.active_source == 'nli' or not _has_cambridge_images
+                # Source switching setup -- any external source with NLI enables toggling
+                _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images
+                _both_sources = _has_nli and _any_ext_images
+                _is_nli_active = state.active_source == 'nli' or not _any_ext_images
                 _is_cambridge_active = state.active_source == 'cambridge' and _has_cambridge_images
+                _is_manchester_active = state.active_source == 'manchester' and _has_manchester_images
+                _is_jts_active = state.active_source == 'jts' and _has_jts_images
 
                 def switch_to_nli():
                     state.active_source = 'nli'
@@ -3198,6 +3219,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 def switch_to_cambridge():
                     state.active_source = 'cambridge'
+                    load_page(direction=0)
+
+                def switch_to_manchester():
+                    state.active_source = 'manchester'
+                    load_page(direction=0)
+
+                def switch_to_jts():
+                    state.active_source = 'jts'
                     load_page(direction=0)
 
                 # NLI viewer deep link handler
@@ -3284,6 +3313,56 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='open_in_new', on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
                                         'flat round dense size=xs'
                                     ).style('min-width: 20px; min-height: 20px; color: #2196f3; opacity: 0.8;').tooltip(tr('Open in Cambridge Digital Library'))
+
+                            if _has_manchester:
+                                manchester_color = '#e91e63'
+                                man_style = (
+                                    f'background: {manchester_color}; color: white; border: 1.5px solid {manchester_color}; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_manchester_active else
+                                    f'border: 1.5px solid {manchester_color}; border-radius: 12px; min-height: 22px; color: {manchester_color}; font-weight: 600;'
+                                )
+                                if _has_nli and _has_manchester_images:
+                                    ui.button('Manchester', on_click=switch_to_manchester).props(
+                                        'flat dense size=sm no-caps'
+                                    ).classes('text-xs px-2 py-0').style(man_style).tooltip(
+                                        tr('View Manchester images') if not _is_manchester_active else tr('Viewing Manchester images')
+                                    )
+                                # External link to LUNA detail page
+                                lib_viewer = page.library_viewer_url or {}
+                                luna_url = lib_viewer.get('url', '')
+                                if luna_url:
+                                    if not (_has_nli and _has_manchester_images):
+                                        ui.button('Manchester', on_click=lambda u=luna_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                            'flat dense size=sm no-caps'
+                                        ).classes('text-xs px-2 py-0').style(man_style).tooltip(tr('Open in Manchester LUNA'))
+                                    ui.button(icon='open_in_new', on_click=lambda u=luna_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                        'flat round dense size=xs'
+                                    ).style(f'min-width: 20px; min-height: 20px; color: {manchester_color}; opacity: 0.8;').tooltip(tr('Open in Manchester LUNA'))
+
+                            if _has_jts:
+                                jts_color = '#ff9800'
+                                jts_style = (
+                                    f'background: {jts_color}; color: white; border: 1.5px solid {jts_color}; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_jts_active else
+                                    f'border: 1.5px solid {jts_color}; border-radius: 12px; min-height: 22px; color: {jts_color}; font-weight: 600;'
+                                )
+                                if _has_nli and _has_jts_images:
+                                    ui.button('JTS', on_click=switch_to_jts).props(
+                                        'flat dense size=sm no-caps'
+                                    ).classes('text-xs px-2 py-0').style(jts_style).tooltip(
+                                        tr('View JTS images') if not _is_jts_active else tr('Viewing JTS images')
+                                    )
+                                # External link to DPUL catalog page
+                                lib_viewer_jts = page.library_viewer_url or {}
+                                dpul_url = lib_viewer_jts.get('url', '')
+                                if dpul_url:
+                                    if not (_has_nli and _has_jts_images):
+                                        ui.button('JTS', on_click=lambda u=dpul_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                            'flat dense size=sm no-caps'
+                                        ).classes('text-xs px-2 py-0').style(jts_style).tooltip(tr('Open in Princeton Digital Library'))
+                                    ui.button(icon='open_in_new', on_click=lambda u=dpul_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                        'flat round dense size=xs'
+                                    ).style(f'min-width: 20px; min-height: 20px; color: {jts_color}; opacity: 0.8;').tooltip(tr('Open in Princeton Digital Library'))
 
                             if page.is_oxford and page.external_url:
                                 ui.button('Oxford', on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(

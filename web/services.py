@@ -75,6 +75,7 @@ class BrowsePage:
     image_source_info: Dict = field(default_factory=dict)  # {nli_fgp: bool, cambridge: bool, image_count: int}
     folio_images: List[Dict] = field(default_factory=list)  # Folio sequence from NliCrossrefService
     cambridge_images: List[Dict] = field(default_factory=list)  # Cambridge IIIF canvas URLs from nli_cache images_ext
+    external_provider: str = ''  # Which library provided images_ext: 'manchester', 'jts', or '' (Cambridge)
     physical_metadata: Optional[Dict] = None  # {material, num_folio, num_bifolio, size} from NLI crossref
     library_viewer_url: Optional[Dict] = None  # {url, label, library_abbrev} for holding library link
 
@@ -356,11 +357,14 @@ class GenizahService:
             except Exception as crossref_err:
                 print(f"NLI crossref enrichment error: {crossref_err}")
 
-            # Cambridge images from nli_cache (populated by enrich_metadata)
+            # External images from nli_cache (populated by enrich_metadata)
+            # images_ext may come from Cambridge, Manchester LUNA, or JTS Figgy
             cambridge_images = []
+            external_provider = ''
             if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
                 cached = state.meta_mgr.nli_cache.get(actual_sys_id, {})
                 cambridge_images = cached.get('images_ext', [])
+                external_provider = cached.get('external_provider', '')
 
             return BrowsePage(
                 uid=result.get('uid', ''),
@@ -389,6 +393,7 @@ class GenizahService:
                 image_source_info=image_source_info,
                 folio_images=folio_images,
                 cambridge_images=cambridge_images,
+                external_provider=external_provider,
                 physical_metadata=physical_metadata,
                 library_viewer_url=library_viewer_url,
             )
@@ -507,11 +512,13 @@ class GenizahService:
             except Exception as crossref_err:
                 print(f"NLI crossref enrichment error (by_fl): {crossref_err}")
 
-            # Cambridge images from nli_cache (populated by enrich_metadata)
+            # External images from nli_cache (populated by enrich_metadata)
             cambridge_images = []
+            external_provider = ''
             if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
                 cached = state.meta_mgr.nli_cache.get(actual_sys_id, {})
                 cambridge_images = cached.get('images_ext', [])
+                external_provider = cached.get('external_provider', '')
 
             return BrowsePage(
                 uid=result.get('uid', ''),
@@ -540,6 +547,7 @@ class GenizahService:
                 image_source_info=image_source_info,
                 folio_images=folio_images,
                 cambridge_images=cambridge_images,
+                external_provider=external_provider,
                 physical_metadata=physical_metadata,
                 library_viewer_url=library_viewer_url,
             )
