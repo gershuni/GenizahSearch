@@ -8762,7 +8762,13 @@ class GenizahGUI(QMainWindow):
         # Build FJMS domain and catalog HTML and prepend to enriched HTML
         fjms_catalog_html = self._build_fjms_catalog_html(sid, text_color)
         fjms_domain_html = self._build_fjms_domain_html(sid, text_color)
-        enriched_html = fjms_domain_html + fjms_catalog_html + enriched_html
+
+        # Build Phase 33 metadata HTML (bibliography, catalog refs, secondary metadata)
+        bibliography_html = self._build_bibliography_html(meta, text_color)
+        catalog_refs_html = self._build_catalog_refs_html(meta, text_color)
+        secondary_meta_html = self._build_secondary_metadata_html(meta, text_color)
+
+        enriched_html = fjms_domain_html + fjms_catalog_html + bibliography_html + catalog_refs_html + secondary_meta_html + enriched_html
 
         self._browse_enriched_html = enriched_html
 
@@ -9022,6 +9028,138 @@ class GenizahGUI(QMainWindow):
                         li += f" <span style='color:gray; font-size:0.85em;'>({source})</span>"
                     html += f"<li>{li}</li>"
             html += "</ul>"
+
+        html += "</div>"
+        return html
+
+    def _build_bibliography_html(self, meta, text_color):
+        """Build HTML for FIST bibliography references in extended info."""
+        bib_entries = meta.get('bibliography', [])
+        if not bib_entries:
+            return ""
+
+        html = (
+            f"<div style='color:{text_color}; padding: 10px; margin-bottom: 10px; "
+            "border-left: 3px solid #e67e22; text-align: left;' dir='ltr'>"
+            f"<p style='margin-top:0;'><b>{tr('Bibliography References')}</b>"
+            f" <span style='color:gray; font-size:0.85em;'>({len(bib_entries)})</span></p>"
+        )
+
+        html += "<ul style='margin-top:2px; padding-left:20px;'>"
+        for entry in bib_entries[:20]:  # Limit to 20 in desktop (no expansion widget)
+            # Format entry line
+            parts = []
+            author = entry.get('article_author_eng', '')
+            if author:
+                parts.append(f"<b>{author}</b>")
+            title = entry.get('running_title', '') or ''
+            year = entry.get('title_year', '') or ''
+            if title:
+                title_str = title
+                if year:
+                    title_str += f' ({year})'
+                parts.append(title_str)
+            # Page reference
+            page_parts = []
+            vol = entry.get('volume', '')
+            if vol and str(vol).strip():
+                page_parts.append(f'vol. {vol}')
+            mention_page = entry.get('mention_page', '')
+            from_page = entry.get('from_page', '')
+            to_page = entry.get('to_page', '')
+            if mention_page and str(mention_page).strip():
+                page_parts.append(f'p. {mention_page}')
+            elif from_page and str(from_page).strip():
+                if to_page and str(to_page).strip() and to_page != from_page:
+                    page_parts.append(f'pp. {from_page}-{to_page}')
+                else:
+                    page_parts.append(f'p. {from_page}')
+            if page_parts:
+                parts.append(', '.join(page_parts))
+
+            line = ', '.join(parts) if parts else '(Unknown reference)'
+
+            # Badges as inline spans
+            badges = []
+            mt = entry.get('mention_type', '')
+            if mt and mt != 'None':
+                color = '#9b59b6' if mt == 'Discussion' else '#3498db' if mt == 'Index' else '#95a5a6'
+                badges.append(f"<span style='color:{color}; font-size:0.85em;'>[{mt}]</span>")
+            tt = entry.get('transcription_type', '')
+            if tt and tt not in ('None', ''):
+                badges.append(f"<span style='color:#1abc9c; font-size:0.85em;'>[{tt}]</span>")
+            tl = entry.get('translation_type', '')
+            if tl and tl not in ('None', ''):
+                badges.append(f"<span style='color:#00bcd4; font-size:0.85em;'>[{tr('Translation')}]</span>")
+
+            badge_str = ' '.join(badges)
+            html += f"<li>{line} {badge_str}</li>"
+
+        html += "</ul>"
+
+        if len(bib_entries) > 20:
+            html += f"<p style='color:gray; font-size:0.85em;'>... and {len(bib_entries) - 20} more references</p>"
+
+        html += "</div>"
+        return html
+
+    def _build_catalog_refs_html(self, meta, text_color):
+        """Build HTML for FIST catalog cross-references in extended info."""
+        cat_refs = meta.get('catalog_refs', [])
+        if not cat_refs:
+            return ""
+
+        html = (
+            f"<div style='color:{text_color}; padding: 10px; margin-bottom: 10px; "
+            "border-left: 3px solid #1abc9c; text-align: left;' dir='ltr'>"
+            f"<p style='margin-top:0;'><b>{tr('Catalog References')}</b></p>"
+        )
+
+        html += "<ul style='margin-top:2px; padding-left:20px;'>"
+        for ref in cat_refs:
+            acronym = ref.get('cat_acronym', '')
+            entry = ref.get('catalog_entry', '')
+            display = f"{acronym} #{entry}" if entry else acronym
+            html += f"<li>{display}</li>"
+        html += "</ul></div>"
+        return html
+
+    def _build_secondary_metadata_html(self, meta, text_color):
+        """Build HTML for secondary metadata (source names, collection, storage)."""
+        source_names = meta.get('source_names', [])
+        coll_storage = meta.get('collection_storage')
+
+        if not source_names and not coll_storage:
+            return ""
+
+        html = (
+            f"<div style='color:{text_color}; padding: 5px 0; margin-bottom: 8px; "
+            "border-left: 3px solid #bdc3c7; text-align: left;' dir='ltr'>"
+        )
+
+        if source_names:
+            html += f"<p style='margin: 0 0 4px 10px;'><b>{tr('Scholarly Sources')}:</b> "
+            html += ', '.join(source_names) + "</p>"
+
+        if coll_storage:
+            parts = []
+            coll = coll_storage.get('collection_name', '')
+            if coll:
+                parts.append(coll)
+            storage = []
+            box = coll_storage.get('ob_box', '')
+            vol = coll_storage.get('ob_volume', '')
+            folio = coll_storage.get('ob_folio', '')
+            if box:
+                storage.append(f'Box {box}')
+            if vol:
+                storage.append(f'Vol. {vol}')
+            if folio:
+                storage.append(f'Fol. {folio}')
+            if storage:
+                parts.append(', '.join(storage))
+            if parts:
+                html += f"<p style='margin: 0 0 0 10px;'><b>{tr('Collection & Storage')}:</b> {' — '.join(parts)}</p>"
 
         html += "</div>"
         return html
