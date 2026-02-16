@@ -2714,6 +2714,23 @@ def _get_crossref_service():
 
 
 # ==============================================================================
+#  FJMS SIDECAR (lazy accessor for bibliography/catalog enrichment)
+# ==============================================================================
+_fjms_svc = None
+
+def _get_fjms_service():
+    """Lazy accessor for the FJMS enrichment sidecar service."""
+    global _fjms_svc
+    if _fjms_svc is None:
+        try:
+            from shared.fjms_service import FjmsService
+            _fjms_svc = FjmsService(thread_safe=True)
+        except Exception:
+            pass
+    return _fjms_svc
+
+
+# ==============================================================================
 #  METADATA MANAGER
 # ==============================================================================
 class MetadataManager:
@@ -3355,8 +3372,40 @@ class MetadataManager:
                 lib_url = crossref_svc.get_library_viewer_url(system_id)
                 if lib_url:
                     current_meta['library_viewer_url'] = lib_url
+
+                # Phase 33: Metadata enrichment from NLI crossref
+                # IsNotGenizah badge
+                current_meta['is_not_genizah'] = crossref_svc.get_is_not_genizah(system_id)
+
+                # Neubauer-Cowley catalog entry (Oxford manuscripts)
+                catalog_entry = crossref_svc.get_catalog_entry(system_id)
+                if catalog_entry:
+                    current_meta['catalog_entry'] = catalog_entry
+
+                # Collection and storage references
+                coll_storage = crossref_svc.get_collection_storage(system_id)
+                if coll_storage:
+                    current_meta['collection_storage'] = coll_storage
             except Exception as e:
                 LOGGER.debug(f"Folio enrichment error for {system_id}: {e}")
+
+        # Phase 33: FJMS bibliography and catalog references
+        fjms_svc = _get_fjms_service()
+        if fjms_svc and fjms_svc.is_available():
+            try:
+                bib_entries = fjms_svc.get_bibliography(system_id)
+                if bib_entries:
+                    current_meta['bibliography'] = bib_entries
+
+                cat_refs = fjms_svc.get_catalog_refs(system_id)
+                if cat_refs:
+                    current_meta['catalog_refs'] = cat_refs
+
+                source_names = fjms_svc.get_source_names(system_id)
+                if source_names:
+                    current_meta['source_names'] = source_names
+            except Exception as e:
+                LOGGER.debug(f"FJMS metadata enrichment error for {system_id}: {e}")
 
         # Update cache precedence (Enrichment overrides basic placeholders)
         if marc_data.get('english_title') and not current_meta.get('title'):
