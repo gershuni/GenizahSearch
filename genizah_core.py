@@ -3240,6 +3240,8 @@ class MetadataManager:
         ext_link = marc_data.get('external_iiif_link')
         if ext_link:
             current_meta['external_url'] = ext_link
+            if 'cudl.lib.cam.ac.uk' in ext_link.lower():
+                current_meta['external_provider'] = 'cambridge'
 
         # Lists for multiple sources
         images_nli = []
@@ -3257,6 +3259,7 @@ class MetadataManager:
                 if cam_manifest_url:
                     ext_link = cam_manifest_url
                     current_meta['external_url'] = ext_link
+                    current_meta['external_provider'] = 'cambridge'
                     LOGGER.info(f"Using local Cambridge manifest for {system_id} from crossref sidecar")
 
         # 2a-manchester: if no external link yet, try Manchester LUNA manifest via crossref sidecar

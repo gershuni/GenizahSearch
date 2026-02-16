@@ -1576,14 +1576,9 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_external.clicked.connect(self.open_external)
 
         # KTIV / NLI Viewer button (Phase 31)
-        self.btn_ktiv = QPushButton("KTIV")
-        self.btn_ktiv.setToolTip(tr("Open in NLI KTIV"))
+        self.btn_ktiv = QPushButton(tr("View on Ktiv"))
+        self.btn_ktiv.setToolTip(tr("View image in Ktiv"))
         self.btn_ktiv.setVisible(False)
-        self.btn_ktiv.setStyleSheet(
-            "QPushButton { border: 1.5px solid #4caf50; border-radius: 12px; "
-            "color: #4caf50; font-weight: 600; padding: 2px 8px; min-height: 24px; } "
-            "QPushButton:hover { background-color: #e8f5e9; }"
-        )
         self.btn_ktiv.clicked.connect(self._open_ktiv_viewer)
         self._ktiv_sys_id = None
 
@@ -1745,9 +1740,9 @@ class ManuscriptViewerWidget(QWidget):
 
         if self.external_url:
             if self.external_provider == "cambridge":
-                btn_label = "Cambridge"
+                btn_label = tr("Cambridge")
             elif self.external_provider == "oxford":
-                btn_label = "Oxford"
+                btn_label = tr("Oxford")
             elif self.external_provider == "manchester":
                 btn_label = "Manchester LUNA"
             elif self.external_provider == "jts":
@@ -4309,10 +4304,15 @@ class ResultDialog(QDialog):
 
         self.external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
         if self.external_url:
-            if oxford_part_id:
-                btn_label = "Oxford"
-            elif "cudl.lib.cam.ac.uk" in (self.external_url or "").lower():
-                btn_label = "Cambridge"
+            provider = meta.get('external_provider', '')
+            if oxford_part_id or provider == 'oxford':
+                btn_label = tr("Oxford")
+            elif provider == 'cambridge' or "cudl.lib.cam.ac.uk" in (self.external_url or "").lower():
+                btn_label = tr("Cambridge")
+            elif provider == 'manchester':
+                btn_label = "Manchester LUNA"
+            elif provider == 'jts':
+                btn_label = "Princeton Digital Library"
             else:
                 btn_label = tr("External Website")
             self.btn_external_link.setText(btn_label)
