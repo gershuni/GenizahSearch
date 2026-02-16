@@ -3320,6 +3320,16 @@ class MetadataManager:
                     system_id, normalized_shelfmark=norm_sm
                 )
                 current_meta['folio_images'] = crossref_svc.get_folio_images(system_id)
+
+                # Physical metadata (Phase 32: META-01, META-02)
+                phys_meta = crossref_svc.get_physical_metadata(system_id)
+                if phys_meta:
+                    current_meta['physical_metadata'] = phys_meta
+
+                # Library viewer URL (Phase 32: META-04)
+                lib_url = crossref_svc.get_library_viewer_url(system_id)
+                if lib_url:
+                    current_meta['library_viewer_url'] = lib_url
             except Exception as e:
                 LOGGER.debug(f"Folio enrichment error for {system_id}: {e}")
 
