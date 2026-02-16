@@ -156,16 +156,27 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   4. Fragment relationships display in both web and desktop apps
 **Plans**: TBD
 
-### Phase 34: Library IIIF Fallback
-**Goal**: Users can view images for manuscripts from JTS, Manchester, and British Library even when NLI/FGP images are unavailable, by falling back to library-specific IIIF endpoints
-**Depends on**: Phase 30
+### Phase 34: Library IIIF Integration (Manchester + JTS/Princeton)
+**Goal**: Users see high-res images and rich metadata from Manchester LUNA and JTS/Princeton Figgy directly in the app, with detail page links instead of search links, by pre-importing library-specific identifiers into the sidecar
+**Depends on**: Phase 29, Phase 30
 **Requirements**: IMG-05
 **Success Criteria** (what must be TRUE):
-  1. When a JTS manuscript has no FGP image, the system attempts to load images from Princeton Figgy IIIF
-  2. When a Manchester manuscript has no FGP image, the system attempts to load images from Manchester LUNA/MDC IIIF
-  3. When a British Library manuscript has no FGP image, the system attempts to load images from the BL IIIF viewer
-  4. Fallback is transparent to the user -- images appear in the same viewer regardless of source
+  1. Manchester LUNA internal IDs (~29K images) are pre-imported into sidecar by paginating the LUNA fetchMediaSearch API using ImageSourceName from crossref
+  2. JTS/Princeton ARK IDs and Figgy manifest URLs (~43K manuscripts) are pre-imported into sidecar by searching DPUL catalog API per shelfmark
+  3. Manchester library links open the LUNA detail page (not search) showing rich metadata and high-res viewer
+  4. JTS library links open the DPUL catalog page (not search) with embedded IIIF viewer
+  5. Manchester IIIF manifests (from LUNA) available as image source in both apps' viewers alongside NLI
+  6. JTS/Princeton IIIF manifests (from Figgy) available as image source in both apps' viewers alongside NLI
+  7. BL links remain as searcharchives.bl.uk search (BL IIIF API still down from cyber attack -- revisit when recovered)
 **Plans**: TBD
+
+**API Discovery (confirmed live 2026-02-16):**
+- Manchester LUNA: `luna.manchester.ac.uk/luna/servlet/as/fetchMediaSearch?fullData=false&q={ImageSourceName}&lc=ManchesterDev~95~2` → returns `identity` field = LUNA ID
+- Manchester IIIF: `luna.manchester.ac.uk/luna/servlet/iiif/m/{luna_id}/manifest` → standard IIIF v2
+- Manchester detail: `luna.manchester.ac.uk/luna/servlet/detail/{luna_id}`
+- JTS/Princeton DPUL: `dpul.princeton.edu/cairo_geniza/catalog.json?q={shelfmark}` → returns ARK ID
+- JTS/Princeton item: `dpul.princeton.edu/cairo_geniza/catalog/{ark_id}.json` → contains `content_metadata_iiif_manifest_field_ssi` = Figgy manifest URL
+- JTS/Princeton IIIF: `figgy.princeton.edu/concern/scanned_resources/{uuid}/manifest` → standard IIIF v2, CC0
 
 ## Progress
 

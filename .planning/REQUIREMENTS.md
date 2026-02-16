@@ -19,7 +19,7 @@ Import NLI crossreference data (815K image-level records) and Cambridge IIIF man
 - [ ] **IMG-02**: Cambridge manuscripts load images via local CUDL IIIF manifest URLs (bypass NLI entirely for 141K records)
 - [ ] **IMG-03**: Image availability indicator on browse page showing which digital image sources exist for the current manuscript (both apps)
 - [ ] **IMG-04**: Page-level image navigation using crossref ImageName ordering (leaf/folio/side sequences)
-- [ ] **IMG-05**: Library-specific IIIF fallback for JTS (Princeton Figgy), Manchester (LUNA/MDC), and British Library IIIF as alternative image sources when NLI/FGP images unavailable
+- [ ] **IMG-05**: Library-specific IIIF integration for Manchester (LUNA IDs pre-imported, IIIF manifests as image source, detail page links) and JTS/Princeton (DPUL ARKs + Figgy manifest URLs pre-imported, IIIF manifests as image source, catalog page links). BL deferred until API recovers from cyber attack.
 
 ### Metadata Display
 
