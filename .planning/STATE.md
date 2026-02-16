@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 33 of 34 (Metadata Enrichment)
-Plan: 4 of 4 in current phase (all complete)
-Status: Phase 33 complete
-Last activity: 2026-02-16 -- Completed 33-03 (web browse: bibliography, catalog refs, badges, scholarly metadata)
+Plan: 5 of 5 in current phase (all complete)
+Status: Phase 33 complete (including gap closure plan 05)
+Last activity: 2026-02-16 -- Completed 33-05 (desktop Oxford Part enrichment thread gap closure)
 
 Progress: [████████████████████] 97%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 98 (across all milestones)
+- Total plans completed: 99 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.7 hours
 
@@ -33,7 +33,7 @@ Progress: [████████████████████] 97%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
-| v5.9.0 | 29-34 | 13 | 30 min |
+| v5.9.0 | 29-34 | 14 | 32 min |
 | Phase 31 P01 | 5min | 2 tasks | 5 files |
 | Phase 31 P02 | 7min | 2 tasks | 4 files |
 | Phase 31 P03 | 3min | 2 tasks | 3 files |
@@ -49,6 +49,7 @@ Progress: [████████████████████] 97%
 | Phase 33 P02 | 6min | 2 tasks | 5 files |
 | Phase 33 P03 | 8min | 2 tasks | 1 file |
 | Phase 33 P04 | 7min | 2 tasks | 2 files |
+| Phase 33 P05 | 2min | 1 task | 1 file |
 
 ## Accumulated Context
 
@@ -103,6 +104,7 @@ See PROJECT.md Key Decisions table for full history.
 - 33-03: _render_bib_entry helper avoids code duplication between initial and expanded entry rendering
 - 33-04: Desktop bibliography limited to 20 entries (no expansion widget), str() wrapping for SQLite numeric page/volume fields
 - 33-04: Desktop metadata section ordering: domains (purple) > catalog (purple) > bibliography (orange) > catalog refs (teal) > secondary (grey) > KTI/Oxford
+- 33-05: Gap closure -- _browse_load_part needed EnrichMetadataThread startup; on_browse_enriched_loaded already handled Part case correctly
 
 ### Blockers/Concerns
 
@@ -119,6 +121,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 33-03-PLAN.md (web browse: bibliography, catalog refs, badges, scholarly metadata)
+Stopped at: Completed 33-05-PLAN.md (desktop Oxford Part enrichment thread gap closure)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 all 4 plans complete -- sidecar export, service layer, web UI, desktop UI all done.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 all 5 plans complete -- sidecar export, service layer, web UI, desktop UI, Oxford Part gap closure all done.
