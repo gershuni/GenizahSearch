@@ -89,7 +89,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 - [x] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators (completed 2026-02-15)
 - [x] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page (completed 2026-02-16)
 - [ ] **Phase 33: Fragment Relationships** - NLI PartOf and See cross-references in Related Fragments panel
-- [ ] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources
+- [x] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources (completed 2026-02-16)
 
 ## Phase Details
 
@@ -168,7 +168,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   5. Manchester IIIF manifests (from LUNA) available as image source in both apps' viewers alongside NLI
   6. JTS/Princeton IIIF manifests (from Figgy) available as image source in both apps' viewers alongside NLI
   7. BL links remain as searcharchives.bl.uk search (BL IIIF API still down from cyber attack -- revisit when recovered)
-**Plans:** 5 plans
+**Plans:** 5/5 plans complete
 Plans:
 - [ ] 34-01-PLAN.md -- Manchester LUNA bulk import script + sidecar table
 - [ ] 34-02-PLAN.md -- JTS/Princeton DPUL import script + sidecar table
@@ -204,7 +204,7 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
 | 32. Metadata Display | v5.9.0 | Complete    | 2026-02-16 | - |
 | 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
-| 34. Library IIIF Fallback | v5.9.0 | 0/TBD | Not started | - |
+| 34. Library IIIF Fallback | v5.9.0 | Complete    | 2026-02-16 | - |
 
 ---
 *Roadmap created: 2026-02-09*
