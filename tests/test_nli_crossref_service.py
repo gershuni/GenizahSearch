@@ -147,6 +147,26 @@ def test_db(tmp_path):
         ],
     )
 
+    # Additional test data for Phase 33 metadata enrichment tests
+    # A005: IsNotGenizah='True', has CatalogEntry and CollectionName/OBBox/OBVolume/OBFolio
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("Oxford", "Oxford", "Oxford", "אוקספורד", "Bodleian",
+         "MS Heb c 57.1", "INV005", "Box 12", "Vol 3", "Fol 45",
+         "A005", "NC", "Neubauer - Cowley 2603.1",
+         "FGP050", "5050", "MS_Heb_c_57__L1F0B0S1", "NLI", "", "", "",
+         "2", "", "Parchment", "20x25", "True"),
+    )
+    # A006: IsNotGenizah='False' (not flagged), has CatalogEntry but empty collection storage
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("Oxford", "Oxford", "Oxford", "אוקספורד", "Bodleian",
+         "MS Heb d 20.5", "INV006", "", "", "",
+         "A006", "NC", "Neubauer - Cowley 1500",
+         "FGP060", "6060", "MS_Heb_d_20__L1F0B0S1", "NLI", "", "", "",
+         "1", "", "Paper", "15x20", "False"),
+    )
+
     # Create indexes (matching import script)
     conn.execute("CREATE INDEX idx_nli_alma ON nli_images(NLI_AlmaId)")
     conn.execute("CREATE INDEX idx_nli_fgp ON nli_images(FGPImageNumberId)")
@@ -646,6 +666,81 @@ def test_get_image_sources_jts_false(service):
     assert sources["jts"] is False
 
 
+# ── IsNotGenizah tests ────────────────────────────────────────────
+
+
+def test_get_is_not_genizah_true(service):
+    """Returns True for manuscript flagged as IsNotGenizah='True'."""
+    assert service.get_is_not_genizah("A005") is True
+
+
+def test_get_is_not_genizah_false(service):
+    """Returns False for manuscript with IsNotGenizah='False' or empty."""
+    # A006 has IsNotGenizah='False'
+    assert service.get_is_not_genizah("A006") is False
+    # A001 has IsNotGenizah='' (empty)
+    assert service.get_is_not_genizah("A001") is False
+
+
+def test_get_is_not_genizah_no_data(service):
+    """Returns False for non-existent sys_id."""
+    assert service.get_is_not_genizah("NONEXISTENT") is False
+
+
+# ── Catalog entry tests ──────────────────────────────────────────
+
+
+def test_get_catalog_entry(service):
+    """Returns CatalogEntry string for manuscript with Neubauer-Cowley reference."""
+    entry = service.get_catalog_entry("A005")
+    assert entry == "Neubauer - Cowley 2603.1"
+
+
+def test_get_catalog_entry_empty(service):
+    """Returns None for non-existent sys_id."""
+    assert service.get_catalog_entry("NONEXISTENT") is None
+
+
+def test_get_catalog_entry_numeric_only(service):
+    """Returns numeric CatalogEntry values as-is (they are stored as TEXT)."""
+    # A001 has CatalogEntry="1"
+    entry = service.get_catalog_entry("A001")
+    assert entry == "1"
+
+
+# ── Collection storage tests ─────────────────────────────────────
+
+
+def test_get_collection_storage(service):
+    """Returns dict with collection/storage info for manuscript with data."""
+    storage = service.get_collection_storage("A005")
+    assert storage is not None
+    assert storage["collection_name"] == "Bodleian"
+    assert storage["ob_box"] == "Box 12"
+    assert storage["ob_volume"] == "Vol 3"
+    assert storage["ob_folio"] == "Fol 45"
+
+
+def test_get_collection_storage_empty(service):
+    """Returns None when no rows match the storage criteria."""
+    # No rows for NONEXISTENT -- same behavior as truly empty
+    storage = service.get_collection_storage("NONEXISTENT")
+    assert storage is None
+
+
+def test_get_collection_storage_no_data(service):
+    """Returns None for non-existent sys_id."""
+    assert service.get_collection_storage("NONEXISTENT") is None
+
+
+def test_get_collection_storage_partial(service):
+    """Returns dict even when only CollectionName is populated."""
+    # A001 has CollectionName="Taylor-Schechter" but OBBox/OBVolume/OBFolio all empty
+    storage = service.get_collection_storage("A001")
+    assert storage is not None
+    assert storage["collection_name"] == "Taylor-Schechter"
+
+
 # ── Graceful degradation tests ─────────────────────────────────────
 
 
@@ -664,6 +759,10 @@ def test_all_methods_return_empty_when_unavailable():
     assert svc.get_part_of("x") == []
     assert svc.get_see_references("x") == []
     assert svc.get_bifolio_partners("x") == []
+    # Phase 33 metadata enrichment methods
+    assert svc.get_is_not_genizah("x") is False
+    assert svc.get_catalog_entry("x") is None
+    assert svc.get_collection_storage("x") is None
     # Manchester and JTS methods
     assert svc.get_manchester_luna_id("x") is None
     assert svc.get_manchester_manifest_url("x") is None

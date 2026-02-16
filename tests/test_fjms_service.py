@@ -120,10 +120,82 @@ def test_db(tmp_path):
     conn.executemany(
         "INSERT INTO meta (key, value) VALUES (?, ?)",
         [
-            ("version", "1.0.0"),
+            ("version", "2.0.0"),
             ("created", "2026-02-12T00:00:00Z"),
             ("source", "FIST.db"),
         ],
+    )
+
+    # Create bibliography table (Phase 33 export)
+    conn.execute("""
+        CREATE TABLE bibliography (
+            AlmaId TEXT NOT NULL,
+            RunningTitle TEXT,
+            TitleYear TEXT,
+            TitleAcronym TEXT,
+            MentionPage TEXT,
+            FromPage TEXT,
+            ToPage TEXT,
+            Volume TEXT,
+            MentionType TEXT,
+            TranscriptionType TEXT,
+            TranslationType TEXT,
+            ArticleName TEXT,
+            ArticleAuthorEng TEXT,
+            ArticleAuthorHeb TEXT,
+            CatalogAcronym TEXT
+        )
+    """)
+
+    # Insert test bibliography data -- Discussion should sort first
+    conn.executemany(
+        "INSERT INTO bibliography VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("990001", "Goitein Med Soc", "1967", "GMS", "123", "120", "130", "I",
+             "Discussion", "", "", "The India Trade", "S.D. Goitein", "גויטיין", ""),
+            ("990001", "Gil Palestine", "1983", "GP", "456", "450", "460", "II",
+             "Mentioned", "", "", "", "Moshe Gil", "משה גיל", ""),
+            ("990001", "Ashtor Prix", "1969", "AP", "78", "", "", "",
+             "Transcription", "Full", "", "Price History", "E. Ashtor", "אשתור", ""),
+        ],
+    )
+
+    # Create catalog_refs table (Phase 33 export)
+    conn.execute("""
+        CREATE TABLE catalog_refs (
+            AlmaId TEXT NOT NULL,
+            CatAcronym TEXT,
+            CatalogAuthor TEXT,
+            CatalogTitle TEXT,
+            CatalogEntry TEXT,
+            IsSource TEXT
+        )
+    """)
+
+    # Insert test catalog_refs data
+    conn.executemany(
+        "INSERT INTO catalog_refs VALUES (?,?,?,?,?,?)",
+        [
+            ("990001", "GMS", "S.D. Goitein", "A Mediterranean Society", "I, 123", "1"),
+            ("990001", "GP", "Moshe Gil", "Palestine During the First Muslim Period", "456", "0"),
+        ],
+    )
+
+    # Add SourceName columns to catalog table for get_source_names test
+    conn.execute("ALTER TABLE catalog ADD COLUMN SourceName TEXT")
+    conn.execute("ALTER TABLE catalog ADD COLUMN SourceNameHeb TEXT")
+    # Update existing rows with source names
+    conn.execute("UPDATE catalog SET SourceName = 'PGPID', SourceNameHeb = '' WHERE AlmaId = '990001'")
+    conn.execute("UPDATE catalog SET SourceName = 'Catalogs', SourceNameHeb = '' WHERE AlmaId = '990002'")
+    # Insert additional row for 990001 with a generic source name
+    conn.execute(
+        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("990001", "Title 2", "", "", "", "", "", "", "", "", "Institution", ""),
+    )
+    # Insert additional row for 990001 with another scholarly source
+    conn.execute(
+        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("990001", "Title 3", "", "", "", "", "", "", "", "", "FGP", ""),
     )
 
     conn.commit()
@@ -159,7 +231,7 @@ def test_service_unavailable_with_missing_db():
 
 def test_get_version(service):
     """get_version returns the stored version string."""
-    assert service.get_version() == "1.0.0"
+    assert service.get_version() == "2.0.0"
 
 
 def test_get_version_unavailable():
@@ -398,7 +470,7 @@ def test_thread_safe_mode(test_db):
     assert svc.is_available() is True
     # Verify queries work in thread-safe mode
     version = svc.get_version()
-    assert version == "1.0.0"
+    assert version == "2.0.0"
     svc.close()
 
 
@@ -435,6 +507,112 @@ def test_close_idempotent(test_db):
     svc = FjmsService(db_path=test_db)
     svc.close()
     svc.close()  # Should not raise
+
+
+# ── Bibliography tests ───────────────────────────────────────────
+
+
+def test_get_bibliography_returns_list(service):
+    """get_bibliography returns correctly shaped dicts with Discussion first."""
+    bib = service.get_bibliography("990001")
+    assert len(bib) == 3
+    # Discussion should sort first
+    assert bib[0]["mention_type"] == "Discussion"
+    assert bib[1]["mention_type"] == "Mentioned"
+    assert bib[2]["mention_type"] == "Transcription"
+    # Check dict keys
+    expected_keys = {
+        "running_title", "title_year", "title_acronym", "mention_page",
+        "from_page", "to_page", "volume", "mention_type",
+        "transcription_type", "translation_type", "article_name",
+        "article_author_eng", "article_author_heb", "catalog_acronym",
+    }
+    for entry in bib:
+        assert set(entry.keys()) == expected_keys
+    # Verify specific values
+    assert bib[0]["running_title"] == "Goitein Med Soc"
+    assert bib[0]["title_year"] == "1967"
+    assert bib[0]["article_author_eng"] == "S.D. Goitein"
+
+
+def test_get_bibliography_empty(service):
+    """get_bibliography returns [] for non-existent AlmaId."""
+    assert service.get_bibliography("999999") == []
+
+
+def test_get_bibliography_missing_table(tmp_path):
+    """get_bibliography returns [] when bibliography table doesn't exist (old sidecar)."""
+    db_path = str(tmp_path / "old_sidecar.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO meta VALUES ('version', '1.0.0')")
+    conn.commit()
+    conn.close()
+    svc = FjmsService(db_path=db_path)
+    assert svc.get_bibliography("990001") == []
+    svc.close()
+
+
+# ── Catalog refs tests ──────────────────────────────────────────
+
+
+def test_get_catalog_refs_returns_list(service):
+    """get_catalog_refs returns correctly shaped dicts for a known AlmaId."""
+    refs = service.get_catalog_refs("990001")
+    assert len(refs) == 2
+    expected_keys = {"cat_acronym", "catalog_author", "catalog_title", "catalog_entry", "is_source"}
+    for ref in refs:
+        assert set(ref.keys()) == expected_keys
+    # Check ordering by CatAcronym
+    assert refs[0]["cat_acronym"] == "GMS"
+    assert refs[1]["cat_acronym"] == "GP"
+    # Verify specific values
+    assert refs[0]["catalog_author"] == "S.D. Goitein"
+    assert refs[0]["catalog_entry"] == "I, 123"
+    assert refs[0]["is_source"] == "1"
+
+
+def test_get_catalog_refs_empty(service):
+    """get_catalog_refs returns [] for non-existent AlmaId."""
+    assert service.get_catalog_refs("999999") == []
+
+
+def test_get_catalog_refs_missing_table(tmp_path):
+    """get_catalog_refs returns [] when catalog_refs table doesn't exist."""
+    db_path = str(tmp_path / "old_sidecar2.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO meta VALUES ('version', '1.0.0')")
+    conn.commit()
+    conn.close()
+    svc = FjmsService(db_path=db_path)
+    assert svc.get_catalog_refs("990001") == []
+    svc.close()
+
+
+# ── Source names tests ──────────────────────────────────────────
+
+
+def test_get_source_names_filters_generic(service):
+    """get_source_names returns only scholarly sources, filtering out generic labels."""
+    names = service.get_source_names("990001")
+    # 990001 has SourceName='PGPID', 'Institution' (generic), and 'FGP'
+    assert "PGPID" in names
+    assert "FGP" in names
+    assert "Institution" not in names
+    assert "Catalogs" not in names
+
+
+def test_get_source_names_all_generic(service):
+    """get_source_names returns [] when only generic source names exist."""
+    # 990002 has SourceName='Catalogs' which is generic
+    names = service.get_source_names("990002")
+    assert names == []
+
+
+def test_get_source_names_empty(service):
+    """get_source_names returns [] for non-existent AlmaId."""
+    assert service.get_source_names("999999") == []
 
 
 # ── Web shim import test ─────────────────────────────────────────

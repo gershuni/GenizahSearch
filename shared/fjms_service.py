@@ -513,6 +513,130 @@ class FjmsService:
             logger.error(f"FjmsService.get_catalog_records error for {sys_id}: {e}")
             return []
 
+    # ── Bibliography & Catalog Refs (Phase 33: META-03) ─────────────
+
+    # Generic source names to filter out from get_source_names()
+    _GENERIC_SOURCE_NAMES = frozenset({'Catalogs', 'Institution', 'Collection', 'Other'})
+
+    def get_bibliography(self, sys_id: str) -> list[dict]:
+        """
+        Get bibliography entries for a manuscript.
+
+        Returns denormalized bibliography rows with resolved author/title/mention
+        information, ordered with Discussion entries first, then Mentioned, then others.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of dicts with keys: running_title, title_year, title_acronym,
+            mention_page, from_page, to_page, volume, mention_type,
+            transcription_type, translation_type, article_name,
+            article_author_eng, article_author_heb, catalog_acronym.
+            Returns [] if conn is None, sys_id not found, or table missing.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM bibliography WHERE AlmaId = ? "
+                "ORDER BY CASE MentionType "
+                "WHEN 'Discussion' THEN 0 "
+                "WHEN 'Mentioned' THEN 1 "
+                "ELSE 2 END, RunningTitle",
+                (sys_id,),
+            )
+            return [
+                {
+                    "running_title": row["RunningTitle"],
+                    "title_year": row["TitleYear"],
+                    "title_acronym": row["TitleAcronym"],
+                    "mention_page": row["MentionPage"],
+                    "from_page": row["FromPage"],
+                    "to_page": row["ToPage"],
+                    "volume": row["Volume"],
+                    "mention_type": row["MentionType"],
+                    "transcription_type": row["TranscriptionType"],
+                    "translation_type": row["TranslationType"],
+                    "article_name": row["ArticleName"],
+                    "article_author_eng": row["ArticleAuthorEng"],
+                    "article_author_heb": row["ArticleAuthorHeb"],
+                    "catalog_acronym": row["CatalogAcronym"],
+                }
+                for row in cursor
+            ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_bibliography error for {sys_id}: {e}")
+            return []
+
+    def get_catalog_refs(self, sys_id: str) -> list[dict]:
+        """
+        Get catalog cross-references for a manuscript.
+
+        Returns entries linking the manuscript to scholarly catalogs
+        (e.g., Goitein Med Soc, Gil Palestine).
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of dicts with keys: cat_acronym, catalog_author,
+            catalog_title, catalog_entry, is_source.
+            Returns [] if conn is None, sys_id not found, or table missing.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM catalog_refs WHERE AlmaId = ? "
+                "ORDER BY CatAcronym, CatalogEntry",
+                (sys_id,),
+            )
+            return [
+                {
+                    "cat_acronym": row["CatAcronym"],
+                    "catalog_author": row["CatalogAuthor"],
+                    "catalog_title": row["CatalogTitle"],
+                    "catalog_entry": row["CatalogEntry"],
+                    "is_source": row["IsSource"],
+                }
+                for row in cursor
+            ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_catalog_refs error for {sys_id}: {e}")
+            return []
+
+    def get_source_names(self, sys_id: str) -> list[str]:
+        """
+        Get distinct scholarly source names for a manuscript.
+
+        Queries the catalog table for SourceName values, filtering out
+        generic labels like 'Catalogs', 'Institution', 'Collection', 'Other'.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of non-generic SourceName strings.
+            Returns [] if conn is None, sys_id not found, or table missing.
+        """
+        if self._conn is None:
+            return []
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT SourceName FROM catalog "
+                "WHERE AlmaId = ? AND SourceName IS NOT NULL AND SourceName != ''",
+                (sys_id,),
+            )
+            return [
+                row["SourceName"]
+                for row in cursor
+                if row["SourceName"] not in self._GENERIC_SOURCE_NAMES
+            ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_source_names error for {sys_id}: {e}")
+            return []
+
     def close(self):
         """Close the database connection if open."""
         if self._conn is not None:

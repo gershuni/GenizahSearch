@@ -563,6 +563,94 @@ class NliCrossrefService:
             logger.debug(f"NliCrossrefService.get_jts_dpul_url error: {e}")
             return None
 
+    # ── Metadata Enrichment (Phase 33: META-03) ─────────────────────
+
+    def get_is_not_genizah(self, sys_id: str) -> bool:
+        """
+        Check if a manuscript is flagged as not being from the Genizah.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            True if any row for this sys_id has IsNotGenizah='True', False otherwise.
+        """
+        if self._conn is None:
+            return False
+        try:
+            cursor = self._conn.execute(
+                "SELECT 1 FROM nli_images WHERE NLI_AlmaId = ? "
+                "AND IsNotGenizah = 'True' LIMIT 1",
+                (sys_id,),
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"NliCrossrefService.get_is_not_genizah error for {sys_id}: {e}")
+            return False
+
+    def get_catalog_entry(self, sys_id: str) -> Optional[str]:
+        """
+        Get catalog entry reference (e.g., Neubauer-Cowley) for a manuscript.
+
+        All values are Oxford Neubauer-Cowley references from the NLI crossref data.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            Catalog entry string (e.g., 'Neubauer - Cowley 2603.1') or None.
+        """
+        if self._conn is None:
+            return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT CatalogEntry FROM nli_images "
+                "WHERE NLI_AlmaId = ? AND CatalogEntry != '' LIMIT 1",
+                (sys_id,),
+            )
+            row = cursor.fetchone()
+            return row["CatalogEntry"] if row else None
+        except Exception as e:
+            logger.error(f"NliCrossrefService.get_catalog_entry error for {sys_id}: {e}")
+            return None
+
+    def get_collection_storage(self, sys_id: str) -> Optional[dict]:
+        """
+        Get collection and physical storage references for a manuscript.
+
+        Returns collection name and original box/volume/folio storage information
+        from the NLI crossref data.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            Dict with keys: collection_name, ob_box, ob_volume, ob_folio.
+            Returns None if no non-empty data found.
+        """
+        if self._conn is None:
+            return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT CollectionName, OBBox, OBVolume, OBFolio "
+                "FROM nli_images WHERE NLI_AlmaId = ? "
+                "AND (CollectionName != '' OR OBBox != '' OR OBVolume != '' OR OBFolio != '') "
+                "LIMIT 1",
+                (sys_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return {
+                "collection_name": row["CollectionName"],
+                "ob_box": row["OBBox"],
+                "ob_volume": row["OBVolume"],
+                "ob_folio": row["OBFolio"],
+            }
+        except Exception as e:
+            logger.error(f"NliCrossrefService.get_collection_storage error for {sys_id}: {e}")
+            return None
+
     # ── Relationships (Phase 33: REL-01, REL-02) ────────────────────
 
     def get_part_of(self, sys_id: str) -> list[str]:
