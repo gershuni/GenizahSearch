@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 34 of 34 (Library IIIF Integration)
-Plan: 2 of 5 in current phase
-Status: Executing Phase 34 -- Plan 02 complete
-Last activity: 2026-02-16 -- Completed 34-02 (JTS/Princeton DPUL import)
+Plan: 3 of 5 in current phase
+Status: Executing Phase 34 -- Plan 03 complete
+Last activity: 2026-02-16 -- Completed 34-03 (Manchester/JTS service integration)
 
 Progress: [████████████████░░░░] 80%
 
@@ -42,6 +42,7 @@ Progress: [████████████████░░░░] 80%
 | Phase 32 P03 | 1min | 2 tasks | 2 files |
 | Phase 34 P01 | 7min | 2 tasks | 1 file |
 | Phase 34 P02 | 19min | 2 tasks | 1 file |
+| Phase 34 P03 | 3min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,9 @@ See PROJECT.md Key Decisions table for full history.
 - 34-02: Per-shelfmark DPUL search, not per-base -- each leaf has unique ARK ID in DPUL
 - 34-02: Exact quoted search (q="shelfmark") required for precise DPUL matching
 - 34-02: 90.6% match rate on 500 JTS shelfmarks; 453 with Figgy manifest URLs
+- 34-03: Manchester detail URL via luna.manchester.ac.uk/luna/servlet/detail/{luna_id}, JTS via dpul_url from sidecar
+- 34-03: external_provider key ('manchester'/'jts') set in enrich_metadata for UI labeling
+- 34-03: JTS shelfmark lookup tries full then base (strip .N suffix); Manchester uses ImageSourceName JOIN
 
 ### Blockers/Concerns
 
@@ -94,6 +98,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 34-02-PLAN.md (JTS/Princeton DPUL import)
+Stopped at: Completed 34-03-PLAN.md (Manchester/JTS service integration)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 34 in progress -- 2 of 5 plans complete. JTS DPUL data partially imported (453 rows), full import resumable via --resume flag.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 34 in progress -- 3 of 5 plans complete. Service layer fully integrated with Manchester LUNA and JTS DPUL sidecar data.
