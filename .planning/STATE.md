@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 ## Current Position
 
-Phase: 34 of 34 (Library IIIF Integration)
-Plan: 5 of 5 in current phase
-Status: Phase 34 complete -- all 5 plans executed
-Last activity: 2026-02-16 -- Completed 34-05 (Desktop ManuscriptViewer Manchester/JTS)
+Phase: 33 of 34 (Metadata Enrichment)
+Plan: 1 of 4 in current phase
+Status: Executing Phase 33 plans
+Last activity: 2026-02-16 -- Completed 33-01 (FIST data export: bibliography 542K, catalog_refs 64K, 3 ref tables)
 
-Progress: [████████████████████] 100%
+Progress: [██████████████████░░] 92%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 95 (across all milestones)
+- Total plans completed: 96 (across all milestones)
 - Average duration: ~8 min
-- Total execution time: ~9.6 hours
+- Total execution time: ~9.7 hours
 
 **By Milestone:**
 
@@ -45,6 +45,7 @@ Progress: [████████████████████] 100%
 | Phase 34 P03 | 3min | 2 tasks | 3 files |
 | Phase 34 P04 | 4min | 2 tasks | 3 files |
 | Phase 34 P05 | 2min | 2 tasks | 1 file |
+| Phase 33 P01 | 8min | 1 task | 1 file |
 
 ## Accumulated Context
 
@@ -88,6 +89,9 @@ See PROJECT.md Key Decisions table for full history.
 - 34-04: Manchester pink (#e91e63), JTS orange (#ff9800) chip colors; toggle when NLI + external, link-only when single source
 - 34-05: library_viewer_url preferred over raw manifest URL for Manchester/JTS external button in desktop
 - 34-05: external_provider explicit key checked first in _detect_external_provider, URL patterns as fallback
+- 33-01: All bibliography JOINs denormalized at export time -- 542K rows with resolved authors, titles, mention types for single-table lookups
+- 33-01: ABS(MentionTypeCode) handles negative FIST codes; SELECT DISTINCT deduplicates join chain (542K actual vs 733K raw)
+- 33-01: Graceful locked-DB: skip delete, overwrite tables in-place when web app holds sidecar open
 
 ### Blockers/Concerns
 
@@ -104,6 +108,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 34-05-PLAN.md (Desktop ManuscriptViewer Manchester/JTS)
+Stopped at: Completed 33-01-PLAN.md (FIST data export)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 34 complete -- all 5 plans executed. Manchester LUNA and JTS/Princeton IIIF fully integrated in service layer, web app, and desktop app.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 plan 01 complete -- fjms_enrichment.db v2.0.0 with bibliography, catalog_refs, ref_catalogs, ref_titles, ref_authors tables. Next: 33-02 (service layer).
