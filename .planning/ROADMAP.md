@@ -86,8 +86,8 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 
 - [x] **Phase 29: Data Infrastructure** - Import NLI crossref and Cambridge IIIF into sidecar with shared service layer (completed 2026-02-15)
 - [x] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL (completed 2026-02-15)
-- [x] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators (completed 2026-02-15)
-- [x] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page (completed 2026-02-16)
+- [x] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators (completed 2026-02-15)
+- [x] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page (completed 2026-02-16)
 - [ ] **Phase 33: Fragment Relationships** - NLI PartOf and See cross-references in Related Fragments panel
 - [ ] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources
 
@@ -129,7 +129,7 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 **Plans:** 3/3 plans complete
   - [x] 31-01-PLAN.md -- Folio label parsing in service layer + web browse page folio navigation and source indicators
   - [x] 31-02-PLAN.md -- Desktop browse tab folio navigation and source indicators
-  - [ ] 31-03-PLAN.md -- Gap closure: web source switching between NLI and Cambridge images
+  - [x] 31-03-PLAN.md -- Gap closure: web source switching between NLI and Cambridge images
 
 ### Phase 32: Metadata Display
 **Goal**: Users see physical manuscript metadata and can navigate to external catalog pages for the manuscripts they are viewing
@@ -140,9 +140,10 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   2. A clickable NLI catalog link (constructed from NLI_AlmaId) on the browse page opens the NLI KTIV viewer for the manuscript
   3. A clickable link to the manuscript's holding library digital collection (CUDL, Princeton DPUL, Manchester LUNA, BL viewer) appears on the browse page
   4. All metadata and links display in both web and desktop apps
-**Plans:** 2/2 plans complete
-  - [ ] 32-01-PLAN.md -- Service layer additions (library viewer URL, physical metadata enrichment) + web browse metadata display
-  - [ ] 32-02-PLAN.md -- Desktop browse extended info panel with physical metadata and library links
+**Plans:** 3 plans
+  - [x] 32-01-PLAN.md -- Service layer additions (library viewer URL, physical metadata enrichment) + web browse metadata display
+  - [x] 32-02-PLAN.md -- Desktop browse extended info panel with physical metadata and library links
+  - [ ] 32-03-PLAN.md -- Gap closure: fix broken library URL patterns for Manchester, BL, JTS
 
 ### Phase 33: Fragment Relationships
 **Goal**: Users discover related manuscripts through NLI PartOf groupings and See cross-references alongside existing PGP and FJMS joins
@@ -184,10 +185,10 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 29. Data Infrastructure | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
-| 32. Metadata Display | v5.9.0 | Complete    | 2026-02-16 | - |
+| 32. Metadata Display | v5.9.0 | 2/3 | Gap closure | - |
 | 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
 | 34. Library IIIF Fallback | v5.9.0 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-15 after Phase 31 complete*
+*Last updated: 2026-02-16 after Phase 32 gap closure plan created*
