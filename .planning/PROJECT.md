@@ -53,19 +53,18 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Catalog enrichment display (titles, authors, dates) on browse page (both apps) -- v5.8.0
 - FTS5 schema in sidecar (UI deferred) -- v5.8.0
 
-### Active (v5.9.0 Multi-Source Image & Metadata Integration)
+- NLI crossref sidecar (815K records) imported with NliCrossrefService (16 methods) -- v5.9.0
+- Cambridge IIIF manifests (141K) imported into sidecar with local image resolution -- v5.9.0
+- Cambridge images load via local CUDL IIIF, bypassing NLI -- v5.9.0
+- Image availability source indicators and folio navigation in both apps -- v5.9.0
+- Physical metadata (material, folios) and library collection links (KTIV, CUDL, LUNA, DPUL) -- v5.9.0
+- FIST bibliography (542K references) with mention type badges and scholar attribution -- v5.9.0
+- Catalog cross-references (64K entries across 80 catalogs), Neubauer-Cowley, IsNotGenizah badge -- v5.9.0
+- Manchester LUNA (28K IDs) and JTS/Princeton Figgy integration with detail page links -- v5.9.0
 
-- [ ] **DATA-01**: NLI crossreference data (815K records) imported into SQLite sidecar with sys_id join key
-- [ ] **DATA-02**: Cambridge IIIF manifest (141K URLs) imported into SQLite sidecar with shelfmark lookup
-- [ ] **DATA-03**: Shared CrossRefService providing image, metadata, and relationship queries for both apps
-- [ ] **IMG-01**: Cambridge manuscripts load images via local IIIF lookup (no NLI manifest fetch)
-- [ ] **IMG-02**: Pre-resolved FL IDs from crossref used for faster image loading across all libraries
-- [ ] **META-01**: Material type (paper/parchment) displayed on browse page (both apps)
-- [ ] **META-02**: Folio count displayed on browse page (both apps)
-- [ ] **META-03**: Image availability indicator showing which sources have digitized images (both apps)
-- [ ] **REL-01**: NLI PartOf relationships surfaced in Related Fragments panel (both apps)
-- [ ] **REL-02**: BifolioWith pairs surfaced in Related Fragments panel (both apps)
-- [ ] **REL-03**: See cross-references surfaced in Related Fragments panel (both apps)
+### Active
+
+(No active requirements -- next milestone not yet defined)
 
 ### Out of Scope
 
@@ -75,7 +74,9 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Build transcription editor -- link to external tools instead
 - Build join detection AI -- import from NLI/PGP instead
 - Transcription search in Tantivy -- deferred (Phase 13, needs server-side index architecture)
-- NLI joins import (~424K PartOf relationships) -- deferred to future milestone
+- NLI PartOf relationships UI (424K records) -- service method exists, UI deferred to future milestone
+- NLI See cross-references UI (19K records) -- service method exists, UI deferred
+- NLI BifolioWith pairs UI (23K records) -- service method exists, UI deferred
 - Per-component search modes (exact/variants per column) -- Option III, defer unless demand
 - Scope search (sentence/paragraph/document) -- Option III feature, defer
 - Per-component negation (NOT clause) -- Option III feature, defer
@@ -86,29 +87,30 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Query preview line -- user explicitly excluded
 - FTS5 catalog search UI -- schema included in v5.8.0, UI deferred to future milestone
 - FJMS full texts (65K transcriptions) -- storage/deduplication complexity, lower priority
-- FJMS bibliography (733K references) -- large volume, unclear UX, defer
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
+- FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
 
 ## Context
 
-### Current State (after v5.9.0 start)
+### Current State (after v5.9.0 shipped)
 
-**Shipped:** v5.8.0 FJMS Integration (2026-02-15, git tag v5.8.0)
-- SQLite sidecar database (762K rows) from FIST.db with domains, joins, catalog + FTS5 index
-- Shared FjmsService with 8 query methods, thread-safe for web
-- FJMS scholarly joins with scholar attribution in Related Fragments panel (both apps)
-- Domain classification badges and hierarchical search filtering (both apps)
-- Post-search dynamic domain filter with checkbox tree dialog (both apps)
-- FJMS catalog enrichment: titles, authors, dates, content identifications (both apps)
-- 19/19 requirements satisfied, 12 plans across 4 phases
+**Shipped:** v5.9.0 Multi-Source Image & Metadata Integration (2026-02-16, git tag v5.9.0)
+- NLI crossref sidecar (815K image records, 141K Cambridge manifests, 28K Manchester LUNA, 453 JTS DPUL)
+- Multi-source image viewing: NLI, Cambridge, Manchester LUNA, JTS/Princeton Figgy with source switching
+- Folio navigation with scholarly notation (1r/1v) across all image sources
+- FIST bibliography (542K references), catalog cross-references (64K across 80 catalogs)
+- Physical metadata, Neubauer-Cowley, IsNotGenizah badge, collection/storage references
+- Library detail page links: KTIV, CUDL, LUNA detail, DPUL catalog
+- 11/14 requirements satisfied, 1 invalidated (FGP ≠ FL), 2 deferred (REL-01/REL-02)
 
 **Architecture:**
-- Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index) + SQLite sidecar (FJMS data)
-- Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index) + SQLite sidecar (FJMS data)
-- Shared: genizah_core.py (~8,200 lines -- search engine, metadata, variants, Responsa)
+- Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index) + SQLite sidecars (FJMS + NLI)
+- Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index) + SQLite sidecars (FJMS + NLI)
+- Shared: genizah_core.py (~8,300 lines -- search engine, metadata, variants, Responsa)
 - Shared: shared/document_service.py (PGP data access)
 - Shared: shared/corrections_service.py (corrections data access)
-- Shared: shared/fjms_service.py (FJMS domain, join, catalog queries)
+- Shared: shared/fjms_service.py (FJMS domain, join, catalog, bibliography queries)
+- Shared: shared/nli_crossref_service.py (NLI crossref, images, metadata, library URLs)
 
 **Data:**
 - documents: 35,839 records (full PGP corpus)
@@ -116,7 +118,8 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - document_footnotes: 22,757 records
 - document_fragments: 36,155 links
 - manuscripts (libraries.csv): ~217,000 records
-- fjms_enrichment.db: 390K domain rows, 48K join rows, 500K catalog rows (v1.1.0)
+- fjms_enrichment.db: 390K domains, 48K joins, 500K catalog, 542K bibliography, 64K catalog_refs (v2.0.0)
+- nli_crossref.db: 815K NLI images, 141K Cambridge manifests, 28K Manchester LUNA, 453 JTS DPUL (v1.2.0)
 
 ### Search Engine (Two-Phase Architecture)
 
@@ -170,6 +173,12 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Batch domain lookup (get_domains_for_sys_ids) | Efficient post-search collection in 500-item batches | Good |
 | SourceName join via LEFT JOIN dbo_CodeSource | Per-record scholarly source attribution in catalog | Good |
 | Sentinel CopyDate values normalized to None | Clean display, no meaningless 0/-99/-1 dates shown | Good |
+| Separate nli_crossref.db sidecar (not in fjms_enrichment.db) | Different provenance and update cycles | Good |
+| All 25 NLI CSV columns stored as TEXT | No filtering per user decision, maximum data preservation | Good |
+| FGP ≠ FL (crossref FGPImageNumberId not usable for IIIF) | Friedberg photo numbers are different numbering system | Lesson Learned |
+| Denormalized bibliography at export time (542K rows) | Single-table lookups, no runtime JOINs | Good |
+| Unconditional EnrichMetadataThread startup | Removed cache-first short-circuit that blocked Oxford enrichment | Good |
+| Manchester LUNA + JTS DPUL pre-imported to sidecar | Detail page links instead of search links, IIIF manifests as image source | Good |
 
 ---
-*Last updated: 2026-02-15 after v5.9.0 milestone started*
+*Last updated: 2026-02-16 after v5.9.0 milestone completed*

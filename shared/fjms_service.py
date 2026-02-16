@@ -649,6 +649,189 @@ class FjmsService:
                 self._conn = None
 
 
+def format_page_ref(entry: dict) -> str:
+    """Format page reference from FJMS bibliography entry fields.
+
+    Handles mention_page, from_page/to_page ranges, and volume prefixes.
+
+    Args:
+        entry: Dict with keys mention_page, from_page, to_page, volume.
+
+    Returns:
+        Formatted page reference string (e.g., 'vol. 2, pp. 15-20') or ''.
+    """
+    parts = []
+    vol = entry.get('volume', '')
+    if vol and str(vol).strip():
+        parts.append(f'vol. {vol}')
+    mention_page = entry.get('mention_page', '')
+    from_page = entry.get('from_page', '')
+    to_page = entry.get('to_page', '')
+    if mention_page and str(mention_page).strip():
+        parts.append(f'p. {mention_page}')
+    elif from_page and str(from_page).strip():
+        if to_page and str(to_page).strip() and str(to_page) != str(from_page):
+            parts.append(f'pp. {from_page}-{to_page}')
+        else:
+            parts.append(f'p. {from_page}')
+    return ', '.join(parts)
+
+
+def _parse_marc_annotations(marc_str: str) -> dict:
+    """Parse Hebrew annotations from end of NLI MARC 581 string.
+
+    NLI MARC strings end with parenthetical Hebrew annotations derived from
+    FJMS data, e.g.: '(דיון, יש תמונה, יש העתקה (מלא), יש תרגום (מלא)).'
+
+    Args:
+        marc_str: Raw MARC bibliography string.
+
+    Returns:
+        Dict with keys: mention_type, has_image, transcription, translation.
+    """
+    result = {'mention_type': '', 'has_image': False, 'transcription': '', 'translation': ''}
+    if not marc_str:
+        return result
+
+    # Find the last parenthetical block containing Hebrew annotations
+    # Pattern: content in parens that contains Hebrew chars, possibly nested parens
+    match = re.search(r'\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*\.?\s*$', marc_str)
+    if not match:
+        return result
+
+    annotation = match.group(1)
+
+    # Mention type
+    if 'דיון' in annotation:
+        result['mention_type'] = 'Discussion'
+    elif 'איזכור' in annotation:
+        result['mention_type'] = 'Mentioned'
+    elif 'מפתח' in annotation:
+        result['mention_type'] = 'Index'
+
+    # Has image
+    if 'יש תמונה' in annotation or 'תמונה' in annotation:
+        result['has_image'] = True
+
+    # Transcription
+    if 'יש העתקה' in annotation:
+        if 'העתקה (מלא)' in annotation:
+            result['transcription'] = 'Full'
+        elif 'העתקה (חלקי)' in annotation:
+            result['transcription'] = 'Partial'
+        else:
+            result['transcription'] = 'Exists'
+
+    # Translation
+    if 'יש תרגום' in annotation:
+        if 'תרגום (מלא)' in annotation:
+            result['translation'] = 'Full'
+        elif 'תרגום (חלקי)' in annotation:
+            result['translation'] = 'Partial'
+        else:
+            result['translation'] = 'Exists'
+
+    return result
+
+
+def strip_marc_annotation_suffix(marc_str: str) -> str:
+    """Strip trailing Hebrew annotation parenthetical from MARC 581 string.
+
+    NLI MARC strings end with '(דיון, יש תמונה, ...).' — this returns
+    the clean reference text for display in the NLI bibliography table.
+
+    Args:
+        marc_str: Raw MARC bibliography string.
+
+    Returns:
+        Reference text with trailing annotation removed, or original string.
+    """
+    if not marc_str:
+        return ''
+    s = marc_str.strip()
+    # Remove trailing period
+    if s.endswith('.'):
+        s = s[:-1].rstrip()
+    # Remove last parenthetical block that contains Hebrew chars
+    cleaned = re.sub(r'\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*$', '', s)
+    # Only strip if the removed part actually contained Hebrew
+    if cleaned != s:
+        removed = s[len(cleaned):]
+        if re.search(r'[\u0590-\u05FF]', removed):
+            return cleaned.rstrip(' .,;-')
+    return s
+
+
+def _ts_symbol(value) -> str:
+    """Map transcription/translation value to FJMS-style symbol.
+
+    Full → '✓+', Partial → '✓−', truthy/Exists → '✓', None/empty → ''.
+    """
+    if not value or str(value).strip() in ('', 'None', 'Unknown'):
+        return ''
+    v = str(value).strip()
+    if v == 'Full':
+        return '\u2713+'
+    if v == 'Partial':
+        return '\u2713\u2212'
+    return '\u2713'
+
+
+def _parse_marc_bib_string(marc_str: str) -> dict:
+    """Parse an NLI MARC 581 bibliography string into structured fields.
+
+    Extracts author (text before first comma), 4-digit year, page numbers,
+    title, and Hebrew annotations from the raw MARC string.
+
+    Args:
+        marc_str: Raw bibliography string from MARC tag 581.
+
+    Returns:
+        Dict with keys: author, year, pages, title, plus annotation fields.
+    """
+    result = {'author': '', 'year': '', 'pages': '', 'title': ''}
+    if not marc_str or not marc_str.strip():
+        return result
+
+    s = marc_str.strip()
+
+    # Extract author: text before first comma (if not too long)
+    comma_idx = s.find(',')
+    if 0 < comma_idx <= 60:
+        result['author'] = s[:comma_idx].strip()
+
+    # Extract title: text between author section and year/page section
+    # Pattern: "Author, Article Title. Book/Journal Title, Year, ..."
+    # Try to find text after author+article that looks like a title
+    title_match = re.search(r'(?:,\s+[^,]+)?\.\s+([^,.]+?)(?:\.\s|\,\s*\d{4}|\,\s*\d+\s*עמ)', s)
+    if title_match:
+        candidate = title_match.group(1).strip()
+        # Only use if it's not too short and not just a year
+        if len(candidate) > 3 and not re.match(r'^\d{4}$', candidate):
+            result['title'] = candidate
+
+    # Extract 4-digit year
+    year_match = re.search(r'\b(1[4-9]\d{2}|20[0-2]\d)\b', s)
+    if year_match:
+        result['year'] = year_match.group(1)
+
+    # Extract page references - Hebrew patterns first (more common in MARC)
+    heb_match = re.search(r"עמ(?:וד|['\u2019])\s*([\w\d,/ -–]+?)(?:\s*\(|$)", s)
+    if heb_match:
+        result['pages'] = heb_match.group(1).strip().rstrip('.')
+    else:
+        # English patterns
+        page_match = re.search(r'(?:pp?\.\s*|pages?\s+)(\d+(?:\s*[-–]\s*\d+)?)', s)
+        if page_match:
+            result['pages'] = page_match.group(1).strip()
+
+    # Parse Hebrew annotations
+    annotations = _parse_marc_annotations(s)
+    result.update(annotations)
+
+    return result
+
+
 def merge_catalog_records(records: list[dict]) -> dict:
     """Merge multiple catalog records into a display-ready structure.
 

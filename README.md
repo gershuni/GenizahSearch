@@ -1,4 +1,4 @@
-# Genizah Search Pro 5.8.0
+# Genizah Search Pro 5.9.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,21 +8,25 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 5.8.0?
+## What's New in Version 5.9.0?
 
-### v5.8.0: FJMS Integration
+### v5.9.0: Multi-Source Image & Metadata Integration
 
-Integration of scholarly metadata from the **Fragment of the Jewish Manuscript Studies (FJMS)** database — domain classifications, scientific joins, and catalog records — into both web and desktop apps.
+NLI crossreference data (815K records), Cambridge IIIF manifests (141K), Manchester LUNA, and JTS/Princeton Figgy — enabling multi-library image viewing, physical metadata, scholarly bibliography, and catalog cross-references in both apps.
 
-* **Domain classifications:** Subject badges (Piyyut, Bible, Letters, etc.) on browse pages with hierarchical search filtering
-* **Scientific joins:** FJMS scholarly join groups with scholar attribution in Related Fragments panel
-* **Catalog enrichment:** FJMS titles, authors, dates, and content identifications alongside PGP metadata
-* **Domain filtering:** Post-search dynamic filtering with hierarchical checkbox tree dialog
-* **SQLite sidecar:** 762K rows from FIST.db with FTS5 full-text index for future catalog search
+* **Multi-source images:** View manuscript images from NLI, Cambridge, Manchester LUNA, and JTS/Princeton Figgy with toggleable source chips
+* **Folio navigation:** Page-level navigation with scholarly notation (1r, 1v, 2r) across all image sources
+* **Physical metadata:** Material type, folio count, and Neubauer-Cowley catalog numbers on browse page
+* **Library links:** Direct links to NLI KTIV, CUDL, Manchester LUNA detail pages, and JTS DPUL catalog pages
+* **FIST bibliography:** 542K scholarly references with mention type badges and scholar attribution
+* **Catalog cross-references:** 64K entries across 80 published scholarly catalogs
+* **IsNotGenizah badge:** Visual indicator for 304K flagged non-Genizah items
+* **Collection & storage:** NLI collection names and physical storage references
 
-### Previous Features (v5.0–v5.7)
+### Previous Features (v5.0–v5.8)
 
-* **Responsa Search:** Advanced search with Responsa-Project style syntax, grammatical expansion, Judeo-Arabic support, and tabular query builder
+* **FJMS Integration (v5.8):** Domain classifications, scientific joins, and catalog enrichment from FIST.db via SQLite sidecar
+* **Responsa Search (v5.7):** Advanced search with Responsa-Project style syntax, grammatical expansion, Judeo-Arabic support, and tabular query builder
 * **Princeton Geniza Project (PGP):** 35,839 curated documents with transcriptions, translations, and metadata
 * **Virtual Reading Desk:** Multi-manuscript synchronized viewer for related fragments
 * **PGP Tag Search:** 251 tags in 16 categories for thematic browsing
@@ -38,8 +42,9 @@ Integration of scholarly metadata from the **Fragment of the Jewish Manuscript S
 
 ### Integrated Visual Analysis (IIIF)
 
-* **In-App Viewer:** High-resolution images from NLI and Cambridge
-* **Sequential Navigation:** Browse pages and manuscripts continuously
+* **In-App Viewer:** High-resolution images from NLI, Cambridge, Manchester LUNA, and JTS/Princeton Figgy
+* **Multi-Source Toggle:** Switch between image sources with colored source chips
+* **Folio Navigation:** Page-level navigation with scholarly recto/verso notation
 * **Image Tools:** Zoom and rotation controls
 
 ### Oxford Bodleian Integration
@@ -79,7 +84,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V5.8.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V5.9.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
@@ -116,31 +121,35 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 5.8.0 | אתר הגניזה של דיקטה
+# Genizah Search Pro 5.9.0 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
-גרסה 5.8 כוללת **שילוב FJMS** — מידע מפרויקט הגניזה של פרידברג: סיווגי תחום, צירופים מדעיים ורשומות קטלוג.
+גרסה 5.9 כוללת **שילוב תמונות ומטא-דאטה ממספר מקורות** — NLI, קיימברידג', מנצ'סטר ו-JTS/פרינסטון עם ביבליוגרפיה מדעית והפניות קטלוגיות.
 
 > **גישה מהאינטרנט:** [genizahsearch.com](https://genizahsearch.com) - חיפוש, עיון ושיתוף פעולה מכל דפדפן
 
 ---
 
-## מה חדש בגרסה 5.8?
+## מה חדש בגרסה 5.9?
 
-### שילוב FJMS
+### שילוב תמונות ומטא-דאטה ממספר מקורות
 
-שילוב מטא-דאטה מדעי מבסיס הנתונים **Fragment of the Jewish Manuscript Studies (FJMS)** — סיווגי תחום, צירופים מדעיים ורשומות קטלוג — בווב ובאפליקציית שולחן העבודה.
+נתוני הצלבה מהספרייה הלאומית (815K רשומות), מניפסטי IIIF של קיימברידג' (141K), LUNA של מנצ'סטר ו-Figgy של JTS/פרינסטון — צפייה בתמונות ממספר ספריות, מטא-דאטה פיזי, ביבליוגרפיה מדעית והפניות קטלוגיות.
 
-* **סיווגי תחום:** תגיות נושא (פיוט, מקרא, מכתבים ועוד) בדפי עיון עם סינון היררכי בחיפוש
-* **צירופים מדעיים:** קבוצות צירוף מדעיות מ-FJMS עם ייחוס לחוקר בפאנל הקטעים הקשורים
-* **העשרת קטלוג:** כותרות, מחברים, תאריכים וזיהויי תוכן מ-FJMS לצד מטא-דאטה של PGP
-* **סינון תחומים:** סינון דינמי לאחר חיפוש עם דיאלוג עץ היררכי
-* **בסיס נתונים SQLite:** 762 אלף שורות מ-FIST.db עם אינדקס FTS5 לחיפוש קטלוגי עתידי
+* **תמונות ממספר מקורות:** צפייה בתמונות כתבי יד מ-NLI, קיימברידג', מנצ'סטר LUNA ו-JTS/פרינסטון Figgy עם כפתורי מקור מתחלפים
+* **ניווט דפים:** ניווט ברמת דף עם סימון מדעי (1r, 1v, 2r) בכל מקורות התמונות
+* **מטא-דאטה פיזי:** סוג חומר, מספר דפים ומספרי קטלוג נויבאואר-קאולי
+* **קישורי ספריות:** קישורים ישירים ל-KTIV, CUDL, מנצ'סטר LUNA ו-JTS DPUL
+* **ביבליוגרפיה מדעית:** 542K הפניות ביבליוגרפיות עם תגיות סוג אזכור וייחוס לחוקר
+* **הפניות קטלוגיות:** 64K רשומות מ-80 קטלוגים מדעיים
+* **תג "לא גניזה":** סימון חזותי ל-304K פריטים שסומנו כלא-גניזה
+* **אוסף ואחסון:** שמות אוספי NLI ומידע אחסון פיזי
 
-### תכונות מגרסאות קודמות (5.0–5.7)
+### תכונות מגרסאות קודמות (5.0–5.8)
 
-* **חיפוש פרויקט השו"ת:** חיפוש מתקדם עם תחביר ייעודי, הרחבה דקדוקית, ערבית-יהודית, ובונה שאילתות טבלאי
+* **שילוב FJMS (5.8):** סיווגי תחום, צירופים מדעיים ורשומות קטלוג מ-FIST.db דרך בסיס נתונים SQLite
+* **חיפוש פרויקט השו"ת (5.7):** חיפוש מתקדם עם תחביר ייעודי, הרחבה דקדוקית, ערבית-יהודית, ובונה שאילתות טבלאי
 * **פרויקט הגניזה של פרינסטון (PGP):** 35,839 מסמכים אצורים עם תעתיקים, תרגומים ומטא-דאטה
 * **שולחן קריאה וירטואלי:** צפיין מסונכרן לקטעים קשורים זה לצד זה
 * **חיפוש תגיות PGP:** 251 תגיות ב-16 קטגוריות לעיון נושאי
@@ -156,8 +165,9 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### ניתוח חזותי משולב (IIIF)
 
-* **צפיין מובנה:** תמונות ברזולוציה גבוהה מהספרייה הלאומית וקיימברידג'
-* **ניווט רציף:** דפדוף בין עמודים וכתבי יד
+* **צפיין מובנה:** תמונות ברזולוציה גבוהה מ-NLI, קיימברידג', מנצ'סטר LUNA ו-JTS/פרינסטון Figgy
+* **מתג מקורות:** מעבר בין מקורות תמונות עם כפתורי מקור צבעוניים
+* **ניווט דפים:** ניווט ברמת דף עם סימון recto/verso מדעי
 * **כלי תמונה:** שליטה בזום וסיבוב
 
 ### אינטגרציית אוקספורד-בודלי
@@ -197,7 +207,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### התקנה לשולחן העבודה
 
-1. **הורדה:** הורידו את `GenizahSearchPro_V5.8.0_Setup.exe` מאזור ה-**Assets**
+1. **הורדה:** הורידו את `GenizahSearchPro_V5.9.0_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
 

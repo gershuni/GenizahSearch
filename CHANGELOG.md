@@ -4,6 +4,50 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [5.9.0] - 2026-02-16
+
+### Milestone: Multi-Source Image & Metadata Integration
+
+Import of NLI crossreference data (815K image-level records) and Cambridge IIIF manifests (141K URLs) into a second SQLite sidecar, plus Manchester LUNA and JTS/Princeton Figgy integration, enabling direct image access across 75+ libraries, physical metadata, scholarly bibliography, and library-specific viewer links in both apps.
+
+#### Data Infrastructure (Phase 29)
+- **NLI crossref sidecar** (`nli_crossref.db`): 815K image-level records from NLI crossreference CSV with 253K distinct AlmaIds, plus 141K Cambridge IIIF manifest URLs
+- **Shared NliCrossrefService**: 16 query methods (images, folio labels, physical metadata, relationships, library URLs, Manchester/JTS lookups)
+- **Thread-safe SQLite**: Read-only URI mode with thread safety for NiceGUI concurrent requests
+- **Graceful degradation**: All methods return empty results when sidecar is missing
+
+#### Direct Image Access (Phase 30)
+- **Cambridge local resolution**: Cambridge manuscripts load images via pre-stored CUDL IIIF manifest URLs, bypassing NLI entirely (141K records)
+- **Fallback chain preserved**: Memory cache -> sidecar -> network for all image resolution
+
+#### Image Navigation & Indicators (Phase 31)
+- **Folio navigation**: Page-level navigation using scholarly notation (1r, 1v, 2r, etc.) in both apps
+- **Source availability indicators**: Colored chips showing which digital image sources exist (NLI, Cambridge, Manchester, JTS)
+- **Source switching**: Toggle between NLI and external image sources in the browse viewer
+- **Cambridge IIIF proxy**: Server-side proxy endpoint for Cambridge image serving
+
+#### Metadata Display (Phase 32)
+- **Physical metadata**: Material type (paper/parchment) and folio count on browse page (both apps)
+- **NLI catalog link (KTIV)**: Clickable link to NLI KTIV viewer for manuscripts
+- **Library collection links**: Clickable links to holding library digital collections (CUDL, Manchester LUNA, JTS DPUL, BL, Oxford)
+- **Hebrew translations**: Material types and metadata labels translated for Hebrew UI
+
+#### Metadata Enrichment (Phase 33)
+- **FIST bibliography**: 542K denormalized bibliography references with scholar attribution, mention type badges, and transcription/translation availability (both apps)
+- **Catalog cross-references**: 64K entries across 80 scholarly catalogs displayed as structured references (both apps)
+- **Neubauer-Cowley catalog numbers**: 27K Oxford entries displayed alongside shelfmark
+- **IsNotGenizah badge**: Orange visual badge for 304K flagged items in corpus
+- **Collection & storage**: NLI collection names and physical storage references (box/volume/folio)
+- **Scholarly source names**: FJMS source attributions with generic name filtering
+- **FJMS sidecar extended**: fjms_enrichment.db upgraded to v2.0.0 with bibliography, catalog_refs, and reference tables
+
+#### Library IIIF Integration (Phase 34)
+- **Manchester LUNA**: 27,940 LUNA IDs pre-imported via API pagination; detail page links (not search); IIIF manifests as image source with pink source chip
+- **JTS/Princeton Figgy**: 453 validated ARK IDs + Figgy manifest URLs via DPUL catalog search; catalog page links; IIIF manifests as image source with orange source chip
+- **BL deferred**: British Library links use searcharchives.bl.uk (BL IIIF API still down from cyber attack)
+
+---
+
 ## [5.8.0] - 2026-02-15
 
 ### Milestone: FJMS Integration

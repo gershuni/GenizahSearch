@@ -2149,77 +2149,42 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             f'/search?domain={quote(dom["domain"])}'
                                         ).classes('text-sm').style('color: var(--primary-600);')
 
-                    # === Phase 33: Bibliography References ===
-                    if fjms.is_available():
-                        bib_entries = fjms.get_bibliography(page.sys_id)
-                        if bib_entries:
-                            ui.separator().classes('my-3')
-                            with ui.row().classes('items-center gap-2 mb-2'):
-                                h3(tr('Bibliography References'), classes='text-xs font-bold', style='color: var(--text-secondary);')
-                                ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
-                                if len(bib_entries) > 1:
-                                    ui.badge(str(len(bib_entries)), color='grey').props('dense').classes('text-xs')
+                    # === Bibliography References (separate FJMS / NLI dialogs) ===
+                    from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
 
-                            def format_bib_entry(entry):
-                                """Format a bibliography entry for display."""
-                                parts = []
-                                author = entry.get('article_author_eng', '')
-                                if author:
-                                    parts.append(author)
-                                title = entry.get('running_title', '') or ''
-                                year = entry.get('title_year', '') or ''
-                                if title:
-                                    title_str = title
-                                    if year:
-                                        title_str += f' ({year})'
-                                    parts.append(title_str)
-                                # Page reference
-                                page_parts = []
-                                vol = entry.get('volume', '')
-                                if vol and str(vol).strip():
-                                    page_parts.append(f'vol. {vol}')
-                                mention_page = entry.get('mention_page', '')
-                                from_page = entry.get('from_page', '')
-                                to_page = entry.get('to_page', '')
-                                if mention_page and str(mention_page).strip():
-                                    page_parts.append(f'p. {mention_page}')
-                                elif from_page and str(from_page).strip():
-                                    if to_page and str(to_page).strip() and str(to_page) != str(from_page):
-                                        page_parts.append(f'pp. {from_page}-{to_page}')
-                                    else:
-                                        page_parts.append(f'p. {from_page}')
-                                if page_parts:
-                                    parts.append(', '.join(page_parts))
-                                return ', '.join(parts) if parts else '(Unknown reference)'
+                    fjms_bib = fjms.get_bibliography(page.sys_id) if fjms.is_available() else []
+                    marc_bib = []
+                    try:
+                        from web.state import state as app_state
+                        if app_state.meta_mgr and hasattr(app_state.meta_mgr, 'nli_cache'):
+                            cached = app_state.meta_mgr.nli_cache.get(page.sys_id, {})
+                            marc_bib = cached.get('marc', {}).get('bibliography', [])
+                    except Exception:
+                        pass
 
-                            def _render_bib_entry(entry):
-                                """Render a single bibliography entry row."""
-                                with ui.row().classes('gap-1 items-baseline flex-wrap mb-1'):
-                                    ui.label(format_bib_entry(entry)).classes('text-sm').style('color: var(--text-primary);')
-                                    # Mention type badge
-                                    mt = entry.get('mention_type', '')
-                                    if mt and mt != 'None':
-                                        badge_color = 'purple' if mt == 'Discussion' else 'blue' if mt == 'Index' else 'grey'
-                                        ui.badge(mt, color=badge_color).props('outline dense').classes('text-xs')
-                                    # Transcription badge
-                                    tt = entry.get('transcription_type', '')
-                                    if tt and tt not in ('None', ''):
-                                        ui.badge(tt, color='teal').props('outline dense').classes('text-xs')
-                                    # Translation badge
-                                    tl = entry.get('translation_type', '')
-                                    if tl and tl not in ('None', ''):
-                                        ui.badge(tr('Translation'), color='cyan').props('outline dense').classes('text-xs')
-
-                            max_initial_bib = 5
-                            show_entries = bib_entries[:max_initial_bib]
-                            for entry in show_entries:
-                                _render_bib_entry(entry)
-
-                            # Collapsible expansion for remaining entries
-                            if len(bib_entries) > max_initial_bib:
-                                with ui.expansion(f'{tr("Show all")} {len(bib_entries)} {tr("references")}').classes('text-xs'):
-                                    for entry in bib_entries[max_initial_bib:]:
-                                        _render_bib_entry(entry)
+                    if fjms_bib or marc_bib:
+                        ui.separator().classes('my-3')
+                        with ui.row().classes('items-center gap-2'):
+                            if fjms_bib:
+                                fjms_dlg = create_fjms_bibliography_dialog(
+                                    fjms_bib, page.sys_id,
+                                    shelfmark=page.shelfmark or '',
+                                )
+                                ui.button(
+                                    f'{tr("Bibliography FJMS")} ({len(fjms_bib)})',
+                                    icon='menu_book',
+                                    on_click=fjms_dlg.open,
+                                ).props('outline dense').classes('text-sm')
+                            if marc_bib:
+                                nli_dlg = create_nli_bibliography_dialog(
+                                    marc_bib, page.sys_id,
+                                    shelfmark=page.shelfmark or '',
+                                )
+                                ui.button(
+                                    f'{tr("Bibliography Ktiv")} ({len(marc_bib)})',
+                                    icon='menu_book',
+                                    on_click=nli_dlg.open,
+                                ).props('outline dense').classes('text-sm')
 
                     # === Phase 33: Catalog Cross-References ===
                     if fjms.is_available():

@@ -1,13 +1,13 @@
 # GenizahSearch Technical Deployment Guide
 
-> Last updated: 2026-02-01
+> Last updated: 2026-02-16
 > For: Developers, System Administrators, AI Assistants
 
 ---
 
-## Architecture Overview (January 2026)
+## Architecture Overview (February 2026)
 
-GenizahSearch uses a simplified architecture with Supabase as the backend:
+GenizahSearch uses a simplified architecture with Supabase as the backend and SQLite sidecars for reference data:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -23,22 +23,22 @@ GenizahSearch uses a simplified architecture with Supabase as the backend:
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      WEB APPLICATION                             │
-│                    (NiceGUI on port 8081)                        │
-│                                                                  │
-│   ┌─────────────────┐              ┌─────────────────────────┐  │
-│   │  Search/Browse  │              │    User Data            │  │
-│   │                 │              │                         │  │
-│   │  Tantivy Index  │              │  Supabase (Cloud)       │  │
-│   │    (Local)      │              │  - Authentication       │  │
-│   │                 │              │  - Lists & Items        │  │
-│   │  - tantivy_db   │              │  - Corrections          │  │
-│   │  - lab_index    │              │  - Comments             │  │
-│   │                 │              │  - Discoveries          │  │
-│   └─────────────────┘              │  - Joins                │  │
-│                                    └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      WEB APPLICATION (NiceGUI on port 8081)             │
+│                                                                         │
+│  ┌──────────────┐  ┌───────────────────┐  ┌─────────────────────────┐  │
+│  │ Search/Browse │  │ SQLite Sidecars   │  │    User Data            │  │
+│  │              │  │ (read-only)       │  │                         │  │
+│  │ Tantivy Index│  │                   │  │  Supabase (Cloud)       │  │
+│  │  (Local)     │  │ fjms_enrichment.db│  │  - Authentication       │  │
+│  │              │  │  Domains, Joins,  │  │  - Lists & Items        │  │
+│  │ - tantivy_db │  │  Catalog, Biblio  │  │  - Corrections          │  │
+│  │ - lab_index  │  │                   │  │  - Comments             │  │
+│  │              │  │ nli_crossref.db   │  │  - Discoveries          │  │
+│  │              │  │  Images, Metadata,│  │  - Joins                │  │
+│  │              │  │  LUNA, DPUL IDs   │  │                         │  │
+│  └──────────────┘  └───────────────────┘  └─────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Changes from Previous Architecture
@@ -78,6 +78,7 @@ GenizahSearch uses a simplified architecture with Supabase as the backend:
 | Web Application | NiceGUI | 8081 |
 | Web Server | Nginx | 80, 443 |
 | Search Engine | Tantivy | - (embedded) |
+| Reference Data | SQLite sidecars (FJMS + NLI) | - (embedded, read-only) |
 | User Database | Supabase | Cloud |
 
 ---
@@ -91,12 +92,27 @@ GenizahSearch uses a simplified architecture with Supabase as the backend:
 │   ├── pages/             # Page components
 │   ├── components/        # UI components
 │   └── supabase_client.py # Supabase integration
+├── shared/                # Shared service layer (both apps)
+│   ├── document_service.py    # PGP data access
+│   ├── corrections_service.py # Corrections data access
+│   ├── fjms_service.py        # FJMS domain/join/catalog queries
+│   └── nli_crossref_service.py # NLI crossref/image/metadata queries
 ├── Genizah_Index/         # Search indexes
 │   ├── tantivy_db/        # Main search index (3.3GB)
 │   ├── lab_index/         # Parallels index (3.0GB)
 │   ├── browse_map.pkl     # Browse navigation data
 │   ├── metadata_cache.pkl # Metadata cache
 │   └── lab/               # Lab configuration
+├── fist_data/             # FJMS sidecar (NOT in git)
+│   └── fjms_enrichment.db # SQLite sidecar v2.0.0 (246MB)
+├── nli_data/              # NLI crossref sidecar (NOT in git)
+│   └── nli_crossref.db   # SQLite sidecar v1.2.0 (248MB)
+├── pgp_data/              # PGP data files (NOT in git)
+│   ├── documents.csv      # 35K PGP document records
+│   ├── fragments.csv      # 36K fragment links
+│   ├── footnotes.csv      # 23K footnotes
+│   └── transcriptions_linked.csv # Linked transcription sources
+├── libraries.csv          # Master manuscript metadata (~217K records)
 ├── genizah_core.py        # Core search logic
 ├── venv/                  # Python virtual environment
 ├── Transcriptions.txt     # Source transcription data (1.4GB)
@@ -509,19 +525,104 @@ Web-based UI for server management:
 
 ---
 
-## Data Sources
+## Data Sources & Sidecar Databases
 
-| File | Source | Size |
-|------|--------|------|
-| Transcriptions.txt (V0.8) | [Zenodo](https://zenodo.org/records/17734473) | 1.4 GB |
-| Genizah_OLD.txt (V0.7) | Optional, historical | ~1 GB |
+### Static Data Files
 
-### Index Sizes
+| File | Source | Size | In Git? |
+|------|--------|------|---------|
+| Transcriptions.txt (V0.8) | [Zenodo](https://zenodo.org/records/17734473) | 1.4 GB | No |
+| Genizah_OLD.txt (V0.7) | Optional, historical | ~1 GB | No |
+| libraries.csv | Master manuscript metadata | ~15 MB | Yes |
+
+### Search Index Sizes
 
 | Index | Size | Purpose |
 |-------|------|---------|
 | tantivy_db | 3.3 GB | Main manuscript search |
 | lab_index | 3.0 GB | Parallels/lab features |
+
+### SQLite Sidecar Databases (v5.8.0+)
+
+Both sidecar databases are **NOT in git** (listed in `.gitignore`). They must be uploaded manually to the server and regenerated when source data changes.
+
+| Database | Directory | Size | Version | Contents |
+|----------|-----------|------|---------|----------|
+| `fjms_enrichment.db` | `fist_data/` | 246 MB | v2.0.0 | FJMS domains (390K), joins (48K), catalog (500K), bibliography (542K), catalog_refs (64K) |
+| `nli_crossref.db` | `nli_data/` | 248 MB | v1.2.0 | NLI crossref images (815K), Cambridge manifests (141K), Manchester LUNA (28K), JTS DPUL (453) |
+
+#### Initial Upload to Server
+
+```bash
+# From local machine:
+scp fist_data/fjms_enrichment.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/fist_data/
+scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/nli_data/
+
+# On server, create directories if needed:
+ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com
+mkdir -p /home/ubuntu/GenizahSearch/fist_data /home/ubuntu/GenizahSearch/nli_data
+```
+
+#### Regenerating Sidecar Databases
+
+Only needed when source data is updated (new FIST.db version, new NLI crossref CSV).
+
+```bash
+cd /home/ubuntu/GenizahSearch
+source venv/bin/activate
+
+# FJMS sidecar (requires FIST_DB_BACKUP/FIST.db):
+python scripts/export_fist_enrichment.py
+
+# NLI crossref sidecar (requires nli_crossreference.csv + cambridge_genizah.json):
+python scripts/import_nli_crossref.py
+
+# Manchester LUNA IDs (fetches from API, ~30 min):
+python scripts/import_manchester_luna.py
+
+# JTS/Princeton DPUL (fetches from API, uses checkpoints):
+python scripts/import_jts_dpul.py
+
+# Restart service after regeneration:
+sudo systemctl restart genizah-web
+```
+
+#### When to Update
+
+| Database | Update Trigger | Frequency |
+|----------|---------------|-----------|
+| `fjms_enrichment.db` | New FIST.db version from FJMS project | Rare (quarterly?) |
+| `nli_crossref.db` | New NLI crossreference CSV or Cambridge JSON | Rare (when NLI provides) |
+| Manchester/JTS tables | New manuscripts added to LUNA or DPUL | Rare (can re-run import scripts) |
+
+**Note:** Both databases are read-only at runtime. The web app opens them in `?mode=ro` URI mode. No write operations occur during normal operation.
+
+### PGP Data Maintenance
+
+PGP data is updated regularly on GitHub at [princeton-geniza-project](https://github.com/Princeton-CDH/geniza). When updated:
+
+```bash
+cd /home/ubuntu/GenizahSearch
+source venv/bin/activate
+
+# 1. Download latest PGP data exports to pgp_data/
+#    (documents.csv, fragments.csv, footnotes.csv, transcriptions from pgp-text repo)
+
+# 2. Import documents, fragments, footnotes into Supabase:
+python scripts/import_pgp_documents.py
+python scripts/import_pgp_full.py
+
+# 3. Import transcription sources:
+python scripts/import_document_sources.py
+
+# 4. Import sections (parses pgp-text HTML):
+python scripts/import_pgp_sections.py
+
+# 5. Restart service:
+sudo systemctl restart genizah-web
+```
+
+**PGP data files** (in `pgp_data/`): Not in git. Must be downloaded from PGP GitHub and placed on server before running import scripts.
 
 ---
 

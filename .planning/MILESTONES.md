@@ -148,3 +148,13 @@
 
 ---
 
+
+## v5.9.0 Multi-Source Image & Metadata Integration (Shipped: 2026-02-16)
+
+**Phases completed:** 36 phases, 106 plans, 32 tasks
+
+**Key accomplishments:**
+- (none recorded)
+
+---
+
