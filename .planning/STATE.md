@@ -5,16 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** No active milestone -- v5.9.0 shipped 2026-02-16
+**Current focus:** v6.0.0 Local Data Architecture — defining requirements
 
 ## Current Position
 
-Phase: All complete
-Plan: All complete
-Status: v5.9.0 milestone shipped. Next milestone not yet defined.
-Last activity: 2026-02-16 -- Completed v5.9.0 milestone (Multi-Source Image & Metadata Integration)
-
-Progress: [████████████████████] 100%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-16 — Milestone v6.0.0 started
 
 ## Performance Metrics
 
@@ -64,6 +62,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: v5.9.0 milestone completed and archived
+Stopped at: Starting v6.0.0 milestone
 Resume file: None
-Notes: 7 milestones shipped. Use /gsd:new-milestone to start next milestone.
+Notes: 8th milestone. PGP to SQLite sidecar + FJMS full texts.

@@ -64,7 +64,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-(No active requirements -- next milestone not yet defined)
+## Current Milestone: v6.0.0 Local Data Architecture
+
+**Goal:** Migrate all reference data from Supabase to local SQLite sidecars and add FJMS full texts as scholarly sources, making browsing fully offline-capable and eliminating cloud dependency for read-only data.
+
+**Target features:**
+- PGP data (documents, sources, footnotes, fragments) migrated to SQLite sidecar
+- Shared document_service.py rewritten for SQLite (both apps)
+- FJMS full texts (65K transcriptions) exported and integrated as version selector sources
+- PGP/FJMS source deduplication
+- Read-only Supabase tables removed (full cutover)
+- Supabase retained only for community features (auth, corrections, lists, comments)
 
 ### Out of Scope
 
@@ -86,7 +96,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - `##` double-hash syntax -- checkbox approach preferred
 - Query preview line -- user explicitly excluded
 - FTS5 catalog search UI -- schema included in v5.8.0, UI deferred to future milestone
-- FJMS full texts (65K transcriptions) -- storage/deduplication complexity, lower priority
+- FJMS full texts (65K transcriptions) -- in scope for v6.0.0
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
 - FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
 
@@ -181,4 +191,4 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Manchester LUNA + JTS DPUL pre-imported to sidecar | Detail page links instead of search links, IIIF manifests as image source | Good |
 
 ---
-*Last updated: 2026-02-16 after v5.9.0 milestone completed*
+*Last updated: 2026-02-16 after v6.0.0 milestone started*
