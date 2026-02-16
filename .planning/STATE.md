@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 33 of 34 (Metadata Enrichment)
-Plan: 4 of 4 in current phase
-Status: Executing Phase 33 plans
-Last activity: 2026-02-16 -- Completed 33-04 (desktop browse: bibliography, catalog refs, badges, secondary metadata)
+Plan: 4 of 4 in current phase (all complete)
+Status: Phase 33 complete
+Last activity: 2026-02-16 -- Completed 33-03 (web browse: bibliography, catalog refs, badges, scholarly metadata)
 
-Progress: [███████████████████░] 95%
+Progress: [████████████████████] 97%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 97 (across all milestones)
+- Total plans completed: 98 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.7 hours
 
@@ -47,6 +47,7 @@ Progress: [███████████████████░] 95%
 | Phase 34 P05 | 2min | 2 tasks | 1 file |
 | Phase 33 P01 | 8min | 1 task | 1 file |
 | Phase 33 P02 | 6min | 2 tasks | 5 files |
+| Phase 33 P03 | 8min | 2 tasks | 1 file |
 | Phase 33 P04 | 7min | 2 tasks | 2 files |
 
 ## Accumulated Context
@@ -97,6 +98,9 @@ See PROJECT.md Key Decisions table for full history.
 - 33-02: Bibliography CASE ordering (Discussion > Mentioned > others), generic source names filtered (Catalogs/Institution/Collection/Other)
 - 33-02: _get_fjms_service() lazy accessor with thread_safe=True matches _get_crossref_service() pattern
 - 33-02: NLI crossref metadata added inside existing crossref try block; FJMS metadata in separate block after it
+- 33-03: Direct service calls in browse page (not via BrowsePage dataclass) -- matches FJMS catalog/domains pattern
+- 33-03: NLI crossref metadata fetched once at shelfmark display, reused for collection/storage section
+- 33-03: _render_bib_entry helper avoids code duplication between initial and expanded entry rendering
 - 33-04: Desktop bibliography limited to 20 entries (no expansion widget), str() wrapping for SQLite numeric page/volume fields
 - 33-04: Desktop metadata section ordering: domains (purple) > catalog (purple) > bibliography (orange) > catalog refs (teal) > secondary (grey) > KTI/Oxford
 
@@ -115,6 +119,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 33-04-PLAN.md (desktop browse: bibliography, catalog refs, badges, secondary metadata)
+Stopped at: Completed 33-03-PLAN.md (web browse: bibliography, catalog refs, badges, scholarly metadata)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 plans 01-02-04 complete -- service methods, enrich_metadata wiring, and desktop UI done. Next: 33-03 (web UI).
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 all 4 plans complete -- sidecar export, service layer, web UI, desktop UI all done.
