@@ -8715,8 +8715,12 @@ class GenizahGUI(QMainWindow):
         text_color = palette.color(QPalette.ColorRole.Text).name()
         base_color = palette.color(QPalette.ColorRole.Base).name()
 
+        physical_metadata = meta.get('physical_metadata')
+        library_viewer_url = meta.get('library_viewer_url')
+
         enriched_html = self._build_browse_enriched_html(
-            marc, part_id_for_ext, part_meta_ext, external_meta, text_color, base_color
+            marc, part_id_for_ext, part_meta_ext, external_meta, text_color, base_color,
+            physical_metadata=physical_metadata, library_viewer_url=library_viewer_url
         )
 
         # Build FJMS domain and catalog HTML and prepend to enriched HTML
@@ -8986,7 +8990,8 @@ class GenizahGUI(QMainWindow):
         html += "</div>"
         return html
 
-    def _build_browse_enriched_html(self, marc, part_id, part_meta, external_meta, text_color, base_color):
+    def _build_browse_enriched_html(self, marc, part_id, part_meta, external_meta, text_color, base_color,
+                                     physical_metadata=None, library_viewer_url=None):
         """Build HTML for KTI/Oxford/Cambridge enrichment data in Browse extended info.
 
         Mirrors the enrichment HTML builder in ResultDialog.on_enriched_data_loaded.
@@ -8998,14 +9003,44 @@ class GenizahGUI(QMainWindow):
             external_meta: External metadata dict (Cambridge, etc.)
             text_color: CSS text color
             base_color: CSS background color
+            physical_metadata: dict with material, num_folio, num_bifolio, size from NLI crossref
+            library_viewer_url: dict with url, label for library digital collection link
 
         Returns:
             HTML string for enrichment section, or empty string.
         """
-        if not marc and not part_meta and not external_meta:
+        if not marc and not part_meta and not external_meta and not physical_metadata and not library_viewer_url:
             return ""
 
         part_bg = QColor(base_color).lighter(115).name()
+
+        # Physical metadata from NLI crossref (Phase 32: META-01, META-02)
+        phys_html = ""
+        if physical_metadata:
+            material = physical_metadata.get('material', '')
+            num_folio = physical_metadata.get('num_folio', '')
+            num_bifolio = physical_metadata.get('num_bifolio', '')
+            size = physical_metadata.get('size', '')
+
+            if material or num_folio or num_bifolio or size:
+                phys_html += f"<p style='margin-bottom:4px;'><b>{tr('Physical Description')}:</b></p>"
+                if material:
+                    phys_html += f"<p style='margin-left:12px;'><b>{tr('Material')}:</b> {tr(material)}</p>"
+                folio_parts = []
+                if num_folio and num_folio != '0':
+                    folio_parts.append(f"{num_folio} {tr('Folios')}")
+                if num_bifolio and num_bifolio != '0':
+                    folio_parts.append(f"{num_bifolio} {tr('Bifolios')}")
+                if folio_parts:
+                    phys_html += f"<p style='margin-left:12px;'><b>{tr('Folios')}:</b> {' + '.join(folio_parts)}</p>"
+                if size:
+                    phys_html += f"<p style='margin-left:12px;'><b>{tr('Size')}:</b> {size}</p>"
+
+        # Library viewer link (Phase 32: META-04)
+        if library_viewer_url and library_viewer_url.get('url'):
+            lib_label = library_viewer_url.get('label', tr('View in Library Catalog'))
+            lib_url = library_viewer_url['url']
+            phys_html += f"<p style='margin-left:12px;'><a href='{lib_url}' style='color:#1976d2;'>{lib_label}</a></p>"
 
         kti_html = ""
         date_val = marc.get('date')
@@ -9107,7 +9142,7 @@ class GenizahGUI(QMainWindow):
         elif kti_html:
             html += kti_html
 
-        return html
+        return phys_html + html
 
     def _browse_toggle_extended_info(self, checked):
         """Toggle browse tab extended info panel visibility."""
