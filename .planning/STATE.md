@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 34 of 34 (Library IIIF Integration)
-Plan: 3 of 5 in current phase
-Status: Executing Phase 34 -- Plan 03 complete
-Last activity: 2026-02-16 -- Completed 34-03 (Manchester/JTS service integration)
+Plan: 5 of 5 in current phase
+Status: Phase 34 complete -- all 5 plans executed
+Last activity: 2026-02-16 -- Completed 34-05 (Desktop ManuscriptViewer Manchester/JTS)
 
-Progress: [████████████████░░░░] 80%
+Progress: [████████████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 93 (across all milestones)
+- Total plans completed: 95 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.6 hours
 
@@ -33,7 +33,7 @@ Progress: [████████████████░░░░] 80%
 | v5.7.2 | 18-21 | 11 | ~1 day |
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
-| v5.9.0 | 29-34 | 11 | 28 min |
+| v5.9.0 | 29-34 | 13 | 30 min |
 | Phase 31 P01 | 5min | 2 tasks | 5 files |
 | Phase 31 P02 | 7min | 2 tasks | 4 files |
 | Phase 31 P03 | 3min | 2 tasks | 3 files |
@@ -43,6 +43,7 @@ Progress: [████████████████░░░░] 80%
 | Phase 34 P01 | 7min | 2 tasks | 1 file |
 | Phase 34 P02 | 19min | 2 tasks | 1 file |
 | Phase 34 P03 | 3min | 2 tasks | 3 files |
+| Phase 34 P05 | 2min | 2 tasks | 1 file |
 
 ## Accumulated Context
 
@@ -82,12 +83,14 @@ See PROJECT.md Key Decisions table for full history.
 - 34-03: Manchester detail URL via luna.manchester.ac.uk/luna/servlet/detail/{luna_id}, JTS via dpul_url from sidecar
 - 34-03: external_provider key ('manchester'/'jts') set in enrich_metadata for UI labeling
 - 34-03: JTS shelfmark lookup tries full then base (strip .N suffix); Manchester uses ImageSourceName JOIN
+- 34-05: library_viewer_url preferred over raw manifest URL for Manchester/JTS external button in desktop
+- 34-05: external_provider explicit key checked first in _detect_external_provider, URL patterns as fallback
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - FIST catalogs at unit (codex) level, not individual leaf level -- upstream FIST data design
-- IMG-05 (library IIIF fallback) depends on discovering external IIIF endpoints for JTS/Manchester/BL -- may need research during planning
+- IMG-05 (library IIIF fallback) resolved: Manchester LUNA and JTS Figgy IIIF integrated in Phase 34; BL remains search-only (no IIIF endpoint)
 
 ### Future Improvements
 
@@ -98,6 +101,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 34-03-PLAN.md (Manchester/JTS service integration)
+Stopped at: Completed 34-05-PLAN.md (Desktop ManuscriptViewer Manchester/JTS)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 34 in progress -- 3 of 5 plans complete. Service layer fully integrated with Manchester LUNA and JTS DPUL sidecar data.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 34 complete -- all 5 plans executed. Manchester LUNA and JTS/Princeton IIIF fully integrated in service layer, web app, and desktop app.
