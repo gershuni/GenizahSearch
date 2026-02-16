@@ -2149,6 +2149,127 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             f'/search?domain={quote(dom["domain"])}'
                                         ).classes('text-sm').style('color: var(--primary-600);')
 
+                    # === Phase 33: Bibliography References ===
+                    if fjms.is_available():
+                        bib_entries = fjms.get_bibliography(page.sys_id)
+                        if bib_entries:
+                            ui.separator().classes('my-3')
+                            with ui.row().classes('items-center gap-2 mb-2'):
+                                h3(tr('Bibliography References'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                                ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+                                if len(bib_entries) > 1:
+                                    ui.badge(str(len(bib_entries)), color='grey').props('dense').classes('text-xs')
+
+                            def format_bib_entry(entry):
+                                """Format a bibliography entry for display."""
+                                parts = []
+                                author = entry.get('article_author_eng', '')
+                                if author:
+                                    parts.append(author)
+                                title = entry.get('running_title', '') or ''
+                                year = entry.get('title_year', '') or ''
+                                if title:
+                                    title_str = title
+                                    if year:
+                                        title_str += f' ({year})'
+                                    parts.append(title_str)
+                                # Page reference
+                                page_parts = []
+                                vol = entry.get('volume', '')
+                                if vol and str(vol).strip():
+                                    page_parts.append(f'vol. {vol}')
+                                mention_page = entry.get('mention_page', '')
+                                from_page = entry.get('from_page', '')
+                                to_page = entry.get('to_page', '')
+                                if mention_page and str(mention_page).strip():
+                                    page_parts.append(f'p. {mention_page}')
+                                elif from_page and str(from_page).strip():
+                                    if to_page and str(to_page).strip() and str(to_page) != str(from_page):
+                                        page_parts.append(f'pp. {from_page}-{to_page}')
+                                    else:
+                                        page_parts.append(f'p. {from_page}')
+                                if page_parts:
+                                    parts.append(', '.join(page_parts))
+                                return ', '.join(parts) if parts else '(Unknown reference)'
+
+                            def _render_bib_entry(entry):
+                                """Render a single bibliography entry row."""
+                                with ui.row().classes('gap-1 items-baseline flex-wrap mb-1'):
+                                    ui.label(format_bib_entry(entry)).classes('text-sm').style('color: var(--text-primary);')
+                                    # Mention type badge
+                                    mt = entry.get('mention_type', '')
+                                    if mt and mt != 'None':
+                                        badge_color = 'purple' if mt == 'Discussion' else 'blue' if mt == 'Index' else 'grey'
+                                        ui.badge(mt, color=badge_color).props('outline dense').classes('text-xs')
+                                    # Transcription badge
+                                    tt = entry.get('transcription_type', '')
+                                    if tt and tt not in ('None', ''):
+                                        ui.badge(tt, color='teal').props('outline dense').classes('text-xs')
+                                    # Translation badge
+                                    tl = entry.get('translation_type', '')
+                                    if tl and tl not in ('None', ''):
+                                        ui.badge(tr('Translation'), color='cyan').props('outline dense').classes('text-xs')
+
+                            max_initial_bib = 5
+                            show_entries = bib_entries[:max_initial_bib]
+                            for entry in show_entries:
+                                _render_bib_entry(entry)
+
+                            # Collapsible expansion for remaining entries
+                            if len(bib_entries) > max_initial_bib:
+                                with ui.expansion(f'{tr("Show all")} {len(bib_entries)} {tr("references")}').classes('text-xs'):
+                                    for entry in bib_entries[max_initial_bib:]:
+                                        _render_bib_entry(entry)
+
+                    # === Phase 33: Catalog Cross-References ===
+                    if fjms.is_available():
+                        cat_refs = fjms.get_catalog_refs(page.sys_id)
+                        if cat_refs:
+                            ui.separator().classes('my-2')
+                            with ui.row().classes('items-center gap-2 mb-2'):
+                                h3(tr('Catalog References'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                                ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+
+                            with ui.column().classes('gap-1'):
+                                for ref in cat_refs:
+                                    acronym = ref.get('cat_acronym', '')
+                                    cat_entry = ref.get('catalog_entry', '')
+                                    display = f"{acronym} #{cat_entry}" if cat_entry else acronym
+                                    ui.label(display).classes('text-sm').style('color: var(--text-primary);')
+
+                    # === Phase 33: Scholarly Source Names ===
+                    if fjms.is_available():
+                        source_names = fjms.get_source_names(page.sys_id)
+                        if source_names:
+                            with ui.column().classes('gap-1 mb-2 mt-2'):
+                                ui.label(tr('Scholarly Sources')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                with ui.row().classes('gap-2 flex-wrap'):
+                                    for sn in source_names:
+                                        ui.label(sn).classes('text-sm').style('color: var(--text-primary);')
+
+                    # === Phase 33: Collection & Storage ===
+                    if _collection_storage:
+                        coll = _collection_storage.get('collection_name', '')
+                        box = _collection_storage.get('ob_box', '')
+                        vol_cs = _collection_storage.get('ob_volume', '')
+                        folio_cs = _collection_storage.get('ob_folio', '')
+                        if coll or box or vol_cs or folio_cs:
+                            with ui.column().classes('gap-1 mb-2'):
+                                ui.label(tr('Collection & Storage')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                parts = []
+                                if coll:
+                                    parts.append(coll)
+                                storage = []
+                                if box:
+                                    storage.append(f'Box {box}')
+                                if vol_cs:
+                                    storage.append(f'Vol. {vol_cs}')
+                                if folio_cs:
+                                    storage.append(f'Fol. {folio_cs}')
+                                if storage:
+                                    parts.append(', '.join(storage))
+                                ui.label(' - '.join(parts)).classes('text-sm').style('color: var(--text-primary);')
+
                     # === Related Fragments Section ===
                     pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
                     joins_data = fetch_connected_fragments(
