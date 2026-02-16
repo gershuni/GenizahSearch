@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 34 of 34 (Library IIIF Integration)
-Plan: 1 of 5 in current phase
-Status: Executing Phase 34 -- Plan 01 complete
-Last activity: 2026-02-16 -- Completed 34-01 (Manchester LUNA bulk import)
+Plan: 2 of 5 in current phase
+Status: Executing Phase 34 -- Plan 02 complete
+Last activity: 2026-02-16 -- Completed 34-02 (JTS/Princeton DPUL import)
 
-Progress: [██████████████░░░░░░] 70%
+Progress: [████████████████░░░░] 80%
 
 ## Performance Metrics
 
@@ -41,6 +41,7 @@ Progress: [██████████████░░░░░░] 70%
 | Phase 32 P02 | 2min | 2 tasks | 2 files |
 | Phase 32 P03 | 1min | 2 tasks | 2 files |
 | Phase 34 P01 | 7min | 2 tasks | 1 file |
+| Phase 34 P02 | 19min | 2 tasks | 1 file |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ See PROJECT.md Key Decisions table for full history.
 - 34-01: LUNA id and identity fields are identical; JRL filename from urlSize0 lowercased matches crossref ImageSourceName
 - 34-01: Sidecar extension pattern: new table in existing nli_crossref.db, version bumped to 1.1.0
 - 34-01: 27,940 LUNA items imported, 83.9% manuscript match rate (11,321/13,496)
+- 34-02: Per-shelfmark DPUL search, not per-base -- each leaf has unique ARK ID in DPUL
+- 34-02: Exact quoted search (q="shelfmark") required for precise DPUL matching
+- 34-02: 90.6% match rate on 500 JTS shelfmarks; 453 with Figgy manifest URLs
 
 ### Blockers/Concerns
 
@@ -90,6 +94,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 34-01-PLAN.md (Manchester LUNA bulk import)
+Stopped at: Completed 34-02-PLAN.md (JTS/Princeton DPUL import)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phases 29-32 complete, Phase 34 Plan 01 complete. 12 plans delivered. Ready for 34-02.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34), 15 requirements. Phase 34 in progress -- 2 of 5 plans complete. JTS DPUL data partially imported (453 rows), full import resumable via --resume flag.
