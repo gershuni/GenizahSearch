@@ -156,13 +156,14 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   4. NLI IsNotGenizah flag shows as a visual badge for the 29,081 flagged items in our corpus
   5. FJMS SourceName, NLI CollectionName, and physical storage references (OBBox/Volume/Folio) are displayed as secondary metadata
   6. All metadata displays in both web and desktop apps
-**Plans:** 5/5 plans complete
+**Plans:** 6 plans
 Plans:
 - [x] 33-01-PLAN.md -- FIST bibliography, catalog cross-refs, and reference tables export to sidecar
 - [x] 33-02-PLAN.md -- Service layer methods + enrich_metadata wiring + tests
 - [x] 33-03-PLAN.md -- Web browse page metadata display (bibliography, catalog refs, badges)
 - [x] 33-04-PLAN.md -- Desktop browse extended info metadata display
-- [ ] 33-05-PLAN.md -- Gap closure: fix Oxford Part enrichment thread for badge/catalog display
+- [x] 33-05-PLAN.md -- Gap closure: fix Oxford Part enrichment thread for badge/catalog display
+- [ ] 33-06-PLAN.md -- Gap closure: fix browse_render_page overwriting enriched info label
 
 ### Phase 34: Library IIIF Integration (Manchester + JTS/Princeton)
 **Goal**: Users see high-res images and rich metadata from Manchester LUNA and JTS/Princeton Figgy directly in the app, with detail page links instead of search links, by pre-importing library-specific identifiers into the sidecar
@@ -211,9 +212,9 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
 | 32. Metadata Display | v5.9.0 | 3/3 | Complete | 2026-02-16 |
-| 33. Metadata Enrichment | v5.9.0 | Complete    | 2026-02-16 | 2026-02-16 |
+| 33. Metadata Enrichment | v5.9.0 | 5/6 | Gap closure | 2026-02-16 |
 | 34. Library IIIF Fallback | v5.9.0 | 5/5 | Complete | 2026-02-16 |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-16 after Phase 33 gap closure plan created*
+*Last updated: 2026-02-16 after Phase 33 gap closure plan 06 created*
