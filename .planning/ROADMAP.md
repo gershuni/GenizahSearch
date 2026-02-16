@@ -88,8 +88,8 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
 - [x] **Phase 30: Direct Image Access** - Bypass NLI manifest fetch using pre-resolved image URLs from crossref and CUDL (completed 2026-02-15)
 - [x] **Phase 31: Image Navigation & Indicators** - Page-level image navigation and source availability indicators (completed 2026-02-15)
 - [x] **Phase 32: Metadata Display** - Physical metadata and catalog links on browse page (completed 2026-02-16)
-- [ ] **Phase 33: Fragment Relationships** - NLI PartOf and See cross-references in Related Fragments panel
-- [x] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources (completed 2026-02-16)
+- [ ] **Phase 33: Metadata Enrichment** - FIST bibliography/catalog export + NLI/FJMS metadata display in both apps
+- [x] **Phase 34: Library IIIF Fallback** - JTS, Manchester, and British Library IIIF as alternative image sources (completed 2026-02-16)
 
 ## Phase Details
 
@@ -145,16 +145,23 @@ Domain filtering, scientific joins with scholar attribution, catalog enrichment 
   - [x] 32-02-PLAN.md -- Desktop browse extended info panel with physical metadata and library links
   - [ ] 32-03-PLAN.md -- Gap closure: fix broken library URL patterns for Manchester, BL, JTS
 
-### Phase 33: Fragment Relationships
-**Goal**: Users discover related manuscripts through NLI PartOf groupings and See cross-references alongside existing PGP and FJMS joins
+### Phase 33: Metadata Enrichment
+**Goal**: Users see comprehensive scholarly metadata -- FIST bibliography (733K references with scholar attribution), catalog cross-references (78K entries across 80 published catalogs), NLI collection/storage references, Neubauer-Cowley catalog numbers, IsNotGenizah flags, and FJMS source classifications -- on the browse page in both apps
 **Depends on**: Phase 29
-**Requirements**: REL-01, REL-02
+**Requirements**: REL-01 (repurposed), META-05 (new)
 **Success Criteria** (what must be TRUE):
-  1. When viewing a manuscript that has NLI PartOf relationships (from 424K records), related fragments appear in the Related Fragments panel alongside PGP and FJMS joins
-  2. When viewing a manuscript that has NLI See cross-references (from 19K records), those references appear in the Related Fragments panel
-  3. NLI relationship entries are visually distinguished from PGP and FJMS sources (e.g., badge or label)
-  4. Fragment relationships display in both web and desktop apps
-**Plans**: TBD
+  1. FIST bibliography data (733K rows) is exported from FIST.db, imported into fjms_enrichment.db sidecar, and displayed as a bibliography section on the browse page showing publication, page reference, mention type, and transcription/translation availability
+  2. FIST catalog cross-references (78K rows across 80 scholarly catalogs) are exported and displayed as structured catalog entry references (e.g., "Baker/Polliack #1234")
+  3. NLI Neubauer-Cowley catalog numbers (2,919 Oxford entries) appear in the metadata section
+  4. NLI IsNotGenizah flag shows as a visual badge for the 29,081 flagged items in our corpus
+  5. FJMS SourceName, NLI CollectionName, and physical storage references (OBBox/Volume/Folio) are displayed as secondary metadata
+  6. All metadata displays in both web and desktop apps
+**Plans:** 4 plans
+Plans:
+- [ ] 33-01-PLAN.md -- FIST bibliography, catalog cross-refs, and reference tables export to sidecar
+- [ ] 33-02-PLAN.md -- Service layer methods + enrich_metadata wiring + tests
+- [ ] 33-03-PLAN.md -- Web browse page metadata display (bibliography, catalog refs, badges)
+- [ ] 33-04-PLAN.md -- Desktop browse extended info metadata display
 
 ### Phase 34: Library IIIF Integration (Manchester + JTS/Princeton)
 **Goal**: Users see high-res images and rich metadata from Manchester LUNA and JTS/Princeton Figgy directly in the app, with detail page links instead of search links, by pre-importing library-specific identifiers into the sidecar
@@ -203,9 +210,9 @@ Priority sequence: Data Infrastructure -> Image Access -> Navigation -> Metadata
 | 30. Direct Image Access | v5.9.0 | 2/2 | Complete | 2026-02-15 |
 | 31. Image Nav & Indicators | v5.9.0 | 3/3 | Complete | 2026-02-15 |
 | 32. Metadata Display | v5.9.0 | Complete    | 2026-02-16 | - |
-| 33. Fragment Relationships | v5.9.0 | 0/TBD | Not started | - |
+| 33. Metadata Enrichment | v5.9.0 | 0/4 | Planned | - |
 | 34. Library IIIF Fallback | v5.9.0 | Complete    | 2026-02-16 | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-16 after Phase 32 gap closure plan created*
+*Last updated: 2026-02-16 after Phase 33 planning complete*
