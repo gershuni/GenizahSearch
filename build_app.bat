@@ -11,13 +11,16 @@ pyinstaller --noconfirm --noconsole --onedir --clean ^
  --version-file "version_info.txt" ^
  --hidden-import "tantivy" ^
  --collect-all "tantivy" ^
- --hidden-import "google.genai" ^
- --collect-all "google.genai" ^
  --add-data "icon.ico;." ^
  --add-data "Help.html;." ^
  --add-data "oxford_full_db.json;." ^
  --add-data "libraries.csv;." ^
  --add-data "bodleian_master_index.csv;." ^
+ --add-data "pgp_tag_translations.py;." ^
+ --add-data "shared_export_utils.py;." ^
+ --add-data "shared;shared" ^
+ --add-data "fist_data\fjms_enrichment.db;fist_data" ^
+ --add-data "nli_data\nli_crossref.db;nli_data" ^
  --exclude-module "tkinter" ^
  --exclude-module "matplotlib" ^
  --exclude-module "scipy" ^
