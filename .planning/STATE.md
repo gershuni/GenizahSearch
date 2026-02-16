@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 33 of 34 (Metadata Enrichment)
-Plan: 6 of 6 in current phase (all complete)
-Status: Phase 33 complete (including gap closure plans 05 and 06)
-Last activity: 2026-02-16 -- Completed 33-06 (browse_render_page info label overwrite fix)
+Plan: 7 of 7 in current phase (all complete)
+Status: Phase 33 complete (including gap closure plans 05, 06, and 07)
+Last activity: 2026-02-16 -- Completed 33-07 (remove cache-first short-circuit from enrichment thread startup)
 
 Progress: [████████████████████] 97%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 100 (across all milestones)
+- Total plans completed: 101 (across all milestones)
 - Average duration: ~8 min
 - Total execution time: ~9.7 hours
 
@@ -51,6 +51,7 @@ Progress: [████████████████████] 97%
 | Phase 33 P04 | 7min | 2 tasks | 2 files |
 | Phase 33 P05 | 2min | 1 task | 1 file |
 | Phase 33 P06 | 1min | 1 task | 1 file |
+| Phase 33 P07 | 1min | 1 task | 1 file |
 
 ## Accumulated Context
 
@@ -107,6 +108,7 @@ See PROJECT.md Key Decisions table for full history.
 - 33-04: Desktop metadata section ordering: domains (purple) > catalog (purple) > bibliography (orange) > catalog refs (teal) > secondary (grey) > KTI/Oxford
 - 33-05: Gap closure -- _browse_load_part needed EnrichMetadataThread startup; on_browse_enriched_loaded already handled Part case correctly
 - 33-06: Gap closure -- browse_render_page reads nli_cache for catalog_entry and is_not_genizah badge, preventing overwrite by page re-renders
+- 33-07: Gap closure -- removed cache-first short-circuit from _browse_load_part and browse_navigate; nli_cache basic CSV metadata was always truthy, preventing EnrichMetadataThread from ever starting
 
 ### Blockers/Concerns
 
@@ -123,6 +125,6 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-02-16
-Stopped at: Completed 33-06-PLAN.md (browse_render_page info label overwrite fix)
+Stopped at: Completed 33-07-PLAN.md (remove cache-first short-circuit from enrichment thread startup)
 Resume file: None
-Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 all 6 plans complete -- sidecar export, service layer, web UI, desktop UI, Oxford Part gap closure, and info label overwrite fix all done.
+Notes: 6 milestones shipped. v5.9.0 roadmap: 6 phases (29-34). Phase 34 complete (7/7 verified). Phase 33 all 7 plans complete -- sidecar export, service layer, web UI, desktop UI, Oxford Part gap closure, info label overwrite fix, and cache-first short-circuit removal all done.
