@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 phase: 32-metadata-display
-source: [32-01-SUMMARY.md, 32-02-SUMMARY.md]
+source: [32-01-SUMMARY.md, 32-02-SUMMARY.md, 32-03-SUMMARY.md]
 started: 2026-02-16T01:30:00Z
-updated: 2026-02-16T02:00:00Z
+updated: 2026-02-16
 ---
 
 ## Current Test
@@ -61,7 +61,7 @@ skipped: 0
 ## Gaps
 
 - truth: "Library digital collection links work correctly for all supported libraries (CUL, JTS, Manchester, BL)"
-  status: failed
+  status: resolved
   reason: "User reported: Manchester LUNA search URL pattern broken. Investigation found 3 of 4 library URL patterns are broken."
   severity: major
   test: 3

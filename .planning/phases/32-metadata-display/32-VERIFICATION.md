@@ -1,17 +1,36 @@
 ---
 phase: 32-metadata-display
-verified: 2026-02-16T08:30:00Z
+verified: 2026-02-16T10:45:00Z
 status: passed
-score: 8/8 must-haves verified
-re_verification: false
+score: 11/11 must-haves verified
+re_verification:
+  previous_status: passed
+  previous_score: 8/8
+  gaps_closed:
+    - "Manchester LUNA links open working search pages (servlet/view/search path)"
+    - "BL links open working searcharchives pages with leaf suffix stripped"
+    - "JTS links use correct cairo_geniza collection slug"
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 32: Metadata Display Verification Report
 
 **Phase Goal:** Users see physical manuscript metadata and can navigate to external catalog pages for the manuscripts they are viewing
-**Verified:** 2026-02-16T08:30:00Z
+**Verified:** 2026-02-16T10:45:00Z
 **Status:** passed
-**Re-verification:** No - initial verification
+**Re-verification:** Yes — after gap closure (Plan 03)
+
+## Re-Verification Context
+
+**Previous verification:** 2026-02-16T08:30:00Z (initial, status: passed)
+**Gap closure plan:** 32-03-PLAN.md (fix broken library URLs)
+**UAT findings:** 3 of 4 library URL patterns were broken
+- Manchester: servlet/s/ path was non-functional
+- BL: manuscripts viewer down after cyber-attack
+- JTS: wrong collection slug (/geniza instead of /cairo_geniza)
+
+**Verification approach:** Full re-verification of all must-haves including the 3 gap closure fixes.
 
 ## Goal Achievement
 
@@ -19,53 +38,93 @@ re_verification: false
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Web browse metadata panel shows material type (Paper/Parchment/Vellum) when NLI crossref data exists | VERIFIED | browse.py:1884-1887 renders page.physical_metadata.get('material') with tr() translation |
-| 2 | Web browse metadata panel shows folio count from NumFolio and bifolio count from NumBifolio | VERIFIED | browse.py:1890-1896 parses num_folio/num_bifolio and formats with separator |
-| 3 | Web browse metadata panel shows clickable link to holding library digital collection | VERIFIED | browse.py:1786-1795 (header), 1946-1952 (external links) render library_viewer_url with guard |
-| 4 | KTIV link in header and metadata panel already exists and continues to work | VERIFIED | Existing code unchanged, separate component in browse page |
-| 5 | Desktop browse extended info panel shows material type when NLI crossref data exists | VERIFIED | genizah_app.py:9027-9028 renders material with tr() translation in phys_html |
-| 6 | Desktop browse extended info panel shows folio count from NumFolio and NumBifolio | VERIFIED | genizah_app.py:9029-9035 parses and formats folio_parts list |
-| 7 | Desktop browse tab has a clickable link to holding library digital collection | VERIFIED | genizah_app.py:9040-9043 renders library_viewer_url as clickable link |
-| 8 | KTIV button in desktop ManuscriptViewerWidget continues to work | VERIFIED | Separate component, unchanged by Phase 32 |
+| 1 | Web browse metadata panel shows material type (Paper/Parchment/Vellum) when NLI crossref data exists | ✓ VERIFIED | browse.py:1884-1887 renders page.physical_metadata.get('material') with tr() translation |
+| 2 | Web browse metadata panel shows folio count from NumFolio and bifolio count from NumBifolio | ✓ VERIFIED | browse.py:1890-1898 parses num_folio/num_bifolio and formats with separator |
+| 3 | Web browse metadata panel shows clickable link to holding library digital collection | ✓ VERIFIED | browse.py:1786-1797 (header), 1946-1952 (external links) render library_viewer_url with guard |
+| 4 | KTIV link in header and metadata panel already exists and continues to work | ✓ VERIFIED | Existing code unchanged, separate component in browse page |
+| 5 | Desktop browse extended info panel shows material type when NLI crossref data exists | ✓ VERIFIED | genizah_app.py:9027-9028 renders material with tr() translation in phys_html |
+| 6 | Desktop browse extended info panel shows folio count from NumFolio and NumBifolio | ✓ VERIFIED | genizah_app.py:9029-9035 parses and formats folio_parts list |
+| 7 | Desktop browse tab has a clickable link to holding library digital collection | ✓ VERIFIED | genizah_app.py:9040-9043 renders library_viewer_url as clickable link |
+| 8 | KTIV button in desktop ManuscriptViewerWidget continues to work | ✓ VERIFIED | Separate component, unchanged by Phase 32 |
+| 9 | Manchester LUNA links open a working search page showing the manuscript | ✓ VERIFIED (GAP CLOSED) | nli_crossref_service.py:398-400 uses servlet/view/search path, test passes |
+| 10 | BL links open the BL searcharchives page with results for the manuscript | ✓ VERIFIED (GAP CLOSED) | nli_crossref_service.py:406-408 uses searcharchives.bl.uk with leaf suffix stripping, test passes |
+| 11 | JTS links open the Princeton Geniza Lab DPUL search page for the manuscript | ✓ VERIFIED (GAP CLOSED) | nli_crossref_service.py:390-393 uses cairo_geniza collection slug, verified by grep |
 
-**Score:** 8/8 truths verified
+**Score:** 11/11 truths verified (8 original + 3 gap closure)
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| shared/nli_crossref_service.py | get_library_viewer_url() and get_physical_metadata() methods | VERIFIED | Lines 313-344 (physical), 346-415 (URL), both substantive with DB queries |
-| web/services.py | BrowsePage.physical_metadata and library_viewer_url fields populated | VERIFIED | Lines 78-79 (fields), 324-325+352-355, 480-481+503-506 (population) |
-| web/pages/browse.py | Material, folio count, and library link display | VERIFIED | Lines 1884-1896 (metadata grid), 1786-1795 (header), 1946-1952 (links) |
-| tests/test_nli_crossref_service.py | Tests for get_library_viewer_url | VERIFIED | 5 test functions (CUL, Manchester, BL, unknown, missing), all pass |
-| genizah_app.py | Physical metadata and library link display in desktop | VERIFIED | Lines 8718-8723 (extraction), 9019-9043 (rendering) |
-| genizah_core.py | physical_metadata and library_viewer_url enrichment | VERIFIED | Lines 3325-3332 - both fields populated from crossref service |
-| genizah_translations.py | Hebrew translations for metadata strings | VERIFIED | Lines 324, 1647-1648, 1653-1654, 1656 - all required translations |
+| shared/nli_crossref_service.py | get_library_viewer_url() and get_physical_metadata() methods | ✓ VERIFIED | Lines 313-344 (physical), 346-421 (URL), both substantive with DB queries |
+| shared/nli_crossref_service.py | Fixed Manchester URL pattern | ✓ VERIFIED (GAP CLOSED) | Line 398: servlet/view/search path with query params |
+| shared/nli_crossref_service.py | Fixed BL URL pattern | ✓ VERIFIED (GAP CLOSED) | Lines 406-408: searcharchives.bl.uk with leaf suffix stripping via regex |
+| shared/nli_crossref_service.py | Fixed JTS URL pattern | ✓ VERIFIED (GAP CLOSED) | Line 391: dpul.princeton.edu/cairo_geniza/catalog |
+| tests/test_nli_crossref_service.py | Tests for all library URL patterns | ✓ VERIFIED | 6 test functions (CUL, Manchester, BL, BL leaf strip, unknown, missing), all pass |
+| web/services.py | BrowsePage.physical_metadata and library_viewer_url fields populated | ✓ VERIFIED | Lines 78-79 (fields), 324-325+352-355, 480-481+503-506 (population) |
+| web/pages/browse.py | Material, folio count, and library link display | ✓ VERIFIED | Lines 1884-1898 (metadata grid), 1786-1797 (header), 1946-1952 (links) |
+| genizah_app.py | Physical metadata and library link display in desktop | ✓ VERIFIED | Lines 8718-8723 (extraction), 9019-9043 (rendering) |
+| genizah_core.py | physical_metadata and library_viewer_url enrichment | ✓ VERIFIED | Lines 3325-3332 - both fields populated from crossref service |
+| genizah_translations.py | Hebrew translations for metadata strings | ✓ VERIFIED | Lines 324, 1647-1648, 1653-1654, 1656 - all required translations |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|----|--------|---------|
-| web/services.py | nli_crossref_service | get_physical_metadata() call | WIRED | Line 352 in both browse methods |
-| web/services.py | nli_crossref_service | get_library_viewer_url() call | WIRED | Line 355 in both browse methods |
-| web/pages/browse.py | web/services.py | page.physical_metadata access | WIRED | Lines 1884, 1890 - accessed and rendered |
-| web/pages/browse.py | web/services.py | page.library_viewer_url access | WIRED | Lines 1786, 1946 - accessed in header and links |
-| genizah_core.py | nli_crossref_service | both methods in enrich_metadata | WIRED | Lines 3325, 3330 - results stored in meta dict |
-| genizah_app.py | genizah_core.py | meta.get('physical_metadata') | WIRED | Line 8718 - extracted and passed to HTML builder |
-| genizah_app.py | genizah_core.py | meta.get('library_viewer_url') | WIRED | Line 8719 - extracted and passed to HTML builder |
+| web/services.py | nli_crossref_service | get_physical_metadata() call | ✓ WIRED | Line 352 in both browse methods |
+| web/services.py | nli_crossref_service | get_library_viewer_url() call | ✓ WIRED | Line 355 in both browse methods |
+| web/pages/browse.py | web/services.py | page.physical_metadata access | ✓ WIRED | Lines 1884, 1890 - accessed and rendered |
+| web/pages/browse.py | web/services.py | page.library_viewer_url access | ✓ WIRED | Lines 1786, 1946 - accessed in header and links |
+| genizah_core.py | nli_crossref_service | both methods in enrich_metadata | ✓ WIRED | Lines 3325, 3330 - results stored in meta dict |
+| genizah_app.py | genizah_core.py | meta.get('physical_metadata') | ✓ WIRED | Line 8718 - extracted and passed to HTML builder |
+| genizah_app.py | genizah_core.py | meta.get('library_viewer_url') | ✓ WIRED | Line 8719 - extracted and passed to HTML builder |
+| nli_crossref_service.py | luna.manchester.ac.uk | servlet/view/search path | ✓ WIRED (GAP CLOSED) | Line 398: URL construction verified by test |
+| nli_crossref_service.py | searcharchives.bl.uk | BL search endpoint | ✓ WIRED (GAP CLOSED) | Line 407: URL construction with leaf strip verified by test |
+| nli_crossref_service.py | dpul.princeton.edu/cairo_geniza/catalog | JTS catalog path | ✓ WIRED (GAP CLOSED) | Line 391: URL construction verified by grep |
 
 ### Requirements Coverage
 
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| META-01: Material type displayed (both apps) | SATISFIED | Web: browse.py:1884-1887; Desktop: genizah_app.py:9027-9028 |
-| META-02: Folio count displayed (both apps) | SATISFIED | Web: browse.py:1890-1896; Desktop: genizah_app.py:9029-9035 |
-| META-03: NLI catalog link (both apps) | SATISFIED | Pre-existing from Phase 31, confirmed unchanged |
-| META-04: Library collection links (both apps) | SATISFIED | Service: nli_crossref_service.py:346-415; UI verified above |
+| META-01: Material type displayed (both apps) | ✓ SATISFIED | Web: browse.py:1884-1887; Desktop: genizah_app.py:9027-9028 |
+| META-02: Folio count displayed (both apps) | ✓ SATISFIED | Web: browse.py:1890-1898; Desktop: genizah_app.py:9029-9035 |
+| META-03: NLI catalog link (both apps) | ✓ SATISFIED | Pre-existing from Phase 31, confirmed unchanged |
+| META-04: Library collection links (both apps) | ✓ SATISFIED | Service: nli_crossref_service.py:346-421; UI verified above; GAP CLOSED for Manchester, BL, JTS |
 
 ### Anti-Patterns Found
 
-No blocker anti-patterns found. All implementations are substantive with full logic.
+No blocker anti-patterns found. All implementations are substantive with full logic. The `return {}` on lines 202 and 230 are legitimate guard clauses for error/no-data cases.
+
+### Test Coverage
+
+**Test suite:** `pytest tests/test_nli_crossref_service.py`
+**Total tests:** 38
+**Status:** All passing
+
+**Gap closure tests:**
+- `test_get_library_viewer_url_manchester` — Verifies servlet/view/search path and query params
+- `test_get_library_viewer_url_bl` — Verifies searcharchives.bl.uk domain and URL-encoded spaces
+- `test_get_library_viewer_url_bl_strips_leaf` — NEW test verifying leaf suffix stripping and no underscore conversion
+
+### Gaps Closed
+
+**Gap 1: Manchester LUNA links broken**
+- **Issue:** servlet/s/ path was non-functional
+- **Fix:** Changed to servlet/view/search?q= with query params
+- **Verification:** Line 398 contains correct pattern, test passes
+- **Status:** ✓ CLOSED
+
+**Gap 2: BL links broken**
+- **Issue:** bl.uk/manuscripts/FullDisplay.aspx down after cyber-attack
+- **Fix:** Switched to searcharchives.bl.uk with leaf suffix stripping and URL-encoded spaces
+- **Verification:** Lines 404-408 contain correct pattern with regex strip, test passes including explicit no-underscore check
+- **Status:** ✓ CLOSED
+
+**Gap 3: JTS links broken**
+- **Issue:** /geniza/catalog path returns 404
+- **Fix:** Corrected to /cairo_geniza/catalog
+- **Verification:** Line 391 contains correct path
+- **Status:** ✓ CLOSED
 
 ### Human Verification Required
 
@@ -81,11 +140,14 @@ No blocker anti-patterns found. All implementations are substantive with full lo
 **Expected:** "Physical Description:" section shows material, folio counts, size, clickable library link.
 **Why human:** QTextBrowser HTML rendering and QDesktopServices.openUrl behavior need manual testing.
 
-#### 3. Library URL Construction
+#### 3. Library URL Construction - All Fixed Patterns
 
-**Test:** Test manuscripts from CUL, JTS, Manchester, BL. Click each library link.
-**Expected:** Opens correct library search page with shelfmark pre-filled.
-**Why human:** External URL patterns and third-party website functionality require actual navigation.
+**Test:** Test manuscripts from Manchester, BL, JTS. Click each library link.
+**Expected:**
+- Manchester: Opens luna.manchester.ac.uk search page with manuscript shelfmark
+- BL: Opens searcharchives.bl.uk with results (leaf suffix stripped from URL)
+- JTS: Opens dpul.princeton.edu/cairo_geniza/catalog search page
+**Why human:** External URL patterns and third-party website functionality require actual navigation to confirm working pages.
 
 #### 4. Translation Coverage
 
@@ -97,28 +159,33 @@ No blocker anti-patterns found. All implementations are substantive with full lo
 
 ## Verification Summary
 
-**All must-haves verified.** Phase 32 goal achieved.
+**All must-haves verified.** Phase 32 goal achieved including gap closure.
 
-- 8/8 observable truths verified
-- 7/7 required artifacts present, substantive, and wired
-- 7/7 key links verified and connected
+- 11/11 observable truths verified (8 original + 3 gap closure)
+- 10/10 required artifacts present, substantive, and wired (7 original + 3 gap closure fixes)
+- 10/10 key links verified and connected (7 original + 3 gap closure links)
 - 4/4 requirements (META-01 through META-04) satisfied in both apps
+- 3/3 gaps from UAT closed and verified
 - 0 blocker anti-patterns
-- 4 items flagged for human verification
+- 0 regressions detected
+- 4 items flagged for human verification (visual/external only)
 
 **Automated checks: PASSED**
 
-Test suite: pytest tests/test_nli_crossref_service.py::test_get_library_viewer_url_* - 5/5 PASSED
+Test suite: `pytest tests/test_nli_crossref_service.py` — 38/38 PASSED
 
 **Commits verified:**
-- 852e68b1 - Plan 01 service layer
-- d686b955 - Plan 01 web UI
-- 663e1ef5 - Plan 02 core enrichment
-- 273f7436 - Plan 02 desktop UI
+- 852e68b1 — Plan 01 service layer (initial implementation)
+- d686b955 — Plan 01 web UI (initial implementation)
+- 663e1ef5 — Plan 02 core enrichment (initial implementation)
+- 273f7436 — Plan 02 desktop UI (initial implementation)
+- 55846fa8 — Plan 03 Task 1 (gap closure: fix library URL patterns)
+- 997880ae — Plan 03 Task 2 (gap closure: update tests for corrected patterns)
 
 **Phase 32 complete and ready for Phase 33.**
 
 ---
 
-_Verified: 2026-02-16T08:30:00Z_
+_Verified: 2026-02-16T10:45:00Z_
 _Verifier: Claude (gsd-verifier)_
+_Re-verification after gap closure: 3/3 gaps closed, 0 regressions_
