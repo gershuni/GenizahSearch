@@ -2346,6 +2346,13 @@ TRANSLATIONS = {
     "Filter by Subject Domain": "סנן לפי תחום נושא",
     "Run a search first to see domain options.": "בצע חיפוש תחילה כדי לראות אפשרויות תחום.",
 
+    # --- Phase 33: Metadata Enrichment ---
+    "Bibliography References": "הפניות ביבליוגרפיות",
+    "Catalog References": "הפניות קטלוגיות",
+    "Not Genizah": "לא גניזה",
+    "Scholarly Sources": "מקורות מדעיים",
+    "Collection & Storage": "אוסף ואחסון",
+
     # --- FJMS Catalog ---
     "FJMS Catalog": "קטלוג FJMS",
     "Content Identification": "זיהוי תוכן",

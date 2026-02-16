@@ -8698,6 +8698,19 @@ class GenizahGUI(QMainWindow):
             if meta.get('physical_desc'):
                 label_text += f" | {meta['physical_desc']}"
 
+        # Append Neubauer-Cowley catalog entry for Oxford manuscripts
+        catalog_entry = meta.get('catalog_entry')
+        if catalog_entry:
+            label_text += f" | {catalog_entry}"
+
+        # Append IsNotGenizah badge for flagged manuscripts
+        if meta.get('is_not_genizah', False):
+            label_text += (
+                f" <span style='background:#fff3e0; color:#e65100; "
+                f"padding:1px 4px; border-radius:3px; font-size:10px;'>"
+                f"{tr('Not Genizah')}</span>"
+            )
+
         self.browse_info_lbl.setText(label_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
 
