@@ -1,65 +1,78 @@
-# Phase 37: FJMS Catalog Descriptions - Research
+# Phase 37: FJMS Catalog Descriptions (v2) - Research
 
 **Researched:** 2026-02-17
-**Domain:** FJMS catalog data display (NiceGUI web + PyQt6 desktop)
+**Domain:** SQLite export enrichment + dual-app dialog UI (NiceGUI + PyQt6)
 **Confidence:** HIGH
 
 ## Summary
 
-This phase surfaces FJMS scholarly catalog descriptions from the existing `catalog` table in `fjms_enrichment.db` via a dedicated button and dialog in both web and desktop apps. The data already exists -- no new export or table is needed. The codebase already has comprehensive infrastructure for this: `FjmsService.get_catalog_records()` returns deduplicated records, `merge_catalog_records()` aggregates metadata, and `parse_textual_frame()` / `split_textual_frames()` handle the `[$...$]` and `@` markup. The existing Bibliography FJMS dialog pattern (both `web/components/bibliography_dialog.py` and desktop `FjmsBibliographyDialog` class) provides a direct template.
+Phase 37 v2 requires two major work streams: (1) extending the `export_fist_enrichment.py` script to extract 5 new data categories from FIST.db into the sidecar, and (2) building a rich catalog records dialog in both web and desktop apps with multi-team side-by-side layout, physical metadata, and running titles.
 
-The catalog table has 500,888 rows across ~227K distinct AlmaIds, with ~96K rows containing TextualFrame data across ~57.6K distinct AlmaIds. Records come from 14 distinct source names, with "Catalogs" (49K records) and "Institution" (32.6K) being the largest. Most entries are short (<100 chars), but some reach 2,688 chars (compound piyyut identifications). Some manuscripts have up to 128 records from the same source, so the dialog must handle scrolling gracefully.
+The v1 implementation was reverted because it only displayed TextualFrame data already visible in browse metadata. The v2 scope adds genuinely new data: multi-team scholarly identifications side-by-side, physical measurements (SizeX/SizeY), material type, condition/physical status codes, running titles, free-text descriptions, and GenizahTitle lookups. The export must add ~1.7M new rows across 4 new tables plus extend the existing catalog table with ~6 new columns.
 
-**Primary recommendation:** Create a new `create_catalog_records_dialog()` in `web/components/` following the bibliography dialog pattern, add a new `FjmsCatalogDialog` QDialog class in the desktop app, and wire buttons in all four locations (web browse, web search, desktop browse ext_info_row, desktop ResultDialog action_row). Add a batch count method `get_catalog_record_counts()` to FjmsService for efficient search result enrichment.
+The codebase has well-established patterns for all UI needs: bibliography dialogs in both apps, batch enrichment for search cards, button placement in ext_info_row (desktop) and bibliography buttons row (web). The reverted code provides a working template that needs enhancement rather than a fresh build.
+
+**Primary recommendation:** Extend the export script first (new tables + catalog column additions), then rebuild the service layer methods, then rebuild the dialog component for both apps using the reverted code as a foundation with new physical metadata sections and multi-team column layout.
 
 <user_constraints>
 ## User Constraints (from CONTEXT.md)
 
 ### Locked Decisions
 
-#### Data Source
-- Query directly from existing `catalog` table's `TextualFrameEng`/`TextualFrameHeb` columns -- no new `full_texts` table needed
-- ~96K records with TextualFrame data, ~500K total catalog rows
-- Also display `Title`/`TitleHeb`, `AuthorText`, `CopyDate`, `CopyPlace` when available
+#### Export Enrichment (NEW -- core change from v1)
+- **Extend `export_fist_enrichment.py`** to add the following new tables:
+  - `catalog_running_titles` -- from `dbo_CatalogMultiRunningTitle` (235K rows), linked by UnitCatalogRecId
+  - `catalog_sizes` -- from `dbo_CatalogMultiSize` (161K rows), SizeX/SizeY per catalog record
+  - `catalog_fields` -- from `dbo_CatalogMultiField` (1.1M rows), coded multi-values: physical status, material, script type, language
+  - `catalog_free_desc` -- from `dbo_UnitFreeDescription` (190K rows), linked by SignatureId
+- **Add to existing catalog table:** NumRow, NumColumn, NumFolio from `dbo_UnitCatalogRec` (not currently selected)
+- **Add inventory-level data:** NumFolio, MaterialCode (-> CODE_FullCode lookup), SizeCode (-> CODE_FullCode lookup) from `dbo_Inventory`
+- **Add GenizahTitle lookup:** OrgTitle, EngTitle from `CODE_GenizahTitle` via GenizahTitleId
+- **Drop empty columns:** Remove DescriptionEng/DescriptionHeb (IdentificationText) -- always empty across all 500K records
+- **Extend FTS5 index:** Include RunningTitle and FreeDescription in catalog_fts for full-text search
+- All new tables stored as separate normalized tables in the sidecar (not flattened into catalog)
 
-#### Description Presentation
-- **Dialog/modal popup** -- matches existing Bibliography FJMS pattern
-- **Follow app language** -- show TextualFrameHeb when app is Hebrew, TextualFrameEng when English
-- **Language fallback** -- if preferred language version is empty, fall back to the other language
-- **Markup rendering** -- preserve `[$...$]` and `@` markup data but render it nicely (styled/emphasized text), not raw
-- **Title as heading** -- show Title/TitleHeb as a heading above the description when present
-- **Author field** -- show AuthorText when available (after title, before frame text)
-- **Extra metadata** -- show CopyDate and CopyPlace in the dialog when available
-- **Desktop parity** -- QDialog popup in desktop app, same content layout as web modal
+#### Physical Metadata Display
+- **Key-value pairs** layout: label: value rows (Material: Vellum, Size: 165 x 210 mm, etc.)
+- **Separate section** with its own header (e.g., "Physical Description") within the dialog
+- **Hide empty fields** -- only show fields that have actual data, don't show placeholders
+- **Follow app language** for labels -- Hebrew labels in Hebrew mode, English labels in English mode
 
-#### Button Design & Placement
-- **Label:** "Catalog Records (N)" in English / "מידע קטלוגי (N)" in Hebrew, with entry count
-- **Icon:** `description` (Material doc icon) -- distinct from bibliography's `menu_book`
+#### Dialog Content Structure
+- **Textual descriptions first, physical metadata below** -- lead with scholarly identification
+- **Side-by-side columns** for multi-team entries -- teams as columns, fields as rows
+- **Title and Running Title** shown as distinct fields -- both displayed when present
+- **Free Description always fully visible** -- no expandable/collapsible, show complete scholarly notes inline
+- **Dialog title:** "Catalog Records -- {shelfmark}"
+- **All FJMS data shown** -- no deduplication against what browse already shows
+- Button appears in **all four locations**: web browse, web search results, desktop browse (ext_info_row), desktop Result Dialog
+
+#### Button Design & Placement (carried from v1)
+- **Label:** "Catalog Records (N)" in English / "catalog_records_heb (N)" in Hebrew
+- **Count N** = number of distinct sources/teams that contributed data
+- **Icon:** `description` (Material doc icon)
 - **Style:** `outline dense` -- matches existing Bibliography FJMS/Ktiv buttons
-- **Web browse:** In the bibliography buttons row (near Bibliography FJMS / Bibliography Ktiv)
-- **Web search results:** Button in the metadata section of search result cards
-- **Desktop browse:** Same row as bibliography buttons (ext_info_row)
-- **Desktop Result Dialog:** Button follows bibliography button pattern (visible when data exists)
-- **Empty state:** Button always visible but disabled with (0) count when no records -- consistent across all locations
+- **No data:** Button disabled with (0) count
 
-#### Attribution Display
-- **Source header per group** -- group entries by SourceName, show source name once as a section header
-- **Source language** -- follow app language (SourceNameHeb in Hebrew mode, SourceName in English)
-- **Author placement** -- after title, before frame text: Title -> Author -> Description
+#### Attribution Display (carried from v1)
+- **Source header per group** -- group entries by SourceName
+- **Source language** -- follow app language
+- **Author placement** -- after title, before frame text
 
-#### Multiple Descriptions
-- **Show all, scrollable** -- dialog scrolls, no truncation or cap regardless of entry count
-- **No deduplication** -- show all entries from all sources as-is, even if overlapping
-- **Dialog title** -- "Catalog Records -- {shelfmark}" (count only on the button, not in dialog title)
+#### Partial Data Handling
+- **Show physical-only records** -- catalog record with only sizes/material but no text still shows
+- **No data at all** -- button disabled with (0), consistent across all locations
 
 ### Claude's Discretion
-- Truncation strategy for very long individual descriptions (up to 2,688 chars)
-- Handling of identical TextualFrameEng/TextualFrameHeb content (dedup display or just show chosen language)
 - Exact spacing, typography, and scroll behavior in the dialog
+- Handling of >3 team columns (horizontal scroll vs tabs)
+- Empty cell display strategy in side-by-side layout
+- FTS5 tokenizer configuration for multilingual RunningTitle/FreeDescription content
+- Whether to add UnitCatalogRecId as a foreign key in the sidecar tables or use AlmaId-only joins
 
 ### Deferred Ideas (OUT OF SCOPE)
 - **Clickable [$reference$] links** -- clicking a `[$Sifra$]` or `[$Talmud Yerushalmi$]` reference to trigger a search -- future phase
-- **FJMS FTS5 search of descriptions** -- already tracked as FJMS-04 in requirements (future)
+- **FJMS FTS5 search of descriptions** -- already tracked as FJMS-04 in requirements (partially addressed by FTS5 extension in this phase)
 </user_constraints>
 
 <phase_requirements>
@@ -67,9 +80,9 @@ The catalog table has 500,888 rows across ~227K distinct AlmaIds, with ~96K rows
 
 | ID | Description | Research Support |
 |----|-------------|-----------------|
-| FJMS-01 | FJMS catalog descriptions (65K records) exported to `fjms_enrichment.db` | **Already satisfied.** The `catalog` table exists with ~96K TextualFrame records across ~57.6K distinct AlmaIds. `FjmsService.get_catalog_records()` already queries and deduplicates them. No export needed. |
-| FJMS-02 | User can view FJMS scholarly descriptions from browse page via dedicated button in both apps | Requires: new dialog component (web + desktop), button wiring in browse page (web: near bibliography buttons row at line ~2165, desktop: ext_info_row at line ~8547), and button in search results. Service layer already exists. |
-| FJMS-03 | Descriptions show source attribution (which catalog/scholar) | `catalog` table has `SourceName`/`SourceNameHeb` columns. `get_catalog_records()` already returns `source_name` and `source_name_heb` fields. Dialog groups entries by source, showing source as section header. |
+| FJMS-01 | FJMS catalog descriptions (65K records) exported to `fjms_enrichment.db` | Export script extension adds 4 new tables + extends catalog table. Total ~1.7M new rows across running titles (235K), sizes (161K), fields (1.1M), free descriptions (190K). Catalog table gets UnitCatalogRecId, NumRow, NumColumn, NumFolio, GenizahTitle OrgTitle/EngTitle. DescriptionEng/DescriptionHeb dropped (confirmed 0 non-empty rows). |
+| FJMS-02 | User can view FJMS scholarly descriptions from browse page via dedicated button in both apps | Reverted v1 code provides foundation for dialog component. New dialog adds physical metadata section and multi-team side-by-side layout. Button pattern established in web browse (bibliography buttons row at line ~2167) and desktop browse (ext_info_row at line ~8540). Search cards at line ~2238. Desktop ResultDialog at line ~4323. |
+| FJMS-03 | Descriptions show source attribution (which catalog/scholar) | catalog table already has SourceName/SourceNameHeb columns. New data tables will carry UnitCatalogRecId linking back to catalog source. Side-by-side team layout groups all data by source. |
 </phase_requirements>
 
 ## Standard Stack
@@ -77,103 +90,291 @@ The catalog table has 500,888 rows across ~227K distinct AlmaIds, with ~96K rows
 ### Core
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
-| NiceGUI | 2.x | Web dialog (ui.dialog, ui.card, ui.html) | Already used for bibliography dialogs |
-| PyQt6 | 6.x | Desktop dialog (QDialog, QTextBrowser, QVBoxLayout) | Already used for FjmsBibliographyDialog |
-| SQLite3 | stdlib | Query fjms_enrichment.db catalog table | Already used via FjmsService |
+| sqlite3 (stdlib) | Python 3.10+ | Sidecar read/write | Already used for all sidecar operations |
+| NiceGUI | Current | Web dialog component | Project web framework |
+| PyQt6 | Current | Desktop dialog component | Project desktop framework |
 
 ### Supporting
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| shared/fjms_service.py | existing | get_catalog_records(), merge_catalog_records(), parse_textual_frame() | All catalog data retrieval |
-| web/translations.py | existing | tr() for bilingual labels | All UI text |
-| genizah_translations.py | existing | TRANSLATIONS dict (both apps) | New keys for "Catalog Records", etc. |
+| tqdm | Current | Export progress bars | Already used in export script |
 
 ### Alternatives Considered
-| Instead of | Could Use | Tradeoff |
-|------------|-----------|----------|
-| Scrollable dialog content | ui.table (like bibliography) | Not suitable -- catalog descriptions are free-text paragraphs, not tabular data. Scrollable HTML/label content is better. |
-| Individual record cards | Single merged view | Decision is "show all entries from all sources" -- card-per-entry grouped by source is the right UX. |
+None -- all technology choices are already established in the codebase.
 
 ## Architecture Patterns
 
-### Recommended File Structure
+### Recommended Project Structure
 ```
-shared/fjms_service.py          # Add: get_catalog_record_counts() batch method
-web/components/catalog_dialog.py  # NEW: create_catalog_records_dialog()
-web/pages/browse.py             # Modify: add button in bibliography row
-web/pages/search.py             # Modify: add button in result card
-genizah_app.py                  # Modify: FjmsCatalogDialog class + button wiring
-genizah_translations.py         # Add: new translation keys
-tests/test_fjms_service.py      # Add: test for batch counts
-tests/test_catalog_dialog.py    # NEW: test markup rendering
+scripts/
+  export_fist_enrichment.py  # Extended with 4 new export functions
+shared/
+  fjms_service.py            # New methods for catalog detail queries
+web/
+  components/
+    catalog_dialog.py        # Recreated web dialog (was reverted)
+  pages/
+    browse.py                # Add catalog records button
+    search.py                # Add catalog records button to cards
+genizah_app.py               # Desktop dialog class + button wiring
+genizah_translations.py      # New translation keys
+tests/
+  test_fjms_service.py       # Extended with new method tests
 ```
 
-### Pattern 1: Web Dialog (following bibliography_dialog.py pattern)
-**What:** NiceGUI dialog with scrollable card, header bar, close button, and content area.
-**When to use:** For the web catalog records popup.
-**Example:**
+### Pattern 1: Export Script Extension
+**What:** Add new `export_*()` functions following the identical batch-insert pattern used by existing exports.
+**When to use:** For each new table (running_titles, sizes, fields, free_desc).
+**Key detail:** The join chain is: `dbo_InventoryAlma -> dbo_Inventory -> dbo_InventorySignature -> dbo_Signature -> dbo_UnitCatalogRec -> [child table]`. This MUST be preserved for AlmaId resolution.
+**Example (from existing code):**
 ```python
-# Source: web/components/bibliography_dialog.py (existing pattern)
-def create_catalog_records_dialog(records, sys_id, shelfmark=""):
-    dialog = ui.dialog().props('maximized=false full-width')
-    with dialog, ui.card().classes('w-full max-w-[900px] max-h-[90vh]').style(
-        'overflow: hidden; display: flex; flex-direction: column;'
+# Source: scripts/export_fist_enrichment.py, export_catalog() pattern
+def export_catalog_running_titles(source, target):
+    target.execute("DROP TABLE IF EXISTS catalog_running_titles")
+    target.execute("""
+        CREATE TABLE catalog_running_titles (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            RunningTitle TEXT,
+            Comment TEXT
+        )
+    """)
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
+            rt.RunningTitle,
+            rt.Comment
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        JOIN dbo_CatalogMultiRunningTitle rt ON cat.UnitCatalogRecId = rt.UnitCatalogRecId
+    """)
+    # ... batch insert pattern ...
+```
+
+### Pattern 2: Service Layer Query (Existing Pattern)
+**What:** Add methods to FjmsService that query by AlmaId and return structured dicts.
+**When to use:** For each new data type the dialog needs.
+**Example (from existing get_catalog_records):**
+```python
+def get_catalog_detail(self, sys_id: str) -> dict:
+    """Get complete catalog detail including all child tables."""
+    # 1. Get catalog records (existing)
+    # 2. Get running titles by AlmaId
+    # 3. Get sizes by AlmaId
+    # 4. Get fields by AlmaId (with category grouping)
+    # 5. Get free descriptions by AlmaId
+    # Return structured dict grouped by UnitCatalogRecId -> source team
+```
+
+### Pattern 3: Dialog Component (Web)
+**What:** NiceGUI dialog with scrollable content, header with icon and close button.
+**When to use:** For the catalog records dialog.
+**Source:** Reverted `web/components/catalog_dialog.py` (in git history at commit `bbb7b6de`) provides the template. The new version adds physical metadata section and multi-team column layout.
+**Key patterns from existing bibliography_dialog.py:**
+```python
+dialog = ui.dialog().props('maximized=false full-width')
+with dialog, ui.card().classes('w-full max-w-[900px] max-h-[90vh]').style(
+    'overflow: hidden; display: flex; flex-direction: column;'
+):
+    # Header with gradient
+    with ui.row().classes('w-full items-center justify-between p-3 rounded-t').style(
+        'background: linear-gradient(135deg, #6c3483, #9b59b6); color: white;'
     ):
-        # Header with purple gradient (FJMS brand color)
-        with ui.row().classes('w-full items-center justify-between p-3 rounded-t').style(
-            'background: linear-gradient(135deg, #6c3483, #9b59b6); color: white;'
-        ):
-            # ... icon, title, close button
-
-        # Scrollable content area
-        with ui.scroll_area().classes('w-full').style('flex: 1;'):
-            # Group by source_name, render entries
-    return dialog
+        # ... icon, title, close button
+    # Scrollable content
+    with ui.scroll_area().classes('w-full').style('flex: 1;'):
+        # ... content
 ```
 
-### Pattern 2: Desktop Dialog (following FjmsBibliographyDialog pattern)
-**What:** QDialog with QScrollArea containing HTML-rendered entries.
-**When to use:** For the desktop catalog records popup.
-**Example:**
+### Pattern 4: Dialog Component (Desktop)
+**What:** QDialog with QTextBrowser for HTML content, matching existing FjmsBibliographyDialog pattern.
+**Source:** Reverted `FjmsCatalogDialog` class (in git history at commit `73320310`).
 ```python
-# Source: genizah_app.py:4971 (FjmsBibliographyDialog pattern)
 class FjmsCatalogDialog(QDialog):
-    def __init__(self, records, sys_id='', shelfmark='', parent=None):
+    def __init__(self, data, sys_id='', shelfmark='', parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{tr('Catalog Records')} — {shelfmark}")
         self.setMinimumSize(700, 500)
+        self.resize(800, 600)
         layout = QVBoxLayout(self)
-        # QTextBrowser with HTML content (scrollable by default)
+        # Header, QTextBrowser with HTML, bottom buttons
         self.text_browser = QTextBrowser()
-        self.text_browser.setHtml(self._build_html(records))
-        layout.addWidget(self.text_browser, 1)
-        # Close button
+        self.text_browser.setHtml(self._build_html(data))
 ```
 
-### Pattern 3: Button Wiring (browse page)
-**What:** Add button next to existing bibliography buttons with disabled-when-empty state.
-**When to use:** All four button locations.
-**Example (web browse):**
+### Pattern 5: Button Placement (Four Locations)
+**What:** Catalog records button appears in all four surfaces.
+
+**Web Browse** (browse.py ~line 2167): In the bibliography buttons `ui.row()` after Bibliography FJMS/Ktiv:
 ```python
-# In the bibliography buttons row (browse.py ~line 2167)
-catalog_count = len(catalog_records)  # Already fetched above for metadata display
-cat_dlg = create_catalog_records_dialog(catalog_records, page.sys_id, shelfmark=page.shelfmark)
-cat_btn = ui.button(
-    f'{tr("Catalog Records")} ({catalog_count})',
-    icon='description',
-    on_click=cat_dlg.open,
-).props('outline dense').classes('text-sm')
-if catalog_count == 0:
-    cat_btn.props('disable')
+ui.button(f'{tr("Catalog Records")} ({count})', icon='description',
+          on_click=dlg.open).props('outline dense').classes('text-sm')
 ```
 
-### Pattern 4: Batch Count Method for Search Results
-**What:** Efficient batch query returning record counts per sys_id.
-**When to use:** When rendering search result cards that need to show "(N)" on the button.
-**Example:**
+**Web Search** (search.py ~line 2238): In the result card metadata area, similar to domain badges:
 ```python
-def get_catalog_record_counts(self, sys_ids: list[str]) -> dict[str, int]:
-    """Get catalog record counts for multiple sys_ids in batch."""
+ui.button(f'{tr("Catalog Records")} ({count})', icon='description',
+          on_click=handler).props('outline dense size=sm no-caps').classes('text-xs')
+```
+
+**Desktop Browse** (genizah_app.py ~line 8554): In ext_info_row after bibliography buttons:
+```python
+self.btn_b_catalog_records = QPushButton(f"{tr('Catalog Records')} (0)")
+self.btn_b_catalog_records.setEnabled(False)
+self.btn_b_catalog_records.clicked.connect(self._show_fjms_catalog_dialog)
+ext_info_row.addWidget(self.btn_b_catalog_records)
+```
+
+**Desktop ResultDialog** (genizah_app.py ~line 4323): In action_row after bibliography buttons:
+```python
+self.btn_rd_catalog = QPushButton(f"{tr('Catalog Records')} (0)")
+self.btn_rd_catalog.setEnabled(False)
+self.btn_rd_catalog.clicked.connect(self._show_rd_catalog)
+```
+
+### Anti-Patterns to Avoid
+- **Flattening child tables into catalog** -- The user explicitly wants normalized tables. Don't try to denormalize running titles, sizes, and fields into the catalog table.
+- **Deduplicating against browse metadata** -- The user explicitly said "All FJMS data shown" with no dedup. The side-by-side multi-team view IS the unique value.
+- **Showing only TextualFrame data** -- This is what caused the v1 revert. The v2 dialog must show physical metadata, running titles, free descriptions, and sizes as genuinely new content.
+
+## Don't Hand-Roll
+
+| Problem | Don't Build | Use Instead | Why |
+|---------|-------------|-------------|-----|
+| Batch SQL inserts | Custom loop | Existing `BATCH_SIZE` + `executemany` pattern | Already proven in export script |
+| Dialog layout | Custom HTML-in-string | NiceGUI component composition / QTextBrowser HTML | Existing patterns handle RTL, theming, responsiveness |
+| Code lookups | Runtime CODE_FullCode joins | Pre-resolved EngDesc/HebDesc in export | One-time JOIN at export eliminates runtime lookups |
+
+**Key insight:** The export script should resolve ALL code lookups (CODE_FullCode, CODE_GenizahTitle, CODE_FCDTable) at export time, storing human-readable text in the sidecar. This avoids needing reference tables at runtime.
+
+## Common Pitfalls
+
+### Pitfall 1: Missing UnitCatalogRecId in Existing Catalog Table
+**What goes wrong:** The existing `catalog` table has no UnitCatalogRecId. Child tables (running_titles, sizes, fields) are keyed by UnitCatalogRecId. Without it in the catalog table, you can't group child data by team/source.
+**Why it happens:** The v1 export didn't need it because it only used catalog-level fields.
+**How to avoid:** Add UnitCatalogRecId to the catalog table schema AND store AlmaId in all child tables for direct lookup. Index both columns.
+**Warning signs:** If you can't display per-team physical metadata alongside per-team textual descriptions.
+
+### Pitfall 2: catalog_fields FCDTableId Category Mapping
+**What goes wrong:** `dbo_CatalogMultiField` uses `ValueCode` referencing `CODE_FullCode.ComputedCode`, and the category (Material vs Physical Status vs Language etc.) is determined by `FCDTableId` in CODE_FullCode, NOT by a column in CatalogMultiField itself.
+**Why it happens:** The FIST schema uses a single CatalogMultiField table for ALL coded multi-values across many categories.
+**How to avoid:** In the export, JOIN CODE_FullCode to get EngDesc + HebDesc, and JOIN CODE_FCDTable to get the TableName (category). Store the category name in the sidecar so the service layer can filter by field type.
+**Warning signs:** All fields appear as a flat list with no way to distinguish material from physical status.
+
+**Confirmed FCDTableId -> Category mappings in CatalogMultiField data:**
+| FCDTableId | TableName | Sample Values | Data Volume |
+|------------|-----------|---------------|-------------|
+| 11 | FragmentMaterial | Paper, Vellum, Printed, Leather | 194K rows |
+| 18 | FragmentStatus | Torn, Rubbed, Mutilated, Stained, Holes, Missing, Faded, etc. | 317K rows |
+| 10 | GenizahLanguages | Arabic, Hebrew, Aramaic | 265K rows |
+| 26 | TypeOfScript | Hebrew, Arabic, Other | 154K rows |
+| 27 | TypeOfScriptPlace | Oriental, Spanish, Ashkenazi, Syrian, Yemenite | 50K rows |
+| 28 | TypeOfScriptStyle | Semi-Cursive, Square, Naskhi, Cursive, Rabbinical | 60K rows |
+| 29 | TypeOfVocalization | Tiberian, Babylonian, Palestinian, Arabic, Diacritic | 54K rows |
+
+### Pitfall 3: FreeDescription Joins Through SignatureId, Not UnitCatalogRecId
+**What goes wrong:** `dbo_UnitFreeDescription` links via `SignatureId`, not `UnitCatalogRecId`. This is a different join path than the other child tables.
+**Why it happens:** Free descriptions are per-signature (per-team entry point), while running titles/sizes/fields are per-catalog-record.
+**How to avoid:** The export query for catalog_free_desc must join through SignatureId. In the sidecar, store both AlmaId and SignatureId (or map to UnitCatalogRecId through catalog).
+**Warning signs:** Free descriptions don't appear or appear duplicated.
+
+### Pitfall 4: Sidecar File Size Growth
+**What goes wrong:** Adding ~1.7M rows (especially 1.1M catalog_fields with text) could significantly increase the 245MB sidecar.
+**Why it happens:** The catalog_fields table alone has 1.1M rows with text descriptions.
+**How to avoid:** Monitor file size after export. Consider whether all FCDTableId categories are needed (the user wants physical status, material, script type, language -- all are needed). VACUUM after export.
+**Warning signs:** Sidecar file size doubles or more.
+
+### Pitfall 5: DescriptionEng/DescriptionHeb Removal Breaking Existing Code
+**What goes wrong:** The existing catalog table has DescriptionEng/DescriptionHeb columns. Removing them changes the schema, breaking existing service code that references them.
+**Why it happens:** The `get_catalog()` method returns `description_eng` and `description_heb` keys from these columns.
+**How to avoid:** Update `get_catalog()` and `get_catalog_records()` in fjms_service.py to no longer reference these columns. Also update the FTS5 index definition which currently indexes them. The test fixtures in test_fjms_service.py also reference the old schema.
+**Warning signs:** `sqlite3.OperationalError: no such column: DescriptionEng`.
+
+### Pitfall 6: GenizahTitle Text vs GenizahTitleId
+**What goes wrong:** `dbo_UnitCatalogRec` has both `GenizahTitleId` (FK to CODE_GenizahTitle) and `GenizahTitleText` (inline text). The GenizahTitleText is already exported as `TitleHeb` in the catalog table. The GenizahTitle lookup adds `OrgTitle` and `EngTitle` which are different values.
+**Why it happens:** FIST stores the original title name (OrgTitle, typically Hebrew) and an English translation (EngTitle) in CODE_GenizahTitle, while GenizahTitleText is the team's specific textual entry.
+**How to avoid:** Add OrgTitle and EngTitle as new columns to the catalog table (alongside existing TitleHeb which comes from GenizahTitleText). Don't replace TitleHeb -- add alongside.
+**Warning signs:** Title data appears duplicated or overwritten.
+
+### Pitfall 7: Count N for Button Label -- "Distinct Sources/Teams"
+**What goes wrong:** The button label shows "(N)" where N should be distinct sources/teams, not total records. But the v1 code counted total records.
+**Why it happens:** The user specifically wants N = distinct SourceNames that contributed data.
+**How to avoid:** The batch count query should count `COUNT(DISTINCT SourceName)` not `COUNT(*)`. The existing `get_source_names()` method filters out generic names ('Catalogs', 'Institution', 'Collection', 'Other') -- the count should also filter these.
+**Warning signs:** Button shows large numbers like "(15)" for a manuscript with only 2 scholarly teams.
+
+## Code Examples
+
+### Export: catalog_fields with Category Resolution
+```python
+def export_catalog_fields(source, target):
+    """Export coded multi-value fields (material, status, language, script)."""
+    target.execute("DROP TABLE IF EXISTS catalog_fields")
+    target.execute("""
+        CREATE TABLE catalog_fields (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            FieldCategory TEXT NOT NULL,
+            FieldValue TEXT,
+            FieldValueHeb TEXT
+        )
+    """)
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
+            fct.TableName as FieldCategory,
+            fc.EngDesc as FieldValue,
+            fc.HebDesc as FieldValueHeb
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        JOIN dbo_CatalogMultiField fld ON cat.UnitCatalogRecId = fld.UnitCatalogRecId
+        JOIN CODE_FullCode fc ON fld.ValueCode = fc.ComputedCode
+        JOIN CODE_FCDTable fct ON fc.FCDTableId = fct.FCDTableId
+    """)
+    # ... batch insert ...
+```
+
+### Export: Extending Catalog Table with New Columns
+```python
+# Modified catalog schema (v2)
+target.execute("""
+    CREATE TABLE catalog (
+        AlmaId TEXT NOT NULL,
+        UnitCatalogRecId INTEGER NOT NULL,
+        Title TEXT,
+        TitleHeb TEXT,
+        AuthorText TEXT,
+        CopyDate TEXT,
+        CopyPlace TEXT,
+        TextualFrameHeb TEXT,
+        TextualFrameEng TEXT,
+        SourceName TEXT,
+        SourceNameHeb TEXT,
+        NumFolio REAL,
+        NumColumn TEXT,
+        NumRow TEXT,
+        GenizahTitleOrgTitle TEXT,
+        GenizahTitleEngTitle TEXT
+    )
+""")
+# Note: DescriptionEng/DescriptionHeb removed (always empty)
+# GenizahTitle resolved via LEFT JOIN CODE_GenizahTitle
+```
+
+### Service: Batch Catalog Detail Count for Search Cards
+```python
+def get_catalog_source_counts(self, sys_ids: list[str]) -> dict[str, int]:
+    """Get count of distinct scholarly sources per AlmaId for button labels.
+
+    Excludes generic source names (Catalogs, Institution, Collection, Other).
+    Returns dict mapping sys_id -> count of distinct non-generic SourceNames.
+    """
     if not self._conn or not sys_ids:
         return {}
     result = {}
@@ -182,10 +383,10 @@ def get_catalog_record_counts(self, sys_ids: list[str]) -> dict[str, int]:
         batch = sys_ids[i:i + batch_size]
         placeholders = ','.join('?' * len(batch))
         cursor = self._conn.execute(
-            f"SELECT AlmaId, COUNT(*) as cnt FROM catalog "
+            f"SELECT AlmaId, COUNT(DISTINCT SourceName) as cnt FROM catalog "
             f"WHERE AlmaId IN ({placeholders}) "
-            f"AND ((TextualFrameEng IS NOT NULL AND TextualFrameEng != '') "
-            f"  OR (TextualFrameHeb IS NOT NULL AND TextualFrameHeb != '')) "
+            f"AND SourceName IS NOT NULL AND SourceName != '' "
+            f"AND SourceName NOT IN ('Catalogs','Institution','Collection','Other') "
             f"GROUP BY AlmaId",
             batch,
         )
@@ -194,248 +395,209 @@ def get_catalog_record_counts(self, sys_ids: list[str]) -> dict[str, int]:
     return result
 ```
 
-### Pattern 5: Markup Rendering ([$...$] and @)
-**What:** Transform `[$Category$]: Content` markup into styled HTML.
-**When to use:** Rendering TextualFrame text in the dialog.
-**Key insight:** `parse_textual_frame()` and `split_textual_frames()` already exist in `shared/fjms_service.py` and handle all markup patterns. The browse page already uses them (lines 2101, 2121). Reuse these functions -- do NOT hand-roll parsing.
-**Example:**
+### Service: Get Full Catalog Detail for Dialog
 ```python
-from shared.fjms_service import split_textual_frames, parse_textual_frame
+def get_catalog_detail(self, sys_id: str) -> dict:
+    """Get complete catalog detail for dialog display.
 
-def render_frame_text(text: str, lang: str) -> str:
-    """Render a TextualFrame string as styled HTML."""
-    parts = split_textual_frames(text)
-    if not parts:
-        return f'<p>{html_escape(text)}</p>'
-    html_parts = []
-    for part in parts:
-        category, content = parse_textual_frame(part)
-        if category:
-            html_parts.append(
-                f'<p><b style="color:#9b59b6;">{category}:</b> {content}</p>'
-            )
-        else:
-            html_parts.append(f'<p>{content}</p>')
-    return '\n'.join(html_parts)
+    Returns dict with:
+      - records: list of catalog records with all fields including new columns
+      - running_titles: dict mapping UnitCatalogRecId -> list of running titles
+      - sizes: dict mapping UnitCatalogRecId -> list of {size_x, size_y, inner_x, inner_y}
+      - fields: dict mapping UnitCatalogRecId -> dict of {FieldCategory -> list of values}
+      - free_descriptions: list of {text, signature_id}
+    """
 ```
 
-### Anti-Patterns to Avoid
-- **Don't duplicate merge_catalog_records logic** -- it already handles deduplication and metadata aggregation. However, for the dialog we show ALL entries (per decision: "no deduplication"), so use `get_catalog_records()` directly, NOT `merge_catalog_records()`.
-- **Don't create new database tables** -- the `catalog` table already has everything needed.
-- **Don't fetch catalog data twice on browse** -- catalog_records is already fetched for the metadata panel (line 2047). Reuse it for the button/dialog.
-- **Don't parse markup manually** -- `split_textual_frames()` and `parse_textual_frame()` already handle all patterns including `@[$...$]`, `[$...$]`, parenthetical sub-types, and plain text.
-
-## Don't Hand-Roll
-
-| Problem | Don't Build | Use Instead | Why |
-|---------|-------------|-------------|-----|
-| TextualFrame parsing | Custom regex | `split_textual_frames()` + `parse_textual_frame()` | Already handles `;` splitting, `@` prefix, `[$...$]` notation, parenthetical sub-types |
-| Record deduplication | Custom dedup | `get_catalog_records()` (has built-in dedup) | Filters empty records, normalizes sentinel dates, deduplicates by key tuple |
-| Language switching | Custom lang detection | `get_language()` (web) / `CURRENT_LANG` (desktop) | Consistent with all other bilingual components |
-| Batch queries | N+1 individual queries | Batched IN clause (see `get_domains_for_sys_ids` pattern) | SQLite limit of 999 variables already handled by 500-batch pattern |
-
-**Key insight:** The service layer (`shared/fjms_service.py`) already has 90% of the data logic. The only new service method needed is `get_catalog_record_counts()` for batch counting in search results.
-
-## Common Pitfalls
-
-### Pitfall 1: Double-fetching catalog data on browse page
-**What goes wrong:** The browse page already fetches `catalog_records` at line 2047 for the metadata panel. Fetching again for the button/dialog wastes a SQLite query.
-**Why it happens:** Code for the button might be added in a separate section without checking what's already loaded.
-**How to avoid:** Reuse the `catalog_records` variable already fetched. Pass it to the dialog constructor directly.
-**Warning signs:** Two calls to `fjms.get_catalog_records(page.sys_id)` in browse.py.
-
-### Pitfall 2: Using merge_catalog_records() in the dialog
-**What goes wrong:** Decision says "show all entries from all sources as-is, even if overlapping" and "no deduplication". `merge_catalog_records()` deduplicates frames and merges metadata.
-**Why it happens:** Browse page currently uses merged data. Tempting to reuse the same approach.
-**How to avoid:** In the DIALOG, use raw `get_catalog_records()` output, group by source_name, render each entry individually. Only use `merge_catalog_records()` for the browse metadata panel (as it already does).
-**Warning signs:** Dialog shows fewer entries than the button count indicates.
-
-### Pitfall 3: Forgetting disabled-when-empty for button
-**What goes wrong:** Button disappears when no catalog data exists, breaking the "always visible, disabled with (0)" decision.
-**Why it happens:** The existing bibliography buttons use `setVisible(False)` / `setVisible(True)` pattern. The catalog button has a DIFFERENT pattern (always visible, disabled when 0).
-**How to avoid:** Always render the button. Set `props('disable')` (web) or `setEnabled(False)` (desktop) when count is 0.
-**Warning signs:** Button not visible for manuscripts without catalog data.
-
-### Pitfall 4: Search results performance
-**What goes wrong:** Fetching full catalog records for each of 200 search results causes slow rendering.
-**Why it happens:** `get_catalog_records()` fetches all fields and does Python-side dedup -- overkill when you just need a count.
-**How to avoid:** Use the new `get_catalog_record_counts()` batch method that returns just `{sys_id: count}`. Only fetch full records when the user opens the dialog.
-**Warning signs:** Search results take >2s to render after adding catalog buttons.
-
-### Pitfall 5: Hebrew/English text direction in dialog
-**What goes wrong:** Hebrew TextualFrame content rendered LTR, or English content rendered RTL.
-**Why it happens:** Dialog doesn't set `dir` attribute based on language.
-**How to avoid:** Set `dir='rtl'` for Hebrew content, `dir='ltr'` for English. The language-aware fallback means the displayed text could be in either language.
-**Warning signs:** Text alignment looks wrong for Hebrew descriptions.
-
-### Pitfall 6: Missing translation keys
-**What goes wrong:** English text appears in Hebrew mode because translation key is not in TRANSLATIONS dict.
-**Why it happens:** New UI text added without corresponding translation entries.
-**How to avoid:** Add all new keys to `genizah_translations.py` before wiring UI.
-**Warning signs:** Hebrew users see English labels.
-
-### Pitfall 7: Desktop test schema missing SourceName columns
-**What goes wrong:** Tests fail because test fixture database doesn't have `SourceName`/`SourceNameHeb` columns.
-**Why it happens:** `tests/test_fjms_service.py` creates the catalog table without these columns (they were added later).
-**How to avoid:** Update the test fixture to include SourceName/SourceNameHeb columns. Note: `get_catalog_records()` already handles missing columns gracefully with `has_source = "SourceName" in col_names`.
-**Warning signs:** Tests pass but production behavior differs.
-
-## Code Examples
-
-### Existing Data Flow (browse page, already working)
+### Dialog: Multi-Team Side-by-Side Layout (Web)
 ```python
-# web/pages/browse.py lines 2044-2131 (already in production)
-from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
-fjms = get_fjms_service(thread_safe=True)
-catalog_records = fjms.get_catalog_records(page.sys_id)
-if catalog_records:
-    merged = merge_catalog_records(catalog_records)
-    # ... renders title, author, date, place, frames in metadata panel
+# Group records by SourceName, then display as columns
+# NiceGUI grid layout for side-by-side teams
+with ui.grid(columns=len(team_groups)).classes('w-full gap-4'):
+    for source_name, team_records in team_groups:
+        with ui.column().classes('w-full'):
+            # Team header
+            ui.label(source_name).classes('font-bold text-sm')
+            # Team's running titles, sizes, fields, descriptions
 ```
 
-### Existing Button Pattern (bibliography, already working)
+## Data Model (Sidecar Schema v3.0.0)
+
+### Existing Tables (Modified)
+```sql
+-- catalog: ADD UnitCatalogRecId, NumFolio, NumColumn, NumRow,
+--          GenizahTitleOrgTitle, GenizahTitleEngTitle
+--          REMOVE DescriptionEng, DescriptionHeb
+-- catalog_fts: REBUILD with RunningTitle + FreeDescription content
+```
+
+### New Tables
+```sql
+CREATE TABLE catalog_running_titles (
+    AlmaId TEXT NOT NULL,
+    UnitCatalogRecId INTEGER NOT NULL,
+    RunningTitle TEXT,
+    Comment TEXT
+);
+-- Indexes: idx_catrt_alma(AlmaId), idx_catrt_ucrid(UnitCatalogRecId)
+
+CREATE TABLE catalog_sizes (
+    AlmaId TEXT NOT NULL,
+    UnitCatalogRecId INTEGER NOT NULL,
+    SizeX REAL,
+    SizeY REAL,
+    InnerSizeX REAL,
+    InnerSizeY REAL
+);
+-- Index: idx_catsz_alma(AlmaId)
+
+CREATE TABLE catalog_fields (
+    AlmaId TEXT NOT NULL,
+    UnitCatalogRecId INTEGER NOT NULL,
+    FieldCategory TEXT NOT NULL,
+    FieldValue TEXT,
+    FieldValueHeb TEXT
+);
+-- Indexes: idx_catfld_alma(AlmaId), idx_catfld_cat(FieldCategory)
+
+CREATE TABLE catalog_free_desc (
+    AlmaId TEXT NOT NULL,
+    SignatureId INTEGER NOT NULL,
+    FreeDesc TEXT
+);
+-- Index: idx_catfd_alma(AlmaId)
+```
+
+### Data Volumes
+| Table | Estimated Rows | Key Fields |
+|-------|---------------|------------|
+| catalog_running_titles | ~235K | AlmaId, UnitCatalogRecId, RunningTitle |
+| catalog_sizes | ~161K | AlmaId, UnitCatalogRecId, SizeX, SizeY |
+| catalog_fields | ~1.1M | AlmaId, UnitCatalogRecId, FieldCategory, FieldValue |
+| catalog_free_desc | ~190K | AlmaId, SignatureId, FreeDesc |
+| catalog (extended) | ~500K | +UnitCatalogRecId, +NumFolio, +NumColumn, +NumRow, +GenizahTitleOrgTitle, +GenizahTitleEngTitle, -DescriptionEng, -DescriptionHeb |
+
+### FTS5 Extension
+```sql
+-- Rebuild catalog_fts to include running titles and free descriptions
+CREATE VIRTUAL TABLE catalog_fts USING fts5(
+    AlmaId,
+    Title,
+    TitleHeb,
+    TextualFrameHeb,
+    TextualFrameEng,
+    RunningTitle,        -- NEW: from catalog_running_titles (aggregated per AlmaId)
+    FreeDescription,     -- NEW: from catalog_free_desc (aggregated per AlmaId)
+    content='',          -- contentless (not synced to a single table)
+    content_rowid='rowid'
+);
+```
+Note: Since FTS5 content now spans multiple tables, use a contentless FTS5 table populated by a custom INSERT that aggregates running titles and free descriptions per AlmaId. This is a departure from the current content-synced approach.
+
+## FIST.db Source Schema Reference
+
+### Key Join Chain (AlmaId -> UnitCatalogRecId)
+```
+dbo_InventoryAlma(AlmaId, InventoryId)
+  -> dbo_Inventory(InventoryId)
+    -> dbo_InventorySignature(InventoryId, SetSignatureId)
+      -> dbo_Signature(SetSignatureId, SignatureId, SourceId)
+        -> dbo_UnitCatalogRec(SignatureId, UnitCatalogRecId, GenizahTitleId, ...)
+          -> dbo_CatalogMultiRunningTitle(UnitCatalogRecId)
+          -> dbo_CatalogMultiSize(UnitCatalogRecId)
+          -> dbo_CatalogMultiField(UnitCatalogRecId, ValueCode)
+  -> dbo_UnitFreeDescription(SignatureId)  // Note: via Signature, not CatalogRec
+```
+
+### Source Team Resolution
+```
+dbo_Signature(SourceId) -> dbo_CodeSource(TeamCode) -> EngDesc/HebDesc
+```
+This is already used in the existing catalog export. Each Signature belongs to one source team.
+
+### CODE_FullCode Category Resolution
+```
+dbo_CatalogMultiField(ValueCode)
+  -> CODE_FullCode(ComputedCode) -> EngDesc, HebDesc, FCDTableId
+    -> CODE_FCDTable(FCDTableId) -> TableName (category)
+```
+
+### CODE_GenizahTitle Resolution
+```
+dbo_UnitCatalogRec(GenizahTitleId)
+  -> CODE_GenizahTitle(GenizahTitleID) -> OrgTitle, EngTitle
+```
+
+## Verified Sample Data (T-S C1.15 = AlmaId 990051150460205171)
+
+This manuscript has data from multiple teams, demonstrating the side-by-side use case:
+
+**Teams present:** Inventory, Midrash Eikha Rabba, Aggadic Midrashim, Catalogs, Institution
+**Catalog records:** 8 UnitCatalogRecIds
+**Running Titles:** 6 entries, e.g.:
+  - "Midrash Lamentations Rabbati: Petihah 2 - 7 (Buber ed., 320-62) N.B. The petihot do not appear in the same order..." (CatRecId=19311, Mandel team)
+  - Hebrew running titles from Aggadic Midrashim team
+**Sizes:** 165 x 210 mm (from CatRecId 19311 and 4968814)
+**Fields:** Material=Vellum (from 4 records), Status=Missing (1), Status=Injured (1)
+**FreeDesc:** 6 entries including physical description ("Parchment, Fragment: Left and right margins visible...") and scholarly notes
+**GenizahTitle:** OrgTitle="Midrash Rabbah Lamentation" (ID 7219), "Midrash Rabbah Lamentation (Buber)" (ID 7220)
+**Inventory:** NumFolio=1.0 (no MaterialCode/SizeCode for this record)
+
+## Translation Keys Needed
+
+New keys for `genizah_translations.py`:
 ```python
-# web/pages/browse.py lines 2168-2177 (existing pattern to follow)
-fjms_dlg = create_fjms_bibliography_dialog(fjms_bib, page.sys_id, shelfmark=page.shelfmark or '')
-ui.button(
-    f'{tr("Bibliography FJMS")} ({len(fjms_bib)})',
-    icon='menu_book',
-    on_click=fjms_dlg.open,
-).props('outline dense').classes('text-sm')
+"Catalog Records": "מידע קטלוגי",
+"Running Title": "כותרת רצה",
+"Free Description": "תיאור חופשי",
+"Physical Description": "תיאור פיזי",  # Already exists
+"Material": "חומר",                      # Already exists
+"Size": "גודל",
+"Script Type": "סוג כתב",
+"Script Style": "סגנון כתב",
+"Vocalization": "ניקוד",
+"Physical Status": "מצב פיזי",
+"Number of Folios": "מספר דפים",
+"Number of Columns": "מספר טורים",
+"Number of Lines": "מספר שורות",
+"Open in KTIV": "פתח בכתיב",  # May already exist
+"Unknown": "לא ידוע",          # May already exist
 ```
-
-### Source Grouping (for dialog content)
-```python
-# Group records by source_name for section headers
-from itertools import groupby
-from operator import itemgetter
-
-sorted_records = sorted(records, key=lambda r: r.get('source_name') or '')
-for source_name, group in groupby(sorted_records, key=lambda r: r.get('source_name') or ''):
-    entries = list(group)
-    # Render source header
-    display_source = (entry['source_name_heb'] if lang == 'he' else entry['source_name']) or source_name
-    # Render each entry: title -> author -> textual_frame
-```
-
-### TextualFrame Rendering (existing functions)
-```python
-# shared/fjms_service.py (already exists)
-from shared.fjms_service import split_textual_frames, parse_textual_frame
-
-text = "@[$Piyyut$] (Yotzer): \"poem title\"; @[$Piyyut$]: \"another\""
-parts = split_textual_frames(text)
-# -> ["@[$Piyyut$] (Yotzer): \"poem title\"", "@[$Piyyut$]: \"another\""]
-for part in parts:
-    category, content = parse_textual_frame(part)
-    # -> ("Piyyut (Yotzer)", "\"poem title\"")
-    # -> ("Piyyut", "\"another\"")
-```
-
-## Data Characteristics
-
-### Catalog Table Schema
-```
-AlmaId TEXT NOT NULL      -- sys_id (Alma ID)
-Title TEXT                -- English title (only ~2.9K distinct AlmaIds have titles)
-TitleHeb TEXT             -- Hebrew title
-AuthorText TEXT           -- Author name
-CopyDate TEXT             -- Date of copy (sentinel values: 0, -99, -1 -> None)
-CopyPlace TEXT            -- Place of copy
-DescriptionEng TEXT       -- NOT used for this phase
-DescriptionHeb TEXT       -- NOT used for this phase
-TextualFrameHeb TEXT      -- Hebrew description (the main content)
-TextualFrameEng TEXT      -- English description (the main content)
-SourceName TEXT           -- Source catalog name in English
-SourceNameHeb TEXT        -- Source catalog name in Hebrew
-```
-
-### Data Statistics
-| Metric | Value |
-|--------|-------|
-| Total catalog rows | 500,888 |
-| Rows with TextualFrame | 96,419 |
-| Distinct AlmaIds with TextualFrame | 57,563 |
-| Distinct AlmaIds with Title | 2,878 |
-| Distinct SourceNames | 30 (14 with TextualFrame data) |
-| Average records per AlmaId | 2.2 |
-| Max records per AlmaId | 128 |
-| Max TextualFrame length | 2,688 chars |
-| Text length distribution | <100: 92K, 100-500: 2.9K, 500-1000: 770, >1000: 490 |
-
-### Top Sources (with TextualFrame data)
-| Source | Records | Hebrew Name |
-|--------|---------|-------------|
-| Catalogs | 49,376 | קטלוגים |
-| Institution | 32,597 | מוסדות |
-| Talmudic Literature | 7,705 | ספרות תלמודית |
-| Judeo-Arabic Biblical Exegesis | 3,633 | פרשנות המקרא בערבית-יהודית |
-| Firkovitch Collections | 1,106 | אוספי פירקוביץ' |
-
-### Markup Patterns
-1. **`@[$Category$]: Content`** -- 27K records with `@` prefix
-2. **`[$Category$]: Content`** -- Without `@` prefix
-3. **`@[$Category$] (Sub-type): Content`** -- With parenthetical qualifier
-4. **Plain text** -- No markup (e.g., "Hosea; Joel", "Esther 9:22 - 28")
-5. **Compound** -- Multiple entries separated by `; ` followed by `@[$` or `[$`
-
-### Translation Keys Needed
-```python
-"Catalog Records": "מידע קטלוגי",      # Button label / dialog title
-# Existing keys that will be reused:
-# "FJMS Catalog", "Title", "Author", "Copy Date", "Place",
-# "Content Identification", "Close"
-```
-
-## Discretion Recommendations
-
-### Truncation Strategy
-**Recommendation:** No truncation. The longest text is 2,688 chars (compound piyyut list with 20+ entries). In a scrollable dialog, this renders as roughly 40-50 lines -- entirely manageable. The `split_textual_frames()` function breaks compound entries into individual items, making even the longest entries readable. Setting `word-break: break-word` and `white-space: pre-wrap` handles edge cases.
-
-### Identical Eng/Heb Content
-**Recommendation:** Just show the chosen language per app setting. Don't cross-compare eng/heb for identity. The fallback logic (show other language if preferred is empty) already handles the main case. If eng and heb happen to be identical, showing one is fine -- the user chose their language preference.
-
-### Dialog Typography and Layout
-**Recommendation:**
-- **Web:** Purple gradient header (matches FJMS brand), `description` icon, scrollable content area with `max-h-[90vh]`
-- **Desktop:** Standard QDialog with QTextBrowser (inherently scrollable), purple left-border on source sections
-- **Entry layout:** Each record as a card/block: Title (bold, if present) -> Author (italic, if present) -> CopyDate + CopyPlace (small, inline, if present) -> TextualFrame content (parsed and styled)
-- **Source grouping:** Horizontal rule between groups, source name as bold heading with count
-- **Spacing:** 12px gap between entries within a group, 16px between groups
 
 ## Open Questions
 
-1. **Should the button appear on search result cards?**
-   - What we know: Decision says "Web search results: Button in the metadata section of search result cards"
-   - What's unclear: Search result cards are currently compact. Adding another button increases visual noise.
-   - Recommendation: Add it, but only show when catalog data exists (disabled-when-empty on search cards could be too noisy with 200 results). For search results, use visible-when-data-exists pattern instead of always-visible-disabled. Reserve the always-visible-disabled pattern for browse page only.
+1. **FTS5 Contentless vs Content-Synced**
+   - What we know: Current FTS5 uses `content='catalog'` (synced to catalog table). New FTS5 needs data from multiple tables (catalog + running_titles + free_desc).
+   - What's unclear: Whether to use contentless FTS5 or create a denormalized FTS source table.
+   - Recommendation: Use contentless FTS5 with manual INSERT. Simpler than maintaining a denormalized view. The FTS5 is only for search, not for retrieval -- actual data comes from individual tables.
 
-2. **Performance of batch catalog counts for search results**
-   - What we know: Need to query counts for up to 200 sys_ids per search page
-   - What's unclear: Whether a single batch SQL is fast enough
-   - Recommendation: Use `get_catalog_record_counts()` with the same 500-batch pattern as domains. Should complete in <50ms based on indexed AlmaId column. Fetch counts alongside domain data in the existing enrichment flow.
+2. **Inventory-Level Data Overlap with Catalog-Level Data**
+   - What we know: `dbo_Inventory` has NumFolio, MaterialCode, SizeCode at the inventory (shelfmark) level. `dbo_UnitCatalogRec` and child tables have NumFolio, Material (via CatalogMultiField), Size (via CatalogMultiSize) at the catalog record (team) level.
+   - What's unclear: Whether to show both levels or prefer one.
+   - Recommendation: Export both. Inventory-level data goes as new columns in catalog or a separate lookup. Catalog-level data is per-team in child tables. The dialog can show inventory-level as "overall" and catalog-level as per-team, but this is Claude's discretion for display.
+
+3. **Sidecar Size After Export**
+   - What we know: Current size is 245 MB. Adding ~1.7M rows with text content.
+   - What's unclear: Final size after VACUUM. Rough estimate: +50-100 MB (running_titles ~10MB, sizes ~5MB, fields ~30MB, free_desc ~25MB, catalog extension ~15MB).
+   - Recommendation: Monitor after export. If >400MB, consider whether all FCDTableId categories are needed. All listed categories ARE needed per user decisions.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `shared/fjms_service.py` -- Full service layer, all methods verified by reading code
-- `web/components/bibliography_dialog.py` -- Dialog pattern, verified by reading code
-- `genizah_app.py:4971-5138` -- Desktop FjmsBibliographyDialog, verified by reading code
-- `web/pages/browse.py:2043-2131` -- Existing catalog metadata rendering, verified by reading code
-- `fist_data/fjms_enrichment.db` -- Schema and data verified by direct SQL queries
+- **FIST.db direct inspection** -- All schemas, row counts, sample data, join chains verified by querying the actual database
+- **Codebase inspection** -- export_fist_enrichment.py, shared/fjms_service.py, web/pages/browse.py, web/pages/search.py, genizah_app.py
+- **Git history** -- Reverted commit `73320310` provides complete v1 code diff
 
 ### Secondary (MEDIUM confidence)
-- `genizah_app.py:2436-2680` -- ResultDialog layout and button patterns
-- `genizah_app.py:8540-8558` -- Desktop browse ext_info_row layout
-- `web/pages/search.py:2174-2313` -- Search result card layout
+- **Data volume estimates** -- Based on actual COUNT queries, but export with JOINs may produce slightly different row counts due to DISTINCT
 
 ## Metadata
 
 **Confidence breakdown:**
-- Standard stack: HIGH -- all libraries already in use, no new dependencies
-- Architecture: HIGH -- direct extrapolation from existing bibliography dialog pattern
-- Pitfalls: HIGH -- identified from actual code inspection and data analysis
-- Data model: HIGH -- verified by direct SQL queries against production database
+- Standard stack: HIGH -- all technology already in use, no new dependencies
+- Architecture: HIGH -- following exact established patterns (export, service, dialog)
+- Data model: HIGH -- verified against actual FIST.db schemas and sample data
+- Pitfalls: HIGH -- identified from actual v1 revert experience and schema analysis
 
 **Research date:** 2026-02-17
-**Valid until:** 2026-03-17 (stable -- data model and UI patterns are established)
+**Valid until:** 2026-03-17 (stable -- internal project, no external dependency changes)
