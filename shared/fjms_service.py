@@ -405,14 +405,15 @@ class FjmsService:
 
     def get_catalog(self, sys_id: str) -> Optional[dict]:
         """
-        Get catalog metadata for a manuscript.
+        Get catalog metadata for a manuscript (first record only).
 
         Args:
             sys_id: The Alma/system ID for the manuscript.
 
         Returns:
             Dict with keys: title, title_heb, author_text, copy_date, copy_place,
-            description_eng, description_heb, textual_frame_heb, textual_frame_eng.
+            textual_frame_heb, textual_frame_eng, unit_catalog_rec_id,
+            num_folio, num_column, num_row, genizah_title_org, genizah_title_eng.
             Returns None if conn is None or not found.
         """
         if self._conn is None:
@@ -425,16 +426,21 @@ class FjmsService:
             row = cursor.fetchone()
             if row is None:
                 return None
+            col_names = row.keys()
             return {
                 "title": row["Title"],
                 "title_heb": row["TitleHeb"],
                 "author_text": row["AuthorText"],
                 "copy_date": row["CopyDate"],
                 "copy_place": row["CopyPlace"],
-                "description_eng": row["DescriptionEng"],
-                "description_heb": row["DescriptionHeb"],
                 "textual_frame_heb": row["TextualFrameHeb"],
                 "textual_frame_eng": row["TextualFrameEng"],
+                "unit_catalog_rec_id": row["UnitCatalogRecId"] if "UnitCatalogRecId" in col_names else None,
+                "num_folio": row["NumFolio"] if "NumFolio" in col_names else None,
+                "num_column": row["NumColumn"] if "NumColumn" in col_names else None,
+                "num_row": row["NumRow"] if "NumRow" in col_names else None,
+                "genizah_title_org": row["GenizahTitleOrgTitle"] if "GenizahTitleOrgTitle" in col_names else None,
+                "genizah_title_eng": row["GenizahTitleEngTitle"] if "GenizahTitleEngTitle" in col_names else None,
             }
         except Exception as e:
             logger.error(f"FjmsService.get_catalog error for {sys_id}: {e}")
@@ -475,6 +481,14 @@ class FjmsService:
                 source_name = row["SourceName"] if has_source else None
                 source_name_heb = row["SourceNameHeb"] if has_source else None
 
+                # Handle new v3.0.0 columns gracefully (may not exist in old sidecars)
+                has_rec_id = "UnitCatalogRecId" in col_names
+                has_num_folio = "NumFolio" in col_names
+                has_num_column = "NumColumn" in col_names
+                has_num_row = "NumRow" in col_names
+                has_genizah_org = "GenizahTitleOrgTitle" in col_names
+                has_genizah_eng = "GenizahTitleEngTitle" in col_names
+
                 record = {
                     "title": row["Title"],
                     "title_heb": row["TitleHeb"],
@@ -485,6 +499,12 @@ class FjmsService:
                     "textual_frame_eng": row["TextualFrameEng"],
                     "source_name": source_name,
                     "source_name_heb": source_name_heb,
+                    "unit_catalog_rec_id": row["UnitCatalogRecId"] if has_rec_id else None,
+                    "num_folio": row["NumFolio"] if has_num_folio else None,
+                    "num_column": row["NumColumn"] if has_num_column else None,
+                    "num_row": row["NumRow"] if has_num_row else None,
+                    "genizah_title_org": row["GenizahTitleOrgTitle"] if has_genizah_org else None,
+                    "genizah_title_eng": row["GenizahTitleEngTitle"] if has_genizah_eng else None,
                 }
 
                 # Filter completely empty records (source fields don't count)
@@ -636,6 +656,162 @@ class FjmsService:
         except Exception as e:
             logger.error(f"FjmsService.get_source_names error for {sys_id}: {e}")
             return []
+
+    def get_catalog_source_counts(self, sys_ids: list[str]) -> dict[str, int]:
+        """
+        Get distinct catalog source counts for multiple manuscripts in batch.
+
+        Used for search card button labels: "Catalog Records (N)".
+        Excludes generic source names (Catalogs, Institution, Collection, Other).
+
+        Args:
+            sys_ids: List of Alma/system IDs.
+
+        Returns:
+            Dict mapping sys_id -> count of distinct non-generic SourceName values.
+            IDs with no catalog data are omitted (not present in result).
+        """
+        if not self._conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT AlmaId, COUNT(DISTINCT SourceName) as cnt FROM catalog "
+                    f"WHERE AlmaId IN ({placeholders}) "
+                    f"AND SourceName IS NOT NULL AND SourceName != '' "
+                    f"AND SourceName NOT IN ('Catalogs','Institution','Collection','Other') "
+                    f"GROUP BY AlmaId",
+                    batch,
+                )
+                for row in cursor:
+                    result[row["AlmaId"]] = row["cnt"]
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_catalog_source_counts error: {e}")
+            return {}
+
+    def get_catalog_detail(self, sys_id: str) -> dict:
+        """
+        Get structured catalog detail for the dialog display.
+
+        Returns all catalog data for a manuscript grouped by child table:
+        records, running titles, sizes, fields, and free descriptions.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            Dict with keys:
+                - records: list of catalog record dicts (from get_catalog_records)
+                - running_titles: dict mapping UnitCatalogRecId -> list of
+                    {"running_title": str, "comment": str}
+                - sizes: dict mapping UnitCatalogRecId -> list of
+                    {"size_x": float, "size_y": float, "inner_size_x": float, "inner_size_y": float}
+                - fields: dict mapping UnitCatalogRecId -> {FieldCategory: [{"value": str, "value_heb": str}]}
+                - free_descriptions: list of {"text": str, "signature_id": int}
+        """
+        empty = {
+            "records": [],
+            "running_titles": {},
+            "sizes": {},
+            "fields": {},
+            "free_descriptions": [],
+        }
+        if self._conn is None:
+            return empty
+
+        # 1. Catalog records
+        records = self.get_catalog_records(sys_id)
+
+        # 2. Running titles
+        running_titles = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, RunningTitle, Comment "
+                "FROM catalog_running_titles WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in running_titles:
+                    running_titles[rec_id] = []
+                running_titles[rec_id].append({
+                    "running_title": row["RunningTitle"],
+                    "comment": row["Comment"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail running_titles error for {sys_id}: {e}")
+
+        # 3. Sizes
+        sizes = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, SizeX, SizeY, InnerSizeX, InnerSizeY "
+                "FROM catalog_sizes WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in sizes:
+                    sizes[rec_id] = []
+                sizes[rec_id].append({
+                    "size_x": row["SizeX"],
+                    "size_y": row["SizeY"],
+                    "inner_size_x": row["InnerSizeX"],
+                    "inner_size_y": row["InnerSizeY"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail sizes error for {sys_id}: {e}")
+
+        # 4. Fields (grouped by UnitCatalogRecId then FieldCategory)
+        fields = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, FieldCategory, FieldValue, FieldValueHeb "
+                "FROM catalog_fields WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                category = row["FieldCategory"]
+                if rec_id not in fields:
+                    fields[rec_id] = {}
+                if category not in fields[rec_id]:
+                    fields[rec_id][category] = []
+                fields[rec_id][category].append({
+                    "value": row["FieldValue"],
+                    "value_heb": row["FieldValueHeb"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail fields error for {sys_id}: {e}")
+
+        # 5. Free descriptions
+        free_descriptions = []
+        try:
+            cursor = self._conn.execute(
+                "SELECT SignatureId, FreeDesc "
+                "FROM catalog_free_desc WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                free_descriptions.append({
+                    "text": row["FreeDesc"],
+                    "signature_id": row["SignatureId"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail free_desc error for {sys_id}: {e}")
+
+        return {
+            "records": records,
+            "running_titles": running_titles,
+            "sizes": sizes,
+            "fields": fields,
+            "free_descriptions": free_descriptions,
+        }
 
     def close(self):
         """Close the database connection if open."""
