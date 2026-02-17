@@ -142,7 +142,11 @@ Plans:
   1. FJMS catalog descriptions (65K records) are stored in fjms_enrichment.db full_texts table
   2. User clicks a dedicated button in the browse metadata panel and sees the FJMS scholarly description for that manuscript
   3. Each description shows source attribution (catalog name and/or scholar)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 37-01-PLAN.md — Service batch counts + translations + web catalog dialog + web browse wiring
+- [ ] 37-02-PLAN.md — Desktop FjmsCatalogDialog + browse and ResultDialog button wiring
+- [ ] 37-03-PLAN.md — Web search result card catalog button with batch enrichment
 
 ### Phase 38: Distribution and Verification
 **Goal**: pgp.db is bundled for both distribution channels and desktop PGP browsing works without internet
@@ -164,9 +168,9 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
 | 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
-| 37. FJMS Catalog Descriptions | 0/TBD | Not started | - |
+| 37. FJMS Catalog Descriptions | 0/3 | Not started | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-17 after Phase 36 UAT gap closure plan*
+*Last updated: 2026-02-17 after Phase 37 planning*
