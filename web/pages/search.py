@@ -56,6 +56,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.domain_exclusions: set = set()  # domain names user has excluded
             self.has_domain_data: bool = False  # whether any results have domain data
             self.domain_name_map: dict = {}  # English domain name -> Hebrew name
+            self.catalog_record_counts: dict = {}  # sys_id -> int (FJMS catalog record counts)
 
     search_state = SearchUIState()
 
@@ -2029,6 +2030,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Process into deduplicated domain names per sys_id
         # Also build English->Hebrew display name map
         search_state.all_result_domains = {}
+        search_state.catalog_record_counts = {}
         search_state.domain_name_map = {}  # English name -> Hebrew name
         for sys_id, doms in raw_domains.items():
             child_names = {d['domain'] for d in doms}
@@ -2041,6 +2043,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
                     search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
         search_state.has_domain_data = bool(search_state.all_result_domains)
+
+        # Batch fetch catalog record counts for search result card buttons
+        def collect_catalog_counts(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            return fjms.get_catalog_record_counts(sys_ids) if fjms.is_available() else {}
+
+        search_state.catalog_record_counts = await run.io_bound(collect_catalog_counts, all_sys_ids)
 
         # Batch lookup for transcription availability
         result_sys_ids = [
