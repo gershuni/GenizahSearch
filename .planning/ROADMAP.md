@@ -135,18 +135,15 @@ Plans:
 - [ ] 36-03-PLAN.md — Gap closure: FL ID browse path missing pgp_metadata assignment
 
 ### Phase 37: FJMS Catalog Descriptions
-**Goal**: Researchers can access 65K FJMS scholarly descriptions from the browse page in both apps
+**Goal**: Researchers can access rich FJMS scholarly descriptions (content, physical metadata, source attribution) from the browse page in both apps
 **Depends on**: Nothing (can run parallel to Phase 36; only depends on fjms_enrichment.db existing, which shipped in v5.8.0)
 **Requirements**: FJMS-01, FJMS-02, FJMS-03
+**Status**: REVERTED — initial implementation only duplicated existing TextualFrame data. Needs richer export from FIST.db (dbo_Inventory join for Material, Sizes, Physical Status, NumFolios) before re-implementation.
 **Success Criteria** (what must be TRUE):
-  1. FJMS catalog descriptions (~96K records with TextualFrame data) are accessible in fjms_enrichment.db's existing `catalog` table (pre-satisfied by v5.8.0; verified, not exported — per CONTEXT.md decision: no new `full_texts` table)
+  1. FJMS catalog descriptions include rich structured data (content identification + physical metadata) beyond what browse already shows
   2. User clicks a dedicated button in the browse metadata panel and sees the FJMS scholarly description for that manuscript
   3. Each description shows source attribution (catalog name and/or scholar)
-**Plans**: 3 plans
-Plans:
-- [ ] 37-01-PLAN.md — Service batch counts + translations + web catalog dialog + web browse wiring
-- [ ] 37-02-PLAN.md — Desktop FjmsCatalogDialog + browse and ResultDialog button wiring
-- [ ] 37-03-PLAN.md — Web search result card catalog button with batch enrichment
+**Plans**: TBD (needs re-planning after export enrichment)
 
 ### Phase 38: Distribution and Verification
 **Goal**: pgp.db is bundled for both distribution channels and desktop PGP browsing works without internet
@@ -168,9 +165,9 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
 | 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
-| 37. FJMS Catalog Descriptions | 0/3 | Complete    | 2026-02-17 |
+| 37. FJMS Catalog Descriptions | 0/TBD | Reverted    | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-17 after Phase 37 planning*
+*Last updated: 2026-02-17 after Phase 37 revert (data too thin)*

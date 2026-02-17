@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 37 of 38 (FJMS Catalog Descriptions)
-Plan: 3 of 3 in current phase (37-01, 37-02, and 37-03 complete)
-Status: Phase 37 Complete
-Last activity: 2026-02-17 -- Completed 37-03 search catalog records button
+Plan: 0 of 0 in current phase (REVERTED)
+Status: Phase 37 REVERTED -- data too thin, needs richer FIST.db export
+Last activity: 2026-02-17 -- Reverted Phase 37 code; planning docs retained
 
-Progress: [##########] 100% (Phase 37)
+Progress: [░░░░░░░░░░] 0% (Phase 37)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 109 (across 7 milestones)
+- Total plans completed: 108 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -34,7 +34,7 @@ Progress: [##########] 100% (Phase 37)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 4+ | 30 min |
+| v6.0.0 | 35-38 | 3 | 18 min |
 
 ## Accumulated Context
 
@@ -45,7 +45,6 @@ Recent decisions affecting current work:
 
 - v6.0.0: New pgp.db sidecar (not extending existing sidecars) -- distinct domain boundary
 - v6.0.0: Tags stored as TEXT JSON, queried with json_each() -- start simple, optimize if >100ms
-- v6.0.0: FJMS descriptions in browse metadata panel button (NOT version selector) -- catalog descriptions, not transcriptions
 - v6.0.0: Supabase PGP tables kept (legacy desktop users) -- cutover deferred to future milestone
 - Phase 35: Hardcoded Supabase URL/anon key defaults matching codebase pattern
 - Phase 35: pgp_url stored as plain TEXT from Supabase generated column
@@ -55,19 +54,15 @@ Recent decisions affecting current work:
 - Phase 36: _row_to_dict helper centralizes JSON deserialization for tags/sections columns
 - Phase 36: Temp file SQLite fixtures (not :memory:) for testing -- PgpService requires real file for read-only URI mode
 - Phase 36: Inline dict assignment (no helper extraction) for FL ID path pgp_metadata -- matches existing load_page pattern
-- Phase 37: Always-visible disabled button pattern for catalog records (not hidden when 0)
-- Phase 37: Separate SQLite fetch for button population vs _build_fjms_catalog_html (negligible overhead)
-- Phase 37-01: FJMS-01 pre-satisfied by existing catalog table (96K rows with TextualFrame data)
-- Phase 37-01: catalog_records initialized to [] before fjms.is_available() for safe button rendering
-- Phase 37-03: Separate io_bound call for catalog counts (not combined with domain fetch) -- minimal code change
-- Phase 37-03: Visible-only-when-data-exists for search cards (vs always-visible-disabled on browse) -- 200 results too noisy
-- Phase 37-03: Lazy-load full records on click (only counts pre-fetched in batch) -- fast search flow
+- Phase 37: REVERTED -- catalog dialog only duplicated TextualFrame data already in browse metadata
+- Phase 37: Rich data (Material, Sizes, Physical Status, NumFolios) exists in FIST.db but not in fjms_enrichment.db export
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - Tags json_each() benchmarked: 115ms for get_all_distinct_tags (2695 tags), 63ms for tag search -- acceptable
 - FJMS/PGP overlap extent unknown -- affects dedup strategy in Phase 38
+- Phase 37 needs FIST.db export enrichment (dbo_Inventory join) before re-implementation
 
 ### Pending Todos
 
@@ -75,10 +70,11 @@ Recent decisions affecting current work:
 - Migrate desktop corrections fetch to shared corrections_service
 - Domain click behavior in browse metadata
 - Pre-search domain filtering optimization
+- Extend FJMS export script to include dbo_Inventory physical metadata
 
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 37-03-PLAN.md (search catalog records button)
-Resume file: .planning/phases/37-fjms-catalog-descriptions/37-03-SUMMARY.md
-Notes: Phase 37 complete (all 3 plans). FJMS catalog records integrated in browse and search.
+Stopped at: Phase 37 reverted -- needs richer FIST.db export first
+Resume file: .planning/phases/37-fjms-catalog-descriptions/37-CONTEXT.md
+Notes: Phase 37 code reverted. Planning docs and research retained. Next step: extend export_fist_enrichment.py to join dbo_Inventory (Material, Sizes, Condition, NumFolios), then re-plan Phase 37 with richer data.
