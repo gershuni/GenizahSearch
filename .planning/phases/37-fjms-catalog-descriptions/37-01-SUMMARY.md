@@ -1,98 +1,101 @@
 ---
 phase: 37-fjms-catalog-descriptions
 plan: 01
-subsystem: ui
-tags: [fjms, catalog, dialog, nicegui, sqlite, textual-frame]
+subsystem: database
+tags: [sqlite, fts5, fist, fjms, sidecar, export]
 
 # Dependency graph
 requires:
-  - phase: 25-28 (v5.8.0)
-    provides: fjms_enrichment.db sidecar with catalog table
+  - phase: 25-data-infrastructure
+    provides: "Original fjms_enrichment.db export script and sidecar schema"
+  - phase: 28-catalog-enrichment
+    provides: "catalog_refs table and reference lookups in sidecar"
 provides:
-  - create_catalog_records_dialog() component for browse page
-  - get_catalog_record_counts() batch method for search enrichment
-  - "Catalog Records" translation key (Hebrew/English)
-affects: [37-02 desktop parity, 37-03 search enrichment]
+  - "4 new sidecar tables: catalog_running_titles (317K), catalog_sizes (178K), catalog_fields (1.3M), catalog_free_desc (303K)"
+  - "Catalog v2 schema with UnitCatalogRecId, NumFolio, NumColumn, NumRow, GenizahTitle columns"
+  - "Contentless FTS5 index spanning catalog + running titles + free descriptions (226K entries)"
+  - "Sidecar version 3.0.0"
+affects: [37-02, 37-03, 37-04, fjms-service]
 
 # Tech tracking
 tech-stack:
   added: []
-  patterns: [source-grouped dialog layout, language-aware TextualFrame rendering with HTML escaping]
+  patterns:
+    - "Contentless FTS5 aggregation across multiple tables via per-AlmaId GROUP_CONCAT"
+    - "Standard batch-insert export pattern with JOIN chain through InventoryAlma->Inventory->InventorySignature->Signature->UnitCatalogRec"
 
 key-files:
-  created: [web/components/catalog_dialog.py]
-  modified: [shared/fjms_service.py, genizah_translations.py, web/pages/browse.py, tests/test_fjms_service.py]
+  created: []
+  modified:
+    - "scripts/export_fist_enrichment.py"
+    - "fist_data/fjms_enrichment.db"
 
 key-decisions:
-  - "FJMS-01 pre-satisfied: 96K catalog rows with TextualFrame data exist in v5.8.0 sidecar (no new full_texts table needed)"
-  - "catalog_records initialized to [] before fjms.is_available() check to ensure button always renders"
-  - "Guard condition catalog_records is not None ensures button row always visible even with no bibliography data"
+  - "Contentless FTS5 (content='') instead of content-synced since RunningTitle/FreeDescription come from separate tables"
+  - "4 normalized tables (not flattened into catalog) for catalog_running_titles, catalog_sizes, catalog_fields, catalog_free_desc"
+  - "catalog_fields resolves category names via CODE_FullCode -> CODE_FCDTable JOIN chain"
+  - "catalog_free_desc joins via SignatureId (not UnitCatalogRecId) per FIST schema design"
 
 patterns-established:
-  - "Source-grouped dialog: itertools.groupby on source_name, language-aware headers with count labels"
-  - "TextualFrame markup rendering: split_textual_frames + parse_textual_frame + html.escape per part"
+  - "Contentless FTS5 aggregation: one row per AlmaId with GROUP_CONCAT from child tables"
+  - "Multi-table export: new tables follow same batch-insert pattern as export_domains()"
 
-requirements-completed: [FJMS-01, FJMS-02, FJMS-03]
+requirements-completed: [FJMS-01]
 
 # Metrics
-duration: 7min
+duration: 22min
 completed: 2026-02-17
 ---
 
-# Phase 37 Plan 01: FJMS Catalog Records Dialog Summary
+# Phase 37 Plan 01: FIST Enrichment Export v3 Summary
 
-**Catalog records dialog on web browse page with source-grouped FJMS descriptions, batch count method, and TextualFrame markup rendering**
+**Extended fjms_enrichment.db with 4 new catalog tables (2.1M rows), v2 catalog schema with GenizahTitle/NumFolio/UnitCatalogRecId, and contentless FTS5 index spanning RunningTitle + FreeDescription**
 
 ## Performance
 
-- **Duration:** 7 min
-- **Started:** 2026-02-17T09:54:24Z
-- **Completed:** 2026-02-17T10:01:44Z
-- **Tasks:** 3
-- **Files modified:** 5 (1 created, 4 modified)
+- **Duration:** 22 min
+- **Started:** 2026-02-17T15:13:23Z
+- **Completed:** 2026-02-17T15:35:00Z
+- **Tasks:** 2
+- **Files modified:** 1 (script) + 1 (sidecar regenerated)
 
 ## Accomplishments
-- FJMS-01 verified: 96,419 catalog rows with TextualFrame data in existing sidecar (pre-satisfied)
-- New catalog records dialog with purple FJMS branding, source grouping, and language-aware content rendering
-- Batch count method `get_catalog_record_counts()` ready for Plan 37-03 search enrichment
-- Browse page shows "Catalog Records (N)" button always visible, disabled with (0) when no data
+- Added 4 new sidecar tables totaling 2,114,884 rows (317K running titles, 178K sizes, 1.3M fields, 303K free descriptions)
+- Extended catalog table from 12 to 16 columns: added UnitCatalogRecId, NumFolio, NumColumn, NumRow, GenizahTitleOrgTitle, GenizahTitleEngTitle; removed empty DescriptionEng/DescriptionHeb
+- Rebuilt FTS5 as contentless aggregated index (226K entries) spanning catalog text + running titles + free descriptions
+- Bumped sidecar version to 3.0.0; final file size 592 MB
 
 ## Task Commits
 
 Each task was committed atomically:
 
-1. **Task 1: Add batch count method and translation keys** - `6db914de` (feat)
-2. **Task 2: Create web catalog records dialog component** - `bbb7b6de` (feat)
-3. **Task 3: Wire catalog records button into web browse page** - `98e1a82e` (feat)
+1. **Task 1: Extend catalog table schema and add 4 new export functions** - `96dabb18` (feat)
+2. **Task 2: Rebuild FTS5 index with RunningTitle and FreeDescription content** - `ccdd9dbd` (feat)
 
 ## Files Created/Modified
-- `web/components/catalog_dialog.py` - New dialog component with source-grouped catalog descriptions
-- `shared/fjms_service.py` - Added `get_catalog_record_counts()` batch method
-- `genizah_translations.py` - Added "Catalog Records" / "מידע קטלוגי" translation key
-- `web/pages/browse.py` - Wired catalog records button into bibliography row
-- `tests/test_fjms_service.py` - Added 2 tests for batch count method
+- `scripts/export_fist_enrichment.py` - Extended with 4 new export functions, v2 catalog schema, contentless FTS5
+- `fist_data/fjms_enrichment.db` - Regenerated sidecar with all new tables (592 MB)
 
 ## Decisions Made
-- FJMS-01 pre-satisfied by existing v5.8.0 sidecar data (96,419 rows with TextualFrame content) -- no new full_texts table needed per CONTEXT.md locked decision
-- Initialized `catalog_records = []` before `fjms.is_available()` check so the button row always renders regardless of FJMS availability
-- Changed bibliography row guard from `if fjms_bib or marc_bib` to `if fjms_bib or marc_bib or catalog_records is not None` so button is always visible
+- Used contentless FTS5 (`content=''`) because the index aggregates data from 3 separate tables (catalog, catalog_running_titles, catalog_free_desc) -- content-synced approach cannot span multiple source tables
+- catalog_free_desc joins through SignatureId rather than UnitCatalogRecId, following the FIST schema where free descriptions are signature-level not catalog-record-level
+- catalog_fields resolves coded values through a two-hop JOIN: dbo_CatalogMultiField -> CODE_FullCode -> CODE_FCDTable to get human-readable FieldCategory names
+- Added UnitCatalogRecId index on catalog table for efficient child-table lookups
 
 ## Deviations from Plan
 
-### Auto-fixed Issues
+None - plan executed exactly as written.
 
-**1. [Rule 1 - Bug] Initialize catalog_records before availability check**
-- **Found during:** Task 3 (wire button into browse page)
-- **Issue:** `catalog_records` was only defined inside `if fjms.is_available():` block, causing potential NameError when FJMS is unavailable
-- **Fix:** Added `catalog_records = []` initialization before the availability check
-- **Files modified:** web/pages/browse.py
-- **Verification:** Syntax check passes
-- **Committed in:** 98e1a82e (Task 3 commit)
+## Row Count Comparison
 
----
-
-**Total deviations:** 1 auto-fixed (1 bug)
-**Impact on plan:** Essential for correctness when FJMS sidecar is missing. No scope creep.
+| Table | Plan Estimate | Actual | Notes |
+|-------|--------------|--------|-------|
+| catalog_running_titles | ~235K | 317,412 | Higher due to DISTINCT across full JOIN chain |
+| catalog_sizes | ~161K | 178,579 | Slightly higher with AlmaId expansion |
+| catalog_fields | ~1.1M | 1,315,501 | Consistent with estimate |
+| catalog_free_desc | ~190K | 303,392 | Higher -- multiple descriptions per signature |
+| catalog | ~500K | 730,624 | More rows with GenizahTitle LEFT JOIN expansion |
+| catalog_fts | ~226K | 226,456 | Distinct AlmaIds in catalog |
 
 ## Issues Encountered
 None
@@ -101,13 +104,9 @@ None
 None - no external service configuration required.
 
 ## Next Phase Readiness
-- Catalog dialog component ready for desktop parity (Plan 37-02)
-- `get_catalog_record_counts()` batch method ready for search enrichment (Plan 37-03)
-- All 42 FJMS service tests passing
-
-## Self-Check: PASSED
-
-All 6 files verified present. All 3 task commits verified in git log. 42/42 tests passing.
+- Sidecar data foundation complete for catalog records dialog (Plans 02-04)
+- All 4 new tables indexed and ready for service layer consumption
+- FTS5 index ready for full-text search across catalog descriptions
 
 ---
 *Phase: 37-fjms-catalog-descriptions*

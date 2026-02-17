@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 37 of 38 (FJMS Catalog Descriptions)
-Plan: 0 of 0 in current phase (REVERTED)
-Status: Phase 37 REVERTED -- data too thin, needs richer FIST.db export
-Last activity: 2026-02-17 -- Reverted Phase 37 code; planning docs retained
+Plan: 1 of 4 in current phase
+Status: Executing Phase 37 plans
+Last activity: 2026-02-17 -- Completed 37-01 (FIST enrichment export v3)
 
-Progress: [░░░░░░░░░░] 0% (Phase 37)
+Progress: [##░░░░░░░░] 25% (Phase 37: 1/4 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 108 (across 7 milestones)
+- Total plans completed: 109 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -34,7 +34,7 @@ Progress: [░░░░░░░░░░] 0% (Phase 37)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 3 | 18 min |
+| v6.0.0 | 35-38 | 4 | 40 min |
 
 ## Accumulated Context
 
@@ -54,15 +54,17 @@ Recent decisions affecting current work:
 - Phase 36: _row_to_dict helper centralizes JSON deserialization for tags/sections columns
 - Phase 36: Temp file SQLite fixtures (not :memory:) for testing -- PgpService requires real file for read-only URI mode
 - Phase 36: Inline dict assignment (no helper extraction) for FL ID path pgp_metadata -- matches existing load_page pattern
-- Phase 37: REVERTED -- catalog dialog only duplicated TextualFrame data already in browse metadata
-- Phase 37: Rich data (Material, Sizes, Physical Status, NumFolios) exists in FIST.db but not in fjms_enrichment.db export
+- Phase 37: REVERTED v1; v2 re-planned with enriched FIST.db export (4 new tables)
+- Phase 37-01: Contentless FTS5 (content='') for cross-table aggregation (catalog + running titles + free desc)
+- Phase 37-01: catalog_free_desc joins via SignatureId (not UnitCatalogRecId) per FIST schema
+- Phase 37-01: catalog_fields resolves categories via CODE_FullCode -> CODE_FCDTable two-hop JOIN
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - Tags json_each() benchmarked: 115ms for get_all_distinct_tags (2695 tags), 63ms for tag search -- acceptable
 - FJMS/PGP overlap extent unknown -- affects dedup strategy in Phase 38
-- Phase 37 needs FIST.db export enrichment (dbo_Inventory join) before re-implementation
+- Phase 37 export enrichment complete (37-01); service layer + UI plans remaining
 
 ### Pending Todos
 
@@ -70,11 +72,11 @@ Recent decisions affecting current work:
 - Migrate desktop corrections fetch to shared corrections_service
 - Domain click behavior in browse metadata
 - Pre-search domain filtering optimization
-- Extend FJMS export script to include dbo_Inventory physical metadata
+- FJMS export script extended with RunningTitle/Size/Field/FreeDesc/GenizahTitle (37-01 complete)
 
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Phase 37 context v2 gathered (enriched export scope)
-Resume file: .planning/phases/37-fjms-catalog-descriptions/37-CONTEXT.md
-Notes: Phase 37 context updated with enriched export scope. 5 new FIST.db tables identified (RunningTitle 235K, Size 161K, Field 1.1M, FreeDescription 190K, GenizahTitle 109K). Next step: /gsd:plan-phase 37 to create plans for export enrichment + dialog re-implementation.
+Stopped at: Completed 37-01-PLAN.md (FIST enrichment export v3)
+Resume file: .planning/phases/37-fjms-catalog-descriptions/37-01-SUMMARY.md
+Notes: Phase 37-01 complete. fjms_enrichment.db v3.0.0 with 4 new tables (2.1M rows), v2 catalog schema, contentless FTS5. Next: 37-02 (service layer).
