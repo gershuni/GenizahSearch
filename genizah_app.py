@@ -2634,8 +2634,13 @@ class ResultDialog(QDialog):
         self.btn_rd_bib_nli = QPushButton()
         self.btn_rd_bib_nli.setVisible(False)
         self.btn_rd_bib_nli.clicked.connect(self._show_rd_nli_bib)
+        self.btn_rd_catalog = QPushButton(f"{tr('Catalog Records')} (0)")
+        self.btn_rd_catalog.setEnabled(False)
+        self.btn_rd_catalog.setVisible(False)
+        self.btn_rd_catalog.clicked.connect(self._show_rd_catalog)
         self._rd_fjms_bib = []
         self._rd_marc_bib = []
+        self._rd_catalog_detail = None
 
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
@@ -2643,6 +2648,7 @@ class ResultDialog(QDialog):
         action_row.addWidget(self.btn_ext_info)
         action_row.addWidget(self.btn_rd_bib_fjms)
         action_row.addWidget(self.btn_rd_bib_nli)
+        action_row.addWidget(self.btn_rd_catalog)
         action_row.addWidget(self.btn_toggle_image)
 
         action_row.addStretch()
@@ -4102,8 +4108,11 @@ class ResultDialog(QDialog):
         self._rd_enriched_data_loaded = False
         self._rd_fjms_bib = []
         self._rd_marc_bib = []
+        self._rd_catalog_detail = None
         self.btn_rd_bib_fjms.setVisible(False)
         self.btn_rd_bib_nli.setVisible(False)
+        self.btn_rd_catalog.setVisible(False)
+        self.btn_rd_catalog.setEnabled(False)
         if hasattr(self, 'btn_compact_bib_fjms'):
             self.btn_compact_bib_fjms.setVisible(False)
             self.btn_compact_bib_nli.setVisible(False)
@@ -4244,6 +4253,19 @@ class ResultDialog(QDialog):
         )
         dlg.exec()
 
+    def _show_rd_catalog(self):
+        """Open FJMS catalog records dialog from ResultDialog."""
+        if not self._rd_catalog_detail:
+            return
+        shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
+        dlg = FjmsCatalogDialog(
+            self._rd_catalog_detail,
+            sys_id=self.current_sys_id or '',
+            shelfmark=shelf,
+            parent=self,
+        )
+        dlg.exec()
+
     def toggle_external_viewer(self, checked):
         self.external_pane.setVisible(checked)
         if checked:
@@ -4340,6 +4362,23 @@ class ResultDialog(QDialog):
             if hasattr(self, 'btn_compact_bib_nli'):
                 self.btn_compact_bib_nli.setText(lbl)
                 self.btn_compact_bib_nli.setVisible(True)
+
+        # Catalog Records button
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms_svc = get_fjms_service()
+            if fjms_svc.is_available():
+                source_names = fjms_svc.get_source_names(self.current_sys_id)
+                catalog_count = len(source_names)
+                self.btn_rd_catalog.setText(f"{tr('Catalog Records')} ({catalog_count})")
+                self.btn_rd_catalog.setEnabled(catalog_count > 0)
+                self.btn_rd_catalog.setVisible(True)
+                if catalog_count > 0:
+                    self._rd_catalog_detail = fjms_svc.get_catalog_detail(self.current_sys_id)
+                else:
+                    self._rd_catalog_detail = None
+        except Exception:
+            self.btn_rd_catalog.setVisible(False)
 
         # 4. Build Extended Info HTML (Text)
         external_meta = meta.get('external_meta', {})
@@ -8846,9 +8885,15 @@ class GenizahGUI(QMainWindow):
         self.btn_b_bibliography_nli.setVisible(False)
         self.btn_b_bibliography_nli.clicked.connect(self._show_nli_bibliography_dialog)
         ext_info_row.addWidget(self.btn_b_bibliography_nli)
+        self.btn_b_catalog_records = QPushButton(f"{tr('Catalog Records')} (0)")
+        self.btn_b_catalog_records.setEnabled(False)
+        self.btn_b_catalog_records.setVisible(False)
+        self.btn_b_catalog_records.clicked.connect(self._show_fjms_catalog_dialog)
+        ext_info_row.addWidget(self.btn_b_catalog_records)
         top_layout.addLayout(ext_info_row)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
+        self._browse_catalog_detail = None
 
         self.txt_b_extended_info = QTextBrowser()
         self.txt_b_extended_info.setVisible(False)
@@ -9349,8 +9394,11 @@ class GenizahGUI(QMainWindow):
         self.txt_b_extended_info.setHtml("")
         self.btn_b_bibliography_fjms.setVisible(False)
         self.btn_b_bibliography_nli.setVisible(False)
+        self.btn_b_catalog_records.setVisible(False)
+        self.btn_b_catalog_records.setEnabled(False)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
+        self._browse_catalog_detail = None
 
         # Store folio images for page combo labels (Phase 31)
         self._browse_folio_images = meta.get('folio_images', [])
@@ -9501,6 +9549,23 @@ class GenizahGUI(QMainWindow):
         else:
             self._browse_marc_bib = []
             self.btn_b_bibliography_nli.setVisible(False)
+
+        # Catalog Records button (FJMS catalog detail dialog)
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms_svc = get_fjms_service()
+            if fjms_svc.is_available():
+                source_names = fjms_svc.get_source_names(sid)
+                catalog_count = len(source_names)
+                self.btn_b_catalog_records.setText(f"{tr('Catalog Records')} ({catalog_count})")
+                self.btn_b_catalog_records.setEnabled(catalog_count > 0)
+                self.btn_b_catalog_records.setVisible(True)
+                if catalog_count > 0:
+                    self._browse_catalog_detail = fjms_svc.get_catalog_detail(sid)
+                else:
+                    self._browse_catalog_detail = None
+        except Exception:
+            self.btn_b_catalog_records.setVisible(False)
 
         enriched_html = fjms_domain_html + fjms_catalog_html + catalog_refs_html + secondary_meta_html + enriched_html
 
@@ -10001,6 +10066,21 @@ class GenizahGUI(QMainWindow):
         shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
         dlg = NliBibliographyDialog(
             self._browse_marc_bib,
+            sys_id=self.current_browse_sid or '',
+            shelfmark=shelf,
+            parent=self,
+        )
+        dlg.exec()
+
+    def _show_fjms_catalog_dialog(self):
+        """Open the FJMS catalog records dialog from Browse tab."""
+        if not self._browse_catalog_detail or not self._browse_catalog_detail.get("records"):
+            # Still try to show if we have free_descriptions or other data
+            if not self._browse_catalog_detail:
+                return
+        shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
+        dlg = FjmsCatalogDialog(
+            self._browse_catalog_detail,
             sys_id=self.current_browse_sid or '',
             shelfmark=shelf,
             parent=self,
