@@ -114,7 +114,9 @@ Multi-source image viewing with folio navigation, bibliography (542K), catalog r
   2. JSON columns (tags, sections) survive the round-trip: exported to TEXT, parsed back to identical Python objects
   3. Re-running the export script from scratch produces an identical pgp.db (repeatable, idempotent)
   4. Meta table tracks version and export timestamp (consistent with existing sidecar pattern)
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 35-01-PLAN.md — Export script + pgp.db generation with validation
 
 ### Phase 36: PGP Service Layer
 **Goal**: Both apps read all PGP data from local SQLite instead of Supabase, with identical behavior
@@ -156,7 +158,7 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 35. PGP Sidecar Export | 0/TBD | Not started | - |
+| 35. PGP Sidecar Export | 0/1 | Planned | - |
 | 36. PGP Service Layer | 0/TBD | Not started | - |
 | 37. FJMS Catalog Descriptions | 0/TBD | Not started | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
