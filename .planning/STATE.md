@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 37 of 38 (FJMS Catalog Descriptions)
-Plan: 3 of 4 in current phase
-Status: Executing Phase 37 plans
-Last activity: 2026-02-17 -- Completed 37-03 (web catalog records dialog)
+Plan: 4 of 4 in current phase
+Status: Phase 37 complete
+Last activity: 2026-02-17 -- Completed 37-04 (desktop catalog records dialog)
 
-Progress: [#######░░░] 75% (Phase 37: 3/4 plans)
+Progress: [##########] 100% (Phase 37: 4/4 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 109 (across 7 milestones)
+- Total plans completed: 110 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -34,7 +34,7 @@ Progress: [#######░░░] 75% (Phase 37: 3/4 plans)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 6 | 50 min |
+| v6.0.0 | 35-38 | 7 | 59 min |
 
 ## Accumulated Context
 
@@ -62,13 +62,15 @@ Recent decisions affecting current work:
 - Phase 37-02: New v3.0.0 columns accessed via col_names membership check for backward compat
 - Phase 37-03: show_catalog_dialog() creates+opens in one call (simpler than create+open bibliography pattern)
 - Phase 37-03: Batch catalog source counts fetched during search execution via get_catalog_source_counts()
+- Phase 37-04: HTML table in QTextBrowser mirrors web dialog approach for consistent rendering with RTL support
+- Phase 37-04: Catalog detail cached per browse/result to avoid repeated DB queries on button click
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - Tags json_each() benchmarked: 115ms for get_all_distinct_tags (2695 tags), 63ms for tag search -- acceptable
 - FJMS/PGP overlap extent unknown -- affects dedup strategy in Phase 38
-- Phase 37 export enrichment + service layer + web UI complete (37-01, 37-02, 37-03); desktop plan remaining (04)
+- Phase 37 fully complete (all 4 plans: export enrichment, service layer, web UI, desktop UI)
 
 ### Pending Todos
 
@@ -81,6 +83,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 37-03-PLAN.md (web catalog records dialog)
-Resume file: .planning/phases/37-fjms-catalog-descriptions/37-03-SUMMARY.md
-Notes: Phase 37-03 complete. Web catalog dialog with FIST 5-section layout, wired into browse and search pages. Next: 37-04 (desktop catalog dialog).
+Stopped at: Completed 37-04-PLAN.md (desktop catalog records dialog)
+Resume file: .planning/phases/37-fjms-catalog-descriptions/37-04-SUMMARY.md
+Notes: Phase 37 complete. Desktop FjmsCatalogDialog with 5-section HTML table layout, catalog records button wired into Browse tab and ResultDialog. All 4 plans done. Next: Phase 38 (dedup/overlap).
