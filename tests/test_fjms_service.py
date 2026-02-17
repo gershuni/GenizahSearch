@@ -590,6 +590,22 @@ def test_get_catalog_refs_missing_table(tmp_path):
     svc.close()
 
 
+# ── Catalog record counts tests ────────────────────────────────
+
+
+def test_get_catalog_record_counts(service):
+    """get_catalog_record_counts returns correct counts for known sys_ids."""
+    counts = service.get_catalog_record_counts(["990001", "990002", "999999"])
+    assert "990001" in counts
+    assert counts["990001"] >= 1
+    assert "999999" not in counts  # No data for this sys_id
+
+
+def test_get_catalog_record_counts_empty(service):
+    """get_catalog_record_counts returns empty dict for empty input."""
+    assert service.get_catalog_record_counts([]) == {}
+
+
 # ── Source names tests ──────────────────────────────────────────
 
 

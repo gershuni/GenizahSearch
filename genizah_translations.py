@@ -2384,6 +2384,7 @@ TRANSLATIONS = {
     "Collection & Storage": "אוסף ואחסון",
 
     # --- FJMS Catalog ---
+    "Catalog Records": "מידע קטלוגי",
     "FJMS Catalog": "קטלוג FJMS",
     "Content Identification": "זיהוי תוכן",
     "Copy Date": "תאריך העתקה",
