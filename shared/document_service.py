@@ -2,182 +2,547 @@
 """
 Document Service for PGP document-fragment relationships.
 
-This module provides functions for accessing PGP document data from Supabase:
+This module provides PgpService class and module-level functions for accessing
+PGP document data from the local pgp.db SQLite sidecar:
 - get_document_for_fragment(sys_id) -> dict | None
 - get_fragments_for_document(pgpid) -> list[dict]
 - get_transcription_for_document(pgpid) -> str | None
 - get_document_metadata(pgpid) -> dict | None
+- get_sources_for_document(pgpid) -> list[dict]
+- get_all_sources_for_fragment(sys_id) -> list[dict]
+- get_editions_for_document(pgpid) -> list[dict]
+- get_translations_for_document(pgpid) -> list[dict]
+- get_sys_ids_with_transcriptions(sys_ids) -> set[str]
+- get_fragments_by_tag(tag) -> list[dict]
+- get_all_distinct_tags() -> list[str]
+- parse_transcription_sections(transcription) -> dict
+- get_section_for_page(transcription, page_num, sections) -> str | None
+- parse_html_sections(html_content) -> dict
 
 All functions handle errors gracefully, returning None or empty lists
-rather than raising exceptions.
+rather than raising exceptions. When the sidecar database is missing,
+the service degrades gracefully (is_available() returns False).
+
+Thread-safe mode (check_same_thread=False) is available for the NiceGUI
+web app which serves concurrent requests from multiple threads.
 """
 
-import re
 import json
-from html.parser import HTMLParser
+import logging
+import re
+import sqlite3
 from html import unescape
-from typing import Optional, List, Dict, Any, Set
-from shared.supabase_provider import get_client
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
+
+# Default sidecar location
+_SIDECAR_FILENAME = "pgp.db"
+_SIDECAR_DIR = "pgp_data"
 
 
-def get_document_for_fragment(sys_id: str, page_num: int = None) -> Optional[Dict[str, Any]]:
-    """
-    Get the PGP document associated with a fragment.
+def _find_project_root() -> Optional[Path]:
+    """Find the project root by looking for libraries.csv up from this file."""
+    current = Path(__file__).resolve().parent
+    for _ in range(5):  # Up to 5 levels
+        if (current / "libraries.csv").exists():
+            return current
+        current = current.parent
+    return None
+
+
+def _row_to_dict(row: sqlite3.Row, json_columns: tuple = ()) -> dict:
+    """Convert sqlite3.Row to dict with JSON deserialization.
 
     Args:
-        sys_id: The GenizahSearch system ID for the fragment
-        page_num: Optional page number (1=recto, 2=verso) to select the correct
-                  document when multiple PGP documents exist for the same fragment
+        row: A sqlite3.Row object.
+        json_columns: Column names whose TEXT values should be parsed
+            via json.loads() back to Python objects (lists/dicts).
 
     Returns:
-        Document dict with all fields (pgpid, shelfmark_combined, document_type,
-        tags, doc_date_original, doc_date_standard, inferred_date_display,
-        description, transcription, transcription_source, pgp_url, doc_relation),
-        or None if not found or on error.
-
-    Note:
-        The doc_relation field indicates the source type ('Digital Edition' for
-        transcriptions, 'Digital Translation' for translations). The transcription
-        field always contains the imported content regardless of doc_relation.
-        Future: translations could be offered as a separate version option.
+        Plain dict with JSON columns deserialized.
     """
-    if not sys_id:
-        return None
+    d = dict(row)
+    for col in json_columns:
+        if col in d and d[col] is not None:
+            try:
+                d[col] = json.loads(d[col])
+            except (json.JSONDecodeError, TypeError):
+                pass  # Leave as-is if parsing fails
+    return d
 
-    try:
-        client = get_client()
 
-        # First, find all fragment links for this sys_id
-        fragment_response = client.table('document_fragments').select(
-            'document_id, page_info'
-        ).eq('sys_id', sys_id).execute()
+class PgpService:
+    """Service for accessing PGP document data from the SQLite sidecar."""
 
-        if not fragment_response.data:
+    def __init__(self, db_path: str = None, thread_safe: bool = False):
+        """
+        Initialize PgpService.
+
+        Args:
+            db_path: Path to pgp.db. If None, auto-detect from project root.
+            thread_safe: If True, use check_same_thread=False for NiceGUI web app.
+                        Desktop app should leave this False (single-threaded).
+        """
+        self._conn: Optional[sqlite3.Connection] = None
+        self._db_path: Optional[str] = None
+
+        # Resolve db_path
+        if db_path is None:
+            root = _find_project_root()
+            if root:
+                db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
+
+        if db_path is None:
+            logger.warning("PgpService: No db_path provided and project root not found")
+            return
+
+        self._db_path = db_path
+        db_file = Path(db_path)
+
+        if not db_file.exists():
+            logger.warning(f"PgpService: Sidecar database not found at {db_path}")
+            return
+
+        try:
+            # Open read-only connection using URI mode
+            uri = f"file:{db_path}?mode=ro"
+            self._conn = sqlite3.connect(
+                uri,
+                uri=True,
+                check_same_thread=not thread_safe,
+                timeout=10.0,
+            )
+            self._conn.row_factory = sqlite3.Row
+            logger.info(f"PgpService: Connected to {db_path}")
+        except Exception as e:
+            logger.error(f"PgpService: Failed to connect to {db_path}: {e}")
+            self._conn = None
+
+    def is_available(self) -> bool:
+        """Returns True if the sidecar database connection is active."""
+        return self._conn is not None
+
+    def get_document_for_fragment(self, sys_id: str, page_num: int = None) -> Optional[Dict[str, Any]]:
+        """
+        Get the PGP document associated with a fragment.
+
+        Args:
+            sys_id: The GenizahSearch system ID for the fragment
+            page_num: Optional page number (1=recto, 2=verso) to select the correct
+                      document when multiple PGP documents exist for the same fragment
+
+        Returns:
+            Document dict with all fields (pgpid, shelfmark_combined, document_type,
+            tags, doc_date_original, doc_date_standard, inferred_date_display,
+            description, transcription, transcription_source, pgp_url, doc_relation),
+            or None if not found or on error.
+
+        Note:
+            The doc_relation field indicates the source type ('Digital Edition' for
+            transcriptions, 'Digital Translation' for translations). The transcription
+            field always contains the imported content regardless of doc_relation.
+            Future: translations could be offered as a separate version option.
+        """
+        if not sys_id or not self._conn:
             return None
 
-        # If page_num specified, try to find matching page_info
-        # page_num 1 = recto, page_num 2 = verso
-        pgpid = None
-        if page_num and len(fragment_response.data) > 1:
-            target_page = 'recto' if page_num == 1 else 'verso'
-            for frag in fragment_response.data:
-                if frag.get('page_info') == target_page:
-                    pgpid = frag.get('document_id')
-                    break
+        try:
+            # Step 1: Find all fragment links for this sys_id
+            cursor = self._conn.execute(
+                "SELECT document_id, page_info FROM document_fragments WHERE sys_id = ?",
+                (sys_id,)
+            )
+            frags = cursor.fetchall()
 
-        # Fallback to first result if no page match or page_num not specified
-        if not pgpid:
-            pgpid = fragment_response.data[0].get('document_id')
+            if not frags:
+                return None
 
-        if not pgpid:
+            # If page_num specified, try to find matching page_info
+            # page_num 1 = recto, page_num 2 = verso
+            pgpid = None
+            if page_num and len(frags) > 1:
+                target_page = 'recto' if page_num == 1 else 'verso'
+                for f in frags:
+                    if f['page_info'] == target_page:
+                        pgpid = f['document_id']
+                        break
+
+            # Fallback to first result if no page match or page_num not specified
+            if not pgpid:
+                pgpid = frags[0]['document_id']
+
+            if not pgpid:
+                return None
+
+            # Step 2: Get the full document
+            cursor = self._conn.execute(
+                "SELECT * FROM documents WHERE pgpid = ?", (pgpid,)
+            )
+            row = cursor.fetchone()
+            return _row_to_dict(row, json_columns=('tags',)) if row else None
+
+        except Exception as e:
+            logger.error(f"Error getting document for fragment {sys_id}: {e}")
             return None
 
-        # Now get the full document
-        doc_response = client.table('documents').select('*').eq(
-            'pgpid', pgpid
-        ).single().execute()
+    def get_fragments_for_document(self, pgpid: int) -> List[Dict[str, Any]]:
+        """
+        Get all fragments for a PGP document, ordered by sequence.
 
-        if doc_response.data:
-            return doc_response.data
+        Args:
+            pgpid: The PGP document ID
 
-        return None
+        Returns:
+            List of fragment dicts (id, document_id, sys_id, shelfmark,
+            sequence_order, page_info), ordered by sequence_order ASC.
+            Returns empty list if not found or on error.
+        """
+        if not pgpid or not self._conn:
+            return []
 
-    except Exception as e:
-        print(f"Error getting document for fragment {sys_id}: {e}")
-        return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM document_fragments WHERE document_id = ? ORDER BY sequence_order",
+                (pgpid,)
+            )
+            return [dict(row) for row in cursor]
+
+        except Exception as e:
+            logger.error(f"Error getting fragments for document {pgpid}: {e}")
+            return []
+
+    def get_transcription_for_document(self, pgpid: int) -> Optional[str]:
+        """
+        Get the transcription text for a PGP document.
+
+        Args:
+            pgpid: The PGP document ID
+
+        Returns:
+            Transcription string, or None if not found, empty, or on error.
+        """
+        if not pgpid or not self._conn:
+            return None
+
+        try:
+            cursor = self._conn.execute(
+                "SELECT transcription FROM documents WHERE pgpid = ?", (pgpid,)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                transcription = row['transcription']
+                # Return None for empty strings as well
+                return transcription if transcription else None
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting transcription for document {pgpid}: {e}")
+            return None
+
+    def get_document_metadata(self, pgpid: int) -> Optional[Dict[str, Any]]:
+        """
+        Get metadata for a PGP document.
+
+        Args:
+            pgpid: The PGP document ID
+
+        Returns:
+            Dict with document_type, tags, date fields, description, pgp_url,
+            shelfmark_combined. Returns None if not found or on error.
+
+        Note:
+            Date columns are: doc_date_original, doc_date_standard, inferred_date_display
+        """
+        if not pgpid or not self._conn:
+            return None
+
+        try:
+            cursor = self._conn.execute(
+                "SELECT document_type, tags, doc_date_original, doc_date_standard, "
+                "inferred_date_display, description, pgp_url, shelfmark_combined "
+                "FROM documents WHERE pgpid = ?", (pgpid,)
+            )
+            row = cursor.fetchone()
+            return _row_to_dict(row, json_columns=('tags',)) if row else None
+
+        except Exception as e:
+            logger.error(f"Error getting metadata for document {pgpid}: {e}")
+            return None
+
+    def get_sources_for_document(self, pgpid: int) -> List[Dict[str, Any]]:
+        """
+        Get all sources (editions and translations) for a PGP document.
+
+        Args:
+            pgpid: The PGP document ID
+
+        Returns:
+            List of source dicts ordered by: doc_relation (Edition first, then Translation),
+            then sequence_order. Returns empty list if not found or on error.
+
+        Note:
+            Each source dict contains: id, pgpid, source_scholar, doc_relation,
+            content, language, content_length, sequence_order, created_at.
+        """
+        if not pgpid or not self._conn:
+            return []
+
+        try:
+            # Order by doc_relation (Editions first alphabetically before Translations)
+            # then by sequence_order
+            cursor = self._conn.execute(
+                "SELECT * FROM document_sources WHERE pgpid = ? "
+                "ORDER BY doc_relation, sequence_order",
+                (pgpid,)
+            )
+            return [_row_to_dict(row, json_columns=('sections',)) for row in cursor]
+
+        except Exception as e:
+            logger.error(f"Error getting sources for document {pgpid}: {e}")
+            return []
+
+    def get_all_sources_for_fragment(self, sys_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all sources (editions and translations) for ALL PGP documents linked to a fragment.
+
+        Some fragments have multiple PGP documents (e.g., one for recto, one for verso).
+        This function retrieves sources from ALL linked documents.
+
+        Args:
+            sys_id: The GenizahSearch system ID for the fragment
+
+        Returns:
+            List of source dicts from all linked documents, ordered by: doc_relation
+            (Edition first), then sequence_order. Each source includes 'page_info'
+            from fragment link (recto/verso). Returns empty list if not found.
+        """
+        if not sys_id or not self._conn:
+            return []
+
+        try:
+            # Get all fragment links for this sys_id
+            cursor = self._conn.execute(
+                "SELECT document_id, page_info FROM document_fragments WHERE sys_id = ?",
+                (sys_id,)
+            )
+            frags = cursor.fetchall()
+
+            if not frags:
+                return []
+
+            # Build page_info map
+            page_map = {f['document_id']: f['page_info'] for f in frags}
+            pgpids = list(page_map.keys())
+
+            # Batch get sources for all linked documents (2 queries instead of N+1)
+            placeholders = ','.join('?' * len(pgpids))
+            cursor = self._conn.execute(
+                f"SELECT * FROM document_sources WHERE pgpid IN ({placeholders}) "
+                f"ORDER BY doc_relation, sequence_order",
+                pgpids
+            )
+
+            all_sources = []
+            for row in cursor:
+                source = _row_to_dict(row, json_columns=('sections',))
+                source['page_info'] = page_map.get(source['pgpid'])
+                all_sources.append(source)
+
+            # Sort: Editions first, then by sequence_order
+            all_sources.sort(key=lambda x: (
+                0 if 'Edition' in (x.get('doc_relation') or '') else 1,
+                x.get('sequence_order', 0)
+            ))
+
+            return all_sources
+
+        except Exception as e:
+            logger.error(f"Error getting all sources for fragment {sys_id}: {e}")
+            return []
+
+    def get_editions_for_document(self, pgpid: int) -> List[Dict[str, Any]]:
+        """
+        Get Digital Editions for a PGP document.
+
+        Args:
+            pgpid: The PGP document ID
+
+        Returns:
+            List of edition source dicts (doc_relation contains 'Edition').
+            Useful for transcription selector with multiple scholars.
+        """
+        if not pgpid or not self._conn:
+            return []
+
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM document_sources WHERE pgpid = ? "
+                "AND doc_relation LIKE '%Edition%' ORDER BY sequence_order",
+                (pgpid,)
+            )
+            return [_row_to_dict(row, json_columns=('sections',)) for row in cursor]
+
+        except Exception as e:
+            logger.error(f"Error getting editions for document {pgpid}: {e}")
+            return []
+
+    def get_translations_for_document(self, pgpid: int) -> List[Dict[str, Any]]:
+        """
+        Get Digital Translations for a PGP document.
+
+        Args:
+            pgpid: The PGP document ID
+
+        Returns:
+            List of translation source dicts (doc_relation contains 'Translation').
+            Each includes a 'language' field (Hebrew or English).
+        """
+        if not pgpid or not self._conn:
+            return []
+
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM document_sources WHERE pgpid = ? "
+                "AND doc_relation LIKE '%Translation%' ORDER BY sequence_order",
+                (pgpid,)
+            )
+            return [_row_to_dict(row, json_columns=('sections',)) for row in cursor]
+
+        except Exception as e:
+            logger.error(f"Error getting translations for document {pgpid}: {e}")
+            return []
+
+    def get_sys_ids_with_transcriptions(self, sys_ids: List[str]) -> Set[str]:
+        """
+        Batch check which sys_ids have PGP transcriptions.
+
+        Args:
+            sys_ids: List of system IDs to check
+
+        Returns:
+            Set of sys_ids that have linked PGP documents with transcriptions
+        """
+        if not sys_ids or not self._conn:
+            return set()
+
+        try:
+            result_set = set()
+            # Chunk to stay under SQLite variable limit (999)
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT DISTINCT sys_id FROM document_fragments "
+                    f"WHERE sys_id IN ({placeholders})",
+                    batch
+                )
+                result_set.update(row['sys_id'] for row in cursor)
+            return result_set
+
+        except Exception as e:
+            logger.error(f"Error batch checking transcriptions: {e}")
+            return set()
+
+    def get_fragments_by_tag(self, tag: str) -> List[Dict[str, Any]]:
+        """
+        Get all fragments linked to PGP documents with a specific tag.
+
+        Uses SQLite json_each() for efficient tag matching.
+        Returns fragment-level results (one per sys_id) with document metadata.
+
+        Args:
+            tag: Tag string to search for (e.g., "communal", "marriage")
+
+        Returns:
+            List of dicts with sys_id, shelfmark, document_type, description, pgpid, transcription.
+            Returns empty list if not found or on error.
+        """
+        if not tag or not self._conn:
+            return []
+
+        try:
+            # Step 1: Find documents with this tag via json_each()
+            cursor = self._conn.execute(
+                "SELECT pgpid, shelfmark_combined, document_type, description, transcription "
+                "FROM documents d, json_each(d.tags) je "
+                "WHERE je.value = ?",
+                (tag,)
+            )
+            docs = cursor.fetchall()
+
+            if not docs:
+                return []
+
+            # Step 2: Batch get all fragments for matching documents
+            doc_ids = [d['pgpid'] for d in docs]
+            placeholders = ','.join('?' * len(doc_ids))
+            frag_cursor = self._conn.execute(
+                f"SELECT sys_id, shelfmark, document_id FROM document_fragments "
+                f"WHERE document_id IN ({placeholders})",
+                doc_ids
+            )
+            frags = frag_cursor.fetchall()
+
+            if not frags:
+                return []
+
+            # Step 3: Join fragment info with document metadata
+            doc_map = {d['pgpid']: dict(d) for d in docs}
+            results = []
+            for frag in frags:
+                doc = doc_map.get(frag['document_id'], {})
+                results.append({
+                    'sys_id': frag['sys_id'],
+                    'shelfmark': frag['shelfmark'],
+                    'document_type': doc.get('document_type', ''),
+                    'description': doc.get('description', ''),
+                    'pgpid': frag['document_id'],
+                    'transcription': doc.get('transcription', ''),
+                })
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error searching by tag '{tag}': {e}")
+            return []
+
+    def get_all_distinct_tags(self) -> List[str]:
+        """Get all distinct PGP tags across all documents, sorted alphabetically."""
+        if not self._conn:
+            return []
+
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT je.value as tag "
+                "FROM documents d, json_each(d.tags) je "
+                "WHERE je.value != '' "
+                "ORDER BY tag"
+            )
+            return [row['tag'] for row in cursor]
+
+        except Exception as e:
+            logger.error(f"Error getting distinct tags: {e}")
+            return []
+
+    def close(self):
+        """Close the database connection if open."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+                logger.info("PgpService: Connection closed")
+            except Exception as e:
+                logger.error(f"PgpService.close error: {e}")
+            finally:
+                self._conn = None
 
 
-def get_fragments_for_document(pgpid: int) -> List[Dict[str, Any]]:
-    """
-    Get all fragments for a PGP document, ordered by sequence.
-
-    Args:
-        pgpid: The PGP document ID
-
-    Returns:
-        List of fragment dicts (id, document_id, sys_id, shelfmark,
-        sequence_order, page_info), ordered by sequence_order ASC.
-        Returns empty list if not found or on error.
-    """
-    if not pgpid:
-        return []
-
-    try:
-        client = get_client()
-
-        response = client.table('document_fragments').select('*').eq(
-            'document_id', pgpid
-        ).order('sequence_order', desc=False).execute()
-
-        return response.data or []
-
-    except Exception as e:
-        print(f"Error getting fragments for document {pgpid}: {e}")
-        return []
-
-
-def get_transcription_for_document(pgpid: int) -> Optional[str]:
-    """
-    Get the transcription text for a PGP document.
-
-    Args:
-        pgpid: The PGP document ID
-
-    Returns:
-        Transcription string, or None if not found, empty, or on error.
-    """
-    if not pgpid:
-        return None
-
-    try:
-        client = get_client()
-
-        response = client.table('documents').select(
-            'transcription'
-        ).eq('pgpid', pgpid).single().execute()
-
-        if response.data:
-            transcription = response.data.get('transcription')
-            # Return None for empty strings as well
-            return transcription if transcription else None
-
-        return None
-
-    except Exception as e:
-        print(f"Error getting transcription for document {pgpid}: {e}")
-        return None
-
-
-def get_document_metadata(pgpid: int) -> Optional[Dict[str, Any]]:
-    """
-    Get metadata for a PGP document.
-
-    Args:
-        pgpid: The PGP document ID
-
-    Returns:
-        Dict with document_type, tags, date fields, description, pgp_url,
-        shelfmark_combined. Returns None if not found or on error.
-
-    Note:
-        Date columns are: doc_date_original, doc_date_standard, inferred_date_display
-    """
-    if not pgpid:
-        return None
-
-    try:
-        client = get_client()
-
-        response = client.table('documents').select(
-            'document_type, tags, doc_date_original, doc_date_standard, '
-            'inferred_date_display, description, pgp_url, shelfmark_combined'
-        ).eq('pgpid', pgpid).single().execute()
-
-        return response.data
-
-    except Exception as e:
-        print(f"Error getting metadata for document {pgpid}: {e}")
-        return None
+# ── Pure Functions (no database dependency) ────────────────────────
 
 
 def parse_transcription_sections(transcription: str) -> dict:
@@ -321,258 +686,6 @@ def get_section_for_page(transcription: str, page_num: int, sections: list = Non
     # No markers found at all - return full transcription
     # (handles documents without recto/verso structure)
     return transcription
-
-
-def get_sources_for_document(pgpid: int) -> List[Dict[str, Any]]:
-    """
-    Get all sources (editions and translations) for a PGP document.
-
-    Args:
-        pgpid: The PGP document ID
-
-    Returns:
-        List of source dicts ordered by: doc_relation (Edition first, then Translation),
-        then sequence_order. Returns empty list if not found or on error.
-
-    Note:
-        Each source dict contains: id, pgpid, source_scholar, doc_relation,
-        content, language, content_length, sequence_order, created_at.
-    """
-    if not pgpid:
-        return []
-
-    try:
-        client = get_client()
-
-        # Order by doc_relation (Editions first alphabetically before Translations)
-        # then by sequence_order
-        response = client.table('document_sources').select('*').eq(
-            'pgpid', pgpid
-        ).order('doc_relation', desc=False).order('sequence_order', desc=False).execute()
-
-        return response.data or []
-
-    except Exception as e:
-        print(f"Error getting sources for document {pgpid}: {e}")
-        return []
-
-
-def get_all_sources_for_fragment(sys_id: str) -> List[Dict[str, Any]]:
-    """
-    Get all sources (editions and translations) for ALL PGP documents linked to a fragment.
-
-    Some fragments have multiple PGP documents (e.g., one for recto, one for verso).
-    This function retrieves sources from ALL linked documents.
-
-    Args:
-        sys_id: The GenizahSearch system ID for the fragment
-
-    Returns:
-        List of source dicts from all linked documents, ordered by: doc_relation
-        (Edition first), then sequence_order. Each source includes 'page_info'
-        from fragment link (recto/verso). Returns empty list if not found.
-    """
-    if not sys_id:
-        return []
-
-    try:
-        client = get_client()
-
-        # Get all fragment links for this sys_id
-        fragment_response = client.table('document_fragments').select(
-            'document_id, page_info'
-        ).eq('sys_id', sys_id).execute()
-
-        if not fragment_response.data:
-            return []
-
-        # Collect sources from all linked documents
-        all_sources = []
-        for frag in fragment_response.data:
-            pgpid = frag.get('document_id')
-            page_info = frag.get('page_info')  # 'recto' or 'verso'
-
-            if pgpid:
-                sources = get_sources_for_document(pgpid)
-                # Add page_info to each source so we know which page it belongs to
-                for source in sources:
-                    source['page_info'] = page_info
-                all_sources.extend(sources)
-
-        # Sort: Editions first, then by sequence_order
-        all_sources.sort(key=lambda x: (
-            0 if 'Edition' in (x.get('doc_relation') or '') else 1,
-            x.get('sequence_order', 0)
-        ))
-
-        return all_sources
-
-    except Exception as e:
-        print(f"Error getting all sources for fragment {sys_id}: {e}")
-        return []
-
-
-def get_editions_for_document(pgpid: int) -> List[Dict[str, Any]]:
-    """
-    Get Digital Editions for a PGP document.
-
-    Args:
-        pgpid: The PGP document ID
-
-    Returns:
-        List of edition source dicts (doc_relation contains 'Edition').
-        Useful for transcription selector with multiple scholars.
-    """
-    if not pgpid:
-        return []
-
-    try:
-        client = get_client()
-
-        # Filter to doc_relation containing 'Edition' (Digital Edition, Edition)
-        response = client.table('document_sources').select('*').eq(
-            'pgpid', pgpid
-        ).like('doc_relation', '%Edition%').order('sequence_order', desc=False).execute()
-
-        return response.data or []
-
-    except Exception as e:
-        print(f"Error getting editions for document {pgpid}: {e}")
-        return []
-
-
-def get_translations_for_document(pgpid: int) -> List[Dict[str, Any]]:
-    """
-    Get Digital Translations for a PGP document.
-
-    Args:
-        pgpid: The PGP document ID
-
-    Returns:
-        List of translation source dicts (doc_relation contains 'Translation').
-        Each includes a 'language' field (Hebrew or English).
-    """
-    if not pgpid:
-        return []
-
-    try:
-        client = get_client()
-
-        # Filter to doc_relation containing 'Translation' (Digital Translation)
-        response = client.table('document_sources').select('*').eq(
-            'pgpid', pgpid
-        ).like('doc_relation', '%Translation%').order('sequence_order', desc=False).execute()
-
-        return response.data or []
-
-    except Exception as e:
-        print(f"Error getting translations for document {pgpid}: {e}")
-        return []
-
-
-def get_sys_ids_with_transcriptions(sys_ids: List[str]) -> Set[str]:
-    """
-    Batch check which sys_ids have PGP transcriptions.
-
-    Args:
-        sys_ids: List of system IDs to check
-
-    Returns:
-        Set of sys_ids that have linked PGP documents with transcriptions
-    """
-    if not sys_ids:
-        return set()
-
-    try:
-        client = get_client()
-        result_set = set()
-        # Chunk to avoid URL length limits with large result sets
-        chunk_size = 200
-        for i in range(0, len(sys_ids), chunk_size):
-            chunk = sys_ids[i:i + chunk_size]
-            response = client.table('document_fragments').select(
-                'sys_id'
-            ).in_('sys_id', chunk).execute()
-            result_set.update(row['sys_id'] for row in (response.data or []))
-        return result_set
-    except Exception as e:
-        print(f"Error batch checking transcriptions: {e}")
-        return set()
-
-
-def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
-    """
-    Get all fragments linked to PGP documents with a specific tag.
-
-    Uses GIN-indexed JSONB @> query for efficient tag matching.
-    Returns fragment-level results (one per sys_id) with document metadata.
-
-    Args:
-        tag: Tag string to search for (e.g., "communal", "marriage")
-
-    Returns:
-        List of dicts with sys_id, shelfmark, document_type, description, pgpid, transcription.
-        Returns empty list if not found or on error.
-    """
-    if not tag:
-        return []
-
-    try:
-        client = get_client()
-
-        # Step 1: Find documents with this tag (GIN-indexed JSONB @> query)
-        doc_response = client.table('documents').select(
-            'pgpid, shelfmark_combined, document_type, description, transcription'
-        ).filter('tags', 'cs', json.dumps([tag])).execute()
-
-        if not doc_response.data:
-            return []
-
-        # Step 2: Batch get all fragments for matching documents
-        doc_ids = [d['pgpid'] for d in doc_response.data]
-        frag_response = client.table('document_fragments').select(
-            'sys_id, shelfmark, document_id'
-        ).in_('document_id', doc_ids).execute()
-
-        if not frag_response.data:
-            return []
-
-        # Step 3: Join fragment info with document metadata
-        doc_map = {d['pgpid']: d for d in doc_response.data}
-        results = []
-        for frag in frag_response.data:
-            doc = doc_map.get(frag['document_id'], {})
-            results.append({
-                'sys_id': frag['sys_id'],
-                'shelfmark': frag['shelfmark'],
-                'document_type': doc.get('document_type', ''),
-                'description': doc.get('description', ''),
-                'pgpid': frag['document_id'],
-                'transcription': doc.get('transcription', ''),
-            })
-
-        return results
-
-    except Exception as e:
-        print(f"Error searching by tag '{tag}': {e}")
-        return []
-
-
-def get_all_distinct_tags() -> List[str]:
-    """Get all distinct PGP tags across all documents, sorted alphabetically."""
-    try:
-        client = get_client()
-        response = client.table('documents').select('tags').not_.is_('tags', 'null').execute()
-        all_tags = set()
-        for row in (response.data or []):
-            tags = row.get('tags', [])
-            if tags:
-                for tag in tags:
-                    all_tags.add(tag)
-        return sorted(all_tags)
-    except Exception as e:
-        print(f"Error getting distinct tags: {e}")
-        return []
 
 
 class PGPHTMLParser(HTMLParser):
@@ -739,3 +852,207 @@ def parse_html_sections(html_content: str) -> dict:
         'language': parser.language,
         'direction': parser.direction,
     }
+
+
+# ── Module-level Singleton ─────────────────────────────────────────
+
+_default_service: Optional[PgpService] = None
+
+
+def get_pgp_service(thread_safe: bool = True) -> PgpService:
+    """Get or create the default PgpService singleton.
+
+    Args:
+        thread_safe: If True, use check_same_thread=False. Defaults to True
+            since read-only SQLite connections are safe across threads and
+            this eliminates the web vs desktop initialization concern.
+
+    Returns:
+        PgpService instance (may have is_available() == False if pgp.db missing).
+    """
+    global _default_service
+    if _default_service is None:
+        _default_service = PgpService(thread_safe=thread_safe)
+    return _default_service
+
+
+# ── Module-level Wrapper Functions (backward-compatible API) ───────
+
+
+def get_document_for_fragment(sys_id: str, page_num: int = None) -> Optional[Dict[str, Any]]:
+    """
+    Get the PGP document associated with a fragment.
+
+    Args:
+        sys_id: The GenizahSearch system ID for the fragment
+        page_num: Optional page number (1=recto, 2=verso) to select the correct
+                  document when multiple PGP documents exist for the same fragment
+
+    Returns:
+        Document dict with all fields (pgpid, shelfmark_combined, document_type,
+        tags, doc_date_original, doc_date_standard, inferred_date_display,
+        description, transcription, transcription_source, pgp_url, doc_relation),
+        or None if not found or on error.
+
+    Note:
+        The doc_relation field indicates the source type ('Digital Edition' for
+        transcriptions, 'Digital Translation' for translations). The transcription
+        field always contains the imported content regardless of doc_relation.
+        Future: translations could be offered as a separate version option.
+    """
+    svc = get_pgp_service()
+    return svc.get_document_for_fragment(sys_id, page_num)
+
+
+def get_fragments_for_document(pgpid: int) -> List[Dict[str, Any]]:
+    """
+    Get all fragments for a PGP document, ordered by sequence.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        List of fragment dicts (id, document_id, sys_id, shelfmark,
+        sequence_order, page_info), ordered by sequence_order ASC.
+        Returns empty list if not found or on error.
+    """
+    svc = get_pgp_service()
+    return svc.get_fragments_for_document(pgpid)
+
+
+def get_transcription_for_document(pgpid: int) -> Optional[str]:
+    """
+    Get the transcription text for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        Transcription string, or None if not found, empty, or on error.
+    """
+    svc = get_pgp_service()
+    return svc.get_transcription_for_document(pgpid)
+
+
+def get_document_metadata(pgpid: int) -> Optional[Dict[str, Any]]:
+    """
+    Get metadata for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        Dict with document_type, tags, date fields, description, pgp_url,
+        shelfmark_combined. Returns None if not found or on error.
+
+    Note:
+        Date columns are: doc_date_original, doc_date_standard, inferred_date_display
+    """
+    svc = get_pgp_service()
+    return svc.get_document_metadata(pgpid)
+
+
+def get_sources_for_document(pgpid: int) -> List[Dict[str, Any]]:
+    """
+    Get all sources (editions and translations) for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        List of source dicts ordered by: doc_relation (Edition first, then Translation),
+        then sequence_order. Returns empty list if not found or on error.
+
+    Note:
+        Each source dict contains: id, pgpid, source_scholar, doc_relation,
+        content, language, content_length, sequence_order, created_at.
+    """
+    svc = get_pgp_service()
+    return svc.get_sources_for_document(pgpid)
+
+
+def get_all_sources_for_fragment(sys_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all sources (editions and translations) for ALL PGP documents linked to a fragment.
+
+    Some fragments have multiple PGP documents (e.g., one for recto, one for verso).
+    This function retrieves sources from ALL linked documents.
+
+    Args:
+        sys_id: The GenizahSearch system ID for the fragment
+
+    Returns:
+        List of source dicts from all linked documents, ordered by: doc_relation
+        (Edition first), then sequence_order. Each source includes 'page_info'
+        from fragment link (recto/verso). Returns empty list if not found.
+    """
+    svc = get_pgp_service()
+    return svc.get_all_sources_for_fragment(sys_id)
+
+
+def get_editions_for_document(pgpid: int) -> List[Dict[str, Any]]:
+    """
+    Get Digital Editions for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        List of edition source dicts (doc_relation contains 'Edition').
+        Useful for transcription selector with multiple scholars.
+    """
+    svc = get_pgp_service()
+    return svc.get_editions_for_document(pgpid)
+
+
+def get_translations_for_document(pgpid: int) -> List[Dict[str, Any]]:
+    """
+    Get Digital Translations for a PGP document.
+
+    Args:
+        pgpid: The PGP document ID
+
+    Returns:
+        List of translation source dicts (doc_relation contains 'Translation').
+        Each includes a 'language' field (Hebrew or English).
+    """
+    svc = get_pgp_service()
+    return svc.get_translations_for_document(pgpid)
+
+
+def get_sys_ids_with_transcriptions(sys_ids: List[str]) -> Set[str]:
+    """
+    Batch check which sys_ids have PGP transcriptions.
+
+    Args:
+        sys_ids: List of system IDs to check
+
+    Returns:
+        Set of sys_ids that have linked PGP documents with transcriptions
+    """
+    svc = get_pgp_service()
+    return svc.get_sys_ids_with_transcriptions(sys_ids)
+
+
+def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
+    """
+    Get all fragments linked to PGP documents with a specific tag.
+
+    Uses SQLite json_each() for efficient tag matching.
+    Returns fragment-level results (one per sys_id) with document metadata.
+
+    Args:
+        tag: Tag string to search for (e.g., "communal", "marriage")
+
+    Returns:
+        List of dicts with sys_id, shelfmark, document_type, description, pgpid, transcription.
+        Returns empty list if not found or on error.
+    """
+    svc = get_pgp_service()
+    return svc.get_fragments_by_tag(tag)
+
+
+def get_all_distinct_tags() -> List[str]:
+    """Get all distinct PGP tags across all documents, sorted alphabetically."""
+    svc = get_pgp_service()
+    return svc.get_all_distinct_tags()
