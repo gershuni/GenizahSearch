@@ -75,6 +75,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Phase 37 reverted -- needs richer FIST.db export first
+Stopped at: Phase 37 context v2 gathered (enriched export scope)
 Resume file: .planning/phases/37-fjms-catalog-descriptions/37-CONTEXT.md
-Notes: Phase 37 code reverted. Planning docs and research retained. Next step: extend export_fist_enrichment.py to join dbo_Inventory (Material, Sizes, Condition, NumFolios), then re-plan Phase 37 with richer data.
+Notes: Phase 37 context updated with enriched export scope. 5 new FIST.db tables identified (RunningTitle 235K, Size 161K, Field 1.1M, FreeDescription 190K, GenizahTitle 109K). Next step: /gsd:plan-phase 37 to create plans for export enrichment + dialog re-implementation.
