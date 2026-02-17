@@ -118,7 +118,7 @@ def test_db(tmp_path):
                 "Letter to a Merchant", "מכתב לסוחר",
                 "Nahray b. Nissim", "1050", "Alexandria",
                 None, None,
-                "Catalogs", "",
+                "Inventory", "",
                 None, None, None,
                 None, None,
             ),
@@ -658,7 +658,7 @@ def test_get_source_names_filters_generic(service):
 
 def test_get_source_names_all_generic(service):
     """get_source_names returns [] when only generic source names exist."""
-    # 990002 has SourceName='Catalogs' which is generic
+    # 990002 has SourceName='Inventory' which is generic
     names = service.get_source_names("990002")
     assert names == []
 
@@ -676,7 +676,7 @@ def test_get_catalog_source_counts(service):
     counts = service.get_catalog_source_counts(["990001", "990002", "990099"])
     # 990001 has SourceName='PGPID', 'FGP', 'Institution' -- Institution is generic
     assert counts["990001"] == 2  # PGPID and FGP only
-    # 990002 has only 'Catalogs' (generic) -- should not appear
+    # 990002 has only 'Inventory' (generic) -- should not appear
     assert "990002" not in counts
     # 990099 doesn't exist -- should not appear
     assert "990099" not in counts

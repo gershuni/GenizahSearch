@@ -163,7 +163,15 @@ def export_joins(source, target):
 
 
 def export_catalog(source, target):
-    """Export catalog metadata from FIST to sidecar (v2 schema)."""
+    """Export catalog metadata from FIST to sidecar (v2 schema).
+
+    Latest-version filter: only exports the most recent version of each
+    signature (per SetSignatureId), avoiding duplicate team entries.
+
+    Catalog name resolution: for SourceId=500 (Catalogs), resolves SubId
+    to CODE_Catalog.CatAcronym for specific catalog names (e.g. 'Danzig Catalog')
+    instead of the generic 'Catalogs' label.
+    """
     print("Exporting catalog...")
 
     target.execute("DROP TABLE IF EXISTS catalog")
@@ -199,8 +207,16 @@ def export_catalog(source, target):
             cat.CopyPlace,
             cat.BI_TextualFrameHeb as TextualFrameHeb,
             cat.BI_TextualFrameEng as TextualFrameEng,
-            cs.EngDesc as SourceName,
-            cs.HebDesc as SourceNameHeb,
+            CASE
+                WHEN sig.SourceId = 500
+                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
+                ELSE cs.EngDesc
+            END as SourceName,
+            CASE
+                WHEN sig.SourceId = 500
+                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
+                ELSE cs.HebDesc
+            END as SourceNameHeb,
             cat.NumFolio,
             cat.NumColumn,
             cat.NumRow,
@@ -210,8 +226,15 @@ def export_catalog(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN (
+            SELECT SetSignatureId, MAX(Version) as MaxVersion
+            FROM dbo_Signature GROUP BY SetSignatureId
+        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
+            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
+        LEFT JOIN CODE_Catalog catname
+            ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
         LEFT JOIN CODE_GenizahTitle gt ON cat.GenizahTitleId = gt.GenizahTitleID
     """)
 
@@ -288,6 +311,11 @@ def export_catalog_running_titles(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN (
+            SELECT SetSignatureId, MAX(Version) as MaxVersion
+            FROM dbo_Signature GROUP BY SetSignatureId
+        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
+            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiRunningTitle rt ON cat.UnitCatalogRecId = rt.UnitCatalogRecId
     """)
@@ -348,6 +376,11 @@ def export_catalog_sizes(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN (
+            SELECT SetSignatureId, MAX(Version) as MaxVersion
+            FROM dbo_Signature GROUP BY SetSignatureId
+        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
+            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiSize sz ON cat.UnitCatalogRecId = sz.UnitCatalogRecId
     """)
@@ -405,6 +438,11 @@ def export_catalog_fields(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN (
+            SELECT SetSignatureId, MAX(Version) as MaxVersion
+            FROM dbo_Signature GROUP BY SetSignatureId
+        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
+            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiField fld ON cat.UnitCatalogRecId = fld.UnitCatalogRecId
         JOIN CODE_FullCode fc ON fld.ValueCode = fc.ComputedCode
@@ -452,6 +490,10 @@ def export_catalog_free_desc(source, target):
         )
     """)
 
+    # NOTE: No latest-version filter here. Free descriptions are linked to
+    # different signatures than catalog records within the same set. E.g. for
+    # ENA 2943.21, the catalog rec is on V3 (SigId 38059814) but the free desc
+    # is on V2 (SigId 37858814). Filtering to latest version would lose them.
     cursor = source.execute("""
         SELECT DISTINCT
             TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,

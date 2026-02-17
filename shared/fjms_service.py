@@ -512,15 +512,19 @@ class FjmsService:
                     record["title"], record["title_heb"], record["author_text"],
                     record["copy_date"], record["copy_place"],
                     record["textual_frame_heb"], record["textual_frame_eng"],
+                    record["num_folio"], record["num_column"], record["num_row"],
+                    record["genizah_title_org"], record["genizah_title_eng"],
                 )
                 if not any(v and str(v).strip() for v in content_fields):
                     continue
 
-                # Deduplicate by key tuple
+                # Deduplicate by key tuple (include source + UCRID for multi-team records)
                 key = (
                     record["textual_frame_eng"] or '',
                     record["copy_date"] or '',
                     record["title"] or '',
+                    record["source_name"] or '',
+                    record["unit_catalog_rec_id"] or '',
                 )
                 if key in seen:
                     continue
@@ -536,7 +540,9 @@ class FjmsService:
     # ── Bibliography & Catalog Refs (Phase 33: META-03) ─────────────
 
     # Generic source names to filter out from get_source_names()
-    _GENERIC_SOURCE_NAMES = frozenset({'Catalogs', 'Institution', 'Collection', 'Other'})
+    _GENERIC_SOURCE_NAMES = frozenset({
+        'Inventory', 'Nuscha', 'Institution', 'Instatution', 'Collection', 'Other',
+    })
 
     def get_bibliography(self, sys_id: str) -> list[dict]:
         """
@@ -662,7 +668,7 @@ class FjmsService:
         Get distinct catalog source counts for multiple manuscripts in batch.
 
         Used for search card button labels: "Catalog Records (N)".
-        Excludes generic source names (Catalogs, Institution, Collection, Other).
+        Excludes generic source names (Inventory, Nuscha, Institution, Collection, Other).
 
         Args:
             sys_ids: List of Alma/system IDs.
@@ -683,7 +689,7 @@ class FjmsService:
                     f"SELECT AlmaId, COUNT(DISTINCT SourceName) as cnt FROM catalog "
                     f"WHERE AlmaId IN ({placeholders}) "
                     f"AND SourceName IS NOT NULL AND SourceName != '' "
-                    f"AND SourceName NOT IN ('Catalogs','Institution','Collection','Other') "
+                    f"AND SourceName NOT IN ('Inventory','Nuscha','Institution','Instatution','Collection','Other') "
                     f"GROUP BY AlmaId",
                     batch,
                 )
