@@ -5137,6 +5137,300 @@ class FjmsBibliographyDialog(QDialog):
             self.detail_panel.setVisible(False)
 
 
+class FjmsCatalogDialog(QDialog):
+    """Dialog showing FJMS catalog records with multi-team scholarly descriptions.
+
+    Mirrors the FIST web interface "Cataloging Data Details" view:
+    teams as columns, fields as rows, grouped into 5 labeled sections:
+    1. Shelfmark Description  2. Content Description  3. Script Description
+    4. Format Description  5. Miscellaneous
+    """
+
+    def __init__(self, detail: dict, sys_id: str = '', shelfmark: str = '', parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f'{tr("Catalog Records")} \u2014 {shelfmark}' if shelfmark else tr('Catalog Records'))
+        self.setMinimumSize(700, 500)
+        self.resize(850, 650)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Header
+        header = QLabel(f'<h3 style="color: #6c3483;">{tr("Catalog Records")} \u2014 {shelfmark}</h3>')
+        layout.addWidget(header)
+
+        # Content browser
+        self.text_browser = QTextBrowser()
+        self.text_browser.setOpenExternalLinks(True)
+        self.text_browser.setHtml(self._build_html(detail))
+        layout.addWidget(self.text_browser)
+
+        # Close button
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton(tr("Close"))
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _build_html(self, detail: dict) -> str:
+        """Build HTML table mirroring FIST Cataloging Data Details view."""
+        from shared.fjms_service import parse_textual_frame, split_textual_frames
+
+        records = detail.get("records", [])
+        running_titles = detail.get("running_titles", {})
+        sizes = detail.get("sizes", {})
+        fields = detail.get("fields", {})
+        free_descriptions = detail.get("free_descriptions", [])
+
+        is_heb = CURRENT_LANG == 'he'
+
+        # Group records by source_name to get team columns
+        teams = []
+        team_map = {}
+        for rec in records:
+            sn = rec.get("source_name") or tr("Unknown")
+            if sn not in team_map:
+                team_map[sn] = len(teams)
+                teams.append({
+                    "source_name": sn,
+                    "source_name_heb": rec.get("source_name_heb") or sn,
+                    "records": [],
+                })
+            teams[team_map[sn]]["records"].append(rec)
+
+        num_teams = len(teams)
+        total_cols = num_teams + 1  # label column + team columns
+
+        if num_teams == 0 and not free_descriptions:
+            return f'<p style="color: gray;">{tr("No catalog data available") if False else "No catalog data available"}</p>'
+
+        html_parts = []
+        html_parts.append(
+            '<table style="width:100%; border-collapse:collapse; font-family:Arial; font-size:13px;">'
+        )
+
+        if num_teams > 0:
+            # === Team header row ===
+            html_parts.append('<tr>')
+            html_parts.append('<th style="padding:8px; min-width:120px;"></th>')
+            for team in teams:
+                team_name = team["source_name_heb"] if is_heb else team["source_name"]
+                first_rec = team["records"][0] if team["records"] else None
+                author_html = ''
+                if first_rec:
+                    author = first_rec.get("author_text", "")
+                    if author and str(author).strip():
+                        author_html = f'<br/><span style="font-weight:normal; font-size:11px; color:gray;">{str(author).strip()}</span>'
+                html_parts.append(
+                    f'<th style="padding:8px; border-bottom:2px solid #9b59b6; text-align:left;">'
+                    f'{team_name}{author_html}</th>'
+                )
+            html_parts.append('</tr>')
+
+            # === Section 1: Shelfmark Description ===
+            html_parts.append(self._section_row(tr('Shelfmark Description'), total_cols))
+
+            # Source
+            source_vals = []
+            for team in teams:
+                sn = team["source_name_heb"] if is_heb else team["source_name"]
+                first_rec = team["records"][0] if team["records"] else None
+                author = ""
+                if first_rec:
+                    a = first_rec.get("author_text")
+                    if a and str(a).strip():
+                        author = f", {str(a).strip()}"
+                source_vals.append(f"{sn}{author}")
+            html_parts.append(self._field_row(tr('Source'), source_vals, is_heb))
+
+            # Number of Folios
+            folio_vals = []
+            for team in teams:
+                folios = [str(r.get("num_folio", "")).strip() for r in team["records"]
+                          if r.get("num_folio") and str(r["num_folio"]).strip() and str(r["num_folio"]).strip() != '0']
+                folio_vals.append(', '.join(folios) if folios else '')
+            html_parts.append(self._field_row(tr('Number of Folios'), folio_vals, is_heb))
+
+            # === Section 2: Content Description ===
+            html_parts.append(self._section_row(tr('Content Description'), total_cols))
+
+            # Domain
+            domain_vals = []
+            for team in teams:
+                categories = []
+                for rec in team["records"]:
+                    tf_eng = rec.get("textual_frame_eng") or ""
+                    tf_heb = rec.get("textual_frame_heb") or ""
+                    tf = tf_heb if is_heb and tf_heb else tf_eng
+                    if tf:
+                        parts = split_textual_frames(tf)
+                        if not parts and tf.strip():
+                            parts = [tf.strip()]
+                        for part in parts:
+                            cat, content = parse_textual_frame(part)
+                            display_parts = []
+                            if cat:
+                                display_parts.append(f"[{cat}]")
+                            if content:
+                                display_parts.append(content)
+                            if display_parts:
+                                categories.append(' '.join(display_parts))
+                domain_vals.append('; '.join(categories) if categories else '')
+            html_parts.append(self._field_row(tr('Domain'), domain_vals, is_heb))
+
+            # Running Title
+            rt_vals = []
+            for team in teams:
+                titles = []
+                for rec in team["records"]:
+                    rec_id = rec.get("unit_catalog_rec_id")
+                    if rec_id and rec_id in running_titles:
+                        for rt in running_titles[rec_id]:
+                            rt_text = rt.get("running_title", "")
+                            if rt_text and str(rt_text).strip():
+                                titles.append(str(rt_text).strip())
+                rt_vals.append('; '.join(titles) if titles else '')
+            html_parts.append(self._field_row(tr('Running Title'), rt_vals, is_heb))
+
+            # GenizahTitle
+            gt_vals = []
+            for team in teams:
+                titles = []
+                for rec in team["records"]:
+                    gt_org = rec.get("genizah_title_org")
+                    gt_eng = rec.get("genizah_title_eng")
+                    gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+                    if gt and str(gt).strip():
+                        titles.append(str(gt).strip())
+                gt_vals.append('; '.join(titles) if titles else '')
+            html_parts.append(self._field_row(tr('Title'), gt_vals, is_heb))
+
+            # === Section 3: Script Description ===
+            html_parts.append(self._section_row(tr('Script Description'), total_cols))
+
+            html_parts.append(self._field_category_row('GenizahLanguages', tr('Language'), teams, fields, is_heb))
+            html_parts.append(self._field_category_row('GenizahScriptType', tr('Script Type'), teams, fields, is_heb))
+            html_parts.append(self._field_category_row('GenizahScriptStyle', tr('Script Style'), teams, fields, is_heb))
+            html_parts.append(self._field_category_row('GenizahVocalization', tr('Vocalization'), teams, fields, is_heb))
+
+            # === Section 4: Format Description ===
+            html_parts.append(self._section_row(tr('Format Description'), total_cols))
+
+            # No. of Rows
+            row_vals = []
+            for team in teams:
+                rows = [str(r.get("num_row", "")).strip() for r in team["records"]
+                        if r.get("num_row") and str(r["num_row"]).strip() and str(r["num_row"]).strip() != '0']
+                row_vals.append(', '.join(rows) if rows else '')
+            html_parts.append(self._field_row(tr('Number of Lines'), row_vals, is_heb))
+
+            # No. of Columns
+            col_vals = []
+            for team in teams:
+                cols = [str(r.get("num_column", "")).strip() for r in team["records"]
+                        if r.get("num_column") and str(r["num_column"]).strip() and str(r["num_column"]).strip() != '0']
+                col_vals.append(', '.join(cols) if cols else '')
+            html_parts.append(self._field_row(tr('Number of Columns'), col_vals, is_heb))
+
+            # Material
+            html_parts.append(self._field_category_row('FragmentMaterial', tr('Material'), teams, fields, is_heb))
+
+            # Physical Status
+            html_parts.append(self._field_category_row('FragmentStatus', tr('Physical Status'), teams, fields, is_heb))
+
+            # Sizes
+            size_vals = []
+            for team in teams:
+                size_parts = []
+                for rec in team["records"]:
+                    rec_id = rec.get("unit_catalog_rec_id")
+                    if rec_id and rec_id in sizes:
+                        for sz in sizes[rec_id]:
+                            sx = sz.get("size_x")
+                            sy = sz.get("size_y")
+                            isx = sz.get("inner_size_x")
+                            isy = sz.get("inner_size_y")
+                            if sx and sy:
+                                dim = f"{self._fmt_num(sx)} \u00d7 {self._fmt_num(sy)}"
+                                if isx and isy:
+                                    dim += f" ({tr('Inner Size')}: {self._fmt_num(isx)} \u00d7 {self._fmt_num(isy)})"
+                                dim += " mm"
+                                size_parts.append(dim)
+                size_vals.append('; '.join(size_parts) if size_parts else '')
+            html_parts.append(self._field_row(tr('Size'), size_vals, is_heb))
+
+        # === Section 5: Miscellaneous ===
+        if free_descriptions:
+            html_parts.append(self._section_row(tr('Miscellaneous'), total_cols if num_teams > 0 else 2))
+
+            dir_attr = ' dir="rtl"' if is_heb else ''
+            for desc in free_descriptions:
+                text = desc.get("text", "")
+                if text and str(text).strip():
+                    html_parts.append(
+                        f'<tr><td colspan="{total_cols if num_teams > 0 else 2}" '
+                        f'style="padding:8px; border-bottom:1px solid #eee;{" direction:rtl; text-align:right;" if is_heb else ""}"'
+                        f'{dir_attr}>{str(text).strip()}</td></tr>'
+                    )
+
+        html_parts.append('</table>')
+        return '\n'.join(html_parts)
+
+    @staticmethod
+    def _section_row(title: str, colspan: int) -> str:
+        """Build a section header row."""
+        return (
+            f'<tr><td colspan="{colspan}" style="background:#f3e5f5; font-weight:bold; '
+            f'padding:8px; color:#6c3483; font-size:13px;">{title}</td></tr>'
+        )
+
+    @staticmethod
+    def _field_row(label: str, values: list, is_heb: bool) -> str:
+        """Build a field row: label in first column, values in team columns.
+        Returns empty string if all values are empty (hides row)."""
+        if not any(v for v in values):
+            return ''
+        dir_style = ' direction:rtl; text-align:right;' if is_heb else ''
+        cells = [f'<td style="padding:6px 8px; font-weight:bold; color:#555; min-width:120px; vertical-align:top;">{label}</td>']
+        for val in values:
+            display = str(val).strip() if val else '\u2014'
+            style = f'padding:6px 8px; border-bottom:1px solid #eee; vertical-align:top;{dir_style}'
+            if not val:
+                style += ' color:#999;'
+            cells.append(f'<td style="{style}">{display}</td>')
+        return '<tr>' + ''.join(cells) + '</tr>'
+
+    @staticmethod
+    def _field_category_row(category: str, label: str, teams: list, fields: dict, is_heb: bool) -> str:
+        """Build a row for a specific FieldCategory from catalog_fields."""
+        vals = []
+        for team in teams:
+            field_vals = []
+            for rec in team["records"]:
+                rec_id = rec.get("unit_catalog_rec_id")
+                if rec_id and rec_id in fields:
+                    cat_fields = fields[rec_id].get(category, [])
+                    for fv in cat_fields:
+                        val = fv.get("value_heb") if is_heb else fv.get("value")
+                        if not val or not str(val).strip():
+                            val = fv.get("value") or fv.get("value_heb")
+                        if val and str(val).strip():
+                            field_vals.append(str(val).strip())
+            vals.append('; '.join(field_vals) if field_vals else '')
+        return FjmsCatalogDialog._field_row(label, vals, is_heb)
+
+    @staticmethod
+    def _fmt_num(val) -> str:
+        """Format a numeric value for size display, removing trailing .0."""
+        if val is None:
+            return ""
+        s = str(val)
+        if s.endswith('.0'):
+            return s[:-2]
+        return s
+
+
 class NliBibliographyDialog(QDialog):
     """NLI bibliography dialog with MARC 581 reference strings."""
 
