@@ -722,7 +722,7 @@ def export_ref_authors(source, target):
 
 
 def create_fts5(target):
-    """Create FTS5 virtual table for full-text search on catalog."""
+    """Create contentless FTS5 index spanning catalog + running titles + free descriptions."""
     print("Creating FTS5 index...")
 
     target.execute("DROP TABLE IF EXISTS catalog_fts")
@@ -731,28 +731,71 @@ def create_fts5(target):
             AlmaId,
             Title,
             TitleHeb,
-            DescriptionEng,
-            DescriptionHeb,
             TextualFrameHeb,
             TextualFrameEng,
-            content='catalog',
+            RunningTitle,
+            FreeDescription,
+            content='',
             content_rowid='rowid'
         )
     """)
 
-    target.execute("""
-        INSERT INTO catalog_fts(rowid, AlmaId, Title, TitleHeb,
-            DescriptionEng, DescriptionHeb, TextualFrameHeb, TextualFrameEng)
-        SELECT rowid, AlmaId, Title, TitleHeb,
-            DescriptionEng, DescriptionHeb, TextualFrameHeb, TextualFrameEng
-        FROM catalog
-    """)
-    target.connection.commit()
+    # Build aggregated rows: one row per AlmaId with all searchable text
+    alma_ids = target.execute("SELECT DISTINCT AlmaId FROM catalog").fetchall()
 
-    fts_count = target.execute(
-        "SELECT COUNT(*) FROM catalog_fts"
-    ).fetchone()[0]
-    print(f"  FTS5 index created with {fts_count:,} entries")
+    batch = []
+    total = 0
+    for (alma_id,) in tqdm(alma_ids, desc="  fts5", unit=" docs"):
+        # Get first catalog record's text fields
+        cat_row = target.execute(
+            "SELECT Title, TitleHeb, TextualFrameHeb, TextualFrameEng "
+            "FROM catalog WHERE AlmaId = ? LIMIT 1",
+            (alma_id,),
+        ).fetchone()
+
+        # Aggregate running titles for this AlmaId
+        rt_rows = target.execute(
+            "SELECT GROUP_CONCAT(RunningTitle, '; ') FROM catalog_running_titles WHERE AlmaId = ?",
+            (alma_id,),
+        ).fetchone()
+        running_titles = rt_rows[0] if rt_rows and rt_rows[0] else ''
+
+        # Aggregate free descriptions for this AlmaId
+        fd_rows = target.execute(
+            "SELECT GROUP_CONCAT(FreeDesc, '; ') FROM catalog_free_desc WHERE AlmaId = ?",
+            (alma_id,),
+        ).fetchone()
+        free_descs = fd_rows[0] if fd_rows and fd_rows[0] else ''
+
+        batch.append((
+            alma_id,
+            cat_row[0] if cat_row else '',  # Title
+            cat_row[1] if cat_row else '',  # TitleHeb
+            cat_row[2] if cat_row else '',  # TextualFrameHeb
+            cat_row[3] if cat_row else '',  # TextualFrameEng
+            running_titles,
+            free_descs,
+        ))
+
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_fts(AlmaId, Title, TitleHeb, TextualFrameHeb, "
+                "TextualFrameEng, RunningTitle, FreeDescription) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                batch,
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_fts(AlmaId, Title, TitleHeb, TextualFrameHeb, "
+            "TextualFrameEng, RunningTitle, FreeDescription) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            batch,
+        )
+        total += len(batch)
+
+    target.connection.commit()
+    print(f"  FTS5 index created with {total:,} entries")
 
 
 def create_meta(target):
