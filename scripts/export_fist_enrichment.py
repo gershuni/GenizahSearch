@@ -4,19 +4,23 @@ Export FIST enrichment data to a SQLite sidecar database.
 
 Reads from FIST_DB_BACKUP/FIST.db and produces fist_data/fjms_enrichment.db
 with the following tables:
-  - domains:      AlmaId -> Domain classifications (~390K rows)
-  - joins:        AlmaId -> Scholar join groups (~48K rows)
-  - catalog:      AlmaId -> Catalog metadata (~243K rows)
-  - catalog_fts:  FTS5 virtual table for full-text search on catalog
-  - bibliography: AlmaId -> Denormalized bibliography references (~733K rows)
-  - catalog_refs: AlmaId -> Catalog cross-references (~78K rows)
-  - ref_catalogs: CODE_Catalog reference lookup (80 rows)
-  - ref_titles:   CODE_Title reference lookup (~4.3K rows)
-  - ref_authors:  CODE_Author reference lookup (~3K rows)
-  - meta:         Version and build metadata
+  - domains:                 AlmaId -> Domain classifications (~390K rows)
+  - joins:                   AlmaId -> Scholar join groups (~48K rows)
+  - catalog:                 AlmaId -> Catalog metadata v2 (~500K rows)
+  - catalog_running_titles:  AlmaId -> Running titles per team (~235K rows)
+  - catalog_sizes:           AlmaId -> Physical sizes per record (~161K rows)
+  - catalog_fields:          AlmaId -> Coded multi-fields (~1.1M rows)
+  - catalog_free_desc:       AlmaId -> Scholarly free descriptions (~190K rows)
+  - catalog_fts:             FTS5 virtual table (catalog + running titles + free desc)
+  - bibliography:            AlmaId -> Denormalized bibliography references (~733K rows)
+  - catalog_refs:            AlmaId -> Catalog cross-references (~78K rows)
+  - ref_catalogs:            CODE_Catalog reference lookup (80 rows)
+  - ref_titles:              CODE_Title reference lookup (~4.3K rows)
+  - ref_authors:             CODE_Author reference lookup (~3K rows)
+  - meta:                    Version and build metadata
 
-This is the data foundation for FJMS Integration (v5.8.0) and
-Metadata Enrichment (v5.9.0).
+This is the data foundation for FJMS Integration (v5.8.0),
+Metadata Enrichment (v5.9.0), and Catalog Descriptions (Phase 37).
 """
 
 import sqlite3
@@ -26,7 +30,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 BATCH_SIZE = 10_000
 
 
@@ -159,63 +163,84 @@ def export_joins(source, target):
 
 
 def export_catalog(source, target):
-    """Export catalog metadata from FIST to sidecar."""
+    """Export catalog metadata from FIST to sidecar (v2 schema)."""
     print("Exporting catalog...")
 
     target.execute("DROP TABLE IF EXISTS catalog")
     target.execute("""
         CREATE TABLE catalog (
             AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
             Title TEXT,
             TitleHeb TEXT,
             AuthorText TEXT,
             CopyDate TEXT,
             CopyPlace TEXT,
-            DescriptionEng TEXT,
-            DescriptionHeb TEXT,
             TextualFrameHeb TEXT,
             TextualFrameEng TEXT,
             SourceName TEXT,
-            SourceNameHeb TEXT
+            SourceNameHeb TEXT,
+            NumFolio REAL,
+            NumColumn TEXT,
+            NumRow TEXT,
+            GenizahTitleOrgTitle TEXT,
+            GenizahTitleEngTitle TEXT
         )
     """)
 
     cursor = source.execute("""
         SELECT DISTINCT
             TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
             cat.Title,
             cat.GenizahTitleText as TitleHeb,
             cat.AuthorText,
             cat.CopyDate,
             cat.CopyPlace,
-            cat.IdentificationTextEng as DescriptionEng,
-            cat.IdentificationTextHeb as DescriptionHeb,
             cat.BI_TextualFrameHeb as TextualFrameHeb,
             cat.BI_TextualFrameEng as TextualFrameEng,
             cs.EngDesc as SourceName,
-            cs.HebDesc as SourceNameHeb
+            cs.HebDesc as SourceNameHeb,
+            cat.NumFolio,
+            cat.NumColumn,
+            cat.NumRow,
+            gt.OrgTitle as GenizahTitleOrgTitle,
+            gt.EngTitle as GenizahTitleEngTitle
         FROM dbo_InventoryAlma alma
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
+        LEFT JOIN CODE_GenizahTitle gt ON cat.GenizahTitleId = gt.GenizahTitleID
     """)
 
     batch = []
     total = 0
     for row in tqdm(cursor, desc="  catalog", unit=" rows"):
-        # Clean CopyDate (index 4) from REAL to TEXT
+        # Clean CopyDate (index 5) from REAL to TEXT
         cleaned = (
-            row[0], row[1], row[2], row[3],
-            clean_copy_date(row[4]),
-            row[5], row[6], row[7], row[8], row[9],
-            row[10], row[11]  # SourceName, SourceNameHeb
+            row[0],   # AlmaId
+            row[1],   # UnitCatalogRecId
+            row[2],   # Title
+            row[3],   # TitleHeb
+            row[4],   # AuthorText
+            clean_copy_date(row[5]),  # CopyDate
+            row[6],   # CopyPlace
+            row[7],   # TextualFrameHeb
+            row[8],   # TextualFrameEng
+            row[9],   # SourceName
+            row[10],  # SourceNameHeb
+            row[11],  # NumFolio
+            row[12],  # NumColumn
+            row[13],  # NumRow
+            row[14],  # GenizahTitleOrgTitle
+            row[15],  # GenizahTitleEngTitle
         )
         batch.append(cleaned)
         if len(batch) >= BATCH_SIZE:
             target.executemany(
-                "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 batch,
             )
             total += len(batch)
@@ -223,16 +248,244 @@ def export_catalog(source, target):
 
     if batch:
         target.executemany(
-            "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             batch,
         )
         total += len(batch)
 
     target.execute("CREATE INDEX idx_catalog_alma ON catalog(AlmaId)")
+    target.execute("CREATE INDEX idx_catalog_ucrid ON catalog(UnitCatalogRecId)")
     target.connection.commit()
 
     distinct_alma = target.execute(
         "SELECT COUNT(DISTINCT AlmaId) FROM catalog"
+    ).fetchone()[0]
+    print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
+    return total
+
+
+def export_catalog_running_titles(source, target):
+    """Export catalog running titles from FIST to sidecar."""
+    print("Exporting catalog running titles...")
+
+    target.execute("DROP TABLE IF EXISTS catalog_running_titles")
+    target.execute("""
+        CREATE TABLE catalog_running_titles (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            RunningTitle TEXT,
+            Comment TEXT
+        )
+    """)
+
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
+            rt.RunningTitle,
+            rt.Comment
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        JOIN dbo_CatalogMultiRunningTitle rt ON cat.UnitCatalogRecId = rt.UnitCatalogRecId
+    """)
+
+    batch = []
+    total = 0
+    for row in tqdm(cursor, desc="  running_titles", unit=" rows"):
+        batch.append(row)
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_running_titles VALUES (?, ?, ?, ?)", batch
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_running_titles VALUES (?, ?, ?, ?)", batch
+        )
+        total += len(batch)
+
+    target.execute("CREATE INDEX idx_catrt_alma ON catalog_running_titles(AlmaId)")
+    target.execute("CREATE INDEX idx_catrt_ucrid ON catalog_running_titles(UnitCatalogRecId)")
+    target.connection.commit()
+
+    distinct_alma = target.execute(
+        "SELECT COUNT(DISTINCT AlmaId) FROM catalog_running_titles"
+    ).fetchone()[0]
+    print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
+    return total
+
+
+def export_catalog_sizes(source, target):
+    """Export catalog sizes from FIST to sidecar."""
+    print("Exporting catalog sizes...")
+
+    target.execute("DROP TABLE IF EXISTS catalog_sizes")
+    target.execute("""
+        CREATE TABLE catalog_sizes (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            SizeX REAL,
+            SizeY REAL,
+            InnerSizeX REAL,
+            InnerSizeY REAL
+        )
+    """)
+
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
+            sz.SizeX,
+            sz.SizeY,
+            sz.InnerSizeX,
+            sz.InnerSizeY
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        JOIN dbo_CatalogMultiSize sz ON cat.UnitCatalogRecId = sz.UnitCatalogRecId
+    """)
+
+    batch = []
+    total = 0
+    for row in tqdm(cursor, desc="  sizes", unit=" rows"):
+        batch.append(row)
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_sizes VALUES (?, ?, ?, ?, ?, ?)", batch
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_sizes VALUES (?, ?, ?, ?, ?, ?)", batch
+        )
+        total += len(batch)
+
+    target.execute("CREATE INDEX idx_catsz_alma ON catalog_sizes(AlmaId)")
+    target.connection.commit()
+
+    distinct_alma = target.execute(
+        "SELECT COUNT(DISTINCT AlmaId) FROM catalog_sizes"
+    ).fetchone()[0]
+    print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
+    return total
+
+
+def export_catalog_fields(source, target):
+    """Export catalog multi-field values from FIST to sidecar."""
+    print("Exporting catalog fields...")
+
+    target.execute("DROP TABLE IF EXISTS catalog_fields")
+    target.execute("""
+        CREATE TABLE catalog_fields (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            FieldCategory TEXT NOT NULL,
+            FieldValue TEXT,
+            FieldValueHeb TEXT
+        )
+    """)
+
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
+            fct.TableName as FieldCategory,
+            fc.EngDesc as FieldValue,
+            fc.HebDesc as FieldValueHeb
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        JOIN dbo_CatalogMultiField fld ON cat.UnitCatalogRecId = fld.UnitCatalogRecId
+        JOIN CODE_FullCode fc ON fld.ValueCode = fc.ComputedCode
+        JOIN CODE_FCDTable fct ON fc.FCDTableId = fct.FCDTableId
+    """)
+
+    batch = []
+    total = 0
+    for row in tqdm(cursor, desc="  fields", unit=" rows"):
+        batch.append(row)
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_fields VALUES (?, ?, ?, ?, ?)", batch
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_fields VALUES (?, ?, ?, ?, ?)", batch
+        )
+        total += len(batch)
+
+    target.execute("CREATE INDEX idx_catfld_alma ON catalog_fields(AlmaId)")
+    target.execute("CREATE INDEX idx_catfld_cat ON catalog_fields(FieldCategory)")
+    target.connection.commit()
+
+    distinct_alma = target.execute(
+        "SELECT COUNT(DISTINCT AlmaId) FROM catalog_fields"
+    ).fetchone()[0]
+    print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
+    return total
+
+
+def export_catalog_free_desc(source, target):
+    """Export catalog free descriptions from FIST to sidecar."""
+    print("Exporting catalog free descriptions...")
+
+    target.execute("DROP TABLE IF EXISTS catalog_free_desc")
+    target.execute("""
+        CREATE TABLE catalog_free_desc (
+            AlmaId TEXT NOT NULL,
+            SignatureId INTEGER NOT NULL,
+            FreeDesc TEXT
+        )
+    """)
+
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            sig.SignatureId,
+            fd.FreeDesc
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN dbo_UnitFreeDescription fd ON sig.SignatureId = fd.SignatureId
+    """)
+
+    batch = []
+    total = 0
+    for row in tqdm(cursor, desc="  free_desc", unit=" rows"):
+        batch.append(row)
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_free_desc VALUES (?, ?, ?)", batch
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_free_desc VALUES (?, ?, ?)", batch
+        )
+        total += len(batch)
+
+    target.execute("CREATE INDEX idx_catfd_alma ON catalog_free_desc(AlmaId)")
+    target.connection.commit()
+
+    distinct_alma = target.execute(
+        "SELECT COUNT(DISTINCT AlmaId) FROM catalog_free_desc"
     ).fetchone()[0]
     print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
     return total
@@ -573,6 +826,10 @@ def main():
         domain_count = export_domains(source, target)
         join_count = export_joins(source, target)
         catalog_count = export_catalog(source, target)
+        rt_count = export_catalog_running_titles(source, target)
+        sz_count = export_catalog_sizes(source, target)
+        fld_count = export_catalog_fields(source, target)
+        fd_count = export_catalog_free_desc(source, target)
         bib_count = export_bibliography(source, target)
         catref_count = export_catalog_refs(source, target)
         refcat_count = export_ref_catalogs(source, target)
@@ -591,14 +848,18 @@ def main():
         # Summary
         file_size_mb = target_path.stat().st_size / (1024 * 1024)
         print(f"\nExport complete!")
-        print(f"  domains:      {domain_count:>10,} rows")
-        print(f"  joins:        {join_count:>10,} rows")
-        print(f"  catalog:      {catalog_count:>10,} rows")
-        print(f"  bibliography: {bib_count:>10,} rows")
-        print(f"  catalog_refs: {catref_count:>10,} rows")
-        print(f"  ref_catalogs: {refcat_count:>10,} rows")
-        print(f"  ref_titles:   {reftitle_count:>10,} rows")
-        print(f"  ref_authors:  {refauthor_count:>10,} rows")
+        print(f"  domains:                {domain_count:>10,} rows")
+        print(f"  joins:                  {join_count:>10,} rows")
+        print(f"  catalog:                {catalog_count:>10,} rows")
+        print(f"  catalog_running_titles: {rt_count:>10,} rows")
+        print(f"  catalog_sizes:          {sz_count:>10,} rows")
+        print(f"  catalog_fields:         {fld_count:>10,} rows")
+        print(f"  catalog_free_desc:      {fd_count:>10,} rows")
+        print(f"  bibliography:           {bib_count:>10,} rows")
+        print(f"  catalog_refs:           {catref_count:>10,} rows")
+        print(f"  ref_catalogs:           {refcat_count:>10,} rows")
+        print(f"  ref_titles:             {reftitle_count:>10,} rows")
+        print(f"  ref_authors:            {refauthor_count:>10,} rows")
         print(f"  File size: {file_size_mb:.1f} MB")
 
     finally:
