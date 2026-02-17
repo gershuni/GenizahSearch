@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 36 of 38 (PGP Service Layer)
-Plan: 1 of 2 in current phase (COMPLETE)
-Status: Executing Phase 36
-Last activity: 2026-02-17 -- Completed 36-01 PGP service layer rewrite
+Plan: 2 of 2 in current phase (COMPLETE)
+Status: Phase 36 COMPLETE
+Last activity: 2026-02-17 -- Completed 36-02 PGP test suite rewrite
 
-Progress: [#####-----] 50% (Phase 36)
+Progress: [##########] 100% (Phase 36)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 106 (across 7 milestones)
+- Total plans completed: 107 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -34,7 +34,7 @@ Progress: [#####-----] 50% (Phase 36)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 2+ | 11 min |
+| v6.0.0 | 35-38 | 3+ | 15 min |
 
 ## Accumulated Context
 
@@ -53,6 +53,7 @@ Recent decisions affecting current work:
 - Phase 36: get_pgp_service() defaults to thread_safe=True (read-only SQLite safe across threads)
 - Phase 36: get_all_sources_for_fragment optimized from N+1 to 2 queries
 - Phase 36: _row_to_dict helper centralizes JSON deserialization for tags/sections columns
+- Phase 36: Temp file SQLite fixtures (not :memory:) for testing -- PgpService requires real file for read-only URI mode
 
 ### Blockers/Concerns
 
@@ -70,6 +71,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 36-01-PLAN.md
-Resume file: .planning/phases/36-pgp-service-layer/36-01-SUMMARY.md
-Notes: Phase 36 plan 1 complete. PgpService class reads from pgp.db via SQLite. All 14 functions backward-compatible. Plan 2 (test rewrite) next.
+Stopped at: Completed 36-02-PLAN.md (Phase 36 complete)
+Resume file: .planning/phases/36-pgp-service-layer/36-02-SUMMARY.md
+Notes: Phase 36 complete. PgpService live + tested with 33 SQLite-backed tests. MIGR-07 verified. Ready for Phase 37 (browse integration).
