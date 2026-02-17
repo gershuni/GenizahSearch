@@ -100,7 +100,7 @@ Multi-source image viewing with folio navigation, bibliography (542K), catalog r
 
 - [x] **Phase 35: PGP Sidecar Export** - Export all PGP data from Supabase to pgp.db with validated JSON serialization (completed 2026-02-17)
 - [x] **Phase 36: PGP Service Layer** - Rewrite document_service.py to read from SQLite, integrating both apps with pgp.db (completed 2026-02-17)
-- [ ] **Phase 37: FJMS Catalog Descriptions** - Export 65K FJMS descriptions and surface them via browse page button in both apps
+- [x] **Phase 37: FJMS Catalog Descriptions** - Export 65K FJMS descriptions and surface them via browse page button in both apps (completed 2026-02-17)
 - [ ] **Phase 38: Distribution and Verification** - Bundle pgp.db for distribution and verify offline browsing works end-to-end
 
 ## Phase Details
@@ -168,7 +168,7 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
 | 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
-| 37. FJMS Catalog Descriptions | 0/3 | Not started | - |
+| 37. FJMS Catalog Descriptions | 0/3 | Complete    | 2026-02-17 |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
 ---
