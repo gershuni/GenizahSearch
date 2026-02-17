@@ -163,7 +163,7 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
-| 36. PGP Service Layer | 2/3 | UAT gap closure    | 2026-02-17 |
+| 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
 | 37. FJMS Catalog Descriptions | 0/TBD | Not started | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
