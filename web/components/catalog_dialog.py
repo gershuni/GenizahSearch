@@ -74,8 +74,11 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
                 'flat dense round'
             ).classes('text-white')
 
-        # Scrollable content area
-        with ui.scroll_area().classes('w-full').style('flex: 1;'):
+        # Scrollable content area (plain div with overflow — QScrollArea needs explicit
+        # height which doesn't work well in flex dialogs)
+        with ui.element('div').classes('w-full').style(
+            'flex: 1; overflow-y: auto; min-height: 200px;'
+        ):
             if not records and not free_descriptions:
                 with ui.column().classes('w-full items-center justify-center p-8'):
                     ui.icon('info_outline').classes('text-3xl').style('color: var(--text-muted);')
