@@ -5286,10 +5286,18 @@ class FjmsCatalogDialog(QDialog):
             # Number of Folios
             folio_vals = []
             for team in teams:
-                folios = [str(r.get("num_folio", "")).strip() for r in team["records"]
+                folios = [self._fmt_int(r.get("num_folio")) for r in team["records"]
                           if r.get("num_folio") and str(r["num_folio"]).strip() and str(r["num_folio"]).strip() != '0']
                 folio_vals.append(', '.join(folios) if folios else '')
             html_parts.append(self._field_row(tr('Number of Folios'), folio_vals, is_heb))
+
+            # Number of Bifolios
+            bifolio_vals = []
+            for team in teams:
+                bifolios = [self._fmt_int(r.get("num_bifolio")) for r in team["records"]
+                            if r.get("num_bifolio") and str(r["num_bifolio"]).strip() and str(r["num_bifolio"]).strip() != '0']
+                bifolio_vals.append(', '.join(bifolios) if bifolios else '')
+            html_parts.append(self._field_row(tr('Number of Bifolios'), bifolio_vals, is_heb))
 
             # === Section 2: Content Description ===
             html_parts.append(self._section_row(tr('Content Description'), total_cols))
@@ -5349,9 +5357,10 @@ class FjmsCatalogDialog(QDialog):
             html_parts.append(self._section_row(tr('Script Description'), total_cols))
 
             html_parts.append(self._field_category_row('GenizahLanguages', tr('Language'), teams, fields, is_heb))
-            html_parts.append(self._field_category_row('GenizahScriptType', tr('Script Type'), teams, fields, is_heb))
-            html_parts.append(self._field_category_row('GenizahScriptStyle', tr('Script Style'), teams, fields, is_heb))
-            html_parts.append(self._field_category_row('GenizahVocalization', tr('Vocalization'), teams, fields, is_heb))
+            html_parts.append(self._field_category_row('TypeOfScript', tr('Script Type'), teams, fields, is_heb))
+            html_parts.append(self._field_category_row('TypeOfScriptStyle', tr('Script Style'), teams, fields, is_heb))
+            html_parts.append(self._field_category_row('TypeOfScriptPlace', tr('Script Place'), teams, fields, is_heb))
+            html_parts.append(self._field_category_row('TypeOfVocalization', tr('Vocalization'), teams, fields, is_heb))
 
             # === Section 4: Format Description ===
             html_parts.append(self._section_row(tr('Format Description'), total_cols))
@@ -5465,6 +5474,16 @@ class FjmsCatalogDialog(QDialog):
         if val is None:
             return ""
         s = str(val)
+        if s.endswith('.0'):
+            return s[:-2]
+        return s
+
+    @staticmethod
+    def _fmt_int(val) -> str:
+        """Format a numeric value as integer (2.0 → '2')."""
+        if val is None:
+            return ""
+        s = str(val).strip()
         if s.endswith('.0'):
             return s[:-2]
         return s

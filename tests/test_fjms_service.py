@@ -52,6 +52,7 @@ def test_db(tmp_path):
             SourceName TEXT,
             SourceNameHeb TEXT,
             NumFolio REAL,
+            NumBifolio REAL,
             NumColumn TEXT,
             NumRow TEXT,
             GenizahTitleOrgTitle TEXT,
@@ -91,9 +92,9 @@ def test_db(tmp_path):
         ],
     )
 
-    # Insert test catalog data (v3.0.0 schema)
+    # Insert test catalog data (v3.1.0 schema — includes NumBifolio)
     conn.executemany(
-        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             (
                 "990001", 100,
@@ -101,7 +102,7 @@ def test_db(tmp_path):
                 "Unknown", "1150", "Fustat",
                 "טקסט עברי", "Hebrew text",
                 "PGPID", "",
-                14.0, "2", "20",
+                14.0, 7.0, "2", "20",
                 "שטר", "Legal Document",
             ),
             (
@@ -110,7 +111,7 @@ def test_db(tmp_path):
                 "Unknown", "1150", "Fustat",
                 "טקסט עברי נוסף", "Additional Hebrew text",
                 "FGP", "",
-                14.0, "2", "20",
+                14.0, None, "2", "20",
                 None, None,
             ),
             (
@@ -119,7 +120,7 @@ def test_db(tmp_path):
                 "Nahray b. Nissim", "1050", "Alexandria",
                 None, None,
                 "Inventory", "",
-                None, None, None,
+                None, None, None, None,
                 None, None,
             ),
         ],
@@ -192,8 +193,8 @@ def test_db(tmp_path):
 
     # Insert additional catalog row for 990001 with a generic source name
     conn.execute(
-        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("990001", 102, "Title 2", "", "", "", "", "", "", "Institution", "", None, None, None, None, None),
+        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("990001", 102, "Title 2", "", "", "", "", "", "", "Institution", "", None, None, None, None, None, None),
     )
 
     # Create catalog child tables (v3.0.0)

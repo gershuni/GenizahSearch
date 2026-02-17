@@ -30,7 +30,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 BATCH_SIZE = 10_000
 
 
@@ -189,6 +189,7 @@ def export_catalog(source, target):
             SourceName TEXT,
             SourceNameHeb TEXT,
             NumFolio REAL,
+            NumBifolio REAL,
             NumColumn TEXT,
             NumRow TEXT,
             GenizahTitleOrgTitle TEXT,
@@ -218,6 +219,7 @@ def export_catalog(source, target):
                 ELSE cs.HebDesc
             END as SourceNameHeb,
             cat.NumFolio,
+            cat.NumBifolio,
             cat.NumColumn,
             cat.NumRow,
             gt.OrgTitle as GenizahTitleOrgTitle,
@@ -255,15 +257,16 @@ def export_catalog(source, target):
             row[9],   # SourceName
             row[10],  # SourceNameHeb
             row[11],  # NumFolio
-            row[12],  # NumColumn
-            row[13],  # NumRow
-            row[14],  # GenizahTitleOrgTitle
-            row[15],  # GenizahTitleEngTitle
+            row[12],  # NumBifolio
+            row[13],  # NumColumn
+            row[14],  # NumRow
+            row[15],  # GenizahTitleOrgTitle
+            row[16],  # GenizahTitleEngTitle
         )
         batch.append(cleaned)
         if len(batch) >= BATCH_SIZE:
             target.executemany(
-                "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 batch,
             )
             total += len(batch)
@@ -271,7 +274,7 @@ def export_catalog(source, target):
 
     if batch:
         target.executemany(
-            "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             batch,
         )
         total += len(batch)

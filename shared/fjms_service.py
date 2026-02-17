@@ -484,6 +484,7 @@ class FjmsService:
                 # Handle new v3.0.0 columns gracefully (may not exist in old sidecars)
                 has_rec_id = "UnitCatalogRecId" in col_names
                 has_num_folio = "NumFolio" in col_names
+                has_num_bifolio = "NumBifolio" in col_names
                 has_num_column = "NumColumn" in col_names
                 has_num_row = "NumRow" in col_names
                 has_genizah_org = "GenizahTitleOrgTitle" in col_names
@@ -501,6 +502,7 @@ class FjmsService:
                     "source_name_heb": source_name_heb,
                     "unit_catalog_rec_id": row["UnitCatalogRecId"] if has_rec_id else None,
                     "num_folio": row["NumFolio"] if has_num_folio else None,
+                    "num_bifolio": row["NumBifolio"] if has_num_bifolio else None,
                     "num_column": row["NumColumn"] if has_num_column else None,
                     "num_row": row["NumRow"] if has_num_row else None,
                     "genizah_title_org": row["GenizahTitleOrgTitle"] if has_genizah_org else None,
@@ -512,7 +514,8 @@ class FjmsService:
                     record["title"], record["title_heb"], record["author_text"],
                     record["copy_date"], record["copy_place"],
                     record["textual_frame_heb"], record["textual_frame_eng"],
-                    record["num_folio"], record["num_column"], record["num_row"],
+                    record["num_folio"], record["num_bifolio"],
+                    record["num_column"], record["num_row"],
                     record["genizah_title_org"], record["genizah_title_eng"],
                 )
                 if not any(v and str(v).strip() for v in content_fields):

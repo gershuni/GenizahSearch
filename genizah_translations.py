@@ -2398,8 +2398,10 @@ TRANSLATIONS = {
     "Vocalization": "ניקוד",
     "Physical Status": "מצב פיזי",
     "Number of Folios": "מספר דפים",
+    "Number of Bifolios": "מספר ביפוליו",
     "Number of Columns": "מספר טורים",
     "Number of Lines": "מספר שורות",
+    "Script Place": "מקום כתב",
 
     # --- Catalog Dialog Sections ---
     "Shelfmark Description": "תיאור סימנייה",
