@@ -1,0 +1,373 @@
+# -*- coding: utf-8 -*-
+"""
+Catalog Records Dialog Component
+
+Displays FJMS catalog data in a FIST 5-section side-by-side table layout:
+teams as columns, fields as rows, grouped into 5 labeled sections.
+
+Mirrors the FIST web interface "Cataloging Data Details" view:
+1. Shelfmark Description
+2. Content Description
+3. Script Description
+4. Format Description
+5. Miscellaneous
+"""
+
+from nicegui import ui
+from web.translations import tr, get_language
+from typing import Optional
+
+
+def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
+    """
+    Create and open a catalog records dialog showing multi-team scholarly data.
+
+    Args:
+        sys_id: The Alma/system ID for the manuscript.
+        shelfmark: Display shelfmark for the header.
+        fjms_service: FjmsService instance (or None to auto-get).
+    """
+    if fjms_service is None:
+        from shared.fjms_service import get_fjms_service
+        fjms_service = get_fjms_service(thread_safe=True)
+
+    detail = fjms_service.get_catalog_detail(sys_id)
+    records = detail.get("records", [])
+    running_titles = detail.get("running_titles", {})
+    sizes = detail.get("sizes", {})
+    fields = detail.get("fields", {})
+    free_descriptions = detail.get("free_descriptions", [])
+
+    lang = get_language()
+    is_heb = lang == 'he'
+
+    # Group records by source_name to get team columns
+    teams = []  # list of (source_name, source_name_heb, [records])
+    team_map = {}  # source_name -> index in teams
+    for rec in records:
+        sn = rec.get("source_name") or tr("Unknown")
+        if sn not in team_map:
+            team_map[sn] = len(teams)
+            teams.append({
+                "source_name": sn,
+                "source_name_heb": rec.get("source_name_heb") or sn,
+                "records": [],
+            })
+        teams[team_map[sn]]["records"].append(rec)
+
+    num_teams = len(teams) if teams else 1
+
+    dialog = ui.dialog().props('maximized=false full-width')
+
+    with dialog, ui.card().classes('w-full max-w-[900px] max-h-[90vh]').style(
+        'overflow: hidden; display: flex; flex-direction: column;'
+    ):
+        # Header with purple gradient
+        with ui.row().classes('w-full items-center justify-between p-3 rounded-t').style(
+            'background: linear-gradient(135deg, #6c3483, #9b59b6); color: white;'
+        ):
+            with ui.row().classes('items-center gap-2'):
+                ui.icon('description').classes('text-xl')
+                title_text = f'{tr("Catalog Records")} \u2014 {shelfmark}'
+                ui.label(title_text).classes('text-lg font-bold')
+            ui.button(icon='close', on_click=dialog.close).props(
+                'flat dense round'
+            ).classes('text-white')
+
+        # Scrollable content area
+        with ui.scroll_area().classes('w-full').style('flex: 1;'):
+            if not records and not free_descriptions:
+                with ui.column().classes('w-full items-center justify-center p-8'):
+                    ui.icon('info_outline').classes('text-3xl').style('color: var(--text-muted);')
+                    ui.label(tr("No catalog data available")).classes('text-sm').style(
+                        'color: var(--text-muted);'
+                    )
+            else:
+                with ui.column().classes('w-full gap-0 p-4'):
+                    _render_catalog_table(teams, running_titles, sizes, fields, free_descriptions, is_heb)
+
+        # Close button
+        with ui.row().classes('w-full justify-end p-2'):
+            ui.button(tr('Close'), on_click=dialog.close).props('flat dense')
+
+    dialog.open()
+    return dialog
+
+
+def _section_header(text: str, num_cols: int):
+    """Render a section header row spanning all columns."""
+    with ui.row().classes('w-full items-center gap-2 py-2 px-3 mt-3 mb-1 rounded').style(
+        'background: linear-gradient(135deg, #f3e8ff, #ede9fe);'
+    ):
+        ui.label(text).classes('text-sm font-bold').style('color: #6c3483;')
+
+
+def _field_row(label: str, values: list, is_heb: bool):
+    """Render a field row: label in first column, values in team columns.
+
+    Args:
+        label: Field label (translated).
+        values: List of display values, one per team. None/empty = blank cell.
+        is_heb: Whether Hebrew mode is active.
+    """
+    # Skip row entirely if all values are empty
+    if not any(v for v in values):
+        return
+
+    num_teams = len(values)
+    dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
+
+    with ui.row().classes('w-full items-start py-1 px-3').style(
+        'border-bottom: 1px solid var(--border-light, #e5e7eb); min-height: 2em;'
+    ):
+        # Label column (fixed width)
+        ui.label(label).classes('text-xs font-semibold shrink-0').style(
+            f'width: 120px; color: var(--text-secondary); {dir_style}'
+        )
+        # Value columns
+        for val in values:
+            display_val = str(val).strip() if val else '\u2014'
+            is_empty = not val
+            style = f'flex: 1; min-width: 100px; {dir_style}'
+            if is_empty:
+                style += ' color: var(--text-muted, #9ca3af);'
+            ui.label(display_val).classes('text-sm break-words').style(style)
+
+
+def _render_catalog_table(teams, running_titles, sizes, fields, free_descriptions, is_heb):
+    """Render the full FIST 5-section side-by-side table."""
+    num_teams = len(teams)
+    dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
+
+    if num_teams == 0:
+        # Only free descriptions, no team data
+        if free_descriptions:
+            _section_header(tr('Miscellaneous') if 'Miscellaneous' not in _section_labels() else _section_labels()['Miscellaneous'], 1)
+            _render_free_descriptions(free_descriptions, is_heb)
+        return
+
+    # === Team header row ===
+    with ui.row().classes('w-full items-start py-2 px-3 mb-1 rounded').style(
+        'background: var(--bg-tertiary, #f9fafb); border-bottom: 2px solid var(--border-light, #e5e7eb);'
+    ):
+        # Label column placeholder
+        ui.label('').classes('shrink-0').style('width: 120px;')
+        # Team name columns
+        for team in teams:
+            team_name = team["source_name_heb"] if is_heb else team["source_name"]
+            with ui.column().classes('gap-0').style(f'flex: 1; min-width: 100px; {dir_style}'):
+                ui.label(team_name).classes('text-sm font-bold').style('color: var(--primary-700);')
+                # Show author from first record if available
+                first_rec = team["records"][0] if team["records"] else None
+                if first_rec:
+                    author = first_rec.get("author_text", "")
+                    if author and str(author).strip():
+                        ui.label(str(author).strip()).classes('text-xs').style(
+                            'color: var(--text-muted);'
+                        )
+
+    # === Section 1: Shelfmark Description ===
+    _section_header(tr('Shelfmark Description'), num_teams + 1)
+
+    # Source (team attribution)
+    source_vals = []
+    for team in teams:
+        sn = team["source_name_heb"] if is_heb else team["source_name"]
+        first_rec = team["records"][0] if team["records"] else None
+        author = ""
+        if first_rec:
+            a = first_rec.get("author_text")
+            if a and str(a).strip():
+                author = f", {str(a).strip()}"
+        source_vals.append(f"{sn}{author}")
+    _field_row(tr('Source'), source_vals, is_heb)
+
+    # Number of Folios
+    folio_vals = []
+    for team in teams:
+        # Aggregate NumFolio from all records for this team
+        folios = [str(r.get("num_folio", "")).strip() for r in team["records"]
+                  if r.get("num_folio") and str(r["num_folio"]).strip() and str(r["num_folio"]).strip() != '0']
+        folio_vals.append(', '.join(folios) if folios else None)
+    _field_row(tr('Number of Folios'), folio_vals, is_heb)
+
+    # === Section 2: Content Description ===
+    _section_header(tr('Content Description'), num_teams + 1)
+
+    # Domain (from TextualFrame content - the [$Category$] parsed category)
+    domain_vals = []
+    for team in teams:
+        from shared.fjms_service import parse_textual_frame
+        categories = []
+        for rec in team["records"]:
+            tf_eng = rec.get("textual_frame_eng") or ""
+            tf_heb = rec.get("textual_frame_heb") or ""
+            tf = tf_heb if is_heb and tf_heb else tf_eng
+            if tf:
+                from shared.fjms_service import split_textual_frames
+                parts = split_textual_frames(tf)
+                if not parts and tf.strip():
+                    parts = [tf.strip()]
+                for part in parts:
+                    cat, content = parse_textual_frame(part)
+                    display_parts = []
+                    if cat:
+                        display_parts.append(f"[{cat}]")
+                    if content:
+                        display_parts.append(content)
+                    if display_parts:
+                        categories.append(' '.join(display_parts))
+        domain_vals.append('; '.join(categories) if categories else None)
+    _field_row(tr('Domain'), domain_vals, is_heb)
+
+    # Running Title
+    rt_vals = []
+    for team in teams:
+        titles = []
+        for rec in team["records"]:
+            rec_id = rec.get("unit_catalog_rec_id")
+            if rec_id and rec_id in running_titles:
+                for rt in running_titles[rec_id]:
+                    rt_text = rt.get("running_title", "")
+                    if rt_text and str(rt_text).strip():
+                        titles.append(str(rt_text).strip())
+        rt_vals.append('; '.join(titles) if titles else None)
+    _field_row(tr('Running Title'), rt_vals, is_heb)
+
+    # GenizahTitle (org/eng)
+    gt_vals = []
+    for team in teams:
+        titles = []
+        for rec in team["records"]:
+            gt_org = rec.get("genizah_title_org")
+            gt_eng = rec.get("genizah_title_eng")
+            gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+            if gt and str(gt).strip():
+                titles.append(str(gt).strip())
+        gt_vals.append('; '.join(titles) if titles else None)
+    _field_row(tr('Title'), gt_vals, is_heb)
+
+    # === Section 3: Script Description ===
+    _section_header(tr('Script Description'), num_teams + 1)
+
+    # Language
+    _render_field_category_row('GenizahLanguages', tr('Language'), teams, fields, is_heb)
+
+    # Script Type
+    _render_field_category_row('GenizahScriptType', tr('Script Type'), teams, fields, is_heb)
+
+    # Script Style
+    _render_field_category_row('GenizahScriptStyle', tr('Script Style'), teams, fields, is_heb)
+
+    # Vocalization
+    _render_field_category_row('GenizahVocalization', tr('Vocalization'), teams, fields, is_heb)
+
+    # === Section 4: Format Description ===
+    _section_header(tr('Format Description'), num_teams + 1)
+
+    # No. of Rows (NumRow)
+    row_vals = []
+    for team in teams:
+        rows = [str(r.get("num_row", "")).strip() for r in team["records"]
+                if r.get("num_row") and str(r["num_row"]).strip() and str(r["num_row"]).strip() != '0']
+        row_vals.append(', '.join(rows) if rows else None)
+    _field_row(tr('Number of Lines'), row_vals, is_heb)
+
+    # Number of Columns (NumColumn)
+    col_vals = []
+    for team in teams:
+        cols = [str(r.get("num_column", "")).strip() for r in team["records"]
+                if r.get("num_column") and str(r["num_column"]).strip() and str(r["num_column"]).strip() != '0']
+        col_vals.append(', '.join(cols) if cols else None)
+    _field_row(tr('Number of Columns'), col_vals, is_heb)
+
+    # Material
+    _render_field_category_row('FragmentMaterial', tr('Material'), teams, fields, is_heb)
+
+    # Physical Status
+    _render_field_category_row('FragmentStatus', tr('Physical Status'), teams, fields, is_heb)
+
+    # Sizes
+    size_vals = []
+    for team in teams:
+        size_parts = []
+        for rec in team["records"]:
+            rec_id = rec.get("unit_catalog_rec_id")
+            if rec_id and rec_id in sizes:
+                for sz in sizes[rec_id]:
+                    sx = sz.get("size_x")
+                    sy = sz.get("size_y")
+                    isx = sz.get("inner_size_x")
+                    isy = sz.get("inner_size_y")
+                    if sx and sy:
+                        dim = f"{_fmt_num(sx)} \u00d7 {_fmt_num(sy)}"
+                        if isx and isy:
+                            dim += f" ({tr('Inner Size')}: {_fmt_num(isx)} \u00d7 {_fmt_num(isy)})"
+                        dim += " mm"
+                        size_parts.append(dim)
+        size_vals.append('; '.join(size_parts) if size_parts else None)
+    _field_row(tr('Size'), size_vals, is_heb)
+
+    # === Section 5: Miscellaneous ===
+    _section_header(tr('Miscellaneous'), num_teams + 1)
+
+    _render_free_descriptions(free_descriptions, is_heb)
+
+
+def _render_field_category_row(category: str, label: str, teams, fields, is_heb):
+    """Render a row for a specific FieldCategory from catalog_fields."""
+    vals = []
+    for team in teams:
+        field_vals = []
+        for rec in team["records"]:
+            rec_id = rec.get("unit_catalog_rec_id")
+            if rec_id and rec_id in fields:
+                cat_fields = fields[rec_id].get(category, [])
+                for fv in cat_fields:
+                    val = fv.get("value_heb") if is_heb else fv.get("value")
+                    if not val or not str(val).strip():
+                        val = fv.get("value") or fv.get("value_heb")
+                    if val and str(val).strip():
+                        field_vals.append(str(val).strip())
+        vals.append('; '.join(field_vals) if field_vals else None)
+    _field_row(label, vals, is_heb)
+
+
+def _render_free_descriptions(free_descriptions, is_heb):
+    """Render free description texts, always fully visible."""
+    dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
+    if not free_descriptions:
+        with ui.row().classes('w-full py-1 px-3'):
+            ui.label('\u2014').classes('text-sm').style('color: var(--text-muted);')
+        return
+
+    for desc in free_descriptions:
+        text = desc.get("text", "")
+        if text and str(text).strip():
+            with ui.row().classes('w-full py-2 px-3').style(
+                f'border-bottom: 1px solid var(--border-light, #e5e7eb); {dir_style}'
+            ):
+                ui.label(str(text).strip()).classes('text-sm whitespace-pre-wrap break-words').style(
+                    f'flex: 1; line-height: 1.6; {dir_style}'
+                )
+
+
+def _fmt_num(val) -> str:
+    """Format a numeric value for size display, removing trailing .0."""
+    if val is None:
+        return ""
+    s = str(val)
+    if s.endswith('.0'):
+        return s[:-2]
+    return s
+
+
+def _section_labels():
+    """Return section label mapping (unused helper, kept for reference)."""
+    return {
+        'Shelfmark Description': tr('Shelfmark Description'),
+        'Content Description': tr('Content Description'),
+        'Script Description': tr('Script Description'),
+        'Format Description': tr('Format Description'),
+        'Miscellaneous': tr('Miscellaneous'),
+    }

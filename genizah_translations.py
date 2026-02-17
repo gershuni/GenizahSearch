@@ -2401,6 +2401,15 @@ TRANSLATIONS = {
     "Number of Columns": "מספר טורים",
     "Number of Lines": "מספר שורות",
 
+    # --- Catalog Dialog Sections ---
+    "Shelfmark Description": "תיאור סימנייה",
+    "Content Description": "תיאור תוכן",
+    "Script Description": "תיאור כתב",
+    "Format Description": "תיאור פורמט",
+    "Miscellaneous": "שונות",
+    "Inner Size": "גודל פנימי",
+    "No catalog data available": "אין נתוני קטלוג זמינים",
+
     # --- Compact Mode ---
     "Compact": "צמצם",
     "Expand": "הרחב",
