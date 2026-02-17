@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 35 of 38 (PGP Sidecar Export)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-16 -- Roadmap created for v6.0.0
+Plan: 1 of 1 in current phase (COMPLETE)
+Status: Phase 35 complete
+Last activity: 2026-02-17 -- Completed 35-01 PGP sidecar export
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [##########] 100% (Phase 35)
 
 ## Performance Metrics
 
@@ -34,7 +34,7 @@ Progress: [░░░░░░░░░░] 0%
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | TBD | — |
+| v6.0.0 | 35-38 | 1+ | 6 min |
 
 ## Accumulated Context
 
@@ -47,6 +47,9 @@ Recent decisions affecting current work:
 - v6.0.0: Tags stored as TEXT JSON, queried with json_each() -- start simple, optimize if >100ms
 - v6.0.0: FJMS descriptions in browse metadata panel button (NOT version selector) -- catalog descriptions, not transcriptions
 - v6.0.0: Supabase PGP tables kept (legacy desktop users) -- cutover deferred to future milestone
+- Phase 35: Hardcoded Supabase URL/anon key defaults matching codebase pattern
+- Phase 35: pgp_url stored as plain TEXT from Supabase generated column
+- Phase 35: Compact JSON (sort_keys, no spaces) for deterministic sidecar serialization
 
 ### Blockers/Concerns
 
@@ -64,6 +67,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Phase 35 context gathered
-Resume file: .planning/phases/35-pgp-sidecar-export/35-CONTEXT.md
-Notes: Heavy Claude discretion — infrastructure/ETL phase. User locked: env vars for creds, progress-per-table output, fail-and-delete on error, verbatim export.
+Stopped at: Completed 35-01-PLAN.md
+Resume file: .planning/phases/35-pgp-sidecar-export/35-01-SUMMARY.md
+Notes: Phase 35 complete (1 plan). pgp.db sidecar (146.6 MB, 104K rows) ready for Phase 36 service rewrite.
