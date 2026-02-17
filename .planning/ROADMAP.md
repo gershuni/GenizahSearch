@@ -94,12 +94,12 @@ Multi-source image viewing with folio navigation, bibliography (542K), catalog r
 
 </details>
 
-### 🚧 v6.0.0 Local Data Architecture (In Progress)
+### v6.0.0 Local Data Architecture (In Progress)
 
 **Milestone Goal:** Migrate all PGP reference data from Supabase to a local SQLite sidecar and add FJMS catalog descriptions as scholarly sources, making browsing fully offline-capable and eliminating cloud dependency for read-only data.
 
-- [x] **Phase 35: PGP Sidecar Export** - Export all PGP data from Supabase to pgp.db with validated JSON serialization (completed 2026-02-17)
-- [x] **Phase 36: PGP Service Layer** - Rewrite document_service.py to read from SQLite, integrating both apps with pgp.db (completed 2026-02-17)
+- [x] **Phase 35: PGP Sidecar Export** - Export all PGP data from Supabase to pgp.db with validated JSON serialization (completed 2026-02-17)
+- [x] **Phase 36: PGP Service Layer** - Rewrite document_service.py to read from SQLite, integrating both apps with pgp.db (completed 2026-02-17)
 - [ ] **Phase 37: FJMS Catalog Descriptions** - Export 65K FJMS descriptions and surface them via browse page button in both apps
 - [ ] **Phase 38: Distribution and Verification** - Bundle pgp.db for distribution and verify offline browsing works end-to-end
 
@@ -128,10 +128,11 @@ Plans:
   3. Search results show PGP transcription indicators (batch lookup) with results identical to Supabase-backed version
   4. PGP tag-based search returns the same results as before (using SQLite json_each instead of Supabase GIN)
   5. Version selector displays all PGP editions and translations with correct section parsing
-**Plans**: 2 plans
+**Plans**: 3 plans
 Plans:
-- [ ] 36-01-PLAN.md — PgpService class rewrite (Supabase to SQLite) + web shim update
-- [ ] 36-02-PLAN.md — Test suite rewrite (in-memory SQLite fixtures) + import smoke tests
+- [x] 36-01-PLAN.md — PgpService class rewrite (Supabase to SQLite) + web shim update
+- [x] 36-02-PLAN.md — Test suite rewrite (in-memory SQLite fixtures) + import smoke tests
+- [ ] 36-03-PLAN.md — Gap closure: FL ID browse path missing pgp_metadata assignment
 
 ### Phase 37: FJMS Catalog Descriptions
 **Goal**: Researchers can access 65K FJMS scholarly descriptions from the browse page in both apps
@@ -161,11 +162,11 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 35. PGP Sidecar Export | 0/1 | Complete    | 2026-02-17 |
-| 36. PGP Service Layer | 0/2 | Complete    | 2026-02-17 |
+| 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
+| 36. PGP Service Layer | 2/3 | UAT gap closure    | 2026-02-17 |
 | 37. FJMS Catalog Descriptions | 0/TBD | Not started | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-16 after v6.0.0 roadmap created*
+*Last updated: 2026-02-17 after Phase 36 UAT gap closure plan*
