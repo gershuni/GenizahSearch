@@ -513,35 +513,6 @@ class FjmsService:
             logger.error(f"FjmsService.get_catalog_records error for {sys_id}: {e}")
             return []
 
-    def get_catalog_record_counts(self, sys_ids: list[str]) -> dict[str, int]:
-        """Get catalog record counts for multiple sys_ids in batch.
-
-        Counts only records that have non-empty TextualFrame data (eng or heb).
-        Used for search result card button labels showing "(N)".
-        """
-        if not self._conn or not sys_ids:
-            return {}
-        try:
-            result = {}
-            batch_size = 500
-            for i in range(0, len(sys_ids), batch_size):
-                batch = sys_ids[i:i + batch_size]
-                placeholders = ','.join('?' * len(batch))
-                cursor = self._conn.execute(
-                    f"SELECT AlmaId, COUNT(*) as cnt FROM catalog "
-                    f"WHERE AlmaId IN ({placeholders}) "
-                    f"AND ((TextualFrameEng IS NOT NULL AND TextualFrameEng != '') "
-                    f"  OR (TextualFrameHeb IS NOT NULL AND TextualFrameHeb != '')) "
-                    f"GROUP BY AlmaId",
-                    batch,
-                )
-                for row in cursor:
-                    result[row["AlmaId"]] = row["cnt"]
-            return result
-        except Exception as e:
-            logger.error(f"FjmsService.get_catalog_record_counts error: {e}")
-            return {}
-
     # ── Bibliography & Catalog Refs (Phase 33: META-03) ─────────────
 
     # Generic source names to filter out from get_source_names()

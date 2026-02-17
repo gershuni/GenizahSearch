@@ -2043,7 +2043,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # === FJMS Catalog Metadata ===
                     from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
                     fjms = get_fjms_service(thread_safe=True)
-                    catalog_records = []  # default; populated below if FJMS available
                     if fjms.is_available():
                         catalog_records = fjms.get_catalog_records(page.sys_id)
                         if catalog_records:
@@ -2150,9 +2149,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             f'/search?domain={quote(dom["domain"])}'
                                         ).classes('text-sm').style('color: var(--primary-600);')
 
-                    # === Bibliography References & Catalog Records (separate dialogs) ===
+                    # === Bibliography References (separate FJMS / NLI dialogs) ===
                     from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
-                    from web.components.catalog_dialog import create_catalog_records_dialog
 
                     fjms_bib = fjms.get_bibliography(page.sys_id) if fjms.is_available() else []
                     marc_bib = []
@@ -2164,11 +2162,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     except Exception:
                         pass
 
-                    catalog_count = len(catalog_records) if catalog_records else 0
-
-                    if fjms_bib or marc_bib or catalog_records is not None:
+                    if fjms_bib or marc_bib:
                         ui.separator().classes('my-3')
-                        with ui.row().classes('items-center gap-2 flex-wrap'):
+                        with ui.row().classes('items-center gap-2'):
                             if fjms_bib:
                                 fjms_dlg = create_fjms_bibliography_dialog(
                                     fjms_bib, page.sys_id,
@@ -2189,23 +2185,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     icon='menu_book',
                                     on_click=nli_dlg.open,
                                 ).props('outline dense').classes('text-sm')
-
-                            # Catalog Records button (always visible, disabled when 0)
-                            if catalog_count > 0:
-                                cat_dlg = create_catalog_records_dialog(
-                                    catalog_records, page.sys_id,
-                                    shelfmark=page.shelfmark or '',
-                                )
-                                ui.button(
-                                    f'{tr("Catalog Records")} ({catalog_count})',
-                                    icon='description',
-                                    on_click=cat_dlg.open,
-                                ).props('outline dense').classes('text-sm')
-                            else:
-                                ui.button(
-                                    f'{tr("Catalog Records")} (0)',
-                                    icon='description',
-                                ).props('outline dense disable').classes('text-sm')
 
                     # === Phase 33: Catalog Cross-References ===
                     if fjms.is_available():
