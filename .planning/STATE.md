@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.0.0 Local Data Architecture -- Phase 36 (PGP Service Layer)
+**Current focus:** v6.0.0 Local Data Architecture -- Phase 37 (FJMS Catalog Descriptions)
 
 ## Current Position
 
@@ -72,6 +72,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 36-03-PLAN.md (Phase 36 complete)
-Resume file: .planning/phases/36-pgp-service-layer/36-03-SUMMARY.md
-Notes: Phase 36 complete. PgpService live + tested with 33 SQLite-backed tests. FL ID browse path pgp_metadata gap closed. Ready for Phase 37 (browse integration).
+Stopped at: Phase 37 context gathered
+Resume file: .planning/phases/37-fjms-catalog-descriptions/37-CONTEXT.md
+Notes: Phase 37 context captured. Ready for /gsd:plan-phase 37.
