@@ -2248,6 +2248,28 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                         'background: #f3e8ff; color: #7c3aed;'
                                     )
+                        # Catalog Records indicator (visible only when data exists)
+                        if sys_id and search_state.catalog_record_counts:
+                            cat_count = search_state.catalog_record_counts.get(sys_id, 0)
+                            if cat_count > 0:
+                                def make_catalog_handler(sid=sys_id, sm=shelfmark, count=cat_count):
+                                    async def handler():
+                                        from shared.fjms_service import get_fjms_service
+                                        fjms = get_fjms_service(thread_safe=True)
+                                        records = await run.io_bound(fjms.get_catalog_records, sid)
+                                        if records:
+                                            from web.components.catalog_dialog import create_catalog_records_dialog
+                                            dlg = create_catalog_records_dialog(records, sid, shelfmark=sm)
+                                            dlg.open()
+                                    return handler
+
+                                ui.button(
+                                    f'{tr("Catalog Records")} ({cat_count})',
+                                    icon='description',
+                                    on_click=make_catalog_handler(),
+                                ).props('outline dense size=sm no-caps').classes('text-xs').style(
+                                    'color: #6c3483; border-color: #d5b8e8;'
+                                )
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     if title_short:
                         ui.label(title_short).classes('text-xs').style(
