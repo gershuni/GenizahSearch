@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.0.0 Local Data Architecture -- Phase 35 (PGP Sidecar Export)
+**Current focus:** v6.0.0 Local Data Architecture -- Phase 36 (PGP Service Layer)
 
 ## Current Position
 
-Phase: 35 of 38 (PGP Sidecar Export)
-Plan: 1 of 1 in current phase (COMPLETE)
-Status: Phase 35 complete
-Last activity: 2026-02-17 -- Completed 35-01 PGP sidecar export
+Phase: 36 of 38 (PGP Service Layer)
+Plan: 1 of 2 in current phase (COMPLETE)
+Status: Executing Phase 36
+Last activity: 2026-02-17 -- Completed 36-01 PGP service layer rewrite
 
-Progress: [##########] 100% (Phase 35)
+Progress: [#####-----] 50% (Phase 36)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 105 (across 7 milestones)
+- Total plans completed: 106 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -34,7 +34,7 @@ Progress: [##########] 100% (Phase 35)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 1+ | 6 min |
+| v6.0.0 | 35-38 | 2+ | 11 min |
 
 ## Accumulated Context
 
@@ -50,11 +50,14 @@ Recent decisions affecting current work:
 - Phase 35: Hardcoded Supabase URL/anon key defaults matching codebase pattern
 - Phase 35: pgp_url stored as plain TEXT from Supabase generated column
 - Phase 35: Compact JSON (sort_keys, no spaces) for deterministic sidecar serialization
+- Phase 36: get_pgp_service() defaults to thread_safe=True (read-only SQLite safe across threads)
+- Phase 36: get_all_sources_for_fragment optimized from N+1 to 2 queries
+- Phase 36: _row_to_dict helper centralizes JSON deserialization for tags/sections columns
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
-- Tags json_each() performance on 35K rows needs benchmarking during Phase 36
+- Tags json_each() benchmarked: 115ms for get_all_distinct_tags (2695 tags), 63ms for tag search -- acceptable
 - FJMS/PGP overlap extent unknown -- affects dedup strategy in Phase 38
 
 ### Pending Todos
@@ -67,6 +70,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 35-01-PLAN.md
-Resume file: .planning/phases/35-pgp-sidecar-export/35-01-SUMMARY.md
-Notes: Phase 35 complete (1 plan). pgp.db sidecar (146.6 MB, 104K rows) ready for Phase 36 service rewrite.
+Stopped at: Completed 36-01-PLAN.md
+Resume file: .planning/phases/36-pgp-service-layer/36-01-SUMMARY.md
+Notes: Phase 36 plan 1 complete. PgpService class reads from pgp.db via SQLite. All 14 functions backward-compatible. Plan 2 (test rewrite) next.
