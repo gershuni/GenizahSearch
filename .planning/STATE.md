@@ -63,7 +63,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-16
-Stopped at: Roadmap created for v6.0.0 milestone
-Resume file: None
-Notes: 8th milestone. 4 phases (35-38), 14 requirements. Phase 37 can run parallel to Phase 36.
+Last session: 2026-02-17
+Stopped at: Phase 35 context gathered
+Resume file: .planning/phases/35-pgp-sidecar-export/35-CONTEXT.md
+Notes: Heavy Claude discretion — infrastructure/ETL phase. User locked: env vars for creds, progress-per-table output, fail-and-delete on error, verbatim export.
