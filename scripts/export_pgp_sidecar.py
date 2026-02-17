@@ -472,13 +472,18 @@ def validate_export(client, conn):
 
 def main():
     """Export all PGP data from Supabase to pgp_data/pgp.db."""
-    # Load environment
+    # Load environment (defaults match the rest of the codebase)
     load_dotenv()
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_ANON_KEY")
+    supabase_url = os.environ.get(
+        "SUPABASE_URL", "https://ylcpglwxompwjcufdemz.supabase.co"
+    )
+    supabase_key = os.environ.get(
+        "SUPABASE_ANON_KEY",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE",
+    )
 
     if not supabase_url or not supabase_key:
-        print("ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env")
+        print("ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env or as defaults")
         sys.exit(1)
 
     # Paths
