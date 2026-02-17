@@ -21,4 +21,5 @@ from shared.document_service import (
     get_fragments_by_tag,
     get_all_distinct_tags,
     parse_html_sections,
+    get_pgp_service,
 )
