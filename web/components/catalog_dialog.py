@@ -37,15 +37,21 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
     sizes = detail.get("sizes", {})
     fields = detail.get("fields", {})
     free_descriptions = detail.get("free_descriptions", [])
+    full_texts = detail.get("full_texts", [])
+    textual_frames = detail.get("textual_frames", {})
+    mentions = detail.get("mentions", {})
 
     lang = get_language()
     is_heb = lang == 'he'
 
-    # Group records by source_name to get team columns
+    # Group records by source_name to get team columns, skipping generic sources
+    from shared.fjms_service import GENERIC_SOURCE_NAMES
     teams = []  # list of (source_name, source_name_heb, [records])
     team_map = {}  # source_name -> index in teams
     for rec in records:
         sn = rec.get("source_name") or tr("Unknown")
+        if sn in GENERIC_SOURCE_NAMES:
+            continue
         if sn not in team_map:
             team_map[sn] = len(teams)
             teams.append({
@@ -79,15 +85,20 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
         with ui.element('div').classes('w-full').style(
             'flex: 1; overflow-y: auto; min-height: 200px;'
         ):
-            if not records and not free_descriptions:
+            if not records and not free_descriptions and not full_texts:
                 with ui.column().classes('w-full items-center justify-center p-8'):
                     ui.icon('info_outline').classes('text-3xl').style('color: var(--text-muted);')
                     ui.label(tr("No catalog data available")).classes('text-sm').style(
                         'color: var(--text-muted);'
                     )
             else:
-                with ui.column().classes('w-full gap-0 p-4'):
-                    _render_catalog_table(teams, running_titles, sizes, fields, free_descriptions, is_heb)
+                # Horizontal scroll wrapper for tables with many team columns
+                with ui.element('div').classes('w-full').style('overflow-x: auto;'):
+                    with ui.column().classes('w-full gap-0 p-4'):
+                        _render_catalog_table(
+                            teams, running_titles, sizes, fields,
+                            free_descriptions, full_texts, textual_frames, mentions, is_heb,
+                        )
 
         # Close button
         with ui.row().classes('w-full justify-end p-2'):
@@ -131,22 +142,26 @@ def _field_row(label: str, values: list, is_heb: bool):
         for val in values:
             display_val = str(val).strip() if val else '\u2014'
             is_empty = not val
-            style = f'flex: 1; min-width: 100px; {dir_style}'
+            style = f'flex: 1; min-width: 130px; {dir_style}'
             if is_empty:
                 style += ' color: var(--text-muted, #9ca3af);'
             ui.label(display_val).classes('text-sm break-words').style(style)
 
 
-def _render_catalog_table(teams, running_titles, sizes, fields, free_descriptions, is_heb):
-    """Render the full FIST 5-section side-by-side table."""
+def _render_catalog_table(teams, running_titles, sizes, fields,
+                          free_descriptions, full_texts, textual_frames, mentions, is_heb):
+    """Render the full FIST 6-section side-by-side table."""
+    from shared.fjms_service import get_team_display_name
+
     num_teams = len(teams)
     dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
 
     if num_teams == 0:
-        # Only free descriptions, no team data
-        if free_descriptions:
-            _section_header(tr('Miscellaneous') if 'Miscellaneous' not in _section_labels() else _section_labels()['Miscellaneous'], 1)
+        # Only free descriptions / full texts, no team data
+        if free_descriptions or full_texts:
+            _section_header(tr('Miscellaneous'), 1)
             _render_free_descriptions(free_descriptions, is_heb)
+            _render_full_texts(full_texts, is_heb)
         return
 
     # === Team header row ===
@@ -157,9 +172,10 @@ def _render_catalog_table(teams, running_titles, sizes, fields, free_description
         ui.label('').classes('shrink-0').style('width: 120px;')
         # Team name columns
         for team in teams:
-            team_name = team["source_name_heb"] if is_heb else team["source_name"]
-            with ui.column().classes('gap-0').style(f'flex: 1; min-width: 100px; {dir_style}'):
-                ui.label(team_name).classes('text-sm font-bold').style('color: var(--primary-700);')
+            raw_name = team["source_name_heb"] if is_heb else team["source_name"]
+            display_name = get_team_display_name(raw_name) if not is_heb else raw_name
+            with ui.column().classes('gap-0').style(f'flex: 1; min-width: 130px; {dir_style}'):
+                ui.label(display_name).classes('text-sm font-bold').style('color: var(--primary-700);')
                 # Show author from first record if available
                 first_rec = team["records"][0] if team["records"] else None
                 if first_rec:
@@ -244,6 +260,21 @@ def _render_catalog_table(teams, running_titles, sizes, fields, free_description
         rt_vals.append('; '.join(titles) if titles else None)
     _field_row(tr('Running Title'), rt_vals, is_heb)
 
+    # Detailed Content (from catalog_textual_frames — richer per-verse references)
+    if textual_frames:
+        dc_vals = []
+        for team in teams:
+            frames = []
+            for rec in team["records"]:
+                rec_id = rec.get("unit_catalog_rec_id")
+                if rec_id and rec_id in textual_frames:
+                    for tf in textual_frames[rec_id]:
+                        text = tf.get("heb") if is_heb and tf.get("heb") else tf.get("eng")
+                        if text and str(text).strip():
+                            frames.append(str(text).strip())
+            dc_vals.append('; '.join(frames) if frames else None)
+        _field_row(tr('Detailed Content'), dc_vals, is_heb)
+
     # GenizahTitle (org/eng)
     gt_vals = []
     for team in teams:
@@ -257,7 +288,12 @@ def _render_catalog_table(teams, running_titles, sizes, fields, free_description
         gt_vals.append('; '.join(titles) if titles else None)
     _field_row(tr('Title'), gt_vals, is_heb)
 
-    # === Section 3: Script Description ===
+    # === Section 3: Mentions ===
+    if mentions:
+        _section_header(tr('Mentions'), num_teams + 1)
+        _render_mentions_rows(teams, mentions, is_heb)
+
+    # === Section 4: Script Description ===
     _section_header(tr('Script Description'), num_teams + 1)
 
     # Language
@@ -275,7 +311,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields, free_description
     # Vocalization
     _render_field_category_row('TypeOfVocalization', tr('Vocalization'), teams, fields, is_heb)
 
-    # === Section 4: Format Description ===
+    # === Section 5: Format Description ===
     _section_header(tr('Format Description'), num_teams + 1)
 
     # No. of Rows (NumRow)
@@ -321,10 +357,11 @@ def _render_catalog_table(teams, running_titles, sizes, fields, free_description
         size_vals.append('; '.join(size_parts) if size_parts else None)
     _field_row(tr('Size'), size_vals, is_heb)
 
-    # === Section 5: Miscellaneous ===
+    # === Section 6: Miscellaneous ===
     _section_header(tr('Miscellaneous'), num_teams + 1)
 
     _render_free_descriptions(free_descriptions, is_heb)
+    _render_full_texts(full_texts, is_heb)
 
 
 def _render_field_category_row(category: str, label: str, teams, fields, is_heb):
@@ -344,6 +381,61 @@ def _render_field_category_row(category: str, label: str, teams, fields, is_heb)
                         field_vals.append(str(val).strip())
         vals.append('; '.join(field_vals) if field_vals else None)
     _field_row(label, vals, is_heb)
+
+
+def _render_mentions_rows(teams, mentions, is_heb):
+    """Render one row per mention type that has data across any team."""
+    # Collect all mention types across all records
+    mention_types_ordered = ['Personalities', 'Places', 'Creations', 'Dates', 'Groups']
+    all_types = set()
+    for rec_id, items in mentions.items():
+        for item in items:
+            mt = item.get("mention_type")
+            if mt:
+                all_types.add(mt)
+
+    # Add any types not in ordered list
+    extra_types = sorted(all_types - set(mention_types_ordered))
+    type_order = [t for t in mention_types_ordered if t in all_types] + extra_types
+
+    for mention_type in type_order:
+        vals = []
+        for team in teams:
+            names = []
+            for rec in team["records"]:
+                rec_id = rec.get("unit_catalog_rec_id")
+                if rec_id and rec_id in mentions:
+                    for m in mentions[rec_id]:
+                        if m.get("mention_type") == mention_type:
+                            name = m.get("mention", "")
+                            if name and str(name).strip():
+                                names.append(str(name).strip())
+            vals.append(', '.join(names) if names else None)
+        _field_row(tr(mention_type), vals, is_heb)
+
+
+def _render_full_texts(full_texts, is_heb):
+    """Render scholarly full text descriptions with distinct styling."""
+    dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
+    if not full_texts:
+        return
+
+    # Sub-header for full texts
+    with ui.row().classes('w-full items-center gap-1 py-1 px-3 mt-2'):
+        ui.label(tr('Scholarly Description')).classes('text-xs font-semibold').style(
+            'color: #6c3483;'
+        )
+
+    for ft in full_texts:
+        text = ft.get("text", "")
+        if text and str(text).strip():
+            with ui.row().classes('w-full py-2 px-3').style(
+                f'border-bottom: 1px solid var(--border-light, #e5e7eb); '
+                f'background: var(--bg-secondary, #fafafa); {dir_style}'
+            ):
+                ui.label(str(text).strip()).classes('text-sm whitespace-pre-wrap break-words').style(
+                    f'flex: 1; line-height: 1.6; {dir_style}'
+                )
 
 
 def _render_free_descriptions(free_descriptions, is_heb):

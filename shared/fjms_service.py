@@ -26,6 +26,60 @@ logger = logging.getLogger(__name__)
 _SIDECAR_FILENAME = "fjms_enrichment.db"
 _SIDECAR_DIR = "fist_data"
 
+# Team display names: maps EngDesc from dbo_CodeSource to full FJMS display name
+# with team leader names (sourced from FJMS website, not present in FIST.db).
+TEAM_DISPLAY_NAMES = {
+    "Transcriptions Team-Genuzos": "FGP Transcriptions Team-Genuzos",
+    "Talmudic Literature": "FGP Talmudic Literature team, Yaacov Sussmann (head)",
+    "Judeo-Arabic Halakhic Literature": "FGP Judeo-Arabic Halakhic Literature team, David Sklare (head)",
+    "Judeo-Arabic Biblical Exegesis": "FGP Judeo-Arabic Biblical Exegesis team, Ephraim Ben-Porat (head)",
+    "Firkovitch Collections": "FGP Firkovitch Collections team, David Sklare (head)",
+    "Princeton Documentary Material (Goitein)": "FGP Princeton Documentary Material (Goitein) team, Mark Cohen (head)",
+    "Magic": "FGP Magic team, Gideon Bohak (head)",
+    "T-S Cataloging": "FGP T-S Cataloging team, Yaacov Sussmann (head)",
+    "Aggadic Midrashim": "FGP Aggadic Midrashim team, Chaim Milikowsky (head)",
+    "Philosophy, Theology and Polemics": "FGP Philosophy, Theology and Polemics team, Sarah Stroumsa (head)",
+    "Bibliography C": "FGP Bibliography C team, Emanuel Friedberg (head)",
+    "Talmud Commentaries and Halakhic Literature (Hebrew)": "FGP Talmud Commentaries and Halakhic Literature (Hebrew) team, Simcha Emanuel (head)",
+    "Linguistics": "FGP Linguistics team, Aharon Maman (head)",
+    "Seride Teshuvot Team: Shocken Institute": "FGP Seride Teshuvot Team: Shocken Institute, Shmuel Glick (head)",
+    "Responsa": "FGP Responsa team, Mordechai A. Friedman (head)",
+    "Scientific Joins": "FGP Scientific Joins team",
+    "Halakhic Midrashim": "FGP Halakhic Midrashim team",
+    "Liturgy": "FGP Liturgy team",
+    "Piyyut": "FGP Piyyut team",
+    "Karaite Literature": "FGP Karaite Literature team",
+    "Documentary Material (Goitein)": "FGP Documentary Material (Goitein) team",
+    "Science": "FGP Science team",
+    "Bible": "FGP Bible team",
+    "Yemenite": "FGP Yemenite team",
+    "Samaritan": "FGP Samaritan team",
+    "FGP": "FGP",
+    "PGPID": "PGPID",
+}
+
+# Generic source names that don't represent scholarly teams — filtered from
+# button counts and dialog team columns for consistency.
+GENERIC_SOURCE_NAMES = frozenset({
+    'Inventory', 'Nuscha', 'Institution', 'Instatution', 'Collection', 'Other',
+})
+
+
+def get_team_display_name(source_name: str) -> str:
+    """Map a catalog SourceName to its full FJMS display name with team leader.
+
+    Falls back to the original source_name if no mapping exists.
+
+    Args:
+        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics").
+
+    Returns:
+        Full display name (e.g., "FGP Linguistics team, Aharon Maman (head)").
+    """
+    if not source_name:
+        return source_name or ''
+    return TEAM_DISPLAY_NAMES.get(source_name, source_name)
+
 
 def _find_project_root() -> Optional[Path]:
     """Find the project root by looking for libraries.csv up from this file."""
@@ -542,10 +596,8 @@ class FjmsService:
 
     # ── Bibliography & Catalog Refs (Phase 33: META-03) ─────────────
 
-    # Generic source names to filter out from get_source_names()
-    _GENERIC_SOURCE_NAMES = frozenset({
-        'Inventory', 'Nuscha', 'Institution', 'Instatution', 'Collection', 'Other',
-    })
+    # Reference module-level constant for backward compatibility
+    _GENERIC_SOURCE_NAMES = GENERIC_SOURCE_NAMES
 
     def get_bibliography(self, sys_id: str) -> list[dict]:
         """
@@ -708,7 +760,8 @@ class FjmsService:
         Get structured catalog detail for the dialog display.
 
         Returns all catalog data for a manuscript grouped by child table:
-        records, running titles, sizes, fields, and free descriptions.
+        records, running titles, sizes, fields, free descriptions,
+        full texts, textual frames, and mentions.
 
         Args:
             sys_id: The Alma/system ID for the manuscript.
@@ -722,6 +775,11 @@ class FjmsService:
                     {"size_x": float, "size_y": float, "inner_size_x": float, "inner_size_y": float}
                 - fields: dict mapping UnitCatalogRecId -> {FieldCategory: [{"value": str, "value_heb": str}]}
                 - free_descriptions: list of {"text": str, "signature_id": int}
+                - full_texts: list of {"text": str, "signature_id": int}
+                - textual_frames: dict mapping UnitCatalogRecId -> list of
+                    {"heb": str, "eng": str}
+                - mentions: dict mapping UnitCatalogRecId -> list of
+                    {"mention_type": str, "mention": str, "mention_desc": str}
         """
         empty = {
             "records": [],
@@ -729,6 +787,9 @@ class FjmsService:
             "sizes": {},
             "fields": {},
             "free_descriptions": [],
+            "full_texts": [],
+            "textual_frames": {},
+            "mentions": {},
         }
         if self._conn is None:
             return empty
@@ -814,12 +875,72 @@ class FjmsService:
         except Exception as e:
             logger.debug(f"FjmsService.get_catalog_detail free_desc error for {sys_id}: {e}")
 
+        # 6. Full texts (v4.0.0+, may not exist in older sidecars)
+        full_texts = []
+        try:
+            cursor = self._conn.execute(
+                "SELECT SignatureId, FullText "
+                "FROM catalog_full_texts WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                text = row["FullText"]
+                if text and str(text).strip():
+                    full_texts.append({
+                        "text": row["FullText"],
+                        "signature_id": row["SignatureId"],
+                    })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail full_texts error for {sys_id}: {e}")
+
+        # 7. Detailed textual frames (v4.0.0+, may not exist in older sidecars)
+        textual_frames = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, TextualFrameHeb, TextualFrameEng "
+                "FROM catalog_textual_frames WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in textual_frames:
+                    textual_frames[rec_id] = []
+                textual_frames[rec_id].append({
+                    "heb": row["TextualFrameHeb"],
+                    "eng": row["TextualFrameEng"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail textual_frames error for {sys_id}: {e}")
+
+        # 8. Mentions (v4.0.0+, may not exist in older sidecars)
+        mentions = {}
+        try:
+            cursor = self._conn.execute(
+                "SELECT UnitCatalogRecId, MentionType, Mention, MentionDesc "
+                "FROM catalog_mentions WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            for row in cursor:
+                rec_id = row["UnitCatalogRecId"]
+                if rec_id not in mentions:
+                    mentions[rec_id] = []
+                mentions[rec_id].append({
+                    "mention_type": row["MentionType"],
+                    "mention": row["Mention"],
+                    "mention_desc": row["MentionDesc"],
+                })
+        except Exception as e:
+            logger.debug(f"FjmsService.get_catalog_detail mentions error for {sys_id}: {e}")
+
         return {
             "records": records,
             "running_titles": running_titles,
             "sizes": sizes,
             "fields": fields,
             "free_descriptions": free_descriptions,
+            "full_texts": full_texts,
+            "textual_frames": textual_frames,
+            "mentions": mentions,
         }
 
     def close(self):

@@ -5188,14 +5188,17 @@ class FjmsCatalogDialog(QDialog):
     def __init__(self, detail: dict, sys_id: str = '', shelfmark: str = '', parent=None):
         super().__init__(parent)
         self.setWindowTitle(f'{tr("Catalog Records")} \u2014 {shelfmark}' if shelfmark else tr('Catalog Records'))
-        self.setMinimumSize(700, 500)
-        self.resize(850, 650)
+        self.setMinimumSize(800, 500)
+        self.resize(900, 650)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Header
-        header = QLabel(f'<h3 style="color: #6c3483;">{tr("Catalog Records")} \u2014 {shelfmark}</h3>')
+        # Header — use palette text color so it works in dark mode
+        palette = QApplication.palette()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        header_color = '#bb86fc' if is_dark else '#6c3483'
+        header = QLabel(f'<h3 style="color: {header_color};">{tr("Catalog Records")} \u2014 {shelfmark}</h3>')
         layout.addWidget(header)
 
         # Content browser
@@ -5214,21 +5217,46 @@ class FjmsCatalogDialog(QDialog):
 
     def _build_html(self, detail: dict) -> str:
         """Build HTML table mirroring FIST Cataloging Data Details view."""
-        from shared.fjms_service import parse_textual_frame, split_textual_frames
+        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, GENERIC_SOURCE_NAMES
 
         records = detail.get("records", [])
         running_titles = detail.get("running_titles", {})
         sizes = detail.get("sizes", {})
         fields = detail.get("fields", {})
         free_descriptions = detail.get("free_descriptions", [])
+        full_texts = detail.get("full_texts", [])
+        textual_frames = detail.get("textual_frames", {})
+        mentions = detail.get("mentions", {})
 
         is_heb = CURRENT_LANG == 'he'
 
-        # Group records by source_name to get team columns
+        # Dark mode detection — define color palette for HTML
+        palette = QApplication.palette()
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+        base_color = palette.color(QPalette.ColorRole.Base).name()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        c = {
+            'text': text_color,
+            'base': base_color,
+            'muted': '#777' if is_dark else '#999',
+            'border': '#444' if is_dark else '#eee',
+            'section_bg': '#2d1f3d' if is_dark else '#f3e5f5',
+            'section_text': '#bb86fc' if is_dark else '#6c3483',
+            'label': '#aaa' if is_dark else '#555',
+            'header_border': '#9b59b6',
+            'full_text_bg': '#2a2a2a' if is_dark else '#fafafa',
+            'author_muted': '#888' if is_dark else 'gray',
+        }
+        # Store for use in helper methods
+        self._colors = c
+
+        # Group records by source_name to get team columns, skipping generic sources
         teams = []
         team_map = {}
         for rec in records:
             sn = rec.get("source_name") or tr("Unknown")
+            if sn in GENERIC_SOURCE_NAMES:
+                continue
             if sn not in team_map:
                 team_map[sn] = len(teams)
                 teams.append({
@@ -5241,28 +5269,41 @@ class FjmsCatalogDialog(QDialog):
         num_teams = len(teams)
         total_cols = num_teams + 1  # label column + team columns
 
-        if num_teams == 0 and not free_descriptions:
-            return f'<p style="color: gray;">{tr("No catalog data available") if False else "No catalog data available"}</p>'
+        if num_teams == 0 and not free_descriptions and not full_texts:
+            return f'<p style="color: {c["muted"]};">No catalog data available</p>'
+
+        # Calculate column widths for table-layout:fixed
+        label_width = 130
+        team_col_width = max(150, (700 - label_width) // max(num_teams, 1)) if num_teams > 0 else 150
 
         html_parts = []
         html_parts.append(
-            '<table style="width:100%; border-collapse:collapse; font-family:Arial; font-size:13px;">'
+            f'<table style="width:100%; border-collapse:collapse; table-layout:fixed; '
+            f'font-family:Arial; font-size:13px; color:{c["text"]};">'
         )
+        # Column width definitions
+        if num_teams > 0:
+            html_parts.append(f'<colgroup><col style="width:{label_width}px;"/>')
+            for _ in teams:
+                html_parts.append(f'<col style="width:{team_col_width}px;"/>')
+            html_parts.append('</colgroup>')
 
         if num_teams > 0:
             # === Team header row ===
             html_parts.append('<tr>')
-            html_parts.append('<th style="padding:8px; min-width:120px;"></th>')
+            html_parts.append(f'<th style="padding:8px;"></th>')
             for team in teams:
-                team_name = team["source_name_heb"] if is_heb else team["source_name"]
+                raw_name = team["source_name_heb"] if is_heb else team["source_name"]
+                team_name = get_team_display_name(raw_name) if not is_heb else raw_name
                 first_rec = team["records"][0] if team["records"] else None
                 author_html = ''
                 if first_rec:
                     author = first_rec.get("author_text", "")
                     if author and str(author).strip():
-                        author_html = f'<br/><span style="font-weight:normal; font-size:11px; color:gray;">{str(author).strip()}</span>'
+                        author_html = f'<br/><span style="font-weight:normal; font-size:11px; color:{c["author_muted"]};">{str(author).strip()}</span>'
                 html_parts.append(
-                    f'<th style="padding:8px; border-bottom:2px solid #9b59b6; text-align:left;">'
+                    f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; text-align:left; '
+                    f'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{team_name}">'
                     f'{team_name}{author_html}</th>'
                 )
             html_parts.append('</tr>')
@@ -5340,6 +5381,21 @@ class FjmsCatalogDialog(QDialog):
                 rt_vals.append('; '.join(titles) if titles else '')
             html_parts.append(self._field_row(tr('Running Title'), rt_vals, is_heb))
 
+            # Detailed Content (from catalog_textual_frames)
+            if textual_frames:
+                dc_vals = []
+                for team in teams:
+                    frames = []
+                    for rec in team["records"]:
+                        rec_id = rec.get("unit_catalog_rec_id")
+                        if rec_id and rec_id in textual_frames:
+                            for tf in textual_frames[rec_id]:
+                                text = tf.get("heb") if is_heb and tf.get("heb") else tf.get("eng")
+                                if text and str(text).strip():
+                                    frames.append(str(text).strip())
+                    dc_vals.append('; '.join(frames) if frames else '')
+                html_parts.append(self._field_row(tr('Detailed Content'), dc_vals, is_heb))
+
             # GenizahTitle
             gt_vals = []
             for team in teams:
@@ -5353,7 +5409,34 @@ class FjmsCatalogDialog(QDialog):
                 gt_vals.append('; '.join(titles) if titles else '')
             html_parts.append(self._field_row(tr('Title'), gt_vals, is_heb))
 
-            # === Section 3: Script Description ===
+            # === Section 3: Mentions ===
+            if mentions:
+                html_parts.append(self._section_row(tr('Mentions'), total_cols))
+                mention_types_ordered = ['Personalities', 'Places', 'Creations', 'Dates', 'Groups']
+                all_types = set()
+                for rec_id, items in mentions.items():
+                    for item in items:
+                        mt = item.get("mention_type")
+                        if mt:
+                            all_types.add(mt)
+                extra_types = sorted(all_types - set(mention_types_ordered))
+                type_order = [t for t in mention_types_ordered if t in all_types] + extra_types
+                for mention_type in type_order:
+                    mn_vals = []
+                    for team in teams:
+                        names = []
+                        for rec in team["records"]:
+                            rec_id = rec.get("unit_catalog_rec_id")
+                            if rec_id and rec_id in mentions:
+                                for m in mentions[rec_id]:
+                                    if m.get("mention_type") == mention_type:
+                                        name = m.get("mention", "")
+                                        if name and str(name).strip():
+                                            names.append(str(name).strip())
+                        mn_vals.append(', '.join(names) if names else '')
+                    html_parts.append(self._field_row(tr(mention_type), mn_vals, is_heb))
+
+            # === Section 4: Script Description ===
             html_parts.append(self._section_row(tr('Script Description'), total_cols))
 
             html_parts.append(self._field_category_row('GenizahLanguages', tr('Language'), teams, fields, is_heb))
@@ -5362,7 +5445,7 @@ class FjmsCatalogDialog(QDialog):
             html_parts.append(self._field_category_row('TypeOfScriptPlace', tr('Script Place'), teams, fields, is_heb))
             html_parts.append(self._field_category_row('TypeOfVocalization', tr('Vocalization'), teams, fields, is_heb))
 
-            # === Section 4: Format Description ===
+            # === Section 5: Format Description ===
             html_parts.append(self._section_row(tr('Format Description'), total_cols))
 
             # No. of Rows
@@ -5408,49 +5491,65 @@ class FjmsCatalogDialog(QDialog):
                 size_vals.append('; '.join(size_parts) if size_parts else '')
             html_parts.append(self._field_row(tr('Size'), size_vals, is_heb))
 
-        # === Section 5: Miscellaneous ===
-        if free_descriptions:
+        # === Section 6: Miscellaneous ===
+        if free_descriptions or full_texts:
             html_parts.append(self._section_row(tr('Miscellaneous'), total_cols if num_teams > 0 else 2))
 
             dir_attr = ' dir="rtl"' if is_heb else ''
+            col_span = total_cols if num_teams > 0 else 2
             for desc in free_descriptions:
                 text = desc.get("text", "")
                 if text and str(text).strip():
                     html_parts.append(
-                        f'<tr><td colspan="{total_cols if num_teams > 0 else 2}" '
-                        f'style="padding:8px; border-bottom:1px solid #eee;{" direction:rtl; text-align:right;" if is_heb else ""}"'
+                        f'<tr><td colspan="{col_span}" '
+                        f'style="padding:8px; border-bottom:1px solid {c["border"]};{" direction:rtl; text-align:right;" if is_heb else ""}"'
                         f'{dir_attr}>{str(text).strip()}</td></tr>'
                     )
+
+            # Full texts (scholarly descriptions) with distinct styling
+            if full_texts:
+                html_parts.append(
+                    f'<tr><td colspan="{col_span}" style="padding:6px 8px; font-weight:bold; '
+                    f'color:{c["section_text"]}; font-size:12px;">{tr("Scholarly Description")}</td></tr>'
+                )
+                for ft in full_texts:
+                    text = ft.get("text", "")
+                    if text and str(text).strip():
+                        html_parts.append(
+                            f'<tr><td colspan="{col_span}" '
+                            f'style="padding:8px; border-bottom:1px solid {c["border"]}; background:{c["full_text_bg"]};'
+                            f'{" direction:rtl; text-align:right;" if is_heb else ""}"'
+                            f'{dir_attr}>{str(text).strip()}</td></tr>'
+                        )
 
         html_parts.append('</table>')
         return '\n'.join(html_parts)
 
-    @staticmethod
-    def _section_row(title: str, colspan: int) -> str:
+    def _section_row(self, title: str, colspan: int) -> str:
         """Build a section header row."""
+        c = self._colors
         return (
-            f'<tr><td colspan="{colspan}" style="background:#f3e5f5; font-weight:bold; '
-            f'padding:8px; color:#6c3483; font-size:13px;">{title}</td></tr>'
+            f'<tr><td colspan="{colspan}" style="background:{c["section_bg"]}; font-weight:bold; '
+            f'padding:8px; color:{c["section_text"]}; font-size:13px;">{title}</td></tr>'
         )
 
-    @staticmethod
-    def _field_row(label: str, values: list, is_heb: bool) -> str:
+    def _field_row(self, label: str, values: list, is_heb: bool) -> str:
         """Build a field row: label in first column, values in team columns.
         Returns empty string if all values are empty (hides row)."""
         if not any(v for v in values):
             return ''
+        c = self._colors
         dir_style = ' direction:rtl; text-align:right;' if is_heb else ''
-        cells = [f'<td style="padding:6px 8px; font-weight:bold; color:#555; min-width:120px; vertical-align:top;">{label}</td>']
+        cells = [f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;">{label}</td>']
         for val in values:
             display = str(val).strip() if val else '\u2014'
-            style = f'padding:6px 8px; border-bottom:1px solid #eee; vertical-align:top;{dir_style}'
+            style = f'padding:6px 8px; border-bottom:1px solid {c["border"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{dir_style}'
             if not val:
-                style += ' color:#999;'
+                style += f' color:{c["muted"]};'
             cells.append(f'<td style="{style}">{display}</td>')
         return '<tr>' + ''.join(cells) + '</tr>'
 
-    @staticmethod
-    def _field_category_row(category: str, label: str, teams: list, fields: dict, is_heb: bool) -> str:
+    def _field_category_row(self, category: str, label: str, teams: list, fields: dict, is_heb: bool) -> str:
         """Build a row for a specific FieldCategory from catalog_fields."""
         vals = []
         for team in teams:
@@ -5466,7 +5565,7 @@ class FjmsCatalogDialog(QDialog):
                         if val and str(val).strip():
                             field_vals.append(str(val).strip())
             vals.append('; '.join(field_vals) if field_vals else '')
-        return FjmsCatalogDialog._field_row(label, vals, is_heb)
+        return self._field_row(label, vals, is_heb)
 
     @staticmethod
     def _fmt_num(val) -> str:
