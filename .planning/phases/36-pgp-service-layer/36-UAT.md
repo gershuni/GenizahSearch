@@ -1,9 +1,9 @@
 ---
-status: complete
+status: resolved
 phase: 36-pgp-service-layer
 source: 36-01-SUMMARY.md, 36-02-SUMMARY.md
 started: 2026-02-17T06:00:00Z
-updated: 2026-02-17T06:15:00Z
+updated: 2026-02-17T06:45:00Z
 ---
 
 ## Current Test
@@ -53,11 +53,14 @@ skipped: 0
 ## Gaps
 
 - truth: "PGP metadata (tags, type, description) should display on browse page for PGP-linked documents"
-  status: failed
+  status: resolved
   reason: "User reported: 990053173470205171 I see transcription but not PGP link to tags. Also 990053655710205171 for example - there I see no PGP info, though in search results there was PGP tag"
   severity: major
   test: 1
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "FL ID initialization path in browse.py (lines 4139-4160) never sets state.pgp_metadata. The load_page() path (lines 922-937) correctly sets it, but when navigating via URL with fl_id (from search results), the FL ID branch executes instead and skips pgp_metadata assignment."
+  artifacts:
+    - path: "web/pages/browse.py"
+      issue: "FL ID init path (lines 4139-4160) missing state.pgp_metadata assignment"
+  missing:
+    - "Add state.pgp_metadata = {...} block into FL ID init path after line 4140 (if pgp_doc:), mirroring lines 924-937"
+  debug_session: ".planning/debug/pgp-metadata-browse-gap.md"
