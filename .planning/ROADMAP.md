@@ -139,7 +139,7 @@ Plans:
 **Depends on**: Nothing (can run parallel to Phase 36; only depends on fjms_enrichment.db existing, which shipped in v5.8.0)
 **Requirements**: FJMS-01, FJMS-02, FJMS-03
 **Success Criteria** (what must be TRUE):
-  1. FJMS catalog descriptions (65K records) are stored in fjms_enrichment.db full_texts table
+  1. FJMS catalog descriptions (~96K records with TextualFrame data) are accessible in fjms_enrichment.db's existing `catalog` table (pre-satisfied by v5.8.0; verified, not exported — per CONTEXT.md decision: no new `full_texts` table)
   2. User clicks a dedicated button in the browse metadata panel and sees the FJMS scholarly description for that manuscript
   3. Each description shows source attribution (catalog name and/or scholar)
 **Plans**: 3 plans
