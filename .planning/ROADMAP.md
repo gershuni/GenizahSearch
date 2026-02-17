@@ -128,7 +128,10 @@ Plans:
   3. Search results show PGP transcription indicators (batch lookup) with results identical to Supabase-backed version
   4. PGP tag-based search returns the same results as before (using SQLite json_each instead of Supabase GIN)
   5. Version selector displays all PGP editions and translations with correct section parsing
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 36-01-PLAN.md — PgpService class rewrite (Supabase to SQLite) + web shim update
+- [ ] 36-02-PLAN.md — Test suite rewrite (in-memory SQLite fixtures) + import smoke tests
 
 ### Phase 37: FJMS Catalog Descriptions
 **Goal**: Researchers can access 65K FJMS scholarly descriptions from the browse page in both apps
@@ -159,7 +162,7 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 0/1 | Complete    | 2026-02-17 |
-| 36. PGP Service Layer | 0/TBD | Not started | - |
+| 36. PGP Service Layer | 0/2 | Not started | - |
 | 37. FJMS Catalog Descriptions | 0/TBD | Not started | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
