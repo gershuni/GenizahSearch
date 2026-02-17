@@ -1,79 +1,84 @@
 ---
 phase: 37-fjms-catalog-descriptions
 plan: 02
-subsystem: ui
-tags: [pyqt6, desktop, fjms, catalog, qdialog, qtextbrowser]
+subsystem: service
+tags: [sqlite, fjms, service-layer, testing, translations]
 
 # Dependency graph
 requires:
-  - phase: 25-fjms-integration
-    provides: shared/fjms_service.py with get_catalog_records, split_textual_frames, parse_textual_frame
+  - phase: 37-fjms-catalog-descriptions
+    provides: "v3.0.0 sidecar with 4 new catalog child tables"
 provides:
-  - FjmsCatalogDialog QDialog class in genizah_app.py
-  - Desktop browse "Catalog Records (N)" button with source-grouped dialog
-  - Desktop ResultDialog "Catalog Records (N)" button in action_row and compact_layout
-affects: [37-fjms-catalog-descriptions, desktop-ui]
+  - "get_catalog_source_counts() for batch button label counts excluding generic sources"
+  - "get_catalog_detail() returning structured dict with records, running_titles, sizes, fields, free_descriptions"
+  - "v3.0.0-compatible get_catalog() and get_catalog_records() with new columns"
+  - "Test fixtures updated to v3.0.0 schema with 4 child tables"
+  - "10 translation keys for catalog dialog labels"
+affects: [37-03, 37-04, fjms-catalog-dialog]
 
 # Tech tracking
 tech-stack:
   added: []
   patterns:
-    - "Always-visible disabled button with (0) count for optional FJMS data"
-    - "Source-grouped dialog with language-aware fallback (CURRENT_LANG)"
+    - "Graceful child-table fallback: try/except per sub-query returning empty defaults for backward compat"
+    - "Batch source count query with generic name exclusion via NOT IN clause"
 
 key-files:
   created: []
   modified:
-    - genizah_app.py
+    - "shared/fjms_service.py"
+    - "tests/test_fjms_service.py"
+    - "genizah_translations.py"
 
 key-decisions:
-  - "Button always visible but disabled when 0 records (not hidden) per FJMS-03 requirement"
-  - "Separate SQLite fetch for button population (negligible overhead, avoids refactoring _build_fjms_catalog_html signature)"
-  - "KTIV link only shown when sys_id is present (conditional in bottom row)"
+  - "get_catalog_detail() wraps each child-table query in try/except for backward compat with old sidecars missing tables"
+  - "New v3.0.0 columns accessed via col_names membership check for backward compat"
+  - "Skipped 'Size' translation key (already exists at line 1658)"
 
 patterns-established:
-  - "FjmsCatalogDialog: source-grouped free-text dialog pattern (vs table-based FjmsBibliographyDialog)"
+  - "Child-table graceful fallback: each sub-query independently fails to empty defaults"
 
-requirements-completed: [FJMS-02, FJMS-03]
+requirements-completed: [FJMS-01, FJMS-03]
 
 # Metrics
 duration: 5min
 completed: 2026-02-17
 ---
 
-# Phase 37 Plan 02: Desktop Catalog Records Summary
+# Phase 37 Plan 02: Service Layer for Catalog Detail Summary
 
-**FjmsCatalogDialog with source-grouped descriptions, wired into desktop browse ext_info_row and ResultDialog action/compact rows**
+**Added get_catalog_source_counts() and get_catalog_detail() methods to FjmsService with v3.0.0 schema support, 46 passing tests, and 10 Hebrew translation keys for dialog labels**
 
 ## Performance
 
 - **Duration:** 5 min
-- **Started:** 2026-02-17T09:55:58Z
-- **Completed:** 2026-02-17T10:01:13Z
+- **Started:** 2026-02-17T15:38:37Z
+- **Completed:** 2026-02-17T15:43:31Z
 - **Tasks:** 2
-- **Files modified:** 1
+- **Files modified:** 3
 
 ## Accomplishments
-- Created FjmsCatalogDialog QDialog with source-grouped, language-aware catalog descriptions
-- Wired "Catalog Records (N)" button into desktop browse ext_info_row (always visible, disabled when 0)
-- Wired "Catalog Records (N)" button into ResultDialog action_row and compact_layout
-- TextualFrame content rendered with category labels, RTL/LTR auto-detection, and styled HTML
-- Proper reset on page change to prevent stale catalog data
+- Added 2 new service methods: `get_catalog_source_counts()` for batch button labels and `get_catalog_detail()` for structured dialog data
+- Updated `get_catalog()` and `get_catalog_records()` to remove DescriptionEng/DescriptionHeb and add v3.0.0 columns (UnitCatalogRecId, NumFolio, NumColumn, NumRow, GenizahTitleOrgTitle, GenizahTitleEngTitle)
+- Updated test fixture from old schema to v3.0.0 with 4 new child tables; all 46 tests pass (40 existing + 6 new)
+- Added 10 Hebrew translation keys for catalog dialog labels
 
 ## Task Commits
 
 Each task was committed atomically:
 
-1. **Task 1: Create FjmsCatalogDialog class** - `4df369f4` (feat)
-2. **Task 2: Wire catalog records buttons into desktop browse and ResultDialog** - `4c5e8c92` (feat)
+1. **Task 1: Add get_catalog_source_counts() and get_catalog_detail() to FjmsService** - `bd3137bc` (feat)
+2. **Task 2: Update test fixtures and add tests for new methods, plus translation keys** - `9bb36dc8` (test)
 
 ## Files Created/Modified
-- `genizah_app.py` - FjmsCatalogDialog class + browse/ResultDialog button wiring
+- `shared/fjms_service.py` - Added get_catalog_source_counts(), get_catalog_detail(); updated get_catalog() and get_catalog_records() for v3.0.0 schema
+- `tests/test_fjms_service.py` - Updated fixture to v3.0.0 schema with child tables; added 6 new tests
+- `genizah_translations.py` - Added 10 translation keys (Catalog Records, Running Title, Free Description, etc.)
 
 ## Decisions Made
-- Button uses always-visible disabled pattern (not hidden) per FJMS-03 requirement -- consistent with how catalog data availability is communicated
-- Separate SQLite fetch for button population rather than refactoring _build_fjms_catalog_html -- negligible overhead for local SQLite, simpler code
-- KTIV link conditionally shown only when sys_id present -- avoids malformed URLs
+- Each child-table sub-query in get_catalog_detail() is independently wrapped in try/except, returning empty defaults if the table doesn't exist -- this provides backward compatibility with old sidecars
+- New columns (UnitCatalogRecId, NumFolio, etc.) are accessed via `col_names` membership check rather than unconditional access, for same backward compatibility
+- "Size" translation key was already present (line 1658), so it was not duplicated
 
 ## Deviations from Plan
 
@@ -86,15 +91,10 @@ None
 None - no external service configuration required.
 
 ## Next Phase Readiness
-- Desktop catalog records dialog fully functional
-- Ready for Phase 37 Plan 03 (web catalog records)
-
-## Self-Check: PASSED
-
-- FOUND: genizah_app.py
-- FOUND: commit 4df369f4 (Task 1)
-- FOUND: commit 4c5e8c92 (Task 2)
-- FOUND: class FjmsCatalogDialog (AST verified)
+- Service API complete for dialog consumption (Plans 03, 04)
+- get_catalog_source_counts() ready for search card button labels
+- get_catalog_detail() returns all 5 data sections: records, running_titles, sizes, fields, free_descriptions
+- Translation keys ready for web and desktop dialog UI
 
 ---
 *Phase: 37-fjms-catalog-descriptions*

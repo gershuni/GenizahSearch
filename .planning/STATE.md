@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 37 of 38 (FJMS Catalog Descriptions)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: Executing Phase 37 plans
-Last activity: 2026-02-17 -- Completed 37-01 (FIST enrichment export v3)
+Last activity: 2026-02-17 -- Completed 37-02 (service layer for catalog detail)
 
-Progress: [##░░░░░░░░] 25% (Phase 37: 1/4 plans)
+Progress: [#####░░░░░] 50% (Phase 37: 2/4 plans)
 
 ## Performance Metrics
 
@@ -34,7 +34,7 @@ Progress: [##░░░░░░░░] 25% (Phase 37: 1/4 plans)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 4 | 40 min |
+| v6.0.0 | 35-38 | 5 | 45 min |
 
 ## Accumulated Context
 
@@ -58,13 +58,15 @@ Recent decisions affecting current work:
 - Phase 37-01: Contentless FTS5 (content='') for cross-table aggregation (catalog + running titles + free desc)
 - Phase 37-01: catalog_free_desc joins via SignatureId (not UnitCatalogRecId) per FIST schema
 - Phase 37-01: catalog_fields resolves categories via CODE_FullCode -> CODE_FCDTable two-hop JOIN
+- Phase 37-02: get_catalog_detail() wraps each child-table sub-query in try/except for backward compat with old sidecars
+- Phase 37-02: New v3.0.0 columns accessed via col_names membership check for backward compat
 
 ### Blockers/Concerns
 
 - Phase 13 (Transcription Search) still deferred -- needs server-side index architecture
 - Tags json_each() benchmarked: 115ms for get_all_distinct_tags (2695 tags), 63ms for tag search -- acceptable
 - FJMS/PGP overlap extent unknown -- affects dedup strategy in Phase 38
-- Phase 37 export enrichment complete (37-01); service layer + UI plans remaining
+- Phase 37 export enrichment + service layer complete (37-01, 37-02); UI plans remaining (03, 04)
 
 ### Pending Todos
 
@@ -77,6 +79,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 37-01-PLAN.md (FIST enrichment export v3)
-Resume file: .planning/phases/37-fjms-catalog-descriptions/37-01-SUMMARY.md
-Notes: Phase 37-01 complete. fjms_enrichment.db v3.0.0 with 4 new tables (2.1M rows), v2 catalog schema, contentless FTS5. Next: 37-02 (service layer).
+Stopped at: Completed 37-02-PLAN.md (service layer for catalog detail)
+Resume file: .planning/phases/37-fjms-catalog-descriptions/37-02-SUMMARY.md
+Notes: Phase 37-02 complete. Service layer with get_catalog_source_counts() and get_catalog_detail(), 46 tests passing, 10 translation keys. Next: 37-03 (web dialog UI).
