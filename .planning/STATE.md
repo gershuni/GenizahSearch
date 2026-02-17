@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 37 of 38 (FJMS Catalog Descriptions)
-Plan: 2 of 3 in current phase (37-01 and 37-02 complete)
-Status: Executing Phase 37
-Last activity: 2026-02-17 -- Completed 37-01 web catalog records dialog and browse button
+Plan: 3 of 3 in current phase (37-01, 37-02, and 37-03 complete)
+Status: Phase 37 Complete
+Last activity: 2026-02-17 -- Completed 37-03 search catalog records button
 
-Progress: [######----] 67% (Phase 37)
+Progress: [##########] 100% (Phase 37)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 108 (across 7 milestones)
+- Total plans completed: 109 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -59,6 +59,9 @@ Recent decisions affecting current work:
 - Phase 37: Separate SQLite fetch for button population vs _build_fjms_catalog_html (negligible overhead)
 - Phase 37-01: FJMS-01 pre-satisfied by existing catalog table (96K rows with TextualFrame data)
 - Phase 37-01: catalog_records initialized to [] before fjms.is_available() for safe button rendering
+- Phase 37-03: Separate io_bound call for catalog counts (not combined with domain fetch) -- minimal code change
+- Phase 37-03: Visible-only-when-data-exists for search cards (vs always-visible-disabled on browse) -- 200 results too noisy
+- Phase 37-03: Lazy-load full records on click (only counts pre-fetched in batch) -- fast search flow
 
 ### Blockers/Concerns
 
@@ -76,6 +79,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 37-01-PLAN.md (web catalog records dialog and browse button)
-Resume file: .planning/phases/37-fjms-catalog-descriptions/37-01-SUMMARY.md
-Notes: Phase 37 Plans 01 and 02 complete. Ready for 37-03 (search enrichment).
+Stopped at: Completed 37-03-PLAN.md (search catalog records button)
+Resume file: .planning/phases/37-fjms-catalog-descriptions/37-03-SUMMARY.md
+Notes: Phase 37 complete (all 3 plans). FJMS catalog records integrated in browse and search.
