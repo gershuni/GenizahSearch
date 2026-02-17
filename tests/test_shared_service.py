@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Smoke tests for shared service layer extraction (Phase 8).
+Smoke tests for shared service layer.
 
 Verifies:
 - shared package is importable
 - shared.supabase_provider exports get_client and reset_client
-- shared.document_service exports all 12 functions
-- web.document_service shim re-exports all 12 functions
+- shared.document_service exports all public names (14 functions + PgpService + get_pgp_service)
+- web.document_service shim re-exports all public names
 - web.supabase_client.get_client still works
 - Desktop importability (shared works without web/ on sys.path)
 """
@@ -27,9 +27,9 @@ class TestSharedProviderImport:
 
 
 class TestSharedDocumentServiceImport:
-    """Verify all 12 functions importable from shared.document_service."""
+    """Verify all public names importable from shared.document_service."""
 
-    def test_all_12_functions_importable(self):
+    def test_all_functions_importable(self):
         from shared.document_service import (
             get_document_for_fragment,
             get_fragments_for_document,
@@ -43,20 +43,28 @@ class TestSharedDocumentServiceImport:
             get_translations_for_document,
             get_sys_ids_with_transcriptions,
             get_fragments_by_tag,
+            get_all_distinct_tags,
+            parse_html_sections,
+            get_pgp_service,
+            PgpService,
         )
         for fn in [get_document_for_fragment, get_fragments_for_document,
                     get_transcription_for_document, get_document_metadata,
                     parse_transcription_sections, get_section_for_page,
                     get_sources_for_document, get_all_sources_for_fragment,
                     get_editions_for_document, get_translations_for_document,
-                    get_sys_ids_with_transcriptions, get_fragments_by_tag]:
+                    get_sys_ids_with_transcriptions, get_fragments_by_tag,
+                    get_all_distinct_tags, parse_html_sections,
+                    get_pgp_service]:
             assert callable(fn)
+        # PgpService is a class, verify it's a type
+        assert isinstance(PgpService, type)
 
 
 class TestWebShimReexports:
-    """Verify web.document_service shim re-exports all 12 functions."""
+    """Verify web.document_service shim re-exports all public names."""
 
-    def test_shim_reexports_all_12(self):
+    def test_shim_reexports_all(self):
         from web.document_service import (
             get_document_for_fragment,
             get_fragments_for_document,
@@ -70,13 +78,18 @@ class TestWebShimReexports:
             get_translations_for_document,
             get_sys_ids_with_transcriptions,
             get_fragments_by_tag,
+            get_all_distinct_tags,
+            parse_html_sections,
+            get_pgp_service,
         )
         for fn in [get_document_for_fragment, get_fragments_for_document,
                     get_transcription_for_document, get_document_metadata,
                     parse_transcription_sections, get_section_for_page,
                     get_sources_for_document, get_all_sources_for_fragment,
                     get_editions_for_document, get_translations_for_document,
-                    get_sys_ids_with_transcriptions, get_fragments_by_tag]:
+                    get_sys_ids_with_transcriptions, get_fragments_by_tag,
+                    get_all_distinct_tags, parse_html_sections,
+                    get_pgp_service]:
             assert callable(fn)
 
     def test_shim_and_shared_are_same_objects(self):
