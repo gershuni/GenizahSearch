@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 37 of 38 (FJMS Catalog Descriptions)
-Plan: 2 of 3 in current phase
+Plan: 2 of 3 in current phase (37-01 and 37-02 complete)
 Status: Executing Phase 37
-Last activity: 2026-02-17 -- Completed 37-02 desktop catalog records dialog
+Last activity: 2026-02-17 -- Completed 37-01 web catalog records dialog and browse button
 
 Progress: [######----] 67% (Phase 37)
 
@@ -34,7 +34,7 @@ Progress: [######----] 67% (Phase 37)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 4+ | 23 min |
+| v6.0.0 | 35-38 | 4+ | 30 min |
 
 ## Accumulated Context
 
@@ -57,6 +57,8 @@ Recent decisions affecting current work:
 - Phase 36: Inline dict assignment (no helper extraction) for FL ID path pgp_metadata -- matches existing load_page pattern
 - Phase 37: Always-visible disabled button pattern for catalog records (not hidden when 0)
 - Phase 37: Separate SQLite fetch for button population vs _build_fjms_catalog_html (negligible overhead)
+- Phase 37-01: FJMS-01 pre-satisfied by existing catalog table (96K rows with TextualFrame data)
+- Phase 37-01: catalog_records initialized to [] before fjms.is_available() for safe button rendering
 
 ### Blockers/Concerns
 
@@ -74,6 +76,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 37-02-PLAN.md (desktop catalog records dialog)
-Resume file: .planning/phases/37-fjms-catalog-descriptions/37-02-SUMMARY.md
-Notes: Phase 37 Plan 02 complete. Ready for 37-03 (web catalog records).
+Stopped at: Completed 37-01-PLAN.md (web catalog records dialog and browse button)
+Resume file: .planning/phases/37-fjms-catalog-descriptions/37-01-SUMMARY.md
+Notes: Phase 37 Plans 01 and 02 complete. Ready for 37-03 (search enrichment).
