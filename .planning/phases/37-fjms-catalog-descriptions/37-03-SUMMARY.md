@@ -2,101 +2,107 @@
 phase: 37-fjms-catalog-descriptions
 plan: 03
 subsystem: ui
-tags: [nicegui, fjms, catalog, search, batch-enrichment, sqlite]
+tags: [nicegui, fjms, catalog-dialog, web-ui, translations]
 
 # Dependency graph
 requires:
-  - phase: 37-01
-    provides: "catalog_dialog.py component and get_catalog_record_counts batch method"
+  - phase: 37-fjms-catalog-descriptions
+    provides: "get_catalog_detail() and get_catalog_source_counts() service methods"
 provides:
-  - "Catalog Records (N) button on search result cards"
-  - "Batch catalog count enrichment in search execution flow"
-affects: [search, fjms]
+  - "show_catalog_dialog() NiceGUI component with FIST 5-section side-by-side layout"
+  - "Catalog Records (N) button on web browse page in bibliography row"
+  - "Catalog Records (N) button on web search result cards with batch-loaded counts"
+  - "7 new Hebrew translation keys for section labels"
+affects: [37-04, fjms-catalog-desktop]
 
 # Tech tracking
 tech-stack:
   added: []
-  patterns: ["visible-when-data-exists for search cards (vs always-visible-disabled on browse)"]
+  patterns:
+    - "show_catalog_dialog() creates + opens dialog in one call (vs create+open pattern of bibliography)"
+    - "Batch catalog source counts fetched alongside domain data during search execution"
+    - "Teams-as-columns layout: group records by source_name, render field rows per team"
 
 key-files:
-  created: []
-  modified: ["web/pages/search.py"]
+  created:
+    - "web/components/catalog_dialog.py"
+  modified:
+    - "web/pages/browse.py"
+    - "web/pages/search.py"
+    - "genizah_translations.py"
 
 key-decisions:
-  - "Separate io_bound call for catalog counts (not combined with domain fetch) for minimal code change"
-  - "Visible-only-when-data-exists pattern for search cards (not always-visible-disabled like browse)"
-  - "Lazy-load full records on button click (only counts pre-fetched in batch)"
+  - "show_catalog_dialog() creates and opens dialog in one call (simpler API than create+open pattern)"
+  - "Catalog button placed in same row as bibliography buttons on browse page"
+  - "Search card button uses batch-loaded counts from get_catalog_source_counts() for performance"
+  - "Free descriptions shown with full text (no collapse) as specified in context decisions"
 
 patterns-established:
-  - "Search card enrichment: batch counts in execute_search, lazy detail fetch on click"
-  - "Closure factory pattern for async click handlers in NiceGUI render loops"
+  - "Catalog dialog pattern: teams-as-columns with 5 labeled section headers"
 
-requirements-completed: [FJMS-02]
+requirements-completed: [FJMS-02, FJMS-03]
 
 # Metrics
-duration: 3min
+duration: 5min
 completed: 2026-02-17
 ---
 
-# Phase 37 Plan 03: Search Catalog Records Button Summary
+# Phase 37 Plan 03: Web Catalog Records Dialog Summary
 
-**Batch catalog count enrichment in search flow with "Catalog Records (N)" button on result cards, lazy-loading full descriptions on click**
+**NiceGUI catalog dialog with FIST 5-section side-by-side team layout, wired into browse page and search cards with batch-loaded source counts**
 
 ## Performance
 
-- **Duration:** 3 min
-- **Started:** 2026-02-17T11:07:04Z
-- **Completed:** 2026-02-17T11:10:50Z
+- **Duration:** 5 min
+- **Started:** 2026-02-17T15:46:03Z
+- **Completed:** 2026-02-17T15:51:00Z
 - **Tasks:** 2
-- **Files modified:** 1
+- **Files modified:** 4
 
 ## Accomplishments
-- Added `catalog_record_counts` state tracking with batch fetch during search enrichment
-- Search result cards show "Catalog Records (N)" button (purple styling) when FJMS catalog data exists
-- Clicking the button lazy-loads full catalog records and opens the dialog from Plan 37-01
-- No performance regression -- batch count query runs alongside existing domain enrichment
+- Created `web/components/catalog_dialog.py` with `show_catalog_dialog()` implementing the FIST "Cataloging Data Details" 5-section layout: Shelfmark Description, Content Description, Script Description, Format Description, Miscellaneous
+- Multi-team side-by-side columns with team headers, author attribution, and per-team field values for all catalog data types (running titles, sizes, fields, free descriptions)
+- Wired "Catalog Records (N)" button into browse page bibliography row and search result cards with batch-loaded counts
+- Added 7 Hebrew translation keys for section labels and UI strings
 
 ## Task Commits
 
 Each task was committed atomically:
 
-1. **Task 1: Add batch catalog count enrichment to search flow** - `92444004` (feat)
-2. **Task 2: Add catalog records button to search result cards** - `1cffe66f` (feat)
-
-**Plan metadata:** (pending)
+1. **Task 1: Create web catalog records dialog component** - `2d04c003` (feat)
+2. **Task 2: Wire catalog button into web browse page and search result cards** - `3643bf26` (feat)
 
 ## Files Created/Modified
-- `web/pages/search.py` - Added catalog_record_counts to SearchUIState, batch enrichment in execute_search, and "Catalog Records (N)" button in create_result_card
+- `web/components/catalog_dialog.py` - New dialog component with FIST 5-section layout, teams-as-columns rendering
+- `web/pages/browse.py` - Added "Catalog Records (N)" button in bibliography row with source count
+- `web/pages/search.py` - Added batch catalog source count lookup and "Catalog Records (N)" button on search cards
+- `genizah_translations.py` - Added 7 translation keys (section labels, "Inner Size", "No catalog data available")
 
 ## Decisions Made
-- **Separate io_bound call for catalog counts:** Rather than combining with the existing domain fetch into a single io_bound call (which would modify more existing code), added a separate parallel `run.io_bound` call. Cleaner separation, minimal code change.
-- **Visible-only-when-data-exists for search cards:** Unlike the browse page (which uses always-visible-disabled pattern), search result cards only show the catalog button when `cat_count > 0`. With up to 200 results, disabled buttons would be too noisy.
-- **Lazy-load full records on click:** Only batch-fetched counts (integers) during search enrichment. Full catalog records are fetched via `io_bound` only when user clicks the button, keeping the search flow fast.
+- `show_catalog_dialog()` creates and opens the dialog in a single call, simpler than the create+open pattern used by bibliography dialogs -- the catalog dialog doesn't need to be created in advance since it's triggered by button click
+- Catalog button placed in the same `ui.row()` as bibliography buttons on browse page, with `flex-wrap` to handle narrow screens
+- Search cards use `search_state.catalog_source_counts` populated during search execution via `get_catalog_source_counts()` batch query -- avoids N+1 queries
+- Free descriptions rendered inline with full text (no collapse/expand), matching context decision
 
 ## Deviations from Plan
 
 None - plan executed exactly as written.
 
 ## Issues Encountered
-- 3 pre-existing test failures detected (KTIV button styling, 2 responsa explosion guard tests) -- all confirmed pre-existing and unrelated to this plan's changes.
+None
 
 ## User Setup Required
-
 None - no external service configuration required.
 
 ## Next Phase Readiness
-- Phase 37 complete (all 3 plans finished)
-- FJMS catalog records integrated in browse page (37-02) and search results (37-03)
-- Ready for Phase 38 or milestone completion
+- Web catalog dialog complete for both browse and search
+- Desktop implementation (Phase 37-04) can follow same data structure patterns
+- All service APIs and translation keys already in place from Phase 37-02
 
 ## Self-Check: PASSED
-
-- FOUND: web/pages/search.py
-- FOUND: commit 92444004 (Task 1)
-- FOUND: commit 1cffe66f (Task 2)
-- catalog_record_counts: 6 occurrences in search.py (init, clear, fetch, populate, 2x button usage)
-- create_catalog_records_dialog: referenced in search.py click handler
-- get_catalog_record_counts: called in batch enrichment
+- web/components/catalog_dialog.py: FOUND
+- Commit 2d04c003: FOUND
+- Commit 3643bf26: FOUND
 
 ---
 *Phase: 37-fjms-catalog-descriptions*
