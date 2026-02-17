@@ -5137,6 +5137,154 @@ class FjmsBibliographyDialog(QDialog):
             self.detail_panel.setVisible(False)
 
 
+class FjmsCatalogDialog(QDialog):
+    """FJMS catalog records dialog with source-grouped scholarly descriptions."""
+
+    def __init__(self, records, sys_id='', shelfmark='', parent=None):
+        super().__init__(parent)
+        self.records = records
+        self.sys_id = sys_id
+        self.setWindowTitle(
+            f"{tr('Catalog Records')} \u2014 {shelfmark}" if shelfmark
+            else tr('Catalog Records')
+        )
+        self.setMinimumSize(700, 500)
+        self.resize(800, 600)
+
+        layout = QVBoxLayout(self)
+
+        # Header label
+        header = QLabel(f"{tr('Catalog Records')} \u2014 {shelfmark}" if shelfmark else tr('Catalog Records'))
+        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #6c3483; padding: 8px;")
+        layout.addWidget(header)
+
+        # Scrollable content area using QTextBrowser
+        self.text_browser = QTextBrowser()
+        self.text_browser.setOpenExternalLinks(True)
+        self.text_browser.setHtml(self._build_html(records))
+        layout.addWidget(self.text_browser, 1)
+
+        # Bottom row: KTIV link + Close
+        bottom_row = QHBoxLayout()
+        if sys_id:
+            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+            btn_ktiv = QPushButton(tr("Open in KTIV"))
+            btn_ktiv.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ktiv_url)))
+            bottom_row.addWidget(btn_ktiv)
+        bottom_row.addStretch()
+        btn_close = QPushButton(tr("Close"))
+        btn_close.clicked.connect(self.accept)
+        bottom_row.addWidget(btn_close)
+        layout.addLayout(bottom_row)
+
+    def _build_html(self, records):
+        """Build HTML content grouped by source name."""
+        from shared.fjms_service import split_textual_frames, parse_textual_frame
+        from html import escape as html_escape
+
+        lang = CURRENT_LANG
+
+        # Group records by source_name
+        from itertools import groupby
+        sorted_records = sorted(records, key=lambda r: r.get('source_name') or '')
+
+        html_parts = []
+        for source_key, group in groupby(sorted_records, key=lambda r: r.get('source_name') or ''):
+            entries = list(group)
+
+            # Source header (language-aware with fallback)
+            display_source = entries[0].get('source_name_heb') if lang == 'he' else entries[0].get('source_name')
+            if not display_source or not display_source.strip():
+                display_source = entries[0].get('source_name') or entries[0].get('source_name_heb') or ''
+            if display_source:
+                html_parts.append(
+                    f"<div style='border-bottom: 2px solid #9b59b6; margin: 16px 0 8px 0; "
+                    f"padding-bottom: 4px;'>"
+                    f"<b style='color: #6c3483; font-size: 14px;'>{html_escape(display_source)}</b>"
+                    f" <span style='color: gray; font-size: 12px;'>({len(entries)})</span>"
+                    f"</div>"
+                )
+
+            for record in entries:
+                html_parts.append("<div style='margin: 8px 0 12px 12px; padding: 8px; "
+                                  "border-left: 3px solid #d5b8e8;'>")
+
+                # Title (language-aware)
+                title = record.get('title_heb') if lang == 'he' else record.get('title')
+                if not title or not title.strip():
+                    title = record.get('title') if lang == 'he' else record.get('title_heb')
+                if title and title.strip():
+                    html_parts.append(f"<p style='margin:0 0 4px 0;'><b>{html_escape(title)}</b></p>")
+
+                # Author (italic)
+                author = record.get('author_text')
+                if author and author.strip():
+                    html_parts.append(f"<p style='margin:0 0 4px 0; font-style: italic;'>{html_escape(author)}</p>")
+
+                # CopyDate + CopyPlace (small, gray)
+                date = record.get('copy_date')
+                place = record.get('copy_place')
+                if date or place:
+                    meta_parts = []
+                    if date:
+                        meta_parts.append(f"{tr('Copy Date')}: {html_escape(str(date))}")
+                    if place:
+                        meta_parts.append(f"{tr('Place')}: {html_escape(str(place))}")
+                    html_parts.append(
+                        f"<p style='margin:0 0 4px 0; color: gray; font-size: 12px;'>"
+                        f"{' | '.join(meta_parts)}</p>"
+                    )
+
+                # TextualFrame content (language-aware with fallback)
+                frame_text = record.get('textual_frame_heb') if lang == 'he' else record.get('textual_frame_eng')
+                if not frame_text or not frame_text.strip():
+                    frame_text = record.get('textual_frame_eng') if lang == 'he' else record.get('textual_frame_heb')
+
+                if frame_text and frame_text.strip():
+                    # Determine text direction based on which language was actually used
+                    is_hebrew = frame_text == record.get('textual_frame_heb')
+                    text_dir = 'rtl' if is_hebrew else 'ltr'
+
+                    parts = split_textual_frames(frame_text)
+                    if parts and len(parts) > 1:
+                        # Multiple entries: render as list
+                        html_parts.append(f"<ul style='margin: 4px 0; padding-left: 20px;' dir='{text_dir}'>")
+                        for part in parts:
+                            category, content = parse_textual_frame(part)
+                            if category:
+                                html_parts.append(
+                                    f"<li><b style='color:#9b59b6;'>{html_escape(category)}:</b> "
+                                    f"{html_escape(content)}</li>"
+                                )
+                            else:
+                                html_parts.append(f"<li>{html_escape(content)}</li>")
+                        html_parts.append("</ul>")
+                    elif parts:
+                        # Single entry
+                        category, content = parse_textual_frame(parts[0])
+                        if category:
+                            html_parts.append(
+                                f"<p style='margin: 4px 0;' dir='{text_dir}'>"
+                                f"<b style='color:#9b59b6;'>{html_escape(category)}:</b> "
+                                f"{html_escape(content)}</p>"
+                            )
+                        else:
+                            html_parts.append(
+                                f"<p style='margin: 4px 0;' dir='{text_dir}'>"
+                                f"{html_escape(content)}</p>"
+                            )
+                    else:
+                        # No markup: render as plain text
+                        html_parts.append(
+                            f"<p style='margin: 4px 0;' dir='{text_dir}'>"
+                            f"{html_escape(frame_text)}</p>"
+                        )
+
+                html_parts.append("</div>")
+
+        return '\n'.join(html_parts) if html_parts else f"<p>{tr('No data available')}</p>"
+
+
 class NliBibliographyDialog(QDialog):
     """NLI bibliography dialog with MARC 581 reference strings."""
 
