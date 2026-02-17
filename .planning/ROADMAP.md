@@ -99,7 +99,7 @@ Multi-source image viewing with folio navigation, bibliography (542K), catalog r
 **Milestone Goal:** Migrate all PGP reference data from Supabase to a local SQLite sidecar and add FJMS catalog descriptions as scholarly sources, making browsing fully offline-capable and eliminating cloud dependency for read-only data.
 
 - [x] **Phase 35: PGP Sidecar Export** - Export all PGP data from Supabase to pgp.db with validated JSON serialization (completed 2026-02-17)
-- [ ] **Phase 36: PGP Service Layer** - Rewrite document_service.py to read from SQLite, integrating both apps with pgp.db
+- [x] **Phase 36: PGP Service Layer** - Rewrite document_service.py to read from SQLite, integrating both apps with pgp.db (completed 2026-02-17)
 - [ ] **Phase 37: FJMS Catalog Descriptions** - Export 65K FJMS descriptions and surface them via browse page button in both apps
 - [ ] **Phase 38: Distribution and Verification** - Bundle pgp.db for distribution and verify offline browsing works end-to-end
 
@@ -162,7 +162,7 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 0/1 | Complete    | 2026-02-17 |
-| 36. PGP Service Layer | 0/2 | Not started | - |
+| 36. PGP Service Layer | 0/2 | Complete    | 2026-02-17 |
 | 37. FJMS Catalog Descriptions | 0/TBD | Not started | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
