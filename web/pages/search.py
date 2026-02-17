@@ -56,6 +56,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.domain_exclusions: set = set()  # domain names user has excluded
             self.has_domain_data: bool = False  # whether any results have domain data
             self.domain_name_map: dict = {}  # English domain name -> Hebrew name
+            self.catalog_source_counts: dict = {}  # sys_id -> count of catalog sources
 
     search_state = SearchUIState()
 
@@ -2053,6 +2054,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             get_sys_ids_with_transcriptions, result_sys_ids
         )
 
+        # Batch lookup for catalog source counts (for "Catalog Records (N)" buttons)
+        def collect_catalog_counts(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            return fjms.get_catalog_source_counts(sys_ids) if fjms.is_available() else {}
+
+        search_state.catalog_source_counts = await run.io_bound(collect_catalog_counts, result_sys_ids)
+
         # Slice result_domains from all_result_domains for badge rendering
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
 
@@ -2243,6 +2252,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.label(title_short).classes('text-xs').style(
                             'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
                         )
+                    # Catalog Records button
+                    if sys_id:
+                        cat_count = search_state.catalog_source_counts.get(sys_id, 0)
+                        from web.components.catalog_dialog import show_catalog_dialog
+                        cat_btn = ui.button(
+                            f'{tr("Catalog Records")} ({cat_count})',
+                            icon='description',
+                            on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
+                        ).props('outline dense size=sm no-caps').classes('text-xs')
+                        if cat_count == 0:
+                            cat_btn.disable()
 
                 # Actions
                 with ui.row().classes('gap-1'):

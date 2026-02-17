@@ -2151,6 +2151,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                     # === Bibliography References (separate FJMS / NLI dialogs) ===
                     from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
+                    from web.components.catalog_dialog import show_catalog_dialog
 
                     fjms_bib = fjms.get_bibliography(page.sys_id) if fjms.is_available() else []
                     marc_bib = []
@@ -2162,9 +2163,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     except Exception:
                         pass
 
-                    if fjms_bib or marc_bib:
+                    # Catalog source count for button label
+                    catalog_source_count = len(fjms.get_source_names(page.sys_id)) if fjms.is_available() else 0
+
+                    if fjms_bib or marc_bib or catalog_source_count > 0:
                         ui.separator().classes('my-3')
-                        with ui.row().classes('items-center gap-2'):
+                        with ui.row().classes('items-center gap-2 flex-wrap'):
                             if fjms_bib:
                                 fjms_dlg = create_fjms_bibliography_dialog(
                                     fjms_bib, page.sys_id,
@@ -2185,6 +2189,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     icon='menu_book',
                                     on_click=nli_dlg.open,
                                 ).props('outline dense').classes('text-sm')
+                            # Catalog Records button
+                            catalog_btn = ui.button(
+                                f'{tr("Catalog Records")} ({catalog_source_count})',
+                                icon='description',
+                                on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_catalog_dialog(s, sm, fjms),
+                            ).props('outline dense').classes('text-sm')
+                            if catalog_source_count == 0:
+                                catalog_btn.disable()
 
                     # === Phase 33: Catalog Cross-References ===
                     if fjms.is_available():
