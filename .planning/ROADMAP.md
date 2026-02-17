@@ -100,7 +100,7 @@ Multi-source image viewing with folio navigation, bibliography (542K), catalog r
 
 - [x] **Phase 35: PGP Sidecar Export** - Export all PGP data from Supabase to pgp.db with validated JSON serialization (completed 2026-02-17)
 - [x] **Phase 36: PGP Service Layer** - Rewrite document_service.py to read from SQLite, integrating both apps with pgp.db (completed 2026-02-17)
-- [x] **Phase 37: FJMS Catalog Descriptions** - Export 65K FJMS descriptions and surface them via browse page button in both apps (completed 2026-02-17)
+- [ ] **Phase 37: FJMS Catalog Descriptions** - Export enriched FJMS catalog data (4 new tables, ~1.7M rows) and surface via dedicated dialog in both apps
 - [ ] **Phase 38: Distribution and Verification** - Bundle pgp.db for distribution and verify offline browsing works end-to-end
 
 ## Phase Details
@@ -138,12 +138,17 @@ Plans:
 **Goal**: Researchers can access rich FJMS scholarly descriptions (content, physical metadata, source attribution) from the browse page in both apps
 **Depends on**: Nothing (can run parallel to Phase 36; only depends on fjms_enrichment.db existing, which shipped in v5.8.0)
 **Requirements**: FJMS-01, FJMS-02, FJMS-03
-**Status**: REVERTED — initial implementation only duplicated existing TextualFrame data. Needs richer export from FIST.db (dbo_Inventory join for Material, Sizes, Physical Status, NumFolios) before re-implementation.
+**Status**: Re-planned (v2) with enriched export scope
 **Success Criteria** (what must be TRUE):
   1. FJMS catalog descriptions include rich structured data (content identification + physical metadata) beyond what browse already shows
   2. User clicks a dedicated button in the browse metadata panel and sees the FJMS scholarly description for that manuscript
   3. Each description shows source attribution (catalog name and/or scholar)
-**Plans**: TBD (needs re-planning after export enrichment)
+**Plans**: 4 plans
+Plans:
+- [ ] 37-01-PLAN.md — Export script enrichment (4 new tables + catalog v2 schema + FTS5 rebuild)
+- [ ] 37-02-PLAN.md — Service layer methods + tests + translation keys
+- [ ] 37-03-PLAN.md — Web catalog dialog + browse/search button wiring
+- [ ] 37-04-PLAN.md — Desktop catalog dialog + Browse tab/ResultDialog button wiring
 
 ### Phase 38: Distribution and Verification
 **Goal**: pgp.db is bundled for both distribution channels and desktop PGP browsing works without internet
@@ -165,9 +170,9 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
 | 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
-| 37. FJMS Catalog Descriptions | 0/TBD | Reverted    | - |
+| 37. FJMS Catalog Descriptions | 0/4 | In progress | - |
 | 38. Distribution and Verification | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-17 after Phase 37 revert (data too thin)*
+*Last updated: 2026-02-17 after Phase 37 v2 re-planning (4 plans, 3 waves)*
