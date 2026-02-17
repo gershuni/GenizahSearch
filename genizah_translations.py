@@ -2390,6 +2390,16 @@ TRANSLATIONS = {
     "Place": "מקום",
     "Show all": "הצג הכל",
     "identifications": "זיהויים",
+    "Catalog Records": "מידע קטלוגי",
+    "Running Title": "כותרת רצה",
+    "Free Description": "תיאור חופשי",
+    "Script Type": "סוג כתב",
+    "Script Style": "סגנון כתב",
+    "Vocalization": "ניקוד",
+    "Physical Status": "מצב פיזי",
+    "Number of Folios": "מספר דפים",
+    "Number of Columns": "מספר טורים",
+    "Number of Lines": "מספר שורות",
 
     # --- Compact Mode ---
     "Compact": "צמצם",

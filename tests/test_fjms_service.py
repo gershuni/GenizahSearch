@@ -41,15 +41,21 @@ def test_db(tmp_path):
     conn.execute("""
         CREATE TABLE catalog (
             AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
             Title TEXT,
             TitleHeb TEXT,
             AuthorText TEXT,
             CopyDate TEXT,
             CopyPlace TEXT,
-            DescriptionEng TEXT,
-            DescriptionHeb TEXT,
             TextualFrameHeb TEXT,
-            TextualFrameEng TEXT
+            TextualFrameEng TEXT,
+            SourceName TEXT,
+            SourceNameHeb TEXT,
+            NumFolio REAL,
+            NumColumn TEXT,
+            NumRow TEXT,
+            GenizahTitleOrgTitle TEXT,
+            GenizahTitleEngTitle TEXT
         )
     """)
     conn.execute("""
@@ -85,33 +91,36 @@ def test_db(tmp_path):
         ],
     )
 
-    # Insert test catalog data
+    # Insert test catalog data (v3.0.0 schema)
     conn.executemany(
-        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             (
-                "990001",
-                "A Legal Document",
-                "שטר משפטי",
-                "Unknown",
-                "1150",
-                "Fustat",
-                "A legal document from the Genizah",
-                "שטר משפטי מן הגניזה",
-                "טקסט עברי",
-                "Hebrew text",
+                "990001", 100,
+                "A Legal Document", "שטר משפטי",
+                "Unknown", "1150", "Fustat",
+                "טקסט עברי", "Hebrew text",
+                "PGPID", "",
+                14.0, "2", "20",
+                "שטר", "Legal Document",
             ),
             (
-                "990002",
-                "Letter to a Merchant",
-                "מכתב לסוחר",
-                "Nahray b. Nissim",
-                "1050",
-                "Alexandria",
-                "A merchant letter",
-                "מכתב סוחר",
-                None,
-                None,
+                "990001", 101,
+                "A Legal Document", "שטר משפטי",
+                "Unknown", "1150", "Fustat",
+                "טקסט עברי נוסף", "Additional Hebrew text",
+                "FGP", "",
+                14.0, "2", "20",
+                None, None,
+            ),
+            (
+                "990002", 200,
+                "Letter to a Merchant", "מכתב לסוחר",
+                "Nahray b. Nissim", "1050", "Alexandria",
+                None, None,
+                "Catalogs", "",
+                None, None, None,
+                None, None,
             ),
         ],
     )
@@ -181,22 +190,60 @@ def test_db(tmp_path):
         ],
     )
 
-    # Add SourceName columns to catalog table for get_source_names test
-    conn.execute("ALTER TABLE catalog ADD COLUMN SourceName TEXT")
-    conn.execute("ALTER TABLE catalog ADD COLUMN SourceNameHeb TEXT")
-    # Update existing rows with source names
-    conn.execute("UPDATE catalog SET SourceName = 'PGPID', SourceNameHeb = '' WHERE AlmaId = '990001'")
-    conn.execute("UPDATE catalog SET SourceName = 'Catalogs', SourceNameHeb = '' WHERE AlmaId = '990002'")
-    # Insert additional row for 990001 with a generic source name
+    # Insert additional catalog row for 990001 with a generic source name
     conn.execute(
-        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("990001", "Title 2", "", "", "", "", "", "", "", "", "Institution", ""),
+        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("990001", 102, "Title 2", "", "", "", "", "", "", "Institution", "", None, None, None, None, None),
     )
-    # Insert additional row for 990001 with another scholarly source
-    conn.execute(
-        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("990001", "Title 3", "", "", "", "", "", "", "", "", "FGP", ""),
-    )
+
+    # Create catalog child tables (v3.0.0)
+
+    # catalog_running_titles
+    conn.execute("""
+        CREATE TABLE catalog_running_titles (
+            AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
+            RunningTitle TEXT, Comment TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_running_titles VALUES (?, ?, ?, ?)", [
+        ("990001", 100, "Midrash Lamentations Rabbati", "Petihah 2-7"),
+        ("990001", 101, "Lamentations Commentary", None),
+    ])
+
+    # catalog_sizes
+    conn.execute("""
+        CREATE TABLE catalog_sizes (
+            AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
+            SizeX REAL, SizeY REAL, InnerSizeX REAL, InnerSizeY REAL
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_sizes VALUES (?, ?, ?, ?, ?, ?)", [
+        ("990001", 100, 165.0, 210.0, None, None),
+    ])
+
+    # catalog_fields
+    conn.execute("""
+        CREATE TABLE catalog_fields (
+            AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
+            FieldCategory TEXT NOT NULL, FieldValue TEXT, FieldValueHeb TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_fields VALUES (?, ?, ?, ?, ?)", [
+        ("990001", 100, "FragmentMaterial", "Vellum", "קלף"),
+        ("990001", 100, "FragmentStatus", "Torn", "קרוע"),
+        ("990001", 100, "GenizahLanguages", "Hebrew", "עברית"),
+        ("990001", 101, "FragmentMaterial", "Vellum", "קלף"),
+    ])
+
+    # catalog_free_desc
+    conn.execute("""
+        CREATE TABLE catalog_free_desc (
+            AlmaId TEXT NOT NULL, SignatureId INTEGER NOT NULL, FreeDesc TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_free_desc VALUES (?, ?, ?)", [
+        ("990001", 500, "Parchment fragment, left and right margins visible."),
+    ])
 
     conn.commit()
     conn.close()
@@ -440,10 +487,14 @@ def test_get_catalog(service):
     assert catalog["author_text"] == "Unknown"
     assert catalog["copy_date"] == "1150"
     assert catalog["copy_place"] == "Fustat"
-    assert catalog["description_eng"] == "A legal document from the Genizah"
-    assert catalog["description_heb"] == "שטר משפטי מן הגניזה"
     assert catalog["textual_frame_heb"] == "טקסט עברי"
     assert catalog["textual_frame_eng"] == "Hebrew text"
+    assert catalog["unit_catalog_rec_id"] == 100
+    assert catalog["num_folio"] == 14.0
+    assert catalog["num_column"] == "2"
+    assert catalog["num_row"] == "20"
+    assert catalog["genizah_title_org"] == "שטר"
+    assert catalog["genizah_title_eng"] == "Legal Document"
 
 
 def test_get_catalog_not_found(service):
@@ -456,7 +507,9 @@ def test_get_catalog_has_all_keys(service):
     catalog = service.get_catalog("990001")
     expected_keys = {
         "title", "title_heb", "author_text", "copy_date", "copy_place",
-        "description_eng", "description_heb", "textual_frame_heb", "textual_frame_eng",
+        "textual_frame_heb", "textual_frame_eng",
+        "unit_catalog_rec_id", "num_folio", "num_column", "num_row",
+        "genizah_title_org", "genizah_title_eng",
     }
     assert set(catalog.keys()) == expected_keys
 
@@ -613,6 +666,104 @@ def test_get_source_names_all_generic(service):
 def test_get_source_names_empty(service):
     """get_source_names returns [] for non-existent AlmaId."""
     assert service.get_source_names("999999") == []
+
+
+# ── Catalog source counts tests ───────────────────────────────────
+
+
+def test_get_catalog_source_counts(service):
+    """get_catalog_source_counts returns batch counts excluding generic sources."""
+    counts = service.get_catalog_source_counts(["990001", "990002", "990099"])
+    # 990001 has SourceName='PGPID', 'FGP', 'Institution' -- Institution is generic
+    assert counts["990001"] == 2  # PGPID and FGP only
+    # 990002 has only 'Catalogs' (generic) -- should not appear
+    assert "990002" not in counts
+    # 990099 doesn't exist -- should not appear
+    assert "990099" not in counts
+
+
+def test_get_catalog_source_counts_empty(service):
+    """get_catalog_source_counts returns {} for empty input list."""
+    assert service.get_catalog_source_counts([]) == {}
+
+
+def test_get_catalog_source_counts_unavailable():
+    """get_catalog_source_counts returns {} when service is unavailable."""
+    svc = FjmsService(db_path="nonexistent.db")
+    assert svc.get_catalog_source_counts(["990001"]) == {}
+    svc.close()
+
+
+# ── Catalog detail tests ─────────────────────────────────────────
+
+
+def test_get_catalog_detail(service):
+    """get_catalog_detail returns structured dict with all child table data."""
+    detail = service.get_catalog_detail("990001")
+
+    # Records
+    assert len(detail["records"]) > 0
+    # Check first record has new v3.0.0 keys
+    rec = detail["records"][0]
+    assert "unit_catalog_rec_id" in rec
+    assert "num_folio" in rec
+
+    # Running titles grouped by UnitCatalogRecId
+    rt = detail["running_titles"]
+    assert len(rt) > 0
+    assert 100 in rt
+    assert rt[100][0]["running_title"] == "Midrash Lamentations Rabbati"
+    assert rt[100][0]["comment"] == "Petihah 2-7"
+    assert 101 in rt
+    assert rt[101][0]["running_title"] == "Lamentations Commentary"
+    assert rt[101][0]["comment"] is None
+
+    # Sizes
+    sizes = detail["sizes"]
+    assert 100 in sizes
+    assert sizes[100][0]["size_x"] == 165.0
+    assert sizes[100][0]["size_y"] == 210.0
+    assert sizes[100][0]["inner_size_x"] is None
+
+    # Fields grouped by UnitCatalogRecId then FieldCategory
+    fields = detail["fields"]
+    assert 100 in fields
+    assert "FragmentMaterial" in fields[100]
+    assert fields[100]["FragmentMaterial"][0]["value"] == "Vellum"
+    assert fields[100]["FragmentMaterial"][0]["value_heb"] == "קלף"
+    assert "FragmentStatus" in fields[100]
+    assert "GenizahLanguages" in fields[100]
+    # rec_id 101 also has fields
+    assert 101 in fields
+    assert "FragmentMaterial" in fields[101]
+
+    # Free descriptions
+    fd = detail["free_descriptions"]
+    assert len(fd) == 1
+    assert fd[0]["text"] == "Parchment fragment, left and right margins visible."
+    assert fd[0]["signature_id"] == 500
+
+
+def test_get_catalog_detail_no_data(service):
+    """get_catalog_detail returns dict with empty values for non-existent sys_id."""
+    detail = service.get_catalog_detail("990099")
+    assert detail["records"] == []
+    assert detail["running_titles"] == {}
+    assert detail["sizes"] == {}
+    assert detail["fields"] == {}
+    assert detail["free_descriptions"] == []
+
+
+def test_get_catalog_detail_unavailable():
+    """get_catalog_detail returns dict with empty values when service is unavailable."""
+    svc = FjmsService(db_path="nonexistent.db")
+    detail = svc.get_catalog_detail("990001")
+    assert detail["records"] == []
+    assert detail["running_titles"] == {}
+    assert detail["sizes"] == {}
+    assert detail["fields"] == {}
+    assert detail["free_descriptions"] == []
+    svc.close()
 
 
 # ── Web shim import test ─────────────────────────────────────────
