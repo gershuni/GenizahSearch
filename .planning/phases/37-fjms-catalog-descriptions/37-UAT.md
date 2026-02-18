@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 37-fjms-catalog-descriptions
 source: 37-01-SUMMARY.md, 37-02-SUMMARY.md, 37-03-SUMMARY.md, 37-04-SUMMARY.md
 started: 2026-02-18T12:00:00Z
-updated: 2026-02-18T12:30:00Z
+updated: 2026-02-18T12:35:00Z
 ---
 
 ## Current Test
@@ -59,17 +59,35 @@ skipped: 0
   reason: "User reported: The Miscellaneous is shown line under line - understandable given the nature of the long data, but if we keep it that way we have to put there the attribution to the source of information"
   severity: minor
   test: 2
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "catalog_free_desc table lacks SourceName/SourceNameHeb columns. Free descriptions are stored per-SignatureId without source team attribution. The join chain SignatureId->UnitCatalogRecId->SourceName is not preserved in the sidecar export."
+  artifacts:
+    - path: "scripts/export_fist_enrichment.py"
+      issue: "export_catalog_free_desc() does not join to get source attribution"
+    - path: "shared/fjms_service.py"
+      issue: "get_catalog_detail() free_descriptions query returns only text+signature_id, no source"
+    - path: "web/components/catalog_dialog.py"
+      issue: "_render_free_descriptions() only renders text, no source label"
+    - path: "genizah_app.py"
+      issue: "Desktop _build_html() free descriptions section has same missing attribution"
+  missing:
+    - "Add SourceName/SourceNameHeb to catalog_free_desc export via JOIN through Signature->UnitCatalogRec->catalog"
+    - "Update get_catalog_detail() to return source_name with each free description"
+    - "Update web and desktop renderers to show source attribution per free description entry"
 
 - truth: "Desktop catalog dialog respects RTL layout direction in Hebrew interface mode"
   status: failed
   reason: "User reported: RTL in Hebrew only when English interface is on. Heb interface it's LTR for both languages and the table layout is LTR also"
   severity: major
   test: 6
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Three missing RTL configurations in FjmsCatalogDialog: (1) No dir wrapper on HTML content, (2) No setLayoutDirection() on QTextBrowser widget, (3) Hardcoded text-align:left in team header row instead of conditional"
+  artifacts:
+    - path: "genizah_app.py"
+      issue: "FjmsCatalogDialog.__init__ ~line 5205: text_browser missing setLayoutDirection()"
+    - path: "genizah_app.py"
+      issue: "_build_html() ~line 5218: returns raw table without <div dir='rtl'> wrapper"
+    - path: "genizah_app.py"
+      issue: "Team header ~line 5305: hardcoded text-align:left instead of conditional on is_heb"
+  missing:
+    - "Add setLayoutDirection(RightToLeft) on text_browser when is_heb"
+    - "Wrap _build_html() return in <div dir='rtl'> when is_heb"
+    - "Make header text-align conditional: right for Hebrew, left for English"
