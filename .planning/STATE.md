@@ -64,6 +64,7 @@ Recent decisions affecting current work:
 - Phase 37-03: Batch catalog source counts fetched during search execution via get_catalog_source_counts()
 - Phase 37-04: HTML table in QTextBrowser mirrors web dialog approach for consistent rendering with RTL support
 - Phase 37-04: Catalog detail cached per browse/result to avoid repeated DB queries on button click
+- Phase 38-01: GenizahSearchPro.spec gitignored (PyInstaller-generated) -- build_app.bat is source of truth for build config
 - Phase 38-02: Import inspection via extracted import lines (not raw source grep) to avoid false positives from docstrings
 
 ### Blockers/Concerns
@@ -84,6 +85,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-18
-Stopped at: Completed 38-02-PLAN.md
-Resume file: .planning/phases/38-distribution-and-verification/38-02-SUMMARY.md
-Notes: Phase 38 plan 02 complete. 12 offline verification tests for PGP/FJMS/NLI sidecars all passing. Next: 38-03.
+Stopped at: Completed 38-01-PLAN.md
+Resume file: .planning/phases/38-distribution-and-verification/38-01-SUMMARY.md
+Notes: Phase 38 plan 01 complete. pgp.db bundled in desktop build, deployment docs updated, PgpService.get_version() added. Plans 01+02 done, next: 38-03.
