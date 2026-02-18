@@ -158,7 +158,11 @@ Plans:
   1. Desktop installer includes pgp.db and the app launches with full PGP browsing from local data
   2. Web server deployment includes pgp.db and serves PGP data from local sidecar
   3. Desktop app with internet disconnected can browse PGP metadata, transcriptions, footnotes, and fragment navigation (images excluded)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 38-01-PLAN.md — Bundle pgp.db in desktop build + deployment docs + PgpService.get_version()
+- [ ] 38-02-PLAN.md — Offline verification tests (all three sidecars)
+- [ ] 38-03-PLAN.md — Sidecar update mechanism + About screen data sources
 
 ## Progress
 
@@ -171,8 +175,8 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 | 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
 | 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
 | 37. FJMS Catalog Descriptions | 0/4 | Complete    | 2026-02-17 |
-| 38. Distribution and Verification | 0/TBD | Not started | - |
+| 38. Distribution and Verification | 0/3 | Planned | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-17 after Phase 37 v2 re-planning (4 plans, 3 waves)*
+*Last updated: 2026-02-18 after Phase 38 planning (3 plans, 2 waves)*
