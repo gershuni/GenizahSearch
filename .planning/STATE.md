@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.0.0 Local Data Architecture -- Phase 37 (FJMS Catalog Descriptions)
+**Current focus:** v6.0.0 Local Data Architecture -- Phase 38 (Distribution and Verification)
 
 ## Current Position
 
-Phase: 37 of 38 (FJMS Catalog Descriptions)
-Plan: 4 of 4 in current phase
-Status: Phase 37 complete
-Last activity: 2026-02-17 -- Completed 37-04 (desktop catalog records dialog)
+Phase: 38 of 38 (Distribution and Verification)
+Plan: 2 of 3 in current phase
+Status: Executing phase 38
+Last activity: 2026-02-18 -- Completed 38-02 (offline verification tests)
 
-Progress: [##########] 100% (Phase 37: 4/4 plans)
+Progress: [######----] 67% (Phase 38: 2/3 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 110 (across 7 milestones)
+- Total plans completed: 111 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -34,7 +34,7 @@ Progress: [##########] 100% (Phase 37: 4/4 plans)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 7 | 59 min |
+| v6.0.0 | 35-38 | 8 | 61 min |
 
 ## Accumulated Context
 
@@ -64,6 +64,7 @@ Recent decisions affecting current work:
 - Phase 37-03: Batch catalog source counts fetched during search execution via get_catalog_source_counts()
 - Phase 37-04: HTML table in QTextBrowser mirrors web dialog approach for consistent rendering with RTL support
 - Phase 37-04: Catalog detail cached per browse/result to avoid repeated DB queries on button click
+- Phase 38-02: Import inspection via extracted import lines (not raw source grep) to avoid false positives from docstrings
 
 ### Blockers/Concerns
 
@@ -83,6 +84,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-18
-Stopped at: Phase 38 context gathered
-Resume file: .planning/phases/38-distribution-and-verification/38-CONTEXT.md
-Notes: Phase 38 context captured. All three sidecars bundled, in-app update check, graceful degradation, version-check integrity. Next: /gsd:plan-phase 38.
+Stopped at: Completed 38-02-PLAN.md
+Resume file: .planning/phases/38-distribution-and-verification/38-02-SUMMARY.md
+Notes: Phase 38 plan 02 complete. 12 offline verification tests for PGP/FJMS/NLI sidecars all passing. Next: 38-03.
