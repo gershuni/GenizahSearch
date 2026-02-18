@@ -82,7 +82,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-17
-Stopped at: Completed 37-04-PLAN.md (desktop catalog records dialog)
-Resume file: .planning/phases/37-fjms-catalog-descriptions/37-04-SUMMARY.md
-Notes: Phase 37 complete. Desktop FjmsCatalogDialog with 5-section HTML table layout, catalog records button wired into Browse tab and ResultDialog. All 4 plans done. Next: Phase 38 (dedup/overlap).
+Last session: 2026-02-18
+Stopped at: Phase 38 context gathered
+Resume file: .planning/phases/38-distribution-and-verification/38-CONTEXT.md
+Notes: Phase 38 context captured. All three sidecars bundled, in-app update check, graceful degradation, version-check integrity. Next: /gsd:plan-phase 38.
