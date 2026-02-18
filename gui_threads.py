@@ -602,3 +602,152 @@ class ReadingDeskWorker(QThread):
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class SidecarUpdateThread(QThread):
+    """Check for sidecar data updates via GitHub release manifest.
+
+    Reads a sidecar-versions.json asset from a dedicated GitHub release tag.
+    Compares remote versions against locally installed sidecar versions.
+    Emits update_available with list of available updates.
+    """
+
+    update_available = pyqtSignal(list)  # list of dicts: {name, current, available, size_mb, url}
+
+    RELEASE_URL = "https://api.github.com/repos/gershuni/GenizahSearch/releases/tags/data-latest"
+
+    def run(self):
+        try:
+            resp = requests.get(self.RELEASE_URL, timeout=5)
+            if resp.status_code != 200:
+                return  # Silent failure for auto-check
+
+            data = resp.json()
+            # Find sidecar-versions.json asset
+            manifest_url = None
+            for asset in data.get('assets', []):
+                if asset['name'] == 'sidecar-versions.json':
+                    manifest_url = asset['browser_download_url']
+                    break
+            if not manifest_url:
+                return
+
+            manifest_resp = requests.get(manifest_url, timeout=5)
+            if manifest_resp.status_code != 200:
+                return
+            manifest = manifest_resp.json()
+
+            # Compare local versions
+            updates = []
+            service_map = {
+                'pgp.db': ('pgp_data', 'shared.document_service', 'get_pgp_service'),
+                'fjms_enrichment.db': ('fist_data', 'shared.fjms_service', 'get_fjms_service'),
+                'nli_crossref.db': ('nli_data', 'shared.nli_crossref_service', 'get_nli_crossref_service'),
+            }
+
+            for sidecar_name, remote_info in manifest.items():
+                if sidecar_name not in service_map:
+                    continue
+                local_version = self._get_local_version(sidecar_name, service_map[sidecar_name])
+                remote_version = remote_info.get('version', '')
+                if self._is_newer(remote_version, local_version):
+                    updates.append({
+                        'name': sidecar_name,
+                        'current': local_version or 'not installed',
+                        'available': remote_version,
+                        'size_mb': remote_info.get('size_mb', 0),
+                        'url': remote_info.get('url', ''),
+                        'subdir': service_map[sidecar_name][0],
+                    })
+
+            if updates:
+                self.update_available.emit(updates)
+
+        except Exception:
+            pass  # Silent failure -- this is a background convenience check
+
+    def _get_local_version(self, sidecar_name, service_info):
+        """Get local sidecar version from the service singleton."""
+        try:
+            module_name, factory_name = service_info[1], service_info[2]
+            import importlib
+            mod = importlib.import_module(module_name)
+            svc = getattr(mod, factory_name)()
+            if svc.is_available():
+                return svc.get_version()
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _is_newer(remote: str, local: str) -> bool:
+        """Compare SemVer strings. Returns True if remote > local."""
+        if not remote or not local:
+            return bool(remote)  # If no local version, any remote is newer
+        try:
+            r = [int(x) for x in remote.split('.') if x.isdigit()]
+            l = [int(x) for x in local.split('.') if x.isdigit()]
+            max_len = max(len(r), len(l))
+            r.extend([0] * (max_len - len(r)))
+            l.extend([0] * (max_len - len(l)))
+            return r > l
+        except (ValueError, AttributeError):
+            return False
+
+
+class SidecarDownloadThread(QThread):
+    """Download a sidecar database update from GitHub Releases."""
+
+    progress_signal = pyqtSignal(int, int)  # downloaded_bytes, total_bytes
+    finished_signal = pyqtSignal(bool, str, str)  # success, file_path_or_error, sidecar_name
+
+    def __init__(self, url: str, target_path: str, sidecar_name: str):
+        super().__init__()
+        self.url = url
+        self.target_path = target_path
+        self.sidecar_name = sidecar_name
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        try:
+            # Validate URL is from GitHub
+            if 'github.com/gershuni/GenizahSearch/' not in self.url:
+                self.finished_signal.emit(False, "Invalid download URL", self.sidecar_name)
+                return
+
+            response = requests.get(self.url, stream=True, timeout=600, allow_redirects=True)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+
+            import os
+            import shutil
+            # Download to temp file first, then move (atomic replacement)
+            tmp_path = self.target_path + '.tmp'
+            os.makedirs(os.path.dirname(self.target_path), exist_ok=True)
+
+            with open(tmp_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if self._cancelled:
+                        f.close()
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+                        self.finished_signal.emit(False, "Download cancelled", self.sidecar_name)
+                        return
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        self.progress_signal.emit(downloaded, total_size)
+
+            # Move temp to final location
+            shutil.move(tmp_path, self.target_path)
+            self.finished_signal.emit(True, self.target_path, self.sidecar_name)
+
+        except Exception as e:
+            self.finished_signal.emit(False, str(e), self.sidecar_name)

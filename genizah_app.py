@@ -54,7 +54,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PGPTagsWorker, PGPTagSearchWorker
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -14615,6 +14615,57 @@ class GenizahGUI(QMainWindow):
 
         gb_about.setLayout(abl); layout.addWidget(gb_about)
 
+        # Data Sources section
+        gb_data = QGroupBox(tr("Data Sources"))
+        data_layout = QVBoxLayout()
+
+        data_html = "<table style='font-size: 12px; border-collapse: collapse;'>"
+        data_html += "<tr><th style='text-align:left; padding: 3px 10px 3px 0;'>Source</th>"
+        data_html += "<th style='text-align:left; padding: 3px 10px 3px 0;'>Version</th>"
+        data_html += "<th style='text-align:left; padding: 3px 10px 3px 0;'>Status</th></tr>"
+
+        # PGP
+        try:
+            from shared.document_service import get_pgp_service
+            pgp_svc = get_pgp_service()
+            pgp_ver = pgp_svc.get_version() if pgp_svc.is_available() else None
+        except Exception:
+            pgp_ver = None
+        pgp_status = f"v{pgp_ver}" if pgp_ver else "Not installed"
+        data_html += f"<tr><td style='padding: 3px 10px 3px 0;'>PGP Documents</td><td>{pgp_status}</td>"
+        data_html += f"<td>{'&#10003;' if pgp_ver else '&#8212;'}</td></tr>"
+
+        # FJMS
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms_svc = get_fjms_service()
+            fjms_ver = fjms_svc.get_version() if fjms_svc.is_available() else None
+        except Exception:
+            fjms_ver = None
+        fjms_status = f"v{fjms_ver}" if fjms_ver else "Not installed"
+        data_html += f"<tr><td style='padding: 3px 10px 3px 0;'>FJMS Catalog</td><td>{fjms_status}</td>"
+        data_html += f"<td>{'&#10003;' if fjms_ver else '&#8212;'}</td></tr>"
+
+        # NLI
+        try:
+            from shared.nli_crossref_service import get_nli_crossref_service
+            nli_svc = get_nli_crossref_service()
+            nli_ver = nli_svc.get_version() if nli_svc.is_available() else None
+        except Exception:
+            nli_ver = None
+        nli_status = f"v{nli_ver}" if nli_ver else "Not installed"
+        data_html += f"<tr><td style='padding: 3px 10px 3px 0;'>NLI Crossref</td><td>{nli_status}</td>"
+        data_html += f"<td>{'&#10003;' if nli_ver else '&#8212;'}</td></tr>"
+
+        data_html += "</table>"
+
+        txt_data = QTextBrowser()
+        txt_data.setHtml(data_html)
+        txt_data.setMaximumHeight(100)
+        data_layout.addWidget(txt_data)
+        gb_data.setLayout(data_layout)
+        layout.addWidget(gb_data)
+
         panel.setLayout(layout)
         return panel
 
@@ -20266,6 +20317,11 @@ class GenizahGUI(QMainWindow):
         self.update_thread.finished_signal.connect(self.on_update_result)
         self.update_thread.start()
 
+        # Also check for sidecar data updates
+        self.sidecar_update_thread = SidecarUpdateThread()
+        self.sidecar_update_thread.update_available.connect(self._on_sidecar_updates)
+        self.sidecar_update_thread.start()
+
     def check_updates_manual(self):
         """Run update checker with UI feedback."""
         self.btn_check_updates.setEnabled(False)
@@ -20316,6 +20372,73 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Update Error"), err)
         else:
             logger.warning(f"Auto-update check failed: {err}")
+
+    def _on_sidecar_updates(self, updates):
+        """Handle sidecar update availability notification."""
+        if not updates:
+            return
+
+        # Build human-readable message
+        lines = []
+        total_mb = 0
+        for u in updates:
+            lines.append(f"  - {u['name']}: {u['current']} \u2192 {u['available']} ({u['size_mb']} MB)")
+            total_mb += u['size_mb']
+
+        msg = tr("New research data available:") + "\n\n"
+        msg += "\n".join(lines)
+        msg += f"\n\n{tr('Total download:')} {total_mb} MB"
+        msg += "\n\n" + tr("Download now?")
+
+        reply = QMessageBox.question(
+            self, tr("Data Update Available"), msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._start_sidecar_download(updates)
+
+    def _start_sidecar_download(self, updates):
+        """Download sidecar updates sequentially."""
+        import os
+        # Use LOCALAPPDATA for updated sidecars (bundled location is read-only)
+        data_dir = os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+            'GenizahSearchPro', 'data'
+        )
+        self._sidecar_download_queue = list(updates)
+        self._sidecar_data_dir = data_dir
+        self._download_next_sidecar()
+
+    def _download_next_sidecar(self):
+        """Download the next sidecar in the queue."""
+        import os
+        if not self._sidecar_download_queue:
+            # All downloads complete -- reset services to pick up new files
+            from shared.document_service import reset_pgp_service
+            from shared.fjms_service import reset_fjms_service
+            from shared.nli_crossref_service import reset_nli_crossref_service
+            reset_pgp_service()
+            reset_fjms_service()
+            reset_nli_crossref_service()
+            QMessageBox.information(
+                self, tr("Update Complete"),
+                tr("Research data has been updated. New data will be used immediately.")
+            )
+            return
+
+        update = self._sidecar_download_queue.pop(0)
+        target = os.path.join(self._sidecar_data_dir, update['subdir'], update['name'])
+        self._current_sidecar_download = SidecarDownloadThread(update['url'], target, update['name'])
+        self._current_sidecar_download.finished_signal.connect(self._on_sidecar_download_finished)
+        self._current_sidecar_download.start()
+
+    def _on_sidecar_download_finished(self, success, result, sidecar_name):
+        """Handle completion of a single sidecar download."""
+        if success:
+            logger.info(f"Sidecar updated: {sidecar_name} -> {result}")
+        else:
+            logger.warning(f"Sidecar download failed: {sidecar_name}: {result}")
+        self._download_next_sidecar()
 
     def on_update_dismissed(self, version):
         """Save dismissed version to config."""
