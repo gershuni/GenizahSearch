@@ -1699,12 +1699,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 domain_counts[d] = domain_counts.get(d, 0) + 1
 
         # Build filtered hierarchy: only domains present in current results
+        from shared.fjms_service import qualify_domain_name, AMBIGUOUS_CHILD_DOMAINS
         result_hierarchy = {}  # parent_name -> {children: [{domain, count}], count}
         for parent_name, info in hierarchy.items():
             parent_in_results = parent_name in domain_counts
             children_in_results = []
             for child in info.get('children', []):
-                if child['domain'] in domain_counts:
+                # Check both qualified and bare names for ambiguous domains
+                qname = qualify_domain_name(child['domain'], parent_name)
+                if qname in domain_counts:
+                    children_in_results.append({
+                        'domain': qname,
+                        'domain_heb': child.get('domain_heb', child['domain']),
+                        'count': domain_counts[qname],
+                    })
+                elif child['domain'] in domain_counts and child['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
                     children_in_results.append({
                         'domain': child['domain'],
                         'domain_heb': child.get('domain_heb', child['domain']),
@@ -2031,12 +2040,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Also build English->Hebrew display name map
         search_state.all_result_domains = {}
         search_state.domain_name_map = {}  # English name -> Hebrew name
+        from shared.fjms_service import qualify_domain_name
         for sys_id, doms in raw_domains.items():
             child_names = {d['domain'] for d in doms}
-            filtered = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
             if filtered:
                 search_state.all_result_domains[sys_id] = filtered
             for d in doms:
+                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                    search_state.domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
                 if d.get('domain_heb') and d['domain'] not in search_state.domain_name_map:
                     search_state.domain_name_map[d['domain']] = d['domain_heb']
                 if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:

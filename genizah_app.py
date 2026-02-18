@@ -4837,7 +4837,7 @@ class DomainFilterDialog(QDialog):
 
     def _populate_tree(self):
         """Populate tree with domains from current search results only."""
-        from shared.fjms_service import get_fjms_service
+        from shared.fjms_service import get_fjms_service, qualify_domain_name, AMBIGUOUS_CHILD_DOMAINS
         fjms = get_fjms_service()
         if not fjms.is_available() or not self.result_domains:
             return
@@ -4850,10 +4850,14 @@ class DomainFilterDialog(QDialog):
         for parent_name, info in hierarchy.items():
             # Show parent if it or any of its children are in result_domains
             parent_in_results = parent_name in self.result_domains
-            children_in_results = [
-                child for child in info.get('children', [])
-                if child['domain'] in self.result_domains
-            ]
+            # Check both qualified and bare names for ambiguous domains
+            children_in_results = []
+            for child in info.get('children', []):
+                qname = qualify_domain_name(child['domain'], parent_name)
+                if qname in self.result_domains:
+                    children_in_results.append((child, qname))
+                elif child['domain'] in self.result_domains and child['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
+                    children_in_results.append((child, child['domain']))
 
             if not parent_in_results and not children_in_results:
                 continue  # Skip this parent entirely
@@ -4862,7 +4866,7 @@ class DomainFilterDialog(QDialog):
             parent_count = self.result_domains.get(parent_name, 0)
             # If parent count is 0 but has children in results, sum their counts
             if children_in_results and parent_count == 0:
-                parent_count = sum(self.result_domains.get(c['domain'], 0) for c in children_in_results)
+                parent_count = sum(self.result_domains.get(domain_key, 0) for _, domain_key in children_in_results)
             parent_display = info.get('parent_domain_heb', parent_name) if CURRENT_LANG == 'he' else parent_name
             parent_item = QTreeWidgetItem([parent_display, f"{parent_count:,}"])
             parent_item.setFlags(parent_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -4870,15 +4874,14 @@ class DomainFilterDialog(QDialog):
             parent_item.setData(0, Qt.ItemDataRole.UserRole, parent_name)
             self.tree.addTopLevelItem(parent_item)
 
-            # Add children that are in results
-            for child in children_in_results:
-                child_domain = child['domain']
-                child_count = self.result_domains.get(child_domain, 0)
-                child_display = child.get('domain_heb', child_domain) if CURRENT_LANG == 'he' else child_domain
+            # Add children that are in results (each entry is (child_dict, domain_key))
+            for child, domain_key in children_in_results:
+                child_count = self.result_domains.get(domain_key, 0)
+                child_display = child.get('domain_heb', child['domain']) if CURRENT_LANG == 'he' else domain_key
                 child_item = QTreeWidgetItem([child_display, f"{child_count:,}"])
                 child_item.setFlags(child_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 child_item.setCheckState(0, Qt.CheckState.Checked)  # All checked by default
-                child_item.setData(0, Qt.ItemDataRole.UserRole, child_domain)
+                child_item.setData(0, Qt.ItemDataRole.UserRole, domain_key)
                 parent_item.addChild(child_item)
 
         # Add "Uncategorized" node for results without domain data
@@ -5202,10 +5205,11 @@ class FjmsCatalogDialog(QDialog):
         layout.addWidget(header)
 
         # Content browser
+        # Note: do NOT use setLayoutDirection or dir="rtl" in HTML — Qt's QTextBrowser
+        # treats text-align as logical, flipping right→left. We use explicit text-align:right
+        # on every cell + reversed column order instead.
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenExternalLinks(True)
-        if CURRENT_LANG == 'he':
-            self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.text_browser.setHtml(self._build_html(detail, shelfmark=shelfmark or ''))
         layout.addWidget(self.text_browser)
 
@@ -5279,10 +5283,9 @@ class FjmsCatalogDialog(QDialog):
         team_col_width = max(150, (700 - label_width) // max(num_teams, 1)) if num_teams > 0 else 150
 
         html_parts = []
-        rtl_table = ' direction:rtl;' if is_heb else ''
         html_parts.append(
             f'<table style="width:100%; border-collapse:collapse; table-layout:fixed; '
-            f'font-family:Arial; font-size:13px; color:{c["text"]};{rtl_table}">'
+            f'font-family:Arial; font-size:13px; color:{c["text"]};">'
         )
         # Column width definitions — RTL: team cols first, label last
         if num_teams > 0:
@@ -5520,8 +5523,8 @@ class FjmsCatalogDialog(QDialog):
         if free_descriptions or full_texts:
             html_parts.append(self._section_row(tr('Miscellaneous'), total_cols if num_teams > 0 else 2))
 
-            dir_attr = ' dir="rtl"' if is_heb else ''
             col_span = total_cols if num_teams > 0 else 2
+            rtl_cell = ' text-align:right;' if is_heb else ''
             for desc in free_descriptions:
                 text = desc.get("text", "")
                 if text and str(text).strip():
@@ -5530,15 +5533,15 @@ class FjmsCatalogDialog(QDialog):
                     source_html = f'<div style="font-weight:bold; font-size:11px; color:{c["section_text"]}; margin-bottom:2px;">{source}</div>' if source else ''
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
-                        f'style="padding:8px; border-bottom:1px solid {c["border"]};{" direction:rtl; text-align:right;" if is_heb else ""}"'
-                        f'{dir_attr}>{source_html}{str(text).strip()}</td></tr>'
+                        f'style="padding:8px; border-bottom:1px solid {c["border"]};{rtl_cell}"'
+                        f'>{source_html}{str(text).strip()}</td></tr>'
                     )
 
             # Full texts (scholarly descriptions) with distinct styling
             if full_texts:
                 html_parts.append(
                     f'<tr><td colspan="{col_span}" style="padding:6px 8px; font-weight:bold; '
-                    f'color:{c["section_text"]}; font-size:12px;">{tr("Scholarly Description")}</td></tr>'
+                    f'color:{c["section_text"]}; font-size:12px;{rtl_cell}">{tr("Scholarly Description")}</td></tr>'
                 )
                 for ft in full_texts:
                     text = ft.get("text", "")
@@ -5546,15 +5549,12 @@ class FjmsCatalogDialog(QDialog):
                         html_parts.append(
                             f'<tr><td colspan="{col_span}" '
                             f'style="padding:8px; border-bottom:1px solid {c["border"]}; background:{c["full_text_bg"]};'
-                            f'{" direction:rtl; text-align:right;" if is_heb else ""}"'
-                            f'{dir_attr}>{str(text).strip()}</td></tr>'
+                            f'{rtl_cell}"'
+                            f'>{str(text).strip()}</td></tr>'
                         )
 
         html_parts.append('</table>')
-        html = '\n'.join(html_parts)
-        if is_heb:
-            html = f'<div dir="rtl">{html}</div>'
-        return html
+        return '\n'.join(html_parts)
 
     def _section_row(self, title: str, colspan: int) -> str:
         """Build a section header row."""
@@ -5571,7 +5571,7 @@ class FjmsCatalogDialog(QDialog):
         if not any(v for v in values):
             return ''
         c = self._colors
-        dir_style = ' direction:rtl; text-align:right;' if is_heb else ''
+        dir_style = ' text-align:right;' if is_heb else ''
         label_align = ' text-align:right;' if is_heb else ''
         label_cell = f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{label_align}">{label}</td>'
         value_cells = []
@@ -15406,12 +15406,16 @@ class GenizahGUI(QMainWindow):
         self._comp_result_domain_map = {}
         if not hasattr(self, '_domain_name_map'):
             self._domain_name_map = {}
+        from shared.fjms_service import qualify_domain_name
         for sys_id, doms in raw_domains.items():
             child_names = {d['domain'] for d in doms}
-            filtered_doms = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            filtered_doms = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
             if filtered_doms:
                 self._comp_result_domain_map[sys_id] = filtered_doms
             for d in doms:
+                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                    self._domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
                 if d.get('domain_heb') and d['domain'] not in self._domain_name_map:
                     self._domain_name_map[d['domain']] = d['domain_heb']
                 if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in self._domain_name_map:
@@ -15876,14 +15880,18 @@ class GenizahGUI(QMainWindow):
         self._result_domain_map = {}
         self._domain_name_map = {}  # English name -> Hebrew name
         domain_counts = {}  # domain_name -> count of results
+        from shared.fjms_service import qualify_domain_name
         for sys_id, doms in raw_domains.items():
             child_names = {d['domain'] for d in doms}
-            filtered = [d['domain'] for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
             if filtered:
                 self._result_domain_map[sys_id] = filtered
                 for d in filtered:
                     domain_counts[d] = domain_counts.get(d, 0) + 1
             for d in doms:
+                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                    self._domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
                 if d.get('domain_heb') and d['domain'] not in self._domain_name_map:
                     self._domain_name_map[d['domain']] = d['domain_heb']
                 if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in self._domain_name_map:
