@@ -872,14 +872,20 @@ class FjmsService:
         free_descriptions = []
         try:
             cursor = self._conn.execute(
-                "SELECT SignatureId, FreeDesc "
+                "SELECT SignatureId, FreeDesc, SourceName, SourceNameHeb "
                 "FROM catalog_free_desc WHERE AlmaId = ?",
                 (sys_id,),
             )
+            col_names = None
             for row in cursor:
+                if col_names is None:
+                    col_names = row.keys()
+                has_source = col_names is not None and "SourceName" in col_names
                 free_descriptions.append({
                     "text": row["FreeDesc"],
                     "signature_id": row["SignatureId"],
+                    "source_name": row["SourceName"] if has_source else None,
+                    "source_name_heb": row["SourceNameHeb"] if has_source else None,
                 })
         except Exception as e:
             logger.debug(f"FjmsService.get_catalog_detail free_desc error for {sys_id}: {e}")

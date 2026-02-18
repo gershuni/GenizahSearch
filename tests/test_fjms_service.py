@@ -10,7 +10,7 @@ graceful degradation, and edge cases.
 import sqlite3
 import pytest
 
-from shared.fjms_service import FjmsService, get_fjms_service
+from shared.fjms_service import FjmsService, get_fjms_service, get_team_display_name, TEAM_DISPLAY_NAMES
 
 
 @pytest.fixture
@@ -239,11 +239,50 @@ def test_db(tmp_path):
     # catalog_free_desc
     conn.execute("""
         CREATE TABLE catalog_free_desc (
-            AlmaId TEXT NOT NULL, SignatureId INTEGER NOT NULL, FreeDesc TEXT
+            AlmaId TEXT NOT NULL, SignatureId INTEGER NOT NULL, FreeDesc TEXT,
+            SourceName TEXT, SourceNameHeb TEXT
         )
     """)
-    conn.executemany("INSERT INTO catalog_free_desc VALUES (?, ?, ?)", [
-        ("990001", 500, "Parchment fragment, left and right margins visible."),
+    conn.executemany("INSERT INTO catalog_free_desc VALUES (?, ?, ?, ?, ?)", [
+        ("990001", 500, "Parchment fragment, left and right margins visible.", "T-S Cataloging", "\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d8-\u05e9"),
+    ])
+
+    # catalog_full_texts (v4.0.0)
+    conn.execute("""
+        CREATE TABLE catalog_full_texts (
+            AlmaId TEXT NOT NULL, SignatureId INTEGER NOT NULL, FullText TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_full_texts VALUES (?, ?, ?)", [
+        ("990001", 500, "This is a detailed scholarly description of the fragment, discussing its provenance and significance."),
+        ("990001", 501, "Additional catalog description from a different signature version."),
+    ])
+
+    # catalog_textual_frames (v4.0.0)
+    conn.execute("""
+        CREATE TABLE catalog_textual_frames (
+            AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
+            TextualFrameHeb TEXT, TextualFrameEng TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_textual_frames VALUES (?, ?, ?, ?)", [
+        ("990001", 100, "במדבר יא:יד-כד", "[Bible]: Numbers 11:14-24"),
+        ("990001", 100, "במדבר יב:א-יד", "[Bible]: Numbers 12:1-14"),
+        ("990001", 101, "איכה רבה פתיחתא ב", "[Midrash]: Lamentations Rabbah Petihta 2"),
+    ])
+
+    # catalog_mentions (v4.0.0)
+    conn.execute("""
+        CREATE TABLE catalog_mentions (
+            AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
+            MentionType TEXT, Mention TEXT, MentionDesc TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_mentions VALUES (?, ?, ?, ?, ?)", [
+        ("990001", 100, "Personalities", "Moses", "Biblical figure"),
+        ("990001", 100, "Personalities", "Aaron", "High priest"),
+        ("990001", 100, "Places", "Sinai", "Mountain"),
+        ("990001", 101, "Dates", "70 CE", "Destruction of the Temple"),
     ])
 
     conn.commit()
@@ -745,6 +784,15 @@ def test_get_catalog_detail(service):
     assert fd[0]["signature_id"] == 500
 
 
+def test_catalog_detail_free_desc_has_source(service):
+    """get_catalog_detail returns source_name in free_descriptions entries."""
+    detail = service.get_catalog_detail("990001")
+    fds = detail["free_descriptions"]
+    assert len(fds) >= 1
+    assert fds[0]["source_name"] == "T-S Cataloging"
+    assert fds[0]["source_name_heb"] == "\u05e7\u05d8\u05dc\u05d5\u05d2 \u05d8-\u05e9"
+
+
 def test_get_catalog_detail_no_data(service):
     """get_catalog_detail returns dict with empty values for non-existent sys_id."""
     detail = service.get_catalog_detail("990099")
@@ -753,6 +801,9 @@ def test_get_catalog_detail_no_data(service):
     assert detail["sizes"] == {}
     assert detail["fields"] == {}
     assert detail["free_descriptions"] == []
+    assert detail["full_texts"] == []
+    assert detail["textual_frames"] == {}
+    assert detail["mentions"] == {}
 
 
 def test_get_catalog_detail_unavailable():
@@ -764,7 +815,147 @@ def test_get_catalog_detail_unavailable():
     assert detail["sizes"] == {}
     assert detail["fields"] == {}
     assert detail["free_descriptions"] == []
+    assert detail["full_texts"] == []
+    assert detail["textual_frames"] == {}
+    assert detail["mentions"] == {}
     svc.close()
+
+
+# ── Full texts tests ──────────────────────────────────────────────
+
+
+def test_get_catalog_detail_full_texts(service):
+    """get_catalog_detail returns full_texts list with expected entries."""
+    detail = service.get_catalog_detail("990001")
+    ft = detail["full_texts"]
+    assert len(ft) == 2
+    assert ft[0]["signature_id"] == 500
+    assert "scholarly description" in ft[0]["text"].lower()
+    assert ft[1]["signature_id"] == 501
+
+
+def test_get_catalog_detail_full_texts_empty(service):
+    """full_texts is empty list for sys_id with no full text data."""
+    detail = service.get_catalog_detail("990002")
+    assert detail["full_texts"] == []
+
+
+# ── Textual frames tests ────────────────────────────────────────
+
+
+def test_get_catalog_detail_textual_frames(service):
+    """get_catalog_detail returns textual_frames grouped by UnitCatalogRecId."""
+    detail = service.get_catalog_detail("990001")
+    tf = detail["textual_frames"]
+    assert len(tf) > 0
+    # rec_id 100 has 2 entries
+    assert 100 in tf
+    assert len(tf[100]) == 2
+    assert tf[100][0]["eng"] == "[Bible]: Numbers 11:14-24"
+    assert tf[100][1]["heb"] == "במדבר יב:א-יד"
+    # rec_id 101 has 1 entry
+    assert 101 in tf
+    assert len(tf[101]) == 1
+    assert "Lamentations" in tf[101][0]["eng"]
+
+
+def test_get_catalog_detail_textual_frames_empty(service):
+    """textual_frames is empty dict for sys_id with no frame data."""
+    detail = service.get_catalog_detail("990002")
+    assert detail["textual_frames"] == {}
+
+
+# ── Mentions tests ───────────────────────────────────────────────
+
+
+def test_get_catalog_detail_mentions(service):
+    """get_catalog_detail returns mentions grouped by UnitCatalogRecId."""
+    detail = service.get_catalog_detail("990001")
+    mn = detail["mentions"]
+    assert len(mn) > 0
+    # rec_id 100 has 3 mentions (2 Personalities + 1 Places)
+    assert 100 in mn
+    assert len(mn[100]) == 3
+    types = {m["mention_type"] for m in mn[100]}
+    assert "Personalities" in types
+    assert "Places" in types
+    names = {m["mention"] for m in mn[100]}
+    assert "Moses" in names
+    assert "Sinai" in names
+    # rec_id 101 has 1 mention (Dates)
+    assert 101 in mn
+    assert mn[101][0]["mention_type"] == "Dates"
+    assert mn[101][0]["mention"] == "70 CE"
+
+
+def test_get_catalog_detail_mentions_empty(service):
+    """mentions is empty dict for sys_id with no mention data."""
+    detail = service.get_catalog_detail("990002")
+    assert detail["mentions"] == {}
+
+
+# ── Backward compat with old sidecar tests ──────────────────────
+
+
+def test_get_catalog_detail_old_sidecar_no_crash(tmp_path):
+    """get_catalog_detail works gracefully when new tables don't exist (old sidecar)."""
+    db_path = str(tmp_path / "old_v3.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO meta VALUES ('version', '3.1.0')")
+    # Minimal catalog table so records query doesn't crash
+    conn.execute("""
+        CREATE TABLE catalog (
+            AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
+            Title TEXT, TitleHeb TEXT, AuthorText TEXT, CopyDate TEXT,
+            CopyPlace TEXT, TextualFrameHeb TEXT, TextualFrameEng TEXT,
+            SourceName TEXT, SourceNameHeb TEXT, NumFolio REAL,
+            NumBifolio REAL, NumColumn TEXT, NumRow TEXT,
+            GenizahTitleOrgTitle TEXT, GenizahTitleEngTitle TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    svc = FjmsService(db_path=db_path)
+    detail = svc.get_catalog_detail("990001")
+    # New keys should exist with empty defaults
+    assert detail["full_texts"] == []
+    assert detail["textual_frames"] == {}
+    assert detail["mentions"] == {}
+    # Old keys also empty
+    assert detail["records"] == []
+    assert detail["running_titles"] == {}
+    svc.close()
+
+
+# ── Team display name tests ─────────────────────────────────────
+
+
+def test_get_team_display_name_known():
+    """get_team_display_name returns enriched name for known teams."""
+    assert "Aharon Maman" in get_team_display_name("Linguistics")
+    assert "FGP" in get_team_display_name("Linguistics")
+    assert "(head)" in get_team_display_name("Linguistics")
+
+
+def test_get_team_display_name_unknown():
+    """get_team_display_name falls back to original name for unknown teams."""
+    assert get_team_display_name("Some Unknown Team") == "Some Unknown Team"
+
+
+def test_get_team_display_name_empty():
+    """get_team_display_name handles empty/None input."""
+    assert get_team_display_name("") == ""
+    assert get_team_display_name(None) == ""
+
+
+def test_team_display_names_has_key_teams():
+    """TEAM_DISPLAY_NAMES has entries for major research teams."""
+    assert "Talmudic Literature" in TEAM_DISPLAY_NAMES
+    assert "Magic" in TEAM_DISPLAY_NAMES
+    assert "Responsa" in TEAM_DISPLAY_NAMES
+    assert len(TEAM_DISPLAY_NAMES) >= 20
 
 
 # ── Web shim import test ─────────────────────────────────────────

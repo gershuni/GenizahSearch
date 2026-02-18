@@ -439,7 +439,9 @@ def _render_full_texts(full_texts, is_heb):
 
 
 def _render_free_descriptions(free_descriptions, is_heb):
-    """Render free description texts, always fully visible."""
+    """Render free description texts with source attribution labels."""
+    from shared.fjms_service import get_team_display_name
+
     dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
     if not free_descriptions:
         with ui.row().classes('w-full py-1 px-3'):
@@ -452,9 +454,18 @@ def _render_free_descriptions(free_descriptions, is_heb):
             with ui.row().classes('w-full py-2 px-3').style(
                 f'border-bottom: 1px solid var(--border-light, #e5e7eb); {dir_style}'
             ):
-                ui.label(str(text).strip()).classes('text-sm whitespace-pre-wrap break-words').style(
-                    f'flex: 1; line-height: 1.6; {dir_style}'
-                )
+                with ui.column().classes('gap-0').style(f'flex: 1; {dir_style}'):
+                    # Source attribution label
+                    source = desc.get("source_name_heb") if is_heb else desc.get("source_name")
+                    if source and not is_heb:
+                        source = get_team_display_name(source)
+                    if source:
+                        ui.label(source).classes('text-xs font-semibold').style(
+                            f'color: var(--primary-700); {dir_style}'
+                        )
+                    ui.label(str(text).strip()).classes('text-sm whitespace-pre-wrap break-words').style(
+                        f'line-height: 1.6; {dir_style}'
+                    )
 
 
 def _fmt_num(val) -> str:

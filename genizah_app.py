@@ -5500,10 +5500,14 @@ class FjmsCatalogDialog(QDialog):
             for desc in free_descriptions:
                 text = desc.get("text", "")
                 if text and str(text).strip():
+                    source = desc.get("source_name_heb") if is_heb else desc.get("source_name")
+                    if source and not is_heb:
+                        source = get_team_display_name(source)
+                    source_html = f'<div style="font-weight:bold; font-size:11px; color:{c["section_text"]}; margin-bottom:2px;">{source}</div>' if source else ''
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
                         f'style="padding:8px; border-bottom:1px solid {c["border"]};{" direction:rtl; text-align:right;" if is_heb else ""}"'
-                        f'{dir_attr}>{str(text).strip()}</td></tr>'
+                        f'{dir_attr}>{source_html}{str(text).strip()}</td></tr>'
                     )
 
             # Full texts (scholarly descriptions) with distinct styling

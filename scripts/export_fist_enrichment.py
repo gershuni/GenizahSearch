@@ -11,7 +11,10 @@ with the following tables:
   - catalog_sizes:           AlmaId -> Physical sizes per record (~161K rows)
   - catalog_fields:          AlmaId -> Coded multi-fields (~1.1M rows)
   - catalog_free_desc:       AlmaId -> Scholarly free descriptions (~190K rows)
-  - catalog_fts:             FTS5 virtual table (catalog + running titles + free desc)
+  - catalog_full_texts:      AlmaId -> Scholarly prose descriptions (~65K rows)
+  - catalog_textual_frames:  AlmaId -> Detailed content identifications (~199K rows)
+  - catalog_mentions:        AlmaId -> Named entity mentions (~24K rows)
+  - catalog_fts:             FTS5 virtual table (catalog + running titles + free desc + full texts)
   - bibliography:            AlmaId -> Denormalized bibliography references (~733K rows)
   - catalog_refs:            AlmaId -> Catalog cross-references (~78K rows)
   - ref_catalogs:            CODE_Catalog reference lookup (80 rows)
@@ -30,7 +33,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-VERSION = "3.1.0"
+VERSION = "4.1.0"
 BATCH_SIZE = 10_000
 
 
@@ -489,7 +492,9 @@ def export_catalog_free_desc(source, target):
         CREATE TABLE catalog_free_desc (
             AlmaId TEXT NOT NULL,
             SignatureId INTEGER NOT NULL,
-            FreeDesc TEXT
+            FreeDesc TEXT,
+            SourceName TEXT,
+            SourceNameHeb TEXT
         )
     """)
 
@@ -501,12 +506,25 @@ def export_catalog_free_desc(source, target):
         SELECT DISTINCT
             TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
             sig.SignatureId,
-            fd.FreeDesc
+            fd.FreeDesc,
+            CASE
+                WHEN sig.SourceId = 500
+                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
+                ELSE cs.EngDesc
+            END as SourceName,
+            CASE
+                WHEN sig.SourceId = 500
+                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
+                ELSE cs.HebDesc
+            END as SourceNameHeb
         FROM dbo_InventoryAlma alma
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
         JOIN dbo_UnitFreeDescription fd ON sig.SignatureId = fd.SignatureId
+        LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
+        LEFT JOIN CODE_Catalog catname
+            ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
     """)
 
     batch = []
@@ -515,14 +533,14 @@ def export_catalog_free_desc(source, target):
         batch.append(row)
         if len(batch) >= BATCH_SIZE:
             target.executemany(
-                "INSERT INTO catalog_free_desc VALUES (?, ?, ?)", batch
+                "INSERT INTO catalog_free_desc VALUES (?, ?, ?, ?, ?)", batch
             )
             total += len(batch)
             batch = []
 
     if batch:
         target.executemany(
-            "INSERT INTO catalog_free_desc VALUES (?, ?, ?)", batch
+            "INSERT INTO catalog_free_desc VALUES (?, ?, ?, ?, ?)", batch
         )
         total += len(batch)
 
@@ -531,6 +549,200 @@ def export_catalog_free_desc(source, target):
 
     distinct_alma = target.execute(
         "SELECT COUNT(DISTINCT AlmaId) FROM catalog_free_desc"
+    ).fetchone()[0]
+    print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
+    return total
+
+
+def export_catalog_full_texts(source, target):
+    """Export catalog full texts from FIST to sidecar.
+
+    Full texts are scholarly prose descriptions (up to 21K chars) stored in
+    dbo_UnitFullText. All records have SourceId=500 (Catalogs). Linked via
+    SignatureId (same pattern as catalog_free_desc — no version filter).
+    """
+    print("Exporting catalog full texts...")
+
+    target.execute("DROP TABLE IF EXISTS catalog_full_texts")
+    target.execute("""
+        CREATE TABLE catalog_full_texts (
+            AlmaId TEXT NOT NULL,
+            SignatureId INTEGER NOT NULL,
+            FullText TEXT
+        )
+    """)
+
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            sig.SignatureId,
+            ft.FullText
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN dbo_UnitFullText ft ON sig.SignatureId = ft.SignatureId
+        WHERE ft.FullText IS NOT NULL AND TRIM(ft.FullText) != ''
+    """)
+
+    batch = []
+    total = 0
+    for row in tqdm(cursor, desc="  full_texts", unit=" rows"):
+        batch.append(row)
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_full_texts VALUES (?, ?, ?)", batch
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_full_texts VALUES (?, ?, ?)", batch
+        )
+        total += len(batch)
+
+    target.execute("CREATE INDEX idx_catft_alma ON catalog_full_texts(AlmaId)")
+    target.connection.commit()
+
+    distinct_alma = target.execute(
+        "SELECT COUNT(DISTINCT AlmaId) FROM catalog_full_texts"
+    ).fetchone()[0]
+    print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
+    return total
+
+
+def export_catalog_textual_frames(source, target):
+    """Export detailed textual frames from FIST to sidecar.
+
+    Richer than the BI_TextualFrame summary in the catalog table — includes
+    individual per-verse biblical/rabbinic references with author names.
+    Uses latest-version filter (same as catalog_running_titles).
+    """
+    print("Exporting catalog textual frames...")
+
+    target.execute("DROP TABLE IF EXISTS catalog_textual_frames")
+    target.execute("""
+        CREATE TABLE catalog_textual_frames (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            TextualFrameHeb TEXT,
+            TextualFrameEng TEXT
+        )
+    """)
+
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
+            tf.TextualFrameHeb,
+            tf.TextualFrameEng
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN (
+            SELECT SetSignatureId, MAX(Version) as MaxVersion
+            FROM dbo_Signature GROUP BY SetSignatureId
+        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
+            AND sig.Version = lsv.MaxVersion
+        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        JOIN dbo_CatalogMultiTextualFrame_Simple tf
+            ON cat.UnitCatalogRecId = tf.UnitCatalogRecId
+    """)
+
+    batch = []
+    total = 0
+    for row in tqdm(cursor, desc="  textual_frames", unit=" rows"):
+        batch.append(row)
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_textual_frames VALUES (?, ?, ?, ?)", batch
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_textual_frames VALUES (?, ?, ?, ?)", batch
+        )
+        total += len(batch)
+
+    target.execute("CREATE INDEX idx_cattf_alma ON catalog_textual_frames(AlmaId)")
+    target.execute("CREATE INDEX idx_cattf_ucrid ON catalog_textual_frames(UnitCatalogRecId)")
+    target.connection.commit()
+
+    distinct_alma = target.execute(
+        "SELECT COUNT(DISTINCT AlmaId) FROM catalog_textual_frames"
+    ).fetchone()[0]
+    print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
+    return total
+
+
+def export_catalog_mentions(source, target):
+    """Export catalog mentions (named entities) from FIST to sidecar.
+
+    MentionType resolved via CODE_FullCode.ComputedCode:
+    Personalities, Places, Creations, Dates, Groups, Other.
+    Uses latest-version filter (same as catalog_fields).
+    """
+    print("Exporting catalog mentions...")
+
+    target.execute("DROP TABLE IF EXISTS catalog_mentions")
+    target.execute("""
+        CREATE TABLE catalog_mentions (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            MentionType TEXT,
+            Mention TEXT,
+            MentionDesc TEXT
+        )
+    """)
+
+    cursor = source.execute("""
+        SELECT DISTINCT
+            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+            cat.UnitCatalogRecId,
+            fc.EngDesc as MentionType,
+            m.Mention,
+            m.MentionDesc
+        FROM dbo_InventoryAlma alma
+        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+        JOIN (
+            SELECT SetSignatureId, MAX(Version) as MaxVersion
+            FROM dbo_Signature GROUP BY SetSignatureId
+        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
+            AND sig.Version = lsv.MaxVersion
+        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+        JOIN dbo_CatalogMultiMention m ON cat.UnitCatalogRecId = m.UnitCatalogRecId
+        LEFT JOIN CODE_FullCode fc ON m.MentionTypeCode = fc.ComputedCode
+    """)
+
+    batch = []
+    total = 0
+    for row in tqdm(cursor, desc="  mentions", unit=" rows"):
+        batch.append(row)
+        if len(batch) >= BATCH_SIZE:
+            target.executemany(
+                "INSERT INTO catalog_mentions VALUES (?, ?, ?, ?, ?)", batch
+            )
+            total += len(batch)
+            batch = []
+
+    if batch:
+        target.executemany(
+            "INSERT INTO catalog_mentions VALUES (?, ?, ?, ?, ?)", batch
+        )
+        total += len(batch)
+
+    target.execute("CREATE INDEX idx_catmn_alma ON catalog_mentions(AlmaId)")
+    target.execute("CREATE INDEX idx_catmn_ucrid ON catalog_mentions(UnitCatalogRecId)")
+    target.connection.commit()
+
+    distinct_alma = target.execute(
+        "SELECT COUNT(DISTINCT AlmaId) FROM catalog_mentions"
     ).fetchone()[0]
     print(f"  Exported {total:,} rows ({distinct_alma:,} distinct AlmaIds)")
     return total
@@ -767,7 +979,7 @@ def export_ref_authors(source, target):
 
 
 def create_fts5(target):
-    """Create contentless FTS5 index spanning catalog + running titles + free descriptions."""
+    """Create contentless FTS5 index spanning catalog + running titles + free desc + full texts + detailed frames."""
     print("Creating FTS5 index...")
 
     target.execute("DROP TABLE IF EXISTS catalog_fts")
@@ -780,6 +992,8 @@ def create_fts5(target):
             TextualFrameEng,
             RunningTitle,
             FreeDescription,
+            FullText,
+            DetailedFrames,
             content='',
             content_rowid='rowid'
         )
@@ -787,6 +1001,10 @@ def create_fts5(target):
 
     # Build aggregated rows: one row per AlmaId with all searchable text
     alma_ids = target.execute("SELECT DISTINCT AlmaId FROM catalog").fetchall()
+
+    # Check if new tables exist (forward compat)
+    has_full_texts = _table_exists(target, 'catalog_full_texts')
+    has_textual_frames = _table_exists(target, 'catalog_textual_frames')
 
     batch = []
     total = 0
@@ -812,6 +1030,25 @@ def create_fts5(target):
         ).fetchone()
         free_descs = fd_rows[0] if fd_rows and fd_rows[0] else ''
 
+        # Aggregate full texts for this AlmaId
+        full_texts = ''
+        if has_full_texts:
+            ft_rows = target.execute(
+                "SELECT GROUP_CONCAT(FullText, '; ') FROM catalog_full_texts WHERE AlmaId = ?",
+                (alma_id,),
+            ).fetchone()
+            full_texts = ft_rows[0] if ft_rows and ft_rows[0] else ''
+
+        # Aggregate detailed textual frames for this AlmaId
+        detailed_frames = ''
+        if has_textual_frames:
+            tf_rows = target.execute(
+                "SELECT GROUP_CONCAT(COALESCE(TextualFrameEng, '') || ' ' || COALESCE(TextualFrameHeb, ''), '; ') "
+                "FROM catalog_textual_frames WHERE AlmaId = ?",
+                (alma_id,),
+            ).fetchone()
+            detailed_frames = tf_rows[0] if tf_rows and tf_rows[0] else ''
+
         batch.append((
             alma_id,
             cat_row[0] if cat_row else '',  # Title
@@ -820,12 +1057,15 @@ def create_fts5(target):
             cat_row[3] if cat_row else '',  # TextualFrameEng
             running_titles,
             free_descs,
+            full_texts,
+            detailed_frames,
         ))
 
         if len(batch) >= BATCH_SIZE:
             target.executemany(
                 "INSERT INTO catalog_fts(AlmaId, Title, TitleHeb, TextualFrameHeb, "
-                "TextualFrameEng, RunningTitle, FreeDescription) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "TextualFrameEng, RunningTitle, FreeDescription, FullText, DetailedFrames) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 batch,
             )
             total += len(batch)
@@ -834,13 +1074,23 @@ def create_fts5(target):
     if batch:
         target.executemany(
             "INSERT INTO catalog_fts(AlmaId, Title, TitleHeb, TextualFrameHeb, "
-            "TextualFrameEng, RunningTitle, FreeDescription) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "TextualFrameEng, RunningTitle, FreeDescription, FullText, DetailedFrames) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             batch,
         )
         total += len(batch)
 
     target.connection.commit()
     print(f"  FTS5 index created with {total:,} entries")
+
+
+def _table_exists(cursor, table_name: str) -> bool:
+    """Check if a table exists in the target database."""
+    result = cursor.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone()
+    return result[0] > 0
 
 
 def create_meta(target):
@@ -918,6 +1168,9 @@ def main():
         sz_count = export_catalog_sizes(source, target)
         fld_count = export_catalog_fields(source, target)
         fd_count = export_catalog_free_desc(source, target)
+        ft_count = export_catalog_full_texts(source, target)
+        tf_count = export_catalog_textual_frames(source, target)
+        mn_count = export_catalog_mentions(source, target)
         bib_count = export_bibliography(source, target)
         catref_count = export_catalog_refs(source, target)
         refcat_count = export_ref_catalogs(source, target)
@@ -936,18 +1189,21 @@ def main():
         # Summary
         file_size_mb = target_path.stat().st_size / (1024 * 1024)
         print(f"\nExport complete!")
-        print(f"  domains:                {domain_count:>10,} rows")
-        print(f"  joins:                  {join_count:>10,} rows")
-        print(f"  catalog:                {catalog_count:>10,} rows")
-        print(f"  catalog_running_titles: {rt_count:>10,} rows")
-        print(f"  catalog_sizes:          {sz_count:>10,} rows")
-        print(f"  catalog_fields:         {fld_count:>10,} rows")
-        print(f"  catalog_free_desc:      {fd_count:>10,} rows")
-        print(f"  bibliography:           {bib_count:>10,} rows")
-        print(f"  catalog_refs:           {catref_count:>10,} rows")
-        print(f"  ref_catalogs:           {refcat_count:>10,} rows")
-        print(f"  ref_titles:             {reftitle_count:>10,} rows")
-        print(f"  ref_authors:            {refauthor_count:>10,} rows")
+        print(f"  domains:                   {domain_count:>10,} rows")
+        print(f"  joins:                     {join_count:>10,} rows")
+        print(f"  catalog:                   {catalog_count:>10,} rows")
+        print(f"  catalog_running_titles:    {rt_count:>10,} rows")
+        print(f"  catalog_sizes:             {sz_count:>10,} rows")
+        print(f"  catalog_fields:            {fld_count:>10,} rows")
+        print(f"  catalog_free_desc:         {fd_count:>10,} rows")
+        print(f"  catalog_full_texts:        {ft_count:>10,} rows")
+        print(f"  catalog_textual_frames:    {tf_count:>10,} rows")
+        print(f"  catalog_mentions:          {mn_count:>10,} rows")
+        print(f"  bibliography:              {bib_count:>10,} rows")
+        print(f"  catalog_refs:              {catref_count:>10,} rows")
+        print(f"  ref_catalogs:              {refcat_count:>10,} rows")
+        print(f"  ref_titles:                {reftitle_count:>10,} rows")
+        print(f"  ref_authors:               {refauthor_count:>10,} rows")
         print(f"  File size: {file_size_mb:.1f} MB")
 
     finally:
