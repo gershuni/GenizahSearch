@@ -143,12 +143,13 @@ Plans:
   1. FJMS catalog descriptions include rich structured data (content identification + physical metadata) beyond what browse already shows
   2. User clicks a dedicated button in the browse metadata panel and sees the FJMS scholarly description for that manuscript
   3. Each description shows source attribution (catalog name and/or scholar)
-**Plans**: 4 plans
+**Plans**: 5 plans
 Plans:
 - [ ] 37-01-PLAN.md — Export script enrichment (4 new tables + catalog v2 schema + FTS5 rebuild)
 - [ ] 37-02-PLAN.md — Service layer methods + tests + translation keys
 - [ ] 37-03-PLAN.md — Web catalog dialog + browse/search button wiring
 - [ ] 37-04-PLAN.md — Desktop catalog dialog + Browse tab/ResultDialog button wiring
+- [ ] 37-05-PLAN.md — Gap closure: free description source attribution + desktop RTL fix
 
 ### Phase 38: Distribution and Verification
 **Goal**: pgp.db is bundled for both distribution channels and desktop PGP browsing works without internet
@@ -174,9 +175,9 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 |-------|----------------|--------|-----------|
 | 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
 | 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
-| 37. FJMS Catalog Descriptions | 0/4 | Complete    | 2026-02-17 |
-| 38. Distribution and Verification | 0/3 | Complete    | 2026-02-18 |
+| 37. FJMS Catalog Descriptions | 4/5 | Gap closure | 2026-02-17 |
+| 38. Distribution and Verification | 3/3 | Complete    | 2026-02-18 |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-18 after Phase 38 planning (3 plans, 2 waves)*
+*Last updated: 2026-02-18 after Phase 37 gap closure planning (1 plan added)*
