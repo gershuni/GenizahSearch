@@ -541,6 +541,25 @@ class PgpService:
             finally:
                 self._conn = None
 
+    def get_version(self) -> Optional[str]:
+        """
+        Get the sidecar database version.
+
+        Returns:
+            Version string (e.g., '1.0.0') or None if unavailable.
+        """
+        if self._conn is None:
+            return None
+        try:
+            cursor = self._conn.execute(
+                "SELECT value FROM meta WHERE key = 'version'"
+            )
+            row = cursor.fetchone()
+            return row["value"] if row else None
+        except Exception as e:
+            logger.error(f"PgpService.get_version error: {e}")
+            return None
+
 
 # ── Pure Functions (no database dependency) ────────────────────────
 
@@ -1056,3 +1075,9 @@ def get_all_distinct_tags() -> List[str]:
     """Get all distinct PGP tags across all documents, sorted alphabetically."""
     svc = get_pgp_service()
     return svc.get_all_distinct_tags()
+
+
+def get_version() -> Optional[str]:
+    """Get the PGP sidecar database version."""
+    svc = get_pgp_service()
+    return svc.get_version() if svc.is_available() else None

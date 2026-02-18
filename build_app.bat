@@ -21,6 +21,7 @@ pyinstaller --noconfirm --noconsole --onedir --clean ^
  --add-data "shared;shared" ^
  --add-data "fist_data\fjms_enrichment.db;fist_data" ^
  --add-data "nli_data\nli_crossref.db;nli_data" ^
+ --add-data "pgp_data\pgp.db;pgp_data" ^
  --exclude-module "tkinter" ^
  --exclude-module "matplotlib" ^
  --exclude-module "scipy" ^
