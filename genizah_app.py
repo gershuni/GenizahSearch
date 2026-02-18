@@ -5204,6 +5204,8 @@ class FjmsCatalogDialog(QDialog):
         # Content browser
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenExternalLinks(True)
+        if CURRENT_LANG == 'he':
+            self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.text_browser.setHtml(self._build_html(detail))
         layout.addWidget(self.text_browser)
 
@@ -5301,8 +5303,9 @@ class FjmsCatalogDialog(QDialog):
                     author = first_rec.get("author_text", "")
                     if author and str(author).strip():
                         author_html = f'<br/><span style="font-weight:normal; font-size:11px; color:{c["author_muted"]};">{str(author).strip()}</span>'
+                align = 'right' if is_heb else 'left'
                 html_parts.append(
-                    f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; text-align:left; '
+                    f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; text-align:{align}; '
                     f'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{team_name}">'
                     f'{team_name}{author_html}</th>'
                 )
@@ -5527,14 +5530,18 @@ class FjmsCatalogDialog(QDialog):
                         )
 
         html_parts.append('</table>')
-        return '\n'.join(html_parts)
+        html = '\n'.join(html_parts)
+        if is_heb:
+            html = f'<div dir="rtl">{html}</div>'
+        return html
 
     def _section_row(self, title: str, colspan: int) -> str:
         """Build a section header row."""
         c = self._colors
+        align = 'right' if CURRENT_LANG == 'he' else 'left'
         return (
             f'<tr><td colspan="{colspan}" style="background:{c["section_bg"]}; font-weight:bold; '
-            f'padding:8px; color:{c["section_text"]}; font-size:13px;">{title}</td></tr>'
+            f'padding:8px; color:{c["section_text"]}; font-size:13px; text-align:{align};">{title}</td></tr>'
         )
 
     def _field_row(self, label: str, values: list, is_heb: bool) -> str:
@@ -5544,7 +5551,8 @@ class FjmsCatalogDialog(QDialog):
             return ''
         c = self._colors
         dir_style = ' direction:rtl; text-align:right;' if is_heb else ''
-        cells = [f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;">{label}</td>']
+        label_align = ' text-align:right;' if is_heb else ''
+        cells = [f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{label_align}">{label}</td>']
         for val in values:
             display = str(val).strip() if val else '\u2014'
             style = f'padding:6px 8px; border-bottom:1px solid {c["border"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{dir_style}'
