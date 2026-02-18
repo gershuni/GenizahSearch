@@ -1,6 +1,6 @@
 # GenizahSearch Technical Deployment Guide
 
-> Last updated: 2026-02-16
+> Last updated: 2026-02-18
 > For: Developers, System Administrators, AI Assistants
 
 ---
@@ -37,6 +37,10 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 │  │              │  │ nli_crossref.db   │  │  - Discoveries          │  │
 │  │              │  │  Images, Metadata,│  │  - Joins                │  │
 │  │              │  │  LUNA, DPUL IDs   │  │                         │  │
+│  │              │  │                   │  │                         │  │
+│  │              │  │ pgp.db            │  │                         │  │
+│  │              │  │  Documents, Sources│  │                         │  │
+│  │              │  │  Footnotes, Frags │  │                         │  │
 │  └──────────────┘  └───────────────────┘  └─────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -78,7 +82,7 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 | Web Application | NiceGUI | 8081 |
 | Web Server | Nginx | 80, 443 |
 | Search Engine | Tantivy | - (embedded) |
-| Reference Data | SQLite sidecars (FJMS + NLI) | - (embedded, read-only) |
+| Reference Data | SQLite sidecars (FJMS + NLI + PGP) | - (embedded, read-only) |
 | User Database | Supabase | Cloud |
 
 ---
@@ -107,10 +111,11 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 │   └── fjms_enrichment.db # SQLite sidecar v2.0.0 (246MB)
 ├── nli_data/              # NLI crossref sidecar (NOT in git)
 │   └── nli_crossref.db   # SQLite sidecar v1.2.0 (248MB)
-├── pgp_data/              # PGP data files (NOT in git)
-│   ├── documents.csv      # 35K PGP document records
-│   ├── fragments.csv      # 36K fragment links
-│   ├── footnotes.csv      # 23K footnotes
+├── pgp_data/              # PGP data + sidecar (NOT in git)
+│   ├── pgp.db             # SQLite sidecar v1.0.0 (147MB)
+│   ├── documents.csv      # 35K PGP document records (export source)
+│   ├── fragments.csv      # 36K fragment links (export source)
+│   ├── footnotes.csv      # 23K footnotes (export source)
 │   └── transcriptions_linked.csv # Linked transcription sources
 ├── libraries.csv          # Master manuscript metadata (~217K records)
 ├── genizah_core.py        # Core search logic
@@ -544,12 +549,13 @@ Web-based UI for server management:
 
 ### SQLite Sidecar Databases (v5.8.0+)
 
-Both sidecar databases are **NOT in git** (listed in `.gitignore`). They must be uploaded manually to the server and regenerated when source data changes.
+All three sidecar databases are **NOT in git** (listed in `.gitignore`). They must be uploaded manually to the server and regenerated when source data changes.
 
 | Database | Directory | Size | Version | Contents |
 |----------|-----------|------|---------|----------|
 | `fjms_enrichment.db` | `fist_data/` | 246 MB | v2.0.0 | FJMS domains (390K), joins (48K), catalog (500K), bibliography (542K), catalog_refs (64K) |
 | `nli_crossref.db` | `nli_data/` | 248 MB | v1.2.0 | NLI crossref images (815K), Cambridge manifests (141K), Manchester LUNA (28K), JTS DPUL (453) |
+| `pgp.db` | `pgp_data/` | 147 MB | v1.0.0 | PGP documents (35K), sources (9K), footnotes (23K), fragments (36K) |
 
 #### Initial Upload to Server
 
@@ -557,10 +563,11 @@ Both sidecar databases are **NOT in git** (listed in `.gitignore`). They must be
 # From local machine:
 scp fist_data/fjms_enrichment.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/fist_data/
 scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/nli_data/
+scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/
 
 # On server, create directories if needed:
 ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com
-mkdir -p /home/ubuntu/GenizahSearch/fist_data /home/ubuntu/GenizahSearch/nli_data
+mkdir -p /home/ubuntu/GenizahSearch/fist_data /home/ubuntu/GenizahSearch/nli_data /home/ubuntu/GenizahSearch/pgp_data
 ```
 
 #### Regenerating Sidecar Databases
@@ -583,6 +590,9 @@ python scripts/import_manchester_luna.py
 # JTS/Princeton DPUL (fetches from API, uses checkpoints):
 python scripts/import_jts_dpul.py
 
+# PGP sidecar (requires pgp_data/*.csv source files):
+python scripts/export_pgp_sidecar.py
+
 # Restart service after regeneration:
 sudo systemctl restart genizah-web
 ```
@@ -594,6 +604,7 @@ sudo systemctl restart genizah-web
 | `fjms_enrichment.db` | New FIST.db version from FJMS project | Rare (quarterly?) |
 | `nli_crossref.db` | New NLI crossreference CSV or Cambridge JSON | Rare (when NLI provides) |
 | Manchester/JTS tables | New manuscripts added to LUNA or DPUL | Rare (can re-run import scripts) |
+| `pgp.db` | New PGP data exported from Princeton Geniza Project | Rare (when PGP releases new data) |
 
 **Note:** Both databases are read-only at runtime. The web app opens them in `?mode=ro` URI mode. No write operations occur during normal operation.
 
@@ -620,6 +631,12 @@ python scripts/import_pgp_sections.py
 
 # 5. Restart service:
 sudo systemctl restart genizah-web
+
+# 6. Regenerate pgp.db sidecar (for desktop and web offline access):
+python scripts/export_pgp_sidecar.py
+
+# 7. Upload pgp.db to server:
+scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/
 ```
 
 **PGP data files** (in `pgp_data/`): Not in git. Must be downloaded from PGP GitHub and placed on server before running import scripts.
