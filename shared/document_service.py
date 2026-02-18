@@ -91,9 +91,18 @@ class PgpService:
 
         # Resolve db_path
         if db_path is None:
-            root = _find_project_root()
-            if root:
-                db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
+            # Check user-updated sidecar location first (LOCALAPPDATA)
+            import os
+            user_path = os.path.join(
+                os.environ.get('LOCALAPPDATA', ''),
+                'GenizahSearchPro', 'data', _SIDECAR_DIR, _SIDECAR_FILENAME
+            )
+            if os.path.isfile(user_path):
+                db_path = user_path
+            else:
+                root = _find_project_root()
+                if root:
+                    db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
 
         if db_path is None:
             logger.warning("PgpService: No db_path provided and project root not found")
@@ -893,6 +902,19 @@ def get_pgp_service(thread_safe: bool = True) -> PgpService:
     if _default_service is None:
         _default_service = PgpService(thread_safe=thread_safe)
     return _default_service
+
+
+def reset_pgp_service():
+    """Reset the singleton PgpService instance.
+
+    Call this after replacing the pgp.db sidecar file to force
+    re-initialization on next access. Closes the existing connection
+    before clearing the singleton.
+    """
+    global _default_service
+    if _default_service is not None:
+        _default_service.close()
+        _default_service = None
 
 
 # ── Module-level Wrapper Functions (backward-compatible API) ───────

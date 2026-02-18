@@ -91,9 +91,18 @@ class NliCrossrefService:
 
         # Resolve db_path
         if db_path is None:
-            root = _find_project_root()
-            if root:
-                db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
+            # Check user-updated sidecar location first (LOCALAPPDATA)
+            import os
+            user_path = os.path.join(
+                os.environ.get('LOCALAPPDATA', ''),
+                'GenizahSearchPro', 'data', _SIDECAR_DIR, _SIDECAR_FILENAME
+            )
+            if os.path.isfile(user_path):
+                db_path = user_path
+            else:
+                root = _find_project_root()
+                if root:
+                    db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
 
         if db_path is None:
             logger.warning("NliCrossrefService: No db_path provided and project root not found")
@@ -842,3 +851,16 @@ def get_nli_crossref_service(thread_safe: bool = False) -> NliCrossrefService:
     if _default_service is None:
         _default_service = NliCrossrefService(thread_safe=thread_safe)
     return _default_service
+
+
+def reset_nli_crossref_service():
+    """Reset the singleton NliCrossrefService instance.
+
+    Call this after replacing the nli_crossref.db sidecar file to force
+    re-initialization on next access. Closes the existing connection
+    before clearing the singleton.
+    """
+    global _default_service
+    if _default_service is not None:
+        _default_service.close()
+        _default_service = None
