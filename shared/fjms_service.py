@@ -223,6 +223,12 @@ GENERIC_SOURCE_NAMES = frozenset({
     'Inventory', 'Nuscha', 'Institution', 'Instatution', 'Collection', 'Other',
 })
 
+# Domains that appear as children of multiple parent categories.
+# These need qualification with parent name to be distinguishable in filters.
+# Data: SELECT Domain FROM domains WHERE ParentDomain IS NOT NULL AND ParentDomain != Domain
+#        GROUP BY Domain HAVING COUNT(DISTINCT ParentDomain) > 1
+AMBIGUOUS_CHILD_DOMAINS = frozenset({'Other'})
+
 
 def _lookup_team(source_name: str):
     """Case-insensitive lookup in _TEAM_NAMES. Returns tuple or None."""
@@ -278,6 +284,47 @@ def get_team_header_name(source_name: str, is_heb: bool = False) -> str:
         return source_name
     result = data[2] if is_heb else data[0]
     return result or source_name
+
+
+def qualify_domain_name(domain: str, parent_domain: str = None) -> str:
+    """Qualify ambiguous child domain names with their parent for uniqueness.
+
+    Domains like "Other" appear under multiple parent categories. Without
+    qualification, filtering by "Other" in one parent would affect all parents.
+    This function returns "Other (Liturgy and Brakhot)" for ambiguous domains
+    and the bare domain name for unambiguous ones.
+
+    Args:
+        domain: The domain name (e.g., "Other", "Piyyut").
+        parent_domain: The parent domain name (e.g., "Liturgy and Brakhot").
+
+    Returns:
+        Qualified name if ambiguous, otherwise the bare domain name.
+    """
+    if domain in AMBIGUOUS_CHILD_DOMAINS and parent_domain and parent_domain != domain:
+        return f"{domain} ({parent_domain})"
+    return domain
+
+
+def unqualify_domain_name(qualified: str) -> tuple[str, str]:
+    """Extract bare domain and parent from a qualified domain name.
+
+    Returns (domain, parent_domain) tuple. For unqualified names,
+    parent_domain is empty string.
+
+    Args:
+        qualified: e.g., "Other (Liturgy and Brakhot)" or "Piyyut".
+
+    Returns:
+        Tuple of (domain, parent_domain).
+    """
+    if ' (' in qualified and qualified.endswith(')'):
+        idx = qualified.index(' (')
+        domain = qualified[:idx]
+        parent = qualified[idx + 2:-1]
+        if domain in AMBIGUOUS_CHILD_DOMAINS:
+            return (domain, parent)
+    return (qualified, '')
 
 
 def _find_project_root() -> Optional[Path]:
@@ -1070,24 +1117,37 @@ class FjmsService:
         # 5. Free descriptions
         free_descriptions = []
         try:
+            # Try with SourceName columns first (v4.1.0+ sidecar)
             cursor = self._conn.execute(
                 "SELECT SignatureId, FreeDesc, SourceName, SourceNameHeb "
                 "FROM catalog_free_desc WHERE AlmaId = ?",
                 (sys_id,),
             )
-            col_names = None
             for row in cursor:
-                if col_names is None:
-                    col_names = row.keys()
-                has_source = col_names is not None and "SourceName" in col_names
                 free_descriptions.append({
                     "text": row["FreeDesc"],
                     "signature_id": row["SignatureId"],
-                    "source_name": row["SourceName"] if has_source else None,
-                    "source_name_heb": row["SourceNameHeb"] if has_source else None,
+                    "source_name": row["SourceName"],
+                    "source_name_heb": row["SourceNameHeb"],
                 })
-        except Exception as e:
-            logger.debug(f"FjmsService.get_catalog_detail free_desc error for {sys_id}: {e}")
+        except Exception:
+            # Fallback: old sidecar without SourceName columns
+            free_descriptions = []
+            try:
+                cursor = self._conn.execute(
+                    "SELECT SignatureId, FreeDesc "
+                    "FROM catalog_free_desc WHERE AlmaId = ?",
+                    (sys_id,),
+                )
+                for row in cursor:
+                    free_descriptions.append({
+                        "text": row["FreeDesc"],
+                        "signature_id": row["SignatureId"],
+                        "source_name": None,
+                        "source_name_heb": None,
+                    })
+            except Exception as e:
+                logger.debug(f"FjmsService.get_catalog_detail free_desc error for {sys_id}: {e}")
 
         # 6. Full texts (v4.0.0+, may not exist in older sidecars)
         full_texts = []
