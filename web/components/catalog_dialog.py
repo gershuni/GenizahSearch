@@ -151,7 +151,7 @@ def _field_row(label: str, values: list, is_heb: bool):
 def _render_catalog_table(teams, running_titles, sizes, fields,
                           free_descriptions, full_texts, textual_frames, mentions, is_heb):
     """Render the full FIST 6-section side-by-side table."""
-    from shared.fjms_service import get_team_display_name
+    from shared.fjms_service import get_team_display_name, get_team_header_name
 
     num_teams = len(teams)
     dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
@@ -172,18 +172,9 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         ui.label('').classes('shrink-0').style('width: 120px;')
         # Team name columns
         for team in teams:
-            raw_name = team["source_name_heb"] if is_heb else team["source_name"]
-            display_name = get_team_display_name(raw_name) if not is_heb else raw_name
+            header_name = get_team_header_name(team["source_name"], is_heb=is_heb)
             with ui.column().classes('gap-0').style(f'flex: 1; min-width: 130px; {dir_style}'):
-                ui.label(display_name).classes('text-sm font-bold').style('color: var(--primary-700);')
-                # Show author from first record if available
-                first_rec = team["records"][0] if team["records"] else None
-                if first_rec:
-                    author = first_rec.get("author_text", "")
-                    if author and str(author).strip():
-                        ui.label(str(author).strip()).classes('text-xs').style(
-                            'color: var(--text-muted);'
-                        )
+                ui.label(header_name).classes('text-sm font-bold').style('color: var(--primary-700);')
 
     # === Section 1: Shelfmark Description ===
     _section_header(tr('Shelfmark Description'), num_teams + 1)
@@ -455,10 +446,9 @@ def _render_free_descriptions(free_descriptions, is_heb):
                 f'border-bottom: 1px solid var(--border-light, #e5e7eb); {dir_style}'
             ):
                 with ui.column().classes('gap-0').style(f'flex: 1; {dir_style}'):
-                    # Source attribution label
-                    source = desc.get("source_name_heb") if is_heb else desc.get("source_name")
-                    if source and not is_heb:
-                        source = get_team_display_name(source)
+                    # Source attribution label — always use English key for lookup
+                    eng_source = desc.get("source_name")
+                    source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
                     if source:
                         ui.label(source).classes('text-xs font-semibold').style(
                             f'color: var(--primary-700); {dir_style}'

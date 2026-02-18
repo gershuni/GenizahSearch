@@ -26,37 +26,193 @@ logger = logging.getLogger(__name__)
 _SIDECAR_FILENAME = "fjms_enrichment.db"
 _SIDECAR_DIR = "fist_data"
 
-# Team display names: maps EngDesc from dbo_CodeSource to full FJMS display name
-# with team leader names (sourced from FJMS website, not present in FIST.db).
-TEAM_DISPLAY_NAMES = {
-    "Transcriptions Team-Genuzos": "FGP Transcriptions Team-Genuzos",
-    "Talmudic Literature": "FGP Talmudic Literature team, Yaacov Sussmann (head)",
-    "Judeo-Arabic Halakhic Literature": "FGP Judeo-Arabic Halakhic Literature team, David Sklare (head)",
-    "Judeo-Arabic Biblical Exegesis": "FGP Judeo-Arabic Biblical Exegesis team, Ephraim Ben-Porat (head)",
-    "Firkovitch Collections": "FGP Firkovitch Collections team, David Sklare (head)",
-    "Princeton Documentary Material (Goitein)": "FGP Princeton Documentary Material (Goitein) team, Mark Cohen (head)",
-    "Magic": "FGP Magic team, Gideon Bohak (head)",
-    "T-S Cataloging": "FGP T-S Cataloging team, Yaacov Sussmann (head)",
-    "Aggadic Midrashim": "FGP Aggadic Midrashim team, Chaim Milikowsky (head)",
-    "Philosophy, Theology and Polemics": "FGP Philosophy, Theology and Polemics team, Sarah Stroumsa (head)",
-    "Bibliography C": "FGP Bibliography C team, Emanuel Friedberg (head)",
-    "Talmud Commentaries and Halakhic Literature (Hebrew)": "FGP Talmud Commentaries and Halakhic Literature (Hebrew) team, Simcha Emanuel (head)",
-    "Linguistics": "FGP Linguistics team, Aharon Maman (head)",
-    "Seride Teshuvot Team: Shocken Institute": "FGP Seride Teshuvot Team: Shocken Institute, Shmuel Glick (head)",
-    "Responsa": "FGP Responsa team, Mordechai A. Friedman (head)",
-    "Scientific Joins": "FGP Scientific Joins team",
-    "Halakhic Midrashim": "FGP Halakhic Midrashim team",
-    "Liturgy": "FGP Liturgy team",
-    "Piyyut": "FGP Piyyut team",
-    "Karaite Literature": "FGP Karaite Literature team",
-    "Documentary Material (Goitein)": "FGP Documentary Material (Goitein) team",
-    "Science": "FGP Science team",
-    "Bible": "FGP Bible team",
-    "Yemenite": "FGP Yemenite team",
-    "Samaritan": "FGP Samaritan team",
-    "FGP": "FGP",
-    "PGPID": "PGPID",
+# Team name data: maps EngDesc from dbo_CodeSource to display names.
+# Each entry: (en_header, en_full, he_header, he_full)
+# - en_header / he_header: column header without leader (e.g., "FGP Linguistics team")
+# - en_full / he_full: full name with leader (e.g., "FGP Linguistics team, Aharon Maman (head)")
+# - None means "fall back to raw source_name"
+# Leader names sourced from FJMS website (not present in FIST.db).
+_TEAM_NAMES = {
+    # fmt: off
+    "Aggadic Midrashim": (
+        "FGP Aggadic Midrashim team",
+        "FGP Aggadic Midrashim team, Chaim Milikowsky (head)",
+        "צוות FGP למדרשי אגדה",
+        "צוות FGP למדרשי אגדה, חיים מיליקובסקי (ראש צוות)",
+    ),
+    "Bibliography B": (
+        "FGP Bibliography B team",
+        "FGP Bibliography B team, Zvi Stampfer, Yitzchack Gila (head)",
+        "צוות FGP לביבליוגרפיה ב",
+        "צוות FGP לביבליוגרפיה ב, צבי שטמפפר, יצחק גילה (ראש צוות)",
+    ),
+    "Bibliography C": (
+        "FGP Bibliography C team",
+        "FGP Bibliography C team, Emanuel Friedberg (head)",
+        "צוות FGP לביבליוגרפיה ג",
+        "צוות FGP לביבליוגרפיה ג, עמנואל פרידברג (ראש צוות)",
+    ),
+    "Bibliography Cambridge": (
+        "FGP Bibliography Cambridge team",
+        "FGP Bibliography Cambridge team",
+        "צוות FGP לביבליוגרפיה קיימברידג",
+        "צוות FGP לביבליוגרפיה קיימברידג",
+    ),
+    "Firkovitch Collections": (
+        "FGP Firkovitch Collections team",
+        "FGP Firkovitch Collections team, David Sklare (head)",
+        "צוות FGP לאוספי פירקוביץ'",
+        "צוות FGP לאוספי פירקוביץ', דוד סקליר (ראש צוות)",
+    ),
+    "Halakhic Midrashim": (
+        "FGP Halakhic Midrashim team",
+        "FGP Halakhic Midrashim team, Menahem Kahana (head)",
+        "צוות FGP למדרשי הלכה",
+        "צוות FGP למדרשי הלכה, מנחם כהנא (ראש צוות)",
+    ),
+    "Judeo-Arabic Biblical Exegesis": (
+        "FGP Judeo-Arabic Biblical Exegesis team",
+        "FGP Judeo-Arabic Biblical Exegesis team, Ephraim Ben-Porat (head)",
+        "צוות FGP לפרשנות המקרא בערבית-יהודית",
+        "צוות FGP לפרשנות המקרא בערבית-יהודית, אפרים בן-פורת (ראש צוות)",
+    ),
+    "Judeo-Arabic Halakhic Literature": (
+        "FGP Judeo-Arabic Halakhic Literature team",
+        "FGP Judeo-Arabic Halakhic Literature team, David Sklare (head)",
+        "צוות FGP לספרות ההלכה בערבית-יהודית",
+        "צוות FGP לספרות ההלכה בערבית-יהודית, דוד סקליר (ראש צוות)",
+    ),
+    "Judeo-Persian": (
+        "FGP Judeo-Persian team",
+        "FGP Judeo-Persian team, Shaul Shaked (head)",
+        "צוות FGP לפרסית-יהודית",
+        "צוות FGP לפרסית-יהודית, שאול שקד (ראש צוות)",
+    ),
+    "Ladino": (
+        "FGP Ladino team",
+        "FGP Ladino team, Aldina Quintana (head)",
+        "צוות FGP ללאדינו",
+        "צוות FGP ללאדינו, אלדינה קינטנה (ראש צוות)",
+    ),
+    "Late Documentary Material (Hebrew)": (
+        "FGP Late Documentary Material (Hebrew) team",
+        "FGP Late Documentary Material (Hebrew) team, Avraham David (head)",
+        "צוות FGP לחומר תיעודי מאוחר (עברית)",
+        "צוות FGP לחומר תיעודי מאוחר (עברית), אברהם דוד (ראש צוות)",
+    ),
+    "Linguistics": (
+        "FGP Linguistics team",
+        "FGP Linguistics team, Aharon Maman (head)",
+        "צוות FGP לחכמת הלשון",
+        "צוות FGP לחכמת הלשון, אהרן ממן (ראש צוות)",
+    ),
+    "Liturgy": (
+        "FGP Liturgy team",
+        "FGP Liturgy team, Uri Erlich (head)",
+        "צוות FGP לתפילה",
+        "צוות FGP לתפילה, אורי ארליך (ראש צוות)",
+    ),
+    "Magic": (
+        "FGP Magic team",
+        "FGP Magic team, Gideon Bohak (head)",
+        "צוות FGP למאגיה",
+        "צוות FGP למאגיה, גדעון בוהק (ראש צוות)",
+    ),
+    "Midrash Eikha Rabba": (
+        "FGP Midrash Eikha Rabba team",
+        "FGP Midrash Eikha Rabba team, Paul Mandel (head)",
+        "צוות FGP למדרש איכה רבא",
+        "צוות FGP למדרש איכה רבא, פנחס מנדל (ראש צוות)",
+    ),
+    "Philosophy, Theology and Polemics": (
+        "FGP Philosophy, Theology and Polemics team",
+        "FGP Philosophy, Theology and Polemics team, Sarah Stroumsa (head)",
+        "צוות FGP לפילוסופיה, תיאולוגיה ופולמוס",
+        "צוות FGP לפילוסופיה, תיאולוגיה ופולמוס, שרה סטרומזה (ראש צוות)",
+    ),
+    "Princeton Documentary Material (Goitein)": (
+        "FGP Princeton Documentary Material (Goitein) team",
+        "FGP Princeton Documentary Material (Goitein) team, Mark Cohen (head)",
+        "צוות FGP פרינסטון לחומר תיעודי (גויטין)",
+        "צוות FGP פרינסטון לחומר תיעודי (גויטין), מרק כהן (ראש צוות)",
+    ),
+    "Rabbinic Material": (
+        "FGP Rabbinic Material team",
+        "FGP Rabbinic Material team, Ezra Chwat (head)",
+        "צוות FGP לחומר רבני",
+        "צוות FGP לחומר רבני, עזרא שבט (ראש צוות)",
+    ),
+    "Responsa": (
+        "FGP Responsa team",
+        "FGP Responsa team, Mordechai A. Friedman (head)",
+        "צוות FGP לשו\"ת",
+        "צוות FGP לשו\"ת, מרדכי עקיבא פרידמן (ראש צוות)",
+    ),
+    "Seride Teshuvot Team: Shocken Institute": (
+        "FGP Seride Teshuvot Team: Shocken Institute",
+        "FGP Seride Teshuvot Team: Shocken Institute, Shmuel Glick (head)",
+        "צוות FGP לשרידי תשובות \u2013 מכון שוקן",
+        "צוות FGP לשרידי תשובות \u2013 מכון שוקן, שמואל גליק (ראש צוות)",
+    ),
+    "T-S Cataloging": (
+        "FGP T-S Cataloging team",
+        "FGP T-S Cataloging team, Yaacov Sussmann (head)",
+        "צוות FGP לT-S NS",
+        "צוות FGP לT-S NS, יעקב זוסמן (ראש צוות)",
+    ),
+    "Talmud Commentaries and Halakhic Literature (Hebrew)": (
+        "FGP Talmud Commentaries and Halakhic Literature (Hebrew) team",
+        "FGP Talmud Commentaries and Halakhic Literature (Hebrew) team, Simcha Emanuel (head)",
+        "צוות FGP לפרשנות התלמוד והספרות ההלכתית (עברית)",
+        "צוות FGP לפרשנות התלמוד והספרות ההלכתית (עברית), שמחה עמנואל (ראש צוות)",
+    ),
+    "Talmudic Literature": (
+        "FGP Talmudic Literature team",
+        "FGP Talmudic Literature team, Yaacov Sussmann (head)",
+        "צוות FGP לספרות תלמודית",
+        "צוות FGP לספרות תלמודית, יעקב זוסמן (ראש צוות)",
+    ),
+    "Transcriptions and Information by various authors": (
+        "FGP Transcriptions and Information by various authors team",
+        "FGP Transcriptions and Information by various authors team, Emanuel Friedberg (head)",
+        "צוות FGP להעתקות ומידע ממחברים שונים",
+        "צוות FGP להעתקות ומידע ממחברים שונים, עמנואל פרידברג (ראש צוות)",
+    ),
+    "Transcriptions and Information from various publications": (
+        "FGP Transcriptions and Information from various publications team",
+        "FGP Transcriptions and Information from various publications team, Emanuel Friedberg (head)",
+        "צוות FGP להעתקות ומידע מכתבי עת ופרסומים שונים",
+        "צוות FGP להעתקות ומידע מכתבי עת ופרסומים שונים, עמנואל פרידברג (ראש צוות)",
+    ),
+    "Transcriptions Team-Genuzos": (
+        "FGP Transcriptions Team-Genuzos",
+        "FGP Transcriptions Team-Genuzos",
+        "צוות FGP להעתקות -גנוזות",
+        "צוות FGP להעתקות -גנוזות",
+    ),
+    "Yerushalmi": (
+        "FGP Yerushalmi team",
+        "FGP Yerushalmi team, Yaacov Sussmann (head)",
+        "צוות FGP לתלמוד ירושלמי",
+        "צוות FGP לתלמוד ירושלמי, יעקב זוסמן (ראש צוות)",
+    ),
+    # Teams without FJMS Hebrew data (header only, no leader)
+    "Bible": ("FGP Bible team", "FGP Bible team", None, None),
+    "Documentary Material (Goitein)": ("FGP Documentary Material (Goitein) team", "FGP Documentary Material (Goitein) team", None, None),
+    "Karaite Literature": ("FGP Karaite Literature team", "FGP Karaite Literature team", None, None),
+    "Piyyut": ("FGP Piyyut team", "FGP Piyyut team", None, None),
+    "Samaritan": ("FGP Samaritan team", "FGP Samaritan team", None, None),
+    "Science": ("FGP Science team", "FGP Science team", None, None),
+    "Scientific Joins": ("FGP Scientific Joins team", "FGP Scientific Joins team", None, None),
+    "Yemenite": ("FGP Yemenite team", "FGP Yemenite team", None, None),
+    # Non-team entries
+    "FGP": ("FGP", "FGP", None, None),
+    "PGPID": ("PGPID", "PGPID", None, None),
+    # fmt: on
 }
+
+# Backward-compatible flat dict (en_full only) — used by existing callers
+TEAM_DISPLAY_NAMES = {k: v[1] for k, v in _TEAM_NAMES.items() if v[1]}
 
 # Generic source names that don't represent scholarly teams — filtered from
 # button counts and dialog team columns for consistency.
@@ -65,20 +221,47 @@ GENERIC_SOURCE_NAMES = frozenset({
 })
 
 
-def get_team_display_name(source_name: str) -> str:
+def get_team_display_name(source_name: str, is_heb: bool = False) -> str:
     """Map a catalog SourceName to its full FJMS display name with team leader.
 
     Falls back to the original source_name if no mapping exists.
 
     Args:
         source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics").
+        is_heb: If True, return Hebrew name; otherwise English.
 
     Returns:
         Full display name (e.g., "FGP Linguistics team, Aharon Maman (head)").
     """
     if not source_name:
         return source_name or ''
-    return TEAM_DISPLAY_NAMES.get(source_name, source_name)
+    data = _TEAM_NAMES.get(source_name)
+    if not data:
+        return source_name
+    result = data[3] if is_heb else data[1]
+    return result or source_name
+
+
+def get_team_header_name(source_name: str, is_heb: bool = False) -> str:
+    """Map a catalog SourceName to its column header name (without leader).
+
+    Used for table column headers in the catalog dialog.
+    Falls back to the original source_name if no mapping exists.
+
+    Args:
+        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics").
+        is_heb: If True, return Hebrew header; otherwise English.
+
+    Returns:
+        Header name (e.g., "FGP Linguistics team" or "צוות FGP לחכמת הלשון").
+    """
+    if not source_name:
+        return source_name or ''
+    data = _TEAM_NAMES.get(source_name)
+    if not data:
+        return source_name
+    result = data[2] if is_heb else data[0]
+    return result or source_name
 
 
 def _find_project_root() -> Optional[Path]:

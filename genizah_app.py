@@ -5219,7 +5219,7 @@ class FjmsCatalogDialog(QDialog):
 
     def _build_html(self, detail: dict) -> str:
         """Build HTML table mirroring FIST Cataloging Data Details view."""
-        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, GENERIC_SOURCE_NAMES
+        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, get_team_header_name, GENERIC_SOURCE_NAMES
 
         records = detail.get("records", [])
         running_titles = detail.get("running_titles", {})
@@ -5283,32 +5283,38 @@ class FjmsCatalogDialog(QDialog):
             f'<table style="width:100%; border-collapse:collapse; table-layout:fixed; '
             f'font-family:Arial; font-size:13px; color:{c["text"]};">'
         )
-        # Column width definitions
+        # Column width definitions — RTL: team cols first, label last
         if num_teams > 0:
-            html_parts.append(f'<colgroup><col style="width:{label_width}px;"/>')
-            for _ in teams:
-                html_parts.append(f'<col style="width:{team_col_width}px;"/>')
+            html_parts.append('<colgroup>')
+            if is_heb:
+                for _ in teams:
+                    html_parts.append(f'<col style="width:{team_col_width}px;"/>')
+                html_parts.append(f'<col style="width:{label_width}px;"/>')
+            else:
+                html_parts.append(f'<col style="width:{label_width}px;"/>')
+                for _ in teams:
+                    html_parts.append(f'<col style="width:{team_col_width}px;"/>')
             html_parts.append('</colgroup>')
 
         if num_teams > 0:
             # === Team header row ===
-            html_parts.append('<tr>')
-            html_parts.append(f'<th style="padding:8px;"></th>')
+            align = 'right' if is_heb else 'left'
+            team_ths = []
             for team in teams:
-                raw_name = team["source_name_heb"] if is_heb else team["source_name"]
-                team_name = get_team_display_name(raw_name) if not is_heb else raw_name
-                first_rec = team["records"][0] if team["records"] else None
-                author_html = ''
-                if first_rec:
-                    author = first_rec.get("author_text", "")
-                    if author and str(author).strip():
-                        author_html = f'<br/><span style="font-weight:normal; font-size:11px; color:{c["author_muted"]};">{str(author).strip()}</span>'
-                align = 'right' if is_heb else 'left'
-                html_parts.append(
+                header_name = get_team_header_name(team["source_name"], is_heb=is_heb)
+                team_ths.append(
                     f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; text-align:{align}; '
-                    f'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{team_name}">'
-                    f'{team_name}{author_html}</th>'
+                    f'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{header_name}">'
+                    f'{header_name}</th>'
                 )
+            empty_th = f'<th style="padding:8px;"></th>'
+            html_parts.append('<tr>')
+            if is_heb:
+                html_parts.extend(team_ths)
+                html_parts.append(empty_th)
+            else:
+                html_parts.append(empty_th)
+                html_parts.extend(team_ths)
             html_parts.append('</tr>')
 
             # === Section 1: Shelfmark Description ===
@@ -5503,9 +5509,8 @@ class FjmsCatalogDialog(QDialog):
             for desc in free_descriptions:
                 text = desc.get("text", "")
                 if text and str(text).strip():
-                    source = desc.get("source_name_heb") if is_heb else desc.get("source_name")
-                    if source and not is_heb:
-                        source = get_team_display_name(source)
+                    eng_source = desc.get("source_name")
+                    source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
                     source_html = f'<div style="font-weight:bold; font-size:11px; color:{c["section_text"]}; margin-bottom:2px;">{source}</div>' if source else ''
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
@@ -5546,20 +5551,23 @@ class FjmsCatalogDialog(QDialog):
 
     def _field_row(self, label: str, values: list, is_heb: bool) -> str:
         """Build a field row: label in first column, values in team columns.
-        Returns empty string if all values are empty (hides row)."""
+        RTL: team columns first, label last. Returns empty string if all values are empty."""
         if not any(v for v in values):
             return ''
         c = self._colors
         dir_style = ' direction:rtl; text-align:right;' if is_heb else ''
         label_align = ' text-align:right;' if is_heb else ''
-        cells = [f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{label_align}">{label}</td>']
+        label_cell = f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{label_align}">{label}</td>'
+        value_cells = []
         for val in values:
             display = str(val).strip() if val else '\u2014'
             style = f'padding:6px 8px; border-bottom:1px solid {c["border"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{dir_style}'
             if not val:
                 style += f' color:{c["muted"]};'
-            cells.append(f'<td style="{style}">{display}</td>')
-        return '<tr>' + ''.join(cells) + '</tr>'
+            value_cells.append(f'<td style="{style}">{display}</td>')
+        if is_heb:
+            return '<tr>' + ''.join(value_cells) + label_cell + '</tr>'
+        return '<tr>' + label_cell + ''.join(value_cells) + '</tr>'
 
     def _field_category_row(self, category: str, label: str, teams: list, fields: dict, is_heb: bool) -> str:
         """Build a row for a specific FieldCategory from catalog_fields."""
