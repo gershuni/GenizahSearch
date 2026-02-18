@@ -98,6 +98,7 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
                         _render_catalog_table(
                             teams, running_titles, sizes, fields,
                             free_descriptions, full_texts, textual_frames, mentions, is_heb,
+                            shelfmark=shelfmark,
                         )
 
         # Close button
@@ -149,9 +150,10 @@ def _field_row(label: str, values: list, is_heb: bool):
 
 
 def _render_catalog_table(teams, running_titles, sizes, fields,
-                          free_descriptions, full_texts, textual_frames, mentions, is_heb):
+                          free_descriptions, full_texts, textual_frames, mentions, is_heb,
+                          shelfmark=''):
     """Render the full FIST 6-section side-by-side table."""
-    from shared.fjms_service import get_team_display_name, get_team_header_name
+    from shared.fjms_service import get_team_display_name, get_team_header_name, is_team_source
 
     num_teams = len(teams)
     dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
@@ -179,17 +181,32 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
     # === Section 1: Shelfmark Description ===
     _section_header(tr('Shelfmark Description'), num_teams + 1)
 
-    # Source (team attribution)
+    # Shelfmark
+    if shelfmark:
+        sm_vals = [shelfmark] * num_teams
+        _field_row(tr('Shelfmark'), sm_vals, is_heb)
+
+    # Source — "{Author}, Head of {Team}" for teams, raw name for catalogs
     source_vals = []
     for team in teams:
-        sn = team["source_name_heb"] if is_heb else team["source_name"]
+        sn = team["source_name"]
         first_rec = team["records"][0] if team["records"] else None
         author = ""
         if first_rec:
             a = first_rec.get("author_text")
             if a and str(a).strip():
-                author = f", {str(a).strip()}"
-        source_vals.append(f"{sn}{author}")
+                author = str(a).strip()
+        if is_team_source(sn) and author:
+            header = get_team_header_name(sn, is_heb=is_heb)
+            if is_heb:
+                source_vals.append(f"{author}, ראש {header}")
+            else:
+                source_vals.append(f"{author}, Head of {header}")
+        elif is_team_source(sn):
+            source_vals.append(get_team_display_name(sn, is_heb=is_heb))
+        else:
+            sn_display = team.get("source_name_heb", sn) if is_heb else sn
+            source_vals.append(sn_display or sn)
     _field_row(tr('Source'), source_vals, is_heb)
 
     # Number of Folios

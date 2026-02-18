@@ -2404,13 +2404,21 @@ TRANSLATIONS = {
     "Script Place": "מקום כתב",
 
     # --- Catalog Dialog Sections ---
-    "Shelfmark Description": "תיאור סימנייה",
+    "Shelfmark Description": "תיאור מספר מדף",
     "Content Description": "תיאור תוכן",
     "Script Description": "תיאור כתב",
     "Format Description": "תיאור פורמט",
     "Miscellaneous": "שונות",
     "Inner Size": "גודל פנימי",
     "No catalog data available": "אין נתוני קטלוג זמינים",
+    "Scholarly Description": "תיאור מדעי",
+    "Detailed Content": "תוכן מפורט",
+    "Mentions": "אזכורים",
+    "Personalities": "אישים",
+    "Places": "מקומות",
+    "Creations": "יצירות",
+    "Dates": "תאריכים",
+    "Groups": "קבוצות",
 
     # --- Compact Mode ---
     "Compact": "צמצם",

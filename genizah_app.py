@@ -5206,7 +5206,7 @@ class FjmsCatalogDialog(QDialog):
         self.text_browser.setOpenExternalLinks(True)
         if CURRENT_LANG == 'he':
             self.text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.text_browser.setHtml(self._build_html(detail))
+        self.text_browser.setHtml(self._build_html(detail, shelfmark=shelfmark or ''))
         layout.addWidget(self.text_browser)
 
         # Close button
@@ -5217,9 +5217,9 @@ class FjmsCatalogDialog(QDialog):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
-    def _build_html(self, detail: dict) -> str:
+    def _build_html(self, detail: dict, shelfmark: str = '') -> str:
         """Build HTML table mirroring FIST Cataloging Data Details view."""
-        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, get_team_header_name, GENERIC_SOURCE_NAMES
+        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, get_team_header_name, is_team_source, GENERIC_SOURCE_NAMES
 
         records = detail.get("records", [])
         running_titles = detail.get("running_titles", {})
@@ -5279,9 +5279,10 @@ class FjmsCatalogDialog(QDialog):
         team_col_width = max(150, (700 - label_width) // max(num_teams, 1)) if num_teams > 0 else 150
 
         html_parts = []
+        rtl_table = ' direction:rtl;' if is_heb else ''
         html_parts.append(
             f'<table style="width:100%; border-collapse:collapse; table-layout:fixed; '
-            f'font-family:Arial; font-size:13px; color:{c["text"]};">'
+            f'font-family:Arial; font-size:13px; color:{c["text"]};{rtl_table}">'
         )
         # Column width definitions — RTL: team cols first, label last
         if num_teams > 0:
@@ -5320,17 +5321,32 @@ class FjmsCatalogDialog(QDialog):
             # === Section 1: Shelfmark Description ===
             html_parts.append(self._section_row(tr('Shelfmark Description'), total_cols))
 
-            # Source
+            # Shelfmark
+            if shelfmark:
+                sm_vals = [shelfmark] * num_teams
+                html_parts.append(self._field_row(tr('Shelfmark'), sm_vals, is_heb))
+
+            # Source — "{Author}, Head of {Team}" for teams, raw name for catalogs
             source_vals = []
             for team in teams:
-                sn = team["source_name_heb"] if is_heb else team["source_name"]
+                sn = team["source_name"]
                 first_rec = team["records"][0] if team["records"] else None
                 author = ""
                 if first_rec:
                     a = first_rec.get("author_text")
                     if a and str(a).strip():
-                        author = f", {str(a).strip()}"
-                source_vals.append(f"{sn}{author}")
+                        author = str(a).strip()
+                if is_team_source(sn) and author:
+                    header = get_team_header_name(sn, is_heb=is_heb)
+                    if is_heb:
+                        source_vals.append(f"{author}, ראש {header}")
+                    else:
+                        source_vals.append(f"{author}, Head of {header}")
+                elif is_team_source(sn):
+                    source_vals.append(get_team_display_name(sn, is_heb=is_heb))
+                else:
+                    sn_display = team.get("source_name_heb", sn) if is_heb else sn
+                    source_vals.append(sn_display or sn)
             html_parts.append(self._field_row(tr('Source'), source_vals, is_heb))
 
             # Number of Folios

@@ -211,6 +211,9 @@ _TEAM_NAMES = {
     # fmt: on
 }
 
+# Case-insensitive lookup (EngDesc in FIST.db may be uppercase)
+_TEAM_NAMES_LOWER = {k.lower(): v for k, v in _TEAM_NAMES.items()}
+
 # Backward-compatible flat dict (en_full only) — used by existing callers
 TEAM_DISPLAY_NAMES = {k: v[1] for k, v in _TEAM_NAMES.items() if v[1]}
 
@@ -221,13 +224,26 @@ GENERIC_SOURCE_NAMES = frozenset({
 })
 
 
+def _lookup_team(source_name: str):
+    """Case-insensitive lookup in _TEAM_NAMES. Returns tuple or None."""
+    if not source_name:
+        return None
+    return _TEAM_NAMES.get(source_name) or _TEAM_NAMES_LOWER.get(source_name.lower())
+
+
+def is_team_source(source_name: str) -> bool:
+    """Check if a source_name maps to an FGP team (not catalog/other)."""
+    return _lookup_team(source_name) is not None
+
+
 def get_team_display_name(source_name: str, is_heb: bool = False) -> str:
     """Map a catalog SourceName to its full FJMS display name with team leader.
 
+    Case-insensitive lookup (EngDesc in FIST.db may be uppercase).
     Falls back to the original source_name if no mapping exists.
 
     Args:
-        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics").
+        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics" or "MAGIC").
         is_heb: If True, return Hebrew name; otherwise English.
 
     Returns:
@@ -235,7 +251,7 @@ def get_team_display_name(source_name: str, is_heb: bool = False) -> str:
     """
     if not source_name:
         return source_name or ''
-    data = _TEAM_NAMES.get(source_name)
+    data = _lookup_team(source_name)
     if not data:
         return source_name
     result = data[3] if is_heb else data[1]
@@ -245,11 +261,11 @@ def get_team_display_name(source_name: str, is_heb: bool = False) -> str:
 def get_team_header_name(source_name: str, is_heb: bool = False) -> str:
     """Map a catalog SourceName to its column header name (without leader).
 
-    Used for table column headers in the catalog dialog.
+    Case-insensitive lookup. Used for table column headers in the catalog dialog.
     Falls back to the original source_name if no mapping exists.
 
     Args:
-        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics").
+        source_name: EngDesc value from dbo_CodeSource (e.g., "Linguistics" or "MAGIC").
         is_heb: If True, return Hebrew header; otherwise English.
 
     Returns:
@@ -257,7 +273,7 @@ def get_team_header_name(source_name: str, is_heb: bool = False) -> str:
     """
     if not source_name:
         return source_name or ''
-    data = _TEAM_NAMES.get(source_name)
+    data = _lookup_team(source_name)
     if not data:
         return source_name
     result = data[2] if is_heb else data[0]
