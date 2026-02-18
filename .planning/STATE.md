@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 Phase: 38 of 38 (Distribution and Verification)
 Plan: 3 of 3 in current phase
 Status: Phase 38 complete
-Last activity: 2026-02-18 -- Completed 38-03 (sidecar update mechanism)
+Last activity: 2026-02-18 - Completed quick task 14: Fix domain filtering for misc categories that appear under multiple parents
 
 Progress: [##########] 100% (Phase 38: 3/3 plans)
 
@@ -76,6 +76,16 @@ Recent decisions affecting current work:
 - Tags json_each() benchmarked: 115ms for get_all_distinct_tags (2695 tags), 63ms for tag search -- acceptable
 - FJMS/PGP overlap extent unknown -- affects dedup strategy in Phase 38
 - Phase 37 fully complete (all 4 plans: export enrichment, service layer, web UI, desktop UI)
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 14 | Fix domain filtering for misc categories that appear under multiple parents | 2026-02-18 | 9bc50777 | [14-fix-domain-filtering-for-misc-categories](./quick/14-fix-domain-filtering-for-misc-categories/) |
+
+### Roadmap Evolution
+
+- Phase 39 added: Bugs fixing and code cleanup
 
 ### Pending Todos
 
