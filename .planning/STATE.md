@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 38 of 38 (Distribution and Verification)
-Plan: 2 of 3 in current phase
-Status: Executing phase 38
-Last activity: 2026-02-18 -- Completed 38-02 (offline verification tests)
+Plan: 3 of 3 in current phase
+Status: Phase 38 complete
+Last activity: 2026-02-18 -- Completed 38-03 (sidecar update mechanism)
 
-Progress: [######----] 67% (Phase 38: 2/3 plans)
+Progress: [##########] 100% (Phase 38: 3/3 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 111 (across 7 milestones)
+- Total plans completed: 112 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -34,7 +34,7 @@ Progress: [######----] 67% (Phase 38: 2/3 plans)
 | v5.7.3 | 22-24 | 3 | 6 min |
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
-| v6.0.0 | 35-38 | 8 | 61 min |
+| v6.0.0 | 35-38 | 8 | 68 min |
 
 ## Accumulated Context
 
@@ -66,6 +66,9 @@ Recent decisions affecting current work:
 - Phase 37-04: Catalog detail cached per browse/result to avoid repeated DB queries on button click
 - Phase 38-01: GenizahSearchPro.spec gitignored (PyInstaller-generated) -- build_app.bat is source of truth for build config
 - Phase 38-02: Import inspection via extracted import lines (not raw source grep) to avoid false positives from docstrings
+- Phase 38-03: Sidecar updates download to LOCALAPPDATA (safe for read-only bundled locations)
+- Phase 38-03: Service __init__ checks LOCALAPPDATA first, falls back to project root (minimal change)
+- Phase 38-03: Sequential download queue with singleton reset after completion
 
 ### Blockers/Concerns
 
@@ -85,6 +88,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-18
-Stopped at: Completed 38-01-PLAN.md
-Resume file: .planning/phases/38-distribution-and-verification/38-01-SUMMARY.md
-Notes: Phase 38 plan 01 complete. pgp.db bundled in desktop build, deployment docs updated, PgpService.get_version() added. Plans 01+02 done, next: 38-03.
+Stopped at: Completed 38-03-PLAN.md (Phase 38 complete)
+Resume file: .planning/phases/38-distribution-and-verification/38-03-SUMMARY.md
+Notes: Phase 38 fully complete (3/3 plans). Sidecar update mechanism with GitHub Releases manifest, LOCALAPPDATA downloads, singleton reset, About screen data sources display.
