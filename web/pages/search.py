@@ -33,6 +33,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
 
     # === State Management ===
+    PAGE_SIZE = 50  # Results per page for pagination
+
     class SearchUIState:
         def __init__(self):
             self.progress = 0.0
@@ -43,6 +45,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.selected_result = None
             self.total_count = 0
             self.current_page_idx = 0  # For browse within viewer
+            self.current_page = 0  # Zero-indexed page number for result pagination
             self.selected_indices = set()  # For bulk operations
             self.is_panel_collapsed = False  # For collapsible search panel
             self.last_scroll_top = 0  # For scroll-based auto-collapse
@@ -972,13 +975,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             filtered.append(res)
 
-        render_results(filtered[:200])
-        shown = min(len(filtered), 200)
+        render_results(filtered, page=0)
+        shown = len(filtered)
         results_count.text = f"{shown} / {len(search_state.results)} {tr('Results')}"
-        if len(filtered) > 200:
-            ui.notify(f"{tr('Showing first 200 of')} {len(filtered)} {tr('filtered results')}", type='info')
-        else:
-            ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
+        ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
 
     def clear_filters():
         """Clear all filters and show all results."""
@@ -987,7 +987,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filter_snippet.value = ''
 
         if search_state.results:
-            render_results(search_state.results[:200])
+            render_results(search_state.results, page=0)
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
             ui.notify(tr('Filters cleared'), type='info')
 
@@ -1003,9 +1003,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Deselect all
             search_state.selected_indices.clear()
 
-        # Re-render to update checkboxes (capped to 200 for WebSocket safety)
-        current_results = list(search_state.results[:200])
-        render_results(current_results)
+        # Re-render to update checkboxes (keeps current page)
+        render_results(search_state.results)
         update_selection_ui()
 
     def update_selection_ui():
@@ -1924,12 +1923,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             results_count.text = f"{total} {tr('Results')}"
 
-        # Update result_domains for badge rendering (slice from all_result_domains for displayed results)
-        result_sys_ids = [r.get('display', {}).get('id') for r in filtered[:200] if r.get('display', {}).get('id')]
+        # Update result_domains for badge rendering (use visible page slice)
+        page_start = search_state.current_page * PAGE_SIZE
+        page_end = page_start + PAGE_SIZE
+        page_slice = filtered[page_start:page_end]
+        result_sys_ids = [r.get('display', {}).get('id') for r in page_slice if r.get('display', {}).get('id')]
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
 
-        # Re-render with filtered results
-        render_results(filtered[:200])
+        # Re-render with filtered results (resets to page 0)
+        render_results(filtered, page=0)
 
     async def execute_search():
         # Handle PGP tag search mode — navigate to tag results page
@@ -2097,10 +2099,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             search_state.domain_hierarchy = {}
 
-        # Batch lookup for transcription availability
+        # Batch lookup for transcription availability (all results, not just visible page)
         result_sys_ids = [
             r.get('display', {}).get('id')
-            for r in results[:200]
+            for r in results
             if r.get('display', {}).get('id')
         ]
 
@@ -2134,8 +2136,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.results = results
 
         try:
-            # Cap stored results to prevent WebSocket overload (18K+ results = 50-100MB JSON)
-            capped = results[:200]
+            # Cap stored results at 1000 (pagination makes all results accessible during session, storage is for page refresh recovery)
+            capped = results[:1000]
             # Strip full_text from stored results (only needed for display, not persistence)
             storage_results = []
             for r in capped:
@@ -2199,20 +2201,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     filtered.append(r)
             n_excl = len(search_state.domain_exclusions)
             results_count.text = f"{len(filtered)} {tr('of')} {len(results)} {tr('Results')} ({n_excl} {tr('domains excluded')})"
-            # Update result_domains for badge rendering
-            result_sys_ids = [r.get('display', {}).get('id') for r in filtered[:200] if r.get('display', {}).get('id')]
+            # Update result_domains for badge rendering (all filtered results, pagination handles slicing)
+            result_sys_ids = [r.get('display', {}).get('id') for r in filtered if r.get('display', {}).get('id')]
             search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
-            render_results(filtered[:200])
-            if len(filtered) > 200:
-                ui.notify(tr("Showing first 200 results. Refine search."), type='info')
+            render_results(filtered, page=0)
         else:
-            render_results(results[:200])
-            if len(results) > 200:
-                ui.notify(tr("Showing first 200 results. Refine search."), type='info')
+            render_results(results, page=0)
 
-    def render_results(results):
+    def render_results(results, page=None):
         results_container.clear()
-        search_state.displayed_results = results  # Track current view for Advanced View navigation
+        search_state.displayed_results = results  # Track full filtered set for Advanced View navigation
+
+        # Use provided page or keep stored page
+        if page is not None:
+            search_state.current_page = page
+        # Clamp page to valid range
+        total = len(results)
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        if search_state.current_page >= total_pages:
+            search_state.current_page = 0
 
         # Show loading spinner when search is running - prominent so user knows it's working
         if search_state.is_running:
@@ -2229,10 +2236,38 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.label(tr("Ready to search.")).classes('mt-4').style('color: var(--text-muted);')
             return
 
+        # Calculate page slice
+        page_idx = search_state.current_page
+        start = page_idx * PAGE_SIZE
+        end = min(start + PAGE_SIZE, total)
+        page_results = results[start:end]
+
         with results_container:
+            # Pagination controls at top (only if more than one page)
+            if total_pages > 1:
+                with ui.row().classes('w-full justify-between items-center px-4 pt-2'):
+                    ui.label(f"{start + 1}-{end} {tr('of')} {total}").classes('text-sm').style('color: var(--text-muted);')
+                    def on_page_change_top(e):
+                        search_state.current_page = e.value - 1  # ui.pagination is 1-indexed
+                        render_results(results, page=search_state.current_page)
+                    ui.pagination(1, total_pages, value=page_idx + 1,
+                        on_change=on_page_change_top).props('max-pages=7 boundary-numbers')
+
+            # Render only this page of results
             with ui.column().classes('w-full gap-2 p-4'):
-                for i, res in enumerate(results):
-                    create_result_card(i, res)
+                for i, res in enumerate(page_results):
+                    create_result_card(start + i, res)
+
+            # Pagination controls at bottom (only if more than one page)
+            if total_pages > 1:
+                with ui.row().classes('w-full justify-center items-center px-4 pb-2'):
+                    def on_page_change_bottom(e):
+                        search_state.current_page = e.value - 1
+                        render_results(results, page=search_state.current_page)
+                        # Scroll to top of results
+                        ui.run_javascript('window.scrollTo(0, 0)')
+                    ui.pagination(1, total_pages, value=page_idx + 1,
+                        on_change=on_page_change_bottom).props('max-pages=7 boundary-numbers')
 
     def create_result_card(index, result):
         display = result.get('display', {})
@@ -3643,4 +3678,4 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         ui.timer(0.5, execute_search, once=True)
     elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
-        render_results(search_state.results[:200])
+        render_results(search_state.results, page=0)
