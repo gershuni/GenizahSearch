@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.0.0 Local Data Architecture -- Phase 38 (Distribution and Verification)
+**Current focus:** Phase 39 (Bug Fixing, Cleanup, Performance Improving)
 
 ## Current Position
 
-Phase: 38 of 38 (Distribution and Verification)
-Plan: 3 of 3 in current phase
-Status: Phase 38 complete
-Last activity: 2026-02-18 - Completed quick task 14: Fix domain filtering for misc categories that appear under multiple parents
+Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
+Plan: 4 of 5 in current phase
+Status: Executing Phase 39
+Last activity: 2026-02-19 - Completed 39-04: Domain hierarchy cache with thread-safe locking
 
-Progress: [##########] 100% (Phase 38: 3/3 plans)
+Progress: [########--] 80% (Phase 39: 4/5 plans)
 
 ## Performance Metrics
 
@@ -69,6 +69,8 @@ Recent decisions affecting current work:
 - Phase 38-03: Sidecar updates download to LOCALAPPDATA (safe for read-only bundled locations)
 - Phase 38-03: Service __init__ checks LOCALAPPDATA first, falls back to project root (minimal change)
 - Phase 38-03: Sequential download queue with singleton reset after completion
+- Phase 39-04: Double-checked locking for thread-safe hierarchy caching (not lru_cache) -- explicit semantics, avoids sqlite3.Row pickling issues
+- Phase 39-04: COUNT(*) replaces COUNT(DISTINCT AlmaId) in domain hierarchy query -- no duplicate tuples exist in domains table
 
 ### Blockers/Concerns
 
@@ -98,6 +100,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-19
-Stopped at: Phase 39 context gathered
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-CONTEXT.md
-Notes: Phase 39 context captured. Bug fixes (all crash types), cleanup (Claude discretion on todos/refactoring), performance (PostHog + pagination + web profiling), testing (Playwright E2E + stress tests).
+Stopped at: Completed 39-04-PLAN.md (domain hierarchy cache)
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-04-SUMMARY.md
+Notes: Phase 39 plan 04 complete. Domain hierarchy caching with thread-safe double-checked locking and COUNT(*) optimization. Plans 01-04 done, plan 05 remaining.
