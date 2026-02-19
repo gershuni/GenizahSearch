@@ -185,11 +185,11 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 **Plans:** 5 plans
 
 Plans:
-- [ ] 39-01-PLAN.md — Fix all desktop crash types (Qt lifecycle + type safety) and archive crash log
-- [ ] 39-02-PLAN.md — Replace 200-result WebSocket cap with server-side pagination
-- [ ] 39-03-PLAN.md — Integrate PostHog analytics (page views, session recordings, search timing)
-- [ ] 39-04-PLAN.md — Optimize web performance (import hoisting, conditional rendering, deferred loading)
-- [ ] 39-05-PLAN.md — Add Playwright E2E tests and performance/stress tests
+- [ ] 39-01-PLAN.md — Fix Qt object lifecycle crashes (sip.isdeleted guards) + archive crash log
+- [ ] 39-02-PLAN.md — Replace 200-result cap with paginated search results (PAGE_SIZE=50)
+- [ ] 39-03-PLAN.md — Integrate PostHog analytics alongside Google Analytics (env-var gated)
+- [ ] 39-04-PLAN.md — Cache domain hierarchy to eliminate ~5s filter dialog lag
+- [ ] 39-05-PLAN.md — Add NiceGUI Screen E2E tests for search/browse + performance tests
 
 ---
 *Roadmap created: 2026-02-09*
