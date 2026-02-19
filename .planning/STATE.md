@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
-Plan: 5 of 5 in current phase
-Status: Executing Phase 39
-Last activity: 2026-02-19 - Completed 39-01: Desktop crash fixes (sip.isdeleted guards)
+Plan: 5 of 5 in current phase (COMPLETE)
+Status: Phase 39 Complete
+Last activity: 2026-02-19 - Completed 39-05: E2E test infrastructure (16 NiceGUI Screen tests)
 
-Progress: [########--] 80% (Phase 39: 4/5 plans)
+Progress: [##########] 100% (Phase 39: 5/5 plans)
 
 ## Performance Metrics
 
@@ -77,6 +77,9 @@ Recent decisions affecting current work:
 - Phase 39-02: Storage persistence cap raised from 200 to 1000 (20 pages of refresh recovery)
 - Phase 39-01: sip.isdeleted() guards inside set_status_message/update_text_pos (protects all callers uniformly)
 - Phase 39-01: Only one unsafe res['uid'] bracket access found -- all others already use safe .get()
+- Phase 39-05: Custom Screen fixture bypasses NiceGUI inipath requirement (request=None + override start_server)
+- Phase 39-05: App-level E2E tests start actual web/main.py via runpy (not stub pages)
+- Phase 39-05: selenium + pytest-selenium as dev dependencies, skip logic for CI environments without ChromeDriver
 
 ### Blockers/Concerns
 
@@ -106,6 +109,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-19
-Stopped at: Completed 39-01-PLAN.md (Desktop crash fixes)
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-01-SUMMARY.md
-Notes: Phase 39 plan 01 complete. sip.isdeleted() guards on all Qt lifecycle crash sites, verified all rare crash types fixed, crash log archived (19,629 lines). 4/5 plans done, 39-05 remaining.
+Stopped at: Completed 39-05-PLAN.md (E2E test infrastructure)
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-05-SUMMARY.md
+Notes: Phase 39 complete (5/5 plans). E2E test infrastructure established with 16 NiceGUI Screen tests (15 passing). Search, browse, and performance flows covered. ChromeDriver skip logic for CI safety.
