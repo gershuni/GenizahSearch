@@ -958,6 +958,29 @@ def test_team_display_names_has_key_teams():
     assert len(TEAM_DISPLAY_NAMES) >= 20
 
 
+# ── Hierarchy cache tests ────────────────────────────────────────
+
+
+def test_hierarchy_cache_returns_same_object(service):
+    """Second call to get_domain_hierarchy returns cached result (same object)."""
+    result1 = service.get_domain_hierarchy()
+    assert result1  # Non-empty with test data
+    result2 = service.get_domain_hierarchy()
+    # Must be the exact same object (cached), not just equal
+    assert result1 is result2
+    # Cache should be populated
+    assert service._hierarchy_cache is not None
+
+
+def test_hierarchy_cache_not_set_when_no_connection():
+    """get_domain_hierarchy with no connection returns {} and does not cache."""
+    svc = FjmsService(db_path="nonexistent_file_for_cache_test.db")
+    result = svc.get_domain_hierarchy()
+    assert result == {}
+    assert svc._hierarchy_cache is None  # Should NOT cache empty result
+    svc.close()
+
+
 # ── Web shim import test ─────────────────────────────────────────
 
 
