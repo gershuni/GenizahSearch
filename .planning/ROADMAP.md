@@ -178,6 +178,19 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 | 37. FJMS Catalog Descriptions | 4/5 | Gap closure | 2026-02-17 |
 | 38. Distribution and Verification | 3/3 | Complete    | 2026-02-18 |
 
+### Phase 39: Bug Fixing, Cleanup, Performance Improving
+
+**Goal:** Stabilize and polish the app: fix all desktop crashes, add server-side pagination, integrate PostHog analytics, optimize web performance, and add Playwright E2E + performance tests
+**Depends on:** Phase 38
+**Plans:** 5 plans
+
+Plans:
+- [ ] 39-01-PLAN.md — Fix all desktop crash types (Qt lifecycle + type safety) and archive crash log
+- [ ] 39-02-PLAN.md — Replace 200-result WebSocket cap with server-side pagination
+- [ ] 39-03-PLAN.md — Integrate PostHog analytics (page views, session recordings, search timing)
+- [ ] 39-04-PLAN.md — Optimize web performance (import hoisting, conditional rendering, deferred loading)
+- [ ] 39-05-PLAN.md — Add Playwright E2E tests and performance/stress tests
+
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-18 after Phase 37 gap closure planning (1 plan added)*
+*Last updated: 2026-02-19 after Phase 39 planning (5 plans)*
