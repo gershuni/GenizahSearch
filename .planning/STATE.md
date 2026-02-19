@@ -12,9 +12,9 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
 Plan: 5 of 5 in current phase
 Status: Executing Phase 39
-Last activity: 2026-02-19 - Completed 39-02: Search results pagination
+Last activity: 2026-02-19 - Completed 39-01: Desktop crash fixes (sip.isdeleted guards)
 
-Progress: [##########] 100% (Phase 39: 5/5 plans)
+Progress: [########--] 80% (Phase 39: 4/5 plans)
 
 ## Performance Metrics
 
@@ -75,6 +75,8 @@ Recent decisions affecting current work:
 - Phase 39-03: Env-var-gated PostHog (empty string when POSTHOG_API_KEY not set) -- zero cost when disabled
 - Phase 39-02: PAGE_SIZE=50 for pagination (not 100+ to stay within WebSocket comfort zone)
 - Phase 39-02: Storage persistence cap raised from 200 to 1000 (20 pages of refresh recovery)
+- Phase 39-01: sip.isdeleted() guards inside set_status_message/update_text_pos (protects all callers uniformly)
+- Phase 39-01: Only one unsafe res['uid'] bracket access found -- all others already use safe .get()
 
 ### Blockers/Concerns
 
@@ -104,6 +106,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-19
-Stopped at: Completed 39-02-PLAN.md (Search results pagination)
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-02-SUMMARY.md
-Notes: Phase 39 plan 02 complete. Client-side pagination with PAGE_SIZE=50, ui.pagination controls, all [:200] caps removed across 11 call sites.
+Stopped at: Completed 39-01-PLAN.md (Desktop crash fixes)
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-01-SUMMARY.md
+Notes: Phase 39 plan 01 complete. sip.isdeleted() guards on all Qt lifecycle crash sites, verified all rare crash types fixed, crash log archived (19,629 lines). 4/5 plans done, 39-05 remaining.
