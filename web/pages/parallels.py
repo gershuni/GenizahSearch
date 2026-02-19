@@ -154,6 +154,7 @@ def create_parallels_page(initial_text: str = None):
             self.domain_exclusions: set = set()
             self.has_domain_data: bool = False
             self.domain_name_map: dict = {}  # English domain name -> Hebrew name
+            self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
 
     p_state = ParallelsState()
 
@@ -182,6 +183,41 @@ def create_parallels_page(initial_text: str = None):
         decoded_text = app.storage.user.get('parallels_source_text', '')
 
     # === UI Layout ===
+
+    # Domain filter dialog JS helpers (must be at page level for inline onchange handlers)
+    # Functions accept containerId parameter for unique dialog instances
+    ui.add_head_html('''<script>
+    function domainFilterParentChanged(parentCb) {
+        try {
+            var children = JSON.parse(parentCb.getAttribute('data-children') || '[]');
+            var container = parentCb.closest('[id^="domain-filter-"]');
+            if (!container) return;
+            for (var i = 0; i < children.length; i++) {
+                var childCb = container.querySelector(
+                    'input[data-domain="' + CSS.escape(children[i]) + '"]'
+                );
+                if (childCb) childCb.checked = parentCb.checked;
+            }
+        } catch(e) { console.error('domainFilterParentChanged:', e); }
+    }
+    function domainFilterSelectAll(containerId, checked) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+        var cbs = container.querySelectorAll('input[type="checkbox"]');
+        for (var i = 0; i < cbs.length; i++) cbs[i].checked = checked;
+    }
+    function domainFilterGetExcluded(containerId) {
+        var container = document.getElementById(containerId);
+        if (!container) return [];
+        var excluded = [];
+        var cbs = container.querySelectorAll('input[type="checkbox"]');
+        for (var i = 0; i < cbs.length; i++) {
+            if (!cbs[i].checked) excluded.push(cbs[i].getAttribute('data-domain'));
+        }
+        return excluded;
+    }
+    </script>''')
+
     with ui.column().classes('w-full max-w-7xl mx-auto gap-6 fade-in'):
 
         # === Page Header ===
@@ -1307,9 +1343,20 @@ def create_parallels_page(initial_text: str = None):
                             if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in p_state.domain_name_map:
                                 p_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
                     p_state.has_domain_data = bool(p_state.all_result_domains)
+
+                    # Pre-cache domain hierarchy for filter dialog
+                    if p_state.has_domain_data:
+                        def fetch_parallels_hierarchy():
+                            from shared.fjms_service import get_fjms_service
+                            fjms_h = get_fjms_service(thread_safe=True)
+                            return fjms_h.get_domain_hierarchy() if fjms_h.is_available() else {}
+                        p_state.domain_hierarchy = await run.io_bound(fetch_parallels_hierarchy)
+                    else:
+                        p_state.domain_hierarchy = {}
                 else:
                     p_state.all_result_domains = {}
                     p_state.has_domain_data = False
+                    p_state.domain_hierarchy = {}
 
                 # Show/hide domain filter button
                 p_domain_filter_btn.set_visibility(p_state.has_domain_data)
@@ -1384,15 +1431,24 @@ def create_parallels_page(initial_text: str = None):
         return en_name
 
     def _open_parallels_domain_filter_dialog():
-        """Open modal dialog with checkbox tree of domains from parallels results."""
+        """Open modal dialog with domain filter checkboxes for parallels results.
+
+        Uses a single HTML container with client-side JavaScript for checkbox
+        interactions to avoid the overhead of creating ~200 individual NiceGUI
+        ui.checkbox elements.
+        """
         if not p_state.has_domain_data:
             if p_state.domain_exclusions:
                 ui.notify(tr('Run a search first to see domain options.'), type='info', timeout=3000)
             return
 
-        from shared.fjms_service import get_fjms_service
-        fjms = get_fjms_service(thread_safe=True)
-        hierarchy = fjms.get_domain_hierarchy() if fjms.is_available() else {}
+        # Use pre-cached hierarchy -- no DB call
+        hierarchy = p_state.domain_hierarchy
+        if not hierarchy:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            hierarchy = fjms.get_domain_hierarchy() if fjms.is_available() else {}
+            p_state.domain_hierarchy = hierarchy
 
         # Count results per domain
         domain_counts = {}
@@ -1407,7 +1463,6 @@ def create_parallels_page(initial_text: str = None):
             parent_in_results = parent_name in domain_counts
             children_in_results = []
             for child in info.get('children', []):
-                # Check both qualified and bare names for ambiguous domains
                 qname = qualify_domain_name(child['domain'], parent_name)
                 if qname in domain_counts:
                     children_in_results.append({
@@ -1460,92 +1515,83 @@ def create_parallels_page(initial_text: str = None):
             }
 
         total_results = len(p_state.results)
-        checkboxes = {}
         current_exclusions = p_state.domain_exclusions.copy()
 
+        # Build checkbox HTML -- all checkboxes as a single HTML string
+        # Use unique container ID to avoid conflicts with stale dialog DOM nodes
+        import json as _json
+        import uuid as _uuid
+        container_id = f'domain-filter-{_uuid.uuid4().hex[:8]}'
+        checkbox_html_parts = []
+        for parent_name, info in sorted(result_hierarchy.items(), key=lambda x: -x[1]['count']):
+            children = info.get('children', [])
+            parent_checked = 'checked' if parent_name not in current_exclusions else ''
+            parent_label = f"{_parallels_domain_display(parent_name)} ({info['count']})"
+            child_domain_names = [c['domain'] for c in children]
+            parent_domain_attr = html.escape(parent_name, quote=True)
+            children_json_attr = html.escape(_json.dumps(child_domain_names), quote=True)
+            parent_label_html = html.escape(parent_label)
+            checkbox_html_parts.append(
+                f'<label class="domain-parent" style="display:flex;align-items:center;gap:6px;'
+                f'font-weight:bold;padding:4px 0;cursor:pointer">'
+                f'<input type="checkbox" data-domain="{parent_domain_attr}" '
+                f'data-children="{children_json_attr}" '
+                f'{parent_checked} onchange="domainFilterParentChanged(this)" '
+                f'style="width:18px;height:18px;accent-color:#1976d2">'
+                f'<span>{parent_label_html}</span></label>'
+            )
+            for child in sorted(children, key=lambda c: -c['count']):
+                child_checked = 'checked' if child['domain'] not in current_exclusions else ''
+                child_label = f"{_parallels_domain_display(child['domain'])} ({child['count']})"
+                child_domain_attr = html.escape(child['domain'], quote=True)
+                child_label_html = html.escape(child_label)
+                checkbox_html_parts.append(
+                    f'<label class="domain-child" style="display:flex;align-items:center;gap:6px;'
+                    f'padding:2px 0;padding-inline-start:2rem;cursor:pointer">'
+                    f'<input type="checkbox" data-domain="{child_domain_attr}" '
+                    f'{child_checked} '
+                    f'style="width:16px;height:16px;accent-color:#1976d2">'
+                    f'<span>{child_label_html}</span></label>'
+                )
+
+        checkbox_html = '\n'.join(checkbox_html_parts)
+
+        # Build the dialog with minimal NiceGUI elements
         with ui.dialog() as dialog, ui.card().classes('w-[600px] max-h-[80vh]'):
             with ui.column().classes('w-full gap-2'):
                 ui.label(tr('Filter by Domain')).classes('text-lg font-bold')
+                ui.label(
+                    f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}"
+                ).classes('text-sm text-gray-500')
 
-                def calc_visible():
-                    excluded = {name for name, cb in checkboxes.items() if not cb.value}
-                    hide_uncat = 'Uncategorized' in excluded
-                    visible = 0
-                    for item in p_state.results:
-                        sys_id = _get_sys_id_from_parallels_item(item)
-                        doms = p_state.all_result_domains.get(sys_id, []) if sys_id else []
-                        if not doms:
-                            if not hide_uncat:
-                                visible += 1
-                        elif not all(d in excluded for d in doms):
-                            visible += 1
-                    return visible
-
-                summary_label = ui.label(f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}").classes('text-sm text-gray-500')
-
+                # Single HTML container with all checkboxes (JS helpers loaded at page level)
                 with ui.scroll_area().classes('w-full').style('max-height: 50vh;'):
-                    with ui.column().classes('w-full gap-0'):
-                        for parent_name, info in sorted(result_hierarchy.items(), key=lambda x: -x[1]['count']):
-                            children = info.get('children', [])
-
-                            def make_parent_handler(pname, child_domains):
-                                def handler(e):
-                                    for cd in child_domains:
-                                        if cd in checkboxes:
-                                            checkboxes[cd].value = e.value
-                                    visible = calc_visible()
-                                    summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
-                                return handler
-
-                            child_domain_names = [c['domain'] for c in children]
-                            parent_checked = parent_name not in current_exclusions
-                            parent_label = f"{_parallels_domain_display(parent_name)} ({info['count']})"
-
-                            parent_cb = ui.checkbox(parent_label, value=parent_checked).classes('font-bold')
-                            checkboxes[parent_name] = parent_cb
-                            parent_cb.on_value_change(make_parent_handler(parent_name, child_domain_names))
-
-                            for child in sorted(children, key=lambda c: -c['count']):
-                                child_checked = child['domain'] not in current_exclusions
-                                child_label = f"{_parallels_domain_display(child['domain'])} ({child['count']})"
-
-                                def make_child_handler():
-                                    def handler(e):
-                                        visible = calc_visible()
-                                        summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
-                                    return handler
-
-                                child_cb = ui.checkbox(child_label, value=child_checked).style('margin-inline-start: 2rem')
-                                checkboxes[child['domain']] = child_cb
-                                child_cb.on_value_change(make_child_handler())
+                    ui.html(f'<div id="{container_id}">{checkbox_html}</div>', sanitize=False)
 
                 with ui.row().classes('w-full justify-between'):
-                    def check_all():
-                        for cb in checkboxes.values():
-                            cb.value = True
-                        for cb in checkboxes.values():
-                            cb.update()
-                        summary_label.text = f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}"
-
-                    def uncheck_all():
-                        for cb in checkboxes.values():
-                            cb.value = False
-                        for cb in checkboxes.values():
-                            cb.update()
-                        visible = calc_visible()
-                        summary_label.text = f"{tr('Showing')} {visible} {tr('of')} {total_results} {tr('results')}"
+                    _cid = container_id  # capture for closures
 
                     with ui.row().classes('gap-2'):
-                        ui.button(tr('Select All'), on_click=check_all).props('flat dense no-caps')
-                        ui.button(tr('Select None'), on_click=uncheck_all).props('flat dense no-caps')
+                        ui.button(
+                            tr('Select All'),
+                            on_click=lambda: ui.run_javascript(
+                                f'domainFilterSelectAll("{_cid}", true)')
+                        ).props('flat dense no-caps')
+                        ui.button(
+                            tr('Select None'),
+                            on_click=lambda: ui.run_javascript(
+                                f'domainFilterSelectAll("{_cid}", false)')
+                        ).props('flat dense no-caps')
 
                     with ui.row().classes('gap-2'):
-                        def apply_filter():
-                            excluded = {name for name, cb in checkboxes.items() if not cb.value}
+                        async def apply_filter():
+                            excluded_list = await ui.run_javascript(
+                                f'domainFilterGetExcluded("{_cid}")', timeout=5.0
+                            )
+                            excluded = set(excluded_list) if excluded_list else set()
                             p_state.domain_exclusions = excluded
                             app.storage.user['parallels_domain_exclusions'] = list(excluded)
                             _update_parallels_domain_filter_btn()
-                            # Re-render results with exclusions applied
                             main_filtered = _filter_parallels_by_domain(p_state.results)
                             filt_filtered = _filter_parallels_by_domain(p_state.filtered_results) if p_state.filtered_results else p_state.filtered_results
                             render_results(main_filtered, filt_filtered)

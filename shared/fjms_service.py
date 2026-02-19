@@ -637,6 +637,19 @@ class FjmsService:
                                     break
                     del hierarchy[child_name]
 
+            # Merge duplicate children (e.g., two "Other" entries promoted from different sources)
+            for parent_name, info in hierarchy.items():
+                seen = {}
+                merged = []
+                for child in info.get('children', []):
+                    key = child['domain']
+                    if key in seen:
+                        seen[key]['count'] += child['count']
+                    else:
+                        seen[key] = child
+                        merged.append(child)
+                info['children'] = merged
+
             # Sort children within each parent by count descending
             for parent in hierarchy:
                 hierarchy[parent]['children'].sort(key=lambda x: x['count'], reverse=True)
