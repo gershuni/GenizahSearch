@@ -85,7 +85,7 @@ Recent decisions affecting current work:
 
 ### Roadmap Evolution
 
-- Phase 39 added: Bugs fixing and code cleanup
+- Phase 39 added: bug fixing, cleanup, performance improving
 
 ### Pending Todos
 
@@ -97,7 +97,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-18
-Stopped at: Completed 38-03-PLAN.md (Phase 38 complete)
-Resume file: .planning/phases/38-distribution-and-verification/38-03-SUMMARY.md
-Notes: Phase 38 fully complete (3/3 plans). Sidecar update mechanism with GitHub Releases manifest, LOCALAPPDATA downloads, singleton reset, About screen data sources display.
+Last session: 2026-02-19
+Stopped at: Phase 39 context gathered
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-CONTEXT.md
+Notes: Phase 39 context captured. Bug fixes (all crash types), cleanup (Claude discretion on todos/refactoring), performance (PostHog + pagination + web profiling), testing (Playwright E2E + stress tests).
