@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
-Plan: 4 of 5 in current phase
+Plan: 5 of 5 in current phase
 Status: Executing Phase 39
-Last activity: 2026-02-19 - Completed 39-04: Domain hierarchy cache with thread-safe locking
+Last activity: 2026-02-19 - Completed 39-03: PostHog analytics integration
 
-Progress: [########--] 80% (Phase 39: 4/5 plans)
+Progress: [##########] 100% (Phase 39: 5/5 plans)
 
 ## Performance Metrics
 
@@ -71,6 +71,8 @@ Recent decisions affecting current work:
 - Phase 38-03: Sequential download queue with singleton reset after completion
 - Phase 39-04: Double-checked locking for thread-safe hierarchy caching (not lru_cache) -- explicit semantics, avoids sqlite3.Row pickling issues
 - Phase 39-04: COUNT(*) replaces COUNT(DISTINCT AlmaId) in domain hierarchy query -- no duplicate tuples exist in domains table
+- Phase 39-03: PostHog maskAllInputs + identified_only for privacy -- researchers' search inputs not in session replays
+- Phase 39-03: Env-var-gated PostHog (empty string when POSTHOG_API_KEY not set) -- zero cost when disabled
 
 ### Blockers/Concerns
 
@@ -100,6 +102,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-19
-Stopped at: Completed 39-04-PLAN.md (domain hierarchy cache)
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-04-SUMMARY.md
-Notes: Phase 39 plan 04 complete. Domain hierarchy caching with thread-safe double-checked locking and COUNT(*) optimization. Plans 01-04 done, plan 05 remaining.
+Stopped at: Completed 39-03-PLAN.md (PostHog analytics integration)
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-03-SUMMARY.md
+Notes: Phase 39 plan 03 complete. PostHog JS snippet on all 14 web pages, conditional on POSTHOG_API_KEY env var, with privacy masking and graceful degradation.
