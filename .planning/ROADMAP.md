@@ -185,12 +185,12 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 **Plans:** 5 plans
 
 Plans:
-- [ ] 39-01-PLAN.md — Fix Qt object lifecycle crashes (sip.isdeleted guards) + archive crash log
-- [ ] 39-02-PLAN.md — Replace 200-result cap with paginated search results (PAGE_SIZE=50)
+- [ ] 39-01-PLAN.md — Fix all desktop crash types (sip.isdeleted guards + rare crash verification) + archive crash log
+- [ ] 39-02-PLAN.md — Replace 200-result cap with paginated search results (PAGE_SIZE=50, all 11 sites)
 - [ ] 39-03-PLAN.md — Integrate PostHog analytics alongside Google Analytics (env-var gated)
 - [ ] 39-04-PLAN.md — Cache domain hierarchy to eliminate ~5s filter dialog lag
 - [ ] 39-05-PLAN.md — Add NiceGUI Screen E2E tests for search/browse + performance tests
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-19 after Phase 39 planning (5 plans)*
+*Last updated: 2026-02-19 after Phase 39 replanning (5 plans, verified)*
