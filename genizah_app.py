@@ -16779,7 +16779,7 @@ class GenizahGUI(QMainWindow):
     def send_result_to_composition(self, res, source_text=None, title=None):
         if not source_text:
             if not res.get('full_text'):
-                res['full_text'] = self.searcher.get_full_text_by_id(res['uid']) or res.get('text', '')
+                res['full_text'] = self.searcher.get_full_text_by_id(res.get('uid', '')) or res.get('text', '')
             source_text = res.get('full_text') or res.get('text', '')
         self.comp_text_area.setPlainText(source_text)
         if title:
