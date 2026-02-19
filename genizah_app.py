@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
+from PyQt6 import sip
 
 from version import APP_VERSION
 
@@ -1418,6 +1419,10 @@ class ZoomableScrollArea(QGraphicsView):
         self._rotation = 0
         self._auto_fit_enabled = bool(pixmap)
 
+        # Guard against destroyed graphics items (async callback after widget close)
+        if sip.isdeleted(self._msg_item) or sip.isdeleted(self._pixmap_item):
+            return
+
         if not pixmap or pixmap.isNull():
             self._pixmap_item.setVisible(False)
             self.set_status_message(tr("No Image"))
@@ -1441,12 +1446,16 @@ class ZoomableScrollArea(QGraphicsView):
              self.centerOn(self._pixmap_item)
 
     def set_status_message(self, text):
+        if sip.isdeleted(self._msg_item) or sip.isdeleted(self._pixmap_item):
+            return
         self._pixmap_item.setVisible(False)
         self._msg_item.setText(text)
         self._msg_item.setVisible(True)
         self._update_text_pos()
 
     def _update_text_pos(self):
+        if sip.isdeleted(self._msg_item):
+            return
         if not self._msg_item.isVisible(): return
 
         # Simple center in view
@@ -10973,6 +10982,8 @@ class GenizahGUI(QMainWindow):
                 return
             self._browse_rd_syncing = True
             try:
+                if sip.isdeleted(text_bar) or sip.isdeleted(image_bar):
+                    return
                 text_max = text_bar.maximum()
                 image_max = image_bar.maximum()
                 if text_max > 0 and image_max > 0:
@@ -10986,6 +10997,8 @@ class GenizahGUI(QMainWindow):
                 return
             self._browse_rd_syncing = True
             try:
+                if sip.isdeleted(text_bar) or sip.isdeleted(image_bar):
+                    return
                 text_max = text_bar.maximum()
                 image_max = image_bar.maximum()
                 if text_max > 0 and image_max > 0:
