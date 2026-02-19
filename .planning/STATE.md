@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
 Plan: 5 of 5 in current phase
 Status: Executing Phase 39
-Last activity: 2026-02-19 - Completed 39-03: PostHog analytics integration
+Last activity: 2026-02-19 - Completed 39-02: Search results pagination
 
 Progress: [##########] 100% (Phase 39: 5/5 plans)
 
@@ -73,6 +73,8 @@ Recent decisions affecting current work:
 - Phase 39-04: COUNT(*) replaces COUNT(DISTINCT AlmaId) in domain hierarchy query -- no duplicate tuples exist in domains table
 - Phase 39-03: PostHog maskAllInputs + identified_only for privacy -- researchers' search inputs not in session replays
 - Phase 39-03: Env-var-gated PostHog (empty string when POSTHOG_API_KEY not set) -- zero cost when disabled
+- Phase 39-02: PAGE_SIZE=50 for pagination (not 100+ to stay within WebSocket comfort zone)
+- Phase 39-02: Storage persistence cap raised from 200 to 1000 (20 pages of refresh recovery)
 
 ### Blockers/Concerns
 
@@ -102,6 +104,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-19
-Stopped at: Completed 39-03-PLAN.md (PostHog analytics integration)
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-03-SUMMARY.md
-Notes: Phase 39 plan 03 complete. PostHog JS snippet on all 14 web pages, conditional on POSTHOG_API_KEY env var, with privacy masking and graceful degradation.
+Stopped at: Completed 39-02-PLAN.md (Search results pagination)
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-02-SUMMARY.md
+Notes: Phase 39 plan 02 complete. Client-side pagination with PAGE_SIZE=50, ui.pagination controls, all [:200] caps removed across 11 call sites.
