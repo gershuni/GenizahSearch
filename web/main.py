@@ -83,6 +83,26 @@ ANALYTICS_SCRIPT = '''
 </script>
 '''
 
+# PostHog Analytics (real-user monitoring + session recordings)
+_posthog_key = os.environ.get('POSTHOG_API_KEY', '')
+POSTHOG_SCRIPT = f'''
+<!-- PostHog Analytics -->
+<script>
+    !function(t,e){{var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){{function g(t,e){{var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){{var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e}},u.people.toString=function(){{return u.toString(1)+".people (stub)"}},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url lib get_property getSessionProperty sessionRecording startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_config __request_queue".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])}},e.__SV=1)}}(document,window.posthog||[]);
+    posthog.init('{_posthog_key}', {{
+        api_host: 'https://us.i.posthog.com',
+        person_profiles: 'identified_only',
+        autocapture: true,
+        capture_pageview: true,
+        capture_pageleave: true,
+        session_recording: {{
+            maskAllInputs: true,
+            maskTextSelector: 'input, textarea'
+        }}
+    }})
+</script>
+''' if _posthog_key else ''
+
 # ============================================================================
 # Modern Theme System - Professional Research UI
 # ============================================================================
@@ -1903,6 +1923,7 @@ def dashboard_page():
     current_theme = app.storage.user.get('theme', 'light') if hasattr(app.storage, 'user') else 'light'
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1922,6 +1943,7 @@ def search_page_route(
     set_current_page('/search')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1940,6 +1962,7 @@ def parallels_page_route(text: str = None):
     set_current_page('/parallels')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1953,6 +1976,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     set_current_page('/browse')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1966,6 +1990,7 @@ def lists_page_route():
     set_current_page('/lists')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1986,6 +2011,7 @@ def settings_page_route():
     set_current_page('/settings')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -1999,6 +2025,7 @@ def help_page_route():
     set_current_page('/help')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -2012,6 +2039,7 @@ async def corrections_page_route():
     set_current_page('/corrections')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -2025,6 +2053,7 @@ def discoveries_page_route():
     set_current_page('/discoveries')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -2038,6 +2067,7 @@ async def admin_page_route():
     set_current_page('/admin')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -2051,6 +2081,7 @@ async def profile_page_route():
     set_current_page('/profile')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -2064,6 +2095,7 @@ def accessibility_page_route():
     set_current_page('/accessibility')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -2090,6 +2122,7 @@ def about_page_route():
     ''')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
@@ -2104,6 +2137,7 @@ def download_page_route():
     set_current_page('/download')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 

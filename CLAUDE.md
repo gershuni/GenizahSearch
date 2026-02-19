@@ -109,6 +109,7 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 ```
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
+POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
 ```
 
 ## Testing
