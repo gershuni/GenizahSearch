@@ -17,6 +17,7 @@ web app which serves concurrent requests from multiple threads.
 import logging
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -351,6 +352,8 @@ class FjmsService:
         """
         self._conn: Optional[sqlite3.Connection] = None
         self._db_path: Optional[str] = None
+        self._hierarchy_cache: Optional[dict] = None
+        self._hierarchy_lock = threading.Lock()
 
         # Resolve db_path
         if db_path is None:
@@ -550,6 +553,9 @@ class FjmsService:
         """
         Get domain hierarchy with counts, grouped by parent domain.
 
+        Results are cached in memory after first computation (hierarchy is static).
+        Thread-safe via double-checked locking.
+
         Returns:
             Dict mapping parent_domain -> {
                 'parent_domain_heb': str,
@@ -559,113 +565,127 @@ class FjmsService:
             Sorted by parent count descending, children by count descending within each parent.
             Returns {} if conn is None.
         """
+        # Fast path: return cached result
+        if self._hierarchy_cache is not None:
+            return self._hierarchy_cache
+
         if self._conn is None:
             return {}
-        try:
-            # Query all domain entries with counts
-            cursor = self._conn.execute(
-                "SELECT Domain, DomainHeb, ParentDomain, ParentDomainHeb, "
-                "COUNT(DISTINCT AlmaId) as count "
-                "FROM domains GROUP BY Domain, ParentDomain ORDER BY count DESC"
-            )
-            rows = cursor.fetchall()
 
-            # Build hierarchy: map parent -> {parent_domain_heb, count, children[]}
-            hierarchy = {}
-            parent_counts = {}  # Track total counts per parent
+        # Slow path: compute and cache
+        with self._hierarchy_lock:
+            # Double-check after acquiring lock
+            if self._hierarchy_cache is not None:
+                return self._hierarchy_cache
 
-            for row in rows:
-                domain = row["Domain"]
-                domain_heb = row["DomainHeb"]
-                parent = row["ParentDomain"]
-                parent_heb = row["ParentDomainHeb"]
-                count = row["count"]
+            try:
+                # Optimized query: COUNT(*) instead of COUNT(DISTINCT AlmaId)
+                # No duplicate (AlmaId, Domain, ParentDomain) tuples exist in the data
+                cursor = self._conn.execute(
+                    "SELECT Domain, DomainHeb, ParentDomain, ParentDomainHeb, "
+                    "COUNT(*) as count "
+                    "FROM domains GROUP BY Domain, ParentDomain ORDER BY count DESC"
+                )
+                rows = cursor.fetchall()
 
-                # If this domain HAS a parent (not a root domain)
-                if parent and parent != domain:
-                    if parent not in hierarchy:
-                        hierarchy[parent] = {
-                            'parent_domain_heb': parent_heb,
-                            'count': 0,
-                            'children': []
-                        }
-                    hierarchy[parent]['children'].append({
-                        'domain': domain,
-                        'domain_heb': domain_heb,
-                        'count': count
-                    })
-                    hierarchy[parent]['count'] += count
-                    parent_counts[parent] = parent_counts.get(parent, 0) + count
-                else:
-                    # Root-level domain (Domain == ParentDomain or no parent)
-                    if domain not in hierarchy:
-                        hierarchy[domain] = {
-                            'parent_domain_heb': domain_heb,
-                            'count': count,
-                            'children': []
-                        }
+                # Build hierarchy: map parent -> {parent_domain_heb, count, children[]}
+                hierarchy = {}
+                parent_counts = {}  # Track total counts per parent
+
+                for row in rows:
+                    domain = row["Domain"]
+                    domain_heb = row["DomainHeb"]
+                    parent = row["ParentDomain"]
+                    parent_heb = row["ParentDomainHeb"]
+                    count = row["count"]
+
+                    # If this domain HAS a parent (not a root domain)
+                    if parent and parent != domain:
+                        if parent not in hierarchy:
+                            hierarchy[parent] = {
+                                'parent_domain_heb': parent_heb,
+                                'count': 0,
+                                'children': []
+                            }
+                        hierarchy[parent]['children'].append({
+                            'domain': domain,
+                            'domain_heb': domain_heb,
+                            'count': count
+                        })
+                        hierarchy[parent]['count'] += count
+                        parent_counts[parent] = parent_counts.get(parent, 0) + count
                     else:
-                        # Already exists as parent, just update count
-                        hierarchy[domain]['count'] += count
-                    parent_counts[domain] = parent_counts.get(domain, 0) + count
+                        # Root-level domain (Domain == ParentDomain or no parent)
+                        if domain not in hierarchy:
+                            hierarchy[domain] = {
+                                'parent_domain_heb': domain_heb,
+                                'count': count,
+                                'children': []
+                            }
+                        else:
+                            # Already exists as parent, just update count
+                            hierarchy[domain]['count'] += count
+                        parent_counts[domain] = parent_counts.get(domain, 0) + count
 
-            # Deduplicate: if a domain appears as both a child and a standalone
-            # root (e.g., "Piyyut" with ParentDomain=NULL AND ParentDomain="Piyut and its Interpretation"),
-            # merge the root count into the child entry and remove the standalone root.
-            child_domains = set()
-            for info in hierarchy.values():
-                for child in info.get('children', []):
-                    child_domains.add(child['domain'])
-            for child_name in child_domains:
-                if child_name in hierarchy:
-                    # Merge root count into child entry
-                    root_count = hierarchy[child_name].get('count', 0)
-                    # Find and update the child entry in its parent
-                    for info in hierarchy.values():
-                        for child in info.get('children', []):
-                            if child['domain'] == child_name:
-                                child['count'] += root_count
-                                break
-                    # Also move any children of the standalone root under the parent
-                    orphan_children = hierarchy[child_name].get('children', [])
-                    if orphan_children:
+                # Deduplicate: if a domain appears as both a child and a standalone
+                # root (e.g., "Piyyut" with ParentDomain=NULL AND ParentDomain="Piyut and its Interpretation"),
+                # merge the root count into the child entry and remove the standalone root.
+                child_domains = set()
+                for info in hierarchy.values():
+                    for child in info.get('children', []):
+                        child_domains.add(child['domain'])
+                for child_name in child_domains:
+                    if child_name in hierarchy:
+                        # Merge root count into child entry
+                        root_count = hierarchy[child_name].get('count', 0)
+                        # Find and update the child entry in its parent
                         for info in hierarchy.values():
                             for child in info.get('children', []):
                                 if child['domain'] == child_name:
-                                    # Can't nest deeper, so promote orphans to same parent level
-                                    info['children'].extend(orphan_children)
+                                    child['count'] += root_count
                                     break
-                    del hierarchy[child_name]
+                        # Also move any children of the standalone root under the parent
+                        orphan_children = hierarchy[child_name].get('children', [])
+                        if orphan_children:
+                            for info in hierarchy.values():
+                                for child in info.get('children', []):
+                                    if child['domain'] == child_name:
+                                        # Can't nest deeper, so promote orphans to same parent level
+                                        info['children'].extend(orphan_children)
+                                        break
+                        del hierarchy[child_name]
 
-            # Merge duplicate children (e.g., two "Other" entries promoted from different sources)
-            for parent_name, info in hierarchy.items():
-                seen = {}
-                merged = []
-                for child in info.get('children', []):
-                    key = child['domain']
-                    if key in seen:
-                        seen[key]['count'] += child['count']
-                    else:
-                        seen[key] = child
-                        merged.append(child)
-                info['children'] = merged
+                # Merge duplicate children (e.g., two "Other" entries promoted from different sources)
+                for parent_name, info in hierarchy.items():
+                    seen = {}
+                    merged = []
+                    for child in info.get('children', []):
+                        key = child['domain']
+                        if key in seen:
+                            seen[key]['count'] += child['count']
+                        else:
+                            seen[key] = child
+                            merged.append(child)
+                    info['children'] = merged
 
-            # Sort children within each parent by count descending
-            for parent in hierarchy:
-                hierarchy[parent]['children'].sort(key=lambda x: x['count'], reverse=True)
+                # Sort children within each parent by count descending
+                for parent in hierarchy:
+                    hierarchy[parent]['children'].sort(key=lambda x: x['count'], reverse=True)
 
-            # Recalculate parent counts after dedup
-            for parent_name, info in hierarchy.items():
-                child_total = sum(c['count'] for c in info.get('children', []))
-                if child_total > info.get('count', 0):
-                    info['count'] = child_total
-                    parent_counts[parent_name] = child_total
+                # Recalculate parent counts after dedup
+                for parent_name, info in hierarchy.items():
+                    child_total = sum(c['count'] for c in info.get('children', []))
+                    if child_total > info.get('count', 0):
+                        info['count'] = child_total
+                        parent_counts[parent_name] = child_total
 
-            # Return sorted by parent count
-            return dict(sorted(hierarchy.items(), key=lambda x: parent_counts.get(x[0], 0), reverse=True))
-        except Exception as e:
-            logger.error(f"FjmsService.get_domain_hierarchy error: {e}")
-            return {}
+                # Cache the result before returning
+                result = dict(sorted(hierarchy.items(), key=lambda x: parent_counts.get(x[0], 0), reverse=True))
+                self._hierarchy_cache = result
+                return result
+            except Exception as e:
+                logger.error(f"FjmsService.get_domain_hierarchy error: {e}")
+                return {}
 
     @staticmethod
     def _split_concat(val):
