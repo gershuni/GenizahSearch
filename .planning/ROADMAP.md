@@ -182,7 +182,7 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 
 **Goal:** Stabilize and polish the app: fix all desktop crashes, add server-side pagination, integrate PostHog analytics, optimize web performance, and add Playwright E2E + performance tests
 **Depends on:** Phase 38
-**Plans:** 7 plans (5 complete + 2 gap closure)
+**Plans:** 6/7 plans executed
 
 Plans:
 - [x] 39-01-PLAN.md — Fix all desktop crash types (sip.isdeleted guards + rare crash verification) + archive crash log

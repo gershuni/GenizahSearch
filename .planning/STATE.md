@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
-Plan: 5 of 5 in current phase (COMPLETE)
-Status: Phase 39 Complete
-Last activity: 2026-02-19 - Completed 39-05: E2E test infrastructure (16 NiceGUI Screen tests)
+Plan: 6 of 7 in current phase
+Status: Executing Phase 39
+Last activity: 2026-02-20 - Completed 39-06: UAT gap closure (3 bug fixes)
 
-Progress: [##########] 100% (Phase 39: 5/5 plans)
+Progress: [########--] 86% (Phase 39: 6/7 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 112 (across 7 milestones)
+- Total plans completed: 113 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -80,6 +80,9 @@ Recent decisions affecting current work:
 - Phase 39-05: Custom Screen fixture bypasses NiceGUI inipath requirement (request=None + override start_server)
 - Phase 39-05: App-level E2E tests start actual web/main.py via runpy (not stub pages)
 - Phase 39-05: selenium + pytest-selenium as dev dependencies, skip logic for CI environments without ChromeDriver
+- Phase 39-06: scrollTo queued before render_results (JS executes client-side even after Python element deletion)
+- Phase 39-06: Ctrl+wheel for zoom, plain wheel for scroll (matches standard app convention)
+- Phase 39-06: pytest.importorskip over try/except (raises pytest.skip during collection, before module-level imports)
 
 ### Blockers/Concerns
 
@@ -108,7 +111,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-19
-Stopped at: Completed 39-05-PLAN.md (E2E test infrastructure)
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-05-SUMMARY.md
-Notes: Phase 39 complete (5/5 plans). E2E test infrastructure established with 16 NiceGUI Screen tests (15 passing). Search, browse, and performance flows covered. ChromeDriver skip logic for CI safety.
+Last session: 2026-02-20
+Stopped at: Completed 39-06-PLAN.md (UAT gap closure)
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-06-SUMMARY.md
+Notes: 3 UAT bugs fixed: bottom pagination scroll RuntimeError, VRD mouse wheel zoom-instead-of-scroll, E2E selenium import crash. One gap closure plan remaining (39-07: domain filter lag).
