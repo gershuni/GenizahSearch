@@ -711,9 +711,16 @@ class BrowseState:
         self.active_source: str = 'nli'
         # Pre-fetched FJMS metadata (populated in load_page, consumed in update_content)
         self.fjms_data: Optional[Dict[str, Any]] = None
+        # Pre-fetched crossref metadata (populated in _load_enrichment, consumed in update_content)
+        self.crossref_data: Optional[Dict[str, Any]] = None
         # Enrichment loading state (two-phase async loading)
         self.enrichment_loaded: bool = False
         self.enrichment_loading: bool = False
+
+
+# Module-level crossref cache: keyed by sys_id, persists across page navigations
+# within the session. Crossref data is read-only public metadata, safe to share.
+_crossref_cache: Dict[str, dict] = {}
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -875,6 +882,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.pgp_metadata = None
         state.all_sources = None
         state.fjms_data = None
+        state.crossref_data = None
 
         state.is_loading = True
         state.error = None
@@ -988,8 +996,31 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 print(f"Failed to fetch FJMS data: {e}")
                 return None
 
+        async def fetch_crossref():
+            _page_sys_id = page.sys_id
+            # Check session cache first
+            if _page_sys_id in _crossref_cache:
+                return _crossref_cache[_page_sys_id]
+
+            def _crossref_sync():
+                from shared.nli_crossref_service import get_nli_crossref_service
+                svc = get_nli_crossref_service(thread_safe=True)
+                if svc.is_available() and _page_sys_id:
+                    return svc.get_crossref_metadata(_page_sys_id)
+                return {}
+
+            try:
+                result = await run.io_bound(_crossref_sync)
+                _crossref_cache[_page_sys_id] = result  # Cache for session
+                return result
+            except Exception as e:
+                print(f"Failed to fetch crossref data: {e}")
+                return {}
+
         try:
-            (all_sources, pgp_doc), fjms_data = await asyncio.gather(fetch_pgp(), fetch_fjms())
+            (all_sources, pgp_doc), fjms_data, crossref_data = await asyncio.gather(
+                fetch_pgp(), fetch_fjms(), fetch_crossref()
+            )
         except Exception as e:
             print(f"Enrichment fetch failed: {e}")
             state.enrichment_loaded = True
@@ -1053,6 +1084,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             state.pgp_metadata = None
 
         state.fjms_data = fjms_data
+        state.crossref_data = crossref_data
         state.enrichment_loaded = True
         state.enrichment_loading = False
 
@@ -2005,19 +2037,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label(page.library_name).classes('text-sm').style('color: var(--text-primary);')
 
                         # Shelfmark (with IsNotGenizah badge and Neubauer-Cowley catalog entry)
-                        # Fetch Phase 33 crossref metadata for this manuscript
-                        _is_not_genizah = False
-                        _catalog_entry_str = ''
-                        _collection_storage = None
-                        try:
-                            from shared.nli_crossref_service import get_nli_crossref_service
-                            _crossref_svc = get_nli_crossref_service(thread_safe=True)
-                            if _crossref_svc.is_available() and page.sys_id:
-                                _is_not_genizah = _crossref_svc.get_is_not_genizah(page.sys_id)
-                                _catalog_entry_str = _crossref_svc.get_catalog_entry(page.sys_id) or ''
-                                _collection_storage = _crossref_svc.get_collection_storage(page.sys_id)
-                        except Exception:
-                            pass
+                        # Read crossref metadata from enrichment state (fetched in parallel by _load_enrichment)
+                        _crossref = state.crossref_data or {}
+                        _is_not_genizah = _crossref.get('is_not_genizah', False)
+                        _catalog_entry_str = _crossref.get('catalog_entry', '') or ''
+                        _collection_storage = _crossref.get('collection_storage')
 
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Shelfmark')).classes('text-xs font-bold').style('color: var(--text-secondary);')
