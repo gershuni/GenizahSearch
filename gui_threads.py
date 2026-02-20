@@ -457,6 +457,39 @@ class UpdateDownloaderThread(QThread):
             self.finished_signal.emit(False, f"Download error: {str(e)}")
 
 
+class DomainEnrichmentWorker(QThread):
+    """Batch-fetch FJMS domain classifications for search results in background.
+
+    Runs get_domains_for_sys_ids off the main thread so search results can
+    display immediately while domain badges fill in asynchronously.
+    """
+    finished = pyqtSignal(dict)  # raw_domains: sys_id -> list of domain dicts
+
+    def __init__(self, results: list, parent=None):
+        super().__init__(parent)
+        self.results = results
+
+    def run(self):
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service()
+            if not fjms.is_available():
+                self.finished.emit({})
+                return
+            all_sys_ids = [
+                r.get('display', {}).get('id')
+                for r in self.results
+                if r.get('display', {}).get('id')
+            ]
+            if not all_sys_ids:
+                self.finished.emit({})
+                return
+            raw_domains = fjms.get_domains_for_sys_ids(all_sys_ids)
+            self.finished.emit(raw_domains)
+        except Exception:
+            self.finished.emit({})
+
+
 class PGPSourceWorker(QThread):
     """Fetch PGP edition/translation sources for a fragment in the background.
 

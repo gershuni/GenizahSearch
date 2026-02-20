@@ -6446,6 +6446,7 @@ class GenizahGUI(QMainWindow):
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self._pgp_transcription_sys_ids = set()
         self._pgp_badge_worker = None
+        self._domain_worker = None
         self._pgp_tags_worker = None
         self._pgp_tag_search_worker = None
         self._pgp_tags = []
@@ -15373,6 +15374,59 @@ class GenizahGUI(QMainWindow):
                 )
             )
 
+    def _on_domain_enrichment_loaded(self, raw_domains):
+        """Handle async domain enrichment results from DomainEnrichmentWorker.
+
+        Processes raw domain data into display-ready structures and updates
+        already-loaded result rows with domain badges.
+        """
+        from shared.fjms_service import qualify_domain_name
+
+        self._result_domain_map = {}
+        self._domain_name_map = getattr(self, '_domain_name_map', {})
+        domain_counts = {}
+
+        for sys_id, doms in raw_domains.items():
+            child_names = {d['domain'] for d in doms}
+            filtered = [
+                qualify_domain_name(d['domain'], d.get('parent_domain'))
+                for d in doms
+                if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])
+            ]
+            if filtered:
+                self._result_domain_map[sys_id] = filtered
+                for d in filtered:
+                    domain_counts[d] = domain_counts.get(d, 0) + 1
+            for d in doms:
+                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                    self._domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
+                if d.get('domain_heb') and d['domain'] not in self._domain_name_map:
+                    self._domain_name_map[d['domain']] = d['domain_heb']
+                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in self._domain_name_map:
+                    self._domain_name_map[d['parent_domain']] = d['parent_domain_heb']
+
+        self._result_domain_counts = domain_counts
+        self._has_result_domains = bool(domain_counts)
+        self.btn_domain_filter.setEnabled(self._has_result_domains)
+
+        # Update domain column cells for already-loaded rows
+        for row in range(self.results_table.rowCount()):
+            item = self.results_table.item(row, self.COL_SYS_ID)
+            if not item:
+                continue
+            sid = item.text().strip()
+            domain_names = self._result_domain_map.get(sid, [])
+            domain_text = ", ".join(self._domain_display_name(d) for d in domain_names) if domain_names else ""
+            domain_item = QTableWidgetItem(domain_text)
+            if domain_names:
+                domain_item.setForeground(QColor("#8e44ad"))
+            self.results_table.setItem(row, self.COL_DOMAIN, domain_item)
+
+        # Apply any remembered domain exclusions after enrichment
+        if self._domain_exclusions and self._has_result_domains:
+            self._apply_domain_exclusions()
+
     def _navigate_to_search_with_domain(self, domain_name):
         """Navigate to search tab with domain context (exclusions cleared)."""
         self._domain_exclusions = set()  # Clear exclusions when navigating from browse
@@ -15885,44 +15939,12 @@ class GenizahGUI(QMainWindow):
         has_multiple_sources = os.path.exists(Config.FILE_V7) and os.path.getsize(Config.FILE_V7) > 0
         self.results_table.setColumnHidden(self.COL_SRC, not has_multiple_sources)
 
-        # Collect domain data for post-search filtering
-        def _collect_result_domains():
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service()
-            if not fjms.is_available():
-                return {}
-            all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
-            return fjms.get_domains_for_sys_ids(all_sys_ids)
-
-        # Run domain collection (blocking is OK here since on_search_finished is already on main thread
-        # and the batch lookup is fast for typical result sets)
-        raw_domains = _collect_result_domains()
-
-        # Process into domain name lists per sys_id (with parent/child dedup)
-        # Also build English->Hebrew display name map
+        # Initialize domain data (will be populated asynchronously by DomainEnrichmentWorker)
         self._result_domain_map = {}
-        self._domain_name_map = {}  # English name -> Hebrew name
-        domain_counts = {}  # domain_name -> count of results
-        from shared.fjms_service import qualify_domain_name
-        for sys_id, doms in raw_domains.items():
-            child_names = {d['domain'] for d in doms}
-            filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
-            if filtered:
-                self._result_domain_map[sys_id] = filtered
-                for d in filtered:
-                    domain_counts[d] = domain_counts.get(d, 0) + 1
-            for d in doms:
-                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
-                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
-                    self._domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
-                if d.get('domain_heb') and d['domain'] not in self._domain_name_map:
-                    self._domain_name_map[d['domain']] = d['domain_heb']
-                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in self._domain_name_map:
-                    self._domain_name_map[d['parent_domain']] = d['parent_domain_heb']
-
-        self._result_domain_counts = domain_counts
-        self._has_result_domains = bool(domain_counts)
-        self.btn_domain_filter.setEnabled(self._has_result_domains)
+        self._domain_name_map = {}
+        self._result_domain_counts = {}
+        self._has_result_domains = False
+        self.btn_domain_filter.setEnabled(False)
 
         self.load_next_batch()
 
@@ -15930,9 +15952,15 @@ class GenizahGUI(QMainWindow):
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
 
-        # Apply any remembered domain exclusions after rows are loaded
-        if self._domain_exclusions and self._has_result_domains:
-            self._apply_domain_exclusions()
+        # Launch domain enrichment worker (async -- results appear first, domains fill in later)
+        from gui_threads import DomainEnrichmentWorker
+        sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+        if sys_ids:
+            if self._domain_worker and self._domain_worker.isRunning():
+                self._domain_worker.wait()
+            self._domain_worker = DomainEnrichmentWorker(results)
+            self._domain_worker.finished.connect(self._on_domain_enrichment_loaded)
+            self._domain_worker.start()
 
         # Launch PGP badge worker to mark results with transcriptions
         sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
