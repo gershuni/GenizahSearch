@@ -106,6 +106,7 @@ Recent decisions affecting current work:
 ### Roadmap Evolution
 
 - Phase 39 added: bug fixing, cleanup, performance improving
+- Phase 40 added: Performance Optimization (profiling-driven — parallelize NLI calls, defer catalog queries, async domain enrichment, variant cache unification, FL ID index, browse crossref parallelization)
 
 ### Pending Todos
 
