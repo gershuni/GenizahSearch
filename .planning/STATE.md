@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
-Plan: 7 of 7 in current phase (COMPLETE)
+Plan: 8 of 8 in current phase (COMPLETE)
 Status: Phase 39 Complete
-Last activity: 2026-02-20 - Completed 39-07: Page navigation performance (static CSS + lazy dialog)
+Last activity: 2026-02-20 - Completed 39-08: Page navigation speed (parallel queries + async loading)
 
-Progress: [##########] 100% (Phase 39: 7/7 plans)
+Progress: [##########] 100% (Phase 39: 8/8 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 114 (across 7 milestones)
+- Total plans completed: 115 (across 7 milestones)
 - Average duration: ~8 min
 - Total execution time: ~10 hours
 
@@ -35,6 +35,7 @@ Progress: [##########] 100% (Phase 39: 7/7 plans)
 | v5.8.0 | 25-28 | 12 | 57 min |
 | v5.9.0 | 29-34 | 22 | ~90 min |
 | v6.0.0 | 35-38 | 8 | 68 min |
+| Phase 39 P08 | 14min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,9 @@ Recent decisions affecting current work:
 - Phase 39-06: pytest.importorskip over try/except (raises pytest.skip during collection, before module-level imports)
 - Phase 39-07: CSS extracted verbatim to static file (no rule changes, indentation removed)
 - Phase 39-07: Lazy dialog uses nonlocal pattern (simple closure, no new dependencies)
+- Phase 39-08: asyncio.gather + run.io_bound for parallel off-thread queries (search enrichment, discoveries initial load)
+- Phase 39-08: Pre-fetch FJMS in load_page, read from state.fjms_data in update_content (separates I/O from rendering)
+- Phase 39-08: Pure-UI render helpers (_render_stat_cards, _render_feed_result) for testable data-to-UI separation
 
 ### Blockers/Concerns
 
@@ -114,6 +118,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-20
-Stopped at: Completed 39-07-PLAN.md (Page navigation performance)
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-07-SUMMARY.md
-Notes: Phase 39 complete (7/7 plans). Static CSS extraction (1,347 lines) and lazy login dialog reduce per-page navigation overhead.
+Stopped at: Completed 39-08-PLAN.md (Page navigation speed - parallel queries)
+Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-08-SUMMARY.md
+Notes: Phase 39 complete (8/8 plans). Parallelized search enrichment, batched FJMS browse metadata, async discoveries loading.
