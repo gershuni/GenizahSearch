@@ -660,6 +660,28 @@ class NliCrossrefService:
             logger.error(f"NliCrossrefService.get_collection_storage error for {sys_id}: {e}")
             return None
 
+    def get_crossref_metadata(self, sys_id: str) -> dict:
+        """Fetch all browse-relevant crossref metadata for a sys_id in one call.
+
+        Consolidates individual crossref queries used by the browse page into
+        a single method call for use in parallel enrichment.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            Dict with keys: is_not_genizah, catalog_entry, collection_storage,
+            physical_metadata. Returns empty dict if service unavailable.
+        """
+        if self._conn is None or not sys_id:
+            return {}
+        return {
+            'is_not_genizah': self.get_is_not_genizah(sys_id),
+            'catalog_entry': self.get_catalog_entry(sys_id),
+            'collection_storage': self.get_collection_storage(sys_id),
+            'physical_metadata': self.get_physical_metadata(sys_id),
+        }
+
     # ── Relationships (Phase 33: REL-01, REL-02) ────────────────────
 
     def get_part_of(self, sys_id: str) -> list[str]:
