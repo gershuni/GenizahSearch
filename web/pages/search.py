@@ -23,6 +23,7 @@ from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
 import re
 import html
+import asyncio
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -2059,7 +2060,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results([])
             return
 
-        # Collect domain data for ALL results (not just displayed 200)
+        # Collect sys_ids for enrichment (all results, not just displayed 200)
         all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
 
         def collect_all_domains(sys_ids):
@@ -2067,9 +2068,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             fjms = get_fjms_service(thread_safe=True)
             return fjms.get_domains_for_sys_ids(sys_ids) if fjms.is_available() else {}
 
-        raw_domains = await run.io_bound(collect_all_domains, all_sys_ids)
+        def collect_catalog_counts(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            return fjms.get_catalog_source_counts(sys_ids) if fjms.is_available() else {}
 
-        # Process into deduplicated domain names per sys_id
+        # Run three independent enrichment queries in parallel
+        raw_domains, transcription_ids, catalog_counts = await asyncio.gather(
+            run.io_bound(collect_all_domains, all_sys_ids),
+            run.io_bound(get_sys_ids_with_transcriptions, all_sys_ids),
+            run.io_bound(collect_catalog_counts, all_sys_ids),
+        )
+
+        # Process domains into deduplicated domain names per sys_id
         # Also build English->Hebrew display name map
         search_state.all_result_domains = {}
         search_state.domain_name_map = {}  # English name -> Hebrew name
@@ -2089,7 +2100,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
         search_state.has_domain_data = bool(search_state.all_result_domains)
 
-        # Pre-cache domain hierarchy for filter dialog (avoids 1s+ DB call on dialog open)
+        # Pre-cache domain hierarchy for filter dialog (depends on domain data, so sequential)
         if search_state.has_domain_data:
             def fetch_hierarchy():
                 from shared.fjms_service import get_fjms_service
@@ -2099,24 +2110,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             search_state.domain_hierarchy = {}
 
-        # Batch lookup for transcription availability (all results, not just visible page)
-        result_sys_ids = [
-            r.get('display', {}).get('id')
-            for r in results
-            if r.get('display', {}).get('id')
-        ]
-
-        search_state.transcription_sys_ids = await run.io_bound(
-            get_sys_ids_with_transcriptions, result_sys_ids
-        )
-
-        # Batch lookup for catalog source counts (for "Catalog Records (N)" buttons)
-        def collect_catalog_counts(sys_ids):
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            return fjms.get_catalog_source_counts(sys_ids) if fjms.is_available() else {}
-
-        search_state.catalog_source_counts = await run.io_bound(collect_catalog_counts, result_sys_ids)
+        # Assign parallel results
+        search_state.transcription_sys_ids = transcription_ids
+        search_state.catalog_source_counts = catalog_counts
 
         # Slice result_domains from all_result_domains for badge rendering
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
@@ -2208,7 +2204,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             render_results(results, page=0)
 
-    def render_results(results, page=None):
+    def render_results(results, page=None, scroll_to_top=False):
         results_container.clear()
         search_state.displayed_results = results  # Track full filtered set for Advanced View navigation
 
@@ -2249,7 +2245,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.label(f"{start + 1}-{end} {tr('of')} {total}").classes('text-sm').style('color: var(--text-muted);')
                     def on_page_change_top(e):
                         search_state.current_page = e.value - 1  # ui.pagination is 1-indexed
-                        render_results(results, page=search_state.current_page)
+                        render_results(results, page=search_state.current_page, scroll_to_top=True)
                     ui.pagination(1, total_pages, value=page_idx + 1,
                         on_change=on_page_change_top).props('max-pages=7 boundary-numbers')
 
@@ -2263,11 +2259,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 with ui.row().classes('w-full justify-center items-center px-4 pb-2'):
                     def on_page_change_bottom(e):
                         search_state.current_page = e.value - 1
-                        # Scroll to top BEFORE render_results destroys this element's parent slot
-                        ui.run_javascript('window.scrollTo(0, 0)')
-                        render_results(results, page=search_state.current_page)
+                        render_results(results, page=search_state.current_page, scroll_to_top=True)
                     ui.pagination(1, total_pages, value=page_idx + 1,
                         on_change=on_page_change_bottom).props('max-pages=7 boundary-numbers')
+
+        # Scroll to top of results after page change
+        if scroll_to_top:
+            results_container.run_method('setScrollPosition', 'vertical', 0)
 
     def create_result_card(index, result):
         display = result.get('display', {})
