@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 40 of 40 (Performance Optimization)
-Plan: 3 of 5 in current phase
+Plan: 5 of 5 in current phase
 Status: Executing Phase 40
-Last activity: 2026-02-20 - Completed 40-03: Browse crossref parallelization (parallel enrichment + session cache)
+Last activity: 2026-02-20 - Completed 40-02: Desktop domain enrichment & lazy catalog (async worker + lazy fetch)
 
-Progress: [####------] 40% (Phase 40: 2/5 plans)
+Progress: [########--] 80% (Phase 40: 4/5 plans)
 
 ## Performance Metrics
 
@@ -37,6 +37,7 @@ Progress: [####------] 40% (Phase 40: 2/5 plans)
 | v6.0.0 | 35-38 | 8 | 68 min |
 | Phase 39 P08 | 14min | 2 tasks | 3 files |
 | Phase 40 P01 | 3min | 1 task | 1 file |
+| Phase 40 P04 | 13min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,7 @@ Recent decisions affecting current work:
 - Phase 40-01: shutdown(wait=False) instead of 'with' context manager for ThreadPoolExecutor -- allows IIIF fetch to overlap with external IIIF processing
 - Phase 40-01: 15-second timeout per future with graceful fallback to empty dict on failure
 - [Phase 40]: Module-level _crossref_cache shared across all users (crossref is read-only public data, safe to share)
+- Phase 40-04: Index-first lookup with linear scan fallback in get_browse_page_by_fl -- correctness during startup window
 
 ### Blockers/Concerns
 
@@ -123,6 +125,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-20
-Stopped at: Completed 40-03-PLAN.md (Browse crossref parallelization)
-Resume file: .planning/phases/40-performance-optimization/40-03-SUMMARY.md
-Notes: Phase 40 in progress (2/5 plans). Crossref queries moved from render path to parallel enrichment with session cache.
+Stopped at: Completed 40-04-PLAN.md (FL ID index lookup)
+Resume file: .planning/phases/40-performance-optimization/40-04-SUMMARY.md
+Notes: Phase 40 in progress (3/5 plans). FL ID navigation now uses O(1) dict lookup with linear scan fallback.
