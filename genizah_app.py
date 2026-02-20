@@ -2042,27 +2042,32 @@ class ImageLoaderThread(QThread):
             self.load_failed.emit()
             return
 
-        # 1. Try to identify the FL ID to use as a filename
+        # 1. Determine cache filename: FL ID for NLI, URL hash for external
         fl_match = re.search(r'FL(\d+)', self.url)
         local_path = None
-        
+
         if fl_match:
             fl_id = fl_match.group(1)
             # v2 cache: high resolution (2000px). Old v1 cache was 600px.
             local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"FL{fl_id}_v2.jpg")
+        else:
+            # Cache external images (Cambridge, Manchester, Oxford, JTS) by URL hash
+            import hashlib
+            url_hash = hashlib.md5(self.url.encode('utf-8')).hexdigest()[:16]
+            local_path = os.path.join(Config.IMAGE_CACHE_DIR, f"ext_{url_hash}.jpg")
 
-            # --- CHECK LOCAL CACHE ---
-            if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-                img = QImage(local_path)
-                if not img.isNull():
-                    self.image_loaded.emit(img)
-                    return
-                else:
-                    # Corrupt file? Delete it so we re-download
-                    try:
-                        os.remove(local_path)
-                    except Exception as e:
-                        logger.warning("Failed to remove corrupt cache file %s: %s", local_path, e)
+        # --- CHECK LOCAL CACHE ---
+        if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            img = QImage(local_path)
+            if not img.isNull():
+                self.image_loaded.emit(img)
+                return
+            else:
+                # Corrupt file? Delete it so we re-download
+                try:
+                    os.remove(local_path)
+                except Exception as e:
+                    logger.warning("Failed to remove corrupt cache file %s: %s", local_path, e)
 
         # 2. Download from Network (if not in cache)
         headers = dict(Config.HTTP_HEADERS)
