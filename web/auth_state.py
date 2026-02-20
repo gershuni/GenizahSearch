@@ -410,16 +410,24 @@ def create_auth_buttons():
 
                     ui.menu_item(tr('Logout'), handle_logout)
     else:
-        # Login/Register buttons
-        dialog = create_login_dialog()
+        # Login/Register buttons (dialog built lazily on first click)
+        dialog = None
+
+        def _ensure_dialog():
+            nonlocal dialog
+            if dialog is None:
+                dialog = create_login_dialog()
+            return dialog
 
         def open_login():
-            dialog.tabs.set_value(dialog.login_tab)
-            dialog.open()
+            d = _ensure_dialog()
+            d.tabs.set_value(d.login_tab)
+            d.open()
 
         def open_register():
-            dialog.tabs.set_value(dialog.register_tab)
-            dialog.open()
+            d = _ensure_dialog()
+            d.tabs.set_value(d.register_tab)
+            d.open()
 
         ui.button(tr('Login'), on_click=open_login).props('flat text-color=white dense').classes('text-sm')
         ui.button(tr('Register'), on_click=open_register).props('outline text-color=white dense').classes('text-sm')
