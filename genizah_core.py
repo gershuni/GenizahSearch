@@ -2265,6 +2265,15 @@ class VariantManager:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
+        # Check if a larger-limit result exists that we can slice from
+        for cached_key, cached_value in self._cache.items():
+            if (cached_key[0] == term and cached_key[1] == mode
+                    and cached_key[3] == pairs_count and cached_key[2] >= limit):
+                # Larger result exists; slice to our limit
+                sliced = cached_value[:limit]
+                self._cache[cache_key] = sliced
+                return sliced
+
         # Select the appropriate map based on mode
         # Use slider_map when settings has custom pairs count
         if self._settings and hasattr(self._settings, 'variant_pairs_count'):
@@ -3227,8 +3236,22 @@ class MetadataManager:
         current_meta = self.nli_cache.get(system_id, {})
         current_meta['sys_id'] = system_id  # Store for downstream consumers
 
-        # 1. Fetch MARC (Bibliographic Data)
-        marc_data = self.fetch_marc_data(system_id)
+        # 1. Submit both NLI network calls concurrently (fetch_marc_data + fetch_iiif_manifest)
+        # These are independent calls; running in parallel halves metadata fetch time.
+        # We avoid 'with' context manager here because its __exit__ calls shutdown(wait=True),
+        # which would block until both futures complete before we can process MARC results.
+        # Instead, we submit both, process MARC first (for external IIIF dependency), then
+        # await IIIF results later — allowing IIIF fetch to overlap with external IIIF logic.
+        _executor = ThreadPoolExecutor(max_workers=2)
+        marc_future = _executor.submit(self.fetch_marc_data, system_id)
+        iiif_future = _executor.submit(self.fetch_iiif_manifest, system_id)
+        _executor.shutdown(wait=False)  # Don't block; futures continue in background threads
+
+        # Await MARC result first (needed for external IIIF logic below)
+        try:
+            marc_data = marc_future.result(timeout=15)
+        except Exception:
+            marc_data = {}
         current_meta['marc'] = marc_data
         marc_attribution = marc_data.get('attribution')
 
@@ -3332,7 +3355,11 @@ class MetadataManager:
                     if name:
                         crossref_labels[name] = name
 
-        nli_iiif_data = self.fetch_iiif_manifest(system_id)
+        # Await NLI IIIF manifest (submitted concurrently with MARC above)
+        try:
+            nli_iiif_data = iiif_future.result(timeout=15)
+        except Exception:
+            nli_iiif_data = {}
         if nli_iiif_data.get('canvas_map'):
             sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
             for fl_id, label in sorted_map:
@@ -5052,7 +5079,51 @@ class SearchEngine:
         self.var_mgr = variants_mgr
         self.index = None
         self.searcher = None
+        # FL ID index for O(1) browse lookup (built in background)
+        self._fl_id_index = None  # dict: fl_digits_str -> list of (sys_id, page_idx)
+        self._fl_id_index_building = False
+        self._fl_id_index_lock = threading.Lock()
         self.reload_index()
+        self.start_fl_id_index_build()
+
+    # ------------------------------------------------------------------
+    #  FL ID Index (background build for O(1) browse-by-FL lookup)
+    # ------------------------------------------------------------------
+    def _build_fl_id_index(self):
+        """Build FL ID -> (sys_id, page_idx) index from browse_map. Called in background thread."""
+        browse_map = self._load_browse_map()
+        if not browse_map:
+            return
+        index = {}
+        for sys_id, pages in browse_map.items():
+            for idx, page in enumerate(pages):
+                parsed = self.meta_mgr.parse_full_id_components(page.get('full_header', ''))
+                fl_id = parsed.get('fl_id')
+                if fl_id:
+                    fl_digits = re.sub(r"\D", "", str(fl_id))
+                    if fl_digits:
+                        if fl_digits not in index:
+                            index[fl_digits] = []
+                        index[fl_digits].append((sys_id, idx))
+        with self._fl_id_index_lock:
+            self._fl_id_index = index
+        LOGGER.info("FL ID index built: %d entries", len(index))
+
+    def start_fl_id_index_build(self):
+        """Start building FL ID index in background. Non-blocking."""
+        if self._fl_id_index is not None or self._fl_id_index_building:
+            return
+        self._fl_id_index_building = True
+        t = threading.Thread(target=self._build_fl_id_index_thread, daemon=True)
+        t.start()
+
+    def _build_fl_id_index_thread(self):
+        try:
+            self._build_fl_id_index()
+        except Exception as e:
+            LOGGER.warning("Failed to build FL ID index: %s", e)
+        finally:
+            self._fl_id_index_building = False
 
     @staticmethod
     def format_snippet(text, style='html_class'):
