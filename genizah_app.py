@@ -4273,7 +4273,19 @@ class ResultDialog(QDialog):
         dlg.exec()
 
     def _show_rd_catalog(self):
-        """Open FJMS catalog records dialog from ResultDialog."""
+        """Open FJMS catalog records dialog from reading desk (lazy fetch)."""
+        # Lazy fetch: load catalog detail on first click if not yet loaded
+        if self._rd_catalog_detail is None and self.current_sys_id:
+            self.statusBar().showMessage(tr("Loading catalog data..."), 3000)
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms_svc = get_fjms_service()
+                if fjms_svc.is_available():
+                    self._rd_catalog_detail = fjms_svc.get_catalog_detail(self.current_sys_id)
+            except Exception:
+                pass
+            self.statusBar().clearMessage()
+
         if not self._rd_catalog_detail:
             return
         shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
@@ -4383,6 +4395,8 @@ class ResultDialog(QDialog):
                 self.btn_compact_bib_nli.setVisible(True)
 
         # Catalog Records button
+        # Detail is fetched lazily on button click, not during page load
+        self._rd_catalog_detail = None
         try:
             from shared.fjms_service import get_fjms_service
             fjms_svc = get_fjms_service()
@@ -4392,10 +4406,6 @@ class ResultDialog(QDialog):
                 self.btn_rd_catalog.setText(f"{tr('Catalog Records')} ({catalog_count})")
                 self.btn_rd_catalog.setEnabled(catalog_count > 0)
                 self.btn_rd_catalog.setVisible(True)
-                if catalog_count > 0:
-                    self._rd_catalog_detail = fjms_svc.get_catalog_detail(self.current_sys_id)
-                else:
-                    self._rd_catalog_detail = None
         except Exception:
             self.btn_rd_catalog.setVisible(False)
 
@@ -9725,6 +9735,8 @@ class GenizahGUI(QMainWindow):
             self.btn_b_bibliography_nli.setVisible(False)
 
         # Catalog Records button (FJMS catalog detail dialog)
+        # Detail is fetched lazily on button click, not during page load
+        self._browse_catalog_detail = None
         try:
             from shared.fjms_service import get_fjms_service
             fjms_svc = get_fjms_service()
@@ -9734,10 +9746,6 @@ class GenizahGUI(QMainWindow):
                 self.btn_b_catalog_records.setText(f"{tr('Catalog Records')} ({catalog_count})")
                 self.btn_b_catalog_records.setEnabled(catalog_count > 0)
                 self.btn_b_catalog_records.setVisible(True)
-                if catalog_count > 0:
-                    self._browse_catalog_detail = fjms_svc.get_catalog_detail(sid)
-                else:
-                    self._browse_catalog_detail = None
         except Exception:
             self.btn_b_catalog_records.setVisible(False)
 
@@ -10247,7 +10255,19 @@ class GenizahGUI(QMainWindow):
         dlg.exec()
 
     def _show_fjms_catalog_dialog(self):
-        """Open the FJMS catalog records dialog from Browse tab."""
+        """Open the FJMS catalog records dialog from Browse tab (lazy fetch)."""
+        # Lazy fetch: load catalog detail on first click if not yet loaded
+        if self._browse_catalog_detail is None and self.current_browse_sid:
+            self.statusBar().showMessage(tr("Loading catalog data..."), 3000)
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms_svc = get_fjms_service()
+                if fjms_svc.is_available():
+                    self._browse_catalog_detail = fjms_svc.get_catalog_detail(self.current_browse_sid)
+            except Exception:
+                pass
+            self.statusBar().clearMessage()
+
         if not self._browse_catalog_detail or not self._browse_catalog_detail.get("records"):
             # Still try to show if we have free_descriptions or other data
             if not self._browse_catalog_detail:
