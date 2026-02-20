@@ -280,9 +280,11 @@ def create_discoveries_page():
                         'active_contributors': 0,
                     }
 
+            # Capture auth state in UI context before entering thread pool
+            current_user = GlobalAuthState.get_user()
+            is_admin = current_user and current_user.get('role') == 'admin'
+
             def _fetch_feed():
-                current_user = GlobalAuthState.get_user()
-                is_admin = current_user and current_user.get('role') == 'admin'
                 return get_feed_items(limit=50, offset=0, include_hidden=is_admin)
 
             # Run stats and feed fetches in parallel off the UI thread

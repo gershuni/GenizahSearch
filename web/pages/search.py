@@ -2115,7 +2115,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.catalog_source_counts = catalog_counts
 
         # Slice result_domains from all_result_domains for badge rendering
-        search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
+        search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(all_sys_ids)}
 
         # Show/hide domain filter button and update styling
         domain_filter_btn.set_visibility(search_state.has_domain_data)
