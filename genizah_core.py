@@ -5180,6 +5180,26 @@ class SearchEngine:
         self._browse_map_cache = cleaned_map
         return cleaned_map
 
+    def _get_or_compute_variants(self, terms, mode):
+        """Pre-compute variants at the larger limit for each search term.
+
+        This ensures that when build_tantivy_query requests variants with
+        limit=200 and build_regex_pattern later requests limit=8000 for the
+        same term+mode, the second call is served from the superset cache
+        (via slicing) instead of recomputing from scratch.
+        """
+        if not self.var_mgr or not terms:
+            return
+        max_limit = Config.REGEX_VARIANTS_LIMIT  # 8000
+        regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
+        for term in terms:
+            if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
+                continue
+            # Pre-compute at the larger limit; Tantivy phase will slice from cache
+            self.var_mgr.get_variants(term, mode, limit=max_limit)
+            if regex_mode != mode:
+                self.var_mgr.get_variants(term, regex_mode, limit=max_limit)
+
     def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None):
         # --- Responsa branch ---
         if responsa_components is not None:
@@ -5809,6 +5829,11 @@ class SearchEngine:
             # --- Existing path (unchanged) ---
             if mode == 'Regex': terms = [query_str]
             else: terms = query_str.split()
+
+            # Pre-compute variants at max limit so Tantivy (limit=200) can
+            # slice from cache instead of recomputing when regex (limit=8000) runs
+            if mode != 'Regex':
+                self._get_or_compute_variants(terms, mode)
 
             t_query_str = self.build_tantivy_query(terms, mode)
             regex = self.build_regex_pattern(terms, mode, gap)
@@ -6491,6 +6516,29 @@ class SearchEngine:
         if not fl_digits:
             return None
 
+        # Try O(1) index lookup first
+        if self._fl_id_index is not None:
+            candidates = self._fl_id_index.get(fl_digits, [])
+            # If sys_id is known, filter to that sys_id
+            if sys_id and candidates:
+                candidates = [(sid, idx) for sid, idx in candidates if sid == sys_id]
+            if candidates:
+                sid, idx = candidates[0]
+                if sid in browse_map and idx < len(browse_map[sid]):
+                    page = browse_map[sid][idx]
+                    text = self.get_full_text_by_id(page['uid'])
+                    return {
+                        'uid': page['uid'],
+                        'p_num': page['p_num'],
+                        'full_header': page['full_header'],
+                        'text': text,
+                        'total_pages': len(browse_map[sid]),
+                        'current_idx': idx + 1,
+                        'sys_id': sid,
+                        'fl_id': fl_digits
+                    }
+
+        # Fallback: linear scan (index not yet ready or FL ID not found in index)
         sys_candidates = [sys_id] if sys_id else list(browse_map.keys())
 
         for sid in sys_candidates:
