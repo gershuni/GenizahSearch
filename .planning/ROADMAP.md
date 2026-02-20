@@ -182,7 +182,7 @@ Note: Phase 37 can run in parallel with Phase 36 (independent data source).
 
 **Goal:** Stabilize and polish the app: fix all desktop crashes, add server-side pagination, integrate PostHog analytics, optimize web performance, and add Playwright E2E + performance tests
 **Depends on:** Phase 38
-**Plans:** 6/7 plans executed
+**Plans:** 7/7 plans executed (COMPLETE)
 
 Plans:
 - [x] 39-01-PLAN.md — Fix all desktop crash types (sip.isdeleted guards + rare crash verification) + archive crash log
@@ -190,9 +190,9 @@ Plans:
 - [x] 39-03-PLAN.md — Integrate PostHog analytics alongside Google Analytics (env-var gated)
 - [x] 39-04-PLAN.md — Cache domain hierarchy to eliminate ~5s filter dialog lag
 - [x] 39-05-PLAN.md — Add NiceGUI Screen E2E tests for search/browse + performance tests
-- [ ] 39-06-PLAN.md — Gap closure: fix pagination scroll error, VRD wheel zoom, E2E selenium skip
-- [ ] 39-07-PLAN.md — Gap closure: extract CSS to static file, lazy login dialog for navigation speed
+- [x] 39-06-PLAN.md — Gap closure: fix pagination scroll error, VRD wheel zoom, E2E selenium skip
+- [x] 39-07-PLAN.md — Gap closure: extract CSS to static file, lazy login dialog for navigation speed
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-20 after Phase 39 gap closure planning (2 new plans from UAT)*
+*Last updated: 2026-02-20 after completing Phase 39 (7/7 plans, all gap closures done)*
