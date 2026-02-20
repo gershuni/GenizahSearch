@@ -10,8 +10,9 @@ Features:
 - Metadata header with external links
 """
 
-from nicegui import ui, app
+from nicegui import ui, app, run
 from typing import Optional, List, Dict, Any
+import asyncio
 import re
 import html as html_module
 from urllib.parse import quote
@@ -710,6 +711,9 @@ class BrowseState:
         self.active_source: str = 'nli'
         # Pre-fetched FJMS metadata (populated in load_page, consumed in update_content)
         self.fjms_data: Optional[Dict[str, Any]] = None
+        # Enrichment loading state (two-phase async loading)
+        self.enrichment_loaded: bool = False
+        self.enrichment_loading: bool = False
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -727,6 +731,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     viewer_container = None
     initial_fl_id_value = initial_fl_id
     slider_refs = {}  # References for UI controls to allow updates from code
+    enrichment_refs = {}  # Containers for PGP link, version selector, joins button
+    _load_generation = {'value': 0}  # Guard against stale enrichment updates
 
     if initial_sys_id:
         state.sys_id = initial_sys_id
@@ -746,7 +752,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.icon('error_outline', size='sm').classes('text-red-500')
                     ui.label(state.search_error).classes('text-red-500 text-sm ml-1')
 
-    def search_shelfmark():
+    async def search_shelfmark():
         """Search for manuscripts by shelfmark."""
         if not state.shelfmark_query.strip():
             return
@@ -758,7 +764,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         update_content()
 
         try:
-            results, exact_match = service.search_by_shelfmark(state.shelfmark_query.strip(), limit=20)
+            _query = state.shelfmark_query.strip()
+            results, exact_match = await run.io_bound(
+                lambda: service.search_by_shelfmark(_query, limit=20)
+            )
 
             if not results:
                 # Show inline error below search bar instead of full-page error
@@ -776,7 +785,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             if exact_match or len(results) == 1:
                 state.sys_id = results[0].sys_id
                 state.current_page = None  # Reset to avoid using old page number
-                load_page(p_num=1)  # Always start at page 1 for new manuscript
+                await load_page(p_num=1)  # Always start at page 1 for new manuscript
             else:
                 # Multiple results - show selection dialog
                 state.is_loading = False
@@ -813,7 +822,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if slider_refs.get('search_input'):
                             slider_refs['search_input'].value = r.shelfmark
                         state.current_page = None
-                        load_page(p_num=1)
+                        asyncio.ensure_future(load_page(p_num=1))
 
                     # Get library display name (short form)
                     library_short = ''
@@ -844,31 +853,60 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         dialog.open()
 
-    def load_page(direction: int = 0, p_num: Optional[int] = None):
-        """Load a page of the manuscript."""
-        if not state.sys_id:
+    async def load_page(direction: int = 0, p_num: Optional[int] = None, fl_id: Optional[str] = None):
+        """Load a page of the manuscript with async two-phase loading.
+
+        Phase A (fast): Fetch page data via run.io_bound → render image + header immediately.
+        Phase B (background): Fetch PGP + FJMS enrichment → update placeholder containers.
+        """
+        if not state.sys_id and not fl_id:
             state.error = tr('No manuscript found')
             update_content()
             return
 
+        # Generation guard: prevent stale updates from superseded loads
+        _load_generation['value'] += 1
+        my_gen = _load_generation['value']
+
+        # Reset enrichment state
+        state.enrichment_loaded = False
+        state.enrichment_loading = False
+        state.pgp_transcription = None
+        state.pgp_metadata = None
+        state.all_sources = None
+        state.fjms_data = None
+
         state.is_loading = True
         state.error = None
         state.zoom_level = 1.0  # Reset zoom on page change
-        update_content()  # Show loading state
+        update_content()  # Show loading spinner
 
+        # === Phase A: Fast page fetch ===
         try:
-            if p_num is not None:
-                page = service.get_browse_page(state.sys_id, p_num=p_num)
-            elif state.current_page:
-                page = service.get_browse_page(
-                    state.sys_id,
-                    p_num=state.current_page.p_num,
-                    direction=direction
-                )
-            else:
-                page = service.get_browse_page(state.sys_id, p_num=1)
+            _sys_id = state.sys_id
+            _current_p_num = state.current_page.p_num if state.current_page else None
+
+            def _fetch_page():
+                if fl_id:
+                    return service.get_browse_page_by_fl(fl_id, sys_id=_sys_id)
+                elif p_num is not None:
+                    return service.get_browse_page(_sys_id, p_num=p_num)
+                elif _current_p_num is not None:
+                    return service.get_browse_page(
+                        _sys_id,
+                        p_num=_current_p_num,
+                        direction=direction
+                    )
+                else:
+                    return service.get_browse_page(_sys_id, p_num=1)
+
+            page = await run.io_bound(_fetch_page)
+
+            if my_gen != _load_generation['value']:
+                return  # Superseded by newer load
 
             if page:
+                state.sys_id = page.sys_id  # Update in case fl_id resolved differently
                 state.current_page = page
                 state.page_input_value = page.p_num
                 state.error = None
@@ -888,114 +926,202 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     try:
                         from web.state import state as app_state
                         if app_state.lists_mgr:
-                            # Use sync version to avoid async/await issues
                             app_state.lists_mgr.add_to_recent_sync(state.sys_id, fl_id=page.fl_id)
                     except Exception as track_err:
                         print(f"Failed to track recent item: {track_err}")
-
-                # Check for PGP transcription
-                if page.sys_id:
-                    try:
-                        # Get all sources from ALL linked documents (recto and verso)
-                        all_sources = get_all_sources_for_fragment(page.sys_id)
-
-                        # Filter sources by current page
-                        # Each source has page_info ('recto' or 'verso') from fragment link
-                        current_page_info = 'recto' if page.p_num == 1 else 'verso'
-                        page_sources = []
-                        for source in all_sources:
-                            source_page = source.get('page_info')
-                            # Include if: matches current page, or no page_info (single-page doc)
-                            if source_page == current_page_info or not source_page:
-                                is_translation = 'Translation' in (source.get('doc_relation') or '')
-                                if source.get('content'):
-                                    # Only filter by recto/verso markers if source doesn't have page_info
-                                    # (meaning it might contain both recto and verso in one document)
-                                    # If source has page_info, the content is already page-specific
-                                    if not is_translation and not source_page:
-                                        source['content'] = get_section_for_page(source['content'], page.p_num, source.get('sections'))
-                                    # Sources with page_info or translations keep full content
-                                page_sources.append(source)
-
-                        state.all_sources = page_sources if page_sources else None
-
-                        # Set pgp_transcription from first edition source for this page
-                        pgp_doc = get_document_for_fragment(page.sys_id, page.p_num)
-                        if pgp_doc:
-                            # Populate PGP metadata for display in metadata panel
-                            state.pgp_metadata = {
-                                'document_type': pgp_doc.get('document_type'),
-                                'tags': pgp_doc.get('tags', []),
-                                'description': pgp_doc.get('description'),
-                                'languages_primary': pgp_doc.get('languages_primary'),
-                                'languages_secondary': pgp_doc.get('languages_secondary'),
-                                'doc_date_original': pgp_doc.get('doc_date_original'),
-                                'doc_date_standard': pgp_doc.get('doc_date_standard'),
-                                'inferred_date_display': pgp_doc.get('inferred_date_display'),
-                                'inferred_date_standard': pgp_doc.get('inferred_date_standard'),
-                                'inferred_date_rationale': pgp_doc.get('inferred_date_rationale'),
-                                'pgp_url': pgp_doc.get('pgp_url'),
-                                'pgpid': pgp_doc.get('pgpid'),
-                            }
-
-                            pgpid = pgp_doc.get('pgpid')
-                            doc_relation = pgp_doc.get('doc_relation', '')
-                            is_edition = 'Edition' in doc_relation or not doc_relation
-                            page_content = get_section_for_page(pgp_doc['transcription'], page.p_num) if pgp_doc.get('transcription') else None
-
-                            if is_edition and page_content:
-                                state.pgp_transcription = {
-                                    'full_content': pgp_doc['transcription'],
-                                    'content': page_content,
-                                    'attribution': pgp_doc.get('transcription_source', 'PGP'),
-                                    'pgp_url': pgp_doc.get('pgp_url'),
-                                    'pgpid': pgpid
-                                }
-                            else:
-                                state.pgp_transcription = None
-                        else:
-                            state.pgp_transcription = None
-                            state.pgp_metadata = None
-                    except Exception as pgp_err:
-                        print(f"Failed to fetch PGP transcription: {pgp_err}")
-                        state.pgp_transcription = None
-                        state.pgp_metadata = None
-                        state.all_sources = None
-
-                # Pre-fetch all FJMS metadata for this sys_id (avoids serial calls in update_content)
-                state.fjms_data = None
-                try:
-                    from shared.fjms_service import get_fjms_service
-                    fjms = get_fjms_service(thread_safe=True)
-                    if fjms.is_available():
-                        state.fjms_data = {
-                            'catalog_records': fjms.get_catalog_records(page.sys_id),
-                            'domains': fjms.get_domains(page.sys_id),
-                            'bibliography': fjms.get_bibliography(page.sys_id),
-                            'source_names': fjms.get_source_names(page.sys_id),
-                            'catalog_refs': fjms.get_catalog_refs(page.sys_id),
-                        }
-                except Exception as fjms_err:
-                    print(f"Failed to pre-fetch FJMS data: {fjms_err}")
             else:
-                state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
+                if fl_id:
+                    state.error = tr('No text available') + f" (fl_id: {fl_id})"
+                else:
+                    state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 
         except Exception as e:
+            if my_gen != _load_generation['value']:
+                return
             state.error = f"{tr('Error')}: {str(e)}"
 
-        finally:
-            state.is_loading = False
-            update_content()
+        state.is_loading = False
+        update_content()  # Phase A complete: show image + header immediately
 
-    def go_to_page(new_page: int):
+        # === Phase B: Background enrichment ===
+        if state.current_page and state.current_page.sys_id and not state.error:
+            await _load_enrichment(state.current_page, my_gen)
+
+    async def _load_enrichment(page, generation):
+        """Phase B: Load PGP + FJMS enrichment data in background."""
+        state.enrichment_loading = True
+
+        async def fetch_pgp():
+            _page_sys_id = page.sys_id
+            _page_p_num = page.p_num
+
+            def _pgp_sync():
+                all_sources = get_all_sources_for_fragment(_page_sys_id)
+                pgp_doc = get_document_for_fragment(_page_sys_id, _page_p_num)
+                return all_sources, pgp_doc
+
+            try:
+                return await run.io_bound(_pgp_sync)
+            except Exception as e:
+                print(f"Failed to fetch PGP data: {e}")
+                return None, None
+
+        async def fetch_fjms():
+            _page_sys_id = page.sys_id
+
+            def _fjms_sync():
+                from shared.fjms_service import get_fjms_service
+                fjms = get_fjms_service(thread_safe=True)
+                if fjms.is_available():
+                    return {
+                        'catalog_records': fjms.get_catalog_records(_page_sys_id),
+                        'domains': fjms.get_domains(_page_sys_id),
+                        'bibliography': fjms.get_bibliography(_page_sys_id),
+                        'source_names': fjms.get_source_names(_page_sys_id),
+                        'catalog_refs': fjms.get_catalog_refs(_page_sys_id),
+                    }
+                return None
+
+            try:
+                return await run.io_bound(_fjms_sync)
+            except Exception as e:
+                print(f"Failed to fetch FJMS data: {e}")
+                return None
+
+        try:
+            (all_sources, pgp_doc), fjms_data = await asyncio.gather(fetch_pgp(), fetch_fjms())
+        except Exception as e:
+            print(f"Enrichment fetch failed: {e}")
+            state.enrichment_loaded = True
+            state.enrichment_loading = False
+            return
+
+        # Stale check
+        if generation != _load_generation['value']:
+            return
+
+        # Process PGP sources
+        if all_sources:
+            current_page_info = 'recto' if page.p_num == 1 else 'verso'
+            page_sources = []
+            for source in all_sources:
+                source_page = source.get('page_info')
+                if source_page == current_page_info or not source_page:
+                    is_translation = 'Translation' in (source.get('doc_relation') or '')
+                    if source.get('content'):
+                        if not is_translation and not source_page:
+                            source['content'] = get_section_for_page(source['content'], page.p_num, source.get('sections'))
+                    page_sources.append(source)
+            state.all_sources = page_sources if page_sources else None
+        else:
+            state.all_sources = None
+
+        # Process PGP document metadata
+        if pgp_doc:
+            state.pgp_metadata = {
+                'document_type': pgp_doc.get('document_type'),
+                'tags': pgp_doc.get('tags', []),
+                'description': pgp_doc.get('description'),
+                'languages_primary': pgp_doc.get('languages_primary'),
+                'languages_secondary': pgp_doc.get('languages_secondary'),
+                'doc_date_original': pgp_doc.get('doc_date_original'),
+                'doc_date_standard': pgp_doc.get('doc_date_standard'),
+                'inferred_date_display': pgp_doc.get('inferred_date_display'),
+                'inferred_date_standard': pgp_doc.get('inferred_date_standard'),
+                'inferred_date_rationale': pgp_doc.get('inferred_date_rationale'),
+                'pgp_url': pgp_doc.get('pgp_url'),
+                'pgpid': pgp_doc.get('pgpid'),
+            }
+
+            pgpid = pgp_doc.get('pgpid')
+            doc_relation = pgp_doc.get('doc_relation', '')
+            is_edition = 'Edition' in doc_relation or not doc_relation
+            page_content = get_section_for_page(pgp_doc['transcription'], page.p_num) if pgp_doc.get('transcription') else None
+
+            if is_edition and page_content:
+                state.pgp_transcription = {
+                    'full_content': pgp_doc['transcription'],
+                    'content': page_content,
+                    'attribution': pgp_doc.get('transcription_source', 'PGP'),
+                    'pgp_url': pgp_doc.get('pgp_url'),
+                    'pgpid': pgpid
+                }
+            else:
+                state.pgp_transcription = None
+        else:
+            state.pgp_transcription = None
+            state.pgp_metadata = None
+
+        state.fjms_data = fjms_data
+        state.enrichment_loaded = True
+        state.enrichment_loading = False
+
+        # Update enrichment placeholders without full re-render
+        _update_enrichment_sections()
+
+    def _update_enrichment_sections():
+        """Update enrichment placeholder containers after Phase B completes."""
+        # PGP link button in header
+        pgp_container = enrichment_refs.get('pgp_link_container')
+        if pgp_container:
+            pgp_container.clear()
+            if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
+                with pgp_container:
+                    with ui.link(target=state.pgp_metadata['pgp_url'], new_tab=True).classes(
+                        'flex items-center gap-1 px-2 py-1 rounded'
+                    ).style(
+                        'text-decoration: none; '
+                        'color: #ffffff !important; '
+                        'background: rgba(255, 255, 255, 0.2);'
+                    ):
+                        ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                        ui.label('PGP').classes('text-sm font-semibold').style('color: #ffffff !important;')
+
+        # Version selector
+        version_container = enrichment_refs.get('version_container')
+        if version_container and (state.pgp_transcription or state.all_sources):
+            version_container.clear()
+            handler = enrichment_refs.get('version_change_handler')
+            page = state.current_page
+            if handler and page and page.text:
+                with version_container:
+                    from web.components import create_version_selector
+                    create_version_selector(
+                        document_id=page.sys_id,
+                        page_number=page.p_num,
+                        original_text=page.text,
+                        on_version_change=handler,
+                        pgp_transcription=state.pgp_transcription,
+                        all_sources=state.all_sources
+                    )
+
+        # Joins button
+        joins_container = enrichment_refs.get('joins_container')
+        if joins_container:
+            joins_container.clear()
+            page = state.current_page
+            if page and page.shelfmark:
+                pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
+                navigate_fn = enrichment_refs.get('navigate_to_shelfmark')
+                with joins_container:
+                    from web.components import create_joins_button
+                    create_joins_button(
+                        shelfmark=page.shelfmark,
+                        document_id=page.sys_id,
+                        pgpid=pgpid_for_joins,
+                        on_navigate=navigate_fn,
+                        on_view_all=enter_joined_view
+                    )
+
+    async def go_to_page(new_page: int):
         """Navigate to a specific page number."""
         if new_page < 1:
             new_page = 1
         if state.current_page and new_page > state.current_page.total_pages:
             new_page = state.current_page.total_pages
-        load_page(p_num=new_page)
+        await load_page(p_num=new_page)
 
-    def navigate_shelfmark(direction: int):
+    async def navigate_shelfmark(direction: int):
         """Navigate to next/prev shelfmark based on file order."""
         if not state.sys_id:
             return
@@ -1004,12 +1130,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         update_content()
 
         try:
-            adjacent_sys_id = service.get_adjacent_shelfmark(state.sys_id, direction)
+            _sys_id = state.sys_id
+            adjacent_sys_id = await run.io_bound(
+                lambda: service.get_adjacent_shelfmark(_sys_id, direction)
+            )
             if adjacent_sys_id:
                 state.sys_id = adjacent_sys_id
                 state.view_all = False  # Reset to single page view
                 state.full_manuscript = []
-                load_page(p_num=1)  # Load first page of new manuscript
+                await load_page(p_num=1)  # Load first page of new manuscript
             else:
                 state.is_loading = False
                 # Show message: at first/last manuscript
@@ -1020,7 +1149,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             state.is_loading = False
             update_content()
 
-    def toggle_view_all():
+    async def toggle_view_all():
         """Toggle between single page and full manuscript view."""
         if state.view_all:
             # Switch back to single page
@@ -1033,7 +1162,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             update_content()
 
             try:
-                pages = service.get_full_manuscript(state.sys_id)
+                _sys_id = state.sys_id
+                pages = await run.io_bound(lambda: service.get_full_manuscript(_sys_id))
                 if pages:
                     state.full_manuscript = pages
                     state.view_all = True
@@ -1498,7 +1628,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.draft_saved = False
         state.draft_id = None
         ui.notify(tr('Correction submitted successfully'), type='positive')
-        load_page(direction=0)
+        asyncio.ensure_future(load_page(direction=0))
 
     def handle_save_draft():
         """Save draft locally (simulated for now, or use backend draft)."""
@@ -1685,7 +1815,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
                     ui.label(state.error).classes('text-red-600 mt-4 text-lg')
-                    ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=lambda: load_page()).classes('mt-4')
+                    ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=lambda: asyncio.ensure_future(load_page())).classes('mt-4')
                 return
 
             if not state.current_page and not state.view_joined:
@@ -1725,7 +1855,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Prev Shelfmark Button
                     ui.button(
                         icon='skip_next' if is_rtl() else 'skip_previous',
-                        on_click=lambda: navigate_shelfmark(-1)
+                        on_click=lambda: asyncio.ensure_future(navigate_shelfmark(-1))
                     ).props('flat round').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
                     # Shelfmark and Title
@@ -1788,17 +1918,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
                             ui.label(tr('Ktiv')).classes('text-sm font-semibold').style('color: #ffffff !important;')
 
-                        # PGP link button (next to Ktiv, only when PGP data exists)
-                        if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
-                            with ui.link(target=state.pgp_metadata['pgp_url'], new_tab=True).classes(
-                                'flex items-center gap-1 px-2 py-1 rounded'
-                            ).style(
-                                'text-decoration: none; '
-                                'color: #ffffff !important; '
-                                'background: rgba(255, 255, 255, 0.2);'
-                            ):
-                                ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
-                                ui.label('PGP').classes('text-sm font-semibold').style('color: #ffffff !important;')
+                        # PGP link button placeholder (populated by enrichment Phase B)
+                        pgp_link_el = ui.element('span')
+                        enrichment_refs['pgp_link_container'] = pgp_link_el
+                        if state.enrichment_loaded and state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
+                            with pgp_link_el:
+                                with ui.link(target=state.pgp_metadata['pgp_url'], new_tab=True).classes(
+                                    'flex items-center gap-1 px-2 py-1 rounded'
+                                ).style(
+                                    'text-decoration: none; '
+                                    'color: #ffffff !important; '
+                                    'background: rgba(255, 255, 255, 0.2);'
+                                ):
+                                    ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                                    ui.label('PGP').classes('text-sm font-semibold').style('color: #ffffff !important;')
 
                         # Library digital collection link (header)
                         if page.library_viewer_url and page.library_viewer_url.get('url'):
@@ -1846,7 +1979,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Next Shelfmark Button
                     ui.button(
                         icon='skip_previous' if is_rtl() else 'skip_next',
-                        on_click=lambda: navigate_shelfmark(1)
+                        on_click=lambda: asyncio.ensure_future(navigate_shelfmark(1))
                     ).props('flat round').style('color: white !important;').tooltip(tr('Next manuscript'))
 
             # === Action Buttons Row ===
@@ -2317,7 +2450,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             def make_nav_to(target=frag_shelfmark):
                                 def nav():
                                     state.shelfmark_query = target
-                                    search_shelfmark()
+                                    asyncio.ensure_future(search_shelfmark())
                                 return nav
 
                             with ui.row().classes(
@@ -2516,7 +2649,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     """Exit reading desk and navigate to a specific fragment."""
                     exit_joined_view()
                     state.shelfmark_query = target_sm
-                    search_shelfmark()
+                    asyncio.ensure_future(search_shelfmark())
 
                 def remove_from_desk(sys_id_to_remove):
                     """Remove a fragment from the reading desk by sys_id."""
@@ -3348,21 +3481,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _is_manchester_active = state.active_source == 'manchester' and _has_manchester_images
                 _is_jts_active = state.active_source == 'jts' and _has_jts_images
 
-                def switch_to_nli():
+                async def switch_to_nli():
                     state.active_source = 'nli'
-                    load_page(direction=0)
+                    await load_page(direction=0)
 
-                def switch_to_cambridge():
+                async def switch_to_cambridge():
                     state.active_source = 'cambridge'
-                    load_page(direction=0)
+                    await load_page(direction=0)
 
-                def switch_to_manchester():
+                async def switch_to_manchester():
                     state.active_source = 'manchester'
-                    load_page(direction=0)
+                    await load_page(direction=0)
 
-                def switch_to_jts():
+                async def switch_to_jts():
                     state.active_source = 'jts'
-                    load_page(direction=0)
+                    await load_page(direction=0)
 
                 # NLI viewer deep link handler
                 if _has_nli:
@@ -3514,7 +3647,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             prev_disabled = _is_single_page or page.current_idx <= 1
                             ui.button(
                                 icon='chevron_right' if is_rtl() else 'chevron_left',
-                                on_click=lambda: load_page(direction=-1)
+                                on_click=lambda: asyncio.ensure_future(load_page(direction=-1))
                             ).props(f'flat round dense size=sm {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
@@ -3527,9 +3660,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 def handle_folio_select(e):
                                     try:
-                                        go_to_page(int(e.value) if e.value is not None else 1)
+                                        val = int(e.value) if e.value is not None else 1
                                     except (ValueError, TypeError):
-                                        pass
+                                        return
+                                    asyncio.ensure_future(go_to_page(val))
 
                                 ui.select(
                                     options=folio_options,
@@ -3543,9 +3677,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 def handle_go_click():
                                     try:
-                                        go_to_page(int(page_input.value) if page_input.value is not None else 1)
+                                        val = int(page_input.value) if page_input.value is not None else 1
                                     except (ValueError, TypeError):
-                                        go_to_page(1)
+                                        val = 1
+                                    asyncio.ensure_future(go_to_page(val))
 
                                 ui.button(tr('Go'), on_click=handle_go_click).props('flat dense color=green size=sm')
 
@@ -3554,7 +3689,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             next_disabled = _is_single_page or page.current_idx >= page.total_pages
                             ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
-                                on_click=lambda: load_page(direction=1)
+                                on_click=lambda: asyncio.ensure_future(load_page(direction=1))
                             ).props(f'flat round dense size=sm {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
                             )
@@ -3587,12 +3722,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 # Refresh callback to reload page after edits/comments
                                 def refresh_page():
-                                    load_page(direction=0)
+                                    asyncio.ensure_future(load_page(direction=0))
 
                                 # Navigation callback for joins
                                 def navigate_to_shelfmark(target_shelfmark: str):
                                     state.shelfmark_query = target_shelfmark
-                                    search_shelfmark()
+                                    asyncio.ensure_future(search_shelfmark())
 
                                 # Custom Edit Button
                                 ui.button(
@@ -3612,16 +3747,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     shelfmark=page.shelfmark or page.sys_id
                                 )
 
-                                # Joins button - show connected fragments
+                                # Joins button placeholder (populated by enrichment Phase B)
                                 if page.shelfmark:
-                                    pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
-                                    create_joins_button(
-                                        shelfmark=page.shelfmark,
-                                        document_id=page.sys_id,
-                                        pgpid=pgpid_for_joins,
-                                        on_navigate=navigate_to_shelfmark,
-                                        on_view_all=enter_joined_view
-                                    )
+                                    joins_el = ui.element('span')
+                                    enrichment_refs['joins_container'] = joins_el
+                                    enrichment_refs['navigate_to_shelfmark'] = navigate_to_shelfmark
+                                    if state.enrichment_loaded:
+                                        pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
+                                        with joins_el:
+                                            create_joins_button(
+                                                shelfmark=page.shelfmark,
+                                                document_id=page.sys_id,
+                                                pgpid=pgpid_for_joins,
+                                                on_navigate=navigate_to_shelfmark,
+                                                on_view_all=enter_joined_view
+                                            )
 
                             # "Add to View" button -- start or extend reading desk with current manuscript
                             ui.button(
@@ -3844,17 +3984,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 elif source in ('V0.7', 'V0.8'):
                                     ui.notify(f"{tr('Showing')} {source}", type='info')
 
-                            # Version selector
+                            # Version selector placeholder (populated by enrichment Phase B)
                             if page.text:
-                                with ui.row().classes('items-center p-2 border-b'):
-                                    create_version_selector(
-                                        document_id=page.sys_id,
-                                        page_number=page.p_num,
-                                        original_text=page.text,
-                                        on_version_change=handle_version_change,
-                                        pgp_transcription=state.pgp_transcription,
-                                        all_sources=state.all_sources
-                                    )
+                                version_row = ui.row().classes('items-center p-2 border-b')
+                                enrichment_refs['version_container'] = version_row
+                                enrichment_refs['version_change_handler'] = handle_version_change
+                                if state.enrichment_loaded:
+                                    with version_row:
+                                        create_version_selector(
+                                            document_id=page.sys_id,
+                                            page_number=page.p_num,
+                                            original_text=page.text,
+                                            on_version_change=handle_version_change,
+                                            pgp_transcription=state.pgp_transcription,
+                                            all_sources=state.all_sources
+                                        )
 
                             # Initial render
                             render_text_content(page.text if page.text else None)
@@ -4080,7 +4224,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     def set_shelfmark_and_search(shelfmark: str):
         """Set shelfmark and trigger search."""
         state.shelfmark_query = shelfmark
-        search_shelfmark()
+        asyncio.ensure_future(search_shelfmark())
 
     # === Main Layout ===
     with ui.column().classes('w-full max-w-7xl mx-auto p-4'):
@@ -4111,7 +4255,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.shelfmark_query = search_input.value or ''
                     state.search_error = None  # Clear previous error
                     if state.shelfmark_query.strip():
-                        search_shelfmark()
+                        asyncio.ensure_future(search_shelfmark())
 
                 search_input.on('keydown.enter', do_search)
 
@@ -4135,82 +4279,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Main content container
         content_container = ui.column().classes('w-full')
 
-        # Load initial page if sys_id or fl_id provided
+        # Load initial page if sys_id or fl_id provided (async via ensure_future)
         if initial_fl_id_value:
-            # Load by FL ID
+            # Load by FL ID — delegate to async load_page with fl_id parameter
             state.is_loading = True
-            update_content()
-            try:
-                page = service.get_browse_page_by_fl(initial_fl_id_value, sys_id=initial_sys_id)
-                if page:
-                    state.sys_id = page.sys_id
-                    state.current_page = page
-                    state.page_input_value = page.p_num
-                    state.error = None
-
-                    # Fetch PGP transcription data (same logic as load_page)
-                    if page.sys_id:
-                        try:
-                            all_sources = get_all_sources_for_fragment(page.sys_id)
-                            current_page_info = 'recto' if page.p_num == 1 else 'verso'
-                            page_sources = []
-                            for source in all_sources:
-                                source_page = source.get('page_info')
-                                if source_page == current_page_info or not source_page:
-                                    is_translation = 'Translation' in (source.get('doc_relation') or '')
-                                    if source.get('content'):
-                                        if not is_translation and not source_page:
-                                            source['content'] = get_section_for_page(source['content'], page.p_num, source.get('sections'))
-                                    page_sources.append(source)
-                            state.all_sources = page_sources if page_sources else None
-
-                            pgp_doc = get_document_for_fragment(page.sys_id, page.p_num)
-                            if pgp_doc:
-                                # Populate PGP metadata for display in metadata panel
-                                state.pgp_metadata = {
-                                    'document_type': pgp_doc.get('document_type'),
-                                    'tags': pgp_doc.get('tags', []),
-                                    'description': pgp_doc.get('description'),
-                                    'languages_primary': pgp_doc.get('languages_primary'),
-                                    'languages_secondary': pgp_doc.get('languages_secondary'),
-                                    'doc_date_original': pgp_doc.get('doc_date_original'),
-                                    'doc_date_standard': pgp_doc.get('doc_date_standard'),
-                                    'inferred_date_display': pgp_doc.get('inferred_date_display'),
-                                    'inferred_date_standard': pgp_doc.get('inferred_date_standard'),
-                                    'inferred_date_rationale': pgp_doc.get('inferred_date_rationale'),
-                                    'pgp_url': pgp_doc.get('pgp_url'),
-                                    'pgpid': pgp_doc.get('pgpid'),
-                                }
-
-                                pgpid = pgp_doc.get('pgpid')
-                                doc_relation = pgp_doc.get('doc_relation', '')
-                                is_edition = 'Edition' in doc_relation or not doc_relation
-                                page_content = get_section_for_page(pgp_doc['transcription'], page.p_num) if pgp_doc.get('transcription') else None
-                                if is_edition and page_content:
-                                    state.pgp_transcription = {
-                                        'full_content': pgp_doc['transcription'],
-                                        'content': page_content,
-                                        'attribution': pgp_doc.get('transcription_source', 'PGP'),
-                                        'pgp_url': pgp_doc.get('pgp_url'),
-                                        'pgpid': pgpid
-                                    }
-                                else:
-                                    state.pgp_transcription = None
-                            else:
-                                state.pgp_transcription = None
-                                state.pgp_metadata = None
-                        except Exception as pgp_err:
-                            print(f"Failed to fetch PGP transcription: {pgp_err}")
-                            state.pgp_transcription = None
-                            state.pgp_metadata = None
-                            state.all_sources = None
-                else:
-                    state.error = tr('No text available') + f" (fl_id: {initial_fl_id_value})"
-            except Exception as e:
-                state.error = f"{tr('Error')}: {str(e)}"
-            finally:
-                state.is_loading = False
-                update_content()
+            update_content()  # Show spinner synchronously before async kicks in
+            asyncio.ensure_future(load_page(fl_id=initial_fl_id_value))
         elif initial_sys_id:
             # Determine if this is a language-switch reload (same manuscripts)
             # or cross-page navigation (different manuscript requested)
@@ -4227,7 +4301,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Language-switch case: sys_id is one of the desk's manuscripts
                     # Restore the full reading desk
                     if not _restore_reading_desk_state():
-                        load_page(p_num=initial_page)
+                        state.is_loading = True
+                        update_content()
+                        asyncio.ensure_future(load_page(p_num=initial_page))
                 else:
                     # Cross-page navigation: user wants a DIFFERENT manuscript
                     # Clear stale reading desk state and load the requested manuscript
@@ -4235,10 +4311,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         app.storage.user.pop('reading_desk_state', None)
                     except Exception:
                         pass
-                    load_page(p_num=initial_page)
+                    state.is_loading = True
+                    update_content()
+                    asyncio.ensure_future(load_page(p_num=initial_page))
             else:
                 # No saved reading desk state, normal page load
-                load_page(p_num=initial_page)
+                state.is_loading = True
+                update_content()
+                asyncio.ensure_future(load_page(p_num=initial_page))
         else:
             # No sys_id in URL -- try to restore reading desk (language-switch case)
             if _restore_reading_desk_state():
@@ -4249,7 +4329,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if saved_position and saved_position.get('sys_id'):
                     state.sys_id = saved_position['sys_id']
                     state.shelfmark_query = saved_position.get('shelfmark', '')
-                    load_page(p_num=saved_position.get('p_num', 1))
+                    state.is_loading = True
+                    update_content()
+                    asyncio.ensure_future(load_page(p_num=saved_position.get('p_num', 1)))
                 else:
                     update_content()
 

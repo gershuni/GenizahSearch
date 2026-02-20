@@ -3833,6 +3833,27 @@ class MetadataManager:
                 if candidate:
                     yield sys_id, candidate, title
 
+    def _get_shelfmark_index(self):
+        """Build or return cached pre-normalized shelfmark index.
+
+        Returns list of (sys_id, shelfmark, title, norm_shelf, norm_shelf_no_dots) tuples,
+        already deduplicated by (sys_id, norm_shelf).
+        """
+        if hasattr(self, '_shelfmark_index') and self._shelfmark_index is not None:
+            return self._shelfmark_index
+
+        index = []
+        seen = set()
+        for sys_id, shelf, title in self._iter_shelfmark_sources():
+            norm_shelf = normalize_shelfmark(shelf)
+            if not norm_shelf or (sys_id, norm_shelf) in seen:
+                continue
+            seen.add((sys_id, norm_shelf))
+            index.append((sys_id, shelf, title, norm_shelf, norm_shelf.replace('.', '')))
+
+        self._shelfmark_index = index
+        return index
+
     def resolve_system_by_shelfmark(self, query, limit=100):
         """
         Resolve a system ID by shelfmark, ignoring dots/slashes/spaces.
@@ -3855,8 +3876,6 @@ class MetadataManager:
 
         exact_matches = []
         partial_matches = []
-        fuzzy_matches = []  # For digit-only queries that might match with dots
-        seen = set()
 
         def shelf_sort_key(entry):
             shelf = entry.get('shelfmark', '')
@@ -3864,46 +3883,46 @@ class MetadataManager:
             sid_val = entry.get('sys_id', '')
             return (natural_sort_key(shelf), natural_sort_key(title), natural_sort_key(sid_val))
 
-        # For pure digit queries without dots (e.g., "19234"), also match with various dot positions
-        # This allows "19234" to match "19.234", "192.34", "1923.4"
-        norm_query_no_dots = norm_query.replace('.', '')
-        query_is_pure_digits = norm_query_no_dots.isdigit() and '.' not in norm_query
+        # Dot-agnostic matching only when query has NO dots (e.g. "19234" → "19.234").
+        # When query has dots (e.g. "31.1"), dots are semantically significant — don't strip.
+        query_has_dots = '.' in norm_query
+        norm_query_no_dots = norm_query.replace('.', '') if not query_has_dots else None
 
-        for sys_id, shelf, title in self._iter_shelfmark_sources():
-            norm_shelf = self._normalize_shelfmark(shelf)
-            if not norm_shelf or (sys_id, norm_shelf) in seen:
-                continue
-            seen.add((sys_id, norm_shelf))
-
+        for sys_id, shelf, title, norm_shelf, norm_shelf_no_dots in self._get_shelfmark_index():
             entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
 
-            # Standard matching
+            # Standard matching (preserves dots — "tsas31.1" != "tsas3.11")
             if norm_shelf == norm_query:
                 exact_matches.append(entry)
             elif norm_query in norm_shelf:
                 partial_matches.append(entry)
-            else:
-                # Dot-agnostic matching - allows "ts12123" to match "ts12.123"
-                norm_shelf_no_dots = norm_shelf.replace('.', '')
-                if norm_shelf_no_dots == norm_query_no_dots:
-                    # Exact match ignoring dots
-                    exact_matches.append(entry)
-                elif norm_query_no_dots in norm_shelf_no_dots:
-                    # Partial match ignoring dots
-                    fuzzy_matches.append(entry)
+            elif norm_query_no_dots and norm_shelf_no_dots == norm_query_no_dots:
+                # Dot-agnostic match only for dotless queries (e.g. "19234" == "19.234")
+                exact_matches.append(entry)
+
+        # Deduplicate exact matches by sys_id (e.g. "T-S AS 31.1" and "Ms. T-S AS 31.1"
+        # are the same manuscript). Keep the shortest shelfmark as most user-friendly.
+        if exact_matches:
+            by_sid = {}
+            for e in exact_matches:
+                sid = e['sys_id']
+                if sid not in by_sid or len(e['shelfmark']) < len(by_sid[sid]['shelfmark']):
+                    by_sid[sid] = e
+            exact_matches = list(by_sid.values())
 
         if len(exact_matches) == 1:
             result['sys_id'] = exact_matches[0]['sys_id']
             result['selected_shelfmark'] = exact_matches[0]['shelfmark']
             return result
 
-        exact_matches.sort(key=shelf_sort_key)
-        partial_matches.sort(key=shelf_sort_key)
-        fuzzy_matches.sort(key=shelf_sort_key)
+        # If we have exact matches, prefer them over partials
+        if exact_matches:
+            exact_matches.sort(key=shelf_sort_key)
+            result['options'] = exact_matches[:limit]
+            return result
 
-        # Aggregate suggestions (exact first, then partial, then fuzzy), capped at limit
-        suggestions = exact_matches + partial_matches + fuzzy_matches
-        result['options'] = suggestions[:limit]
+        partial_matches.sort(key=shelf_sort_key)
+        result['options'] = partial_matches[:limit]
         return result
 
     def get_display_data(self, full_header, src_label):
@@ -5066,7 +5085,13 @@ class SearchEngine:
         return False
 
     def _load_browse_map(self):
-        """Load the browse map, deduplicate it, and persist corrections if needed."""
+        """Load the browse map, deduplicate it, and persist corrections if needed.
+
+        Caches in memory after first load to avoid re-reading 100MB+ pickle on every call.
+        """
+        if hasattr(self, '_browse_map_cache') and self._browse_map_cache is not None:
+            return self._browse_map_cache
+
         if not os.path.exists(Config.BROWSE_MAP):
             return {}
 
@@ -5081,6 +5106,7 @@ class SearchEngine:
             except Exception as e:
                 LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
 
+        self._browse_map_cache = cleaned_map
         return cleaned_map
 
     def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None):
