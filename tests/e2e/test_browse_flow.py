@@ -11,6 +11,7 @@ These tests require ChromeDriver and skip gracefully when unavailable.
 import os
 import pytest
 
+pytest.importorskip("selenium", reason="selenium not installed -- skipping E2E tests")
 from selenium.webdriver.common.by import By
 
 

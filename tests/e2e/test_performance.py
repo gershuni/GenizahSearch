@@ -12,6 +12,7 @@ import os
 import time
 import pytest
 
+pytest.importorskip("selenium", reason="selenium not installed -- skipping E2E tests")
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
