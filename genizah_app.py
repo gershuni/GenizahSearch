@@ -1475,11 +1475,16 @@ class ZoomableScrollArea(QGraphicsView):
         self._pixmap_item.setRotation(self._rotation)
 
     def wheelEvent(self, event):
-        self._auto_fit_enabled = False
-        delta = event.angleDelta().y()
-        factor = 1.1 if delta > 0 else 0.9
-        self._apply_zoom(factor)
-        event.accept()
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            # Ctrl+wheel: zoom
+            self._auto_fit_enabled = False
+            delta = event.angleDelta().y()
+            factor = 1.1 if delta > 0 else 0.9
+            self._apply_zoom(factor)
+            event.accept()
+        else:
+            # Plain wheel: propagate to parent for normal scrolling
+            event.ignore()
 
     def zoom_in(self):
         self._auto_fit_enabled = False
