@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 40 of 40 (Performance Optimization)
-Plan: 1 of 5 in current phase
+Plan: 3 of 5 in current phase
 Status: Executing Phase 40
-Last activity: 2026-02-20 - Completed 40-01: Parallel NLI metadata fetch (enrich_metadata)
+Last activity: 2026-02-20 - Completed 40-03: Browse crossref parallelization (parallel enrichment + session cache)
 
-Progress: [##--------] 20% (Phase 40: 1/5 plans)
+Progress: [####------] 40% (Phase 40: 2/5 plans)
 
 ## Performance Metrics
 
@@ -92,6 +92,7 @@ Recent decisions affecting current work:
 - Phase 39-08: Pure-UI render helpers (_render_stat_cards, _render_feed_result) for testable data-to-UI separation
 - Phase 40-01: shutdown(wait=False) instead of 'with' context manager for ThreadPoolExecutor -- allows IIIF fetch to overlap with external IIIF processing
 - Phase 40-01: 15-second timeout per future with graceful fallback to empty dict on failure
+- [Phase 40]: Module-level _crossref_cache shared across all users (crossref is read-only public data, safe to share)
 
 ### Blockers/Concerns
 
@@ -122,6 +123,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-20
-Stopped at: Completed 40-01-PLAN.md (Parallel NLI metadata fetch)
-Resume file: .planning/phases/40-performance-optimization/40-01-SUMMARY.md
-Notes: Phase 40 started. Parallelized fetch_marc_data + fetch_iiif_manifest in enrich_metadata via ThreadPoolExecutor.
+Stopped at: Completed 40-03-PLAN.md (Browse crossref parallelization)
+Resume file: .planning/phases/40-performance-optimization/40-03-SUMMARY.md
+Notes: Phase 40 in progress (2/5 plans). Crossref queries moved from render path to parallel enrichment with session cache.
