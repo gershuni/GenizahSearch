@@ -38,6 +38,7 @@ Progress: [########--] 80% (Phase 40: 4/5 plans)
 | Phase 39 P08 | 14min | 2 tasks | 3 files |
 | Phase 40 P01 | 3min | 1 task | 1 file |
 | Phase 40 P04 | 13min | 1 tasks | 1 files |
+| Phase 40 P02 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,9 @@ Recent decisions affecting current work:
 - Phase 40-01: 15-second timeout per future with graceful fallback to empty dict on failure
 - [Phase 40]: Module-level _crossref_cache shared across all users (crossref is read-only public data, safe to share)
 - Phase 40-04: Index-first lookup with linear scan fallback in get_browse_page_by_fl -- correctness during startup window
+- Phase 40-02: DomainEnrichmentWorker follows existing EnrichMetadataThread/PGPBadgeWorker pattern for consistency
+- Phase 40-02: Domain filter button disabled until enrichment completes (~200ms after results display)
+- Phase 40-02: Catalog detail fetched lazily in click handler with statusBar feedback, not during page load
 
 ### Blockers/Concerns
 
@@ -125,6 +129,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-20
-Stopped at: Completed 40-04-PLAN.md (FL ID index lookup)
-Resume file: .planning/phases/40-performance-optimization/40-04-SUMMARY.md
-Notes: Phase 40 in progress (3/5 plans). FL ID navigation now uses O(1) dict lookup with linear scan fallback.
+Stopped at: Completed 40-02-PLAN.md (Desktop domain enrichment & lazy catalog)
+Resume file: .planning/phases/40-performance-optimization/40-02-SUMMARY.md
+Notes: Phase 40 in progress (4/5 plans). Desktop search results display immediately with async domain enrichment; catalog detail fetched lazily on button click.
