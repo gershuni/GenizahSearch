@@ -708,6 +708,8 @@ class BrowseState:
         self.reading_desk_selected_sources: dict = {}  # sys_id -> selected source index
         # Source switching state: 'nli' (default), 'cambridge', 'manchester', or 'jts'
         self.active_source: str = 'nli'
+        # Pre-fetched FJMS metadata (populated in load_page, consumed in update_content)
+        self.fjms_data: Optional[Dict[str, Any]] = None
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
@@ -959,6 +961,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         state.pgp_transcription = None
                         state.pgp_metadata = None
                         state.all_sources = None
+
+                # Pre-fetch all FJMS metadata for this sys_id (avoids serial calls in update_content)
+                state.fjms_data = None
+                try:
+                    from shared.fjms_service import get_fjms_service
+                    fjms = get_fjms_service(thread_safe=True)
+                    if fjms.is_available():
+                        state.fjms_data = {
+                            'catalog_records': fjms.get_catalog_records(page.sys_id),
+                            'domains': fjms.get_domains(page.sys_id),
+                            'bibliography': fjms.get_bibliography(page.sys_id),
+                            'source_names': fjms.get_source_names(page.sys_id),
+                            'catalog_refs': fjms.get_catalog_refs(page.sys_id),
+                        }
+                except Exception as fjms_err:
+                    print(f"Failed to pre-fetch FJMS data: {fjms_err}")
             else:
                 state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 
@@ -2040,12 +2058,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 if date_rationale:
                                     create_translatable_text(date_rationale, container_style='color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
 
-                    # === FJMS Catalog Metadata ===
+                    # === FJMS Catalog Metadata (pre-fetched in load_page) ===
                     from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
+                    fjms_data = state.fjms_data or {}
+                    # Keep fjms reference for on-demand dialog queries (catalog dialog click)
                     fjms = get_fjms_service(thread_safe=True)
-                    if fjms.is_available():
-                        catalog_records = fjms.get_catalog_records(page.sys_id)
-                        if catalog_records:
+                    catalog_records = fjms_data.get('catalog_records')
+                    if catalog_records:
                             ui.separator().classes('my-3')
                             # Section header with purple FJMS badge
                             with ui.row().classes('items-center gap-2 mb-2'):
@@ -2130,30 +2149,29 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                             ui.label(f'({source})').classes('text-xs').style('color: var(--text-tertiary);')
 
                     # === FJMS Domain Classifications ===
-                    if fjms.is_available():
-                        domains = fjms.get_domains(page.sys_id)
-                        if domains:
-                            with ui.column().classes('gap-1 mb-2'):
-                                ui.label(tr('Subject Domains')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                with ui.row().classes('gap-2 flex-wrap'):
-                                    lang = get_language()
-                                    # Deduplicate: skip parent if child already shown
-                                    all_domain_names = {d['domain'] for d in domains}
-                                    for dom in domains:
-                                        parent = dom.get('parent_domain')
-                                        if parent and parent in all_domain_names and parent != dom['domain']:
-                                            continue
-                                        display_name = dom['domain_heb'] if lang == 'he' else dom['domain']
-                                        ui.link(
-                                            display_name,
-                                            f'/search?domain={quote(dom["domain"])}'
-                                        ).classes('text-sm').style('color: var(--primary-600);')
+                    domains = fjms_data.get('domains')
+                    if domains:
+                        with ui.column().classes('gap-1 mb-2'):
+                            ui.label(tr('Subject Domains')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            with ui.row().classes('gap-2 flex-wrap'):
+                                lang = get_language()
+                                # Deduplicate: skip parent if child already shown
+                                all_domain_names = {d['domain'] for d in domains}
+                                for dom in domains:
+                                    parent = dom.get('parent_domain')
+                                    if parent and parent in all_domain_names and parent != dom['domain']:
+                                        continue
+                                    display_name = dom['domain_heb'] if lang == 'he' else dom['domain']
+                                    ui.link(
+                                        display_name,
+                                        f'/search?domain={quote(dom["domain"])}'
+                                    ).classes('text-sm').style('color: var(--primary-600);')
 
                     # === Bibliography References (separate FJMS / NLI dialogs) ===
                     from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
                     from web.components.catalog_dialog import show_catalog_dialog
 
-                    fjms_bib = fjms.get_bibliography(page.sys_id) if fjms.is_available() else []
+                    fjms_bib = fjms_data.get('bibliography', [])
                     marc_bib = []
                     try:
                         from web.state import state as app_state
@@ -2164,7 +2182,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         pass
 
                     # Catalog source count for button label
-                    catalog_source_count = len(fjms.get_source_names(page.sys_id)) if fjms.is_available() else 0
+                    catalog_source_count = len(fjms_data.get('source_names', []))
 
                     if fjms_bib or marc_bib or catalog_source_count > 0:
                         ui.separator().classes('my-3')
@@ -2199,30 +2217,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 catalog_btn.disable()
 
                     # === Phase 33: Catalog Cross-References ===
-                    if fjms.is_available():
-                        cat_refs = fjms.get_catalog_refs(page.sys_id)
-                        if cat_refs:
-                            ui.separator().classes('my-2')
-                            with ui.row().classes('items-center gap-2 mb-2'):
-                                h3(tr('Catalog References'), classes='text-xs font-bold', style='color: var(--text-secondary);')
-                                ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
+                    cat_refs = fjms_data.get('catalog_refs')
+                    if cat_refs:
+                        ui.separator().classes('my-2')
+                        with ui.row().classes('items-center gap-2 mb-2'):
+                            h3(tr('Catalog References'), classes='text-xs font-bold', style='color: var(--text-secondary);')
+                            ui.badge('FJMS', color='purple').props('outline dense').classes('text-xs')
 
-                            with ui.column().classes('gap-1'):
-                                for ref in cat_refs:
-                                    acronym = ref.get('cat_acronym', '')
-                                    cat_entry = ref.get('catalog_entry', '')
-                                    display = f"{acronym} #{cat_entry}" if cat_entry else acronym
-                                    ui.label(display).classes('text-sm').style('color: var(--text-primary);')
+                        with ui.column().classes('gap-1'):
+                            for ref in cat_refs:
+                                acronym = ref.get('cat_acronym', '')
+                                cat_entry = ref.get('catalog_entry', '')
+                                display = f"{acronym} #{cat_entry}" if cat_entry else acronym
+                                ui.label(display).classes('text-sm').style('color: var(--text-primary);')
 
                     # === Phase 33: Scholarly Source Names ===
-                    if fjms.is_available():
-                        source_names = fjms.get_source_names(page.sys_id)
-                        if source_names:
-                            with ui.column().classes('gap-1 mb-2 mt-2'):
-                                ui.label(tr('Scholarly Sources')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                with ui.row().classes('gap-2 flex-wrap'):
-                                    for sn in source_names:
-                                        ui.label(sn).classes('text-sm').style('color: var(--text-primary);')
+                    source_names = fjms_data.get('source_names')
+                    if source_names:
+                        with ui.column().classes('gap-1 mb-2 mt-2'):
+                            ui.label(tr('Scholarly Sources')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            with ui.row().classes('gap-2 flex-wrap'):
+                                for sn in source_names:
+                                    ui.label(sn).classes('text-sm').style('color: var(--text-primary);')
 
                     # === Phase 33: Collection & Storage ===
                     if _collection_storage:

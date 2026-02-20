@@ -9,6 +9,7 @@ Shows:
 - NO leaderboard (researchers prefer anonymity over competition)
 """
 
+import asyncio
 import difflib
 import html
 from nicegui import ui, app, run
@@ -175,13 +176,10 @@ def create_discoveries_page():
 
         # === Statistics Cards ===
         stats_row = ui.row().classes('w-full gap-4')
-        # Show loading spinner first
+        # Show loading spinner (replaced asynchronously below)
         with stats_row:
             with ui.column().classes('w-full items-center py-4'):
                 ui.spinner('dots', size='md', color='primary')
-        # Clear and load actual stats
-        stats_row.clear()
-        load_stats(stats_row)
 
         # === Filter Bar ===
         with ui.row().classes('w-full items-center justify-between p-3 rounded').style('background: var(--surface-secondary);'):
@@ -258,10 +256,95 @@ def create_discoveries_page():
             with ui.column().classes('w-full items-center py-12'):
                 ui.spinner('dots', size='lg', color='primary')
                 ui.label(tr('Loading feed...')).classes('mt-4 text-lg').style('color: var(--text-secondary);')
-        # Then load the actual feed
-        feed_container.clear()
-        with feed_container:
-            load_feed(None, None, on_refresh=refresh_feed)
+
+        # Async initial load: fetch stats and feed off UI thread in parallel
+        async def initial_load():
+            def _fetch_stats():
+                try:
+                    client = get_client()
+                    discoveries = client.table('discoveries').select('id', count='exact').execute()
+                    corrections = client.table('corrections').select('id', count='exact').eq('status', 'approved').execute()
+                    profiles = client.table('profiles').select('id', count='exact').execute()
+                    return {
+                        'words_corrected': 0,
+                        'documents_edited': corrections.count or 0,
+                        'total_discoveries': discoveries.count or 0,
+                        'open_questions': 0,
+                        'active_contributors': profiles.count or 0,
+                    }
+                except Exception as e:
+                    print(f"Error loading stats: {e}")
+                    return {
+                        'words_corrected': 0, 'documents_edited': 0,
+                        'total_discoveries': 0, 'open_questions': 0,
+                        'active_contributors': 0,
+                    }
+
+            def _fetch_feed():
+                current_user = GlobalAuthState.get_user()
+                is_admin = current_user and current_user.get('role') == 'admin'
+                return get_feed_items(limit=50, offset=0, include_hidden=is_admin)
+
+            # Run stats and feed fetches in parallel off the UI thread
+            stats, feed_result = await asyncio.gather(
+                run.io_bound(_fetch_stats),
+                run.io_bound(_fetch_feed),
+            )
+
+            # Render stats
+            stats_row.clear()
+            with stats_row:
+                _render_stat_cards(stats)
+
+            # Render feed
+            feed_container.clear()
+            with feed_container:
+                _render_feed_result(feed_result, on_refresh=refresh_feed)
+
+        ui.timer(0.1, initial_load, once=True)
+
+
+def _render_stat_cards(stats: dict):
+    """Render stat cards from pre-fetched stats dict (pure UI, no I/O)."""
+    stat_cards = [
+        {'icon': 'edit', 'value': stats.get('words_corrected', 0), 'label': tr('Words Corrected'), 'color': 'blue'},
+        {'icon': 'description', 'value': stats.get('documents_edited', 0), 'label': tr('Documents Edited'), 'color': 'green'},
+        {'icon': 'lightbulb', 'value': stats.get('total_discoveries', 0), 'label': tr('Discoveries Shared'), 'color': 'amber'},
+        {'icon': 'help_outline', 'value': stats.get('open_questions', 0), 'label': tr('Open Questions'), 'color': 'purple'},
+        {'icon': 'people', 'value': stats.get('active_contributors', 0), 'label': tr('Active Contributors'), 'color': 'teal'},
+        {'icon': 'link', 'value': stats.get('user_joins', 0), 'label': tr('User Joins'), 'color': 'green'},
+    ]
+    for card in stat_cards:
+        with ui.card().classes('flex-1 p-4 min-w-36'):
+            with ui.column().classes('items-center gap-2'):
+                ui.icon(card['icon']).classes(f'text-3xl text-{card["color"]}-500')
+                h3(str(card['value']), classes='text-2xl font-bold')
+                ui.label(card['label']).classes('text-xs text-center').style('color: var(--text-secondary);')
+
+
+def _render_feed_result(result: dict, on_refresh=None):
+    """Render feed items from pre-fetched result dict (pure UI, no I/O)."""
+    if "error" in result:
+        with ui.column().classes('w-full items-center py-8'):
+            ui.icon('error_outline').classes('text-4xl text-red-400')
+            ui.label(tr('Error loading feed')).style('color: var(--text-secondary);')
+        return
+
+    items = result.get('items', [])
+    total = result.get('total', 0)
+
+    if not items:
+        with ui.column().classes('w-full items-center py-12'):
+            ui.icon('forum').classes('text-6xl').style('color: var(--text-tertiary);')
+            h2(tr('No discoveries yet'), classes='text-xl mt-4', style='color: var(--text-secondary);')
+            ui.label(tr('Be the first to share a discovery or ask a question!')).style('color: var(--text-tertiary);')
+        return
+
+    for item in items:
+        create_feed_item(item, on_refresh=on_refresh)
+
+    if total > len(items):
+        ui.label(f"{tr('Showing')} {len(items)} {tr('of')} {total}").classes('text-sm text-center w-full mt-4').style('color: var(--text-tertiary);')
 
 
 def load_stats(container):
