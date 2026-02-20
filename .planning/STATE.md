@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-16)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 39 (Bug Fixing, Cleanup, Performance Improving)
+**Current focus:** Phase 40 (Performance Optimization)
 
 ## Current Position
 
-Phase: 39 of 39 (Bug Fixing, Cleanup, Performance Improving)
-Plan: 8 of 8 in current phase (COMPLETE)
-Status: Phase 39 Complete
-Last activity: 2026-02-20 - Completed 39-08: Page navigation speed (parallel queries + async loading)
+Phase: 40 of 40 (Performance Optimization)
+Plan: 1 of 5 in current phase
+Status: Executing Phase 40
+Last activity: 2026-02-20 - Completed 40-01: Parallel NLI metadata fetch (enrich_metadata)
 
-Progress: [##########] 100% (Phase 39: 8/8 plans)
+Progress: [##--------] 20% (Phase 40: 1/5 plans)
 
 ## Performance Metrics
 
@@ -36,6 +36,7 @@ Progress: [##########] 100% (Phase 39: 8/8 plans)
 | v5.9.0 | 29-34 | 22 | ~90 min |
 | v6.0.0 | 35-38 | 8 | 68 min |
 | Phase 39 P08 | 14min | 2 tasks | 3 files |
+| Phase 40 P01 | 3min | 1 task | 1 file |
 
 ## Accumulated Context
 
@@ -89,6 +90,8 @@ Recent decisions affecting current work:
 - Phase 39-08: asyncio.gather + run.io_bound for parallel off-thread queries (search enrichment, discoveries initial load)
 - Phase 39-08: Pre-fetch FJMS in load_page, read from state.fjms_data in update_content (separates I/O from rendering)
 - Phase 39-08: Pure-UI render helpers (_render_stat_cards, _render_feed_result) for testable data-to-UI separation
+- Phase 40-01: shutdown(wait=False) instead of 'with' context manager for ThreadPoolExecutor -- allows IIIF fetch to overlap with external IIIF processing
+- Phase 40-01: 15-second timeout per future with graceful fallback to empty dict on failure
 
 ### Blockers/Concerns
 
@@ -119,6 +122,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-20
-Stopped at: Completed 39-08-PLAN.md (Page navigation speed - parallel queries)
-Resume file: .planning/phases/39-bug-fixing-cleanup-performance-improving/39-08-SUMMARY.md
-Notes: Phase 39 complete (8/8 plans). Parallelized search enrichment, batched FJMS browse metadata, async discoveries loading.
+Stopped at: Completed 40-01-PLAN.md (Parallel NLI metadata fetch)
+Resume file: .planning/phases/40-performance-optimization/40-01-SUMMARY.md
+Notes: Phase 40 started. Parallelized fetch_marc_data + fetch_iiif_manifest in enrich_metadata via ThreadPoolExecutor.
