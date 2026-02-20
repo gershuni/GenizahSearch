@@ -1,27 +1,46 @@
 ---
 phase: 39-bug-fixing-cleanup-performance-improving
-verified: 2026-02-20T00:00:00Z
-status: passed
-score: 27/27 must-haves verified
+verified: 2026-02-20T12:00:00Z
+status: gaps_found
+score: 25/26 must-haves verified
 re_verification:
   previous_status: passed
-  previous_score: 20/20
-  note: "Previous VERIFICATION.md written 2026-02-19 before UAT ran. UAT found 4 gaps closed by plans 39-06 and 39-07. This re-verification covers all 7 plans."
+  previous_score: 27/27
+  note: "Previous VERIFICATION.md covered plans 01-07. Plan 39-08 was executed after that document was written in response to RETEST-UAT finding that page navigation remained slow. This re-verification covers all 8 plans and found a NameError bug introduced by plan 39-08."
   gaps_closed:
-    - "Bottom pagination scroll-to-top RuntimeError (scrollTo moved before render_results)"
+    - "Bottom pagination scroll-to-top RuntimeError (now uses results_container.run_method after content is built)"
     - "VRD mouse wheel zoom-instead-of-scroll (Ctrl modifier check added)"
     - "E2E tests crash on missing selenium (importorskip guards added)"
     - "Slow page navigation (CSS extracted to cacheable static file, login dialog lazy-built)"
-  gaps_remaining: []
-  regressions: []
+    - "Browse page loads FJMS metadata in parallel (pre-fetch in load_page, state.fjms_data pattern)"
+    - "Discoveries page loads stats+feed concurrently (asyncio.gather + run.io_bound)"
+  gaps_remaining:
+    - "NameError in search.py line 2118: result_sys_ids undefined after plan 39-08 consolidation"
+  regressions:
+    - "Plan 39-08 Task 1 consolidated result_sys_ids into all_sys_ids but left one reference at line 2118 unchanged; every search execution fails with NameError before results are rendered"
+gaps:
+  - truth: "Search post-processing (domains, transcriptions, catalog counts) runs in parallel, not sequentially"
+    status: failed
+    reason: "asyncio.gather is correctly added at line 2077, but line 2118 references result_sys_ids which was removed when consolidating into all_sys_ids. Every search execution crashes at this line with NameError: name 'result_sys_ids' is not defined."
+    artifacts:
+      - path: "web/pages/search.py"
+        issue: "Line 2118: `if sid in set(result_sys_ids)` — result_sys_ids is not defined in execute_search() scope; plan 39-08 renamed this variable to all_sys_ids (line 2064) but did not update line 2118"
+    missing:
+      - "Change result_sys_ids to all_sys_ids on line 2118 of web/pages/search.py"
 ---
 
 # Phase 39: Bug Fixing, Cleanup, Performance Improving — Verification Report
 
 **Phase Goal:** Stabilize and polish the app: fix all desktop crashes, add server-side pagination, integrate PostHog analytics, optimize web performance, and add Playwright E2E + performance tests
 **Verified:** 2026-02-20
-**Status:** PASSED
-**Re-verification:** Yes — after UAT found 4 gaps (plans 39-06, 39-07 closed all 4)
+**Status:** GAPS FOUND
+**Re-verification:** Yes — after plan 39-08 (page navigation parallelization) was executed post-previous-verification
+
+---
+
+## Scope of This Verification
+
+The previous VERIFICATION.md covered plans 01-07. Plan 39-08 was planned and executed after that document was written, in response to a RETEST-UAT finding that page navigation remained slow. This re-verification covers all 8 plans with full spot-check verification of plan 39-08 and regression checks on plans 01-07.
 
 ---
 
@@ -31,172 +50,116 @@ re_verification:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Desktop app no longer crashes when Reading Desk scroll sync fires on destroyed scrollbars | VERIFIED | `sip.isdeleted(text_bar) or sip.isdeleted(image_bar)` guard in `sync_text_to_image` and `sync_image_to_text` closures (genizah_app.py lines 10990, 11005) |
-| 2 | Desktop app no longer crashes when ZoomableScrollArea is destroyed during async image load | VERIFIED | `sip.isdeleted(self._msg_item) or sip.isdeleted(self._pixmap_item)` guards in `set_image()` (line 1423), `set_status_message()` (line 1449), and `_update_text_pos()` (line 1457) |
-| 3 | No unsafe `res['uid']` bracket access remains in genizah_app.py | VERIFIED | Zero matches for `res['uid']` or `result['uid']` pattern; sole remaining uid access uses `.get('uid')` safe pattern (line 16532) |
-| 4 | crash_log.txt archived and cleared for clean baseline | VERIFIED | `crash_log_archive.txt` exists with historical crash data; `crash_log.txt` contains only a single header comment line |
-| 5 | Search results display in pages of 50, not all at once | VERIFIED | `PAGE_SIZE = 50` constant at line 36; `render_results()` slices `results[start:end]` per page |
-| 6 | User can navigate between result pages using pagination controls | VERIFIED | `ui.pagination(1, total_pages, ...)` rendered at top (line 2253) and bottom (line 2269) of results with `max-pages=7 boundary-numbers` |
-| 7 | Total result count shown accurately regardless of page | VERIFIED | `results_count.text` updated at all filter call sites (lines 980, 991, 1922-1924, 2160, 2165, 2167, 2203) |
-| 8 | Result numbering is globally correct across pages (page 2 starts at #51) | VERIFIED | `create_result_card(start + i, res)` uses `start = page_idx * PAGE_SIZE` as offset (line 2259) |
-| 9 | Filters and domain exclusions work against full result set, then paginate | VERIFIED | `render_results(filtered, page=0)` at apply_filters (line 978), domain filter (lines 1934, 2207, 2209), and clear_filters (line 990) |
-| 10 | No `[:200]` WebSocket cap remains in search.py | VERIFIED | Zero occurrences of `[:200]` in web/pages/search.py; storage cap raised to `[:1000]` at line 2140 |
-| 11 | Bottom pagination scroll-to-top does not throw RuntimeError | VERIFIED | `ui.run_javascript('window.scrollTo(0, 0)')` placed BEFORE `render_results()` in `on_page_change_bottom` (line 2267 precedes 2268); JavaScript sent to client before parent slot is destroyed |
-| 12 | PostHog JS snippet loads on every page when POSTHOG_API_KEY env var is set | VERIFIED | `ui.add_head_html(POSTHOG_SCRIPT)` on all 14 page handlers in web/main.py (lines 577, 597, 616, 630, 644, 665, 679, 693, 707, 721, 735, 749, 776, 791) |
-| 13 | PostHog does NOT load when POSTHOG_API_KEY is not set | VERIFIED | `POSTHOG_SCRIPT = f'...' if _posthog_key else ''` — empty string when env var absent |
-| 14 | PostHog autocaptures page views, clicks, and enables session recordings | VERIFIED | `autocapture: true`, `capture_pageview: true`, `capture_pageleave: true`, `session_recording: {...}` in snippet |
-| 15 | Input fields are masked in session recordings for privacy | VERIFIED | `maskAllInputs: true` and `maskTextSelector: 'input, textarea'` in session_recording config |
-| 16 | Domain filter dialog opens instantly on second+ access (hierarchy cached) | VERIFIED | Double-checked locking: fast path `if self._hierarchy_cache is not None: return self._hierarchy_cache` at line 569; cache set at line 684 after first computation |
-| 17 | Cache is thread-safe (concurrent NiceGUI async handlers safe) | VERIFIED | `threading.Lock()` in `__init__`; `with self._hierarchy_lock:` wraps slow path with double-check pattern |
-| 18 | COUNT(*) replaces COUNT(DISTINCT AlmaId) for faster SQL | VERIFIED | SQL: `COUNT(*) as count FROM domains GROUP BY Domain, ParentDomain` confirmed in fjms_service.py |
-| 19 | Mouse wheel scrolls the VRD view; Ctrl+wheel zooms | VERIFIED | `wheelEvent` at line 1477 checks `event.modifiers() & Qt.KeyboardModifier.ControlModifier`; plain wheel calls `event.ignore()` (propagates to parent scroll) at line 1487 |
-| 20 | E2E tests skip gracefully when selenium is not installed | VERIFIED | `pytest.importorskip("selenium", ...)` at module level in all 3 test files (test_search_flow.py line 17, test_browse_flow.py line 14, test_performance.py line 15); conftest.py wraps selenium imports in try/except |
-| 21 | E2E tests cover search happy path (page load, query, results, pagination) | VERIFIED | 6 tests in test_search_flow.py: `TestSearchPageLoads` (3 tests) and `TestSearchExecution` (3 tests) |
-| 22 | E2E tests cover browse happy path (page load, metadata) | VERIFIED | 5 tests in test_browse_flow.py: `TestBrowsePageLoads` (2 tests) and `TestBrowseNavigation` (3 tests) |
-| 23 | E2E performance tests cover large result sets and page load times | VERIFIED | test_performance.py: `TestSearchPerformance` (2 tests) and `TestPageLoadPerformance` (3 tests) |
-| 24 | COMMON_STYLES CSS is served as a browser-cacheable static file | VERIFIED | `COMMON_STYLES = '<link rel="stylesheet" href="/static/common.css">'` at web/main.py line 110; web/static/common.css exists with 1,348 lines of CSS |
-| 25 | No inline CSS is injected per-page (eliminating 1,350-line per-page transfer) | VERIFIED | All `ui.add_head_html(COMMON_STYLES)` calls now inject a 49-character link tag instead of 1,350 lines; no `<style>` tags in common.css |
-| 26 | Login dialog is built lazily only when Login/Register is clicked | VERIFIED | `_ensure_dialog()` function with `nonlocal dialog` pattern in web/auth_state.py lines 416-420; `dialog = None` initialization at line 414; `create_login_dialog()` only called inside `_ensure_dialog()` |
-| 27 | Web page navigation feels faster due to reduced per-page overhead | VERIFIED (structural) | CSS now browser-cached across navigations; login dialog deferred for anonymous users; architectural NiceGUI full-page-reload limitation acknowledged — improvement is measurable but requires human timing test to confirm user experience |
+| 1 | Desktop app no longer crashes on destroyed Reading Desk scrollbars | VERIFIED | `sip.isdeleted(text_bar) or sip.isdeleted(image_bar)` guards at genizah_app.py lines 10990, 11005 |
+| 2 | Desktop app no longer crashes when ZoomableScrollArea destroyed during async image load | VERIFIED | `sip.isdeleted(self._msg_item) or sip.isdeleted(self._pixmap_item)` guards at lines 1423, 1449, 1457 |
+| 3 | No unsafe bracket uid access remains in genizah_app.py | VERIFIED | All uid accesses use `.get('uid')` safe pattern; no direct `res['uid']` bracket access |
+| 4 | Search results display 50 per page with pagination controls | VERIFIED | `PAGE_SIZE = 50` at line 37; `ui.pagination` at lines 2249 and 2263; `[:1000]` storage cap at line 2136; zero `[:200]` occurrences |
+| 5 | User can navigate between result pages using pagination controls | VERIFIED | `ui.pagination(1, total_pages, ...)` at top (line 2249) and bottom (line 2263) with `max-pages=7 boundary-numbers` |
+| 6 | Total result count shown accurately regardless of page | VERIFIED | `results_count.text` updated at all filter and search call sites |
+| 7 | Result numbering globally correct across pages (page 2 starts at #51) | VERIFIED | `create_result_card(start + i, res)` where `start = page_idx * PAGE_SIZE` (lines 2237, 2254) |
+| 8 | Filters work against full result set, then paginate | VERIFIED | `render_results(filtered, page=0)` at apply_filters (lines 1935, 2203, 2205) |
+| 9 | Bottom pagination scroll-to-top does not throw RuntimeError | VERIFIED | `results_container.run_method('setScrollPosition', 'vertical', 0)` at line 2268, placed after the `with results_container:` block exits — operates on the live container, not a destroyed parent slot |
+| 10 | PostHog JS snippet loads on every page when POSTHOG_API_KEY env var is set | VERIFIED | `ui.add_head_html(POSTHOG_SCRIPT)` in all 14 page handlers in web/main.py (lines 577, 597, 616, 630, 644, 665, 679, 693, 707, 721, 735, 749, 776, 791) |
+| 11 | PostHog does NOT load when POSTHOG_API_KEY is not set | VERIFIED | `POSTHOG_SCRIPT = f'...' if _posthog_key else ''` at line 104 — empty string when env var absent |
+| 12 | PostHog autocaptures page views, clicks, enables session recordings with masked inputs | VERIFIED | `autocapture: true`, `capture_pageview: true`, `maskAllInputs: true`, `maskTextSelector: 'input, textarea'` in snippet (lines 88-104) |
+| 13 | Domain filter dialog opens instantly on second+ access (hierarchy cached) | VERIFIED | Double-checked locking: fast path at line 569; `with self._hierarchy_lock:` at line 576; cache assigned at line 684 |
+| 14 | Mouse wheel scrolls VRD view; Ctrl+wheel zooms | VERIFIED | `event.modifiers() & Qt.KeyboardModifier.ControlModifier` at line 1478; plain wheel calls `event.ignore()` at line 1487 |
+| 15 | E2E tests skip gracefully when selenium is not installed | VERIFIED | `pytest.importorskip("selenium", ...)` at module level: test_search_flow.py line 17, test_browse_flow.py line 14, test_performance.py line 15 |
+| 16 | E2E tests cover search happy path | VERIFIED | 6 tests in test_search_flow.py (179 lines): TestSearchPageLoads + TestSearchExecution |
+| 17 | E2E tests cover browse happy path | VERIFIED | 5 tests in test_browse_flow.py (121 lines): TestBrowsePageLoads + TestBrowseNavigation |
+| 18 | E2E performance tests cover large result sets and page load times | VERIFIED | 5 tests in test_performance.py (191 lines): TestSearchPerformance + TestPageLoadPerformance |
+| 19 | COMMON_STYLES CSS served as browser-cacheable static file | VERIFIED | `COMMON_STYLES = '<link rel="stylesheet" href="/static/common.css">'` at web/main.py line 110; web/static/common.css exists at 1,347 lines of pure CSS |
+| 20 | No inline CSS injected per-page | VERIFIED | All `ui.add_head_html(COMMON_STYLES)` calls inject 49-char link tag; no per-page inline `<style>` block |
+| 21 | Login dialog built lazily only when Login/Register clicked | VERIFIED | `_ensure_dialog()` with `nonlocal dialog` at web/auth_state.py lines 414-428; `dialog = None` init; `create_login_dialog()` called only inside `_ensure_dialog()` |
+| 22 | Browse page loads FJMS metadata in load_page (not serially in update_content) | VERIFIED | `state.fjms_data = {'catalog_records':..., 'domains':..., 'bibliography':..., 'source_names':..., 'catalog_refs':...}` at browse.py lines 966-977; `update_content()` reads `fjms_data = state.fjms_data or {}` at line 2063 — all 5 direct service calls replaced |
+| 23 | Discoveries page loads stats and feed concurrently | VERIFIED | `asyncio.gather(run.io_bound(_fetch_stats), run.io_bound(_fetch_feed))` at discoveries.py lines 289-292; pure-UI helpers at lines 307, 325; `ui.timer(0.1, initial_load, once=True)` at line 304 |
+| 24 | All three plan 39-08 files have no syntax errors | VERIFIED | `ast.parse()` confirms search.py, browse.py, and discoveries.py all parse cleanly |
+| 25 | Search.py, browse.py, and discoveries.py use asyncio import | VERIFIED | `import asyncio` at search.py line 26; `import asyncio` at discoveries.py (confirmed via run.io_bound + asyncio.gather usage) |
+| 26 | Search post-processing runs domains, transcriptions, and catalog counts in parallel via asyncio.gather | FAILED | `asyncio.gather` added at line 2077 is correct, but **line 2118 references `result_sys_ids` which is not defined in `execute_search()` scope** — plan 39-08 consolidated this to `all_sys_ids` (line 2064) but left line 2118 unchanged; every search execution raises `NameError: name 'result_sys_ids' is not defined` before results are rendered |
 
-**Score:** 27/27 truths verified
+**Score:** 25/26 truths verified
 
 ---
 
 ## Required Artifacts
 
-### Plan 01: Desktop Crash Fixes
+### Plans 01-07 (spot-checked, no regressions found)
+
+| Artifact | Status | Evidence |
+|----------|--------|---------|
+| `genizah_app.py` — sip.isdeleted guards (5 locations) | VERIFIED | Lines 1423, 1449, 1457, 10990, 11005 confirmed present |
+| `web/pages/search.py` — pagination (PAGE_SIZE, ui.pagination, [:1000]) | VERIFIED | Lines 37, 2249, 2263, 2136 confirmed |
+| `web/main.py` — PostHog snippet (14 pages, conditional) | VERIFIED | Lines 87-104, all 14 add_head_html calls confirmed |
+| `shared/fjms_service.py` — thread-safe hierarchy cache | VERIFIED | Lines 355-356, 569-684 confirmed |
+| `web/static/common.css` — 1,347 lines of pure CSS | VERIFIED | File exists, 1,347 lines, no HTML tags |
+| `web/auth_state.py` — lazy dialog via _ensure_dialog() | VERIFIED | Lines 414-428 confirmed |
+| `tests/e2e/` — 3 test files with importorskip (491 total lines) | VERIFIED | All guards present at module level |
+
+### Plan 08: Page Navigation Speed
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `genizah_app.py` | sip.isdeleted() guards on Qt lifecycle crash sites | VERIFIED | 5 guard locations confirmed; `from PyQt6 import sip` at line 36 |
-| `crash_log_archive.txt` | Historical crash data preserved | VERIFIED | File exists, local-only (untracked per gitignore) |
-| `crash_log.txt` | Cleared to single header line | VERIFIED | Contains only `# Crash log - cleared 2026-02-19 after Phase 39 fixes` |
-
-### Plan 02: Search Pagination
-
-| Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `web/pages/search.py` | Paginated search results with ui.pagination | VERIFIED | `PAGE_SIZE = 50` at line 36; `ui.pagination` at lines 2253 and 2269; zero `[:200]` caps remaining; `[:1000]` storage cap at line 2140 |
-
-### Plan 03: PostHog Analytics
-
-| Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `web/main.py` | PostHog JS snippet alongside Google Analytics | VERIFIED | `POSTHOG_SCRIPT` constant at line 88; 14 `ui.add_head_html(POSTHOG_SCRIPT)` calls; graceful degradation when key absent |
-
-### Plan 04: Domain Hierarchy Cache
-
-| Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `shared/fjms_service.py` | In-memory hierarchy cache with thread-safe locking | VERIFIED | `_hierarchy_cache` and `_hierarchy_lock` in `__init__`; double-checked locking in `get_domain_hierarchy()`; `COUNT(*)` optimization |
-| `tests/test_fjms_service.py` | Cache behavior tests | VERIFIED | `test_hierarchy_cache_returns_same_object` (identity check) and `test_hierarchy_cache_not_set_when_no_connection` both present and substantive |
-
-### Plan 05: E2E Test Infrastructure
-
-| Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `tests/e2e/__init__.py` | E2E test package | VERIFIED | Exists |
-| `tests/e2e/conftest.py` | NiceGUI Screen fixture + skip logic | VERIFIED | Custom Screen fixture; `pytest_collection_modifyitems` skip logic; `nicegui_driver` fixture skips on ChromeDriver failure |
-| `tests/e2e/test_search_flow.py` | Search happy path E2E tests | VERIFIED | 6 tests; `screen.open('/search')` wiring present |
-| `tests/e2e/test_browse_flow.py` | Browse happy path E2E tests | VERIFIED | 5 tests; `screen.open('/browse')` wiring present |
-| `tests/e2e/test_performance.py` | Performance and stress tests | VERIFIED | 5 tests: large result set stability, pagination speed, 3 page load timing tests |
-
-### Plan 06: UAT Gap Closure (3 bugs)
-
-| Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `web/pages/search.py` | scrollTo before render_results in on_page_change_bottom | VERIFIED | `ui.run_javascript('window.scrollTo(0, 0)')` at line 2267, `render_results()` call at line 2268 |
-| `genizah_app.py` | wheelEvent with Ctrl modifier check | VERIFIED | `event.modifiers() & Qt.KeyboardModifier.ControlModifier` check at line 1478; `event.ignore()` for plain wheel at line 1487 |
-| `tests/e2e/test_browse_flow.py` | pytest.importorskip guard | VERIFIED | `pytest.importorskip("selenium", ...)` at line 14 |
-| `tests/e2e/test_search_flow.py` | pytest.importorskip guard | VERIFIED | `pytest.importorskip("selenium", ...)` at line 17 |
-| `tests/e2e/test_performance.py` | pytest.importorskip guard | VERIFIED | `pytest.importorskip("selenium", ...)` at line 15 |
-
-### Plan 07: Page Navigation Performance
-
-| Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `web/static/common.css` | All CSS extracted from COMMON_STYLES (1300+ lines) | VERIFIED | File exists; 1,348 lines; pure CSS (no HTML tags); begins with `:root {` custom properties |
-| `web/main.py` | COMMON_STYLES replaced with link tag | VERIFIED | `COMMON_STYLES = '<link rel="stylesheet" href="/static/common.css">'` at line 110 (49 chars) |
-| `web/auth_state.py` | Lazy login dialog via nonlocal pattern | VERIFIED | `_ensure_dialog()` with `nonlocal dialog` pattern; `dialog = None` initialization; `create_login_dialog()` only called on first click |
+| `web/pages/search.py` | asyncio.gather for 3 parallel enrichment queries | BROKEN | asyncio.gather at line 2077 is correct; import asyncio at line 26 is correct; **line 2118 uses undefined `result_sys_ids`** instead of `all_sys_ids`; NameError on every search |
+| `web/pages/browse.py` | fjms_data batch pre-fetch in load_page | VERIFIED | state.fjms_data dict at lines 966-977; 5 update_content reads at lines 2063-2235 |
+| `web/pages/discoveries.py` | Async stats+feed with asyncio.gather | VERIFIED | initial_load() with asyncio.gather at lines 261-304; ui.timer at line 304 |
 
 ---
 
 ## Key Link Verification
 
-### Plan 01
+### Plan 08 — Critical Wiring Issue
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| `sync_text_to_image` | `PyQt6.sip.isdeleted` | Guard before scrollbar methods | WIRED | `sip.isdeleted(text_bar) or sip.isdeleted(image_bar)` at line 10990 |
-| `ZoomableScrollArea.set_image` | `PyQt6.sip.isdeleted` | Guard before graphics item access | WIRED | `sip.isdeleted(self._msg_item) or sip.isdeleted(self._pixmap_item)` at line 1423 |
+| `execute_search()` | `asyncio.gather` | parallel run.io_bound calls | WIRED | Line 2077: `raw_domains, transcription_ids, catalog_counts = await asyncio.gather(...)` |
+| `execute_search()` | `search_state.result_domains` | all_sys_ids dict slice | BROKEN | Line 2118 uses `result_sys_ids` which does not exist in `execute_search()` scope; was consolidated into `all_sys_ids` by commit f549e75e but line 2118 was not updated |
+| `load_page()` | `state.fjms_data` | pre-fetch 5 FJMS calls | WIRED | Lines 966-977: dict with all 5 FJMS calls |
+| `update_content()` | `state.fjms_data` | fjms_data.get() reads | WIRED | Line 2063: `fjms_data = state.fjms_data or {}` used for all 5 formerly-serial calls |
+| `initial_load()` | `asyncio.gather` | parallel run.io_bound for stats+feed | WIRED | Lines 289-292: stats and feed fetched concurrently |
 
-### Plan 02
+---
 
-| From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `render_results` | `ui.pagination` | Page change handler re-renders page slice | WIRED | `ui.pagination(1, total_pages, ..., on_change=on_page_change_top)` and bottom variant |
-| `apply_filters` | `render_results` | Filters applied to full set, then paginated | WIRED | `render_results(filtered, page=0)` at lines 978, 990, 1934, 2207, 2209 |
+## Bug Detail: NameError in search.py line 2118
 
-### Plan 03
+**Commit that introduced it:** `f549e75e` (perf(39-08): parallelize search post-processing enrichment queries)
 
-| From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `POSTHOG_SCRIPT` | PostHog CDN | Async script tag in snippet HTML | WIRED | `p.async=!0` in minified snippet; 14 page handlers inject via `ui.add_head_html` |
-| `_posthog_key` | `POSTHOG_SCRIPT` | Conditional string assignment | WIRED | `... if _posthog_key else ''` at line 104 |
+**Root cause:** Plan 39-08 Task 1 consolidated two identical list comprehensions (`result_sys_ids` and `all_sys_ids`) into a single `all_sys_ids` variable. The commit correctly removed all three old sequential await calls that used `result_sys_ids`. However, there was a fourth use of `result_sys_ids` at line 2118 (slicing `result_domains` for badge rendering) that was not updated:
 
-### Plan 04
+```python
+# Line 2118 — BROKEN:
+search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
 
-| From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `get_domain_hierarchy` | `_hierarchy_cache` | Double-checked locking pattern | WIRED | Fast path check at line 569, lock acquired, double-check, cache assigned at line 684 |
+# Should be:
+search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(all_sys_ids)}
+```
 
-### Plan 05
+**Scope:** `result_sys_ids` is defined at line 1931 inside `_apply_domain_exclusions()` (a different nested function) and at line 2201 inside `execute_search()` (but only within a conditional block that runs AFTER line 2118). Neither is in scope at line 2118.
 
-| From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `conftest.py` | `nicegui.testing.screen.Screen` | Custom fixture setup | WIRED | `from nicegui.testing.screen import Screen`; custom `screen` fixture |
-| `test_search_flow.py` | `/search` page | `screen.open('/search')` | WIRED | 6 calls in TestSearchPageLoads and TestSearchExecution |
+**Impact:** `NameError: name 'result_sys_ids' is not defined` on every search execution that produces results. Search results will not be rendered.
 
-### Plan 06
-
-| From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `on_page_change_bottom` | `ui.run_javascript` | Called before `render_results()` | WIRED | Ordering verified: scrollTo at line 2267, render_results at line 2268 |
-| `ZoomableScrollArea.wheelEvent` | `Qt.KeyboardModifier.ControlModifier` | Modifier check gates zoom vs scroll | WIRED | `event.modifiers() & Qt.KeyboardModifier.ControlModifier` at line 1478 |
-| `test_*.py` | `pytest.importorskip` | Module-level guard before selenium imports | WIRED | All 3 test files have guard before `from selenium...` imports |
-
-### Plan 07
-
-| From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `web/main.py` COMMON_STYLES | `web/static/common.css` | `<link rel="stylesheet" href="/static/common.css">` | WIRED | Link tag confirmed at line 110; static file served via `app.add_static_files('/static', STATIC_DIR)` at line 41 |
-| `web/auth_state.py` `open_login` | `create_login_dialog` | Called inside `_ensure_dialog()` on first click only | WIRED | `_ensure_dialog()` with `if dialog is None` check before calling `create_login_dialog()` |
+**Fix:** One-word change on line 2118: `result_sys_ids` → `all_sys_ids`.
 
 ---
 
 ## Requirements Coverage
 
-All 7 plans declare `requirements: []`. Phase 39 is a maintenance/polish phase with no formal requirement IDs. No entries in `.planning/REQUIREMENTS.md` map to Phase 39. No orphaned requirements.
+All plans declare `requirements: []`. Phase 39 is a maintenance/polish phase with no formal requirement IDs. No entries in `.planning/REQUIREMENTS.md` map to Phase 39. No orphaned requirements.
 
 ---
 
 ## Anti-Patterns Found
 
-No blocker anti-patterns detected across modified files:
+| File | Line | Pattern | Severity | Impact |
+|------|------|---------|----------|--------|
+| `web/pages/search.py` | 2118 | `result_sys_ids` undefined variable | BLOCKER | NameError on every search execution — search results not rendered |
 
-- `genizah_app.py`: sip guards are substantive (5 guard locations); wheelEvent Ctrl modifier check is complete
-- `web/pages/search.py`: No `[:200]` remnants; pagination logic complete; scrollTo ordering correct
-- `web/main.py`: PostHog snippet is the real production CDN snippet; COMMON_STYLES is a valid link tag
-- `web/auth_state.py`: Lazy dialog pattern is complete; no empty function bodies
-- `shared/fjms_service.py`: Full double-checked locking; no stub returns
-- `web/static/common.css`: 1,348 lines of real CSS; no HTML tags
-- `tests/e2e/*.py`: `pytest.importorskip` guards present; all 3 files; tests make real assertions
+### Pre-existing non-blocker items (documented in deferred-items.md)
 
-| Item | Severity | Impact |
-|------|----------|--------|
-| 3 pre-existing test failures in `test_desktop_folio_navigation.py` and `test_responsa_core.py` | Warning (pre-existing) | Unrelated to Phase 39 changes; logged in deferred-items.md; do not block the phase goal |
-| `test_pagination_page_change_speed` may skip at runtime if Quasar pagination button "2" not found | Info | Graceful skip via `pytest.skip()`, not a failure; large result set stability still covered by `test_large_result_set_does_not_crash` |
+| Item | Severity |
+|------|----------|
+| `test_msviewer_ktiv_button_exists` test failure | Warning — pre-existing, button styling changed |
+| `test_suffixes_counted_in_explosion_guard` test failure | Warning — pre-existing, Hebrew vs English text mismatch |
+| `test_prefix_plus_suffix_cascades_down_instead_of_error` test failure | Warning — pre-existing, same text mismatch |
 
 ---
 
@@ -204,55 +167,48 @@ No blocker anti-patterns detected across modified files:
 
 ### 1. Desktop Crash Stability
 
-**Test:** Run the desktop app, open the Reading Desk view for a manuscript with an image. While an image is loading, close the Reading Desk dialog rapidly (~5 times). Then rapidly scroll up and down in the VRD — verify no RuntimeError appears in crash_log.txt.
+**Test:** Run the desktop app, open the Reading Desk view for a manuscript with an image. While an image is loading, close the Reading Desk dialog rapidly. Then rapidly scroll up and down in the VRD. Verify no RuntimeError appears in crash_log.txt.
 **Expected:** App remains stable; no new crash entries.
 **Why human:** Cannot automate PyQt6 widget destruction race conditions in CI.
 
 ### 2. VRD Mouse Wheel Behavior
 
 **Test:** Open the desktop VRD with an image loaded. Scroll the mouse wheel without holding Ctrl. Then hold Ctrl and scroll.
-**Expected:** Plain scroll = the view scrolls vertically. Ctrl+scroll = the image zooms in/out.
-**Why human:** Qt wheel event propagation behavior requires a running PyQt6 app to verify.
+**Expected:** Plain scroll = view scrolls vertically. Ctrl+scroll = image zooms in/out.
+**Why human:** Qt wheel event propagation requires a running PyQt6 app to verify.
 
 ### 3. PostHog Analytics Activation
 
-**Test:** Set `POSTHOG_API_KEY=phc_test_key` in the server environment, start the web app, open the search page, check browser DevTools Network tab for requests to `us.i.posthog.com`.
+**Test:** Set `POSTHOG_API_KEY=phc_test_key`, start the web app, open search page, check browser DevTools Network tab for requests to `us.i.posthog.com`.
 **Expected:** PostHog CDN script loads; page view events fire; no JS errors in console.
-**Why human:** Cannot verify live CDN requests or browser JS execution without a real API key.
+**Why human:** Cannot verify live CDN requests without a real API key and browser session.
 
-### 4. Pagination UX
+### 4. Browse and Discoveries Page Load Speed
 
-**Test:** Run a broad search (e.g., "ketubah") returning 50+ results. Verify pagination controls appear at top and bottom. Click page 2 — verify result numbering starts at #51. Apply a filter — verify page resets to 1.
-**Expected:** Smooth page transitions, correct numbering, filter resets page, no RuntimeError on bottom pagination.
-**Why human:** Visual/UX verification of pagination rendering requires a running browser session.
-
-### 5. Domain Filter Dialog Speed
-
-**Test:** Open the web app, run any search, open the domain filter dialog. Close it. Open it again immediately.
-**Expected:** First open may take a few seconds. Second open is near-instant (< 0.5 seconds).
+**Test:** Navigate to the browse page for a manuscript with FJMS data. Navigate to the Discoveries/Community page. Both should load faster than before plan 39-08.
+**Expected:** Browse metadata panel populates without blocking the UI render. Discoveries stats+feed load concurrently off the UI thread.
 **Why human:** Timing verification requires a running server with the fjms_enrichment.db sidecar.
 
-### 6. CSS Caching Performance
+### 5. Search Pagination UX (after line 2118 fix)
 
-**Test:** Open the web app in a browser with DevTools Network tab open. Navigate from Search to Browse to Lists. Check if `/static/common.css` shows as "304 Not Modified" or from cache on subsequent navigations.
-**Expected:** CSS file cached by browser; page navigation feels faster than before.
-**Why human:** Browser HTTP caching behavior requires a running server and real browser to observe.
+**Test:** After fixing line 2118, run a broad search returning 50+ results. Verify results display, pagination controls appear, page 2 starts at #51, and bottom pagination scrolls back to top.
+**Expected:** Full pagination flow works with correct numbering and smooth transitions.
+**Why human:** Visual/UX verification requires a running browser session.
 
 ---
 
 ## Gaps Summary
 
-No gaps. All 27 observable truths pass verification. The previous VERIFICATION.md (20/20 truths, dated 2026-02-19) was written before UAT ran. UAT found 4 issues. Plans 39-06 and 39-07 closed all 4:
+One gap blocks full goal achievement:
 
-1. **Bottom pagination RuntimeError** — closed by 39-06 (scrollTo moved before render_results)
-2. **VRD mouse wheel zooms instead of scrolling** — closed by 39-06 (Ctrl modifier check)
-3. **E2E selenium import crash** — closed by 39-06 (pytest.importorskip guards)
-4. **Slow page navigation** — closed by 39-07 (CSS extracted to static file, login dialog lazy-built)
+**Search NameError (search.py line 2118, plan 39-08):** A one-line bug was introduced when plan 39-08 consolidated `result_sys_ids` into `all_sys_ids`. The `asyncio.gather` implementation at line 2077 is structurally correct. Browse.py (fjms_data pre-fetch) and discoveries.py (async stats+feed) are both complete and correct. The sole issue is that line 2118 still references the old variable name `result_sys_ids` instead of `all_sys_ids`. This causes a `NameError` on every search execution, preventing results from being rendered.
 
-All artifact checks pass at all three levels (exists, substantive, wired). No requirements to satisfy. Three pre-existing test failures are documented in deferred-items.md and are unrelated to Phase 39 changes.
+**Fix:** Single-word change on line 2118: `result_sys_ids` → `all_sys_ids`.
+
+All 7 previous plans (01-07) remain verified with no regressions detected. The RETEST-UAT confirmed all 4 previously-found gaps were closed. Plan 39-08 addressed the remaining page speed gap with correct implementations in browse.py and discoveries.py, and nearly correct implementation in search.py (one variable name not updated).
 
 ---
 
 _Verified: 2026-02-20_
 _Verifier: Claude (gsd-verifier)_
-_Mode: Re-verification (previous VERIFICATION.md dated 2026-02-19 predated UAT)_
+_Mode: Re-verification — plan 39-08 executed after previous VERIFICATION.md was written_

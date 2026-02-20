@@ -192,7 +192,7 @@ Plans:
 - [x] 39-05-PLAN.md — Add NiceGUI Screen E2E tests for search/browse + performance tests
 - [x] 39-06-PLAN.md — Gap closure: fix pagination scroll error, VRD wheel zoom, E2E selenium skip
 - [x] 39-07-PLAN.md — Gap closure: extract CSS to static file, lazy login dialog for navigation speed
-- [ ] 39-08-PLAN.md — Gap closure: parallelize page queries (asyncio.gather for search, batch FJMS for browse, async discoveries)
+- [x] 39-08-PLAN.md — Gap closure: parallelize page queries (asyncio.gather for search, batch FJMS for browse, async discoveries)
 
 ---
 *Roadmap created: 2026-02-09*
