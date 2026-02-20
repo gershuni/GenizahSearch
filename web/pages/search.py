@@ -2263,9 +2263,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 with ui.row().classes('w-full justify-center items-center px-4 pb-2'):
                     def on_page_change_bottom(e):
                         search_state.current_page = e.value - 1
-                        render_results(results, page=search_state.current_page)
-                        # Scroll to top of results
+                        # Scroll to top BEFORE render_results destroys this element's parent slot
                         ui.run_javascript('window.scrollTo(0, 0)')
+                        render_results(results, page=search_state.current_page)
                     ui.pagination(1, total_pages, value=page_idx + 1,
                         on_change=on_page_change_bottom).props('max-pages=7 boundary-numbers')
 
