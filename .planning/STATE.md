@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-16)
 ## Current Position
 
 Phase: 40 of 40 (Performance Optimization)
-Plan: 5 of 5 in current phase
-Status: Executing Phase 40
-Last activity: 2026-02-20 - Completed 40-02: Desktop domain enrichment & lazy catalog (async worker + lazy fetch)
+Plan: 5 of 5 in current phase (COMPLETE)
+Status: Phase 40 Complete
+Last activity: 2026-02-20 - Completed 40-05: Variant cache unification (superset-aware cache + precompute)
 
-Progress: [########--] 80% (Phase 40: 4/5 plans)
+Progress: [##########] 100% (Phase 40: 5/5 plans)
 
 ## Performance Metrics
 
@@ -99,6 +99,7 @@ Recent decisions affecting current work:
 - Phase 40-02: DomainEnrichmentWorker follows existing EnrichMetadataThread/PGPBadgeWorker pattern for consistency
 - Phase 40-02: Domain filter button disabled until enrichment completes (~200ms after results display)
 - Phase 40-02: Catalog detail fetched lazily in click handler with statusBar feedback, not during page load
+- [Phase 40]: Pre-compute variants at REGEX_VARIANTS_LIMIT (8000) before per-term loops; Tantivy (200) slices from superset cache
 
 ### Blockers/Concerns
 
@@ -129,6 +130,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-20
-Stopped at: Completed 40-02-PLAN.md (Desktop domain enrichment & lazy catalog)
-Resume file: .planning/phases/40-performance-optimization/40-02-SUMMARY.md
-Notes: Phase 40 in progress (4/5 plans). Desktop search results display immediately with async domain enrichment; catalog detail fetched lazily on button click.
+Stopped at: Completed 40-05-PLAN.md (Variant cache unification)
+Resume file: .planning/phases/40-performance-optimization/40-05-SUMMARY.md
+Notes: Phase 40 complete (5/5 plans). All performance optimizations verified: parallel NLI fetch, async domain enrichment, browse crossref parallelization, FL ID index, variant cache unification.
