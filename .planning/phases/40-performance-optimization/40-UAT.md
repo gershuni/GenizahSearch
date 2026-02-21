@@ -3,7 +3,7 @@ status: complete
 phase: 40-performance-optimization
 source: 40-01-SUMMARY.md, 40-02-SUMMARY.md, 40-03-SUMMARY.md, 40-04-SUMMARY.md, 40-05-SUMMARY.md
 started: 2026-02-20T14:30:00Z
-updated: 2026-02-20T14:30:00Z
+updated: 2026-02-21T00:00:00Z
 ---
 
 ## Current Test
@@ -64,6 +64,6 @@ skipped: 0
 
 ## Unresolved / Deferred
 
-1. **Cambridge credit text stretches ResultDialog image pane** — Needs word-wrap/max-width constraint on credit label.
-2. **Web images not loading (transient)** — NLI IIIF returning HTTP 520 (Cloudflare outage). Not a code bug.
-3. **Text disappearing on rapid forward navigation** — May be manuscripts without indexed text or NiceGUI rendering race. Needs retest after fixes.
+1. ~~**Cambridge credit text stretches ResultDialog image pane**~~ — Resolved (2026-02-21)
+2. ~~**Web images not loading (transient)**~~ — Resolved (2026-02-21)
+3. ~~**Text disappearing on rapid forward navigation**~~ — Resolved (2026-02-21)
