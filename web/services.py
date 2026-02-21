@@ -344,9 +344,16 @@ class GenizahService:
                     # Folio images with labels
                     folio_images = crossref_svc.get_folio_images(actual_sys_id)
 
-                    # Extract current folio label from page number
+                    # Extract current folio label from page number.
+                    # Only use crossref labels when the image count matches the
+                    # page count from the search index -- otherwise the labels
+                    # would map to the wrong pages (e.g. crossref starts at leaf 4
+                    # while search-index pages start at 1).
+                    total_pages = result.get('total_pages', 0)
                     current_p = result.get('p_num', 0)
-                    if folio_images and 0 < current_p <= len(folio_images):
+                    if (folio_images
+                            and len(folio_images) == total_pages
+                            and 0 < current_p <= len(folio_images)):
                         folio_label = folio_images[current_p - 1].get('folio_label', '')
 
                     # Physical metadata (material, folio counts)
@@ -500,8 +507,16 @@ class GenizahService:
 
                     folio_images = crossref_svc.get_folio_images(actual_sys_id)
 
+                    # Extract current folio label from page number.
+                    # Only use crossref labels when the image count matches the
+                    # page count from the search index -- otherwise the labels
+                    # would map to the wrong pages (e.g. crossref starts at leaf 4
+                    # while search-index pages start at 1).
+                    total_pages = result.get('total_pages', 0)
                     current_p = result.get('p_num', 0)
-                    if folio_images and 0 < current_p <= len(folio_images):
+                    if (folio_images
+                            and len(folio_images) == total_pages
+                            and 0 < current_p <= len(folio_images)):
                         folio_label = folio_images[current_p - 1].get('folio_label', '')
 
                     # Physical metadata (material, folio counts)

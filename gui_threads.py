@@ -471,8 +471,10 @@ class DomainEnrichmentWorker(QThread):
 
     def run(self):
         try:
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service()
+            # Create a thread-local FjmsService connection -- the main-thread
+            # singleton uses check_same_thread=True so cannot be reused here.
+            from shared.fjms_service import FjmsService
+            fjms = FjmsService(thread_safe=True)
             if not fjms.is_available():
                 self.finished.emit({})
                 return

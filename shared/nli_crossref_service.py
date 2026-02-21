@@ -249,13 +249,18 @@ class NliCrossrefService:
         For images where parse_folio_label returns empty string, assigns
         a sequential fallback label (e.g., '1', '2', '3').
 
+        The result is sorted numerically by (leaf_number, side) so that
+        ``1r, 1v, 2r, 2v, ...`` is the natural page order.  The
+        underlying ``get_images()`` query orders by ImageName which is
+        alphabetical (``L10`` before ``L1``); this method corrects that.
+
         Args:
             sys_id: The Alma/system ID for the manuscript.
 
         Returns:
             List of dicts with keys: fgp_image_number_id, fgp_number,
             image_name, image_source_name, shelfmark, folio_label.
-            Ordered by ImageName (natural page sequence).
+            Ordered by leaf number then side (recto before verso).
         """
         images = self.get_images(sys_id)
         fallback_counter = 0
@@ -265,6 +270,19 @@ class NliCrossrefService:
                 fallback_counter += 1
                 label = str(fallback_counter)
             img['folio_label'] = label
+
+        # Sort by (leaf_number, side) for natural page order.
+        # parse_folio_label already extracted leaf+side; re-extract the
+        # numeric components from ImageName for a stable numeric sort.
+        def _sort_key(img):
+            name = img.get('image_name', '')
+            m = _FOLIO_PATTERN.search(name)
+            if m:
+                return (int(m.group(1)), int(m.group(2)))
+            # Fall back to keeping alphabetical order for non-matching names
+            return (999999, 0)
+
+        images.sort(key=_sort_key)
         return images
 
     # ── Cambridge IIIF (Phase 30: IMG-02) ───────────────────────────

@@ -1613,6 +1613,7 @@ class ManuscriptViewerWidget(QWidget):
         # Attribution
         self.lbl_attribution = QLabel("")
         self.lbl_attribution.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_attribution.setWordWrap(True)
         self.lbl_attribution.setStyleSheet("font-size: 10px; color: #7f8c8d; background: transparent; margin: 0px;")
         self.lbl_attribution.setVisible(False)
         layout.addWidget(self.lbl_attribution)
@@ -4276,7 +4277,6 @@ class ResultDialog(QDialog):
         """Open FJMS catalog records dialog from reading desk (lazy fetch)."""
         # Lazy fetch: load catalog detail on first click if not yet loaded
         if self._rd_catalog_detail is None and self.current_sys_id:
-            self.statusBar().showMessage(tr("Loading catalog data..."), 3000)
             try:
                 from shared.fjms_service import get_fjms_service
                 fjms_svc = get_fjms_service()
@@ -4284,7 +4284,6 @@ class ResultDialog(QDialog):
                     self._rd_catalog_detail = fjms_svc.get_catalog_detail(self.current_sys_id)
             except Exception:
                 pass
-            self.statusBar().clearMessage()
 
         if not self._rd_catalog_detail:
             return
@@ -20274,23 +20273,28 @@ class GenizahGUI(QMainWindow):
         curr_idx = pd['current_idx'] # 1-based index
 
         # Get folio images from enriched metadata (if available)
+        # Only use crossref folio labels when the image count matches the
+        # page count from the search index.  When they differ the labels
+        # would map to the wrong pages (e.g. crossref starts at leaf 4
+        # while search-index pages start at 1).
         folio_images = self._browse_folio_images
-        has_folio_labels = bool(folio_images) and len(folio_images) > 0
+        has_folio_labels = (
+            bool(folio_images)
+            and len(folio_images) > 0
+            and len(folio_images) == total
+        )
 
         self.combo_browse_page.blockSignals(True)
-        if self.combo_browse_page.count() != total:
-            self.combo_browse_page.clear()
-            if has_folio_labels:
-                # Use folio labels from crossref service
-                for i, img in enumerate(folio_images):
-                    label = img.get('folio_label', str(i + 1))
-                    self.combo_browse_page.addItem(label)
-                # If there are more pages than folio images, fill rest with numbers
-                for i in range(len(folio_images), total):
-                    self.combo_browse_page.addItem(str(i + 1))
-            else:
-                items = [str(i) for i in range(1, total + 1)]
-                self.combo_browse_page.addItems(items)
+        # Always repopulate — stale labels persist when consecutive MSs have same page count
+        self.combo_browse_page.clear()
+        if has_folio_labels:
+            # Use folio labels from crossref service
+            for i, img in enumerate(folio_images):
+                label = img.get('folio_label', str(i + 1))
+                self.combo_browse_page.addItem(label)
+        else:
+            items = [str(i) for i in range(1, total + 1)]
+            self.combo_browse_page.addItems(items)
 
         if 0 < curr_idx <= total:
             self.combo_browse_page.setCurrentIndex(curr_idx - 1)

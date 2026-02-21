@@ -792,6 +792,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             if exact_match or len(results) == 1:
                 state.sys_id = results[0].sys_id
                 state.current_page = None  # Reset to avoid using old page number
+                state.view_joined = False  # Exit reading desk if active
+                state.reading_desk_entries = []
+                state.active_source = 'nli'  # Reset image source for new manuscript
+                enrichment_refs.clear()  # Prevent stale ref usage
                 await load_page(p_num=1)  # Always start at page 1 for new manuscript
             else:
                 # Multiple results - show selection dialog
@@ -829,6 +833,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if slider_refs.get('search_input'):
                             slider_refs['search_input'].value = r.shelfmark
                         state.current_page = None
+                        state.view_joined = False  # Exit reading desk if active
+                        state.reading_desk_entries = []
+                        state.active_source = 'nli'  # Reset image source for new manuscript
+                        enrichment_refs.clear()  # Prevent stale ref usage
                         asyncio.ensure_future(load_page(p_num=1))
 
                     # Get library display name (short form)
@@ -1169,7 +1177,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             if adjacent_sys_id:
                 state.sys_id = adjacent_sys_id
                 state.view_all = False  # Reset to single page view
+                state.view_joined = False  # Exit reading desk if active
                 state.full_manuscript = []
+                state.reading_desk_entries = []
+                state.active_source = 'nli'  # Reset image source for new manuscript
+                enrichment_refs.clear()  # Prevent stale ref usage across navigations
                 await load_page(p_num=1)  # Load first page of new manuscript
             else:
                 state.is_loading = False
@@ -3676,7 +3688,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
 
-                            if _folio_images and len(_folio_images) > 1:
+                            # Only use folio-label dropdown when crossref image count
+                            # matches the page count from the search index.  When they
+                            # differ the labels would be misleading (e.g. crossref starts
+                            # at leaf 4 while pages start at 1).
+                            _folio_count_matches = (
+                                _folio_images
+                                and len(_folio_images) > 1
+                                and len(_folio_images) == page.total_pages
+                            )
+                            if _folio_count_matches:
                                 folio_options = {
                                     str(i + 1): img.get('folio_label', str(i + 1))
                                     for i, img in enumerate(_folio_images)
@@ -3689,9 +3710,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         return
                                     asyncio.ensure_future(go_to_page(val))
 
+                                # Clamp p_num to valid folio range to prevent ValueError
+                                _folio_val = str(min(page.p_num, len(_folio_images)))
                                 ui.select(
                                     options=folio_options,
-                                    value=str(page.p_num),
+                                    value=_folio_val,
                                     on_change=handle_folio_select
                                 ).classes('w-20').props('dense outlined')
                             else:
