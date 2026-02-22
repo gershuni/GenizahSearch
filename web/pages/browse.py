@@ -3829,12 +3829,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'text-green-700'
                             ).tooltip(tr('Add to Reading Desk'))
 
-                # === Bibliography & Catalog Buttons ===
-                # Deferred population: buttons appear after enrichment Phase B loads
-                bib_catalog_el = ui.element('div').classes('w-full')
-                enrichment_refs['bib_catalog_container'] = bib_catalog_el
-                if state.enrichment_loaded:
-                    _populate_bib_catalog_buttons(bib_catalog_el, state, page)
+                    # === Bibliography & Catalog Buttons ===
+                    # Deferred population: buttons appear after enrichment Phase B loads
+                    bib_catalog_el = ui.element('div').classes('w-full')
+                    enrichment_refs['bib_catalog_container'] = bib_catalog_el
+                    if state.enrichment_loaded:
+                        _populate_bib_catalog_buttons(bib_catalog_el, state, page)
 
                 # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
                 # State for image panel visibility
