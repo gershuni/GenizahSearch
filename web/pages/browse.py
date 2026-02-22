@@ -1153,6 +1153,73 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         on_view_all=enter_joined_view
                     )
 
+        # Bibliography & Catalog buttons
+        bib_catalog_container = enrichment_refs.get('bib_catalog_container')
+        if bib_catalog_container:
+            _populate_bib_catalog_buttons(bib_catalog_container, state, state.current_page)
+
+    def _populate_bib_catalog_buttons(container, state, page):
+        """Populate bibliography and catalog buttons in the page navigation pane.
+
+        Called both inline (if enrichment already loaded) and from
+        _update_enrichment_sections (deferred enrichment Phase B).
+        """
+        if not page:
+            return
+        container.clear()
+
+        fjms_data = state.fjms_data or {}
+        fjms_bib = fjms_data.get('bibliography', [])
+
+        # NLI/Ktiv bibliography from crossref cache
+        marc_bib = []
+        try:
+            from web.state import state as app_state
+            if app_state.meta_mgr and hasattr(app_state.meta_mgr, 'nli_cache'):
+                cached = app_state.meta_mgr.nli_cache.get(page.sys_id, {})
+                marc_bib = cached.get('marc', {}).get('bibliography', [])
+        except Exception:
+            pass
+
+        catalog_source_count = len(fjms_data.get('source_names', []))
+
+        if not fjms_bib and not marc_bib and catalog_source_count == 0:
+            return
+
+        from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
+        from web.components.catalog_dialog import show_catalog_dialog
+
+        with container:
+            with ui.row().classes('items-center gap-2 flex-wrap px-3 py-1'):
+                if fjms_bib:
+                    fjms_dlg = create_fjms_bibliography_dialog(
+                        fjms_bib, page.sys_id,
+                        shelfmark=page.shelfmark or '',
+                    )
+                    ui.button(
+                        f'{tr("Bibliography FJMS")} ({len(fjms_bib)})',
+                        icon='menu_book',
+                        on_click=fjms_dlg.open,
+                    ).props('outline dense').classes('text-sm')
+                if marc_bib:
+                    nli_dlg = create_nli_bibliography_dialog(
+                        marc_bib, page.sys_id,
+                        shelfmark=page.shelfmark or '',
+                    )
+                    ui.button(
+                        f'{tr("Bibliography Ktiv")} ({len(marc_bib)})',
+                        icon='menu_book',
+                        on_click=nli_dlg.open,
+                    ).props('outline dense').classes('text-sm')
+                # Catalog Records button -- show_catalog_dialog auto-creates fjms_service
+                catalog_btn = ui.button(
+                    f'{tr("Catalog Records")} ({catalog_source_count})',
+                    icon='description',
+                    on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_catalog_dialog(s, sm),
+                ).props('outline dense').classes('text-sm')
+                if catalog_source_count == 0:
+                    catalog_btn.disable()
+
     async def go_to_page(new_page: int):
         """Navigate to a specific page number."""
         if new_page < 1:
@@ -2223,10 +2290,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     create_translatable_text(date_rationale, container_style='color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
 
                     # === FJMS Catalog Metadata (pre-fetched in load_page) ===
-                    from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
+                    from shared.fjms_service import merge_catalog_records, parse_textual_frame
                     fjms_data = state.fjms_data or {}
-                    # Keep fjms reference for on-demand dialog queries (catalog dialog click)
-                    fjms = get_fjms_service(thread_safe=True)
                     catalog_records = fjms_data.get('catalog_records')
                     if catalog_records:
                             ui.separator().classes('my-3')
@@ -2330,55 +2395,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         display_name,
                                         f'/search?domain={quote(dom["domain"])}'
                                     ).classes('text-sm').style('color: var(--primary-600);')
-
-                    # === Bibliography References (separate FJMS / NLI dialogs) ===
-                    from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
-                    from web.components.catalog_dialog import show_catalog_dialog
-
-                    fjms_bib = fjms_data.get('bibliography', [])
-                    marc_bib = []
-                    try:
-                        from web.state import state as app_state
-                        if app_state.meta_mgr and hasattr(app_state.meta_mgr, 'nli_cache'):
-                            cached = app_state.meta_mgr.nli_cache.get(page.sys_id, {})
-                            marc_bib = cached.get('marc', {}).get('bibliography', [])
-                    except Exception:
-                        pass
-
-                    # Catalog source count for button label
-                    catalog_source_count = len(fjms_data.get('source_names', []))
-
-                    if fjms_bib or marc_bib or catalog_source_count > 0:
-                        ui.separator().classes('my-3')
-                        with ui.row().classes('items-center gap-2 flex-wrap'):
-                            if fjms_bib:
-                                fjms_dlg = create_fjms_bibliography_dialog(
-                                    fjms_bib, page.sys_id,
-                                    shelfmark=page.shelfmark or '',
-                                )
-                                ui.button(
-                                    f'{tr("Bibliography FJMS")} ({len(fjms_bib)})',
-                                    icon='menu_book',
-                                    on_click=fjms_dlg.open,
-                                ).props('outline dense').classes('text-sm')
-                            if marc_bib:
-                                nli_dlg = create_nli_bibliography_dialog(
-                                    marc_bib, page.sys_id,
-                                    shelfmark=page.shelfmark or '',
-                                )
-                                ui.button(
-                                    f'{tr("Bibliography Ktiv")} ({len(marc_bib)})',
-                                    icon='menu_book',
-                                    on_click=nli_dlg.open,
-                                ).props('outline dense').classes('text-sm')
-                            # Catalog Records button
-                            catalog_btn = ui.button(
-                                f'{tr("Catalog Records")} ({catalog_source_count})',
-                                icon='description',
-                                on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_catalog_dialog(s, sm, fjms),
-                            ).props('outline dense').classes('text-sm')
-                            if catalog_source_count == 0:
-                                catalog_btn.disable()
 
                     # === Phase 33: Catalog Cross-References ===
                     cat_refs = fjms_data.get('catalog_refs')
@@ -3812,6 +3828,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ).props(f'flat dense aria-label="{tr("Add to Reading Desk")}"').classes(
                                 'text-green-700'
                             ).tooltip(tr('Add to Reading Desk'))
+
+                # === Bibliography & Catalog Buttons ===
+                # Deferred population: buttons appear after enrichment Phase B loads
+                bib_catalog_el = ui.element('div').classes('w-full')
+                enrichment_refs['bib_catalog_container'] = bib_catalog_el
+                if state.enrichment_loaded:
+                    _populate_bib_catalog_buttons(bib_catalog_el, state, page)
 
                 # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
                 # State for image panel visibility
