@@ -29,8 +29,8 @@ from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngin
 
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
-APP_VERSION = "5.8"
-WHATS_NEW_VERSION = "5.8"  # Bump when adding new "What's New" content
+from version import APP_VERSION
+WHATS_NEW_VERSION = APP_VERSION  # Bump when adding new "What's New" content
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
