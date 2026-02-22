@@ -666,27 +666,6 @@ def test_get_image_sources_jts_false(service):
     assert sources["jts"] is False
 
 
-# ── IsNotGenizah tests ────────────────────────────────────────────
-
-
-def test_get_is_not_genizah_true(service):
-    """Returns True for manuscript flagged as IsNotGenizah='True'."""
-    assert service.get_is_not_genizah("A005") is True
-
-
-def test_get_is_not_genizah_false(service):
-    """Returns False for manuscript with IsNotGenizah='False' or empty."""
-    # A006 has IsNotGenizah='False'
-    assert service.get_is_not_genizah("A006") is False
-    # A001 has IsNotGenizah='' (empty)
-    assert service.get_is_not_genizah("A001") is False
-
-
-def test_get_is_not_genizah_no_data(service):
-    """Returns False for non-existent sys_id."""
-    assert service.get_is_not_genizah("NONEXISTENT") is False
-
-
 # ── Catalog entry tests ──────────────────────────────────────────
 
 
@@ -760,7 +739,6 @@ def test_all_methods_return_empty_when_unavailable():
     assert svc.get_see_references("x") == []
     assert svc.get_bifolio_partners("x") == []
     # Phase 33 metadata enrichment methods
-    assert svc.get_is_not_genizah("x") is False
     assert svc.get_catalog_entry("x") is None
     assert svc.get_collection_storage("x") is None
     # Manchester and JTS methods

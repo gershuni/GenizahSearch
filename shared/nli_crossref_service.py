@@ -592,29 +592,6 @@ class NliCrossrefService:
 
     # ── Metadata Enrichment (Phase 33: META-03) ─────────────────────
 
-    def get_is_not_genizah(self, sys_id: str) -> bool:
-        """
-        Check if a manuscript is flagged as not being from the Genizah.
-
-        Args:
-            sys_id: The Alma/system ID for the manuscript.
-
-        Returns:
-            True if any row for this sys_id has IsNotGenizah='True', False otherwise.
-        """
-        if self._conn is None:
-            return False
-        try:
-            cursor = self._conn.execute(
-                "SELECT 1 FROM nli_images WHERE NLI_AlmaId = ? "
-                "AND IsNotGenizah = 'True' LIMIT 1",
-                (sys_id,),
-            )
-            return cursor.fetchone() is not None
-        except Exception as e:
-            logger.error(f"NliCrossrefService.get_is_not_genizah error for {sys_id}: {e}")
-            return False
-
     def get_catalog_entry(self, sys_id: str) -> Optional[str]:
         """
         Get catalog entry reference (e.g., Neubauer-Cowley) for a manuscript.
@@ -688,13 +665,12 @@ class NliCrossrefService:
             sys_id: The Alma/system ID for the manuscript.
 
         Returns:
-            Dict with keys: is_not_genizah, catalog_entry, collection_storage,
+            Dict with keys: catalog_entry, collection_storage,
             physical_metadata. Returns empty dict if service unavailable.
         """
         if self._conn is None or not sys_id:
             return {}
         return {
-            'is_not_genizah': self.get_is_not_genizah(sys_id),
             'catalog_entry': self.get_catalog_entry(sys_id),
             'collection_storage': self.get_collection_storage(sys_id),
             'physical_metadata': self.get_physical_metadata(sys_id),

@@ -2,15 +2,45 @@
 
 ## What This Is
 
-A research platform for the Cairo Genizah that combines manuscript image browsing with scholarly data from Princeton Geniza Project (PGP) and Fragment of the Jewish Manuscript Studies (FJMS). Users can view human-curated transcriptions from multiple scholars, browse rich document metadata with domain classifications and catalog enrichment, navigate fragment relationships including scientific joins, search across ~217,000 manuscript records with domain-based filtering, and perform advanced Responsa-Project style searches with grammatical expansion, Judeo-Arabic support, and a visual query builder. Available as both a NiceGUI web app and a PyQt6 desktop app.
+A research platform for the Cairo Genizah that combines manuscript image browsing with scholarly data from Princeton Geniza Project (PGP) and Fragment of the Jewish Manuscript Studies (FJMS). Users can view human-curated transcriptions from multiple scholars, browse rich document metadata with domain classifications and catalog enrichment, navigate fragment relationships including scientific joins, search across ~217,000 manuscript records with domain-based filtering, and perform advanced Responsa-Project style searches with grammatical expansion, Judeo-Arabic support, and a visual query builder. All scholarly reference data served from local SQLite sidecars for offline-capable, sub-millisecond browsing. Available as both a NiceGUI web app and a PyQt6 desktop app.
 
 ## Core Value
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current State (after v6.0.0 shipped)
+
+**Shipped:** v6.0.0 Local Data Architecture (2026-02-22, git tag v6.0.0)
+- PGP data migrated to local pgp.db sidecar (147MB, 104K rows) -- zero Supabase dependency for read-only data
+- PgpService with sub-millisecond local queries replacing 50-200ms Supabase API calls
+- FJMS catalog descriptions expanded (4 new tables, ~1.7M rows) with dedicated 5-section scholarly dialog
+- Desktop offline PGP browsing verified, sidecar update mechanism for future data updates
+- All desktop Qt lifecycle crashes fixed, 200-result cap replaced with PAGE_SIZE=50 pagination
+- Performance optimizations: parallel NLI fetch, browse crossref parallelization, FL ID O(1) index, variant cache unification
+- PostHog analytics integrated (env-var gated, privacy-first: maskAllInputs + identified_only)
+- IsNotGenizah badge removed from UI (data preserved in sidecar)
+
+**Architecture:**
+- Web: NiceGUI -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI) + Supabase (community features only)
+- Desktop: PyQt6 -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI) + Supabase (community features only)
+- Shared: genizah_core.py (~8,300 lines -- search engine, metadata, variants, Responsa)
+- Shared: shared/document_service.py (PGP data from pgp.db SQLite)
+- Shared: shared/corrections_service.py (corrections data access)
+- Shared: shared/fjms_service.py (FJMS domain, join, catalog, bibliography queries from fjms_enrichment.db)
+- Shared: shared/nli_crossref_service.py (NLI crossref, images, metadata, library URLs from nli_crossref.db)
+
+**Data:**
+- pgp.db: 35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments (v1.0.0)
+- manuscripts (libraries.csv): ~217,000 records
+- fjms_enrichment.db: 390K domains, 48K joins, 500K catalog, 542K bibliography, 64K catalog_refs, ~1.7M new catalog detail rows (v3.0.0)
+- nli_crossref.db: 815K NLI images, 141K Cambridge manifests, 28K Manchester LUNA, 453 JTS DPUL (v1.2.0)
+
 ## Requirements
 
 ### Validated
+
+<details>
+<summary>v1 through v5.9.0 requirements (55 items)</summary>
 
 - Search MiDRASH auto-transcriptions (V0.8/V0.7) per page -- existing
 - User correction submissions with approval workflow -- existing
@@ -52,29 +82,30 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - FJMS join group display with scholar attribution on browse page (both apps) -- v5.8.0
 - Catalog enrichment display (titles, authors, dates) on browse page (both apps) -- v5.8.0
 - FTS5 schema in sidecar (UI deferred) -- v5.8.0
-
 - NLI crossref sidecar (815K records) imported with NliCrossrefService (16 methods) -- v5.9.0
 - Cambridge IIIF manifests (141K) imported into sidecar with local image resolution -- v5.9.0
 - Cambridge images load via local CUDL IIIF, bypassing NLI -- v5.9.0
 - Image availability source indicators and folio navigation in both apps -- v5.9.0
 - Physical metadata (material, folios) and library collection links (KTIV, CUDL, LUNA, DPUL) -- v5.9.0
 - FIST bibliography (542K references) with mention type badges and scholar attribution -- v5.9.0
-- Catalog cross-references (64K entries across 80 catalogs), Neubauer-Cowley, IsNotGenizah badge -- v5.9.0
+- Catalog cross-references (64K entries across 80 catalogs), Neubauer-Cowley -- v5.9.0
 - Manchester LUNA (28K IDs) and JTS/Princeton Figgy integration with detail page links -- v5.9.0
 
-### Active
+</details>
 
-## Current Milestone: v6.0.0 Local Data Architecture
-
-**Goal:** Migrate all reference data from Supabase to local SQLite sidecars and add FJMS full texts as scholarly sources, making browsing fully offline-capable and eliminating cloud dependency for read-only data.
-
-**Target features:**
-- PGP data (documents, sources, footnotes, fragments) migrated to SQLite sidecar
-- Shared document_service.py rewritten for SQLite (both apps)
-- FJMS full texts (65K transcriptions) exported and integrated as version selector sources
-- PGP/FJMS source deduplication
-- Read-only Supabase tables removed (full cutover)
-- Supabase retained only for community features (auth, corrections, lists, comments)
+- PGP data (documents, sources, footnotes, fragments) exported to pgp.db sidecar -- v6.0.0
+- document_service.py rewritten to read from SQLite instead of Supabase -- v6.0.0
+- Both web and desktop apps use pgp.db for all PGP reference data -- v6.0.0
+- JSON data (tags, sections) preserved correctly in SQLite with query parity -- v6.0.0
+- Search result enrichment (PGP metadata batch lookup) uses pgp.db -- v6.0.0
+- PGP tag-based search uses SQLite json_each() instead of Supabase -- v6.0.0
+- FJMS catalog descriptions exported and accessible via dedicated dialog in both apps -- v6.0.0
+- pgp.db bundled in desktop installer and web deployment -- v6.0.0
+- Desktop PGP browsing works without internet (images excluded) -- v6.0.0
+- Paginated search results (PAGE_SIZE=50) replacing 200-result cap -- v6.0.0
+- PostHog analytics integrated alongside Google Analytics -- v6.0.0
+- Desktop crash fixes (sip.isdeleted guards on all Qt lifecycle sites) -- v6.0.0
+- Performance: parallel NLI fetch, browse crossref parallelization, variant cache unification -- v6.0.0
 
 ### Out of Scope
 
@@ -84,52 +115,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Build transcription editor -- link to external tools instead
 - Build join detection AI -- import from NLI/PGP instead
 - Transcription search in Tantivy -- deferred (Phase 13, needs server-side index architecture)
-- NLI PartOf relationships UI (424K records) -- service method exists, UI deferred to future milestone
+- NLI PartOf relationships UI (424K records) -- service method exists, UI deferred
 - NLI See cross-references UI (19K records) -- service method exists, UI deferred
 - NLI BifolioWith pairs UI (23K records) -- service method exists, UI deferred
-- Per-component search modes (exact/variants per column) -- Option III, defer unless demand
-- Scope search (sentence/paragraph/document) -- Option III feature, defer
-- Per-component negation (NOT clause) -- Option III feature, defer
-- Bidirectional sync between tabular and text field -- one-way only
-- `\s*` per char on variants/JA expansions -- only on original terms
-- Desktop Responsa checkbox persistence between sessions -- defaults on startup
-- `##` double-hash syntax -- checkbox approach preferred
-- Query preview line -- user explicitly excluded
-- FTS5 catalog search UI -- schema included in v5.8.0, UI deferred to future milestone
-- FJMS full texts (65K transcriptions) -- in scope for v6.0.0
+- FTS5 catalog search UI -- schema exists in sidecar, UI deferred
+- FJMS full texts (65K transcriptions) as version selector sources -- deferred
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
 - FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
 
 ## Context
-
-### Current State (after v5.9.0 shipped)
-
-**Shipped:** v5.9.0 Multi-Source Image & Metadata Integration (2026-02-16, git tag v5.9.0)
-- NLI crossref sidecar (815K image records, 141K Cambridge manifests, 28K Manchester LUNA, 453 JTS DPUL)
-- Multi-source image viewing: NLI, Cambridge, Manchester LUNA, JTS/Princeton Figgy with source switching
-- Folio navigation with scholarly notation (1r/1v) across all image sources
-- FIST bibliography (542K references), catalog cross-references (64K across 80 catalogs)
-- Physical metadata, Neubauer-Cowley, IsNotGenizah badge, collection/storage references
-- Library detail page links: KTIV, CUDL, LUNA detail, DPUL catalog
-- 11/14 requirements satisfied, 1 invalidated (FGP ≠ FL), 2 deferred (REL-01/REL-02)
-
-**Architecture:**
-- Web: NiceGUI -> Supabase (PGP data) + Tantivy (search index) + SQLite sidecars (FJMS + NLI)
-- Desktop: PyQt6 -> Supabase (community features) + Tantivy (search index) + SQLite sidecars (FJMS + NLI)
-- Shared: genizah_core.py (~8,300 lines -- search engine, metadata, variants, Responsa)
-- Shared: shared/document_service.py (PGP data access)
-- Shared: shared/corrections_service.py (corrections data access)
-- Shared: shared/fjms_service.py (FJMS domain, join, catalog, bibliography queries)
-- Shared: shared/nli_crossref_service.py (NLI crossref, images, metadata, library URLs)
-
-**Data:**
-- documents: 35,839 records (full PGP corpus)
-- document_sources: 9,364 (7,664 editions + 1,696 translations) with sections JSONB
-- document_footnotes: 22,757 records
-- document_fragments: 36,155 links
-- manuscripts (libraries.csv): ~217,000 records
-- fjms_enrichment.db: 390K domains, 48K joins, 500K catalog, 542K bibliography, 64K catalog_refs (v2.0.0)
-- nli_crossref.db: 815K NLI images, 141K Cambridge manifests, 28K Manchester LUNA, 453 JTS DPUL (v1.2.0)
 
 ### Search Engine (Two-Phase Architecture)
 
@@ -149,6 +143,7 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 - **Backward Compatibility**: All existing search modes unchanged when Responsa mode OFF
 - **Combinatorial Cap**: MAX_EXPANDED_TERMS = 500 with 6-step downgrade cascade
 - **PGP Tags Interaction**: Responsa sub-options hidden when PGP Tags mode active
+- **Legacy Supabase**: PGP tables kept in Supabase (legacy desktop users depend on them)
 
 ## Key Decisions
 
@@ -159,36 +154,13 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Two-phase search (Tantivy + Regex) | Best of both: speed + precision | Good |
 | Shared service layer (document_service.py) | Both apps consume PGP data | Good |
 | Option II (Hybrid) for Responsa core | Tantivy OR groups + Regex patterns, best balance | Good |
-| Option IIb (Dialog/Panel) for tabular | Separate builder, one-way sync to text | Good |
-| Responsa as dropdown mode (not checkbox row) | Cleaner UX, first-class mode | Good |
-| `#` conflict: Responsa ON = shortcuts OFF | Clear separation, no ambiguity | Good |
-| Simplified JA: always 'al' (no assimilation) | 8 forms vs 14, simpler and sufficient for Genizah | Good |
-| 6-step explosion guard cascade | Prevents query explosion while maximizing coverage | Good |
-| Flex spacing on originals only | Performance-safe, covers most OCR cases | Good |
-| Desktop QDialog for tabular | Avoids crowding, follows existing patterns | Good |
-| One-way tabular -> text sync | Complexity-appropriate for MVP | Good |
-| Phase 13 deferred | Transcription index build too slow for desktop | Revisit |
-| Query-time diacritics stripping (not re-index) | No index rebuild needed, sufficient for Genizah text | Good |
-| Regex mode exempt from normalization | Users control their own regex patterns | Good |
-| stdlib HTMLParser for PGP canvases | No external dependency, sufficient for structured HTML | Good |
-| Sections JSONB per-source (not per-document) | Multi-scholar support, avoids cross-contamination | Good |
-| Author_slug matching for section import | Prevents broadcasting sections to wrong sources | Good |
-| Client-as-parameter for corrections service | Enables both web and desktop to pass their own authenticated client | Good |
-| Shared+shim pattern for corrections (like document_service) | Consistent import pattern, backward-compatible | Good |
-| asyncio.call_later replaces ui.timer for one-shot loads | Avoids NiceGUI parent_slot crash on container clear | Good |
-| SQLite sidecar for FJMS data (not CSV+dict or Supabase) | Read-only reference data, reverse lookups for domain filtering, no memory overhead, both apps | Good |
-| FTS5 schema now, UI deferred | Low-cost to include in schema, catalog search UI needs separate UX design | Good |
-| Three-source join merge (user -> PGP -> FJMS) | Consistent pipeline, dedup at each stage, purple badge for FJMS | Good |
+| SQLite sidecar pattern (3 sidecars) | Read-only reference data, both apps, offline capable | Good |
+| pgp.db as separate sidecar (not extending existing) | Distinct domain boundary, different update cycle | Good |
+| Tags as TEXT JSON with json_each() | Simple start, 115ms acceptable for 2695 tags | Good |
 | Post-search domain filtering (not pre-search) | Users see all results first, then narrow by domain | Good |
-| Batch domain lookup (get_domains_for_sys_ids) | Efficient post-search collection in 500-item batches | Good |
-| SourceName join via LEFT JOIN dbo_CodeSource | Per-record scholarly source attribution in catalog | Good |
-| Sentinel CopyDate values normalized to None | Clean display, no meaningless 0/-99/-1 dates shown | Good |
-| Separate nli_crossref.db sidecar (not in fjms_enrichment.db) | Different provenance and update cycles | Good |
-| All 25 NLI CSV columns stored as TEXT | No filtering per user decision, maximum data preservation | Good |
+| Separate nli_crossref.db sidecar | Different provenance and update cycles from FJMS | Good |
 | FGP ≠ FL (crossref FGPImageNumberId not usable for IIIF) | Friedberg photo numbers are different numbering system | Lesson Learned |
-| Denormalized bibliography at export time (542K rows) | Single-table lookups, no runtime JOINs | Good |
-| Unconditional EnrichMetadataThread startup | Removed cache-first short-circuit that blocked Oxford enrichment | Good |
-| Manchester LUNA + JTS DPUL pre-imported to sidecar | Detail page links instead of search links, IIIF manifests as image source | Good |
+| Phase 13 deferred | Transcription index build too slow for desktop | Revisit |
 
 ---
-*Last updated: 2026-02-16 after v6.0.0 milestone started*
+*Last updated: 2026-02-22 after v6.0.0 milestone shipped*

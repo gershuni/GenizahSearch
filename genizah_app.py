@@ -9651,14 +9651,6 @@ class GenizahGUI(QMainWindow):
         if catalog_entry:
             label_text += f" | {catalog_entry}"
 
-        # Append IsNotGenizah badge for flagged manuscripts
-        if meta.get('is_not_genizah', False):
-            label_text += (
-                f" <span style='background:#fff3e0; color:#e65100; "
-                f"padding:1px 4px; border-radius:3px; font-size:10px;'>"
-                f"{tr('Not Genizah')}</span>"
-            )
-
         self.browse_info_lbl.setText(label_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
 
@@ -20256,13 +20248,6 @@ class GenizahGUI(QMainWindow):
         catalog_entry = cached_meta.get('catalog_entry')
         if catalog_entry:
             info_text += f" | {catalog_entry}"
-        if cached_meta.get('is_not_genizah', False):
-            info_text += (
-                f" <span style='background:#fff3e0; color:#e65100; "
-                f"padding:1px 4px; border-radius:3px; font-size:10px;'>"
-                f"{tr('Not Genizah')}</span>"
-            )
-
         self.browse_info_lbl.setText(info_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
         if input_shelf:

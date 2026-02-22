@@ -151,10 +151,49 @@
 
 ## v5.9.0 Multi-Source Image & Metadata Integration (Shipped: 2026-02-16)
 
-**Phases completed:** 36 phases, 106 plans, 32 tasks
+**Delivered:** Imported NLI crossreference data (815K image-level records) and Cambridge IIIF manifests (141K URLs) into a second SQLite sidecar, plus Manchester LUNA and JTS/Princeton Figgy integration, enabling direct image access across 75+ libraries, physical metadata, scholarly bibliography, and library-specific viewer links in both apps.
+
+**Phases completed:** 29-34 (22 plans total, including 3 gap closure plans)
 
 **Key accomplishments:**
-- (none recorded)
+- NLI crossref sidecar (815K records, 253K distinct AlmaIds) with NliCrossrefService (16 query methods)
+- Cambridge IIIF (141K manifest URLs) for direct image resolution, bypassing NLI
+- Folio navigation with scholarly notation (1r/1v) and multi-source image switching (NLI, Cambridge, Manchester, JTS)
+- FIST bibliography (542K denormalized references) with mention type badges and scholar attribution
+- Catalog cross-references (64K entries across 80 catalogs), Neubauer-Cowley numbers, physical metadata
+- Manchester LUNA (28K) and JTS/Princeton Figgy (453) integration with detail page links and IIIF manifests
+
+**Stats:**
+- 76 commits, 6 phases (29-34), 22 plans
+- 6 days (Feb 10 -> Feb 16, 2026)
+- 11/14 requirements satisfied, 1 invalidated (FGP != FL), 2 deferred (REL-01/REL-02)
+
+**Git tag:** v5.9.0
+
+---
+
+
+## v6.0.0 Local Data Architecture (Shipped: 2026-02-22)
+
+**Delivered:** Migrated all PGP reference data from Supabase to a local SQLite sidecar (pgp.db, 147MB) and added FJMS catalog descriptions as a scholarly resource, making browsing fully offline-capable and eliminating cloud dependency for read-only data. Additionally stabilized the app with crash fixes, pagination, and analytics, and optimized performance with parallel NLI fetch, async domain enrichment, and variant cache unification.
+
+**Phases completed:** 35-40 (21 plans total: 8 core + 8 bug-fix/cleanup + 5 performance optimization)
+
+**Key accomplishments:**
+- PGP data migrated to local pgp.db sidecar (147MB, 104K rows across 5 tables) -- zero Supabase dependency for read-only data
+- PgpService rewritten for SQLite with sub-millisecond local queries replacing 50-200ms API calls
+- FJMS catalog descriptions expanded with 4 new tables (~1.7M rows), dedicated 5-section scholarly dialog in both apps
+- Desktop offline PGP browsing verified, sidecar update mechanism for future data updates without app reinstall
+- All desktop Qt lifecycle crashes fixed (sip.isdeleted guards), 200-result cap replaced with PAGE_SIZE=50 pagination
+- Performance optimizations: parallel NLI fetch, browse crossref parallelization, FL ID O(1) index, variant cache unification
+
+**Stats:**
+- 155 commits, 122 files changed, +25,123 / -4,595 lines
+- 6 phases (35-40), 21 plans
+- 6 days (Feb 16 -> Feb 22, 2026)
+- 14/14 requirements satisfied (audit passed)
+
+**Git tag:** v6.0.0
 
 ---
 

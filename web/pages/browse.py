@@ -2048,10 +2048,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label(tr('Library')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                                 ui.label(page.library_name).classes('text-sm').style('color: var(--text-primary);')
 
-                        # Shelfmark (with IsNotGenizah badge and Neubauer-Cowley catalog entry)
+                        # Shelfmark (with Neubauer-Cowley catalog entry)
                         # Read crossref metadata from enrichment state (fetched in parallel by _load_enrichment)
                         _crossref = state.crossref_data or {}
-                        _is_not_genizah = _crossref.get('is_not_genizah', False)
                         _catalog_entry_str = _crossref.get('catalog_entry', '') or ''
                         _collection_storage = _crossref.get('collection_storage')
 
@@ -2059,10 +2058,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.label(tr('Shelfmark')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                             with ui.row().classes('items-center gap-2'):
                                 ui.label(page.shelfmark or 'N/A').classes('text-sm').style('color: var(--text-primary);')
-                                if _is_not_genizah:
-                                    ui.badge(tr('Not Genizah'), color='orange').props('outline dense').classes('text-xs').tooltip(
-                                        tr('This item may not be from the Cairo Genizah')
-                                    )
                             if _catalog_entry_str:
                                 ui.label(_catalog_entry_str).classes('text-xs text-gray-500').style('color: var(--text-tertiary);')
 

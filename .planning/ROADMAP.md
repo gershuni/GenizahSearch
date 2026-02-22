@@ -9,7 +9,7 @@
 - ✅ **v5.7.3 Pending Corrections Visibility** -- Phases 22-24 (shipped 2026-02-11)
 - ✅ **v5.8.0 FJMS Integration** -- Phases 25-28 (shipped 2026-02-15)
 - ✅ **v5.9.0 Multi-Source Image & Metadata Integration** -- Phases 29-34 (shipped 2026-02-16)
-- 🚧 **v6.0.0 Local Data Architecture** -- Phases 35-38 (in progress)
+- ✅ **v6.0.0 Local Data Architecture** -- Phases 35-40 (shipped 2026-02-22)
 
 ## Phases
 
@@ -94,106 +94,25 @@ Multi-source image viewing with folio navigation, bibliography (542K), catalog r
 
 </details>
 
-### v6.0.0 Local Data Architecture (In Progress)
+<details>
+<summary>✅ v6.0.0 Local Data Architecture (Phases 35-40) -- SHIPPED 2026-02-22</summary>
 
-**Milestone Goal:** Migrate all PGP reference data from Supabase to a local SQLite sidecar and add FJMS catalog descriptions as scholarly sources, making browsing fully offline-capable and eliminating cloud dependency for read-only data.
+See: .planning/milestones/v6.0.0-ROADMAP.md
 
-- [x] **Phase 35: PGP Sidecar Export** - Export all PGP data from Supabase to pgp.db with validated JSON serialization (completed 2026-02-17)
-- [x] **Phase 36: PGP Service Layer** - Rewrite document_service.py to read from SQLite, integrating both apps with pgp.db (completed 2026-02-17)
-- [x] **Phase 37: FJMS Catalog Descriptions** - Export enriched FJMS catalog data (4 new tables, ~1.7M rows) and surface via dedicated dialog in both apps (completed 2026-02-17)
-- [x] **Phase 38: Distribution and Verification** - Bundle pgp.db for distribution and verify offline browsing works end-to-end (completed 2026-02-18)
+6 phases, 21 plans (8 core + 8 bug-fix/cleanup + 5 performance optimization), 155 commits.
+PGP data migrated to local pgp.db sidecar (147MB). FJMS catalog descriptions expanded (4 new tables, ~1.7M rows).
+Desktop offline PGP browsing. All desktop crashes fixed. Paginated search (PAGE_SIZE=50).
+Performance: parallel NLI fetch, browse crossref parallelization, FL ID index, variant cache unification.
+14/14 requirements satisfied (audit passed).
 
-## Phase Details
-
-### Phase 35: PGP Sidecar Export
-**Goal**: PGP reference data exists as a validated, reproducible SQLite sidecar
-**Depends on**: Nothing (first phase of v6.0.0)
-**Requirements**: MIGR-01, MIGR-04, MIGR-08
-**Success Criteria** (what must be TRUE):
-  1. Running the export script produces pgp.db with all 4 tables (documents, sources, footnotes, fragments) and correct row counts matching Supabase
-  2. JSON columns (tags, sections) survive the round-trip: exported to TEXT, parsed back to identical Python objects
-  3. Re-running the export script from scratch produces an identical pgp.db (repeatable, idempotent)
-  4. Meta table tracks version and export timestamp (consistent with existing sidecar pattern)
-**Plans**: 1 plan
-Plans:
-- [ ] 35-01-PLAN.md — Export script + pgp.db generation with validation
-
-### Phase 36: PGP Service Layer
-**Goal**: Both apps read all PGP data from local SQLite instead of Supabase, with identical behavior
-**Depends on**: Phase 35
-**Requirements**: MIGR-02, MIGR-03, MIGR-05, MIGR-06, MIGR-07
-**Success Criteria** (what must be TRUE):
-  1. User browses any PGP document in web app and sees the same metadata, transcriptions, footnotes, and fragments as before the migration
-  2. User browses any PGP document in desktop app and sees the same metadata, transcriptions, footnotes, and fragments as before the migration
-  3. Search results show PGP transcription indicators (batch lookup) with results identical to Supabase-backed version
-  4. PGP tag-based search returns the same results as before (using SQLite json_each instead of Supabase GIN)
-  5. Version selector displays all PGP editions and translations with correct section parsing
-**Plans**: 3 plans
-Plans:
-- [x] 36-01-PLAN.md — PgpService class rewrite (Supabase to SQLite) + web shim update
-- [x] 36-02-PLAN.md — Test suite rewrite (in-memory SQLite fixtures) + import smoke tests
-- [ ] 36-03-PLAN.md — Gap closure: FL ID browse path missing pgp_metadata assignment
-
-### Phase 37: FJMS Catalog Descriptions
-**Goal**: Researchers can access rich FJMS scholarly descriptions (content, physical metadata, source attribution) from the browse page in both apps
-**Depends on**: Nothing (can run parallel to Phase 36; only depends on fjms_enrichment.db existing, which shipped in v5.8.0)
-**Requirements**: FJMS-01, FJMS-02, FJMS-03
-**Status**: Re-planned (v2) with enriched export scope
-**Success Criteria** (what must be TRUE):
-  1. FJMS catalog descriptions include rich structured data (content identification + physical metadata) beyond what browse already shows
-  2. User clicks a dedicated button in the browse metadata panel and sees the FJMS scholarly description for that manuscript
-  3. Each description shows source attribution (catalog name and/or scholar)
-**Plans**: 5 plans
-Plans:
-- [ ] 37-01-PLAN.md — Export script enrichment (4 new tables + catalog v2 schema + FTS5 rebuild)
-- [ ] 37-02-PLAN.md — Service layer methods + tests + translation keys
-- [ ] 37-03-PLAN.md — Web catalog dialog + browse/search button wiring
-- [ ] 37-04-PLAN.md — Desktop catalog dialog + Browse tab/ResultDialog button wiring
-- [ ] 37-05-PLAN.md — Gap closure: free description source attribution + desktop RTL fix
-
-### Phase 38: Distribution and Verification
-**Goal**: pgp.db is bundled for both distribution channels and desktop PGP browsing works without internet
-**Depends on**: Phase 36, Phase 37
-**Requirements**: DIST-01, DIST-02, PERF-01
-**Success Criteria** (what must be TRUE):
-  1. Desktop installer includes pgp.db and the app launches with full PGP browsing from local data
-  2. Web server deployment includes pgp.db and serves PGP data from local sidecar
-  3. Desktop app with internet disconnected can browse PGP metadata, transcriptions, footnotes, and fragment navigation (images excluded)
-**Plans**: 3 plans
-Plans:
-- [ ] 38-01-PLAN.md — Bundle pgp.db in desktop build + deployment docs + PgpService.get_version()
-- [ ] 38-02-PLAN.md — Offline verification tests (all three sidecars)
-- [ ] 38-03-PLAN.md — Sidecar update mechanism + About screen data sources
+</details>
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 35 -> 36 -> 37 -> 38
-Note: Phase 37 can run in parallel with Phase 36 (independent data source).
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 35. PGP Sidecar Export | 1/1 | Complete    | 2026-02-17 |
-| 36. PGP Service Layer | 2/3 | Complete    | 2026-02-17 |
-| 37. FJMS Catalog Descriptions | 4/5 | Gap closure | 2026-02-17 |
-| 38. Distribution and Verification | 3/3 | Complete    | 2026-02-18 |
-
-### Phase 39: Bug Fixing, Cleanup, Performance Improving
-
-**Goal:** Stabilize and polish the app: fix all desktop crashes, add server-side pagination, integrate PostHog analytics, optimize web performance, and add Playwright E2E + performance tests
-**Depends on:** Phase 38
-**Plans:** 8/8 plans complete
-
-Plans:
-- [x] 39-01-PLAN.md — Fix all desktop crash types (sip.isdeleted guards + rare crash verification) + archive crash log
-- [x] 39-02-PLAN.md — Replace 200-result cap with paginated search results (PAGE_SIZE=50, all 11 sites)
-- [x] 39-03-PLAN.md — Integrate PostHog analytics alongside Google Analytics (env-var gated)
-- [x] 39-04-PLAN.md — Cache domain hierarchy to eliminate ~5s filter dialog lag
-- [x] 39-05-PLAN.md — Add NiceGUI Screen E2E tests for search/browse + performance tests
-- [x] 39-06-PLAN.md — Gap closure: fix pagination scroll error, VRD wheel zoom, E2E selenium skip
-- [x] 39-07-PLAN.md — Gap closure: extract CSS to static file, lazy login dialog for navigation speed
-- [x] 39-08-PLAN.md — Gap closure: parallelize page queries (asyncio.gather for search, batch FJMS for browse, async discoveries)
+**Total phases completed:** 40
+**Total plans completed:** ~115
+**Total milestones shipped:** 8
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-20 after adding 39-08 gap closure plan for page navigation speed*
+*Last updated: 2026-02-22 after v6.0.0 milestone shipped*

@@ -2379,7 +2379,6 @@ TRANSLATIONS = {
     # --- Phase 33: Metadata Enrichment ---
     "Bibliography References": "הפניות ביבליוגרפיות",
     "Catalog References": "הפניות קטלוגיות",
-    "Not Genizah": "לא גניזה",
     "Scholarly Sources": "מקורות מדעיים",
     "Collection & Storage": "אוסף ואחסון",
 

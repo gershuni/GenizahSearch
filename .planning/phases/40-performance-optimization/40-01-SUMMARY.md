@@ -58,7 +58,7 @@ Each task was committed atomically:
 
 1. **Task 1: Parallelize fetch_marc_data and fetch_iiif_manifest in enrich_metadata** - `62bf9217` (perf)
 
-**Plan metadata:** [pending] (docs: complete plan)
+**Plan metadata:** `81740bc0` (docs: complete plan)
 
 ## Files Created/Modified
 - `genizah_core.py` - enrich_metadata refactored to submit both NLI calls concurrently via ThreadPoolExecutor

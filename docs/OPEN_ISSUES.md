@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-16 (v5.9.0 milestone closed — multi-source image & metadata integration)
+> **Last Updated:** 2026-02-22 (v6.0.0 milestone closed — local data architecture, bug fixes, performance optimization)
 > **Status:** Active working document
 
 ---
@@ -196,6 +196,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-02-22 | Closed v6.0.0 milestone — local data architecture (pgp.db sidecar, FJMS catalog descriptions, offline browsing), bug fixes (desktop crashes, pagination), performance optimization (parallel NLI, crossref, variant cache), IsNotGenizah badge removed | Claude |
 | 2026-02-16 | Closed v5.9.0 milestone — multi-source image & metadata integration (NLI crossref, Cambridge/Manchester/JTS IIIF, bibliography, catalog refs), version bump to 5.9.0 | Claude |
 | 2026-02-15 | Closed v5.8.0 milestone — FJMS integration (domains, scientific joins, catalog enrichment), version bump to 5.8.0 | Claude |
 | 2026-02-11 | Closed v5.7.2 milestone — version bump to 5.7.2, AI code removed, search normalization, full green test suite, structural sections | Claude |

@@ -3404,9 +3404,6 @@ class MetadataManager:
                     current_meta['library_viewer_url'] = lib_url
 
                 # Phase 33: Metadata enrichment from NLI crossref
-                # IsNotGenizah badge
-                current_meta['is_not_genizah'] = crossref_svc.get_is_not_genizah(system_id)
-
                 # Neubauer-Cowley catalog entry (Oxford manuscripts)
                 catalog_entry = crossref_svc.get_catalog_entry(system_id)
                 if catalog_entry:

@@ -4,6 +4,55 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.0.0] - 2026-02-22
+
+### Milestone: Local Data Architecture
+
+Migrated all PGP reference data from Supabase to a local SQLite sidecar, added FJMS catalog descriptions as a scholarly resource, stabilized the app with crash fixes and pagination, and optimized performance across both apps.
+
+#### PGP Sidecar Migration (Phase 35-36)
+- **pgp.db sidecar**: All PGP data (35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments) exported to local SQLite (147MB)
+- **PgpService rewrite**: `document_service.py` reads from SQLite instead of Supabase -- sub-millisecond local queries replace 50-200ms API calls
+- **JSON preservation**: Tags and sections stored as TEXT JSON, queried with `json_each()` for full parity with Supabase GIN queries
+- **Both apps updated**: Web shim and desktop imports all point to local pgp.db
+- **Zero Supabase dependency**: All PGP reference data served locally; Supabase retained only for community features (auth, corrections, lists)
+
+#### FJMS Catalog Descriptions (Phase 37)
+- **Enriched export**: fjms_enrichment.db extended to v3.0.0 with 4 new tables (running_titles, size_field, catalog_free_desc, genizah_titles) adding ~1.7M rows
+- **Catalog dialog**: Dedicated 5-section scholarly layout (content identification, physical metadata, running titles, free descriptions, genizah titles) in both apps
+- **Source attribution**: Each catalog entry shows which scholarly catalog or scholar produced the description
+- **Batch catalog counts**: Search results show catalog source count on button labels for quick reference
+
+#### Distribution & Offline (Phase 38)
+- **Desktop bundling**: pgp.db included in installer via `build_app.bat` -- no separate download needed
+- **LOCALAPPDATA resolution**: User-updated sidecars stored in AppData, separate from bundled install directory
+- **Sidecar update mechanism**: SidecarUpdateThread checks for newer sidecar versions at startup with sequential download queue
+- **About screen**: Data Sources section showing versions of all 3 sidecars (pgp.db, fjms_enrichment.db, nli_crossref.db)
+- **Offline verification**: 12 tests confirming zero network dependency for all 3 sidecar services
+- **Desktop offline PGP browsing**: Full metadata, transcriptions, footnotes, and fragment navigation without internet (images excluded)
+
+#### Bug Fixing & Cleanup (Phase 39)
+- **Desktop crash fixes**: `sip.isdeleted()` guards on all Qt lifecycle crash sites (set_status_message, update_text_pos) -- eliminates all known crash-on-navigate bugs
+- **Paginated search results**: PAGE_SIZE=50 replaces the 200-result hard cap; prev/next navigation with scroll-to-top; storage persistence cap raised to 1000
+- **PostHog analytics**: Integrated alongside Google Analytics (env-var gated via `POSTHOG_API_KEY`); maskAllInputs + identified_only for privacy
+- **Domain filter performance**: Cached domain hierarchy eliminates ~5s lag when opening domain filter dialog (double-checked locking for thread safety)
+- **E2E test infrastructure**: Custom NiceGUI Screen fixture, app-level E2E via runpy, selenium as dev dependency with skip logic for CI
+- **CSS extraction**: Inline styles moved to static CSS file for maintainability
+- **Lazy login dialog**: Login dialog created on-demand instead of at page load, improving navigation speed
+- **Parallel page queries**: asyncio.gather + run.io_bound for search enrichment, batch FJMS for browse, async discoveries
+
+#### Performance Optimization (Phase 40)
+- **Parallel NLI fetch**: ThreadPoolExecutor for concurrent MARC + IIIF manifest calls, halving browse metadata load time
+- **Desktop async domain enrichment**: DomainEnrichmentWorker thread loads domain data after results display (~200ms); catalog detail fetched lazily on click
+- **Browse crossref parallelization**: 3 independent crossref queries via ThreadPoolExecutor (catalog entry, collection/storage, physical metadata)
+- **FL ID O(1) index**: Dictionary-based lookup for browse-by-FL-ID replacing linear scan (with fallback during startup window)
+- **Variant cache unification**: Pre-compute variants at REGEX_VARIANTS_LIMIT (8000) before per-term loops; Tantivy slices from superset cache
+
+#### Pre-Ship Cleanup
+- **IsNotGenizah badge removed**: Orange "Not Genizah" badge removed from both apps' browse pages and Reading Desk (data preserved in nli_crossref.db)
+
+---
+
 ## [5.9.0] - 2026-02-16
 
 ### Milestone: Multi-Source Image & Metadata Integration

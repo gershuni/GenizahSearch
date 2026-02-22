@@ -17,10 +17,16 @@ Web App (NiceGUI) ──────────────┐
          ├── Tantivy Index       ├──► Supabase (PostgreSQL)
          │   (local search)      │    - User auth
          │                       │    - Lists, corrections
-Desktop App (PyQt6) ────────────┘    - Comments, discoveries
+         ├── pgp.db (SQLite)     │    - Comments, discoveries
+         │   (PGP reference data)│
+         ├── fjms_enrichment.db  │
+         │   (FJMS scholarly)    │
+         ├── nli_crossref.db     │
+         │   (NLI images/meta)   │
+Desktop App (PyQt6) ────────────┘
 ```
 
-**Note:** The FastAPI backend was removed in January 2026. All user data now goes directly to Supabase.
+**Note:** The FastAPI backend was removed in January 2026. All read-only reference data is now served from local SQLite sidecars (pgp.db, fjms_enrichment.db, nli_crossref.db). Supabase is retained only for community features (auth, corrections, lists, comments).
 
 ## Key Files
 
@@ -179,6 +185,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- February 2026: v6.0.0 Local Data Architecture -- PGP data migrated to pgp.db sidecar (147MB), FJMS catalog descriptions expanded, offline browsing, desktop crash fixes, paginated search, performance optimizations (both apps)
 - February 2026: v5.9.0 Multi-Source Image & Metadata Integration -- NLI crossref sidecar (815K), Cambridge/Manchester/JTS IIIF, folio navigation, bibliography, catalog refs (both apps)
 - February 2026: v5.8.0 FJMS Integration -- domain classifications, scientific joins, catalog enrichment via SQLite sidecar (both apps)
 - February 2026: v5.7.2 Cleanup, Normalization & Sections -- AI code removed, Unicode search normalization, full green test suite, structural HTML section parser
