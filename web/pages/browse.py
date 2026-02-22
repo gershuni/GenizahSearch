@@ -1189,36 +1189,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
         from web.components.catalog_dialog import show_catalog_dialog
 
+        bib_chip_style = 'border: 1.5px solid #7e57c2; border-radius: 12px; min-height: 22px; color: #7e57c2; font-weight: 600;'
+        catalog_chip_style = 'border: 1.5px solid #5c6bc0; border-radius: 12px; min-height: 22px; color: #5c6bc0; font-weight: 600;'
+
         with container:
-            with ui.row().classes('items-center gap-2 flex-wrap px-3 py-1'):
-                if fjms_bib:
-                    fjms_dlg = create_fjms_bibliography_dialog(
-                        fjms_bib, page.sys_id,
-                        shelfmark=page.shelfmark or '',
-                    )
-                    ui.button(
-                        f'{tr("Bibliography FJMS")} ({len(fjms_bib)})',
-                        icon='menu_book',
-                        on_click=fjms_dlg.open,
-                    ).props('outline dense').classes('text-sm')
-                if marc_bib:
-                    nli_dlg = create_nli_bibliography_dialog(
-                        marc_bib, page.sys_id,
-                        shelfmark=page.shelfmark or '',
-                    )
-                    ui.button(
-                        f'{tr("Bibliography Ktiv")} ({len(marc_bib)})',
-                        icon='menu_book',
-                        on_click=nli_dlg.open,
-                    ).props('outline dense').classes('text-sm')
-                # Catalog Records button -- show_catalog_dialog auto-creates fjms_service
-                catalog_btn = ui.button(
-                    f'{tr("Catalog Records")} ({catalog_source_count})',
-                    icon='description',
+            if fjms_bib:
+                fjms_dlg = create_fjms_bibliography_dialog(
+                    fjms_bib, page.sys_id,
+                    shelfmark=page.shelfmark or '',
+                )
+                ui.button(
+                    f'{tr("Bib. FJMS")} ({len(fjms_bib)})',
+                    on_click=fjms_dlg.open,
+                ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(bib_chip_style)
+            if marc_bib:
+                nli_dlg = create_nli_bibliography_dialog(
+                    marc_bib, page.sys_id,
+                    shelfmark=page.shelfmark or '',
+                )
+                ui.button(
+                    f'{tr("Bib. Ktiv")} ({len(marc_bib)})',
+                    on_click=nli_dlg.open,
+                ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(bib_chip_style)
+            if catalog_source_count > 0:
+                ui.button(
+                    f'{tr("Catalog rec.")} ({catalog_source_count})',
                     on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_catalog_dialog(s, sm),
-                ).props('outline dense').classes('text-sm')
-                if catalog_source_count == 0:
-                    catalog_btn.disable()
+                ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(catalog_chip_style)
 
     async def go_to_page(new_page: int):
         """Navigate to a specific page number."""
@@ -3686,6 +3683,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     'border: 1.5px solid #ff9800; border-radius: 12px; min-height: 22px; color: #ff9800; font-weight: 600;'
                                 ).tooltip(tr('Open in Bodleian Libraries'))
 
+                            # === Bibliography & Catalog Buttons (inline, deferred) ===
+                            bib_catalog_el = ui.element('span').classes('inline-flex items-center gap-1')
+                            enrichment_refs['bib_catalog_container'] = bib_catalog_el
+                            if state.enrichment_loaded:
+                                _populate_bib_catalog_buttons(bib_catalog_el, state, page)
+
                         # Spacer
                         ui.element('div').classes('flex-grow')
 
@@ -3828,13 +3831,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ).props(f'flat dense aria-label="{tr("Add to Reading Desk")}"').classes(
                                 'text-green-700'
                             ).tooltip(tr('Add to Reading Desk'))
-
-                    # === Bibliography & Catalog Buttons ===
-                    # Deferred population: buttons appear after enrichment Phase B loads
-                    bib_catalog_el = ui.element('div').classes('w-full')
-                    enrichment_refs['bib_catalog_container'] = bib_catalog_el
-                    if state.enrichment_loaded:
-                        _populate_bib_catalog_buttons(bib_catalog_el, state, page)
 
                 # === SIDE-BY-SIDE LAYOUT: Image (left) + Text (right) ===
                 # State for image panel visibility
