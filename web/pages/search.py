@@ -106,6 +106,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.original_edit_text: str = ""
             self.draft_saved: bool = False
             self.draft_id: Optional[str] = None
+            # Enrichment data (FJMS + crossref)
+            self.fjms_data: Optional[dict] = None
+            self.crossref_data: Optional[dict] = None
+            # Highlighted search terms for re-application on version change
+            self.highlight_terms: List[str] = []
             # UI element references for in-place updates
             self.result_label = None
             self.score_badge = None
@@ -2428,13 +2433,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         with ui.dialog().props('maximized') as dialog:
             with ui.card().classes('w-full h-full flex flex-col').style('background: var(--bg-secondary);'):
-                # === Header Bar ===
-                adv_state.header_container = ui.row().classes('w-full px-4 py-3 items-center justify-between shrink-0').style(
+                # === Header Bar (compact: close, shelfmark, result nav, fullscreen) ===
+                adv_state.header_container = ui.row().classes('w-full px-4 py-2 items-center justify-between shrink-0').style(
                     'background: var(--bg-header); color: white;'
                 )
                 with adv_state.header_container:
-                    # Left: Close and Title
-                    with ui.row().classes('items-center gap-3'):
+                    # Left: Close and result counter
+                    with ui.row().classes('items-center gap-2'):
                         ui.button(icon='close', on_click=dialog.close).props('flat round color=white size=sm')
                         adv_state.result_label = ui.label(
                             f"{tr('Result')} {index + 1} / {len(adv_state.results)}"
@@ -2445,7 +2450,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Right: Navigation and Fullscreen
                     with ui.row().classes('items-center gap-2'):
-                        # Navigation Buttons
                         adv_state.prev_btn = ui.button(
                             icon='chevron_right' if is_rtl() else 'chevron_left',
                             on_click=lambda: navigate_result(-1)
@@ -2458,7 +2462,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-400')
 
-                        # Fullscreen toggle
                         def toggle_fullscreen():
                             adv_state.is_fullscreen = not adv_state.is_fullscreen
                             render_content(adv_state.results[adv_state.current_result_idx])
@@ -2468,9 +2471,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             on_click=toggle_fullscreen
                         ).props('flat round color=white size=sm').tooltip(tr('Fullscreen'))
 
+                # === Info Bar (shelfmark, buttons, chips — rendered in render_content) ===
+                adv_state.info_bar_container = ui.element('div').classes('w-full shrink-0').style(
+                    'background: var(--bg-primary); border-bottom: 1px solid var(--border-light);'
+                )
+
                 # === Main Content (refreshable container) ===
                 with ui.scroll_area().classes('flex-grow'):
-                    adv_state.content_container = ui.column().classes('w-full max-w-6xl mx-auto p-6 gap-6')
+                    adv_state.content_container = ui.column().classes('w-full max-w-6xl mx-auto px-4 py-2 gap-2')
 
         def navigate_result(direction: int):
             """Navigate to prev/next result with in-place update (no dialog close/reopen)."""
@@ -2484,6 +2492,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             result = adv_state.results[idx]
             display = result.get('display', {})
             adv_state.current_sys_id = display.get('id', '')
+
+            # Reset enrichment data for new result
+            adv_state.fjms_data = None
+            adv_state.crossref_data = None
 
             # Update header label
             adv_state.result_label.set_text(
@@ -2528,6 +2540,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 else:
                     adv_state.current_page = None
                     adv_state.total_pages = 1
+
+                # Fetch FJMS + crossref enrichment
+                if adv_state.current_sys_id:
+                    sid = adv_state.current_sys_id
+                    try:
+                        from shared.fjms_service import get_fjms_service
+                        fjms = get_fjms_service(thread_safe=True)
+                        if fjms.is_available():
+                            adv_state.fjms_data = await run.io_bound(lambda: {
+                                'catalog_records': fjms.get_catalog_records(sid),
+                                'domains': fjms.get_domains(sid),
+                                'bibliography': fjms.get_bibliography(sid),
+                                'source_names': fjms.get_source_names(sid),
+                                'catalog_refs': fjms.get_catalog_refs(sid),
+                            })
+                    except Exception:
+                        pass
+                    try:
+                        from shared.nli_crossref_service import get_nli_crossref_service
+                        svc = get_nli_crossref_service(thread_safe=True)
+                        if svc.is_available():
+                            adv_state.crossref_data = await run.io_bound(
+                                lambda: svc.get_crossref_metadata(sid)
+                            )
+                    except Exception:
+                        pass
 
                 render_content(result)
 
@@ -2672,6 +2710,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             except Exception as e:
                 ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
 
+        def _apply_highlight_marks(text: str, terms: list) -> str:
+            """Apply <mark> highlight tags around terms and convert newlines to <br>."""
+            for term in terms:
+                if term in text:
+                    text = text.replace(
+                        term,
+                        f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px; font-weight: 600;">{term}</mark>'
+                    )
+            return text.replace('\n', '<br>')
+
         def render_content(result):
             """Render the main content area."""
             adv_state.content_container.clear()
@@ -2786,15 +2834,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if snippet and '*' in snippet and display_text:
                 import re as re_module
                 highlighted_terms = re_module.findall(r'\*([^*]+)\*', snippet)
-                highlighted_text = display_text
-                for term in highlighted_terms:
-                    if term in highlighted_text:
-                        highlighted_text = highlighted_text.replace(
-                            term,
-                            f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px; font-weight: 600;">{term}</mark>'
-                        )
-                text_html = highlighted_text.replace('\n', '<br>')
+                adv_state.highlight_terms = highlighted_terms
+                text_html = _apply_highlight_marks(display_text, highlighted_terms)
             else:
+                adv_state.highlight_terms = []
                 text_html = display_text.replace('\n', '<br>') if display_text else ''
 
             with adv_state.content_container:
@@ -2803,6 +2846,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # FULLSCREEN MODE - Compact layout with text and image only
                 # ============================================================
                 if adv_state.is_fullscreen:
+                    # Hide the info bar in fullscreen mode
+                    adv_state.info_bar_container.clear()
                     # Compact info bar
                     with ui.row().classes('w-full items-center justify-between p-2 mb-2 rounded-lg').style(
                         'background: var(--bg-tertiary);'
@@ -2893,44 +2938,62 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     return  # Exit early for fullscreen mode
 
                 # ============================================================
-                # NORMAL MODE - Full layout with hero, text, image, actions
+                # NORMAL MODE - Compact info bar + text/image panels
                 # ============================================================
 
-                # === Hero Section ===
-                with ui.card().classes('w-full overflow-hidden').style('border-radius: 16px; border: none;'):
-                    ui.element('div').classes('w-full h-2').style(
-                        'background: linear-gradient(90deg, var(--primary-600), var(--primary-400), var(--accent-gold));'
-                    )
-                    with ui.column().classes('p-6 gap-4'):
-                        with ui.row().classes('items-start justify-between w-full'):
-                            with ui.column().classes('gap-2 flex-grow'):
-                                h1(display_shelfmark, classes='text-3xl font-bold', style='color: var(--primary-700);')
-                                if title:
-                                    ui.label(title).classes('text-lg').style(
-                                        'color: var(--text-secondary); direction: rtl; text-align: right;'
-                                    )
+                # --- Prepare enrichment data ---
+                fjms_data = adv_state.fjms_data or {}
+                from shared.fjms_service import get_fjms_service, merge_catalog_records, parse_textual_frame
+                fjms = get_fjms_service(thread_safe=True)
+                from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
+                from web.components.catalog_dialog import show_catalog_dialog
 
-                            with ui.row().classes('gap-2 shrink-0'):
+                fjms_bib = fjms_data.get('bibliography', [])
+                marc_bib = []
+                try:
+                    from web.state import state as app_state
+                    if app_state.meta_mgr and hasattr(app_state.meta_mgr, 'nli_cache'):
+                        cached = app_state.meta_mgr.nli_cache.get(sys_id, {})
+                        marc_bib = cached.get('marc', {}).get('bibliography', [])
+                except Exception:
+                    pass
+                catalog_source_count = len(fjms_data.get('source_names', []))
+
+                # === Info Bar (outside scroll area) ===
+                adv_state.info_bar_container.clear()
+                with adv_state.info_bar_container:
+                    with ui.column().classes('w-full max-w-6xl mx-auto px-4 py-2 gap-1'):
+                        # Row 1: Shelfmark + action buttons
+                        with ui.row().classes('items-center justify-between w-full gap-2'):
+                            # Left: Shelfmark (compact)
+                            with ui.row().classes('items-center gap-2 min-w-0 flex-shrink'):
+                                ui.label(display_shelfmark).classes('text-sm font-bold truncate').style(
+                                    'color: var(--primary-700); max-width: 400px;'
+                                )
+                                if title:
+                                    ui.label(f'\u2014 {title[:60]}{"..." if title and len(title) > 60 else ""}').classes(
+                                        'text-xs truncate'
+                                    ).style('color: var(--text-muted); direction: rtl; max-width: 350px;')
+
+                            # Right: Action buttons
+                            with ui.row().classes('items-center gap-1 shrink-0 flex-wrap'):
                                 if sys_id:
                                     browse_url = f'/browse?sys_id={sys_id}'
                                     if fl_id:
                                         browse_url += f'&fl_id={fl_id}'
-                                    # Use ui.link for full page reload to ensure browse page recreates with PGP data
                                     with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
-                                        ui.button(icon='menu_book').props('round color=green')
+                                        ui.button(icon='menu_book').props('flat round size=sm color=green')
 
                                 def make_add_handler(r):
                                     def handler():
                                         show_add_to_list_dialog_local(r)
                                     return handler
-                                # Check if item is in any list
                                 adv_result_sys_id = result.get('display', {}).get('id')
                                 adv_result_in_list = state.lists_mgr and adv_result_sys_id and state.lists_mgr.is_item_in_any_list(adv_result_sys_id)
                                 ui.button(icon='star' if adv_result_in_list else 'star_border', on_click=make_add_handler(result)).props(
-                                    'round'
+                                    'flat round size=sm'
                                 ).style('color: var(--accent-amber);').tooltip(tr('In List') if adv_result_in_list else tr('Add to List'))
 
-                                # Image toggle button
                                 if has_image:
                                     def toggle_image():
                                         adv_state.show_image_panel = not adv_state.show_image_panel
@@ -2938,43 +3001,96 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.button(
                                         icon='image' if adv_state.show_image_panel else 'hide_image',
                                         on_click=toggle_image
-                                    ).props('round').tooltip(
+                                    ).props('flat round size=sm').tooltip(
                                         tr('Hide Image') if adv_state.show_image_panel else tr('Show Image')
                                     )
 
-                        # Info chips
-                        with ui.row().classes('gap-3 flex-wrap mt-2'):
+                                ui.separator().props('vertical').classes('h-4')
+
+                                # Bibliography / Catalog buttons
+                                if fjms_bib:
+                                    fjms_dlg = create_fjms_bibliography_dialog(
+                                        fjms_bib, sys_id, shelfmark=shelfmark or '',
+                                    )
+                                    ui.button(
+                                        f'{tr("Bib")} ({len(fjms_bib)})',
+                                        icon='menu_book', on_click=fjms_dlg.open,
+                                    ).props('outline dense size=sm').classes('text-xs').tooltip(tr('Bibliography FJMS'))
+                                if marc_bib:
+                                    nli_dlg = create_nli_bibliography_dialog(
+                                        marc_bib, sys_id, shelfmark=shelfmark or '',
+                                    )
+                                    ui.button(
+                                        f'{tr("Ktiv")} ({len(marc_bib)})',
+                                        icon='menu_book', on_click=nli_dlg.open,
+                                    ).props('outline dense size=sm').classes('text-xs').tooltip(tr('Bibliography Ktiv'))
+                                if catalog_source_count > 0:
+                                    ui.button(
+                                        f'{tr("Cat")} ({catalog_source_count})',
+                                        icon='description',
+                                        on_click=lambda s=sys_id, sm=shelfmark or '': show_catalog_dialog(s, sm, fjms),
+                                    ).props('outline dense size=sm').classes('text-xs').tooltip(tr('Catalog Records'))
+
+                                # PGP expander button
+                                if pgp_metadata:
+                                    ui.button(
+                                        'PGP', icon='verified',
+                                        on_click=lambda: ui.run_javascript("document.querySelector('.pgp-expand .q-expansion-item__toggle')?.click()"),
+                                    ).props('outline dense size=sm color=green').classes('text-xs')
+
+                                # FJMS expander button
+                                catalog_records = fjms_data.get('catalog_records')
+                                if catalog_records:
+                                    ui.button(
+                                        'FJMS', icon='library_books',
+                                        on_click=lambda: ui.run_javascript("document.querySelector('.fjms-expand .q-expansion-item__toggle')?.click()"),
+                                    ).props('outline dense size=sm color=purple').classes('text-xs')
+
+                        # Row 2: Chips (source, page, result#, domains)
+                        with ui.row().classes('items-center gap-2 flex-wrap'):
                             if source:
-                                with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                                with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
                                     'background: var(--primary-100); color: var(--primary-700);'
                                 ):
-                                    ui.icon('source').classes('text-sm')
-                                    ui.label(source).classes('text-sm font-medium')
+                                    ui.icon('source').classes('text-xs')
+                                    ui.label(source).classes('text-xs font-medium')
 
-                            with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                            with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
                                 'background: var(--accent-blue); color: white;'
                             ):
-                                ui.icon('description').classes('text-sm')
-                                ui.label(f"{tr('Page')} {current_p_num} / {total_pages}").classes('text-sm font-medium')
+                                ui.icon('description').classes('text-xs')
+                                ui.label(f"{tr('Page')} {current_p_num}/{total_pages}").classes('text-xs font-medium')
 
-                            with ui.element('div').classes('flex items-center gap-1 px-3 py-1 rounded-full').style(
+                            with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
                                 'background: var(--bg-tertiary); color: var(--text-secondary);'
                             ):
-                                ui.icon('tag').classes('text-sm')
-                                ui.label(f"#{adv_state.current_result_idx + 1}").classes('text-sm font-medium')
+                                ui.icon('tag').classes('text-xs')
+                                ui.label(f"#{adv_state.current_result_idx + 1}").classes('text-xs font-medium')
 
-                # === PGP Metadata Section ===
+                            # Subject Domains inline
+                            domains = fjms_data.get('domains')
+                            if domains:
+                                from web.translations import get_language
+                                lang = get_language()
+                                all_domain_names = {d['domain'] for d in domains}
+                                for dom in domains:
+                                    parent = dom.get('parent_domain')
+                                    if parent and parent in all_domain_names and parent != dom['domain']:
+                                        continue
+                                    display_name = dom['domain_heb'] if lang == 'he' else dom['domain']
+                                    ui.link(
+                                        display_name,
+                                        f'/search?domain={quote(dom["domain"])}'
+                                    ).classes('text-xs px-2 py-0.5 rounded-full no-underline').style(
+                                        'background: #f3e8ff; color: #7c3aed;'
+                                    )
+
+                # === Expandable PGP Metadata (inside scroll area, collapsed) ===
                 if pgp_metadata:
-                    with ui.card().classes('w-full p-4').style('border-radius: 12px; border-left: 3px solid #27ae60;'):
-                        with ui.row().classes('items-center gap-2 mb-2'):
-                            h4(tr('Princeton Geniza Project'), classes='text-xs font-bold', style='color: var(--text-secondary);')
-                            if pgp_metadata.get('pgp_url'):
-                                ui.link('', pgp_metadata['pgp_url'], new_tab=True).props(
-                                    'icon=open_in_new flat dense round size=xs'
-                                ).style('color: var(--primary-600);').tooltip(tr('View on PGP'))
-
+                    with ui.expansion(group='enrichment').classes('w-full pgp-expand').style(
+                        'border-left: 3px solid #27ae60; border-radius: 8px; margin-bottom: 4px;'
+                    ).props('dense header-class="text-xs font-bold" label="PGP Details"'):
                         with ui.row().classes('gap-6 flex-wrap'):
-                            # Document Type + Languages
                             doc_type = pgp_metadata.get('document_type')
                             lang_primary = pgp_metadata.get('languages_primary')
                             if doc_type or lang_primary:
@@ -2983,7 +3099,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     type_parts = [p for p in [doc_type, lang_primary, pgp_metadata.get('languages_secondary')] if p]
                                     create_translatable_text(' \u00b7 '.join(type_parts), container_style='color: var(--text-primary);')
 
-                            # Dates
                             inferred_display = pgp_metadata.get('inferred_date_display')
                             doc_date_standard = pgp_metadata.get('doc_date_standard')
                             doc_date_original = pgp_metadata.get('doc_date_original')
@@ -2996,51 +3111,107 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     if doc_date_original and doc_date_original != primary_date:
                                         ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
 
-                        # Tags
                         tags = pgp_metadata.get('tags', [])
                         if tags:
-                            with ui.column().classes('gap-1 mt-2'):
-                                ui.label(tr('Tags')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                with ui.row().classes('gap-1 flex-wrap'):
-                                    for tag in tags:
-                                        ui.badge(tag, color='green').props('outline clickable').classes(
-                                            'text-xs cursor-pointer'
-                                        ).on('click', lambda t=tag: (dialog.close(), ui.navigate.to(f'/search?tag={quote(t)}')))
+                            with ui.row().classes('gap-1 flex-wrap mt-2'):
+                                for tag in tags:
+                                    ui.badge(tag, color='green').props('outline clickable').classes(
+                                        'text-xs cursor-pointer'
+                                    ).on('click', lambda t=tag: (dialog.close(), ui.navigate.to(f'/search?tag={quote(t)}')))
 
-                        # Description
                         description = (pgp_metadata.get('description') or '').strip()
                         if description:
                             with ui.column().classes('gap-1 mt-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                                 create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
 
-                # === Page Navigation Bar ===
-                if total_pages > 1:
-                    with ui.card().classes('w-full p-3').style('border-radius: 12px;'):
-                        with ui.row().classes('items-center justify-center gap-3'):
-                            prev_page_btn = ui.button(
-                                icon='chevron_right' if is_rtl() else 'chevron_left',
-                                on_click=lambda: ui.timer(0, lambda: load_page(direction=-1), once=True)
-                            ).props('flat round').tooltip(tr('Previous Page'))
-                            prev_page_btn.set_enabled(current_p_num > 1)
+                        if pgp_metadata.get('pgp_url'):
+                            ui.link(tr('View on PGP'), pgp_metadata['pgp_url'], new_tab=True).classes(
+                                'text-xs mt-2'
+                            ).style('color: var(--primary-600);')
 
-                            page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-16').props('dense outlined')
-                            ui.label(f"/ {total_pages}").classes('text-sm').style('color: var(--text-secondary);')
+                # === Expandable FJMS Catalog (inside scroll area, collapsed) ===
+                catalog_records = fjms_data.get('catalog_records')
+                if catalog_records:
+                    with ui.expansion(group='enrichment').classes('w-full fjms-expand').style(
+                        'border-left: 3px solid #9b59b6; border-radius: 8px; margin-bottom: 4px;'
+                    ).props('dense header-class="text-xs font-bold" label="FJMS Details"'):
+                        from web.translations import get_language
+                        merged = merge_catalog_records(catalog_records)
+                        lang = get_language()
 
-                            def go_to_page():
-                                try:
-                                    p = int(page_input.value) if page_input.value else 1
-                                    p = max(1, min(total_pages, p))
-                                    ui.timer(0, lambda: load_page(p_num=p), once=True)
-                                except (ValueError, TypeError):
-                                    pass
-                            ui.button(tr('Go'), on_click=go_to_page).props('flat dense color=green')
+                        fjms_title = merged.get('title_heb') if lang == 'he' else merged.get('title')
+                        if fjms_title and fjms_title.strip():
+                            with ui.row().classes('gap-1 items-baseline'):
+                                ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(fjms_title).classes('text-sm').style('color: var(--text-primary);')
 
-                            next_page_btn = ui.button(
-                                icon='chevron_left' if is_rtl() else 'chevron_right',
-                                on_click=lambda: ui.timer(0, lambda: load_page(direction=1), once=True)
-                            ).props('flat round').tooltip(tr('Next Page'))
-                            next_page_btn.set_enabled(current_p_num < total_pages)
+                        if merged.get('author_text') and merged['author_text'].strip():
+                            with ui.row().classes('gap-1 items-baseline'):
+                                ui.label(tr('Author')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(merged['author_text']).classes('text-sm').style('color: var(--text-primary);')
+
+                        date_val = merged.get('copy_date')
+                        place_val = merged.get('copy_place')
+                        if date_val or place_val:
+                            with ui.row().classes('gap-4'):
+                                if date_val:
+                                    with ui.row().classes('gap-1 items-baseline'):
+                                        ui.label(tr('Copy Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                        ui.label(str(date_val)).classes('text-sm').style('color: var(--text-primary);')
+                                if place_val:
+                                    with ui.row().classes('gap-1 items-baseline'):
+                                        ui.label(tr('Place')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                        ui.label(place_val).classes('text-sm').style('color: var(--text-primary);')
+
+                        frames = merged.get('textual_frames', [])
+                        if frames:
+                            ui.label(tr('Content Identification')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
+                            max_initial = 10
+                            show_frames = frames[:max_initial] if len(frames) > max_initial else frames
+                            for frame in show_frames:
+                                text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                if not text_f or not text_f.strip():
+                                    text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                if text_f and text_f.strip():
+                                    category, content = parse_textual_frame(text_f)
+                                    source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                    with ui.row().classes('gap-1 items-baseline'):
+                                        if category:
+                                            ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                            ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                        else:
+                                            ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
+                                        if source_name and source_name.strip():
+                                            ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
+                            if len(frames) > max_initial:
+                                remaining = frames[max_initial:]
+                                with ui.expansion(f'{tr("Show all")} {len(frames)} {tr("identifications")}').classes('text-xs'):
+                                    for frame in remaining:
+                                        text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                        if not text_f or not text_f.strip():
+                                            text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                        if text_f and text_f.strip():
+                                            category, content = parse_textual_frame(text_f)
+                                            source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                            with ui.row().classes('gap-1 items-baseline'):
+                                                if category:
+                                                    ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                                    ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                                else:
+                                                    ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
+                                                if source_name and source_name.strip():
+                                                    ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
+
+                        cat_refs = fjms_data.get('catalog_refs')
+                        if cat_refs:
+                            ui.label(tr('Catalog References')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
+                            with ui.row().classes('gap-2 flex-wrap'):
+                                for ref in cat_refs:
+                                    acronym = ref.get('cat_acronym', '')
+                                    cat_entry = ref.get('catalog_entry', '')
+                                    ref_display = f"{acronym} #{cat_entry}" if cat_entry else acronym
+                                    ui.label(ref_display).classes('text-xs').style('color: var(--text-primary);')
 
                 # === Two-Panel Layout: Text + Image ===
                 with ui.row().classes('w-full gap-4 flex-wrap lg:flex-nowrap'):
@@ -3058,20 +3229,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         text_content_container = None
                         current_display_text = {'value': display_text, 'html': text_html}
 
-                        def render_text_section(text_to_render: str):
-                            """Render the text content (called on version change)."""
+                        def render_text_section(html_to_render: str):
+                            """Render pre-formatted HTML text content (called on initial render and version change)."""
                             nonlocal text_content_container
                             if text_content_container is None:
                                 return
                             text_content_container.clear()
                             with text_content_container:
-                                with ui.scroll_area().classes('w-full').style('max-height: 60vh;'):
+                                with ui.scroll_area().classes('w-full').style('max-height: 70vh;'):
                                     with ui.element('div').classes('p-6').style(
                                         'direction: rtl; text-align: right; '
                                         'line-height: 2.4; font-size: 1.2rem; font-family: "SBL Hebrew", "David", serif;'
                                     ):
-                                        html_content = text_to_render.replace('\n', '<br>') if text_to_render else ''
-                                        ui.html(html_content, sanitize=False)
+                                        ui.html(html_to_render or '', sanitize=False)
                             text_content_container.update()
 
                         # Page Text Section with inline editing
@@ -3115,25 +3285,51 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                                 else:
                                     # === VIEW MODE ===
-                                    # Header with page info and actions
-                                    with ui.row().classes('items-center justify-between w-full p-4 border-b').style('border-color: var(--border-light);'):
-                                        with ui.row().classes('items-center gap-3'):
-                                            ui.icon('article').classes('text-2xl').style('color: var(--primary-600);')
-                                            ui.label(f"{tr('Page')} {current_p_num}").classes('text-lg font-bold')
+                                    # Header with page info, page navigation, and actions
+                                    with ui.row().classes('items-center justify-between w-full px-4 py-2 border-b').style('border-color: var(--border-light);'):
+                                        with ui.row().classes('items-center gap-2'):
+                                            ui.icon('article').classes('text-lg').style('color: var(--primary-600);')
+                                            ui.label(f"{tr('Page')} {current_p_num}").classes('text-sm font-bold')
                                             word_count = len(display_text.split()) if display_text else 0
-                                            ui.label(f"({word_count} {tr('words')})").classes('text-sm').style('color: var(--text-muted);')
+                                            ui.label(f"({word_count} {tr('words')})").classes('text-xs').style('color: var(--text-muted);')
 
-                                        with ui.row().classes('gap-2'):
+                                            # Page navigation (merged into header)
+                                            if total_pages > 1:
+                                                ui.separator().props('vertical').classes('h-4 mx-1')
+                                                prev_page_btn = ui.button(
+                                                    icon='chevron_right' if is_rtl() else 'chevron_left',
+                                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=-1), once=True)
+                                                ).props('flat round size=xs').tooltip(tr('Previous Page'))
+                                                prev_page_btn.set_enabled(current_p_num > 1)
+
+                                                page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-12').props('dense outlined borderless')
+                                                ui.label(f"/{total_pages}").classes('text-xs').style('color: var(--text-secondary);')
+
+                                                def go_to_page():
+                                                    try:
+                                                        p = int(page_input.value) if page_input.value else 1
+                                                        p = max(1, min(total_pages, p))
+                                                        ui.timer(0, lambda: load_page(p_num=p), once=True)
+                                                    except (ValueError, TypeError):
+                                                        pass
+                                                page_input.on('keydown.enter', lambda: go_to_page())
+
+                                                next_page_btn = ui.button(
+                                                    icon='chevron_left' if is_rtl() else 'chevron_right',
+                                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=1), once=True)
+                                                ).props('flat round size=xs').tooltip(tr('Next Page'))
+                                                next_page_btn.set_enabled(current_p_num < total_pages)
+
+                                        with ui.row().classes('gap-1'):
                                             ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props('flat round size=sm').tooltip(tr('Copy Text'))
-                                            # Inline edit button
                                             if sys_id and current_text:
                                                 ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props('flat round size=sm').tooltip(tr('Edit'))
 
                                     # Text content - create container (same scope as outer text_content_container)
                                     text_content_container = ui.element('div').classes('w-full')
 
-                                    # Initial render
-                                    render_text_section(display_text)
+                                    # Initial render (use highlighted HTML)
+                                    render_text_section(text_html)
 
                         # Community Features Row (compact) - only in view mode
                         if sys_id and current_text and not adv_state.edit_mode:
@@ -3146,7 +3342,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 def handle_version_change(new_text: str, version_info: dict):
                                     """Handle version selection - update displayed text."""
                                     current_display_text['value'] = new_text
-                                    render_text_section(new_text)
+                                    # Re-apply search term highlighting to new version text
+                                    if adv_state.highlight_terms and new_text:
+                                        new_html = _apply_highlight_marks(new_text, adv_state.highlight_terms)
+                                    else:
+                                        new_html = new_text.replace('\n', '<br>') if new_text else ''
+                                    current_display_text['html'] = new_html
+                                    render_text_section(new_html)
                                     source = version_info.get('source', 'unknown')
 
                                     if source == 'pgp':
@@ -3212,7 +3414,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
                                 is_oxford_js = 'true' if is_oxford else 'false'
 
-                                with ui.element('div').classes('adv-image-container w-full').style('height: 500px;'):
+                                with ui.element('div').classes('adv-image-container w-full').style('height: 70vh;'):
                                     img_html = f'''
                                     <img
                                         src="{safe_img_url}"
