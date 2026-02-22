@@ -75,7 +75,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | Map-based geographic browse | Requires places.csv + UI work, defer |
 | Build transcription editor | Link to external tools instead |
 | Real-time index updates for new corrections | Index is a periodic snapshot; live correction indexing deferred |
-| FGP direct image access | FGPImageNumberId ≠ IIIF FL ID |
+| FGP direct image access | FGPImageNumberId is not equal to IIIF FL ID |
 
 ## Traceability
 
@@ -83,13 +83,41 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | | |
+| BROWSE-01 | Phase 41 | Pending |
+| BROWSE-02 | Phase 41 | Pending |
+| BROWSE-03 | Phase 41 | Pending |
+| BROWSE-04 | Phase 41 | Pending |
+| BROWSE-05 | Phase 41 | Pending |
+| BROWSE-06 | Phase 41 | Pending |
+| CAT-01 | Phase 42 | Pending |
+| CAT-02 | Phase 42 | Pending |
+| CAT-03 | Phase 42 | Pending |
+| CAT-04 | Phase 42 | Pending |
+| CAT-05 | Phase 42 | Pending |
+| FILT-01 | Phase 43 | Pending |
+| FILT-02 | Phase 43 | Pending |
+| FILT-03 | Phase 43 | Pending |
+| FILT-04 | Phase 43 | Pending |
+| FILT-05 | Phase 43 | Pending |
+| TRANS-01 | Phase 44 | Pending |
+| TRANS-02 | Phase 44 | Pending |
+| SRCH-01 | Phase 45 | Pending |
+| SRCH-02 | Phase 45 | Pending |
+| SRCH-03 | Phase 45 | Pending |
+| SRCH-04 | Phase 45 | Pending |
+| SRCH-05 | Phase 45 | Pending |
+| SRCH-06 | Phase 45 | Pending |
+| SRCH-07 | Phase 45 | Pending |
+| DIST-01 | Phase 46 | Pending |
+| DIST-02 | Phase 46 | Pending |
+| DIST-03 | Phase 46 | Pending |
+| DIST-04 | Phase 46 | Pending |
 
 **Coverage:**
 - v7.0.0 requirements: 28 total
-- Mapped to phases: 0
-- Unmapped: 28 ⚠️
+- Mapped to phases: 28
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-22*
-*Last updated: 2026-02-22 after initial definition*
+*Last updated: 2026-02-22 after roadmap traceability mapping*
