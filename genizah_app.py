@@ -5246,10 +5246,9 @@ class FjmsCatalogDialog(QDialog):
         header = QLabel(f'<h3 style="color: {header_color};">{tr("Catalog Records")} \u2014 {shelfmark}</h3>')
         layout.addWidget(header)
 
-        # Content browser
-        # Note: do NOT use setLayoutDirection or dir="rtl" in HTML — Qt's QTextBrowser
-        # treats text-align as logical, flipping right→left. We use explicit text-align:right
-        # on every cell + reversed column order instead.
+        # Content browser — rely on app-level RTL layout direction for Hebrew.
+        # Qt's QTextBrowser inherits RTL from the application, so we use plain
+        # LTR HTML (no text-align or column reversal) and let Qt handle alignment.
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenExternalLinks(True)
         self.text_browser.setHtml(self._build_html(detail, shelfmark=shelfmark or ''))
@@ -5329,7 +5328,9 @@ class FjmsCatalogDialog(QDialog):
             f'<table style="width:100%; border-collapse:collapse; table-layout:fixed; '
             f'font-family:Arial; font-size:13px; color:{c["text"]};">'
         )
-        # Column width definitions — RTL: team cols first, label last
+        # Column width definitions — RTL: reverse column order (team cols first,
+        # label last) so Hebrew readers see labels on the right.  Qt handles
+        # text alignment within cells automatically via app-level RTL.
         if num_teams > 0:
             html_parts.append('<colgroup>')
             if is_heb:
@@ -5344,12 +5345,11 @@ class FjmsCatalogDialog(QDialog):
 
         if num_teams > 0:
             # === Team header row ===
-            align = 'right' if is_heb else 'left'
             team_ths = []
             for team in teams:
                 header_name = get_team_header_name(team["source_name"], is_heb=is_heb)
                 team_ths.append(
-                    f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; text-align:{align}; '
+                    f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; '
                     f'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{header_name}">'
                     f'{header_name}</th>'
                 )
@@ -5566,7 +5566,6 @@ class FjmsCatalogDialog(QDialog):
             html_parts.append(self._section_row(tr('Miscellaneous'), total_cols if num_teams > 0 else 2))
 
             col_span = total_cols if num_teams > 0 else 2
-            rtl_cell = ' text-align:right;' if is_heb else ''
             for desc in free_descriptions:
                 text = desc.get("text", "")
                 if text and str(text).strip():
@@ -5575,7 +5574,7 @@ class FjmsCatalogDialog(QDialog):
                     source_html = f'<div style="font-weight:bold; font-size:11px; color:{c["section_text"]}; margin-bottom:2px;">{source}</div>' if source else ''
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
-                        f'style="padding:8px; border-bottom:1px solid {c["border"]};{rtl_cell}"'
+                        f'style="padding:8px; border-bottom:1px solid {c["border"]};"'
                         f'>{source_html}{str(text).strip()}</td></tr>'
                     )
 
@@ -5583,15 +5582,14 @@ class FjmsCatalogDialog(QDialog):
             if full_texts:
                 html_parts.append(
                     f'<tr><td colspan="{col_span}" style="padding:6px 8px; font-weight:bold; '
-                    f'color:{c["section_text"]}; font-size:12px;{rtl_cell}">{tr("Scholarly Description")}</td></tr>'
+                    f'color:{c["section_text"]}; font-size:12px;">{tr("Scholarly Description")}</td></tr>'
                 )
                 for ft in full_texts:
                     text = ft.get("text", "")
                     if text and str(text).strip():
                         html_parts.append(
                             f'<tr><td colspan="{col_span}" '
-                            f'style="padding:8px; border-bottom:1px solid {c["border"]}; background:{c["full_text_bg"]};'
-                            f'{rtl_cell}"'
+                            f'style="padding:8px; border-bottom:1px solid {c["border"]}; background:{c["full_text_bg"]};"'
                             f'>{str(text).strip()}</td></tr>'
                         )
 
@@ -5601,25 +5599,22 @@ class FjmsCatalogDialog(QDialog):
     def _section_row(self, title: str, colspan: int) -> str:
         """Build a section header row."""
         c = self._colors
-        align = 'right' if CURRENT_LANG == 'he' else 'left'
         return (
             f'<tr><td colspan="{colspan}" style="background:{c["section_bg"]}; font-weight:bold; '
-            f'padding:8px; color:{c["section_text"]}; font-size:13px; text-align:{align};">{title}</td></tr>'
+            f'padding:8px; color:{c["section_text"]}; font-size:13px;">{title}</td></tr>'
         )
 
     def _field_row(self, label: str, values: list, is_heb: bool) -> str:
-        """Build a field row: label in first column, values in team columns.
-        RTL: team columns first, label last. Returns empty string if all values are empty."""
+        """Build a field row: label + value columns. RTL: values first, label last.
+        Qt handles text alignment via app-level layout direction. Returns '' if all values empty."""
         if not any(v for v in values):
             return ''
         c = self._colors
-        dir_style = ' text-align:right;' if is_heb else ''
-        label_align = ' text-align:right;' if is_heb else ''
-        label_cell = f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{label_align}">{label}</td>'
+        label_cell = f'<td style="padding:6px 8px; font-weight:bold; color:{c["label"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;">{label}</td>'
         value_cells = []
         for val in values:
             display = str(val).strip() if val else '\u2014'
-            style = f'padding:6px 8px; border-bottom:1px solid {c["border"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;{dir_style}'
+            style = f'padding:6px 8px; border-bottom:1px solid {c["border"]}; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word;'
             if not val:
                 style += f' color:{c["muted"]};'
             value_cells.append(f'<td style="{style}">{display}</td>')
