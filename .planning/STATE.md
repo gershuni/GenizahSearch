@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 Phase: 41 of 46 (Catalog Browse & Navigation)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-02-22 -- v7.0.0 roadmap created (6 phases, 28 requirements)
+Last activity: 2026-02-22 - Completed quick task 15: Move catalog/bib buttons to page nav pane in Browse; fix FJMS button in advanced mode
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -56,6 +56,12 @@ Recent decisions affecting current work:
 - FIST.db access required for Phase 44 (FJMS transcription import) -- confirm file available
 - Phase 45 extends Tantivy schema -- need backward-compatible index upgrade strategy
 - Phase 43 pre-search filtering must not break parallels search mode
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 15 | Move catalog/bib buttons to page nav pane in Browse; fix FJMS button in advanced mode | 2026-02-22 | da8cd4ab | [15-move-catalog-bib-buttons-to-page-nav-pan](./quick/15-move-catalog-bib-buttons-to-page-nav-pan/) |
 
 ## Session Continuity
 
