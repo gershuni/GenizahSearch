@@ -8,6 +8,16 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current Milestone: v7.0.0 Catalog Navigation & Transcription Search
+
+**Goal:** Enable researchers to browse and search the scholarly catalog (authors, works, domains) and search within transcription text alongside OCR, with pre-search domain scoping.
+
+**Target features:**
+- Catalog browse & navigation: faceted browsing by author, work, domain, or combination
+- Catalog search: full-text + structured field search across FJMS and PGP catalog data
+- Pre-search domain filtering: include/exclude domains and identifications before Tantivy search
+- Transcription search: FJMS transcription import, unified Tantivy index over PGP + FJMS + user transcription text
+
 ## Current State (after v6.0.0 shipped)
 
 **Shipped:** v6.0.0 Local Data Architecture (2026-02-22, git tag v6.0.0)
@@ -107,6 +117,14 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Desktop crash fixes (sip.isdeleted guards on all Qt lifecycle sites) -- v6.0.0
 - Performance: parallel NLI fetch, browse crossref parallelization, variant cache unification -- v6.0.0
 
+### Active
+
+- Catalog browse & navigation: faceted browsing by author, work, domain, or combination (both apps)
+- Catalog search: full-text + structured field search across FJMS and PGP catalog data (both apps)
+- Pre-search domain filtering: include/exclude domains/identifications before Tantivy search (both apps)
+- FJMS transcription import: ~30K transcriptions from FIST.db into fjms_enrichment.db
+- Transcription search: unified Tantivy index over PGP + FJMS + user transcription text, prioritizing human transcriptions (both apps)
+
 ### Out of Scope
 
 - PGP people/places integration -- complexity too high, defer
@@ -114,12 +132,10 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Automatic PGP sync from GitHub -- manual refresh sufficient
 - Build transcription editor -- link to external tools instead
 - Build join detection AI -- import from NLI/PGP instead
-- Transcription search in Tantivy -- deferred (Phase 13, needs server-side index architecture)
 - NLI PartOf relationships UI (424K records) -- service method exists, UI deferred
 - NLI See cross-references UI (19K records) -- service method exists, UI deferred
 - NLI BifolioWith pairs UI (23K records) -- service method exists, UI deferred
-- FTS5 catalog search UI -- schema exists in sidecar, UI deferred
-- FJMS full texts (65K transcriptions) as version selector sources -- deferred
+- FJMS full texts as version selector sources -- deferred (catalog descriptions only)
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
 - FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
 
@@ -163,4 +179,4 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Phase 13 deferred | Transcription index build too slow for desktop | Revisit |
 
 ---
-*Last updated: 2026-02-22 after v6.0.0 milestone shipped*
+*Last updated: 2026-02-22 after v7.0.0 milestone started*
