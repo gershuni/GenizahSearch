@@ -2565,6 +2565,12 @@ class ResultDialog(QDialog):
         self.btn_compact_bib_nli.clicked.connect(self._show_rd_nli_bib)
         compact_layout.addWidget(self.btn_compact_bib_nli)
 
+        # Catalog Records (compact)
+        self.btn_compact_catalog = QPushButton()
+        self.btn_compact_catalog.setVisible(False)
+        self.btn_compact_catalog.clicked.connect(self._show_rd_catalog)
+        compact_layout.addWidget(self.btn_compact_catalog)
+
         # Joins (compact) - chain icon like normal mode
         self.btn_compact_joins = QToolButton()
         self.btn_compact_joins.setText("🔗")
@@ -4136,6 +4142,8 @@ class ResultDialog(QDialog):
         if hasattr(self, 'btn_compact_bib_fjms'):
             self.btn_compact_bib_fjms.setVisible(False)
             self.btn_compact_bib_nli.setVisible(False)
+        if hasattr(self, 'btn_compact_catalog'):
+            self.btn_compact_catalog.setVisible(False)
         parent = self.parent()
         if parent:
             # Disconnect old worker signals first to prevent stale results
@@ -4405,8 +4413,14 @@ class ResultDialog(QDialog):
                 self.btn_rd_catalog.setText(f"{tr('Catalog Records')} ({catalog_count})")
                 self.btn_rd_catalog.setEnabled(catalog_count > 0)
                 self.btn_rd_catalog.setVisible(True)
+                if hasattr(self, 'btn_compact_catalog'):
+                    self.btn_compact_catalog.setText(f"{tr('Catalog Records')} ({catalog_count})")
+                    self.btn_compact_catalog.setEnabled(catalog_count > 0)
+                    self.btn_compact_catalog.setVisible(True)
         except Exception:
             self.btn_rd_catalog.setVisible(False)
+            if hasattr(self, 'btn_compact_catalog'):
+                self.btn_compact_catalog.setVisible(False)
 
         # 4. Build Extended Info HTML (Text)
         external_meta = meta.get('external_meta', {})
