@@ -136,6 +136,14 @@ def build_iiif_image_url(base_url: str, size: str = 'full') -> str:
     else: size_param = size
     return f"{base_url}/full/{size_param}/0/default.jpg"
 
+
+def is_oxford_manuscript(shelfmark: str = '', library_code: str = '') -> bool:
+    """Classify Oxford manuscripts using library code first, shelfmark fallback."""
+    if (library_code or '').strip().lower() == 'oxford':
+        return True
+    shelfmark_lower = (shelfmark or '').strip().lower()
+    return shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb')
+
 # ============================================================================
 # Service Proxy
 # ============================================================================
@@ -240,14 +248,10 @@ class GenizahService:
             thumb_url = get_thumbnail_url(fl_id) if fl_id else None
             image_url = get_full_image_url(fl_id) if fl_id else None
 
-            # Determine attribution from cache or shelfmark pattern
+            # Determine attribution and source classification
             attribution = ''
-            is_oxford = False
-            
-            # Check if Oxford manuscript by shelfmark pattern
-            shelfmark_lower = (shelfmark or '').lower()
-            if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
-                is_oxford = True
+            is_oxford = is_oxford_manuscript(shelfmark, library_code)
+            if is_oxford:
                 attribution = 'From the collections of the Bodleian Libraries, Oxford'
             else:
                 # Try to get from NLI metadata cache
@@ -430,14 +434,10 @@ class GenizahService:
             thumb_url = get_thumbnail_url(fl_id_parsed) if fl_id_parsed else None
             image_url = get_full_image_url(fl_id_parsed) if fl_id_parsed else None
 
-            # Determine attribution from cache or shelfmark pattern
+            # Determine attribution and source classification
             attribution = ''
-            is_oxford = False
-
-            # Check if Oxford manuscript by shelfmark pattern
-            shelfmark_lower = (shelfmark or '').lower()
-            if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
-                is_oxford = True
+            is_oxford = is_oxford_manuscript(shelfmark, library_code)
+            if is_oxford:
                 attribution = 'From the collections of the Bodleian Libraries, Oxford'
             else:
                 # Try to get from NLI metadata cache

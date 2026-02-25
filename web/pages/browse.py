@@ -17,7 +17,14 @@ import re
 import html as html_module
 from urllib.parse import quote
 
-from web.services import get_service, BrowsePage, DocumentPage, get_thumbnail_url, get_full_image_url
+from web.services import (
+    get_service,
+    BrowsePage,
+    DocumentPage,
+    get_thumbnail_url,
+    get_full_image_url,
+    is_oxford_manuscript,
+)
 from web.translations import tr, is_rtl, get_language
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction, update_correction, get_corrections
@@ -2558,8 +2565,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                     ui.badge(tr('Current'), color='green').props('dense').classes('text-xs')
 
                                             # Oxford detection for correct image endpoint
-                                            frag_sm_lower = frag_sm.lower()
-                                            frag_is_oxford = frag_sm_lower.startswith('ms heb') or frag_sm_lower.startswith('ms. heb')
+                                            frag_library_code = ''
+                                            if state.meta_mgr and frag_sid:
+                                                try:
+                                                    frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
+                                                except Exception:
+                                                    frag_library_code = ''
+                                            frag_is_oxford = is_oxford_manuscript(frag_sm, frag_library_code)
 
                                             # Show recto and verso images side by side
                                             with ui.row().classes('w-full gap-2 flex-wrap justify-center'):
@@ -3011,8 +3023,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ).props('flat round size=xs').classes('text-gray-400 hover:text-red-500').tooltip(tr('Remove'))
 
                                 # Oxford detection
-                                frag_sm_lower = frag_sm.lower()
-                                frag_is_oxford = frag_sm_lower.startswith('ms heb') or frag_sm_lower.startswith('ms. heb')
+                                frag_library_code = ''
+                                if state.meta_mgr and frag_sid:
+                                    try:
+                                        frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
+                                    except Exception:
+                                        frag_library_code = ''
+                                frag_is_oxford = is_oxford_manuscript(frag_sm, frag_library_code)
 
                                 if not frag_pages:
                                     frag_pages = [type('P', (), {'p_num': 1, 'text': '', 'full_header': '', 'fl_id': ''})(),
@@ -3451,11 +3468,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Use pre-computed is_oxford from BrowsePage (computed in services.py)
                 # Also check shelfmark pattern as fallback
                 is_oxford = page.is_oxford
-                if not is_oxford and page.shelfmark:
-                    shelfmark_lower = page.shelfmark.lower()
-                    # Oxford shelfmarks: "MS heb. f.21/21", "MS. Heb. a. 1", etc.
-                    if shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb'):
-                        is_oxford = True
+                if not is_oxford:
+                    is_oxford = is_oxford_manuscript(page.shelfmark, page.library_code)
 
 
                 # Choose image endpoint based on source
