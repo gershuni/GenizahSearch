@@ -70,6 +70,9 @@ class ListFilterDialog(QDialog):
 
         self.btn_ok = QPushButton(tr("OK"))
         self.btn_ok.clicked.connect(self.on_accept)
+        self.btn_ok.setDefault(True)
+        self.btn_ok.setAutoDefault(True)
+        self.btn_cancel.setAutoDefault(False)
 
         btn_box.addWidget(self.btn_cancel)
         btn_box.addWidget(self.btn_ok)
