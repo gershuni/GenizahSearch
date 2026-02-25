@@ -3480,7 +3480,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Choose image endpoint based on source
                 # Prioritize page-specific fl_id over sys_id for correct page images
                 # Add cache-buster to force image refresh on page navigation
-                cache_bust = f"&_cb={page.p_num}" if page.p_num else ""
+                cache_bust_value = f"_cb={page.p_num}" if page.p_num else ""
+                cache_bust_api = f"&{cache_bust_value}" if cache_bust_value else ""
+                cache_bust_direct = f"?{cache_bust_value}" if cache_bust_value else ""
 
                 # Page index (0-based) for multi-page manuscripts
                 page_idx = max(0, page.p_num - 1)
@@ -3493,17 +3495,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Prefer direct Bodleian URL in browser to avoid production /api proxy failures.
                     oxford_direct = get_oxford_direct_image_url(page.shelfmark, page_idx)
                     if oxford_direct:
-                        img_url = f"{oxford_direct}{cache_bust}"
+                        img_url = f"{oxford_direct}{cache_bust_direct}"
                     else:
                         # Fallback to proxy when direct URL cannot be derived from shelfmark.
-                        img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                        img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
                     fallback_url = None
                 elif page.sys_id:
                     # Use server-side NLI proxy for ALL NLI items
                     # This works reliably for all collections (Cambridge, Russian, etc.)
                     # Direct browser requests to NLI are blocked for some collections
                     has_image = True
-                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{cache_bust}"
+                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{cache_bust_api}"
                     fallback_url = None
 
                 # External source override: if user switched to Cambridge/Manchester/JTS and images are available
@@ -3514,19 +3516,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 if state.active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
                     has_image = True
-                    img_url = f"/api/cambridge_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    img_url = f"/api/cambridge_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
                     fallback_url = None
 
                 # Manchester source override
                 if state.active_source == 'manchester' and _has_manchester_images and not is_oxford:
                     has_image = True
-                    img_url = f"/api/manchester_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    img_url = f"/api/manchester_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
                     fallback_url = None
 
                 # JTS source override
                 if state.active_source == 'jts' and _has_jts_images and not is_oxford:
                     has_image = True
-                    img_url = f"/api/jts_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    img_url = f"/api/jts_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
                     fallback_url = None
 
                 # Header bar with folio info, navigation, controls
