@@ -528,9 +528,14 @@ def init_api_routes():
                     headers={"Cache-Control": "public, max-age=600"}
                 )
             else:
-                return Response(content=f"Failed to fetch image: {resp.status_code}", status_code=resp.status_code)
+                # Production fallback: if server-side fetch fails, let browser fetch directly.
+                print(f"Oxford proxy fetch failed ({resp.status_code}) for {sys_id} page={page}; redirecting to direct URL")
+                return RedirectResponse(url=img_url, status_code=307)
         except Exception as e:
-            return Response(content=f"Error fetching image: {e}", status_code=500)
+            # Production fallback: network/SSL differences can break server fetches while
+            # direct browser access still works.
+            print(f"Oxford proxy exception for {sys_id} page={page}: {e}; redirecting to direct URL")
+            return RedirectResponse(url=img_url, status_code=307)
 
     @app.get('/api/oxford_image_url/{sys_id}')
     def oxford_image_url(sys_id: str, page: int = 0):
