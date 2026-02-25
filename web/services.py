@@ -144,6 +144,22 @@ def is_oxford_manuscript(shelfmark: str = '', library_code: str = '') -> bool:
     shelfmark_lower = (shelfmark or '').strip().lower()
     return shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb')
 
+
+def get_oxford_direct_image_url(shelfmark: str = '', page_idx: int = 0) -> str:
+    """Build direct Bodleian image URL from Oxford shelfmark (MS heb. e.93/58)."""
+    if not shelfmark:
+        return ''
+    match = re.match(
+        r'^(?:MS\.?\s*)?Heb\.?\s*([a-z])\.?\s*(\d+)[./](\d+)',
+        shelfmark.strip(),
+        re.IGNORECASE,
+    )
+    if not match:
+        return ''
+    letter, volume, folio = match.groups()
+    side = 'b' if int(page_idx or 0) % 2 == 1 else 'a'
+    return f"https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_{letter}_{volume}_{folio}{side}.jpg"
+
 # ============================================================================
 # Service Proxy
 # ============================================================================

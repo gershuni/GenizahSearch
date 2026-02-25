@@ -23,6 +23,7 @@ from web.services import (
     DocumentPage,
     get_thumbnail_url,
     get_full_image_url,
+    get_oxford_direct_image_url,
     is_oxford_manuscript,
 )
 from web.translations import tr, is_rtl, get_language
@@ -2578,7 +2579,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 for pg_idx in range(2):  # 0=recto, 1=verso
                                                     pg_label = tr('Recto') if pg_idx == 0 else tr('Verso')
                                                     if frag_is_oxford:
-                                                        img_src = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                                        img_src = get_oxford_direct_image_url(frag_sm, pg_idx)
+                                                        if not img_src:
+                                                            img_src = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
                                                     else:
                                                         img_src = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
 
@@ -3044,7 +3047,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                     # Image URL
                                     if frag_is_oxford:
-                                        frag_img_url = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                        frag_img_url = get_oxford_direct_image_url(frag_sm, pg_idx)
+                                        if not frag_img_url:
+                                            frag_img_url = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
                                     else:
                                         frag_img_url = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
 
@@ -3485,9 +3490,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 if is_oxford and page.sys_id:
                     has_image = True
-                    # Oxford images - use proxy with proper page parameter
-                    # The API will fetch the correct recto/verso based on page_idx
-                    img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust}"
+                    # Prefer direct Bodleian URL in browser to avoid production /api proxy failures.
+                    oxford_direct = get_oxford_direct_image_url(page.shelfmark, page_idx)
+                    if oxford_direct:
+                        img_url = f"{oxford_direct}{cache_bust}"
+                    else:
+                        # Fallback to proxy when direct URL cannot be derived from shelfmark.
+                        img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust}"
                     fallback_url = None
                 elif page.sys_id:
                     # Use server-side NLI proxy for ALL NLI items

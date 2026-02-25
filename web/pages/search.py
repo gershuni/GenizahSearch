@@ -14,7 +14,12 @@ from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3, h4
-from web.services import get_service, BrowsePage, is_oxford_manuscript
+from web.services import (
+    get_service,
+    BrowsePage,
+    get_oxford_direct_image_url,
+    is_oxford_manuscript,
+)
 from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from web.components.translate_button import create_translatable_text
@@ -2805,7 +2810,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             has_image = bool(sys_id)
             page_idx = max(0, current_p_num - 1)
             if is_oxford and sys_id:
-                img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+                img_url = get_oxford_direct_image_url(shelfmark, page_idx)
+                if not img_url:
+                    img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
             elif sys_id:
                 img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}"
             else:
