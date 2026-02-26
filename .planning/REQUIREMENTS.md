@@ -14,7 +14,7 @@ Requirements for v7.0.0 Catalog Navigation & Transcription Search. Each maps to 
 - [x] **BROWSE-03**: User can browse manuscripts by work/title from catalog data
 - [x] **BROWSE-04**: User can combine browse axes (e.g., filter by domain + author simultaneously)
 - [x] **BROWSE-05**: Browse results show manuscript metadata (shelfmark, library, domain, identification)
-- [ ] **BROWSE-06**: Catalog browse works in both web and desktop apps
+- [x] **BROWSE-06**: Catalog browse works in both web and desktop apps
 
 ### Catalog Search
 
@@ -88,7 +88,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BROWSE-03 | Phase 41 | Complete |
 | BROWSE-04 | Phase 41 | Complete |
 | BROWSE-05 | Phase 41 | Complete |
-| BROWSE-06 | Phase 41 | Pending |
+| BROWSE-06 | Phase 41 | Complete |
 | CAT-01 | Phase 42 | Pending |
 | CAT-02 | Phase 42 | Pending |
 | CAT-03 | Phase 42 | Pending |
