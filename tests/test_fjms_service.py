@@ -197,6 +197,32 @@ def test_db(tmp_path):
         ("990001", 102, "Title 2", "", "", "", "", "", "", "Institution", "", None, None, None, None, None, None),
     )
 
+    # Additional catalog rows for browse tests (Phase 41)
+    conn.executemany(
+        "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("990007", 700, "Sefer HaMitzvot", "\u05e1\u05e4\u05e8 \u05d4\u05de\u05e6\u05d5\u05d5\u05ea",
+             "Maimonides", None, None, "Frame1", None, None, None, None, None, None, None, None, None),
+            ("990008", 800, "Mishneh Torah", "\u05de\u05e9\u05e0\u05d4 \u05ea\u05d5\u05e8\u05d4",
+             "Maimonides", "1180", None, "Frame2", None, None, None, None, None, None, None, None, None),
+            ("990009", 900, "Commentary on Psalms", "\u05e4\u05d9\u05e8\u05d5\u05e9 \u05e2\u05dc \u05ea\u05d4\u05dc\u05d9\u05dd",
+             "Saadia Gaon", "930", None, None, "Commentary", None, None, None, None, None, None, None, None),
+            # 990010: catalog record but NO domain (used for unclassified test)
+            ("990010", 1000, "Unknown Fragment", "\u05e7\u05d8\u05e2 \u05dc\u05d0 \u05de\u05d6\u05d5\u05d4\u05d4",
+             None, None, None, None, None, None, None, None, None, None, None, None, None),
+        ],
+    )
+
+    # Additional domain entries for browse tests
+    conn.executemany(
+        "INSERT INTO domains VALUES (?, ?, ?, ?, ?)",
+        [
+            ("990007", "Piyyut", "\u05e4\u05d9\u05d5\u05d8", None, None),
+            ("990008", "Letters", "\u05de\u05db\u05ea\u05d1\u05d9\u05dd", "Documentary", "\u05ea\u05e2\u05d5\u05d3\u05d5\u05ea"),
+            ("990009", "Bible", "\u05de\u05e7\u05e8\u05d0", None, None),
+        ],
+    )
+
     # Create catalog child tables (v3.0.0)
 
     # catalog_running_titles
@@ -418,8 +444,8 @@ def test_get_all_domains_piyyut_count(service):
     """Piyyut domain has correct count of distinct manuscripts."""
     all_domains = service.get_all_domains()
     piyyut = next(d for d in all_domains if d["domain"] == "Piyyut")
-    # 990001 and 990003 both have domain=Piyyut
-    assert piyyut["count"] == 2
+    # 990001, 990003, and 990007 all have domain=Piyyut
+    assert piyyut["count"] == 3
 
 
 # ── Join group tests ─────────────────────────────────────────────
@@ -978,6 +1004,241 @@ def test_hierarchy_cache_not_set_when_no_connection():
     result = svc.get_domain_hierarchy()
     assert result == {}
     assert svc._hierarchy_cache is None  # Should NOT cache empty result
+    svc.close()
+
+
+# ── Browse service tests (Phase 41) ─────────────────────────────
+
+
+def test_get_browse_authors(test_db):
+    """get_browse_authors returns all unique authors with counts, sorted by count desc."""
+    svc = FjmsService(db_path=test_db)
+    authors = svc.get_browse_authors()
+
+    # Should have: "Unknown" (990001), "Nahray b. Nissim" (990002),
+    # "Maimonides" (990007, 990008), "Saadia Gaon" (990009)
+    # Note: 990010 has no AuthorText, should be excluded
+    author_names = {a["author"] for a in authors}
+    assert "Maimonides" in author_names
+    assert "Saadia Gaon" in author_names
+    assert "Unknown" in author_names
+    assert "Nahray b. Nissim" in author_names
+    assert len(authors) == 4
+
+    # Maimonides has 2 manuscripts (990007, 990008), should have count=2
+    maim = next(a for a in authors if a["author"] == "Maimonides")
+    assert maim["count"] == 2
+
+    # Sorted by count descending
+    counts = [a["count"] for a in authors]
+    assert counts == sorted(counts, reverse=True)
+
+    svc.close()
+
+
+def test_get_browse_authors_filtered_by_domain(test_db):
+    """get_browse_authors with domain filter only returns authors in that domain."""
+    svc = FjmsService(db_path=test_db)
+
+    # Piyyut domain: 990001 (Unknown), 990007 (Maimonides)
+    piyyut_authors = svc.get_browse_authors(domain="Piyyut")
+    piyyut_names = {a["author"] for a in piyyut_authors}
+    assert "Unknown" in piyyut_names
+    assert "Maimonides" in piyyut_names
+    assert "Nahray b. Nissim" not in piyyut_names  # in Documentary, not Piyyut
+
+    # Documentary domain: 990002 (Nahray), 990008 (Maimonides via ParentDomain)
+    doc_authors = svc.get_browse_authors(domain="Documentary")
+    doc_names = {a["author"] for a in doc_authors}
+    assert "Nahray b. Nissim" in doc_names
+    assert "Maimonides" in doc_names  # 990008 has ParentDomain=Documentary
+
+    svc.close()
+
+
+def test_get_browse_works(test_db):
+    """get_browse_works returns all unique title pairs with counts, sorted by count desc."""
+    svc = FjmsService(db_path=test_db)
+    works = svc.get_browse_works()
+
+    # Should include titles from catalog records (excluding totally empty ones)
+    titles = {w["title"] for w in works}
+    assert "Sefer HaMitzvot" in titles
+    assert "Mishneh Torah" in titles
+    assert "Commentary on Psalms" in titles
+    assert "A Legal Document" in titles
+    assert "Letter to a Merchant" in titles
+
+    # Title 2 from 990001 generic record (has Title but empty TitleHeb) -- should be included
+    assert "Title 2" in titles
+
+    # Verify empty titles excluded (990010 has None Title and None TitleHeb)
+    # The "Unknown Fragment" record has a title so it IS included
+    assert "Unknown Fragment" in titles
+
+    # Sorted by count descending
+    counts = [w["count"] for w in works]
+    assert counts == sorted(counts, reverse=True)
+
+    svc.close()
+
+
+def test_get_browse_works_filtered(test_db):
+    """get_browse_works with author or domain filter narrows results."""
+    svc = FjmsService(db_path=test_db)
+
+    # Filter by author: Maimonides
+    maim_works = svc.get_browse_works(author="Maimonides")
+    maim_titles = {w["title"] for w in maim_works}
+    assert "Sefer HaMitzvot" in maim_titles
+    assert "Mishneh Torah" in maim_titles
+    assert "A Legal Document" not in maim_titles  # by "Unknown"
+    assert len(maim_works) == 2
+
+    # Filter by domain: Piyyut (990001 and 990007)
+    piyyut_works = svc.get_browse_works(domain="Piyyut")
+    piyyut_titles = {w["title"] for w in piyyut_works}
+    assert "A Legal Document" in piyyut_titles  # 990001 in Piyyut
+    assert "Sefer HaMitzvot" in piyyut_titles  # 990007 in Piyyut
+    assert "Letter to a Merchant" not in piyyut_titles  # 990002 in Documentary
+
+    svc.close()
+
+
+def test_get_browse_results_no_filter(test_db):
+    """get_browse_results with no filters returns all manuscripts with catalog data."""
+    svc = FjmsService(db_path=test_db)
+    res = svc.get_browse_results()
+
+    assert res["total"] > 0
+    # Should return all AlmaIds that have catalog entries
+    sys_ids = {r["sys_id"] for r in res["results"]}
+    assert "990001" in sys_ids
+    assert "990002" in sys_ids
+    assert "990007" in sys_ids
+    assert "990008" in sys_ids
+    assert "990009" in sys_ids
+    assert "990010" in sys_ids
+
+    # Check result structure
+    first = res["results"][0]
+    assert "sys_id" in first
+    assert "title" in first
+    assert "title_heb" in first
+    assert "author" in first
+    assert "copy_date" in first
+    assert "textual_frame_heb" in first
+    assert "textual_frame_eng" in first
+    assert "domains" in first
+    assert "domains_heb" in first
+    assert isinstance(first["domains"], list)
+
+    svc.close()
+
+
+def test_get_browse_results_domain_filter(test_db):
+    """get_browse_results with domain filter returns only matching manuscripts."""
+    svc = FjmsService(db_path=test_db)
+
+    # Piyyut: 990001, 990003 (domain only), 990007
+    # But 990003 has no catalog -> still returned because catalog JOIN finds entries
+    res = svc.get_browse_results(domain="Piyyut")
+    sys_ids = {r["sys_id"] for r in res["results"]}
+    assert "990001" in sys_ids
+    assert "990007" in sys_ids
+    assert "990002" not in sys_ids  # in Documentary, not Piyyut
+
+    svc.close()
+
+
+def test_get_browse_results_combined_filter(test_db):
+    """get_browse_results with combined domain+author filters returns intersection."""
+    svc = FjmsService(db_path=test_db)
+
+    # Piyyut + Maimonides: only 990007 (Maimonides in Piyyut)
+    res = svc.get_browse_results(domain="Piyyut", author="Maimonides")
+    assert res["total"] == 1
+    assert res["results"][0]["sys_id"] == "990007"
+    assert res["results"][0]["author"] == "Maimonides"
+
+    svc.close()
+
+
+def test_get_browse_results_pagination(test_db):
+    """get_browse_results pagination returns correct slices."""
+    svc = FjmsService(db_path=test_db)
+
+    # Get all results
+    all_res = svc.get_browse_results(limit=100)
+    total = all_res["total"]
+    assert total > 1  # Need at least 2 to test pagination
+
+    # First page
+    page1 = svc.get_browse_results(limit=1, offset=0)
+    assert len(page1["results"]) == 1
+    assert page1["total"] == total
+
+    # Second page
+    page2 = svc.get_browse_results(limit=1, offset=1)
+    assert len(page2["results"]) == 1
+    assert page2["total"] == total
+
+    # Different results on different pages
+    assert page1["results"][0]["sys_id"] != page2["results"][0]["sys_id"]
+
+    svc.close()
+
+
+def test_get_unclassified_count(test_db):
+    """get_unclassified_count returns count of catalog AlmaIds not in domains table."""
+    svc = FjmsService(db_path=test_db)
+    count = svc.get_unclassified_count()
+
+    # 990010 has catalog but no domain entry -> unclassified
+    # 990001, 990002, 990007, 990008, 990009 all have domains
+    assert count >= 1
+    # 990010 definitely unclassified
+    assert count > 0
+
+    svc.close()
+
+
+def test_browse_authors_cache(test_db):
+    """get_browse_authors caches unfiltered result and returns same object on second call."""
+    svc = FjmsService(db_path=test_db)
+
+    result1 = svc.get_browse_authors()
+    assert result1  # Non-empty
+    assert svc._authors_cache is not None
+
+    result2 = svc.get_browse_authors()
+    # Same object (cached), not just equal
+    assert result1 is result2
+
+    svc.close()
+
+
+def test_browse_works_cache(test_db):
+    """get_browse_works caches unfiltered result and returns same object on second call."""
+    svc = FjmsService(db_path=test_db)
+
+    result1 = svc.get_browse_works()
+    assert result1  # Non-empty
+    assert svc._works_cache is not None
+
+    result2 = svc.get_browse_works()
+    assert result1 is result2
+
+    svc.close()
+
+
+def test_browse_graceful_degradation():
+    """All browse methods return empty results when connection is None."""
+    svc = FjmsService(db_path="nonexistent_browse_test.db")
+    assert svc.get_browse_authors() == []
+    assert svc.get_browse_works() == []
+    assert svc.get_browse_results() == {"results": [], "total": 0}
+    assert svc.get_unclassified_count() == 0
     svc.close()
 
 
