@@ -131,7 +131,13 @@ Performance: parallel NLI fetch, browse crossref parallelization, FL ID index, v
   3. User can browse manuscripts by work/title and see all fragments containing that work
   4. User can combine axes (e.g., domain + author) to narrow browse results, with results showing shelfmark, library, domain, and identification
   5. Catalog browse is fully functional in both web (NiceGUI) and desktop (PyQt6) apps
-**Plans**: TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 41-01-PLAN.md -- Service layer: browse methods for FjmsService (authors, works, results, combined filtering)
+- [ ] 41-02-PLAN.md -- Web catalog browse page with domain tree, filtering, pagination, deep linking
+- [ ] 41-03-PLAN.md -- Desktop catalog browse tab with matching functionality
+- [ ] 41-04-PLAN.md -- Cross-links between browse pages + visual verification
 
 ### Phase 42: Catalog Search
 **Goal**: Researchers can search across catalog metadata (titles, authors, dates, descriptions, identifications) using free-text or field-specific queries, and navigate from results to manuscript browse view
@@ -196,7 +202,7 @@ Note: Phases 41-43 (catalog) and Phase 44 (import) are independent chains. Phase
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 41. Catalog Browse & Navigation | 0/TBD | Not started | - |
+| 41. Catalog Browse & Navigation | 0/4 | Planning complete | - |
 | 42. Catalog Search | 0/TBD | Not started | - |
 | 43. Pre-Search Domain Filtering | 0/TBD | Not started | - |
 | 44. Transcription Import | 0/TBD | Not started | - |
@@ -209,4 +215,4 @@ Note: Phases 41-43 (catalog) and Phase 44 (import) are independent chains. Phase
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-22 after v7.0.0 milestone roadmap created*
+*Last updated: 2026-02-26 after Phase 41 planning complete*
