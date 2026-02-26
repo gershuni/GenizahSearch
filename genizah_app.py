@@ -6661,12 +6661,14 @@ class GenizahGUI(QMainWindow):
         self.search_tab = self.create_search_tab()
         self.composition_tab = self.create_composition_tab()
         self.browse_tab = self.create_browse_tab()
+        self.catalog_browse_tab = self.create_catalog_browse_tab()
         self.lists_tab = self.create_lists_tab()
         self.community_tab = self.create_community_tab()
         self.settings_tab = self.create_settings_tab()
         self.tabs.addTab(self.search_tab, tr("Search"))
         self.tabs.addTab(self.composition_tab, tr("Composition Search"))
-        self.tabs.addTab(self.browse_tab, tr("Browse Manuscript"))
+        self.tabs.addTab(self.browse_tab, tr("Browse by Shelfmark"))
+        self.tabs.addTab(self.catalog_browse_tab, tr("Browse by Identification"))
         self.tabs.addTab(self.lists_tab, tr("Personal Lists"))
         self.tabs.addTab(self.community_tab, tr("Community"))
         self.tabs.addTab(self.settings_tab, tr("Settings & About"))
@@ -6791,6 +6793,10 @@ class GenizahGUI(QMainWindow):
                     self._refresh_community_panels()
                     logger.debug("_refresh_community_panels completed")
                     self._community_data_loaded = True
+            # Lazy-load catalog browse tree on first tab activation
+            if hasattr(self, 'catalog_browse_tab') and current_widget == self.catalog_browse_tab:
+                if not getattr(self, '_catalog_tree_loaded', False):
+                    self._catalog_populate_tree()
         except Exception as e:
             import traceback
             print(f"Error in _on_tab_changed: {e}", flush=True)
@@ -11451,6 +11457,519 @@ class GenizahGUI(QMainWindow):
                 f.write(lab_config)
         
         QMessageBox.information(self, tr("Saved"), tr("Manuscript saved to:\n{}").format(path))
+
+    # ==========================================================================
+    #  CATALOG BROWSE TAB (Browse by Identification)
+    # ==========================================================================
+
+    def create_catalog_browse_tab(self):
+        """Create the 'Browse by Identification' tab with domain tree, author/work search, and results table."""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # --- Internal state ---
+        self._catalog_current_domain = None
+        self._catalog_current_author = None
+        self._catalog_current_work = None
+        self._catalog_current_page = 0
+        self._catalog_authors_cache = []
+        self._catalog_works_cache = []
+        self._catalog_tree_loaded = False
+        self._CATALOG_PAGE_SIZE = 50
+
+        # --- Top Controls Row: Active Filters + Result Count ---
+        top_row = QHBoxLayout()
+        self._catalog_chips_layout = QHBoxLayout()
+        self._catalog_chips_layout.setSpacing(4)
+        top_row.addLayout(self._catalog_chips_layout)
+
+        self._catalog_clear_all_btn = QPushButton(tr("Clear All"))
+        self._catalog_clear_all_btn.setFixedHeight(26)
+        self._catalog_clear_all_btn.setStyleSheet(
+            "QPushButton { background: #e74c3c; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; }"
+            "QPushButton:hover { background: #c0392b; }"
+        )
+        self._catalog_clear_all_btn.clicked.connect(lambda: self._catalog_remove_filter("all"))
+        self._catalog_clear_all_btn.setVisible(False)
+        top_row.addWidget(self._catalog_clear_all_btn)
+
+        top_row.addStretch()
+
+        self._catalog_count_label = QLabel("")
+        self._catalog_count_label.setStyleSheet("color: #555; font-size: 12px;")
+        top_row.addWidget(self._catalog_count_label)
+
+        layout.addLayout(top_row)
+
+        # --- Main Splitter ---
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # LEFT PANEL: Domain Tree + Author Search + Work Search
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 5, 0)
+
+        # a) Domain Tree
+        domain_label = QLabel(tr("Domain"))
+        domain_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-bottom: 2px;")
+        left_layout.addWidget(domain_label)
+
+        self.catalog_domain_tree = QTreeWidget()
+        self.catalog_domain_tree.setHeaderLabels([tr("Domain"), "#"])
+        self.catalog_domain_tree.setColumnWidth(0, 220)
+        self.catalog_domain_tree.setAlternatingRowColors(True)
+        self.catalog_domain_tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        self.catalog_domain_tree.itemClicked.connect(self._catalog_on_domain_select)
+        self.catalog_domain_tree.setStyleSheet(
+            "QTreeWidget { font-size: 12px; }"
+            "QTreeWidget::item { padding: 2px 0; }"
+            "QTreeWidget::item:selected { background-color: #3498db; color: white; }"
+        )
+        left_layout.addWidget(self.catalog_domain_tree, 3)
+
+        # b) Author Search
+        author_label = QLabel(tr("Author"))
+        author_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
+        left_layout.addWidget(author_label)
+
+        self.catalog_author_input = QLineEdit()
+        self.catalog_author_input.setPlaceholderText(tr("Search authors..."))
+        left_layout.addWidget(self.catalog_author_input)
+
+        self.catalog_author_list = QListWidget()
+        self.catalog_author_list.setAlternatingRowColors(True)
+        self.catalog_author_list.setStyleSheet("QListWidget { font-size: 12px; }")
+        self.catalog_author_list.itemClicked.connect(self._catalog_on_author_select)
+        left_layout.addWidget(self.catalog_author_list, 2)
+
+        # Debounce timer for author search
+        self._catalog_author_timer = QTimer()
+        self._catalog_author_timer.setSingleShot(True)
+        self._catalog_author_timer.setInterval(300)
+        self._catalog_author_timer.timeout.connect(self._catalog_filter_authors)
+        self.catalog_author_input.textChanged.connect(lambda _: self._catalog_author_timer.start())
+
+        # c) Work Search
+        work_label = QLabel(tr("Work / Title"))
+        work_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
+        left_layout.addWidget(work_label)
+
+        self.catalog_work_input = QLineEdit()
+        self.catalog_work_input.setPlaceholderText(tr("Search works..."))
+        left_layout.addWidget(self.catalog_work_input)
+
+        self.catalog_work_list = QListWidget()
+        self.catalog_work_list.setAlternatingRowColors(True)
+        self.catalog_work_list.setStyleSheet("QListWidget { font-size: 12px; }")
+        self.catalog_work_list.itemClicked.connect(self._catalog_on_work_select)
+        left_layout.addWidget(self.catalog_work_list, 2)
+
+        # Debounce timer for work search
+        self._catalog_work_timer = QTimer()
+        self._catalog_work_timer.setSingleShot(True)
+        self._catalog_work_timer.setInterval(300)
+        self._catalog_work_timer.timeout.connect(self._catalog_filter_works)
+        self.catalog_work_input.textChanged.connect(lambda _: self._catalog_work_timer.start())
+
+        left_panel.setMinimumWidth(280)
+        left_panel.setMaximumWidth(400)
+        splitter.addWidget(left_panel)
+
+        # RIGHT PANEL: Results Table + Pagination
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(5, 0, 0, 0)
+
+        # d) Results Table
+        self.catalog_results_table = QTableWidget()
+        self.catalog_results_table.setColumnCount(5)
+        headers = [tr("Shelfmark"), tr("Library"), tr("Domain"), tr("Identification"), tr("Date")]
+        self.catalog_results_table.setHorizontalHeaderLabels(headers)
+        self.catalog_results_table.horizontalHeader().setStretchLastSection(True)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.catalog_results_table.setColumnWidth(0, 180)
+        self.catalog_results_table.setColumnWidth(2, 150)
+        self.catalog_results_table.setAlternatingRowColors(True)
+        self.catalog_results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.catalog_results_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.catalog_results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.catalog_results_table.verticalHeader().setVisible(False)
+        self.catalog_results_table.doubleClicked.connect(self._catalog_open_manuscript)
+        self.catalog_results_table.setStyleSheet(
+            "QTableWidget { font-size: 12px; }"
+            "QTableWidget::item { padding: 3px; }"
+        )
+        right_layout.addWidget(self.catalog_results_table)
+
+        # e) Pagination
+        pagination_layout = QHBoxLayout()
+        pagination_layout.addStretch()
+
+        self._catalog_prev_btn = QPushButton(tr("Previous"))
+        self._catalog_prev_btn.setEnabled(False)
+        self._catalog_prev_btn.clicked.connect(self._catalog_prev_page)
+        pagination_layout.addWidget(self._catalog_prev_btn)
+
+        self._catalog_page_label = QLabel("")
+        self._catalog_page_label.setStyleSheet("margin: 0 10px; font-size: 12px;")
+        pagination_layout.addWidget(self._catalog_page_label)
+
+        self._catalog_next_btn = QPushButton(tr("Next"))
+        self._catalog_next_btn.setEnabled(False)
+        self._catalog_next_btn.clicked.connect(self._catalog_next_page)
+        pagination_layout.addWidget(self._catalog_next_btn)
+
+        pagination_layout.addStretch()
+        right_layout.addLayout(pagination_layout)
+
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+
+        layout.addWidget(splitter)
+        return panel
+
+    # --- Catalog Browse: Refresh & Data Methods ---
+
+    def _catalog_refresh(self):
+        """Main refresh: re-fetch results with current filters + pagination, update UI."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return
+
+        offset = self._catalog_current_page * self._CATALOG_PAGE_SIZE
+        data = fjms.get_browse_results(
+            domain=self._catalog_current_domain,
+            author=self._catalog_current_author,
+            work=self._catalog_current_work,
+            offset=offset,
+            limit=self._CATALOG_PAGE_SIZE,
+        )
+
+        results = data.get("results", [])
+        total = data.get("total", 0)
+
+        # Update results table
+        self.catalog_results_table.setRowCount(len(results))
+        for row_idx, r in enumerate(results):
+            sys_id = r.get("sys_id", "")
+            # Resolve shelfmark/library from metadata manager
+            shelfmark = "Unknown"
+            library = ""
+            if self.meta_mgr:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+                library = self.meta_mgr.get_library_for_id(sys_id)
+
+            # Domain: pick Hebrew/English based on current language
+            domains = r.get("domains_heb", []) if CURRENT_LANG == 'he' else r.get("domains", [])
+            domain_str = ", ".join(domains) if domains else ""
+
+            # Identification: Author - Title
+            author = r.get("author", "")
+            title = r.get("title_heb", "") if CURRENT_LANG == 'he' else r.get("title", "")
+            if not title:
+                title = r.get("title", "") or r.get("title_heb", "")
+            ident = f"{author} - {title}" if author and title else (author or title or "")
+
+            date_str = r.get("copy_date", "")
+
+            item_shelf = QTableWidgetItem(shelfmark)
+            item_shelf.setData(Qt.ItemDataRole.UserRole, sys_id)  # Store sys_id for navigation
+            self.catalog_results_table.setItem(row_idx, 0, item_shelf)
+            self.catalog_results_table.setItem(row_idx, 1, QTableWidgetItem(library))
+            self.catalog_results_table.setItem(row_idx, 2, QTableWidgetItem(domain_str))
+            self.catalog_results_table.setItem(row_idx, 3, QTableWidgetItem(ident))
+            self.catalog_results_table.setItem(row_idx, 4, QTableWidgetItem(date_str))
+
+        # Update count label
+        if total > 0:
+            start = offset + 1
+            end = min(offset + self._CATALOG_PAGE_SIZE, total)
+            self._catalog_count_label.setText(
+                tr("Showing {start}-{end} of {total} manuscripts").format(start=start, end=end, total=f"{total:,}")
+            )
+        else:
+            self._catalog_count_label.setText(tr("No results"))
+
+        # Update pagination
+        total_pages = max(1, (total + self._CATALOG_PAGE_SIZE - 1) // self._CATALOG_PAGE_SIZE)
+        current_page_display = self._catalog_current_page + 1
+        self._catalog_page_label.setText(
+            tr("Page {current} of {total}").format(current=current_page_display, total=total_pages)
+        )
+        self._catalog_prev_btn.setEnabled(self._catalog_current_page > 0)
+        self._catalog_next_btn.setEnabled(current_page_display < total_pages)
+
+        # Update chips bar
+        self._catalog_update_chips()
+
+    def _catalog_refresh_authors(self):
+        """Fetch authors scoped to current domain, update author list widget."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return
+        self._catalog_authors_cache = fjms.get_browse_authors(domain=self._catalog_current_domain)
+        self._catalog_filter_authors()
+
+    def _catalog_filter_authors(self):
+        """Filter author list widget based on current text input."""
+        search_text = self.catalog_author_input.text().strip().lower()
+        self.catalog_author_list.clear()
+        shown = 0
+        for entry in self._catalog_authors_cache:
+            author = entry["author"]
+            count = entry["count"]
+            if search_text and search_text not in author.lower():
+                continue
+            self.catalog_author_list.addItem(f"{author}  ({count:,})")
+            shown += 1
+            if shown >= 50:
+                break
+
+    def _catalog_refresh_works(self):
+        """Fetch works scoped to current domain + author, update works list widget."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return
+        self._catalog_works_cache = fjms.get_browse_works(
+            domain=self._catalog_current_domain,
+            author=self._catalog_current_author,
+        )
+        self._catalog_filter_works()
+
+    def _catalog_filter_works(self):
+        """Filter works list widget based on current text input."""
+        search_text = self.catalog_work_input.text().strip().lower()
+        self.catalog_work_list.clear()
+        shown = 0
+        for entry in self._catalog_works_cache:
+            title = entry.get("title", "")
+            title_heb = entry.get("title_heb", "")
+            count = entry["count"]
+            display = title_heb if CURRENT_LANG == 'he' and title_heb else title
+            if not display:
+                display = title or title_heb or "?"
+            if search_text and search_text not in title.lower() and search_text not in title_heb.lower():
+                continue
+            item = QListWidgetItem(f"{display}  ({count:,})")
+            item.setData(Qt.ItemDataRole.UserRole, title)  # Store English title for query
+            self.catalog_work_list.addItem(item)
+            shown += 1
+            if shown >= 50:
+                break
+
+    # --- Catalog Browse: Selection Handlers ---
+
+    def _catalog_on_domain_select(self, item):
+        """Handle domain tree item click."""
+        domain_key = item.data(0, Qt.ItemDataRole.UserRole)
+        if domain_key == "__unclassified__":
+            # Unclassified bucket - not a real domain filter for now
+            # (Would need special query logic; skip for initial release)
+            return
+        self._catalog_current_domain = domain_key
+        self._catalog_current_author = None
+        self._catalog_current_work = None
+        self._catalog_current_page = 0
+        self.catalog_author_input.clear()
+        self.catalog_work_input.clear()
+        self._catalog_refresh_authors()
+        self._catalog_refresh_works()
+        self._catalog_refresh()
+
+    def _catalog_on_author_select(self, item):
+        """Handle author list item click."""
+        text = item.text()
+        # Parse author name from "Author Name  (123)" format
+        author = text.rsplit("  (", 1)[0].strip()
+        self._catalog_current_author = author
+        self._catalog_current_work = None
+        self._catalog_current_page = 0
+        self.catalog_work_input.clear()
+        self._catalog_refresh_works()
+        self._catalog_refresh()
+
+    def _catalog_on_work_select(self, item):
+        """Handle work list item click."""
+        # Get the English title stored in UserRole for the query
+        work_title = item.data(Qt.ItemDataRole.UserRole)
+        if not work_title:
+            text = item.text()
+            work_title = text.rsplit("  (", 1)[0].strip()
+        self._catalog_current_work = work_title
+        self._catalog_current_page = 0
+        self._catalog_refresh()
+
+    def _catalog_remove_filter(self, filter_type):
+        """Remove a specific filter (or all) and refresh."""
+        if filter_type == "all":
+            self._catalog_current_domain = None
+            self._catalog_current_author = None
+            self._catalog_current_work = None
+            self.catalog_domain_tree.clearSelection()
+            self.catalog_author_input.clear()
+            self.catalog_work_input.clear()
+            self._catalog_refresh_authors()
+            self._catalog_refresh_works()
+        elif filter_type == "domain":
+            self._catalog_current_domain = None
+            self._catalog_current_author = None
+            self._catalog_current_work = None
+            self.catalog_domain_tree.clearSelection()
+            self.catalog_author_input.clear()
+            self.catalog_work_input.clear()
+            self._catalog_refresh_authors()
+            self._catalog_refresh_works()
+        elif filter_type == "author":
+            self._catalog_current_author = None
+            self._catalog_current_work = None
+            self.catalog_work_input.clear()
+            self._catalog_refresh_works()
+        elif filter_type == "work":
+            self._catalog_current_work = None
+        self._catalog_current_page = 0
+        self._catalog_refresh()
+
+    def _catalog_update_chips(self):
+        """Update the active filter chips bar."""
+        # Clear existing chips
+        while self._catalog_chips_layout.count():
+            child = self._catalog_chips_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        has_any = False
+        chip_style = (
+            "QPushButton { background: #3498db; color: white; border-radius: 12px; "
+            "padding: 3px 10px; font-size: 11px; border: none; }"
+            "QPushButton:hover { background: #2980b9; }"
+        )
+
+        if self._catalog_current_domain:
+            has_any = True
+            btn = QPushButton(f"{tr('Domain')}: {self._catalog_current_domain}  \u00d7")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda: self._catalog_remove_filter("domain"))
+            self._catalog_chips_layout.addWidget(btn)
+
+        if self._catalog_current_author:
+            has_any = True
+            display = self._catalog_current_author
+            if len(display) > 30:
+                display = display[:27] + "..."
+            btn = QPushButton(f"{tr('Author')}: {display}  \u00d7")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda: self._catalog_remove_filter("author"))
+            self._catalog_chips_layout.addWidget(btn)
+
+        if self._catalog_current_work:
+            has_any = True
+            display = self._catalog_current_work
+            if len(display) > 30:
+                display = display[:27] + "..."
+            btn = QPushButton(f"{tr('Work / Title')}: {display}  \u00d7")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda: self._catalog_remove_filter("work"))
+            self._catalog_chips_layout.addWidget(btn)
+
+        self._catalog_clear_all_btn.setVisible(has_any)
+
+    def _catalog_open_manuscript(self, index):
+        """Double-click result row: navigate to Browse by Shelfmark tab."""
+        row = index.row()
+        item = self.catalog_results_table.item(row, 0)
+        if not item:
+            return
+        sys_id = item.data(Qt.ItemDataRole.UserRole)
+        if sys_id:
+            self.tabs.setCurrentWidget(self.browse_tab)
+            self.browse_sys_input.setText(str(sys_id))
+            self.browse_load()
+
+    def _catalog_next_page(self):
+        """Go to next page of results."""
+        self._catalog_current_page += 1
+        self._catalog_refresh()
+
+    def _catalog_prev_page(self):
+        """Go to previous page of results."""
+        if self._catalog_current_page > 0:
+            self._catalog_current_page -= 1
+            self._catalog_refresh()
+
+    # --- Catalog Browse: Tree Population (lazy) ---
+
+    def _catalog_populate_tree(self):
+        """Populate the domain tree from FjmsService hierarchy. Called on first tab activation."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if not fjms.is_available():
+            return
+
+        hierarchy = fjms.get_domain_hierarchy()
+        self.catalog_domain_tree.clear()
+
+        # Sort parents by count descending
+        sorted_parents = sorted(hierarchy.items(), key=lambda x: x[1].get('count', 0), reverse=True)
+
+        expanded_count = 0
+        for parent_name, info in sorted_parents:
+            parent_heb = info.get('parent_domain_heb', parent_name)
+            parent_count = info.get('count', 0)
+            display_name = parent_heb if CURRENT_LANG == 'he' else parent_name
+
+            parent_item = QTreeWidgetItem([display_name, f"{parent_count:,}"])
+            parent_item.setData(0, Qt.ItemDataRole.UserRole, parent_name)
+            self.catalog_domain_tree.addTopLevelItem(parent_item)
+
+            # Sort children by count descending
+            children = sorted(info.get('children', []), key=lambda c: c.get('count', 0), reverse=True)
+            for child in children:
+                child_name = child.get('domain', '')
+                child_heb = child.get('domain_heb', child_name)
+                child_count = child.get('count', 0)
+                child_display = child_heb if CURRENT_LANG == 'he' else child_name
+
+                child_item = QTreeWidgetItem([child_display, f"{child_count:,}"])
+                child_item.setData(0, Qt.ItemDataRole.UserRole, child_name)
+                parent_item.addChild(child_item)
+
+            # Expand top 3 parent domains by default
+            if expanded_count < 3:
+                parent_item.setExpanded(True)
+                expanded_count += 1
+
+        # Add "Unclassified" item at bottom
+        try:
+            unclassified_count = fjms.get_unclassified_count()
+        except Exception:
+            unclassified_count = 0
+
+        if unclassified_count > 0:
+            uncat_display = tr("Unclassified")
+            uncat_item = QTreeWidgetItem([uncat_display, f"{unclassified_count:,}"])
+            uncat_item.setData(0, Qt.ItemDataRole.UserRole, "__unclassified__")
+            self.catalog_domain_tree.addTopLevelItem(uncat_item)
+
+        self._catalog_tree_loaded = True
+
+        # Also pre-load author and work lists (unfiltered)
+        self._catalog_refresh_authors()
+        self._catalog_refresh_works()
 
     # ==========================================================================
     #  PERSONAL LISTS TAB
