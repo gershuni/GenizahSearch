@@ -9,11 +9,11 @@ Requirements for v7.0.0 Catalog Navigation & Transcription Search. Each maps to 
 
 ### Catalog Browse & Navigation
 
-- [ ] **BROWSE-01**: User can browse manuscripts by FJMS domain hierarchy (domain > sub-domain > manuscripts)
-- [ ] **BROWSE-02**: User can browse manuscripts by author from catalog data (FJMS and PGP)
-- [ ] **BROWSE-03**: User can browse manuscripts by work/title from catalog data
-- [ ] **BROWSE-04**: User can combine browse axes (e.g., filter by domain + author simultaneously)
-- [ ] **BROWSE-05**: Browse results show manuscript metadata (shelfmark, library, domain, identification)
+- [x] **BROWSE-01**: User can browse manuscripts by FJMS domain hierarchy (domain > sub-domain > manuscripts)
+- [x] **BROWSE-02**: User can browse manuscripts by author from catalog data (FJMS and PGP)
+- [x] **BROWSE-03**: User can browse manuscripts by work/title from catalog data
+- [x] **BROWSE-04**: User can combine browse axes (e.g., filter by domain + author simultaneously)
+- [x] **BROWSE-05**: Browse results show manuscript metadata (shelfmark, library, domain, identification)
 - [ ] **BROWSE-06**: Catalog browse works in both web and desktop apps
 
 ### Catalog Search
@@ -83,11 +83,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BROWSE-01 | Phase 41 | Pending |
-| BROWSE-02 | Phase 41 | Pending |
-| BROWSE-03 | Phase 41 | Pending |
-| BROWSE-04 | Phase 41 | Pending |
-| BROWSE-05 | Phase 41 | Pending |
+| BROWSE-01 | Phase 41 | Complete |
+| BROWSE-02 | Phase 41 | Complete |
+| BROWSE-03 | Phase 41 | Complete |
+| BROWSE-04 | Phase 41 | Complete |
+| BROWSE-05 | Phase 41 | Complete |
 | BROWSE-06 | Phase 41 | Pending |
 | CAT-01 | Phase 42 | Pending |
 | CAT-02 | Phase 42 | Pending |

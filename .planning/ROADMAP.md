@@ -131,7 +131,7 @@ Performance: parallel NLI fetch, browse crossref parallelization, FL ID index, v
   3. User can browse manuscripts by work/title and see all fragments containing that work
   4. User can combine axes (e.g., domain + author) to narrow browse results, with results showing shelfmark, library, domain, and identification
   5. Catalog browse is fully functional in both web (NiceGUI) and desktop (PyQt6) apps
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
 - [ ] 41-01-PLAN.md -- Service layer: browse methods for FjmsService (authors, works, results, combined filtering)
@@ -202,7 +202,7 @@ Note: Phases 41-43 (catalog) and Phase 44 (import) are independent chains. Phase
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 41. Catalog Browse & Navigation | 0/4 | Planning complete | - |
+| 41. Catalog Browse & Navigation | 1/4 | In Progress|  |
 | 42. Catalog Search | 0/TBD | Not started | - |
 | 43. Pre-Search Domain Filtering | 0/TBD | Not started | - |
 | 44. Transcription Import | 0/TBD | Not started | - |

@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 41 of 46 (Catalog Browse & Navigation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-22 - Completed quick task 15: Move catalog/bib buttons to page nav pane in Browse; fix FJMS button in advanced mode
+Plan: 1 of 4 in current phase
+Status: Executing
+Last activity: 2026-02-26 - Completed 41-01: Catalog Browse Service Layer
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [##░░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -27,7 +27,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 41-46 | TBD | - | - |
+| 41-01 | 1 | 4min | 4min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -44,6 +44,7 @@ See PROJECT.md Key Decisions table for full history.
 Recent decisions affecting current work:
 - Phase 13 deferred (v5.6.0): Transcription index build too slow for desktop -- revisited in Phase 45-46
 - Post-search domain filtering chosen over pre-search (v5.8.0) -- Phase 43 now adds pre-search option
+- Phase 41-01: MAX(CASE WHEN) aggregation for browse result dedup; batch domain post-query for performance
 
 ### Pending Todos
 
@@ -65,7 +66,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: v7.0.0 roadmap created
+Last session: 2026-02-26
+Stopped at: Completed 41-01-PLAN.md
 Resume file: None
-Notes: Next step is `/gsd:plan-phase 41` to plan Catalog Browse & Navigation.
+Notes: Plan 41-01 (service layer) complete. Next: 41-02 (web UI browse page).
