@@ -2425,4 +2425,22 @@ TRANSLATIONS = {
     # --- Compact Mode ---
     "Compact": "צמצם",
     "Expand": "הרחב",
+
+    # --- Catalog Browse (Desktop & Web) ---
+    "Browse by Shelfmark": "עיון לפי סימן מדף",
+    "Browse by Identification": "עיון לפי זיהוי",
+    "Work / Title": "חיבור / כותרת",
+    "Search authors...": "חיפוש מחברים...",
+    "Search works...": "חיפוש חיבורים...",
+    "Showing {start}-{end} of {total} manuscripts": "מציג {start}-{end} מתוך {total} כתבי יד",
+    "Page {current} of {total}": "עמוד {current} מתוך {total}",
+    "Previous": "הקודם",
+    "Next": "הבא",
+    "Domain": "תחום",
+    "Identification": "זיהוי",
+    "Date": "תאריך",
+    "No results": "אין תוצאות",
+    "Unclassified": "לא מסווג",
+    "No manuscripts match the current filters": "לא נמצאו כתבי יד התואמים את הסינון הנוכחי",
+    "Browse the manuscript corpus by scholarly domain classifications, author attributions, and work identifications.": "עיון בקורפוס כתבי היד לפי סיווגי תחום מדעיים, שיוכי מחבר וזיהויי חיבורים.",
 }

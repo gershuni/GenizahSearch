@@ -377,7 +377,8 @@ def create_layout():
                     ('/about', 'info', tr('About the Genizah'), None),
                     ('/search', 'search', tr('Search'), None),
                     ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
-                    ('/browse', 'menu_book', tr('Browse'), None),
+                    ('/browse', 'menu_book', tr('Browse by Shelfmark'), None),
+                    ('/catalog-browse', 'category', tr('Browse by Identification'), None),
                     ('/discoveries', 'lightbulb', tr('Community'), None),
                     ('/lists', 'star', tr('My Lists'), None),
                 ]
@@ -635,6 +636,25 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     with content:
         from web.pages.browse import create_browse_page
         create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page)
+
+@ui.page('/catalog-browse')
+def catalog_browse_page_route(domain: str = None, author: str = None, work: str = None, page: int = None):
+    set_current_page('/catalog-browse')
+    ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.catalog_browse import create_catalog_browse_page
+        create_catalog_browse_page(
+            initial_domain=domain,
+            initial_author=author,
+            initial_work=work,
+            initial_page=page,
+        )
 
 @ui.page('/lists')
 def lists_page_route():
