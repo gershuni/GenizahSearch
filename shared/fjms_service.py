@@ -354,6 +354,10 @@ class FjmsService:
         self._db_path: Optional[str] = None
         self._hierarchy_cache: Optional[dict] = None
         self._hierarchy_lock = threading.Lock()
+        self._authors_cache: Optional[list] = None
+        self._authors_lock = threading.Lock()
+        self._works_cache: Optional[list] = None
+        self._works_lock = threading.Lock()
 
         # Resolve db_path
         if db_path is None:
@@ -392,6 +396,17 @@ class FjmsService:
             )
             self._conn.row_factory = sqlite3.Row
             logger.info(f"FjmsService: Connected to {db_path}")
+
+            # Create performance indices for browse queries (idempotent)
+            try:
+                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_author ON catalog (AuthorText)")
+                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_title ON catalog (Title)")
+                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_alma ON catalog (AlmaId)")
+                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains (Domain)")
+                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_parent ON domains (ParentDomain)")
+            except Exception as idx_err:
+                # Read-only databases will raise -- safe to ignore
+                logger.debug(f"FjmsService: Index creation skipped (read-only?): {idx_err}")
         except Exception as e:
             logger.error(f"FjmsService: Failed to connect to {db_path}: {e}")
             self._conn = None
@@ -686,6 +701,297 @@ class FjmsService:
             except Exception as e:
                 logger.error(f"FjmsService.get_domain_hierarchy error: {e}")
                 return {}
+
+    # ── Catalog Browse Methods (Phase 41: BROWSE-01..05) ──────────
+
+    def get_browse_authors(self, domain: str = None) -> list[dict]:
+        """
+        Get unique authors from the catalog with manuscript counts.
+
+        Args:
+            domain: Optional domain filter. If provided, only include manuscripts
+                    that have this domain (matches Domain OR ParentDomain).
+
+        Returns:
+            List of dicts with keys: author (str), count (int).
+            Sorted by count descending. Excludes NULL/empty AuthorText.
+            Returns [] if conn is None.
+        """
+        if self._conn is None:
+            return []
+
+        # Return cached result for unfiltered query
+        if domain is None and self._authors_cache is not None:
+            return self._authors_cache
+
+        try:
+            if domain is None:
+                with self._authors_lock:
+                    # Double-check after lock
+                    if self._authors_cache is not None:
+                        return self._authors_cache
+                    cursor = self._conn.execute(
+                        "SELECT AuthorText, COUNT(DISTINCT AlmaId) as count "
+                        "FROM catalog "
+                        "WHERE AuthorText IS NOT NULL AND AuthorText != '' "
+                        "GROUP BY AuthorText ORDER BY count DESC"
+                    )
+                    result = [
+                        {"author": row["AuthorText"], "count": row["count"]}
+                        for row in cursor
+                    ]
+                    self._authors_cache = result
+                    return result
+            else:
+                cursor = self._conn.execute(
+                    "SELECT c.AuthorText, COUNT(DISTINCT c.AlmaId) as count "
+                    "FROM catalog c "
+                    "INNER JOIN domains d ON c.AlmaId = d.AlmaId "
+                    "WHERE c.AuthorText IS NOT NULL AND c.AuthorText != '' "
+                    "  AND (d.Domain = ? OR d.ParentDomain = ?) "
+                    "GROUP BY c.AuthorText ORDER BY count DESC",
+                    (domain, domain),
+                )
+                return [
+                    {"author": row["AuthorText"], "count": row["count"]}
+                    for row in cursor
+                ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_browse_authors error: {e}")
+            return []
+
+    def get_browse_works(self, domain: str = None, author: str = None) -> list[dict]:
+        """
+        Get unique works (Title/TitleHeb pairs) from the catalog with manuscript counts.
+
+        Args:
+            domain: Optional domain filter. If provided, only include manuscripts
+                    that have this domain (matches Domain OR ParentDomain).
+            author: Optional author filter. If provided, filter by AuthorText = author.
+
+        Returns:
+            List of dicts with keys: title (str), title_heb (str), count (int).
+            Sorted by count descending. Excludes rows where both Title and TitleHeb
+            are NULL/empty. Returns [] if conn is None.
+        """
+        if self._conn is None:
+            return []
+
+        # Return cached result for unfiltered query
+        if domain is None and author is None and self._works_cache is not None:
+            return self._works_cache
+
+        try:
+            conditions = [
+                "(c.Title IS NOT NULL AND c.Title != '' "
+                "OR c.TitleHeb IS NOT NULL AND c.TitleHeb != '')"
+            ]
+            params = []
+            join_clause = ""
+
+            if domain is not None:
+                join_clause = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
+                conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
+                params.extend([domain, domain])
+
+            if author is not None:
+                conditions.append("c.AuthorText = ?")
+                params.append(author)
+
+            where = " AND ".join(conditions)
+            sql = (
+                f"SELECT c.Title, c.TitleHeb, COUNT(DISTINCT c.AlmaId) as count "
+                f"FROM catalog c {join_clause} "
+                f"WHERE {where} "
+                f"GROUP BY c.Title, c.TitleHeb ORDER BY count DESC"
+            )
+
+            if domain is None and author is None:
+                with self._works_lock:
+                    if self._works_cache is not None:
+                        return self._works_cache
+                    cursor = self._conn.execute(sql, params)
+                    result = [
+                        {
+                            "title": row["Title"] or "",
+                            "title_heb": row["TitleHeb"] or "",
+                            "count": row["count"],
+                        }
+                        for row in cursor
+                    ]
+                    self._works_cache = result
+                    return result
+            else:
+                cursor = self._conn.execute(sql, params)
+                return [
+                    {
+                        "title": row["Title"] or "",
+                        "title_heb": row["TitleHeb"] or "",
+                        "count": row["count"],
+                    }
+                    for row in cursor
+                ]
+        except Exception as e:
+            logger.error(f"FjmsService.get_browse_works error: {e}")
+            return []
+
+    def get_browse_results(
+        self,
+        domain: str = None,
+        author: str = None,
+        work: str = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> dict:
+        """
+        Get paginated browse results matching all provided filters (intersection).
+
+        Args:
+            domain: Optional domain filter (matches Domain OR ParentDomain).
+            author: Optional author filter (AuthorText = author).
+            work: Optional work/title filter (Title = work).
+            offset: Pagination offset.
+            limit: Maximum results to return per page.
+
+        Returns:
+            Dict with keys:
+                - results: list of dicts with keys: sys_id, title, title_heb,
+                  author, copy_date, textual_frame_heb, textual_frame_eng,
+                  domains, domains_heb
+                - total: int (total matching count before pagination)
+            Returns {"results": [], "total": 0} if conn is None.
+        """
+        empty = {"results": [], "total": 0}
+        if self._conn is None:
+            return empty
+
+        try:
+            conditions = []
+            params = []
+            join_clause = ""
+
+            if domain is not None:
+                join_clause = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
+                conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
+                params.extend([domain, domain])
+
+            if author is not None:
+                conditions.append("c.AuthorText = ?")
+                params.append(author)
+
+            if work is not None:
+                conditions.append("c.Title = ?")
+                params.append(work)
+
+            where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+            # Count query
+            count_sql = (
+                f"SELECT COUNT(DISTINCT c.AlmaId) as total "
+                f"FROM catalog c {join_clause}{where}"
+            )
+            total = self._conn.execute(count_sql, params).fetchone()["total"]
+
+            if total == 0:
+                return empty
+
+            # Results query -- pick first non-empty value per grouped AlmaId
+            # Use GROUP BY + aggregation to deduplicate
+            results_sql = (
+                f"SELECT c.AlmaId, "
+                f"  MAX(CASE WHEN c.Title IS NOT NULL AND c.Title != '' THEN c.Title END) as Title, "
+                f"  MAX(CASE WHEN c.TitleHeb IS NOT NULL AND c.TitleHeb != '' THEN c.TitleHeb END) as TitleHeb, "
+                f"  MAX(CASE WHEN c.AuthorText IS NOT NULL AND c.AuthorText != '' THEN c.AuthorText END) as AuthorText, "
+                f"  MAX(CASE WHEN c.CopyDate IS NOT NULL AND c.CopyDate != '' THEN c.CopyDate END) as CopyDate, "
+                f"  MAX(CASE WHEN c.TextualFrameHeb IS NOT NULL AND c.TextualFrameHeb != '' THEN c.TextualFrameHeb END) as TextualFrameHeb, "
+                f"  MAX(CASE WHEN c.TextualFrameEng IS NOT NULL AND c.TextualFrameEng != '' THEN c.TextualFrameEng END) as TextualFrameEng "
+                f"FROM catalog c {join_clause}{where} "
+                f"GROUP BY c.AlmaId "
+                f"ORDER BY c.AlmaId "
+                f"LIMIT ? OFFSET ?"
+            )
+            result_params = list(params) + [limit, offset]
+            cursor = self._conn.execute(results_sql, result_params)
+            rows = cursor.fetchall()
+
+            # Batch-fetch domains for result sys_ids
+            sys_ids = [row["AlmaId"] for row in rows]
+            domains_map = self._batch_domains(sys_ids)
+
+            results = []
+            for row in rows:
+                sid = row["AlmaId"]
+                dom_info = domains_map.get(sid, [])
+                results.append({
+                    "sys_id": sid,
+                    "title": row["Title"] or "",
+                    "title_heb": row["TitleHeb"] or "",
+                    "author": row["AuthorText"] or "",
+                    "copy_date": row["CopyDate"] or "",
+                    "textual_frame_heb": row["TextualFrameHeb"] or "",
+                    "textual_frame_eng": row["TextualFrameEng"] or "",
+                    "domains": list({d["domain"] for d in dom_info}),
+                    "domains_heb": list({d["domain_heb"] for d in dom_info if d.get("domain_heb")}),
+                })
+
+            return {"results": results, "total": total}
+        except Exception as e:
+            logger.error(f"FjmsService.get_browse_results error: {e}")
+            return empty
+
+    def _batch_domains(self, sys_ids: list[str]) -> dict:
+        """Fetch domains for a batch of sys_ids efficiently.
+
+        Returns dict mapping sys_id -> list of {"domain": str, "domain_heb": str}.
+        """
+        if not self._conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT AlmaId, Domain, DomainHeb FROM domains "
+                    f"WHERE AlmaId IN ({placeholders})",
+                    batch,
+                )
+                for row in cursor:
+                    sid = row["AlmaId"]
+                    if sid not in result:
+                        result[sid] = []
+                    result[sid].append({
+                        "domain": row["Domain"],
+                        "domain_heb": row["DomainHeb"],
+                    })
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService._batch_domains error: {e}")
+            return {}
+
+    def get_unclassified_count(self) -> int:
+        """
+        Get count of catalog AlmaIds that have no corresponding entry in the domains table.
+
+        Used for showing "Unclassified" bucket in the browse UI.
+
+        Returns:
+            Count of unclassified manuscript IDs. Returns 0 if conn is None.
+        """
+        if self._conn is None:
+            return 0
+        try:
+            cursor = self._conn.execute(
+                "SELECT COUNT(DISTINCT c.AlmaId) as count "
+                "FROM catalog c "
+                "LEFT JOIN domains d ON c.AlmaId = d.AlmaId "
+                "WHERE d.AlmaId IS NULL"
+            )
+            return cursor.fetchone()["count"]
+        except Exception as e:
+            logger.error(f"FjmsService.get_unclassified_count error: {e}")
+            return 0
 
     @staticmethod
     def _split_concat(val):
