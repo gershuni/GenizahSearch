@@ -2315,11 +2315,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                                     ui.label(title).classes('text-sm').style('color: var(--text-primary);')
 
-                            # Author (prominent)
+                            # Author (prominent, clickable link to catalog browse)
                             if merged.get('author_text') and merged['author_text'].strip():
                                 with ui.column().classes('gap-1 mb-2'):
                                     ui.label(tr('Author')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(merged['author_text']).classes('text-sm').style('color: var(--text-primary);')
+                                    ui.link(
+                                        merged['author_text'],
+                                        f'/catalog-browse?author={quote(merged["author_text"])}'
+                                    ).classes('text-sm').style('color: var(--primary-600);')
 
                             # Copy Date and Place (inline row)
                             date = merged.get('copy_date')
@@ -2398,7 +2401,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     display_name = dom['domain_heb'] if lang == 'he' else dom['domain']
                                     ui.link(
                                         display_name,
-                                        f'/search?domain={quote(dom["domain"])}'
+                                        f'/catalog-browse?domain={quote(dom["domain"])}'
                                     ).classes('text-sm').style('color: var(--primary-600);')
 
                     # === Phase 33: Catalog Cross-References ===

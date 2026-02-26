@@ -9979,9 +9979,14 @@ class GenizahGUI(QMainWindow):
         if title and title.strip():
             html += f"<p><b>{tr('Title')}:</b> {title}</p>"
 
-        # Author
+        # Author (clickable link to catalog browse)
         if merged.get('author_text') and merged['author_text'].strip():
-            html += f"<p><b>{tr('Author')}:</b> {merged['author_text']}</p>"
+            author_text = merged['author_text']
+            html += (
+                f"<p><b>{tr('Author')}:</b> "
+                f"<a href='author:{author_text}' style='color: #9b59b6; "
+                f"text-decoration: underline;'>{author_text}</a></p>"
+            )
 
         # Date and Place
         date = merged.get('copy_date')
@@ -10295,9 +10300,70 @@ class GenizahGUI(QMainWindow):
             self._search_by_pgp_tag(tag)
         elif url_str.startswith('domain:'):
             domain = url_str[7:]
-            self._navigate_to_search_with_domain(domain)
+            self._navigate_to_catalog_browse(domain=domain)
+        elif url_str.startswith('author:'):
+            author = url_str[7:]
+            self._navigate_to_catalog_browse(author=author)
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
+
+    def _navigate_to_catalog_browse(self, domain=None, author=None, work=None):
+        """Navigate to the catalog browse tab with the specified filter pre-set.
+
+        Clears existing filters, sets the requested filter(s), loads the domain
+        tree if needed, and switches to the catalog browse tab.
+        """
+        if not hasattr(self, 'catalog_browse_tab'):
+            return
+
+        # Clear existing catalog browse filters
+        self._catalog_current_domain = domain
+        self._catalog_current_author = author
+        self._catalog_current_work = work
+        self._catalog_current_page = 0
+        self.catalog_author_input.clear()
+        self.catalog_work_input.clear()
+
+        # Pre-fill author/work input fields if specified
+        if author:
+            self.catalog_author_input.setText(author)
+        if work:
+            self.catalog_work_input.setText(work)
+
+        # Ensure domain tree is loaded
+        if not self._catalog_tree_loaded:
+            self._catalog_populate_tree()
+
+        # If domain specified, select it in the tree
+        if domain:
+            self._catalog_select_domain_in_tree(domain)
+
+        # Switch to catalog browse tab
+        self.tabs.setCurrentWidget(self.catalog_browse_tab)
+
+        # Refresh results with the new filters
+        self._catalog_refresh_authors()
+        self._catalog_refresh_works()
+        self._catalog_refresh()
+        self._catalog_update_chips()
+
+    def _catalog_select_domain_in_tree(self, domain_name):
+        """Select a domain in the catalog browse domain tree by its English key."""
+        tree = self.catalog_domain_tree
+        for i in range(tree.topLevelItemCount()):
+            top_item = tree.topLevelItem(i)
+            key = top_item.data(0, Qt.ItemDataRole.UserRole)
+            if key == domain_name:
+                tree.setCurrentItem(top_item)
+                return
+            # Check children
+            for j in range(top_item.childCount()):
+                child_item = top_item.child(j)
+                child_key = child_item.data(0, Qt.ItemDataRole.UserRole)
+                if child_key == domain_name:
+                    top_item.setExpanded(True)
+                    tree.setCurrentItem(child_item)
+                    return
 
     def _browse_display_pgp_text(self, text, is_rtl=True):
         """Display PGP edition/translation text with proper directionality."""
