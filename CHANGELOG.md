@@ -4,6 +4,36 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.1.0] - 2026-02-27
+
+### Milestone: Catalog Browse & Navigation (Phase 41)
+
+Added faceted catalog browsing by domain, author, and work in both apps, with free-text filtering, FIST v5.0.0 enrichment, and cross-links between browse pages.
+
+#### Catalog Browse Pages (Plans 41-01 through 41-04)
+- **Web catalog browse page**: New `/catalog-browse` page with domain hierarchy tree, author/work search dropdowns, combined filtering, pagination, and deep linking via URL params
+- **Desktop catalog browse tab**: New "Browse by Identification" tab with matching domain tree, author/work filtering, and result navigation
+- **Cross-links**: Domain and author labels on manuscript browse pages are clickable links to catalog browse filtered by that value (both apps)
+- **Sidebar/tab navigation**: "Browse by Shelfmark" and "Browse by Identification" entries in both apps
+
+#### Free Text Filter
+- **FTS5-based catalog search**: ALL/ANY/NOT modes for filtering catalog browse results by text across titles, descriptions, and identifications
+- **Hybrid FTS5 + domain LIKE**: Domain name searches (e.g., "פילוסופיה") return results via UNION query combining FTS5 catalog fields with domain table LIKE search
+- **Filter chips**: Color-coded removable chips (blue=ALL, green=ANY, red=NOT) with button-style removal to avoid NiceGUI slot issues
+- **sessionStorage persistence**: Text filter state preserved across page navigation
+
+#### FIST v5.0.0 Enrichment
+- **3 new tables**: genizah_persons (2,286 historical people), genizah_titles (775 works), code_values (3,440 decoded field values)
+- **20 new catalog columns**: GenizahTitleId, Author, CopyToDate, CreationTypeCode, Comment, Colophon, CopyName, and more
+- **Structured author/work browsing**: 801 authors (was 204) and 663 works via FK path through genizah_persons/genizah_titles
+- **Graceful fallback**: `_has_persons_titles` flag enables v4 sidecar compatibility
+
+#### Translations & Tests
+- **15 new Hebrew translations** for catalog browse UI strings
+- **Test updates**: Browse author/work tests updated for new dict key format; 72 FJMS tests passing
+
+---
+
 ## [6.0.0] - 2026-02-22
 
 ### Milestone: Local Data Architecture

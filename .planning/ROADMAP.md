@@ -112,7 +112,7 @@ Performance: parallel NLI fetch, browse crossref parallelization, FL ID index, v
 
 **Milestone Goal:** Enable researchers to browse and search the scholarly catalog (authors, works, domains) and search within transcription text alongside OCR, with pre-search domain scoping.
 
-- [ ] **Phase 41: Catalog Browse & Navigation** - Faceted browsing of manuscripts by domain, author, and work hierarchies in both apps
+- [x] **Phase 41: Catalog Browse & Navigation** - Faceted browsing of manuscripts by domain, author, and work hierarchies in both apps (shipped 2026-02-27, v6.1.0)
 - [ ] **Phase 42: Catalog Search** - Full-text and structured field search across FJMS and PGP catalog data as a search mode
 - [ ] **Phase 43: Pre-Search Domain Filtering** - Include/exclude domains, identifications, and authors before Tantivy search across all modes
 - [ ] **Phase 44: Transcription Import** - FJMS ~30K transcriptions from FIST.db into fjms_enrichment.db with shared service access
@@ -131,7 +131,7 @@ Performance: parallel NLI fetch, browse crossref parallelization, FL ID index, v
   3. User can browse manuscripts by work/title and see all fragments containing that work
   4. User can combine axes (e.g., domain + author) to narrow browse results, with results showing shelfmark, library, domain, and identification
   5. Catalog browse is fully functional in both web (NiceGUI) and desktop (PyQt6) apps
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans executed
 
 Plans:
 - [ ] 41-01-PLAN.md -- Service layer: browse methods for FjmsService (authors, works, results, combined filtering)
@@ -202,7 +202,7 @@ Note: Phases 41-43 (catalog) and Phase 44 (import) are independent chains. Phase
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 41. Catalog Browse & Navigation | 3/4 | In Progress|  |
+| 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
 | 42. Catalog Search | 0/TBD | Not started | - |
 | 43. Pre-Search Domain Filtering | 0/TBD | Not started | - |
 | 44. Transcription Import | 0/TBD | Not started | - |
@@ -215,4 +215,4 @@ Note: Phases 41-43 (catalog) and Phase 44 (import) are independent chains. Phase
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-26 after Phase 41 planning complete*
+*Last updated: 2026-02-27 after Phase 41 shipped as v6.1.0*
