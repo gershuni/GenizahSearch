@@ -278,6 +278,28 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex=
     color: var(--text-primary) !important;
 }
 
+/* Catalog Browse Table - theme-aware (high specificity to override Quasar) */
+.catalog-browse-table .q-table { table-layout: fixed; width: 100% !important; }
+.catalog-browse-table .q-table thead tr th {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    font-weight: 600;
+}
+.catalog-browse-table .q-table tbody tr td {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+.catalog-browse-table .q-table tbody tr:hover td {
+    background: var(--bg-hover) !important;
+}
+.catalog-browse-table .q-table__bottom {
+    background: var(--bg-card) !important;
+    color: var(--text-secondary) !important;
+}
+.catalog-browse-table .catalog-detail-row td {
+    white-space: normal !important;
+}
+
 /* ========================================================================
    Base Styles
    ======================================================================== */

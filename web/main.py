@@ -638,7 +638,10 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
         create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page)
 
 @ui.page('/catalog-browse')
-def catalog_browse_page_route(domain: str = None, author: str = None, work: str = None, page: int = None):
+def catalog_browse_page_route(
+    domain: str = None, author: str = None, work: str = None, page: int = None,
+    text_all: str = None, text_any: str = None, text_not: str = None,
+):
     set_current_page('/catalog-browse')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -654,6 +657,9 @@ def catalog_browse_page_route(domain: str = None, author: str = None, work: str 
             initial_author=author,
             initial_work=work,
             initial_page=page,
+            initial_text_all=text_all,
+            initial_text_any=text_any,
+            initial_text_not=text_not,
         )
 
 @ui.page('/lists')

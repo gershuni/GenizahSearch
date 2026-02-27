@@ -338,6 +338,19 @@ def _find_project_root() -> Optional[Path]:
     return None
 
 
+def _is_int(value) -> bool:
+    """Check if a value can be interpreted as an integer (for person_id/title_id)."""
+    if isinstance(value, int):
+        return True
+    if isinstance(value, str):
+        try:
+            int(value)
+            return True
+        except ValueError:
+            return False
+    return False
+
+
 class FjmsService:
     """Service for accessing FJMS enrichment data from the SQLite sidecar."""
 
@@ -358,6 +371,7 @@ class FjmsService:
         self._authors_lock = threading.Lock()
         self._works_cache: Optional[list] = None
         self._works_lock = threading.Lock()
+        self._has_persons_titles: bool = False  # Set True if v5+ tables exist
 
         # Resolve db_path
         if db_path is None:
@@ -407,6 +421,18 @@ class FjmsService:
             except Exception as idx_err:
                 # Read-only databases will raise -- safe to ignore
                 logger.debug(f"FjmsService: Index creation skipped (read-only?): {idx_err}")
+
+            # Detect v5+ lookup tables (genizah_persons, genizah_titles)
+            try:
+                cnt = self._conn.execute(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                    "AND name IN ('genizah_persons', 'genizah_titles')"
+                ).fetchone()[0]
+                self._has_persons_titles = cnt == 2
+                if self._has_persons_titles:
+                    logger.info("FjmsService: v5+ lookup tables detected (genizah_persons, genizah_titles)")
+            except Exception:
+                self._has_persons_titles = False
         except Exception as e:
             logger.error(f"FjmsService: Failed to connect to {db_path}: {e}")
             self._conn = None
@@ -708,13 +734,21 @@ class FjmsService:
         """
         Get unique authors from the catalog with manuscript counts.
 
+        With v5+ sidecar (genizah_persons/genizah_titles tables), uses the
+        structured FK path: catalog.GenizahTitleId -> genizah_titles.AuthorId
+        -> genizah_persons, UNION catalog.Author -> genizah_persons.
+
+        Falls back to sparse AuthorText for pre-v5 sidecars.
+
         Args:
             domain: Optional domain filter. If provided, only include manuscripts
                     that have this domain (matches Domain OR ParentDomain).
 
         Returns:
-            List of dicts with keys: author (str), count (int).
-            Sorted by count descending. Excludes NULL/empty AuthorText.
+            List of dicts with keys: person_id (int), eng_desc (str),
+            heb_desc (str), count (int). For legacy fallback: person_id=None,
+            eng_desc=AuthorText, heb_desc=''.
+            Sorted by count descending.
             Returns [] if conn is None.
         """
         if self._conn is None:
@@ -725,54 +759,119 @@ class FjmsService:
             return self._authors_cache
 
         try:
+            result = self._query_browse_authors(domain)
+
             if domain is None:
                 with self._authors_lock:
-                    # Double-check after lock
                     if self._authors_cache is not None:
                         return self._authors_cache
-                    cursor = self._conn.execute(
-                        "SELECT AuthorText, COUNT(DISTINCT AlmaId) as count "
-                        "FROM catalog "
-                        "WHERE AuthorText IS NOT NULL AND AuthorText != '' "
-                        "GROUP BY AuthorText ORDER BY count DESC"
-                    )
-                    result = [
-                        {"author": row["AuthorText"], "count": row["count"]}
-                        for row in cursor
-                    ]
                     self._authors_cache = result
-                    return result
-            else:
-                cursor = self._conn.execute(
-                    "SELECT c.AuthorText, COUNT(DISTINCT c.AlmaId) as count "
-                    "FROM catalog c "
-                    "INNER JOIN domains d ON c.AlmaId = d.AlmaId "
-                    "WHERE c.AuthorText IS NOT NULL AND c.AuthorText != '' "
-                    "  AND (d.Domain = ? OR d.ParentDomain = ?) "
-                    "GROUP BY c.AuthorText ORDER BY count DESC",
-                    (domain, domain),
-                )
-                return [
-                    {"author": row["AuthorText"], "count": row["count"]}
-                    for row in cursor
-                ]
+            return result
         except Exception as e:
             logger.error(f"FjmsService.get_browse_authors error: {e}")
             return []
 
+    def _query_browse_authors(self, domain: str = None) -> list[dict]:
+        """Execute the browse authors query."""
+        if self._has_persons_titles:
+            return self._query_browse_authors_v5(domain)
+        return self._query_browse_authors_legacy(domain)
+
+    def _query_browse_authors_v5(self, domain: str = None) -> list[dict]:
+        """v5+ query: structured FK path through genizah_persons."""
+        domain_join = ""
+        domain_where = ""
+        params = []
+        if domain is not None:
+            domain_join = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
+            domain_where = "AND (d.Domain = ? OR d.ParentDomain = ?)"
+            params = [domain, domain]
+
+        # Path 1: catalog -> genizah_titles -> genizah_persons (via GenizahTitleId)
+        # Path 2: catalog.Author -> genizah_persons (direct FK, for records without GenizahTitleId)
+        sql = f"""
+            SELECT person_id, eng_desc, heb_desc, SUM(cnt) as count FROM (
+                SELECT gp.GenizahPersonId as person_id, gp.EngDesc as eng_desc,
+                       gp.HebDesc as heb_desc, COUNT(DISTINCT c.AlmaId) as cnt
+                FROM catalog c
+                INNER JOIN genizah_titles gt ON c.GenizahTitleId = gt.GenizahTitleId
+                INNER JOIN genizah_persons gp ON gt.AuthorId = gp.GenizahPersonId
+                {domain_join}
+                WHERE gp.GenizahPersonId > 0 {domain_where}
+                GROUP BY gp.GenizahPersonId, gp.EngDesc, gp.HebDesc
+                UNION ALL
+                SELECT gp.GenizahPersonId as person_id, gp.EngDesc as eng_desc,
+                       gp.HebDesc as heb_desc, COUNT(DISTINCT c.AlmaId) as cnt
+                FROM catalog c
+                INNER JOIN genizah_persons gp ON c.Author = gp.GenizahPersonId
+                {domain_join}
+                WHERE c.GenizahTitleId IS NULL AND c.Author IS NOT NULL AND c.Author > 0
+                {domain_where}
+                GROUP BY gp.GenizahPersonId, gp.EngDesc, gp.HebDesc
+            ) grouped
+            GROUP BY person_id, eng_desc, heb_desc
+            ORDER BY count DESC
+        """
+        all_params = list(params) + list(params)
+        cursor = self._conn.execute(sql, all_params)
+        return [
+            {
+                "person_id": row["person_id"],
+                "eng_desc": row["eng_desc"] or "",
+                "heb_desc": row["heb_desc"] or "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
+
+    def _query_browse_authors_legacy(self, domain: str = None) -> list[dict]:
+        """Legacy query: sparse AuthorText column."""
+        if domain is None:
+            cursor = self._conn.execute(
+                "SELECT AuthorText, COUNT(DISTINCT AlmaId) as count "
+                "FROM catalog "
+                "WHERE AuthorText IS NOT NULL AND AuthorText != '' "
+                "GROUP BY AuthorText ORDER BY count DESC"
+            )
+        else:
+            cursor = self._conn.execute(
+                "SELECT c.AuthorText, COUNT(DISTINCT c.AlmaId) as count "
+                "FROM catalog c "
+                "INNER JOIN domains d ON c.AlmaId = d.AlmaId "
+                "WHERE c.AuthorText IS NOT NULL AND c.AuthorText != '' "
+                "  AND (d.Domain = ? OR d.ParentDomain = ?) "
+                "GROUP BY c.AuthorText ORDER BY count DESC",
+                (domain, domain),
+            )
+        return [
+            {
+                "person_id": None,
+                "eng_desc": row["AuthorText"],
+                "heb_desc": "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
+
     def get_browse_works(self, domain: str = None, author: str = None) -> list[dict]:
         """
-        Get unique works (Title/TitleHeb pairs) from the catalog with manuscript counts.
+        Get unique works from the catalog with manuscript counts.
+
+        With v5+ sidecar, uses genizah_titles for structured title lookup.
+        Falls back to sparse Title/TitleHeb for pre-v5 sidecars.
 
         Args:
             domain: Optional domain filter. If provided, only include manuscripts
                     that have this domain (matches Domain OR ParentDomain).
-            author: Optional author filter. If provided, filter by AuthorText = author.
+            author: Optional author filter. For v5+: person_id (int or str digit).
+                    For legacy: AuthorText string.
 
         Returns:
-            List of dicts with keys: title (str), title_heb (str), count (int).
-            Sorted by count descending. Excludes rows where both Title and TitleHeb
-            are NULL/empty. Returns [] if conn is None.
+            List of dicts with keys: title_id (int), org_title (str),
+            eng_title (str), count (int). For legacy fallback: title_id=None,
+            org_title=Title, eng_title=TitleHeb.
+            Sorted by count descending.
+            Returns [] if conn is None.
         """
         if self._conn is None:
             return []
@@ -782,58 +881,103 @@ class FjmsService:
             return self._works_cache
 
         try:
-            conditions = [
-                "(c.Title IS NOT NULL AND c.Title != '' "
-                "OR c.TitleHeb IS NOT NULL AND c.TitleHeb != '')"
-            ]
-            params = []
-            join_clause = ""
-
-            if domain is not None:
-                join_clause = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
-                conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
-                params.extend([domain, domain])
-
-            if author is not None:
-                conditions.append("c.AuthorText = ?")
-                params.append(author)
-
-            where = " AND ".join(conditions)
-            sql = (
-                f"SELECT c.Title, c.TitleHeb, COUNT(DISTINCT c.AlmaId) as count "
-                f"FROM catalog c {join_clause} "
-                f"WHERE {where} "
-                f"GROUP BY c.Title, c.TitleHeb ORDER BY count DESC"
-            )
+            result = self._query_browse_works(domain, author)
 
             if domain is None and author is None:
                 with self._works_lock:
                     if self._works_cache is not None:
                         return self._works_cache
-                    cursor = self._conn.execute(sql, params)
-                    result = [
-                        {
-                            "title": row["Title"] or "",
-                            "title_heb": row["TitleHeb"] or "",
-                            "count": row["count"],
-                        }
-                        for row in cursor
-                    ]
                     self._works_cache = result
-                    return result
-            else:
-                cursor = self._conn.execute(sql, params)
-                return [
-                    {
-                        "title": row["Title"] or "",
-                        "title_heb": row["TitleHeb"] or "",
-                        "count": row["count"],
-                    }
-                    for row in cursor
-                ]
+            return result
         except Exception as e:
             logger.error(f"FjmsService.get_browse_works error: {e}")
             return []
+
+    def _query_browse_works(self, domain: str = None, author=None) -> list[dict]:
+        """Execute the browse works query."""
+        if self._has_persons_titles:
+            return self._query_browse_works_v5(domain, author)
+        return self._query_browse_works_legacy(domain, author)
+
+    def _query_browse_works_v5(self, domain: str = None, author=None) -> list[dict]:
+        """v5+ query: structured genizah_titles lookup."""
+        conditions = ["gt.GenizahTitleId > 0"]
+        params = []
+        domain_join = ""
+
+        if domain is not None:
+            domain_join = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
+            conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
+            params.extend([domain, domain])
+
+        if author is not None:
+            # v5+: author is person_id (int)
+            try:
+                person_id = int(author)
+                conditions.append("(gt.AuthorId = ? OR c.Author = ?)")
+                params.extend([person_id, person_id])
+            except (ValueError, TypeError):
+                # Legacy string passed -- fall back to AuthorText match
+                conditions.append("c.AuthorText = ?")
+                params.append(author)
+
+        where = " AND ".join(conditions)
+        sql = f"""
+            SELECT gt.GenizahTitleId as title_id, gt.OrgTitle as org_title,
+                   gt.EngTitle as eng_title, COUNT(DISTINCT c.AlmaId) as count
+            FROM catalog c
+            INNER JOIN genizah_titles gt ON c.GenizahTitleId = gt.GenizahTitleId
+            {domain_join}
+            WHERE {where}
+            GROUP BY gt.GenizahTitleId, gt.OrgTitle, gt.EngTitle
+            ORDER BY count DESC
+        """
+        cursor = self._conn.execute(sql, params)
+        return [
+            {
+                "title_id": row["title_id"],
+                "org_title": row["org_title"] or "",
+                "eng_title": row["eng_title"] or "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
+
+    def _query_browse_works_legacy(self, domain: str = None, author=None) -> list[dict]:
+        """Legacy query: sparse Title/TitleHeb columns."""
+        conditions = [
+            "(c.Title IS NOT NULL AND c.Title != '' "
+            "OR c.TitleHeb IS NOT NULL AND c.TitleHeb != '')"
+        ]
+        params = []
+        join_clause = ""
+
+        if domain is not None:
+            join_clause = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
+            conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
+            params.extend([domain, domain])
+
+        if author is not None:
+            conditions.append("c.AuthorText = ?")
+            params.append(author)
+
+        where = " AND ".join(conditions)
+        sql = (
+            f"SELECT c.Title, c.TitleHeb, COUNT(DISTINCT c.AlmaId) as count "
+            f"FROM catalog c {join_clause} "
+            f"WHERE {where} "
+            f"GROUP BY c.Title, c.TitleHeb ORDER BY count DESC"
+        )
+        cursor = self._conn.execute(sql, params)
+        return [
+            {
+                "title_id": None,
+                "org_title": row["Title"] or "",
+                "eng_title": row["TitleHeb"] or "",
+                "count": row["count"],
+            }
+            for row in cursor
+        ]
 
     def get_browse_results(
         self,
@@ -842,6 +986,12 @@ class FjmsService:
         work: str = None,
         offset: int = 0,
         limit: int = 50,
+        date_from: int = None,
+        date_to: int = None,
+        include_undated: bool = False,
+        text_all: list[str] = None,
+        text_any: list[str] = None,
+        text_not: list[str] = None,
     ) -> dict:
         """
         Get paginated browse results matching all provided filters (intersection).
@@ -852,6 +1002,13 @@ class FjmsService:
             work: Optional work/title filter (Title = work).
             offset: Pagination offset.
             limit: Maximum results to return per page.
+            date_from: Optional minimum year (inclusive). Records with year >= date_from.
+            date_to: Optional maximum year (inclusive). Records with year <= date_to.
+            include_undated: If True AND date filter is active, also include records
+                with no date (CopyDate is NULL, empty, '0', or '-99').
+            text_all: Terms that must ALL appear (AND). Matched across all text fields.
+            text_any: Terms where ANY must appear (OR). Matched across all text fields.
+            text_not: Terms that must NOT appear. Excluded across all text fields.
 
         Returns:
             Dict with keys:
@@ -876,12 +1033,109 @@ class FjmsService:
                 params.extend([domain, domain])
 
             if author is not None:
-                conditions.append("c.AuthorText = ?")
-                params.append(author)
+                if self._has_persons_titles and _is_int(author):
+                    # v5+: author is person_id -- match via title FK or direct Author FK
+                    person_id = int(author)
+                    conditions.append(
+                        "(c.GenizahTitleId IN ("
+                        "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                        "  WHERE gt.AuthorId = ?"
+                        ") OR c.Author = ?)"
+                    )
+                    params.extend([person_id, person_id])
+                else:
+                    # Legacy: author is AuthorText string
+                    conditions.append("c.AuthorText = ?")
+                    params.append(author)
 
             if work is not None:
-                conditions.append("c.Title = ?")
-                params.append(work)
+                if self._has_persons_titles and _is_int(work):
+                    # v5+: work is GenizahTitleId
+                    conditions.append("c.GenizahTitleId = ?")
+                    params.append(int(work))
+                else:
+                    # Legacy: work is Title string
+                    conditions.append("c.Title = ?")
+                    params.append(work)
+
+            # Date range filter
+            has_date_filter = date_from is not None or date_to is not None
+            if has_date_filter:
+                _no_date = "(c.CopyDate IS NULL OR c.CopyDate = '' OR c.CopyDate = '0' OR c.CopyDate = '-99')"
+                date_parts = []
+                if date_from is not None and date_to is not None:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) BETWEEN ? AND ?")
+                    params.extend([date_from, date_to])
+                elif date_from is not None:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) >= ?")
+                    params.append(date_from)
+                else:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) <= ?")
+                    params.append(date_to)
+                # Exclude sentinel values from the numeric range check
+                dated_cond = f"(NOT {_no_date} AND {date_parts[0]})"
+                if include_undated:
+                    conditions.append(f"({dated_cond} OR {_no_date})")
+                else:
+                    conditions.append(dated_cond)
+
+            # Free text filters: hybrid FTS5 (catalog fields) + domain name LIKE
+            # FTS5 covers Title, TitleHeb, TextualFrame*, RunningTitle, FreeDescription, FullText, DetailedFrames
+            # Domain LIKE covers Domain/DomainHeb names which are NOT in the FTS5 index
+            def _fts_escape(term: str) -> str:
+                """Escape FTS5 special characters and wrap for substring match."""
+                escaped = term.replace('"', '""')
+                return f'"{escaped}"'
+
+            _TEXT_MATCH = (
+                "c.rowid IN ("
+                "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                "UNION "
+                "SELECT c2.rowid FROM catalog c2 "
+                "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+                ")"
+            )
+            _TEXT_NOT_MATCH = (
+                "c.rowid NOT IN ("
+                "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                "UNION "
+                "SELECT c2.rowid FROM catalog c2 "
+                "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+                ")"
+            )
+
+            if text_all:
+                for term in text_all:
+                    conditions.append(_TEXT_MATCH)
+                    like_pat = f"%{term}%"
+                    params.extend([_fts_escape(term), like_pat, like_pat])
+
+            if text_any:
+                fts_expr = " OR ".join(_fts_escape(t) for t in text_any)
+                like_parts = []
+                like_params = []
+                for t in text_any:
+                    like_parts.append("dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?")
+                    like_params.extend([f"%{t}%", f"%{t}%"])
+                conditions.append(
+                    "c.rowid IN ("
+                    "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                    "UNION "
+                    "SELECT c2.rowid FROM catalog c2 "
+                    "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                    f"WHERE {' OR '.join(like_parts)}"
+                    ")"
+                )
+                params.append(fts_expr)
+                params.extend(like_params)
+
+            if text_not:
+                for term in text_not:
+                    conditions.append(_TEXT_NOT_MATCH)
+                    like_pat = f"%{term}%"
+                    params.extend([_fts_escape(term), like_pat, like_pat])
 
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 

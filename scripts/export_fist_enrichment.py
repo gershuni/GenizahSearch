@@ -20,6 +20,9 @@ with the following tables:
   - ref_catalogs:            CODE_Catalog reference lookup (80 rows)
   - ref_titles:              CODE_Title reference lookup (~4.3K rows)
   - ref_authors:             CODE_Author reference lookup (~3K rows)
+  - genizah_persons:         CODE_GenizahPerson historical people (~2.3K rows)
+  - genizah_titles:          CODE_GenizahTitle work/title lookup (~775 rows)
+  - code_values:             CODE_FullCode decoded field values (~3K rows)
   - meta:                    Version and build metadata
 
 This is the data foundation for FJMS Integration (v5.8.0),
@@ -33,7 +36,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-VERSION = "4.1.0"
+VERSION = "5.0.0"
 BATCH_SIZE = 10_000
 
 
@@ -196,7 +199,27 @@ def export_catalog(source, target):
             NumColumn TEXT,
             NumRow TEXT,
             GenizahTitleOrgTitle TEXT,
-            GenizahTitleEngTitle TEXT
+            GenizahTitleEngTitle TEXT,
+            GenizahTitleId INTEGER,
+            Author INTEGER,
+            CopyToDate TEXT,
+            CreationTypeCode INTEGER,
+            PartVocalCode INTEGER,
+            CantillationCode INTEGER,
+            SizeUnitCode INTEGER,
+            Autograph INTEGER,
+            Massorah INTEGER,
+            PalimpsestCode INTEGER,
+            IllustrationCode INTEGER,
+            Comment TEXT,
+            Colophon TEXT,
+            ColophonFolio REAL,
+            CopyName TEXT,
+            ShelfmarkRange TEXT,
+            OrgCreation INTEGER,
+            OrgAuthor INTEGER,
+            GenizahCode INTEGER,
+            NumEmpty REAL
         )
     """)
 
@@ -226,7 +249,27 @@ def export_catalog(source, target):
             cat.NumColumn,
             cat.NumRow,
             gt.OrgTitle as GenizahTitleOrgTitle,
-            gt.EngTitle as GenizahTitleEngTitle
+            gt.EngTitle as GenizahTitleEngTitle,
+            cat.GenizahTitleId,
+            cat.Author,
+            cat.CopyToDate,
+            cat.CreationTypeCode,
+            cat.PartVocalCode,
+            cat.CantillationCode,
+            cat.SizeUnitCode,
+            cat.Autograph,
+            cat.Massorah,
+            cat.PalimpsestCode,
+            cat.IllustrationCode,
+            cat.Comment,
+            cat.Colophon,
+            cat.ColophonFolio,
+            cat.CopyName,
+            cat.ShelfmarkRange,
+            cat.OrgCreation,
+            cat.OrgAuthor,
+            cat.GenizahCode,
+            cat.NumEmpty
         FROM dbo_InventoryAlma alma
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
@@ -243,17 +286,20 @@ def export_catalog(source, target):
         LEFT JOIN CODE_GenizahTitle gt ON cat.GenizahTitleId = gt.GenizahTitleID
     """)
 
+    _placeholders = ", ".join(["?"] * 37)
+    _insert_sql = f"INSERT INTO catalog VALUES ({_placeholders})"
+
     batch = []
     total = 0
     for row in tqdm(cursor, desc="  catalog", unit=" rows"):
-        # Clean CopyDate (index 5) from REAL to TEXT
+        # Clean CopyDate (index 5) and CopyToDate (index 19) from REAL to TEXT
         cleaned = (
             row[0],   # AlmaId
             row[1],   # UnitCatalogRecId
             row[2],   # Title
             row[3],   # TitleHeb
             row[4],   # AuthorText
-            clean_copy_date(row[5]),  # CopyDate
+            clean_copy_date(row[5]),   # CopyDate
             row[6],   # CopyPlace
             row[7],   # TextualFrameHeb
             row[8],   # TextualFrameEng
@@ -265,25 +311,41 @@ def export_catalog(source, target):
             row[14],  # NumRow
             row[15],  # GenizahTitleOrgTitle
             row[16],  # GenizahTitleEngTitle
+            row[17],  # GenizahTitleId
+            row[18],  # Author (FK)
+            clean_copy_date(row[19]),  # CopyToDate
+            row[20],  # CreationTypeCode
+            row[21],  # PartVocalCode
+            row[22],  # CantillationCode
+            row[23],  # SizeUnitCode
+            row[24],  # Autograph
+            row[25],  # Massorah
+            row[26],  # PalimpsestCode
+            row[27],  # IllustrationCode
+            row[28],  # Comment
+            row[29],  # Colophon
+            row[30],  # ColophonFolio
+            row[31],  # CopyName
+            row[32],  # ShelfmarkRange
+            row[33],  # OrgCreation
+            row[34],  # OrgAuthor
+            row[35],  # GenizahCode
+            row[36],  # NumEmpty
         )
         batch.append(cleaned)
         if len(batch) >= BATCH_SIZE:
-            target.executemany(
-                "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                batch,
-            )
+            target.executemany(_insert_sql, batch)
             total += len(batch)
             batch = []
 
     if batch:
-        target.executemany(
-            "INSERT INTO catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            batch,
-        )
+        target.executemany(_insert_sql, batch)
         total += len(batch)
 
     target.execute("CREATE INDEX idx_catalog_alma ON catalog(AlmaId)")
     target.execute("CREATE INDEX idx_catalog_ucrid ON catalog(UnitCatalogRecId)")
+    target.execute("CREATE INDEX idx_catalog_genizah_title ON catalog(GenizahTitleId)")
+    target.execute("CREATE INDEX idx_catalog_author_fk ON catalog(Author)")
     target.connection.commit()
 
     distinct_alma = target.execute(
@@ -978,6 +1040,104 @@ def export_ref_authors(source, target):
     return total
 
 
+def export_genizah_persons(source, target):
+    """Export CODE_GenizahPerson historical people reference table to sidecar."""
+    print("Exporting genizah_persons...")
+
+    target.execute("DROP TABLE IF EXISTS genizah_persons")
+    target.execute("""
+        CREATE TABLE genizah_persons (
+            GenizahPersonId INTEGER PRIMARY KEY,
+            EngDesc TEXT,
+            HebDesc TEXT,
+            HebDescAc TEXT
+        )
+    """)
+
+    cursor = source.execute(
+        "SELECT GenizahPersonId, EngDesc, HebDesc, HebDescAc "
+        "FROM CODE_GenizahPerson"
+    )
+    rows = cursor.fetchall()
+    target.executemany(
+        "INSERT INTO genizah_persons VALUES (?, ?, ?, ?)", rows
+    )
+    target.connection.commit()
+
+    total = len(rows)
+    print(f"  Exported {total:,} rows")
+    return total
+
+
+def export_genizah_titles(source, target):
+    """Export CODE_GenizahTitle work/title reference table to sidecar."""
+    print("Exporting genizah_titles...")
+
+    target.execute("DROP TABLE IF EXISTS genizah_titles")
+    target.execute("""
+        CREATE TABLE genizah_titles (
+            GenizahTitleId INTEGER PRIMARY KEY,
+            OrgTitle TEXT,
+            EngTitle TEXT,
+            DomainId INTEGER,
+            AuthorId INTEGER,
+            LanguageCode INTEGER
+        )
+    """)
+
+    cursor = source.execute(
+        "SELECT GenizahTitleID, OrgTitle, EngTitle, DomainId, AuthorId, "
+        "LanguageCode FROM CODE_GenizahTitle"
+    )
+    rows = cursor.fetchall()
+    target.executemany(
+        "INSERT INTO genizah_titles VALUES (?, ?, ?, ?, ?, ?)", rows
+    )
+    target.execute("CREATE INDEX idx_gt_author ON genizah_titles(AuthorId)")
+    target.connection.commit()
+
+    total = len(rows)
+    print(f"  Exported {total:,} rows")
+    return total
+
+
+def export_code_values(source, target):
+    """Export CODE_FullCode decoded field values to sidecar.
+
+    This single table decodes all integer code columns in the catalog
+    (CreationTypeCode, PartVocalCode, etc.) via the composite key
+    (FCDTableId, Code). FCDTableId maps: 22=CreationType, 26=TypeOfScript,
+    27=TypeOfScriptPlace, 28=TypeOfScriptStyle, 29=TypeOfVocalization, etc.
+    """
+    print("Exporting code_values...")
+
+    target.execute("DROP TABLE IF EXISTS code_values")
+    target.execute("""
+        CREATE TABLE code_values (
+            FCDTableId INTEGER NOT NULL,
+            Code INTEGER NOT NULL,
+            EngDesc TEXT,
+            HebDesc TEXT,
+            PRIMARY KEY (FCDTableId, Code)
+        )
+    """)
+
+    cursor = source.execute(
+        "SELECT FCDTableId, FCDTableInnerId, EngDesc, HebDesc "
+        "FROM CODE_FullCode "
+        "WHERE IsCanceledCode IS NULL OR IsCanceledCode = 0"
+    )
+    rows = cursor.fetchall()
+    target.executemany(
+        "INSERT OR IGNORE INTO code_values VALUES (?, ?, ?, ?)", rows
+    )
+    target.connection.commit()
+
+    total = len(rows)
+    print(f"  Exported {total:,} rows")
+    return total
+
+
 def create_fts5(target):
     """Create contentless FTS5 index spanning catalog + running titles + free desc + full texts + detailed frames."""
     print("Creating FTS5 index...")
@@ -1176,6 +1336,9 @@ def main():
         refcat_count = export_ref_catalogs(source, target)
         reftitle_count = export_ref_titles(source, target)
         refauthor_count = export_ref_authors(source, target)
+        gp_count = export_genizah_persons(source, target)
+        gt_count = export_genizah_titles(source, target)
+        cv_count = export_code_values(source, target)
         create_fts5(target)
         create_meta(target)
 
@@ -1204,6 +1367,9 @@ def main():
         print(f"  ref_catalogs:              {refcat_count:>10,} rows")
         print(f"  ref_titles:                {reftitle_count:>10,} rows")
         print(f"  ref_authors:               {refauthor_count:>10,} rows")
+        print(f"  genizah_persons:           {gp_count:>10,} rows")
+        print(f"  genizah_titles:            {gt_count:>10,} rows")
+        print(f"  code_values:               {cv_count:>10,} rows")
         print(f"  File size: {file_size_mb:.1f} MB")
 
     finally:

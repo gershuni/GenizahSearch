@@ -1018,7 +1018,7 @@ def test_get_browse_authors(test_db):
     # Should have: "Unknown" (990001), "Nahray b. Nissim" (990002),
     # "Maimonides" (990007, 990008), "Saadia Gaon" (990009)
     # Note: 990010 has no AuthorText, should be excluded
-    author_names = {a["author"] for a in authors}
+    author_names = {a["eng_desc"] for a in authors}
     assert "Maimonides" in author_names
     assert "Saadia Gaon" in author_names
     assert "Unknown" in author_names
@@ -1026,7 +1026,7 @@ def test_get_browse_authors(test_db):
     assert len(authors) == 4
 
     # Maimonides has 2 manuscripts (990007, 990008), should have count=2
-    maim = next(a for a in authors if a["author"] == "Maimonides")
+    maim = next(a for a in authors if a["eng_desc"] == "Maimonides")
     assert maim["count"] == 2
 
     # Sorted by count descending
@@ -1042,14 +1042,14 @@ def test_get_browse_authors_filtered_by_domain(test_db):
 
     # Piyyut domain: 990001 (Unknown), 990007 (Maimonides)
     piyyut_authors = svc.get_browse_authors(domain="Piyyut")
-    piyyut_names = {a["author"] for a in piyyut_authors}
+    piyyut_names = {a["eng_desc"] for a in piyyut_authors}
     assert "Unknown" in piyyut_names
     assert "Maimonides" in piyyut_names
     assert "Nahray b. Nissim" not in piyyut_names  # in Documentary, not Piyyut
 
     # Documentary domain: 990002 (Nahray), 990008 (Maimonides via ParentDomain)
     doc_authors = svc.get_browse_authors(domain="Documentary")
-    doc_names = {a["author"] for a in doc_authors}
+    doc_names = {a["eng_desc"] for a in doc_authors}
     assert "Nahray b. Nissim" in doc_names
     assert "Maimonides" in doc_names  # 990008 has ParentDomain=Documentary
 
@@ -1062,7 +1062,7 @@ def test_get_browse_works(test_db):
     works = svc.get_browse_works()
 
     # Should include titles from catalog records (excluding totally empty ones)
-    titles = {w["title"] for w in works}
+    titles = {w["org_title"] for w in works}
     assert "Sefer HaMitzvot" in titles
     assert "Mishneh Torah" in titles
     assert "Commentary on Psalms" in titles
@@ -1089,7 +1089,7 @@ def test_get_browse_works_filtered(test_db):
 
     # Filter by author: Maimonides
     maim_works = svc.get_browse_works(author="Maimonides")
-    maim_titles = {w["title"] for w in maim_works}
+    maim_titles = {w["org_title"] for w in maim_works}
     assert "Sefer HaMitzvot" in maim_titles
     assert "Mishneh Torah" in maim_titles
     assert "A Legal Document" not in maim_titles  # by "Unknown"
@@ -1097,7 +1097,7 @@ def test_get_browse_works_filtered(test_db):
 
     # Filter by domain: Piyyut (990001 and 990007)
     piyyut_works = svc.get_browse_works(domain="Piyyut")
-    piyyut_titles = {w["title"] for w in piyyut_works}
+    piyyut_titles = {w["org_title"] for w in piyyut_works}
     assert "A Legal Document" in piyyut_titles  # 990001 in Piyyut
     assert "Sefer HaMitzvot" in piyyut_titles  # 990007 in Piyyut
     assert "Letter to a Merchant" not in piyyut_titles  # 990002 in Documentary

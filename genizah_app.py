@@ -11538,11 +11538,19 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_domain = None
         self._catalog_current_author = None
         self._catalog_current_work = None
+        self._catalog_date_from = None
+        self._catalog_date_to = None
+        self._catalog_include_undated = False
+        self._catalog_text_all = []   # AND terms
+        self._catalog_text_any = []   # OR terms
+        self._catalog_text_not = []   # NOT terms
         self._catalog_current_page = 0
         self._catalog_authors_cache = []
         self._catalog_works_cache = []
         self._catalog_tree_loaded = False
         self._CATALOG_PAGE_SIZE = 50
+        self._catalog_results_data = []  # Store result dicts for ResultDialog
+        self._catalog_hovered_row = -1   # Track hovered row for action buttons
 
         # --- Top Controls Row: Active Filters + Result Count ---
         top_row = QHBoxLayout()
@@ -11567,6 +11575,12 @@ class GenizahGUI(QMainWindow):
         top_row.addWidget(self._catalog_count_label)
 
         layout.addLayout(top_row)
+
+        # Text filter summary sentence
+        self._catalog_text_summary_label = QLabel("")
+        self._catalog_text_summary_label.setStyleSheet("color: #888; font-size: 11px; margin-bottom: 2px;")
+        self._catalog_text_summary_label.setVisible(False)
+        layout.addWidget(self._catalog_text_summary_label)
 
         # --- Main Splitter ---
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -11638,34 +11652,140 @@ class GenizahGUI(QMainWindow):
         self._catalog_work_timer.timeout.connect(self._catalog_filter_works)
         self.catalog_work_input.textChanged.connect(lambda _: self._catalog_work_timer.start())
 
-        left_panel.setMinimumWidth(280)
-        left_panel.setMaximumWidth(400)
-        splitter.addWidget(left_panel)
+        # d) Date Filter
+        date_label = QLabel(tr("Date"))
+        date_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
+        left_layout.addWidget(date_label)
+
+        date_row = QHBoxLayout()
+        self._catalog_date_from_input = QLineEdit()
+        self._catalog_date_from_input.setPlaceholderText(tr("From year"))
+        self._catalog_date_from_input.setMaximumWidth(80)
+        date_row.addWidget(self._catalog_date_from_input)
+        date_row.addWidget(QLabel("–"))
+        self._catalog_date_to_input = QLineEdit()
+        self._catalog_date_to_input.setPlaceholderText(tr("To year"))
+        self._catalog_date_to_input.setMaximumWidth(80)
+        date_row.addWidget(self._catalog_date_to_input)
+        date_row.addStretch()
+        left_layout.addLayout(date_row)
+
+        # Debounce timer for date input
+        self._catalog_date_timer = QTimer()
+        self._catalog_date_timer.setSingleShot(True)
+        self._catalog_date_timer.setInterval(500)
+        self._catalog_date_timer.timeout.connect(self._catalog_on_date_changed)
+        self._catalog_date_from_input.textChanged.connect(lambda _: self._catalog_date_timer.start())
+        self._catalog_date_to_input.textChanged.connect(lambda _: self._catalog_date_timer.start())
+
+        # Century presets
+        century_row = QHBoxLayout()
+        century_row.setSpacing(2)
+        for c in range(9, 15):
+            btn = QPushButton(tr(f"{c+1}th"))
+            btn.setFixedHeight(22)
+            btn.setStyleSheet("QPushButton { font-size: 10px; padding: 1px 4px; }")
+            btn.clicked.connect(lambda _, cent=c: self._catalog_set_century(cent))
+            century_row.addWidget(btn)
+        btn_late = QPushButton(tr("16-19"))
+        btn_late.setFixedHeight(22)
+        btn_late.setStyleSheet("QPushButton { font-size: 10px; padding: 1px 4px; }")
+        btn_late.clicked.connect(lambda _: self._catalog_set_century_range(16, 19))
+        century_row.addWidget(btn_late)
+        century_row.addStretch()
+        left_layout.addLayout(century_row)
+
+        # Include undated checkbox
+        self._catalog_undated_cb = QCheckBox(tr("Include undated"))
+        self._catalog_undated_cb.setStyleSheet("font-size: 11px; margin-top: 2px;")
+        self._catalog_undated_cb.toggled.connect(self._catalog_on_undated_changed)
+        left_layout.addWidget(self._catalog_undated_cb)
+
+        # --- Text Filter ---
+        text_filter_label = QLabel(tr("Text Filter"))
+        text_filter_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
+        left_layout.addWidget(text_filter_label)
+        text_row = QHBoxLayout()
+        self._catalog_text_mode = QComboBox()
+        self._catalog_text_mode.addItem(tr("ALL"), "all")
+        self._catalog_text_mode.addItem(tr("ANY"), "any")
+        self._catalog_text_mode.addItem(tr("NOT"), "not")
+        self._catalog_text_mode.setFixedWidth(75)
+        self._catalog_text_mode.setStyleSheet("font-size: 11px;")
+        self._catalog_text_mode_tooltips = {
+            0: tr("Must contain ALL terms"),
+            1: tr("Must contain at least ONE term"),
+            2: tr("Must NOT contain the term"),
+        }
+        self._catalog_text_mode.setToolTip(self._catalog_text_mode_tooltips[0])
+        self._catalog_text_mode.currentIndexChanged.connect(
+            lambda idx: self._catalog_text_mode.setToolTip(
+                self._catalog_text_mode_tooltips.get(idx, "")
+            )
+        )
+        text_row.addWidget(self._catalog_text_mode)
+        self._catalog_text_input = QLineEdit()
+        self._catalog_text_input.setPlaceholderText(tr("Type term, press Enter"))
+        self._catalog_text_input.setStyleSheet("font-size: 11px;")
+        self._catalog_text_input.returnPressed.connect(self._catalog_add_text_term)
+        text_row.addWidget(self._catalog_text_input)
+        left_layout.addLayout(text_row)
+
+        # Text filter chips container
+        self._catalog_text_chips_widget = QWidget()
+        self._catalog_text_chips_layout = QHBoxLayout(self._catalog_text_chips_widget)
+        self._catalog_text_chips_layout.setContentsMargins(0, 2, 0, 0)
+        self._catalog_text_chips_layout.setSpacing(4)
+        self._catalog_text_chips_layout.addStretch()
+        left_layout.addWidget(self._catalog_text_chips_widget)
+
+        left_panel.setMinimumWidth(260)
+
+        left_scroll = QScrollArea()
+        left_scroll.setWidget(left_panel)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setMinimumWidth(280)
+        left_scroll.setMaximumWidth(400)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setStyleSheet("QScrollArea { border: none; }")
+        splitter.addWidget(left_scroll)
 
         # RIGHT PANEL: Results Table + Pagination
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(5, 0, 0, 0)
 
-        # d) Results Table
+        # d) Results Table -- column indices
+        self._CAT_COL_ACTIONS = 0
+        self._CAT_COL_SHELF = 1
+        self._CAT_COL_LIBRARY = 2
+        self._CAT_COL_DOMAIN = 3
+        self._CAT_COL_IDENT = 4
+        self._CAT_COL_DATE = 5
+
         self.catalog_results_table = QTableWidget()
-        self.catalog_results_table.setColumnCount(5)
-        headers = [tr("Shelfmark"), tr("Library"), tr("Domain"), tr("Identification"), tr("Date")]
+        self.catalog_results_table.setColumnCount(6)
+        headers = ["", tr("Shelfmark"), tr("Library"), tr("Domain"), tr("Identification"), tr("Date")]
         self.catalog_results_table.setHorizontalHeaderLabels(headers)
-        self.catalog_results_table.horizontalHeader().setStretchLastSection(True)
-        self.catalog_results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        self.catalog_results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.catalog_results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        self.catalog_results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.catalog_results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.catalog_results_table.setColumnWidth(0, 180)
-        self.catalog_results_table.setColumnWidth(2, 150)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(self._CAT_COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(self._CAT_COL_SHELF, QHeaderView.ResizeMode.Interactive)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(self._CAT_COL_LIBRARY, QHeaderView.ResizeMode.ResizeToContents)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(self._CAT_COL_DOMAIN, QHeaderView.ResizeMode.Interactive)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(self._CAT_COL_IDENT, QHeaderView.ResizeMode.Stretch)
+        self.catalog_results_table.horizontalHeader().setSectionResizeMode(self._CAT_COL_DATE, QHeaderView.ResizeMode.ResizeToContents)
+        self.catalog_results_table.setColumnWidth(self._CAT_COL_ACTIONS, 65)
+        self.catalog_results_table.setColumnWidth(self._CAT_COL_SHELF, 180)
+        self.catalog_results_table.setColumnWidth(self._CAT_COL_DOMAIN, 150)
         self.catalog_results_table.setAlternatingRowColors(True)
         self.catalog_results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.catalog_results_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.catalog_results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.catalog_results_table.verticalHeader().setVisible(False)
-        self.catalog_results_table.doubleClicked.connect(self._catalog_open_manuscript)
+        self.catalog_results_table.setSortingEnabled(True)
+        self.catalog_results_table.doubleClicked.connect(self._catalog_view_result)
+        self.catalog_results_table.setMouseTracking(True)
+        self.catalog_results_table.cellEntered.connect(self._catalog_on_cell_entered)
+        self.catalog_results_table.installEventFilter(self)
         self.catalog_results_table.setStyleSheet(
             "QTableWidget { font-size: 12px; }"
             "QTableWidget::item { padding: 3px; }"
@@ -11697,7 +11817,7 @@ class GenizahGUI(QMainWindow):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
 
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)  # stretch=1: splitter takes all remaining vertical space
         return panel
 
     # --- Catalog Browse: Refresh & Data Methods ---
@@ -11716,13 +11836,27 @@ class GenizahGUI(QMainWindow):
             work=self._catalog_current_work,
             offset=offset,
             limit=self._CATALOG_PAGE_SIZE,
+            date_from=self._catalog_date_from,
+            date_to=self._catalog_date_to,
+            include_undated=self._catalog_include_undated,
+            text_all=self._catalog_text_all or None,
+            text_any=self._catalog_text_any or None,
+            text_not=self._catalog_text_not or None,
         )
 
         results = data.get("results", [])
         total = data.get("total", 0)
 
+        # Store result dicts for ResultDialog access
+        self._catalog_results_data = results
+
+        # Disable sorting during population (performance)
+        self.catalog_results_table.setSortingEnabled(False)
+        self._catalog_hovered_row = -1
+
         # Update results table
         self.catalog_results_table.setRowCount(len(results))
+        is_hebrew = (CURRENT_LANG == 'he')
         for row_idx, r in enumerate(results):
             sys_id = r.get("sys_id", "")
             # Resolve shelfmark/library from metadata manager
@@ -11733,25 +11867,48 @@ class GenizahGUI(QMainWindow):
                 library = self.meta_mgr.get_library_for_id(sys_id)
 
             # Domain: pick Hebrew/English based on current language
-            domains = r.get("domains_heb", []) if CURRENT_LANG == 'he' else r.get("domains", [])
+            domains = r.get("domains_heb", []) if is_hebrew else r.get("domains", [])
             domain_str = ", ".join(domains) if domains else ""
 
             # Identification: Author - Title
             author = r.get("author", "")
-            title = r.get("title_heb", "") if CURRENT_LANG == 'he' else r.get("title", "")
+            title = r.get("title_heb", "") if is_hebrew else r.get("title", "")
             if not title:
                 title = r.get("title", "") or r.get("title_heb", "")
             ident = f"{author} - {title}" if author and title else (author or title or "")
 
             date_str = r.get("copy_date", "")
 
+            # Action buttons (column 0)
+            align = Qt.AlignmentFlag.AlignLeft if is_hebrew else Qt.AlignmentFlag.AlignRight
+            actions_widget = ActionsHoverWidget(alignment=align)
+            actions_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+
+            view_btn = self._create_action_button(
+                "👁", tr("View result"),
+                lambda _, ri=row_idx: self._catalog_view_result_by_row(ri),
+                parent=self.catalog_results_table,
+            )
+            browse_btn = self._create_action_button(
+                "📖", tr("Browse manuscript"),
+                lambda _, ri=row_idx: self._catalog_browse_manuscript_by_row(ri),
+                parent=self.catalog_results_table,
+            )
+            actions_widget.add_btn(view_btn)
+            actions_widget.add_btn(browse_btn)
+            self.catalog_results_table.setCellWidget(row_idx, self._CAT_COL_ACTIONS, actions_widget)
+
+            # Data columns
             item_shelf = QTableWidgetItem(shelfmark)
             item_shelf.setData(Qt.ItemDataRole.UserRole, sys_id)  # Store sys_id for navigation
-            self.catalog_results_table.setItem(row_idx, 0, item_shelf)
-            self.catalog_results_table.setItem(row_idx, 1, QTableWidgetItem(library))
-            self.catalog_results_table.setItem(row_idx, 2, QTableWidgetItem(domain_str))
-            self.catalog_results_table.setItem(row_idx, 3, QTableWidgetItem(ident))
-            self.catalog_results_table.setItem(row_idx, 4, QTableWidgetItem(date_str))
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_SHELF, item_shelf)
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_LIBRARY, QTableWidgetItem(library))
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_DOMAIN, QTableWidgetItem(domain_str))
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_IDENT, QTableWidgetItem(ident))
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_DATE, QTableWidgetItem(date_str))
+
+        # Re-enable sorting after population
+        self.catalog_results_table.setSortingEnabled(True)
 
         # Update count label
         if total > 0:
@@ -11775,6 +11932,27 @@ class GenizahGUI(QMainWindow):
         # Update chips bar
         self._catalog_update_chips()
 
+        # Update text filter summary
+        self._catalog_update_text_summary()
+
+    def _catalog_update_text_summary(self):
+        """Update the human-readable text filter summary label."""
+        parts = []
+        if self._catalog_text_all:
+            terms = ' & '.join(f'"{t}"' for t in self._catalog_text_all)
+            parts.append(f"{tr('containing')} {terms}")
+        if self._catalog_text_any:
+            terms = f' {tr("or")} '.join(f'"{t}"' for t in self._catalog_text_any)
+            parts.append(f"{tr('at least one of')} {terms}")
+        if self._catalog_text_not:
+            terms = ', '.join(f'"{t}"' for t in self._catalog_text_not)
+            parts.append(f"{tr('excluding')} {terms}")
+        if parts:
+            self._catalog_text_summary_label.setText(', '.join(parts))
+            self._catalog_text_summary_label.setVisible(True)
+        else:
+            self._catalog_text_summary_label.setVisible(False)
+
     def _catalog_refresh_authors(self):
         """Fetch authors scoped to current domain, update author list widget."""
         from shared.fjms_service import get_fjms_service
@@ -11790,11 +11968,20 @@ class GenizahGUI(QMainWindow):
         self.catalog_author_list.clear()
         shown = 0
         for entry in self._catalog_authors_cache:
-            author = entry["author"]
+            # v5+: person_id, eng_desc, heb_desc; legacy: eng_desc=AuthorText
+            eng = entry.get("eng_desc", "")
+            heb = entry.get("heb_desc", "")
+            person_id = entry.get("person_id")
             count = entry["count"]
-            if search_text and search_text not in author.lower():
+            display = heb if CURRENT_LANG == 'he' and heb else eng
+            if not display:
+                display = eng or heb or "?"
+            if search_text and search_text not in eng.lower() and search_text not in heb.lower():
                 continue
-            self.catalog_author_list.addItem(f"{author}  ({count:,})")
+            item = QListWidgetItem(f"{display}  ({count:,})")
+            # Store person_id (or eng_desc for legacy) for query
+            item.setData(Qt.ItemDataRole.UserRole, str(person_id) if person_id is not None else eng)
+            self.catalog_author_list.addItem(item)
             shown += 1
             if shown >= 50:
                 break
@@ -11817,16 +12004,19 @@ class GenizahGUI(QMainWindow):
         self.catalog_work_list.clear()
         shown = 0
         for entry in self._catalog_works_cache:
-            title = entry.get("title", "")
-            title_heb = entry.get("title_heb", "")
+            # v5+: title_id, org_title, eng_title; legacy: org_title=Title, eng_title=TitleHeb
+            org = entry.get("org_title", "")
+            eng = entry.get("eng_title", "")
+            title_id = entry.get("title_id")
             count = entry["count"]
-            display = title_heb if CURRENT_LANG == 'he' and title_heb else title
+            display = org if CURRENT_LANG == 'he' and org else eng
             if not display:
-                display = title or title_heb or "?"
-            if search_text and search_text not in title.lower() and search_text not in title_heb.lower():
+                display = eng or org or "?"
+            if search_text and search_text not in org.lower() and search_text not in eng.lower():
                 continue
             item = QListWidgetItem(f"{display}  ({count:,})")
-            item.setData(Qt.ItemDataRole.UserRole, title)  # Store English title for query
+            # Store title_id (or org_title for legacy) for query
+            item.setData(Qt.ItemDataRole.UserRole, str(title_id) if title_id is not None else org)
             self.catalog_work_list.addItem(item)
             shown += 1
             if shown >= 50:
@@ -11853,9 +12043,11 @@ class GenizahGUI(QMainWindow):
 
     def _catalog_on_author_select(self, item):
         """Handle author list item click."""
-        text = item.text()
-        # Parse author name from "Author Name  (123)" format
-        author = text.rsplit("  (", 1)[0].strip()
+        # Get person_id or AuthorText stored in UserRole
+        author = item.data(Qt.ItemDataRole.UserRole)
+        if not author:
+            text = item.text()
+            author = text.rsplit("  (", 1)[0].strip()
         self._catalog_current_author = author
         self._catalog_current_work = None
         self._catalog_current_page = 0
@@ -11865,7 +12057,7 @@ class GenizahGUI(QMainWindow):
 
     def _catalog_on_work_select(self, item):
         """Handle work list item click."""
-        # Get the English title stored in UserRole for the query
+        # Get title_id or title string stored in UserRole for the query
         work_title = item.data(Qt.ItemDataRole.UserRole)
         if not work_title:
             text = item.text()
@@ -11873,6 +12065,104 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_work = work_title
         self._catalog_current_page = 0
         self._catalog_refresh()
+
+    def _catalog_on_date_changed(self):
+        """Handle date From/To input change."""
+        df_text = self._catalog_date_from_input.text().strip()
+        dt_text = self._catalog_date_to_input.text().strip()
+        try:
+            self._catalog_date_from = int(df_text) if df_text else None
+        except ValueError:
+            self._catalog_date_from = None
+        try:
+            self._catalog_date_to = int(dt_text) if dt_text else None
+        except ValueError:
+            self._catalog_date_to = None
+        self._catalog_current_page = 0
+        self._catalog_refresh()
+
+    def _catalog_on_undated_changed(self, checked):
+        """Handle include-undated checkbox toggle."""
+        self._catalog_include_undated = checked
+        if self._catalog_date_from is not None or self._catalog_date_to is not None:
+            self._catalog_current_page = 0
+            self._catalog_refresh()
+
+    def _catalog_set_century(self, century):
+        """Set date range to a single century and refresh."""
+        self._catalog_date_from = century * 100
+        self._catalog_date_to = century * 100 + 99
+        self._catalog_date_from_input.setText(str(self._catalog_date_from))
+        self._catalog_date_to_input.setText(str(self._catalog_date_to))
+
+    def _catalog_set_century_range(self, lo, hi):
+        """Set date range spanning multiple centuries and refresh."""
+        self._catalog_date_from = lo * 100
+        self._catalog_date_to = hi * 100 + 99
+        self._catalog_date_from_input.setText(str(self._catalog_date_from))
+        self._catalog_date_to_input.setText(str(self._catalog_date_to))
+
+    def _catalog_clear_date(self):
+        """Clear date filter state and UI."""
+        self._catalog_date_from = None
+        self._catalog_date_to = None
+        self._catalog_include_undated = False
+        self._catalog_date_from_input.clear()
+        self._catalog_date_to_input.clear()
+        self._catalog_undated_cb.setChecked(False)
+
+    def _catalog_add_text_term(self):
+        """Add the current text input as a filter term with the selected mode."""
+        term = self._catalog_text_input.text().strip()
+        if not term:
+            return
+        mode = self._catalog_text_mode.currentData() or 'all'
+        target = (
+            self._catalog_text_all if mode == 'all'
+            else self._catalog_text_any if mode == 'any'
+            else self._catalog_text_not
+        )
+        if term not in target:
+            target.append(term)
+        self._catalog_text_input.clear()
+        self._catalog_render_text_chips()
+        self._catalog_current_page = 0
+        self._catalog_refresh()
+
+    def _catalog_remove_text_term(self, mode: str, term: str):
+        """Remove a text filter term and refresh."""
+        target = (
+            self._catalog_text_all if mode == 'all'
+            else self._catalog_text_any if mode == 'any'
+            else self._catalog_text_not
+        )
+        if term in target:
+            target.remove(term)
+        self._catalog_render_text_chips()
+        self._catalog_current_page = 0
+        self._catalog_refresh()
+
+    def _catalog_render_text_chips(self):
+        """Re-render the inline text filter chips below the input in the sidebar."""
+        layout = self._catalog_text_chips_layout
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        _colors = {'all': '#2196F3', 'any': '#4CAF50', 'not': '#F44336'}
+        for mode, terms in [('all', self._catalog_text_all), ('any', self._catalog_text_any), ('not', self._catalog_text_not)]:
+            for t in terms:
+                color = _colors[mode]
+                btn = QPushButton(f"{mode.upper()}: {t}  \u00d7")
+                btn.setStyleSheet(
+                    f"QPushButton {{ background: {color}; color: white; border-radius: 10px; "
+                    f"padding: 2px 8px; font-size: 10px; border: none; }}"
+                    f"QPushButton:hover {{ opacity: 0.8; }}"
+                )
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setFixedHeight(20)
+                btn.clicked.connect(lambda _, m=mode, term=t: self._catalog_remove_text_term(m, term))
+                layout.insertWidget(layout.count() - 1, btn)  # Before stretch
 
     def _catalog_remove_filter(self, filter_type):
         """Remove a specific filter (or all) and refresh."""
@@ -11883,6 +12173,12 @@ class GenizahGUI(QMainWindow):
             self.catalog_domain_tree.clearSelection()
             self.catalog_author_input.clear()
             self.catalog_work_input.clear()
+            self._catalog_clear_date()
+            self._catalog_text_all.clear()
+            self._catalog_text_any.clear()
+            self._catalog_text_not.clear()
+            self._catalog_text_input.clear()
+            self._catalog_render_text_chips()
             self._catalog_refresh_authors()
             self._catalog_refresh_works()
         elif filter_type == "domain":
@@ -11901,8 +12197,36 @@ class GenizahGUI(QMainWindow):
             self._catalog_refresh_works()
         elif filter_type == "work":
             self._catalog_current_work = None
+        elif filter_type == "date":
+            self._catalog_clear_date()
+        elif filter_type == "text":
+            self._catalog_text_all.clear()
+            self._catalog_text_any.clear()
+            self._catalog_text_not.clear()
+            self._catalog_text_input.clear()
+            self._catalog_render_text_chips()
         self._catalog_current_page = 0
         self._catalog_refresh()
+
+    def _resolve_catalog_author_display(self, author_val):
+        """Resolve author value to display name from cached authors list."""
+        for a in self._catalog_authors_cache:
+            key = str(a.get('person_id')) if a.get('person_id') is not None else a.get('eng_desc', '')
+            if key == author_val:
+                if CURRENT_LANG == 'he':
+                    return a.get('heb_desc', '') or a.get('eng_desc', '')
+                return a.get('eng_desc', '') or a.get('heb_desc', '')
+        return author_val
+
+    def _resolve_catalog_work_display(self, work_val):
+        """Resolve work value to display name from cached works list."""
+        for w in self._catalog_works_cache:
+            key = str(w.get('title_id')) if w.get('title_id') is not None else w.get('org_title', '')
+            if key == work_val:
+                if CURRENT_LANG == 'he':
+                    return w.get('org_title', '') or w.get('eng_title', '')
+                return w.get('eng_title', '') or w.get('org_title', '')
+        return work_val
 
     def _catalog_update_chips(self):
         """Update the active filter chips bar."""
@@ -11930,7 +12254,7 @@ class GenizahGUI(QMainWindow):
 
         if self._catalog_current_author:
             has_any = True
-            display = self._catalog_current_author
+            display = self._resolve_catalog_author_display(self._catalog_current_author)
             if len(display) > 30:
                 display = display[:27] + "..."
             btn = QPushButton(f"{tr('Author')}: {display}  \u00d7")
@@ -11942,7 +12266,7 @@ class GenizahGUI(QMainWindow):
 
         if self._catalog_current_work:
             has_any = True
-            display = self._catalog_current_work
+            display = self._resolve_catalog_work_display(self._catalog_current_work)
             if len(display) > 30:
                 display = display[:27] + "..."
             btn = QPushButton(f"{tr('Work / Title')}: {display}  \u00d7")
@@ -11952,12 +12276,79 @@ class GenizahGUI(QMainWindow):
             btn.clicked.connect(lambda: self._catalog_remove_filter("work"))
             self._catalog_chips_layout.addWidget(btn)
 
+        if self._catalog_date_from is not None or self._catalog_date_to is not None:
+            has_any = True
+            df = self._catalog_date_from
+            dt = self._catalog_date_to
+            if df is not None and dt is not None:
+                date_display = f"{tr('Date')}: {df}-{dt}"
+            elif df is not None:
+                date_display = f"{tr('Date')}: {df}+"
+            else:
+                date_display = f"{tr('Date')}: -{dt}"
+            if self._catalog_include_undated:
+                date_display += f" (+{tr('Include undated')})"
+            btn = QPushButton(f"{date_display}  \u00d7")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda: self._catalog_remove_filter("date"))
+            self._catalog_chips_layout.addWidget(btn)
+
+        # Text filter chips in top bar
+        _text_colors = {'all': '#2196F3', 'any': '#4CAF50', 'not': '#F44336'}
+        for mode, terms in [('all', self._catalog_text_all), ('any', self._catalog_text_any), ('not', self._catalog_text_not)]:
+            for t in terms:
+                has_any = True
+                color = _text_colors[mode]
+                btn = QPushButton(f"{mode.upper()}: {t}  \u00d7")
+                btn.setStyleSheet(
+                    f"QPushButton {{ background: {color}; color: white; border-radius: 12px; "
+                    f"padding: 3px 10px; font-size: 11px; border: none; }}"
+                    f"QPushButton:hover {{ opacity: 0.8; }}"
+                )
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setFixedHeight(24)
+                btn.clicked.connect(lambda _, m=mode, term=t: self._catalog_remove_text_term(m, term))
+                self._catalog_chips_layout.addWidget(btn)
+
         self._catalog_clear_all_btn.setVisible(has_any)
 
-    def _catalog_open_manuscript(self, index):
-        """Double-click result row: navigate to Browse by Shelfmark tab."""
-        row = index.row()
-        item = self.catalog_results_table.item(row, 0)
+    def _catalog_view_result(self, index):
+        """Double-click result row: open ResultDialog with prev/next navigation."""
+        self._catalog_view_result_by_row(index.row())
+
+    def _catalog_view_result_by_row(self, row):
+        """Open ResultDialog for the catalog browse result at the given row."""
+        item = self.catalog_results_table.item(row, self._CAT_COL_SHELF)
+        if not item:
+            return
+        sys_id = item.data(Qt.ItemDataRole.UserRole)
+        if not sys_id:
+            return
+
+        # Build ResultDialog-compatible result dicts from stored catalog data
+        adapted_results = []
+        target_index = 0
+        for i, r in enumerate(self._catalog_results_data):
+            sid = r.get("sys_id", "")
+            shelfmark = ""
+            if self.meta_mgr:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+            adapted_results.append({
+                'display': {'id': sid, 'shelf': shelfmark or sid, 'img': '1'},
+                'full_text': '',
+                'raw_header': '',
+            })
+            if sid == sys_id:
+                target_index = i
+
+        if adapted_results:
+            ResultDialog(self, adapted_results, target_index, self.meta_mgr, self.searcher).exec()
+
+    def _catalog_browse_manuscript_by_row(self, row):
+        """Navigate to Browse by Shelfmark tab for the given row."""
+        item = self.catalog_results_table.item(row, self._CAT_COL_SHELF)
         if not item:
             return
         sys_id = item.data(Qt.ItemDataRole.UserRole)
@@ -11965,6 +12356,24 @@ class GenizahGUI(QMainWindow):
             self.tabs.setCurrentWidget(self.browse_tab)
             self.browse_sys_input.setText(str(sys_id))
             self.browse_load()
+
+    def _catalog_on_cell_entered(self, row, col):
+        """Handle mouse hover on catalog results table rows for action button visibility."""
+        if row == self._catalog_hovered_row:
+            return
+
+        # Hide previous row's buttons
+        if self._catalog_hovered_row != -1:
+            w = self.catalog_results_table.cellWidget(self._catalog_hovered_row, self._CAT_COL_ACTIONS)
+            if isinstance(w, ActionsHoverWidget):
+                w.set_buttons_visible(False)
+
+        self._catalog_hovered_row = row
+
+        # Show current row's buttons
+        w = self.catalog_results_table.cellWidget(row, self._CAT_COL_ACTIONS)
+        if isinstance(w, ActionsHoverWidget):
+            w.set_buttons_visible(True)
 
     def _catalog_next_page(self):
         """Go to next page of results."""
@@ -17130,6 +17539,12 @@ class GenizahGUI(QMainWindow):
                 if isinstance(w, ActionsHoverWidget):
                     w.set_buttons_visible(False)
                 self.lists_hovered_row = -1
+        if hasattr(self, "catalog_results_table") and source == self.catalog_results_table and event.type() == QEvent.Type.Leave:
+            if self._catalog_hovered_row != -1:
+                w = self.catalog_results_table.cellWidget(self._catalog_hovered_row, self._CAT_COL_ACTIONS)
+                if isinstance(w, ActionsHoverWidget):
+                    w.set_buttons_visible(False)
+                self._catalog_hovered_row = -1
         return super().eventFilter(source, event)
 
     def _collect_sorted_results(self):

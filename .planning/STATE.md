@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 41 of 46 (Catalog Browse & Navigation)
-Plan: 3 of 4 in current phase
-Status: Executing
-Last activity: 2026-02-26 - Completed 41-03: Desktop Catalog Browse Tab
+Plan: 4 of 4 in current phase
+Status: Complete
+Last activity: 2026-02-27 - Completed 41-04: Cross-links, text filter, FIST v5.0.0 enrichment
 
-Progress: [#######░░░] 75%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
@@ -30,6 +30,7 @@ Progress: [#######░░░] 75%
 | 41-01 | 1 | 4min | 4min |
 | 41-02 | 1 | 6min | 6min |
 | 41-03 | 1 | 9min | 9min |
+| 41-04 | 1 | 45min | 45min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -55,6 +56,12 @@ Recent decisions affecting current work:
 - JA diacritic dots normalization in search
 - Migrate desktop corrections fetch to shared corrections_service
 - CUT-01: Remove read-only PGP tables from Supabase (legacy desktop users depend on them)
+- Date range filter using CopyToDate (21K rows) — show "from-to" date display
+- Creation type filter via code_values (CreationTypeCode, 69K rows) — Original/Copy/Commentary/Tafsir
+- Display scholarly Comment (100K rows) and Colophon (789 rows) in expanded detail rows
+- Script/vocalization/cantillation filters for paleography researchers
+- Copyist name browse axis (CopyName, 1.6K rows)
+- OrgCreation/OrgAuthor cross-refs for commentary identification display
 
 ### Blockers/Concerns
 
@@ -70,7 +77,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-26
-Stopped at: Completed 41-03-PLAN.md
-Resume file: None
-Notes: Plan 41-03 (desktop catalog browse tab) complete. Next: 41-04 (cross-links).
+Last session: 2026-02-27
+Stopped at: Phase 41 complete — all 4 plans executed
+Resume file: none
+Notes: FIST v5.0.0 enrichment, text filter with FTS5+domain hybrid, chip remove fix, 72 tests green. Phase 41 ready for next phase transition.
