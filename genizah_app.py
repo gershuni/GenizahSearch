@@ -6571,7 +6571,7 @@ class GenizahGUI(QMainWindow):
                 reply = QMessageBox.question(self, tr("Index Missing"), msg,
                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 if reply == QMessageBox.StandardButton.Yes:
-                    self.tabs.setCurrentIndex(3) 
+                    self.tabs.setCurrentWidget(self.settings_tab)
                     self.run_indexing()
 
             # Start checking for CSV bank readiness to init Autocomplete
