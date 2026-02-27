@@ -49,6 +49,7 @@ def _create_english_content():
                 ('pgp', 'Princeton Geniza Project (PGP) Data'),
                 ('reading-desk', 'Reading Desk'),
                 ('browse', 'Browse Manuscript'),
+                ('catalog-browse', 'Browse by Identification'),
                 ('lists', 'Lists'),
                 ('export', 'Exporting Data'),
             ]
@@ -324,6 +325,29 @@ This page enables convenient continuous reading of a full manuscript, synchroniz
 - **PGP Info:** If Princeton Geniza Project data is available, an information panel is displayed with transcriptions, description, tags, and dating (see [PGP Data](#help-pgp) above)
         ''').style('color: var(--text-secondary);')
 
+    # === Browse by Identification ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-catalog-browse"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('category').classes('text-2xl text-primary')
+            h2('Browse by Identification', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+Browse the scholarly catalog by domain classification, author, or work title.
+
+**Domain Hierarchy:** The left panel shows the domain tree (e.g., Bible > Torah > Genesis). Click a domain to see all manuscripts classified under it. Counts show how many manuscripts belong to each category.
+
+**Author & Work Filters:** Use the search dropdowns to filter by author name or work title. Filters combine — selecting a domain and an author shows only manuscripts matching both.
+
+**Text Filter:** Type keywords to search across catalog titles, descriptions, and domain names. Choose ALL (all terms must match), ANY (any term matches), or NOT (exclude matching terms). Add multiple terms as color-coded chips.
+
+**Features:**
+- **Filter chips:** Active filters appear as removable chips above the results
+- **Pagination:** Results display 50 per page with navigation controls
+- **Deep linking:** The URL updates with your filter selections for bookmarking and sharing
+- **Cross-links:** Domain and author labels on the manuscript Browse page link directly here with the appropriate filter pre-set
+        ''').style('color: var(--text-secondary);')
+
     # === Lists ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-lists"')
@@ -392,6 +416,7 @@ def _create_hebrew_content():
                 ('pgp', 'מידע מפרויקט הגניזה של פרינסטון (PGP)'),
                 ('reading-desk', 'שולחן קריאה (Reading Desk)'),
                 ('browse', 'עיון בכתב יד'),
+                ('catalog-browse', 'עיון לפי זיהוי'),
                 ('lists', 'רשימות'),
                 ('export', 'ייצוא נתונים'),
             ]
@@ -660,6 +685,29 @@ def _create_hebrew_content():
 - **צפה בכתיב:** פתיחת כתב היד בקטלוג המקוון של הספרייה הלאומית
 - **עריכה והערות:** הגישו תיקונים או הוסיפו הערות מחקריות לטובת כלל קהילת החוקרים, או לעצמכם (דורש התחברות)
 - **מידע PGP:** אם קיים מידע מפרויקט פרינסטון, יוצג פאנל מידע עם תעתוקים, תיאור, תגיות ותיארוך (ראו [מידע PGP](#help-pgp) לעיל)
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Browse by Identification ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-catalog-browse"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('category').classes('text-2xl text-primary')
+            h2('עיון לפי זיהוי', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+עיון בקטלוג המדעי לפי סיווג תחום, מחבר או כותרת יצירה.
+
+**היררכיית תחומים:** הפאנל השמאלי מציג את עץ התחומים (למשל: מקרא > תורה > בראשית). לחצו על תחום כדי לראות את כל כתבי היד המסווגים תחתיו. המספרים מראים כמה כתבי יד שייכים לכל קטגוריה.
+
+**סינון לפי מחבר ויצירה:** השתמשו בתפריטי החיפוש לסינון לפי שם מחבר או כותרת יצירה. המסננים משתלבים — בחירת תחום ומחבר מציגה רק כתבי יד התואמים לשניהם.
+
+**סינון טקסט:** הקלידו מילות מפתח לחיפוש בכותרות, תיאורים ושמות תחומים. בחרו הכל (כל המונחים חייבים להתאים), אחד (כל מונח מתאים), או ללא (הוצאת תוצאות תואמות). הוסיפו מספר מונחים כצ׳יפים צבעוניים.
+
+**תכונות:**
+- **צ׳יפים של מסננים:** מסננים פעילים מופיעים כצ׳יפים ניתנים להסרה מעל התוצאות
+- **דפדוף:** התוצאות מוצגות 50 בעמוד עם פקדי ניווט
+- **קישור עמוק:** הכתובת מתעדכנת עם בחירות המסנן שלכם לסימנייה ושיתוף
+- **קישורים צולבים:** תוויות תחום ומחבר בעמוד עיון בכתב יד מקשרות ישירות לכאן עם המסנן המתאים
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Lists ===

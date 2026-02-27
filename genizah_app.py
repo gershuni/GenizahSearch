@@ -334,7 +334,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Responsa-Project style search, PGP corpus (35K documents), and FJMS scholarly metadata"))
+        self.lbl_msg.setText(tr("New: Catalog browse by domain, author, and work with free text filter and cross-links"))
         self.show()
 
     def on_learn_more(self):
@@ -366,9 +366,8 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
-            f"<li><b>{tr('Responsa-Project style Search: advanced syntax parsing with grammatical expansion, Judeo-Arabic support, and tabular query builder')}</b></li>"
-            f"<li><b>{tr('PGP Integration: 35,000 documents from the Princeton Geniza Project with editions, translations, and more information')}</b></li>"
-            f"<li><b>{tr('FJMS scholarly metadata: 390K domain classifications, 48K scientific joins, and 500K catalog records from the Friedberg Genizah Project')}</b></li>"
+            f"<li><b>{tr('Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search')}</b></li>"
+            f"<li><b>{tr('Cross-links: domain and author labels on browse pages link directly to catalog browse filtered by that value')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)

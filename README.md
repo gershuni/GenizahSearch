@@ -1,4 +1,4 @@
-# Genizah Search Pro 6.0.0
+# Genizah Search Pro 6.1.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,21 +8,18 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 6.0.0?
+## What's New in Version 6.1.0?
 
-### v6.0.0: Local Data Architecture
+### v6.1.0: Catalog Browse & Navigation
 
-All scholarly reference data migrated to local SQLite sidecars for offline-capable, sub-millisecond browsing. Plus desktop stability fixes, paginated search, and performance optimizations.
+Browse the scholarly catalog by domain, author, and work — with free-text filtering and cross-links.
 
-* **Offline PGP browsing:** All PGP data (35,839 documents, transcriptions, footnotes, fragments) served from local pgp.db sidecar — no internet required for metadata browsing
-* **FJMS catalog descriptions:** Expanded scholarly catalog with dedicated dialog showing content identification, physical metadata, running titles, free descriptions, and genizah titles
-* **Paginated search:** PAGE_SIZE=50 replaces the 200-result cap, with prev/next navigation
-* **Desktop stability:** All known crash-on-navigate bugs fixed with Qt lifecycle guards
-* **Performance:** Parallel NLI fetch, browse crossref parallelization, FL ID O(1) index, variant cache unification
-* **PostHog analytics:** Privacy-first analytics alongside Google Analytics (env-var gated)
-* **Sidecar updates:** Desktop app checks for newer sidecar versions at startup, downloads to AppData
+* **Catalog Browse:** New "Browse by Identification" page/tab for faceted browsing by domain hierarchy, author, or work title with combined filtering and free text search
+* **Cross-links:** Domain and author labels on the manuscript browse page link directly to catalog browse filtered by that value
 
-### Previous Features (v5.0–v5.9)
+### Previous Features (v5.0–v6.0)
+
+* **Local Data Architecture (v6.0):** PGP data in local SQLite sidecar, offline browsing, paginated search, desktop crash fixes, performance optimizations
 
 * **Multi-Source Images (v5.9):** NLI, Cambridge, Manchester LUNA, JTS/Princeton Figgy with folio navigation, bibliography (542K), catalog cross-references (64K)
 * **FJMS Integration (v5.8):** Domain classifications, scientific joins, and catalog enrichment from FIST.db via SQLite sidecar
@@ -84,7 +81,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V6.0.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V6.1.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
@@ -121,30 +118,28 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 6.0.0 | אתר הגניזה של דיקטה
+# Genizah Search Pro 6.1.0 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
-גרסה 6.0 כוללת **ארכיטקטורת נתונים מקומית** — כל נתוני PGP הועברו לבסיס נתונים מקומי, עיון במטא-דאטה ללא אינטרנט, תיקוני יציבות, ואופטימיזציית ביצועים.
+גרסה 6.1 כוללת **עיון בקטלוג ולפי זיהוי** — עיון מובנה לפי תחום, מחבר ויצירה עם סינון טקסט חופשי וקישורים צולבים.
 
 > **גישה מהאינטרנט:** [genizahsearch.com](https://genizahsearch.com) - חיפוש, עיון ושיתוף פעולה מכל דפדפן
 
 ---
 
-## מה חדש בגרסה 6.0?
+## מה חדש בגרסה 6.1?
 
-### ארכיטקטורת נתונים מקומית
+### עיון בקטלוג ולפי זיהוי
 
-כל נתוני ההפניה המדעיים הועברו לבסיסי נתונים מקומיים (SQLite) לעיון אופליין עם זמני תגובה של פחות מאלפית שנייה.
+עיון בקטלוג המדעי לפי תחום, מחבר ויצירה — עם סינון טקסט חופשי וקישורים צולבים.
 
-* **עיון PGP אופליין:** כל נתוני PGP (35,839 מסמכים, תעתיקים, הערות שוליים, קטעים) מוגשים מבסיס נתונים מקומי — אין צורך באינטרנט לעיון במטא-דאטה
-* **תיאורי קטלוג FJMS:** קטלוג מדעי מורחב עם דיאלוג ייעודי המציג זיהוי תוכן, מטא-דאטה פיזי, כותרות ריצה, תיאורים חופשיים וכותרות גניזה
-* **חיפוש עם דפדוף:** 50 תוצאות בעמוד מחליפים את מגבלת 200 התוצאות
-* **יציבות שולחן העבודה:** כל התרסקויות הניווט הידועות תוקנו
-* **ביצועים:** שליפת NLI מקבילית, אינדקס FL ID, איחוד מטמון וריאנטים
-* **עדכוני סיידקר:** האפליקציה בודקת גרסאות חדשות של בסיסי נתונים בהפעלה
+* **עיון לפי זיהוי:** עמוד/לשונית חדשים לעיון מובנה לפי היררכיית תחומים, מחבר או כותרת יצירה עם סינון משולב וחיפוש טקסט חופשי
+* **קישורים צולבים:** תוויות תחום ומחבר בעמוד עיון בכתב יד מקשרות ישירות לעיון בקטלוג המסונן לפי אותו ערך
 
-### תכונות מגרסאות קודמות (5.0–5.9)
+### תכונות מגרסאות קודמות (5.0–6.0)
+
+* **ארכיטקטורת נתונים מקומית (6.0):** נתוני PGP בבסיס נתונים מקומי, עיון אופליין, חיפוש עם דפדוף, תיקוני יציבות, אופטימיזציית ביצועים
 
 * **שילוב תמונות ממספר מקורות (5.9):** NLI, קיימברידג', מנצ'סטר LUNA ו-JTS/פרינסטון Figgy עם ניווט דפים, ביבליוגרפיה (542K), הפניות קטלוגיות (64K)
 * **שילוב FJMS (5.8):** סיווגי תחום, צירופים מדעיים ורשומות קטלוג מ-FIST.db דרך בסיס נתונים SQLite
@@ -206,7 +201,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 ### התקנה לשולחן העבודה
 
-1. **הורדה:** הורידו את `GenizahSearchPro_V6.0.0_Setup.exe` מאזור ה-**Assets**
+1. **הורדה:** הורידו את `GenizahSearchPro_V6.1.0_Setup.exe` מאזור ה-**Assets**
 2. **התקנה:** הריצו את קובץ ההתקנה ועקבו אחר ההוראות
 3. **הגדרת נתונים:** התוכנה דורשת את מאגר **MiDRASH** (`Transcriptions.txt`)
 

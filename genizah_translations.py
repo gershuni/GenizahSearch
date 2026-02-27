@@ -2313,14 +2313,12 @@ TRANSLATIONS = {
 
     # --- What's New notifications ---
     "New Features!": "תכונות חדשות!",
-    "Responsa-Project style Search: advanced syntax parsing with grammatical expansion, Judeo-Arabic support, and tabular query builder":
-        "חיפוש בסגנון פרויקט השו\"ת: פענוח תחביר מתקדם עם הרחבה דקדוקית, תמיכה בערבית-יהודית ובונה שאילתות טבלאי",
-    "PGP Integration: 35,000 documents from the Princeton Geniza Project with editions, translations, and more information":
-        "שילוב PGP: 35,000 מסמכים מפרויקט הגניזה של פרינסטון עם מהדורות, תרגומים ומידע נוסף",
-    "FJMS scholarly metadata: 390K domain classifications, 48K scientific joins, and 500K catalog records from the Friedberg Genizah Project":
-        "מטא-דאטה מדעי מ-FJMS: 390K סיווגי תחום, 48K צירופי קטעים ו-500K רשומות קטלוג מפרויקט הגניזה של פרידברג",
-    "New: Responsa-Project style search, PGP corpus (35K documents), and FJMS scholarly metadata":
-        "חדש: חיפוש בסגנון פרויקט השו\"ת, מאגר PGP (35K מסמכים) ונתונים מפרויקט הגנזיה של פרידברג",
+    "Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search":
+        "עיון לפי זיהוי: עיון בכתבי יד לפי היררכיית תחומים, מחבר או כותרת יצירה עם סינון משולב וחיפוש טקסט חופשי",
+    "Cross-links: domain and author labels on browse pages link directly to catalog browse filtered by that value":
+        "קישורים צולבים: תוויות תחום ומחבר בעמודי עיון מקשרות ישירות לעיון בקטלוג המסונן לפי אותו ערך",
+    "New: Catalog browse by domain, author, and work with free text filter and cross-links":
+        "חדש: עיון בקטלוג לפי תחום, מחבר ויצירה עם סינון טקסט חופשי וקישורים צולבים",
     "Got it!": "הבנתי!",
     "Learn More": "למידע נוסף",
 
