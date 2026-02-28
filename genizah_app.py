@@ -584,10 +584,10 @@ class UpdateProgressDialog(QDialog):
             self.reject()
             return
 
-        # Close the dialog and quit the application
-        # The installer will handle closing us, but we quit gracefully to speed things up
+        # Don't call QApplication.quit() — let the installer's CloseApplications=force
+        # handle shutdown. This allows Restart Manager to track the process and relaunch
+        # the app after installation. If we quit first, Restart Manager has nothing to restart.
         self.accept()
-        QApplication.quit()
 
     def on_cancel(self):
         """Handle cancel button click."""

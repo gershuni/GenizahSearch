@@ -65,6 +65,6 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall
 Filename: "https://zenodo.org/records/17734473"; Description: "{cm:DownloadTranscriptions}"; Flags: postinstall shellexec nowait unchecked
 Filename: "https://www.GenizahSearch.com/"; Description: "{cm:VisitWebsite}"; Flags: postinstall shellexec nowait unchecked
