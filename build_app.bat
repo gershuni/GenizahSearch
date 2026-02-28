@@ -9,9 +9,7 @@ REM Checkpoint any WAL journals into main .db files before bundling.
 REM PyInstaller copies only the .db file — WAL/SHM journals are lost,
 REM which can cause empty tables in the installed copy.
 echo Checkpointing sidecar databases...
-python -c "import sqlite3, os;^
-dbs=['fist_data/fjms_enrichment.db','pgp_data/pgp.db','nli_data/nli_crossref.db'];^
-[exec('c=sqlite3.connect(p);c.execute(\"PRAGMA wal_checkpoint(TRUNCATE)\");c.execute(\"PRAGMA journal_mode=DELETE\");c.close();print(f\"  {p}: ok\")') for p in dbs if os.path.exists(p)]"
+python scripts\checkpoint_sidecars.py
 echo Done.
 
 pyinstaller --noconfirm --noconsole --onedir --clean ^
