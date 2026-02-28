@@ -553,6 +553,19 @@ class UpdateProgressDialog(QDialog):
         # Update status
         self.status_label.setText(tr("Launching installer..."))
 
+        # Close all sidecar DB connections before the installer tries to
+        # overwrite the bundled .db files — otherwise Windows file locks
+        # prevent the installer from replacing pgp.db / fjms_enrichment.db
+        try:
+            from shared.document_service import reset_pgp_service
+            from shared.fjms_service import reset_fjms_service
+            from shared.nli_crossref_service import reset_nli_crossref_service
+            reset_pgp_service()
+            reset_fjms_service()
+            reset_nli_crossref_service()
+        except Exception:
+            pass  # Best-effort — installer's CloseApplications=force is fallback
+
         # Run the installer with silent mode
         # The installer will:
         # 1. Close this running app (CloseApplications=force)
@@ -21519,19 +21532,25 @@ class GenizahGUI(QMainWindow):
         )
         self._sidecar_download_queue = list(updates)
         self._sidecar_data_dir = data_dir
+        # Close DB connections BEFORE downloading so shutil.move can replace files
+        self._reset_sidecar_connections()
         self._download_next_sidecar()
+
+    def _reset_sidecar_connections(self):
+        """Close all sidecar DB connections so files can be replaced."""
+        from shared.document_service import reset_pgp_service
+        from shared.fjms_service import reset_fjms_service
+        from shared.nli_crossref_service import reset_nli_crossref_service
+        reset_pgp_service()
+        reset_fjms_service()
+        reset_nli_crossref_service()
 
     def _download_next_sidecar(self):
         """Download the next sidecar in the queue."""
         import os
         if not self._sidecar_download_queue:
-            # All downloads complete -- reset services to pick up new files
-            from shared.document_service import reset_pgp_service
-            from shared.fjms_service import reset_fjms_service
-            from shared.nli_crossref_service import reset_nli_crossref_service
-            reset_pgp_service()
-            reset_fjms_service()
-            reset_nli_crossref_service()
+            # All downloads complete -- reset again to pick up new files
+            self._reset_sidecar_connections()
             QMessageBox.information(
                 self, tr("Update Complete"),
                 tr("Research data has been updated. New data will be used immediately.")
