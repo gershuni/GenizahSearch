@@ -5,6 +5,15 @@ REM
 REM NOTE: If antivirus software flags this application, see ANTIVIRUS_INFO.md
 REM for instructions on submitting the app for whitelisting.
 
+REM Checkpoint any WAL journals into main .db files before bundling.
+REM PyInstaller copies only the .db file — WAL/SHM journals are lost,
+REM which can cause empty tables in the installed copy.
+echo Checkpointing sidecar databases...
+python -c "import sqlite3, os;^
+dbs=['fist_data/fjms_enrichment.db','pgp_data/pgp.db','nli_data/nli_crossref.db'];^
+[exec('c=sqlite3.connect(p);c.execute(\"PRAGMA wal_checkpoint(TRUNCATE)\");c.execute(\"PRAGMA journal_mode=DELETE\");c.close();print(f\"  {p}: ok\")') for p in dbs if os.path.exists(p)]"
+echo Done.
+
 pyinstaller --noconfirm --noconsole --onedir --clean ^
  --name "GenizahSearchPro" ^
  --icon "icon.ico" ^
