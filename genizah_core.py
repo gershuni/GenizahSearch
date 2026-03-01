@@ -1404,6 +1404,7 @@ class LabEngine:
                 'highlight_pattern': hl_pattern,
                 'full_text': data['content'],
                 'is_text_filtered': data.get('is_text_filtered', False),
+                'filter_reason': 'source_text' if data.get('is_text_filtered', False) else '',
                 # Boundary metadata
                 'has_boundary_matches': has_boundary_matches,
                 'boundary_match_count': len(data.get('crossed_boundaries', set())),
@@ -6006,58 +6007,67 @@ class SearchEngine:
         })
 
         total_chunks = len(chunks_data)
+        was_cancelled = False
 
-        # 2. Scan chunks
-        for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
-            if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
+        # 2. Scan chunks (wrapped in try/except to support partial results on cancel)
+        try:
+            for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
+                if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
 
-            # Build query
-            t_query = self.build_tantivy_query(chunk, mode)
-            regex = self.build_regex_pattern(chunk, mode, 0)
-            if not regex: continue
+                # Build query
+                t_query = self.build_tantivy_query(chunk, mode)
+                regex = self.build_regex_pattern(chunk, mode, 0)
+                if not regex: continue
 
-            # Check: Is phrase in "Filter Text"?
-            is_text_filtered = False
-            if filter_text:
-                if regex.search(filter_text):
-                    is_text_filtered = True
+                # Check: Is phrase in "Filter Text"?
+                is_text_filtered = False
+                if filter_text:
+                    if regex.search(filter_text):
+                        is_text_filtered = True
 
-            try:
-                # Search index
-                query = self.index.parse_query(t_query, ["content"])
-                hits = self.searcher.search(query, 50).hits
+                try:
+                    # Search index
+                    query = self.index.parse_query(t_query, ["content"])
+                    hits = self.searcher.search(query, 50).hits
 
-                is_freq_filtered = len(hits) > max_freq
+                    is_freq_filtered = len(hits) > max_freq
 
-                for score, doc_addr in hits:
-                    doc = self.searcher.doc(doc_addr)
-                    content = doc['content'][0]
+                    for score, doc_addr in hits:
+                        doc = self.searcher.doc(doc_addr)
+                        content = doc['content'][0]
 
-                    # Verify exact Regex match
-                    if regex.search(content):
-                        uid = doc['unique_id'][0]
+                        # Verify exact Regex match
+                        if regex.search(content):
+                            uid = doc['unique_id'][0]
 
-                        # Always use single map - accumulate all matches for same uid
-                        rec = doc_hits[uid]
+                            # Always use single map - accumulate all matches for same uid
+                            rec = doc_hits[uid]
 
-                        # Mark as filtered if ANY chunk match is filtered
-                        if is_text_filtered or is_freq_filtered:
-                            rec['is_filtered'] = True
+                            # Mark as filtered if ANY chunk match is filtered
+                            if is_text_filtered or is_freq_filtered:
+                                rec['is_filtered'] = True
+                                # Annotate filter reason for UI display
+                                if is_text_filtered:
+                                    rec['filter_reason'] = 'source_text'
+                                elif is_freq_filtered:
+                                    rec['filter_reason'] = 'high_frequency'
 
-                        rec['head'] = doc['full_header'][0]
-                        rec['src'] = doc['source'][0]
-                        rec['content'] = content
-                        rec['matches'].append(regex.search(content).span())
-                        # Save indices of found words in *source* text
-                        rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
-                        rec['patterns'].add(regex.pattern)
+                            rec['head'] = doc['full_header'][0]
+                            rec['src'] = doc['source'][0]
+                            rec['content'] = content
+                            rec['matches'].append(regex.search(content).span())
+                            # Save indices of found words in *source* text
+                            rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
+                            rec['patterns'].add(regex.pattern)
 
-                        # Track boundary-crossing matches - each boundary counted once
-                        if chunk_crossed_bounds:
-                            rec['boundary_chunk_scores'].append(score)
-                            rec['crossed_boundaries'].update(chunk_crossed_bounds)
-            except Exception as e:
-                LAB_LOGGER.warning(f"Failed composition chunk processing at token {token_idx}: {e}")
+                            # Track boundary-crossing matches - each boundary counted once
+                            if chunk_crossed_bounds:
+                                rec['boundary_chunk_scores'].append(score)
+                                rec['crossed_boundaries'].update(chunk_crossed_bounds)
+                except Exception as e:
+                    LAB_LOGGER.warning(f"Failed composition chunk processing at token {token_idx}: {e}")
+        except InterruptedError:
+            was_cancelled = True
 
         # 3. Build results with Wide Context
         def build_items(hits_dict):
@@ -6162,8 +6172,9 @@ class SearchEngine:
                     'has_boundary_matches': has_boundary_matches,
                     'boundary_match_count': len(data.get('crossed_boundaries', set())),
                     'boundary_quality': boundary_quality_normalized,
-                    # Filtering flag
-                    'is_filtered': data.get('is_filtered', False)
+                    # Filtering flag and reason
+                    'is_filtered': data.get('is_filtered', False),
+                    'filter_reason': data.get('filter_reason', '')
                 })
 
             # Sort by final_score in combined mode, otherwise by base score
@@ -6189,7 +6200,7 @@ class SearchEngine:
         main_list = [item for item in all_items if not item.get('is_filtered', False)]
         filtered_list = [item for item in all_items if item.get('is_filtered', False)]
 
-        return {'main': main_list, 'filtered': filtered_list, 'boundary_stats': boundary_stats}
+        return {'main': main_list, 'filtered': filtered_list, 'partial': was_cancelled, 'boundary_stats': boundary_stats}
     
     def group_pages_by_manuscript(self, pages_list):
         """Aggregate individual page results into manuscript-level items.
