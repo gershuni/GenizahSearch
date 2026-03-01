@@ -2201,6 +2201,7 @@ TRANSLATIONS = {
 
     # --- Search Mode ---
     "Searching...": "מחפש...",
+    "Searching": "מחפש",
     "No results": "אין תוצאות",
     "Max frequency": "תדירות מקסימלית",
     "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
@@ -2495,4 +2496,7 @@ TRANSLATIONS = {
     "Min chunks: ": "מינ' מקטעים: ",
     "Minimum chunk matches per manuscript": "מינימום התאמות מקטע לכתב יד",
     "Printed material (not handwritten manuscript)": "חומר דפוס (לא כתב יד)",
+    # Excluded section reason sub-headers (Phase 42 R3)
+    "Found in source text": "נמצא בטקסט המקור",
+    "High frequency": "תדירות גבוהה",
 }
