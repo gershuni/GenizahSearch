@@ -6530,6 +6530,7 @@ class GenizahGUI(QMainWindow):
         self.comp_col_sysid = 4
         self.comp_col_context = 5
         self.comp_col_ms_context = 6
+        self.comp_col_printed = 7  # Dedicated Printed column
         self.setWindowTitle(tr(f"Genizah Search Pro V{APP_VERSION}"))
         # Initial size - will be overridden by showMaximized() at startup
         self.setMinimumSize(1200, 700)
@@ -9025,11 +9026,12 @@ class GenizahGUI(QMainWindow):
         self.comp_chunks_total = 0
         self.comp_last_eta_update = 0.0
         self.comp_last_eta_text = ""
+        self.comp_summary_text = ""  # Persistent summary for progress bar after completion
 
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context")])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context"), tr("Printed")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree.itemExpanded.connect(self.on_comp_tree_item_expanded)
         self.comp_tree.itemCollapsed.connect(self.on_comp_tree_item_collapsed)
@@ -9052,6 +9054,7 @@ class GenizahGUI(QMainWindow):
         header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
+        header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.ResizeToContents) # Printed
 
         self.comp_tree.setColumnWidth(0, 160) # Score - widened
 
@@ -9061,6 +9064,7 @@ class GenizahGUI(QMainWindow):
         context_width = self.comp_tree.fontMetrics().averageCharWidth() * 35
         self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
         self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
+        self.comp_tree.setColumnWidth(self.comp_col_printed, 60)  # Printed column - narrow
         header.setStretchLastSection(True)
 
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
@@ -9082,6 +9086,7 @@ class GenizahGUI(QMainWindow):
         comp_header.setSectionResizeMode(self.comp_col_library, QHeaderView.ResizeMode.Interactive) # Library
         comp_header.setSectionResizeMode(self.comp_col_shelfmark, QHeaderView.ResizeMode.Interactive) # Shelfmark
         comp_header.setSectionResizeMode(self.comp_col_sysid, QHeaderView.ResizeMode.ResizeToContents) # System ID
+        comp_header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.ResizeToContents) # Printed
         comp_header.setStretchLastSection(True)
 
         rl.addWidget(self.comp_tree)
@@ -17049,7 +17054,7 @@ class GenizahGUI(QMainWindow):
             self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
-        self.search_thread.progress_signal.connect(lambda c, t: (self.search_progress.setMaximum(t), self.search_progress.setValue(c)))
+        self.search_thread.progress_signal.connect(self._on_search_progress)
 
         if hasattr(self.search_thread, 'status_signal'):
              self.search_thread.status_signal.connect(self.status_label.setText)
@@ -17066,6 +17071,14 @@ class GenizahGUI(QMainWindow):
         self.search_progress.setVisible(False)
 
     def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
+
+    def _on_search_progress(self, current, total):
+        """Handle regular search progress: update bar and show elapsed timer (GAP-3)."""
+        self.search_progress.setMaximum(total)
+        self.search_progress.setValue(current)
+        elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+        self.status_label.setText(f"{tr('Searching')}... {elapsed_str}")
 
     def render_asterisks_to_html(self, text):
         if not text: return ""
@@ -17282,9 +17295,9 @@ class GenizahGUI(QMainWindow):
 
         for b in self.export_buttons: b.setEnabled(True)
 
-        # Show elapsed time in status bar (stays for 10 seconds)
+        # Show elapsed time in status bar (persists until next action)
         self.statusBar().showMessage(
-            f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}", 10000
+            f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}", 0
         )
 
         # Hide Source column if secondary source file (V0.7) is missing or empty
@@ -19541,6 +19554,7 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False; self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
+        self.comp_summary_text = ""  # Clear persistent summary on reset
 
     def run_composition(self, custom_text=None):
         """
@@ -19810,13 +19824,14 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setRange(0, 1)
         self.comp_progress.setValue(1)
         if is_partial:
-            self.comp_progress.setFormat(
+            self.comp_summary_text = (
                 f"{tr('Partial results')} \u2014 {elapsed_str} \u2014 {chunks_processed}/{chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
             )
         else:
-            self.comp_progress.setFormat(
+            self.comp_summary_text = (
                 f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
             )
+        self.comp_progress.setFormat(self.comp_summary_text)
 
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
@@ -20146,11 +20161,18 @@ class GenizahGUI(QMainWindow):
                  QTimer.singleShot(10, self._process_snippet_queue)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
-        # 1. איפוס וניקוי
+        # 1. Reset and cleanup
         self.is_comp_running = False
         self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
-        self.comp_progress.setVisible(False)
+        # Restore persistent summary in progress bar (GAP-2/GAP-5)
+        if self.comp_summary_text:
+            self.comp_progress.setVisible(True)
+            self.comp_progress.setRange(0, 1)
+            self.comp_progress.setValue(1)
+            self.comp_progress.setFormat(self.comp_summary_text)
+        else:
+            self.comp_progress.setVisible(False)
         for b in self.comp_export_buttons: b.setEnabled(True)
 
         # Reset Select All Checkbox
@@ -20242,12 +20264,11 @@ class GenizahGUI(QMainWindow):
         _printed_tag = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
 
         def apply_printed_badge(node, sid):
-            """Add [Printed] label to title column if manuscript is printed material."""
+            """Set dedicated Printed column if manuscript is printed material (GAP-9)."""
             if sid and sid in comp_printed_ids:
-                current_title = node.text(self.comp_col_title) or ''
-                node.setText(self.comp_col_title, f"[{_printed_tag}] {current_title}" if current_title else f"[{_printed_tag}]")
-                node.setForeground(self.comp_col_title, QColor("#dc2626"))
-                node.setToolTip(self.comp_col_title, tr("Printed material (not handwritten manuscript)"))
+                node.setText(self.comp_col_printed, _printed_tag)
+                node.setForeground(self.comp_col_printed, QColor("#dc2626"))
+                node.setToolTip(self.comp_col_printed, tr("Printed material (not handwritten manuscript)"))
 
         def add_manuscript_node(parent, ms_item):
             item_type = ms_item.get('type', '')
@@ -20433,10 +20454,31 @@ class GenizahGUI(QMainWindow):
                     placeholder = QTreeWidgetItem(group_node, [tr("Loading...")])
                     placeholder.setData(0, Qt.ItemDataRole.UserRole + 201, "PLACEHOLDER")
 
-            # 3. Filtered (collapsed by default, amber header, with filter reasons)
+            # 3. Filtered (collapsed by default, amber header, with grouped reason counts -- GAP-7)
             total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
             if total_filt > 0:
-                root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered ({})").format(total_filt)])
+                # Aggregate filter reasons across all filtered items for header summary
+                reason_counts = {}
+                for filt_item in clean_filt:
+                    reason = self._get_filter_reason(filt_item)
+                    if reason:
+                        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                    else:
+                        reason_counts[tr('Filtered')] = reason_counts.get(tr('Filtered'), 0) + 1
+                for filt_group_items in clean_filt_appx.values():
+                    for filt_item in filt_group_items:
+                        reason = self._get_filter_reason(filt_item)
+                        if reason:
+                            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                        else:
+                            reason_counts[tr('Filtered')] = reason_counts.get(tr('Filtered'), 0) + 1
+                # Build reason summary string
+                reason_parts = [f"{r} ({c})" for r, c in sorted(reason_counts.items())]
+                reason_summary = ', '.join(reason_parts) if reason_parts else ''
+                filt_header_text = tr("Filtered ({})").format(total_filt)
+                if reason_summary:
+                    filt_header_text += f" \u2014 {reason_summary}"
+                root_filt = QTreeWidgetItem(self.comp_tree, [filt_header_text])
                 root_filt.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT")
                 root_filt.setExpanded(False)  # Collapsed by default
                 root_filt.setForeground(0, QColor('#f39c12'))  # Amber color
@@ -20526,6 +20568,15 @@ class GenizahGUI(QMainWindow):
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         node.setCheckState(0, Qt.CheckState.Unchecked)
 
+    def _apply_comp_printed_badge(self, node, sid):
+        """Set dedicated Printed column on composition tree node if manuscript is printed material."""
+        comp_printed_ids = getattr(self, '_comp_printed_sys_ids', set())
+        if sid and sid in comp_printed_ids:
+            _printed_tag = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
+            node.setText(self.comp_col_printed, _printed_tag)
+            node.setForeground(self.comp_col_printed, QColor("#dc2626"))
+            node.setToolTip(self.comp_col_printed, tr("Printed material (not handwritten manuscript)"))
+
     def _add_manuscript_node(self, parent, ms_item, defer_widgets=True):
         """Add a manuscript/part node to the tree. Used for lazy/batched loading."""
         def get_library_info(sid):
@@ -20552,6 +20603,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(ms_node, self.comp_col_sysid, ms_item.get('part_id', ''))
             self._make_node_checkable(ms_node)
             ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+            self._apply_comp_printed_badge(ms_node, sid)
 
             pages = ms_item.get('pages', [])
             folios = ms_item.get('folios', [])
@@ -20599,6 +20651,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
             self._make_node_checkable(ms_node)
             ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+            self._apply_comp_printed_badge(ms_node, sid)
 
             pages = ms_item.get('pages', [])
             if len(pages) == 1:
@@ -20638,6 +20691,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(node, self.comp_col_sysid, sid)
             self._make_node_checkable(node)
             node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+            self._apply_comp_printed_badge(node, sid)
             self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=defer_widgets)
 
     def _add_single_node_to_tree(self, parent, ms_item):
@@ -20654,7 +20708,7 @@ class GenizahGUI(QMainWindow):
         library_display = get_library_display(library_code, short=False) if library_code else ""
 
         node = QTreeWidgetItem(parent)
-        self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0)))) # עיגול הציון
+        self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0)))) # Score
         self._set_comp_tree_text(node, self.comp_col_shelfmark, display_shelf)
         self._set_comp_tree_text(node, self.comp_col_library, library_display)
         self._set_comp_tree_text(node, self.comp_col_title, t or "")
@@ -20663,6 +20717,7 @@ class GenizahGUI(QMainWindow):
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         node.setCheckState(0, Qt.CheckState.Unchecked)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+        self._apply_comp_printed_badge(node, sid)
 
         pages = ms_item.get('pages', [])
 
@@ -22217,6 +22272,7 @@ class GenizahGUI(QMainWindow):
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         node.setCheckState(0, Qt.CheckState.Unchecked)
         node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+        self._apply_comp_printed_badge(node, sid)
 
         node.setData(1, Qt.ItemDataRole.UserRole, (best_ctx, best_snippet))
 
