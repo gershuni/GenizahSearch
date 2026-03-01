@@ -162,6 +162,7 @@ def create_parallels_page(initial_text: str = None):
             self.has_domain_data: bool = False
             self.domain_name_map: dict = {}  # English domain name -> Hebrew name
             self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
+            self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
 
     p_state = ParallelsState()
 
@@ -1336,11 +1337,11 @@ def create_parallels_page(initial_text: str = None):
                         min_boundary_matches=captured_min_boundary_matches,
                         min_delimiter_distance=captured_min_delimiter_distance
                     )
-                    # Add empty fields for compatibility with result display
-                    if result:
-                        result['partial'] = False
-
                 return result
+            except InterruptedError:
+                # Search was cancelled -- return None; partial results handled by core functions
+                # that catch InterruptedError internally and return accumulated results
+                return None
             except Exception as e:
                 print(f"Parallels Error: {e}")
                 import traceback
@@ -1398,7 +1399,17 @@ def create_parallels_page(initial_text: str = None):
                         fjms = get_fjms_service(thread_safe=True)
                         return fjms.get_domains_for_sys_ids(sys_ids) if fjms.is_available() else {}
 
-                    raw_domains = await run.io_bound(collect_parallels_domains, all_sys_ids)
+                    def collect_parallels_printed(sys_ids):
+                        from shared.fjms_service import get_fjms_service
+                        fjms = get_fjms_service(thread_safe=True)
+                        return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
+
+                    import asyncio as _asyncio
+                    raw_domains, printed_result = await _asyncio.gather(
+                        run.io_bound(collect_parallels_domains, all_sys_ids),
+                        run.io_bound(collect_parallels_printed, all_sys_ids),
+                    )
+                    p_state.printed_ids = printed_result
                     p_state.all_result_domains = {}
                     p_state.domain_name_map = {}
                     from shared.fjms_service import qualify_domain_name
@@ -1430,6 +1441,7 @@ def create_parallels_page(initial_text: str = None):
                     p_state.all_result_domains = {}
                     p_state.has_domain_data = False
                     p_state.domain_hierarchy = {}
+                    p_state.printed_ids = set()
 
                 # Show/hide domain filter button
                 p_domain_filter_btn.set_visibility(p_state.has_domain_data)
@@ -1706,6 +1718,17 @@ def create_parallels_page(initial_text: str = None):
                 show_empty_state()
             return
 
+        # Show partial results warning banner at top
+        if is_partial:
+            with results_container:
+                with ui.element('div').classes('w-full px-4 py-3 rounded-lg mb-4').style(
+                    'background: #fff3cd; border: 1px solid #ffc107; color: #856404;'
+                ):
+                    with ui.row().classes('items-center gap-2'):
+                        ui.icon('warning').classes('text-xl')
+                        chunks_info = f"{p_state.chunks_processed} / {p_state.chunks_total}" if p_state.chunks_total > 0 else ""
+                        ui.label(f"{tr('Partial results')} — {chunks_info} {tr('chunks searched')}").classes('font-medium')
+
         # Sort if needed
         sort_by = sort_select.value
         if sort_by == 'score':
@@ -1815,10 +1838,6 @@ def create_parallels_page(initial_text: str = None):
             main_results_container = ui.column().classes('w-full gap-4')
             main_load_more_container = ui.row().classes('w-full justify-center py-4')
 
-            # Filtered results section
-            filtered_section = ui.column().classes('w-full gap-4')
-            filtered_load_more_container = ui.row().classes('w-full justify-center py-4')
-
         def load_more_main():
             """Load next batch of main results."""
             start = main_displayed[0]
@@ -1839,39 +1858,44 @@ def create_parallels_page(initial_text: str = None):
                         on_click=load_more_main
                     ).props('flat color=primary')
 
-        def load_more_filtered():
-            """Load next batch of filtered results."""
-            start = filtered_displayed[0]
-            end = min(start + BATCH_SIZE, len(sorted_filtered_groups))
-            with filtered_section:
-                for group_key, group_data in sorted_filtered_groups[start:end]:
-                    create_manuscript_group(group_data, is_filtered=True)
-            filtered_displayed[0] = end
-
-            # Update load more button
-            filtered_load_more_container.clear()
-            remaining = len(sorted_filtered_groups) - filtered_displayed[0]
-            if remaining > 0:
-                with filtered_load_more_container:
-                    ui.button(
-                        f"{tr('Load more')} ({remaining} {tr('remaining')})",
-                        icon='expand_more',
-                        on_click=load_more_filtered
-                    ).props('flat color=amber')
-
         # Initial load of main results
         if sorted_groups:
             load_more_main()
 
-        # Filtered results section header and initial load
+        # Filtered/excluded results in collapsible section (collapsed by default)
         if sorted_filtered_groups:
             with results_container:
-                ui.separator().classes('my-4')
-                with ui.row().classes('w-full items-center gap-2 py-2'):
-                    ui.icon('filter_alt').classes('text-xl').style('color: var(--accent-amber);')
-                    h3(tr('Filtered Results (found in source texts)'), classes='text-lg', style='color: var(--accent-amber);')
-                    ui.badge(f"{filtered_count}", color='amber').classes('text-xs')
-            load_more_filtered()
+                with ui.expansion(
+                    text=f"{tr('Excluded Results')} ({filtered_count})",
+                    icon='filter_alt',
+                    value=False  # collapsed by default
+                ).classes('w-full').style(
+                    'border: 1px solid var(--accent-amber); border-radius: 8px; margin-top: 16px;'
+                ).props('dense header-class="text-amber-8 text-subtitle1 text-weight-medium"') as filtered_expansion:
+                    filtered_section = ui.column().classes('w-full gap-4')
+                    filtered_load_more_container = ui.row().classes('w-full justify-center py-4')
+
+            def load_more_filtered_inner():
+                """Load next batch of filtered results."""
+                start = filtered_displayed[0]
+                end = min(start + BATCH_SIZE, len(sorted_filtered_groups))
+                with filtered_section:
+                    for group_key, group_data in sorted_filtered_groups[start:end]:
+                        create_manuscript_group(group_data, is_filtered=True)
+                filtered_displayed[0] = end
+
+                # Update load more button
+                filtered_load_more_container.clear()
+                remaining = len(sorted_filtered_groups) - filtered_displayed[0]
+                if remaining > 0:
+                    with filtered_load_more_container:
+                        ui.button(
+                            f"{tr('Load more')} ({remaining} {tr('remaining')})",
+                            icon='expand_more',
+                            on_click=load_more_filtered_inner
+                        ).props('flat color=amber')
+
+            load_more_filtered_inner()
 
     def create_manuscript_group(group_data, is_filtered=False):
         """Create an expandable manuscript group with its parallels."""
@@ -1914,6 +1938,35 @@ def create_parallels_page(initial_text: str = None):
                         h3(display_shelfmark, classes='text-lg font-bold', style=shelfmark_color)
                         badge_color = 'amber' if is_filtered else 'blue'
                         ui.badge(f"{len(items)} {tr('matches')}", color=badge_color).classes('text-xs')
+
+                        # Printed material indicator
+                        if sys_id and sys_id in p_state.printed_ids:
+                            from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
+                            from web.translations import get_language as _get_lang
+                            _bg, _fg = PRINTED_BADGE_COLORS
+                            _plabel = PRINTED_LABEL_HE if _get_lang() == 'he' else PRINTED_LABEL_EN
+                            ui.label(_plabel).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
+                                f'background: {_bg}; color: {_fg};'
+                            )
+
+                        # Exclusion reason chip for filtered results
+                        if is_filtered:
+                            # Determine dominant filter reason from items
+                            reasons = set()
+                            for it in items:
+                                fr = it.get('filter_reason', '') or ''
+                                if fr == 'source_text':
+                                    reasons.add(tr('Found in source text'))
+                                elif fr == 'high_frequency':
+                                    reasons.add(tr('High frequency'))
+                                elif it.get('is_text_filtered'):
+                                    reasons.add(tr('Found in source text'))
+                                elif it.get('is_filtered'):
+                                    reasons.add(tr('Filtered'))
+                            reason_text = ', '.join(reasons) if reasons else tr('Filtered')
+                            ui.label(reason_text).classes('text-xs px-2 py-0.5 rounded').style(
+                                'background: #fff3cd; color: #856404; white-space: nowrap;'
+                            )
 
                     if title:
                         title_short = (title[:100] + '...') if len(title) > 100 else title

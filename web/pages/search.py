@@ -68,6 +68,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.catalog_source_counts: dict = {}  # sys_id -> count of catalog sources
             self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
             self.search_start_time: float = 0.0  # For elapsed timer display
+            self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
+            self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
 
     search_state = SearchUIState()
 
@@ -1982,9 +1984,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if not search_state.domain_exclusions:
             # No exclusions -- show all results
             filtered = search_state.results
+            search_state.domain_excluded_results = []
         else:
             hide_uncategorized = 'Uncategorized' in search_state.domain_exclusions
             filtered = []
+            excluded_with_reasons = []
             for r in search_state.results:
                 sys_id = r.get('display', {}).get('id')
                 result_domains = search_state.all_result_domains.get(sys_id, []) if sys_id else []
@@ -1992,13 +1996,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # No domain data -- hide if Uncategorized is excluded
                     if not hide_uncategorized:
                         filtered.append(r)
+                    else:
+                        excluded_with_reasons.append({
+                            'result': r,
+                            'reason': tr('Uncategorized')
+                        })
                     continue
                 elif all(d in search_state.domain_exclusions for d in result_domains):
-                    # ALL domains excluded -- hide this result
+                    # ALL domains excluded -- track with reason
+                    domain_names = [_domain_display_name(d) for d in result_domains]
+                    excluded_with_reasons.append({
+                        'result': r,
+                        'reason': ', '.join(domain_names)
+                    })
                     continue
                 else:
                     # At least one domain not excluded -- keep
                     filtered.append(r)
+            search_state.domain_excluded_results = excluded_with_reasons
 
         # Update count display
         total = len(search_state.results)
@@ -2158,11 +2173,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             fjms = get_fjms_service(thread_safe=True)
             return fjms.get_catalog_source_counts(sys_ids) if fjms.is_available() else {}
 
-        # Run three independent enrichment queries in parallel
-        raw_domains, transcription_ids, catalog_counts = await asyncio.gather(
+        def collect_printed_ids(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
+
+        # Run four independent enrichment queries in parallel
+        raw_domains, transcription_ids, catalog_counts, printed_ids = await asyncio.gather(
             run.io_bound(collect_all_domains, all_sys_ids),
             run.io_bound(get_sys_ids_with_transcriptions, all_sys_ids),
             run.io_bound(collect_catalog_counts, all_sys_ids),
+            run.io_bound(collect_printed_ids, all_sys_ids),
         )
 
         # Process domains into deduplicated domain names per sys_id
@@ -2198,6 +2219,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Assign parallel results
         search_state.transcription_sys_ids = transcription_ids
         search_state.catalog_source_counts = catalog_counts
+        search_state.printed_ids = printed_ids
 
         # Slice result_domains from all_result_domains for badge rendering
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(all_sys_ids)}
@@ -2278,24 +2300,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Render results (apply remembered exclusions if active)
         if search_state.domain_exclusions and search_state.has_domain_data:
-            # Apply remembered exclusions before first render
-            hide_uncategorized = 'Uncategorized' in search_state.domain_exclusions
-            filtered = []
-            for r in results:
-                sys_id = r.get('display', {}).get('id')
-                result_domains = search_state.all_result_domains.get(sys_id, []) if sys_id else []
-                if not result_domains:
-                    if not hide_uncategorized:
-                        filtered.append(r)
-                elif not all(d in search_state.domain_exclusions for d in result_domains):
-                    filtered.append(r)
-            n_excl = len(search_state.domain_exclusions)
-            results_count.text = f"{len(filtered)} {tr('of')} {len(results)} {tr('Results')} ({n_excl} {tr('domains excluded')})"
-            # Update result_domains for badge rendering (all filtered results, pagination handles slicing)
-            result_sys_ids = [r.get('display', {}).get('id') for r in filtered if r.get('display', {}).get('id')]
-            search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
-            render_results(filtered, page=0)
+            # Delegate to _apply_domain_exclusions which tracks excluded results with reasons
+            _apply_domain_exclusions()
         else:
+            search_state.domain_excluded_results = []
             render_results(results, page=0)
 
     def render_results(results, page=None, scroll_to_top=False):
@@ -2356,6 +2364,43 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         render_results(results, page=search_state.current_page, scroll_to_top=True)
                     ui.pagination(1, total_pages, value=page_idx + 1,
                         on_change=on_page_change_bottom).props('max-pages=7 boundary-numbers')
+
+            # Collapsible excluded results section (domain-excluded)
+            excluded = search_state.domain_excluded_results
+            if excluded:
+                with ui.expansion(
+                    text=f"{tr('Excluded Results')} ({len(excluded)})",
+                    icon='filter_alt',
+                    value=False  # collapsed by default
+                ).classes('w-full').style(
+                    'border: 1px solid var(--accent-amber); border-radius: 8px; margin-top: 16px;'
+                ).props('dense header-class="text-amber-8 text-subtitle1 text-weight-medium"'):
+                    # Show up to 50 excluded results with their reasons
+                    EXCLUDED_DISPLAY_LIMIT = 50
+                    for i, excl_item in enumerate(excluded[:EXCLUDED_DISPLAY_LIMIT]):
+                        excl_result = excl_item['result']
+                        excl_reason = excl_item.get('reason', '')
+                        excl_display = excl_result.get('display', {})
+                        excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
+                        excl_title = excl_display.get('title', '')
+                        with ui.row().classes('w-full items-center gap-2 py-1 px-2').style(
+                            'border-bottom: 1px solid var(--border-light);'
+                        ):
+                            ui.label(excl_shelfmark).classes('text-sm font-medium').style(
+                                'color: var(--text-secondary); min-width: 200px;'
+                            )
+                            if excl_title:
+                                title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
+                                ui.label(title_short).classes('text-xs flex-grow').style(
+                                    'color: var(--text-muted); direction: rtl;'
+                                )
+                            ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                'background: #fff3cd; color: #856404; white-space: nowrap;'
+                            )
+                    if len(excluded) > EXCLUDED_DISPLAY_LIMIT:
+                        ui.label(
+                            f"... {tr('and')} {len(excluded) - EXCLUDED_DISPLAY_LIMIT} {tr('more')}"
+                        ).classes('text-sm py-2 px-2').style('color: var(--text-muted);')
 
         # Scroll to top of results after page change
         if scroll_to_top:
@@ -2428,6 +2473,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                         'background: #f3e8ff; color: #7c3aed;'
                                     )
+                        # Printed material indicator
+                        if sys_id and sys_id in search_state.printed_ids:
+                            from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
+                            from web.translations import get_language
+                            _bg, _fg = PRINTED_BADGE_COLORS
+                            _plabel = PRINTED_LABEL_HE if get_language() == 'he' else PRINTED_LABEL_EN
+                            ui.label(_plabel).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
+                                f'background: {_bg}; color: {_fg};'
+                            )
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     if title_short:
                         ui.label(title_short).classes('text-xs').style(
@@ -3174,6 +3228,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ).classes('text-xs px-2 py-0.5 rounded-full no-underline').style(
                                         'background: #f3e8ff; color: #7c3aed;'
                                     )
+
+                            # Printed material indicator in advanced view
+                            if adv_state.current_sys_id and adv_state.current_sys_id in search_state.printed_ids:
+                                from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
+                                from web.translations import get_language as _get_lang
+                                _bg, _fg = PRINTED_BADGE_COLORS
+                                _plabel = PRINTED_LABEL_HE if _get_lang() == 'he' else PRINTED_LABEL_EN
+                                with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
+                                    f'background: {_bg}; color: {_fg};'
+                                ):
+                                    ui.icon('print').classes('text-xs')
+                                    ui.label(_plabel).classes('text-xs font-medium')
 
                 # === Expandable PGP Metadata (inside scroll area, collapsed) ===
                 if pgp_metadata:

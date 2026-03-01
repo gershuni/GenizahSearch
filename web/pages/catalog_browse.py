@@ -209,10 +209,19 @@ def create_catalog_browse_page(
 
     # ── Resolve shelfmark / library / catalog count / snippet ────────
     def _resolve_all(result_list):
-        """Batch resolve shelfmarks, libraries, catalog counts, snippets. Runs in io_bound."""
+        """Batch resolve shelfmarks, libraries, catalog counts, snippets, printed status. Runs in io_bound."""
         from web.state import state
 
         sys_ids = [r.get('sys_id', '') for r in result_list]
+
+        # Batch fetch printed status
+        printed_ids = set()
+        try:
+            valid_ids = [s for s in sys_ids if s]
+            if valid_ids:
+                printed_ids = fjms.get_printed_sys_ids(valid_ids) if fjms.is_available() else set()
+        except Exception as e:
+            logger.debug(f"Printed status batch failed: {e}")
 
         # Batch fetch catalog record counts
         catalog_count_map = {}
@@ -268,6 +277,7 @@ def create_catalog_browse_page(
                 'library_code': library_code,
                 'catalog_count': catalog_count_map.get(sid, 0),
                 'snippet': snippet_map.get(sid, ''),
+                'is_printed': sid in printed_ids,
             })
         return resolved
 
@@ -336,6 +346,7 @@ def create_catalog_browse_page(
                 '_textual_frame': textual_frame,
                 '_catalog_count': meta['catalog_count'],
                 '_snippet': meta['snippet'],
+                '_is_printed': meta.get('is_printed', False),
             })
 
         render_results_table(rows, total)
@@ -381,6 +392,7 @@ def create_catalog_browse_page(
             lbl_browse = tr('Browse')
             lbl_catalog = tr('Catalog')
             lbl_snippet = tr('Text Preview')
+            lbl_printed = '\u05d3\u05e4\u05d5\u05e1' if lang == 'he' else 'Printed'
 
             # Table columns with percentage widths (required for table-layout: fixed)
             _col_style = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap'
@@ -428,7 +440,9 @@ def create_catalog_browse_page(
                 }}" class="cursor-pointer">
                     <q-td v-for="col in props.cols" :key="col.name" :props="props"
                         :title="col.value">
-                        {{{{ col.value }}}}
+                        <span>{{{{ col.value }}}}</span>
+                        <q-badge v-if="col.name === 'shelfmark' && props.row._is_printed"
+                            color="red-2" text-color="red-10" class="q-ml-xs" dense>{lbl_printed}</q-badge>
                     </q-td>
                 </q-tr>
                 <q-tr :props="props" class="catalog-detail-row" style="display: none;">
@@ -456,6 +470,10 @@ def create_catalog_browse_page(
                                     <div v-if="props.row.date" class="row items-start q-mb-xs">
                                         <div class="text-caption text-weight-bold text-uppercase" style="min-width: 80px; color: var(--text-tertiary);">{lbl_date}</div>
                                         <div class="text-body2" style="color: var(--text-primary);">{{{{ props.row.date }}}}</div>
+                                    </div>
+                                    <div v-if="props.row._is_printed" class="row items-start q-mb-xs">
+                                        <div class="text-caption text-weight-bold text-uppercase" style="min-width: 80px; color: var(--text-tertiary);">Material</div>
+                                        <q-badge color="red-2" text-color="red-10" dense>{lbl_printed}</q-badge>
                                     </div>
                                     <div v-if="props.row._textual_frame" class="row items-start q-mb-xs">
                                         <div class="text-caption text-weight-bold text-uppercase" style="min-width: 80px; color: var(--text-tertiary);">{lbl_desc}</div>
