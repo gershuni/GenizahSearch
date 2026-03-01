@@ -9014,6 +9014,11 @@ class GenizahGUI(QMainWindow):
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
         in_l.addWidget(self.comp_progress)
 
+        # Escape shortcut to cancel composition search
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        comp_cancel_shortcut = QShortcut(QKeySequence("Escape"), self.comp_text_area)
+        comp_cancel_shortcut.activated.connect(lambda: self.cancel_composition() if self.is_comp_running else None)
+
         # Composition search timing state
         self.comp_search_start_time = 0.0
         self.comp_chunks_processed = 0
@@ -19515,12 +19520,22 @@ class GenizahGUI(QMainWindow):
                 # Pass explicit empty dicts for other arguments to avoid crashes
                 self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
             elif getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
-                self.comp_thread.terminate()
-                self.comp_thread.wait()
-            self.is_comp_running = False
-            self.reset_comp_ui()
+                # Signal thread to cancel gracefully -- partial results will be emitted
+                self.comp_thread.cancel_flag = True
+                self.comp_progress.setFormat(tr("Cancelling..."))
+                # Don't reset UI yet -- wait for scan_finished_signal with partial results
+                return
+            else:
+                self.is_comp_running = False
+                self.reset_comp_ui()
         else:
             self.run_composition()
+
+    def cancel_composition(self):
+        """Cancel composition search gracefully (called by Escape shortcut)."""
+        if self.is_comp_running and getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
+            self.comp_thread.cancel_flag = True
+            self.comp_progress.setFormat(tr("Cancelling..."))
         
     def reset_comp_ui(self):
         self.is_comp_running = False; self.btn_comp_run.setText(tr("Analyze Composition"))
@@ -19768,6 +19783,11 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.reset_comp_ui()
 
+        # Detect partial results (search was cancelled)
+        is_partial = False
+        if isinstance(result_obj, dict):
+            is_partial = result_obj.get('partial', False)
+
         # Show completion summary in progress bar (stays visible until next search)
         elapsed = time.time() - self.comp_search_start_time if self.comp_search_start_time else 0
         elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
@@ -19782,15 +19802,21 @@ class GenizahGUI(QMainWindow):
             filtered_items = []
 
         result_count = len(items) + len(filtered_items)
+        chunks_processed = self.comp_chunks_processed
         chunks_total = self.comp_chunks_total
 
         # Show summary in progress bar that persists until next search
         self.comp_progress.setVisible(True)
         self.comp_progress.setRange(0, 1)
         self.comp_progress.setValue(1)
-        self.comp_progress.setFormat(
-            f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
-        )
+        if is_partial:
+            self.comp_progress.setFormat(
+                f"{tr('Partial results')} \u2014 {elapsed_str} \u2014 {chunks_processed}/{chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
+            )
+        else:
+            self.comp_progress.setFormat(
+                f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
+            )
 
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
@@ -20407,18 +20433,30 @@ class GenizahGUI(QMainWindow):
                     placeholder = QTreeWidgetItem(group_node, [tr("Loading...")])
                     placeholder.setData(0, Qt.ItemDataRole.UserRole + 201, "PLACEHOLDER")
 
-            # 3. Filtered 
+            # 3. Filtered (collapsed by default, amber header, with filter reasons)
             total_filt = len(clean_filt) + sum(len(v) for v in clean_filt_appx.values())
             if total_filt > 0:
                 root_filt = QTreeWidgetItem(self.comp_tree, [tr("Filtered ({})").format(total_filt)])
                 root_filt.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT")
-                root_filt.setExpanded(True)
+                root_filt.setExpanded(False)  # Collapsed by default
+                root_filt.setForeground(0, QColor('#f39c12'))  # Amber color
                 make_checkable(root_filt)
-                
-                # Filtered Main
+
+                # Filtered Main - add filter reason to title column
                 for item in self._sort_comp_items(clean_filt):
                     add_manuscript_node(root_filt, item)
-                
+                    # Add filter reason to the last added child node
+                    last_child_idx = root_filt.childCount() - 1
+                    if last_child_idx >= 0:
+                        child = root_filt.child(last_child_idx)
+                        # Determine filter reason from item's pages or direct data
+                        filter_reason = self._get_filter_reason(item)
+                        if filter_reason:
+                            existing_title = child.text(self.comp_col_title)
+                            reason_prefix = f"[{filter_reason}] "
+                            child.setText(self.comp_col_title, reason_prefix + existing_title)
+                            child.setForeground(self.comp_col_title, QColor('#f39c12'))
+
                 # Filtered Appendix - Using Virtual Children for performance
                 for sig, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     g_node = QTreeWidgetItem(root_filt, ["", "", f"{sig} ({len(items)})", ""])
@@ -20428,13 +20466,14 @@ class GenizahGUI(QMainWindow):
                     placeholder = QTreeWidgetItem(g_node, [tr("Loading...")])
                     placeholder.setData(0, Qt.ItemDataRole.UserRole + 201, "PLACEHOLDER")
 
-            # 4. Excluded
+            # 4. Excluded (collapsed by default)
             if self.comp_known:
                 root_known = QTreeWidgetItem(self.comp_tree, [tr("Excluded ({})").format(len(self.comp_known))])
                 root_known.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_KNOWN")
                 root_known.setForeground(0, Qt.GlobalColor.darkGray)
+                root_known.setExpanded(False)  # Collapsed by default
                 make_checkable(root_known)
-                
+
                 for item in self._sort_comp_items(self.comp_known):
                     add_manuscript_node(root_known, item)
 
@@ -20456,6 +20495,31 @@ class GenizahGUI(QMainWindow):
 
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
+
+    def _get_filter_reason(self, item):
+        """Get human-readable filter reason for a composition result item."""
+        # Check pages for filter_reason
+        pages = item.get('pages', [])
+        reasons = set()
+        for p in pages:
+            fr = p.get('filter_reason', '')
+            if fr == 'source_text':
+                reasons.add(tr('Found in source text'))
+            elif fr == 'high_frequency':
+                reasons.add(tr('High frequency'))
+            elif p.get('is_text_filtered'):
+                reasons.add(tr('Found in source text'))
+            elif p.get('is_filtered'):
+                reasons.add(tr('Filtered'))
+        # Also check item directly
+        fr = item.get('filter_reason', '')
+        if fr == 'source_text':
+            reasons.add(tr('Found in source text'))
+        elif fr == 'high_frequency':
+            reasons.add(tr('High frequency'))
+        elif item.get('is_text_filtered'):
+            reasons.add(tr('Found in source text'))
+        return ', '.join(reasons) if reasons else ''
 
     def _make_node_checkable(self, node):
         """Make a tree node checkable."""

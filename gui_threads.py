@@ -104,6 +104,7 @@ class CompositionThread(QThread):
         self.mode = mode
         self.filter_text = filter_text
         self.threshold = threshold
+        self.cancel_flag = False
         # Boundary search parameters
         self.boundary_mode = boundary_mode
         self.boundary_delimiter = boundary_delimiter
@@ -114,7 +115,10 @@ class CompositionThread(QThread):
     def run(self):
         try:
             self.status_signal.emit("Scanning chunks...")
-            def cb(curr, total): self.progress_signal.emit(curr, total)
+            def cb(curr, total):
+                if self.cancel_flag:
+                    raise InterruptedError("Search cancelled by user")
+                self.progress_signal.emit(curr, total)
 
             # Returns dict {'main': [], 'filtered': []} or list [] (legacy safety)
             result = self.searcher.search_composition_logic(
@@ -149,6 +153,7 @@ class LabCompositionThread(QThread):
         self.filter_text = filter_text
         self.deep_scan = deep_scan
         self.scan_limit = scan_limit
+        self.cancel_flag = False
         # Boundary search parameters
         self.boundary_mode = boundary_mode
         self.boundary_delimiter = boundary_delimiter
@@ -162,6 +167,8 @@ class LabCompositionThread(QThread):
 
             # Callback handler that supports both (int, int) and (str)
             def cb(arg1, arg2=None):
+                if self.cancel_flag:
+                    raise InterruptedError("Search cancelled by user")
                 if isinstance(arg1, str):
                     self.status_signal.emit(arg1)
                 elif isinstance(arg1, int) and arg2 is not None:
