@@ -175,7 +175,12 @@ Plans:
   2. Web app preserves search state across page reloads and browser sessions (via storage)
   3. Users can view a history of past searches with their result counts and re-execute them
   4. Session persistence works in both web and desktop apps
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 43-01-PLAN.md -- Desktop session persistence service + save/restore hooks (SESS-01)
+- [ ] 43-02-PLAN.md -- Web session persistence expansion + settings toggles (SESS-01)
+- [ ] 43-03-PLAN.md -- Desktop search history dropdowns + resume interrupted search (SESS-02)
+- [ ] 43-04-PLAN.md -- Web search history dropdowns for search and parallels pages (SESS-02)
 
 ### Phase 44: Quick UX Wins
 **Goal**: Batch of small, high-value UX improvements across both apps
