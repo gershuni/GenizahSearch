@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 _SIDECAR_FILENAME = "fjms_enrichment.db"
 _SIDECAR_DIR = "fist_data"
 
+# Printed badge display constants
+PRINTED_BADGE_COLORS = ('#fee2e2', '#dc2626')  # Red-tinted attention color (bg, text)
+PRINTED_LABEL_EN = 'Printed'
+PRINTED_LABEL_HE = '\u05d3\u05e4\u05d5\u05e1'
+
 # Team name data: maps EngDesc from dbo_CodeSource to display names.
 # Each entry: (en_header, en_full, he_header, he_full)
 # - en_header / he_header: column header without leader (e.g., "FGP Linguistics team")
@@ -726,6 +731,35 @@ class FjmsService:
         except Exception as e:
             logger.error(f"FjmsService.get_domains_for_sys_ids error: {e}")
             return {}
+
+    def get_printed_sys_ids(self, sys_ids: list[str]) -> set:
+        """Batch lookup which sys_ids have FragmentMaterial=Printed.
+
+        Returns: set of sys_ids that are printed materials.
+        Uses the catalog_fields table: FieldCategory='FragmentMaterial' AND FieldValue='Printed'.
+        Covers ~12,421 AlmaIds in the Genizah corpus.
+        """
+        if not self._conn or not sys_ids:
+            return set()
+        try:
+            result = set()
+            batch_size = 500
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT DISTINCT AlmaId FROM catalog_fields "
+                    f"WHERE FieldCategory = 'FragmentMaterial' "
+                    f"AND FieldValue = 'Printed' "
+                    f"AND AlmaId IN ({placeholders})",
+                    batch,
+                )
+                for row in cursor:
+                    result.add(row["AlmaId"])
+            return result
+        except Exception as e:
+            logger.error(f"FjmsService.get_printed_sys_ids error: {e}")
+            return set()
 
     def get_all_domains(self) -> list[dict]:
         """
