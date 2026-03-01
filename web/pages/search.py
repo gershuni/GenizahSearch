@@ -764,7 +764,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         def _update_printed_filter_btn():
                             if search_state.printed_filter == 'all':
-                                printed_filter_btn.text = tr('Printed')
+                                printed_filter_btn.text = tr('Filter Printed')
                                 printed_filter_btn.props(remove='color')
                                 printed_filter_btn.props('outline dense no-caps')
                             elif search_state.printed_filter == 'hide_printed':
@@ -777,7 +777,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 printed_filter_btn.props('outline dense no-caps color=deep-orange')
 
                         printed_filter_btn = ui.button(
-                            tr('Printed'), icon='local_printshop',
+                            tr('Filter Printed'), icon='local_printshop',
                             on_click=lambda: _toggle_printed_filter()
                         ).classes('text-sm').props('outline dense no-caps')
                         printed_filter_btn.set_visibility(False)
@@ -2458,9 +2458,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         excl_display = excl_result.get('display', {})
                         excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
                         excl_title = excl_display.get('title', '')
-                        with ui.row().classes('w-full items-center gap-2 py-1 px-2').style(
+                        with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                             'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
-                        ):
+                        ).on('click', lambda r=excl_result: load_in_viewer(r)):
                             ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
                                 'color: var(--text-secondary); max-width: 200px;'
                             )

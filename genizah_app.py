@@ -6580,6 +6580,7 @@ class GenizahGUI(QMainWindow):
         self._pgp_badge_worker = None
         self._printed_badge_worker = None
         self._printed_sys_ids = set()
+        self._printed_filter_state = 'all'  # 'all', 'hide_printed', 'only_printed'
         self._domain_worker = None
         self._pgp_tags_worker = None
         self._pgp_tag_search_worker = None
@@ -8707,7 +8708,7 @@ class GenizahGUI(QMainWindow):
         self.chk_search_header = CheckBoxHeader(
             self.results_table,
             non_sortable_cols=[0, 1, self.COL_IMG],
-            filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET, self.COL_DOMAIN],
+            filter_columns=[self.COL_ACTIONS, self.COL_SHELF, self.COL_LIBRARY, self.COL_TITLE, self.COL_SNIPPET, self.COL_DOMAIN, self.COL_PRINTED],
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
             star_callback=self.toggle_list_filter,
@@ -17023,7 +17024,9 @@ class GenizahGUI(QMainWindow):
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
 
-        self.results_table.setRowCount(0) 
+        self.results_table.setRowCount(0)
+        self._printed_filter_state = 'all'
+        self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
         for b in self.export_buttons: b.setEnabled(False)
         self.result_row_by_sys_id = {}
         self.hovered_row = -1
@@ -17355,6 +17358,26 @@ class GenizahGUI(QMainWindow):
             self.open_list_filter_dialog()
             return
 
+        if column == self.COL_PRINTED:
+            # 3-state cycle: all -> hide_printed -> only_printed -> all
+            states = ['all', 'hide_printed', 'only_printed']
+            current_idx = states.index(self._printed_filter_state)
+            self._printed_filter_state = states[(current_idx + 1) % 3]
+            # Update header icon state to reflect active filter
+            self.chk_search_header.set_filter_active(
+                self.COL_PRINTED,
+                self._printed_filter_state != 'all'
+            )
+            # Show statusbar message
+            state_labels = {
+                'all': tr('Showing all'),
+                'hide_printed': tr('Hiding printed'),
+                'only_printed': tr('Only printed'),
+            }
+            self.statusBar().showMessage(state_labels.get(self._printed_filter_state, ''), 3000)
+            self._apply_results_table_filters()
+            return
+
         header_item = self.results_table.horizontalHeaderItem(column)
         column_label = header_item.text() if header_item else str(column)
         current = self.results_filters.get(column, {})
@@ -17403,7 +17426,7 @@ class GenizahGUI(QMainWindow):
         has_domain_exclusions = bool(self._domain_exclusions) and self._has_result_domains
         hide_uncategorized = "Uncategorized" in self._domain_exclusions if has_domain_exclusions else False
 
-        if not self.results_filters and not list_active and not has_domain_exclusions:
+        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all':
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
@@ -17444,6 +17467,16 @@ class GenizahGUI(QMainWindow):
                     if hide_uncategorized:
                         visible = False
                 elif all(d in self._domain_exclusions for d in result_domains):
+                    visible = False
+
+            # D. Check Printed Filter
+            if visible and self._printed_filter_state != 'all':
+                item = self.results_table.item(row, self.COL_SYS_ID)
+                sys_id = item.text().strip() if item else None
+                is_printed = sys_id in self._printed_sys_ids if self._printed_sys_ids and sys_id else False
+                if self._printed_filter_state == 'hide_printed' and is_printed:
+                    visible = False
+                elif self._printed_filter_state == 'only_printed' and not is_printed:
                     visible = False
 
             self.results_table.setRowHidden(row, not visible)
