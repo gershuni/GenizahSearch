@@ -2228,6 +2228,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results([])
             return
 
+        # Skip expensive enrichment when search was cancelled (GAP-R7 round 3)
+        if search_state.is_cancelled:
+            search_state.is_running = False
+            search_state.is_cancelled = False
+            search_state.progress = 1.0
+            search_state.results = results
+            search_state.domain_excluded_results = []
+
+            # Still save results for display
+            state.last_results = results
+
+            # Compute elapsed
+            total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
+            if total_elapsed >= 3600:
+                total_elapsed_str = f"{int(total_elapsed // 3600)}:{int((total_elapsed % 3600) // 60):02d}:{int(total_elapsed % 60):02d}"
+            else:
+                total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
+
+            status_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {len(results)} {tr('Results')}"
+            ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+            results_count.text = f"{len(results)} {tr('Results')} ({tr('partial')})"
+
+            # Render what we have (no enrichment badges -- acceptable for partial results)
+            render_results(results, page=0)
+            return
+
         # Collect sys_ids for enrichment (all results, not just displayed 200)
         all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
 

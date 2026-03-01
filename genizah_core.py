@@ -778,6 +778,8 @@ class LabEngine:
                 # Send numeric progress for ProgressBar (i, total)
                 try:
                     progress_callback(i, total_hits)
+                except (InterruptedError, KeyboardInterrupt):
+                    raise
                 except Exception:
                     pass
                 # Send text status for Label
