@@ -17077,6 +17077,8 @@ class GenizahGUI(QMainWindow):
                 self.search_thread.terminate()
                 self.search_thread.wait()
         self.reset_ui()
+        # Show partial results notification (GAP-R3 round 3)
+        self.statusBar().showMessage(tr('Partial results'), 5000)
 
     def reset_ui(self):
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
