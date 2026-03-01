@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-02-22 (v6.0.0 milestone closed — local data architecture, bug fixes, performance optimization)
+> **Last Updated:** 2026-03-01 (v6.1.1 — async catalog browse, 100x faster domain queries)
 > **Status:** Active working document
 
 ---
@@ -196,6 +196,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-01 | v6.1.1 — async desktop catalog browse (QThread), 100x faster domain queries (35s->0.8s via IN+UNION subquery + dedup CTE), 3-level domain hierarchy, canonical FJMS ordering, thread-safe FjmsService, browse cache v2 | Claude |
 | 2026-02-22 | Closed v6.0.0 milestone — local data architecture (pgp.db sidecar, FJMS catalog descriptions, offline browsing), bug fixes (desktop crashes, pagination), performance optimization (parallel NLI, crossref, variant cache), IsNotGenizah badge removed | Claude |
 | 2026-02-16 | Closed v5.9.0 milestone — multi-source image & metadata integration (NLI crossref, Cambridge/Manchester/JTS IIIF, bibliography, catalog refs), version bump to 5.9.0 | Claude |
 | 2026-02-15 | Closed v5.8.0 milestone — FJMS integration (domains, scientific joins, catalog enrichment), version bump to 5.8.0 | Claude |
