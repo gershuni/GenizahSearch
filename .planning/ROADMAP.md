@@ -10,7 +10,9 @@
 - ✅ **v5.8.0 FJMS Integration** -- Phases 25-28 (shipped 2026-02-15)
 - ✅ **v5.9.0 Multi-Source Image & Metadata Integration** -- Phases 29-34 (shipped 2026-02-16)
 - ✅ **v6.0.0 Local Data Architecture** -- Phases 35-40 (shipped 2026-02-22)
-- **v7.0.0 Catalog Navigation & Transcription Search** -- Phases 41-46 (in progress)
+- ✅ **v6.1.0 Catalog Browse & Navigation** -- Phase 41 (shipped 2026-02-27)
+- **v6.5.0 Search UX & Filtered Search** -- Phases 42-47 (in progress)
+- **v7.0.0 Transcription Search** -- Phases 48-50 (planned)
 
 ## Phases
 
@@ -108,73 +110,111 @@ Performance: parallel NLI fetch, browse crossref parallelization, FL ID index, v
 
 </details>
 
-### v7.0.0 Catalog Navigation & Transcription Search (In Progress)
+<details>
+<summary>v6.1.0 Catalog Browse & Navigation (Phase 41) -- SHIPPED 2026-02-27</summary>
 
-**Milestone Goal:** Enable researchers to browse and search the scholarly catalog (authors, works, domains) and search within transcription text alongside OCR, with pre-search domain scoping.
+1 phase, 4 plans.
+Faceted browsing by domain hierarchy, author, and work title in both apps.
+FIST v5.0.0 enrichment (genizah_persons, genizah_titles, code_values), FTS5+domain text filter,
+cross-links between browse and catalog browse pages. 72 tests.
 
-- [x] **Phase 41: Catalog Browse & Navigation** - Faceted browsing of manuscripts by domain, author, and work hierarchies in both apps (shipped 2026-02-27, v6.1.0)
-- [ ] **Phase 42: Catalog Search** - Full-text and structured field search across FJMS and PGP catalog data as a search mode
-- [ ] **Phase 43: Pre-Search Domain Filtering** - Include/exclude domains, identifications, and authors before Tantivy search across all modes
-- [ ] **Phase 44: Transcription Import** - FJMS ~30K transcriptions from FIST.db into fjms_enrichment.db with shared service access
-- [ ] **Phase 45: Transcription Indexing & Search** - Unified Tantivy index over PGP + FJMS + user transcription text with source badges and ranking
-- [ ] **Phase 46: Index Distribution & Upgrade** - Pre-built index download, desktop upgrade path, and fresh install support
+</details>
+
+### v6.5.0 Search UX & Filtered Search (In Progress)
+
+**Milestone Goal:** Improve the daily search experience (composition UX, session persistence, quick wins), add CreationType visibility, implement bidirectional filtered search (pre-search filtering from search page + "search within" from catalog browse), and translate all data via Dicta API for multilingual access.
+
+**Origin:** Power user feedback letter (2026-02-27, 17 requests) + existing roadmap items.
+
+- [ ] **Phase 42: Search UX & Composition Polish** - Search duration display, ETA, partial results on cancel, chunk count, min-chunks filter, result/excluded separator, CreationType badge on search & browse results
+- [ ] **Phase 43: Session Persistence & Search History** - Restore state + exclusions on reopen (critical: user lost 5K exclusions), search history with saved results
+- [ ] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results
+- [ ] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels
+- [ ] **Phase 46: Dicta Translation** - Translate all data (PGP metadata, identifications, catalog, bibliography) via Dicta API for multilingual display and search completeness, careful handling of already-bilingual fields
+
+### v7.0.0 Transcription Search (Planned)
+
+**Milestone Goal:** Import FJMS transcriptions and build a unified searchable index over all human transcription text (PGP + FJMS + user corrections) alongside OCR, with source badges, ranking, and desktop distribution.
+
+- [ ] **Phase 47: Transcription Import** - FJMS ~30K transcriptions from FIST.db into fjms_enrichment.db with shared service access
+- [ ] **Phase 48: Transcription Indexing & Search** - Unified Tantivy index over PGP + FJMS + user transcription text with source badges and ranking
+- [ ] **Phase 49: Index Distribution & Upgrade** - Pre-built index download, desktop upgrade path, and fresh install support
 
 ## Phase Details
 
-### Phase 41: Catalog Browse & Navigation
-**Goal**: Researchers can explore the manuscript corpus through structured scholarly categories -- browsing by domain hierarchy, author, or work title -- and combine these axes to narrow results
-**Depends on**: Nothing (builds on existing fjms_enrichment.db catalog data and FjmsService)
-**Requirements**: BROWSE-01, BROWSE-02, BROWSE-03, BROWSE-04, BROWSE-05, BROWSE-06
+### Phase 42: Search UX & Composition Polish
+**Goal**: Improve the composition/parallels search experience with progress feedback, partial results, and visual polish; add CreationType badge to all result views
+**Depends on**: Nothing (UX improvements on existing search infrastructure)
+**Requirements**: UX-01 (א duration display), UX-02 (ב ETA), UX-03 (ג partial results on cancel), UX-04 (ו separator between results/excluded), UX-05 (ז chunk count display), UX-06 (ח min-chunks filter for regular search), UX-07 (טו CreationType badge)
 **Success Criteria** (what must be TRUE):
-  1. User can navigate a domain hierarchy (e.g., Bible > Torah > Genesis) and see manuscripts classified under each level
-  2. User can browse manuscripts by author name and see all works attributed to that author
-  3. User can browse manuscripts by work/title and see all fragments containing that work
-  4. User can combine axes (e.g., domain + author) to narrow browse results, with results showing shelfmark, library, domain, and identification
-  5. Catalog browse is fully functional in both web (NiceGUI) and desktop (PyQt6) apps
-**Plans:** 4/4 plans executed
-
-Plans:
-- [ ] 41-01-PLAN.md -- Service layer: browse methods for FjmsService (authors, works, results, combined filtering)
-- [ ] 41-02-PLAN.md -- Web catalog browse page with domain tree, filtering, pagination, deep linking
-- [ ] 41-03-PLAN.md -- Desktop catalog browse tab with matching functionality
-- [ ] 41-04-PLAN.md -- Cross-links between browse pages + visual verification
-
-### Phase 42: Catalog Search
-**Goal**: Researchers can search across catalog metadata (titles, authors, dates, descriptions, identifications) using free-text or field-specific queries, and navigate from results to manuscript browse view
-**Depends on**: Phase 41 (browse view must exist for result navigation)
-**Requirements**: CAT-01, CAT-02, CAT-03, CAT-04, CAT-05
-**Success Criteria** (what must be TRUE):
-  1. User can type a free-text query and get results matching across all catalog fields (titles, authors, dates, descriptions, identifications)
-  2. User can filter catalog search by specific fields (author name, work title, date range) for precision queries
-  3. Catalog search is accessible as a mode/option within the main search interface (not a separate page)
-  4. Clicking a catalog search result navigates to the manuscript browse view for that record
-  5. Catalog search works in both web and desktop apps
+  1. User sees elapsed search duration while a search is running (both apps)
+  2. Long composition searches show estimated time remaining or progress indication
+  3. Cancelling a search preserves and displays results found so far
+  4. Chunk count is visible during/after search
+  5. Min-chunks filter available for regular chunk search (not just composition mode)
+  6. Clear visual separator between included results and excluded results in expanded view
+  7. CreationType badge (Original/Copy/Print/etc.) visible on search results and browse results in both apps
 **Plans**: TBD
 
-### Phase 43: Pre-Search Domain Filtering
-**Goal**: Researchers can scope their text searches by domain, identification, or author before executing, so only manuscripts matching those scholarly categories are searched
-**Depends on**: Phase 41 (catalog data access patterns established)
-**Requirements**: FILT-01, FILT-02, FILT-03, FILT-04, FILT-05
+### Phase 43: Session Persistence & Search History
+**Goal**: Users never lose search state (exclusions, filters, results) when the app restarts, and can recall past searches
+**Depends on**: Nothing (independent of other phases)
+**Requirements**: SESS-01 (טז session persistence), SESS-02 (יב search history)
 **Success Criteria** (what must be TRUE):
-  1. User can include or exclude FJMS domain classifications before running a text search, and only manuscripts matching the filter appear in results
-  2. User can include or exclude catalog identifications (work/title) and author attributions before running a text search
-  3. Pre-search filters work correctly with all search modes: regular search, Responsa, PGP tags, and parallels
-  4. Pre-search filtering is available and functional in both web and desktop apps
+  1. Desktop app restores all search state on reopen: active exclusions, domain filters, current results, search parameters
+  2. Web app preserves search state across page reloads and browser sessions (via storage)
+  3. Users can view a history of past searches with their result counts and re-execute them
+  4. Session persistence works in both web and desktop apps
 **Plans**: TBD
 
-### Phase 44: Transcription Import
+### Phase 44: Quick UX Wins
+**Goal**: Batch of small, high-value UX improvements across both apps
+**Depends on**: Nothing (independent quick fixes)
+**Requirements**: QUX-01 (ה desktop notification), QUX-02 (יד prevent sleep), QUX-03 (ט Hebrew library names), QUX-04 (יז copy from compact results)
+**Success Criteria** (what must be TRUE):
+  1. Desktop app shows system notification when a long search completes (user may have switched to another app)
+  2. OS sleep is prevented while a search is running (desktop)
+  3. Hebrew library names displayed alongside English names in both apps
+  4. Users can select and copy text from compact/collapsed search results without expanding
+**Plans**: TBD
+
+### Phase 45: Filtered Search Context
+**Goal**: Researchers can constrain text searches by scholarly categories (domain, author, work, date, CreationType) either before searching (Path A: search page pre-filter) or after browsing (Path B: catalog browse "search within these results"), with the same shared filter mechanism
+**Depends on**: Phase 41 (catalog browse UI and service methods), Phase 42 (CreationType badge data)
+**Requirements**: FILT-01 (domain include/exclude), FILT-02 (author/work include/exclude), FILT-03 (CreationType filter), FILT-04 (all search modes), FILT-05 (Path B: browse→search), FILT-06 (both apps)
+**Success Criteria** (what must be TRUE):
+  1. User can include or exclude FJMS domains, authors, works, date ranges, and CreationType before running a text search (Path A)
+  2. User can narrow results in catalog browse, then click "Search within" to execute a text/parallels search constrained to those manuscripts (Path B)
+  3. Filters work correctly with all search modes: regular, Responsa, PGP tags, and parallels
+  4. Filtered search context is available and functional in both web and desktop apps
+  5. Exclude manuscripts in word search works the same as in composition search (ד)
+**Plans**: TBD
+
+### Phase 46: Dicta Translation
+**Goal**: All scholarly data is available in multiple languages via Dicta Translate API, enabling non-Hebrew/non-English speakers to use the platform and improving search completeness across languages
+**Depends on**: Nothing (independent data enrichment, but benefits from all UI being in place)
+**Requirements**: TRANS-01 (translate PGP metadata), TRANS-02 (translate identifications/catalog), TRANS-03 (translate bibliography), TRANS-04 (handle bilingual fields), TRANS-05 (search across translations)
+**Success Criteria** (what must be TRUE):
+  1. PGP document metadata (descriptions, tags, types) available in both Hebrew and English
+  2. FJMS catalog data (identifications, domains, descriptions) translated where not already bilingual
+  3. Already-bilingual fields are preserved and not double-translated
+  4. Translated data improves search coverage (searching in either language finds results regardless of original language)
+  5. Translation pipeline is repeatable for future data updates
+**Plans**: TBD
+
+### Phase 47: Transcription Import
 **Goal**: FJMS transcription text (~30K transcriptions) is imported from FIST.db into fjms_enrichment.db and accessible through the shared service layer for both apps
-**Depends on**: Nothing (data pipeline, independent of catalog UI phases)
-**Requirements**: TRANS-01, TRANS-02
+**Depends on**: Nothing (data pipeline, independent of v6.5.0 phases)
+**Requirements**: TIMP-01, TIMP-02
 **Success Criteria** (what must be TRUE):
   1. FJMS transcriptions (~30K) are stored in fjms_enrichment.db with proper schema (shelfmark linkage, scholar attribution, text content)
   2. Both web and desktop apps can retrieve transcription text for a given manuscript through the shared FjmsService
 **Plans**: TBD
 
-### Phase 45: Transcription Indexing & Search
+### Phase 48: Transcription Indexing & Search
 **Goal**: Researchers searching for text find matches in human transcriptions (PGP, FJMS, user corrections) alongside OCR results, with transcription hits clearly identified and ranked higher
-**Depends on**: Phase 44 (FJMS transcriptions must be imported before indexing)
-**Requirements**: SRCH-01, SRCH-02, SRCH-03, SRCH-04, SRCH-05, SRCH-06, SRCH-07
+**Depends on**: Phase 47 (FJMS transcriptions must be imported before indexing)
+**Requirements**: TSRCH-01, TSRCH-02, TSRCH-03, TSRCH-04
 **Success Criteria** (what must be TRUE):
   1. Text searches return matches found in PGP editions/translations, FJMS transcription text, and user corrections -- not just OCR text
   2. Search results display a badge/icon indicating the source of the match (OCR vs. transcription) so users know the provenance
@@ -182,10 +222,10 @@ Plans:
   4. Transcription search works with all search modes (regular and Responsa) in both web and desktop apps
 **Plans**: TBD
 
-### Phase 46: Index Distribution & Upgrade
+### Phase 49: Index Distribution & Upgrade
 **Goal**: Desktop users (both new and existing) receive a complete Tantivy index that includes transcription fields, with automatic detection and upgrade for users with older index formats
-**Depends on**: Phase 45 (index must include transcription fields before distribution)
-**Requirements**: DIST-01, DIST-02, DIST-03, DIST-04
+**Depends on**: Phase 48 (index must include transcription fields before distribution)
+**Requirements**: IDIST-01, IDIST-02, IDIST-03, IDIST-04
 **Success Criteria** (what must be TRUE):
   1. A pre-built Tantivy index (with transcription fields) is available for download from the web server
   2. Desktop app detects when the existing local index lacks transcription fields and offers an upgrade path
@@ -196,23 +236,25 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 41 -> 42 -> 43 -> 44 -> 45 -> 46
-
-Note: Phases 41-43 (catalog) and Phase 44 (import) are independent chains. Phase 44 can execute in parallel with 41-43 if desired, but Phase 45 requires Phase 44 complete.
+v6.5.0: Phases 42 -> 43 -> 44 -> 45 -> 46 (UX first, then filtering, then translation)
+v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
-| 42. Catalog Search | 0/TBD | Not started | - |
-| 43. Pre-Search Domain Filtering | 0/TBD | Not started | - |
-| 44. Transcription Import | 0/TBD | Not started | - |
-| 45. Transcription Indexing & Search | 0/TBD | Not started | - |
-| 46. Index Distribution & Upgrade | 0/TBD | Not started | - |
+| 42. Search UX & Composition Polish | 0/TBD | Not started | - |
+| 43. Session Persistence & History | 0/TBD | Not started | - |
+| 44. Quick UX Wins | 0/TBD | Not started | - |
+| 45. Filtered Search Context | 0/TBD | Not started | - |
+| 46. Dicta Translation | 0/TBD | Not started | - |
+| 47. Transcription Import | 0/TBD | Not started | - |
+| 48. Transcription Indexing & Search | 0/TBD | Not started | - |
+| 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
 
-**Total phases completed:** 40 (from previous milestones)
-**Total plans completed:** ~115 (from previous milestones)
-**Total milestones shipped:** 8
+**Total phases completed:** 41 (from previous milestones including Phase 41)
+**Total plans completed:** ~119 (from previous milestones)
+**Total milestones shipped:** 9
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-02-27 after Phase 41 shipped as v6.1.0*
+*Last updated: 2026-03-01 after v6.5.0 milestone scoped*

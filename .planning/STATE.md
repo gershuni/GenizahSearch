@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 41 - Catalog Browse & Navigation
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 42 next
 
 ## Current Position
 
-Phase: 41 of 46 (Catalog Browse & Navigation)
-Plan: 4 of 4 in current phase
-Status: Complete
-Last activity: 2026-02-27 - Completed 41-04: Cross-links, text filter, FIST v5.0.0 enrichment
+Milestone: v6.5.0 Search UX & Filtered Search
+Phase: 42 of 47 (Search UX & Composition Polish) — not started
+Status: Milestone scoped, ready to plan Phase 42
+Last activity: 2026-03-01 - v6.5.0 milestone scoped from user feedback
 
-Progress: [##########] 100%
+Progress: [░░░░░░░░░░] 0/5 phases (Phase 41 shipped as v6.1.0)
 
 ## Performance Metrics
 
@@ -45,11 +45,10 @@ Progress: [##########] 100%
 See PROJECT.md Key Decisions table for full history.
 
 Recent decisions affecting current work:
-- Phase 13 deferred (v5.6.0): Transcription index build too slow for desktop -- revisited in Phase 45-46
-- Post-search domain filtering chosen over pre-search (v5.8.0) -- Phase 43 now adds pre-search option
-- Phase 41-01: MAX(CASE WHEN) aggregation for browse result dedup; batch domain post-query for performance
-- Phase 41-02: Single-pass NiceGUI layout with dict refs; history.replaceState deep linking; unclassified bucket informational only
-- Phase 41-03: Merged lazy-load into tab creation; inline get_fjms_service() matching existing desktop pattern; English domain key in UserRole for queries
+- Phase 13 deferred (v5.6.0): Transcription index build too slow for desktop -- revisited in v7.0.0 Phase 47-49
+- Post-search domain filtering chosen over pre-search (v5.8.0) -- Phase 45 now adds bidirectional filtered search
+- v6.5.0 scoped (2026-03-01): UX first (42-44), then filtered search (45), then Dicta translation (46). Transcription deferred to v7.0.0
+- CreationType badge added to Phase 42 scope (print vs manuscript visibility)
 
 ### Pending Todos
 
@@ -65,9 +64,10 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- FIST.db access required for Phase 44 (FJMS transcription import) -- confirm file available
-- Phase 45 extends Tantivy schema -- need backward-compatible index upgrade strategy
-- Phase 43 pre-search filtering must not break parallels search mode
+- FIST.db access required for v7.0.0 Phase 47 (FJMS transcription import) -- confirm file available
+- v7.0.0 Phase 48 extends Tantivy schema -- need backward-compatible index upgrade strategy
+- Phase 45 bidirectional filtered search must not break parallels search mode
+- Dicta Translation (Phase 46) must handle already-bilingual fields carefully
 
 ### Quick Tasks Completed
 
@@ -77,7 +77,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-27
-Stopped at: Phase 41 complete — all 4 plans executed
-Resume file: none
-Notes: FIST v5.0.0 enrichment, text filter with FTS5+domain hybrid, chip remove fix, 72 tests green. Phase 41 ready for next phase transition.
+Last session: 2026-03-01
+Stopped at: Phase 42 context gathered — ready to plan
+Resume file: .planning/phases/42-search-ux-composition-polish/42-CONTEXT.md
+Notes: Phase 42 context captured: progress display (timer+ETA all modes), cancel with partial results (full functionality), CreationType colored chips (Print emphasized), min-chunks all modes, collapsible excluded section with reasons. Next: /gsd:plan-phase 42.

@@ -8,15 +8,25 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.0.0 Catalog Navigation & Transcription Search
+## Current Milestone: v6.5.0 Search UX & Filtered Search
 
-**Goal:** Enable researchers to browse and search the scholarly catalog (authors, works, domains) and search within transcription text alongside OCR, with pre-search domain scoping.
+**Goal:** Improve the daily search experience based on power user feedback, add CreationType visibility, implement bidirectional filtered search, and translate all data via Dicta API for multilingual access.
 
 **Target features:**
-- Catalog browse & navigation: faceted browsing by author, work, domain, or combination
-- Catalog search: full-text + structured field search across FJMS and PGP catalog data
-- Pre-search domain filtering: include/exclude domains and identifications before Tantivy search
-- Transcription search: FJMS transcription import, unified Tantivy index over PGP + FJMS + user transcription text
+- Search UX & composition polish: duration display, ETA, partial results on cancel, chunk count, min-chunks filter, CreationType badge
+- Session persistence: restore state + exclusions on reopen, search history
+- Quick UX wins: desktop notification, prevent sleep, Hebrew library names, copy from compact results
+- Filtered search context: bidirectional (search pre-filter + browse "search within"), domain/author/work/date/CreationType filters across all search modes
+- Dicta translation: translate all data via API for multilingual display and search completeness
+
+## Next Milestone: v7.0.0 Transcription Search
+
+**Goal:** Import FJMS transcriptions and build unified searchable index over all human transcription text alongside OCR.
+
+**Target features:**
+- FJMS transcription import (~30K from FIST.db)
+- Unified Tantivy index (PGP + FJMS + user corrections) with source badges and ranking
+- Pre-built index distribution and desktop upgrade path
 
 ## Current State (after v6.0.0 shipped)
 
@@ -119,11 +129,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-- Catalog browse & navigation: faceted browsing by author, work, domain, or combination (both apps)
-- Catalog search: full-text + structured field search across FJMS and PGP catalog data (both apps)
-- Pre-search domain filtering: include/exclude domains/identifications before Tantivy search (both apps)
+- Search UX & composition polish: duration display, ETA, partial results on cancel, chunk count, min-chunks filter, CreationType badge (both apps)
+- Session persistence: restore state + exclusions on reopen, search history (both apps)
+- Quick UX wins: desktop notification, prevent sleep, Hebrew library names, copy from compact results
+- Filtered search context: bidirectional pre-search filtering (domain/author/work/date/CreationType) across all search modes (both apps)
+- Dicta translation: translate all scholarly data via Dicta API for multilingual access (both apps)
+
+### Planned (v7.0.0)
+
 - FJMS transcription import: ~30K transcriptions from FIST.db into fjms_enrichment.db
 - Transcription search: unified Tantivy index over PGP + FJMS + user transcription text, prioritizing human transcriptions (both apps)
+- Index distribution: pre-built index download, desktop upgrade path
 
 ### Out of Scope
 
@@ -138,6 +154,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - FJMS full texts as version selector sources -- deferred (catalog descriptions only)
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
 - FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
+- Search tabs / multi-search workspace (יג) -- deferred, too architectural for v6.5.0
 
 ## Context
 
@@ -176,7 +193,11 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Post-search domain filtering (not pre-search) | Users see all results first, then narrow by domain | Good |
 | Separate nli_crossref.db sidecar | Different provenance and update cycles from FJMS | Good |
 | FGP ≠ FL (crossref FGPImageNumberId not usable for IIIF) | Friedberg photo numbers are different numbering system | Lesson Learned |
-| Phase 13 deferred | Transcription index build too slow for desktop | Revisit |
+| Phase 13 deferred | Transcription index build too slow for desktop | Revisit in v7.0.0 |
+| v6.5.0 UX-first ordering | Power user feedback: search UX pain > catalog features | In progress |
+| Bidirectional filtered search | Pre-filter from search + "search within" from browse — same mechanism | Planned (Phase 45) |
+| Dicta Translation for all data | Multilingual access + search completeness, careful with bilingual fields | Planned (Phase 46) |
+| Transcription deferred to v7.0.0 | v6.5.0 focuses on UX + filtering; transcription is separate milestone | Good |
 
 ---
-*Last updated: 2026-02-22 after v7.0.0 milestone started*
+*Last updated: 2026-03-01 after v6.5.0 milestone scoped*
