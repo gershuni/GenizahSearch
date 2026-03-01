@@ -2480,11 +2480,17 @@ TRANSLATIONS = {
     "Excluded Results": "תוצאות שהוחרגו",
     # Printed filter
     "Printed": "דפוס",
+    "Filter Printed": "סנן דפוסים",
+    "Showing all": "מציג הכל",
     "Hiding printed": "מסתיר דפוסים",
     "Only printed": "דפוסים בלבד",
     # Composition / parallels min-chunks
     "Min. chunk matches": "מינ' התאמות מקטע",
     "Minimum matching chunks per manuscript": "מספר מינימלי של מקטעים תואמים לכתב יד",
+    # Desktop search status strings
+    "Showing {} of {} results": "מציג {} מתוך {} תוצאות",
+    "Showing {} of {} results (searching {} expanded terms)": "מציג {} מתוך {} תוצאות (מחפש {} ביטויים מורחבים)",
+    "Showing {} of {} results (filtering {} domains)": "מציג {} מתוך {} תוצאות (מסנן {} תחומים)",
     # Desktop-specific Phase 42 strings
     "Min chunks: ": "מינ' מקטעים: ",
     "Minimum chunk matches per manuscript": "מינימום התאמות מקטע לכתב יד",
