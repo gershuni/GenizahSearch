@@ -8857,6 +8857,7 @@ class GenizahGUI(QMainWindow):
         self._comp_result_domain_map = {}
         self._comp_has_result_domains = False
         self._comp_printed_sys_ids = set()
+        self._comp_printed_filter_state = 'all'
 
         top_row.addWidget(btn_exclude); top_row.addWidget(btn_filter_text)
         top_row.addWidget(self.btn_comp_domain_filter)
@@ -16843,6 +16844,9 @@ class GenizahGUI(QMainWindow):
 
         # Also fetch printed status for composition results
         self._comp_printed_sys_ids = fjms.get_printed_sys_ids(list(all_sys_ids)) if fjms.is_available() else set()
+        self._comp_printed_filter_state = 'all'
+        if hasattr(self, 'chk_comp_header'):
+            self.chk_comp_header.set_filter_active(self.comp_col_printed, False)
 
     def _open_comp_domain_filter_dialog(self):
         """Open the domain filter dialog for composition results."""
@@ -17639,6 +17643,24 @@ class GenizahGUI(QMainWindow):
         self._execute_tag_search()
 
     def _open_comp_filter_dialog(self, column):
+        # 3-state cycle for Printed column (mirrors regular search results behavior)
+        if column == self.comp_col_printed:
+            states = ['all', 'hide_printed', 'only_printed']
+            current_idx = states.index(self._comp_printed_filter_state)
+            self._comp_printed_filter_state = states[(current_idx + 1) % 3]
+            self.chk_comp_header.set_filter_active(
+                self.comp_col_printed,
+                self._comp_printed_filter_state != 'all'
+            )
+            state_labels = {
+                'all': tr('Showing all'),
+                'hide_printed': tr('Hiding printed'),
+                'only_printed': tr('Only printed'),
+            }
+            self.statusBar().showMessage(state_labels.get(self._comp_printed_filter_state, ''), 3000)
+            self._apply_comp_tree_filters()
+            return
+
         header_item = self.comp_tree.headerItem()
         column_label = header_item.text(column) if header_item else str(column)
         current = self.comp_filters.get(column, {})
@@ -17659,11 +17681,15 @@ class GenizahGUI(QMainWindow):
 
     def _update_comp_filter_indicators(self):
         for column in (self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context, self.comp_col_printed):
-            self.chk_comp_header.set_filter_active(column, column in self.comp_filters)
+            if column == self.comp_col_printed:
+                # Printed column uses 3-state filter, not text filter
+                self.chk_comp_header.set_filter_active(column, self._comp_printed_filter_state != 'all' or column in self.comp_filters)
+            else:
+                self.chk_comp_header.set_filter_active(column, column in self.comp_filters)
 
     def _apply_comp_tree_filters(self):
         root = self.comp_tree.invisibleRootItem()
-        if not self.comp_filters:
+        if not self.comp_filters and self._comp_printed_filter_state == 'all':
             def unhide(node):
                 node.setHidden(False)
                 for j in range(node.childCount()):
@@ -17711,6 +17737,14 @@ class GenizahGUI(QMainWindow):
             else:
                 continue
             if not self._text_matches_filter(text, rule):
+                return False
+        # 3-state printed filter (like regular search results)
+        if self._comp_printed_filter_state != 'all':
+            sid = data.get('sys_id', '')
+            is_printed = sid in self._comp_printed_sys_ids if self._comp_printed_sys_ids and sid else False
+            if self._comp_printed_filter_state == 'hide_printed' and is_printed:
+                return False
+            elif self._comp_printed_filter_state == 'only_printed' and not is_printed:
                 return False
         return True
 
