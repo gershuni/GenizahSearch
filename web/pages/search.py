@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 import re
 import html
 import asyncio
+import time
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -66,6 +67,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.domain_name_map: dict = {}  # English domain name -> Hebrew name
             self.catalog_source_counts: dict = {}  # sys_id -> count of catalog sources
             self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
+            self.search_start_time: float = 0.0  # For elapsed timer display
 
     search_state = SearchUIState()
 
@@ -1232,7 +1234,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_state.is_running:
                 progress_bar.classes(remove='opacity-0')
                 progress_bar.value = search_state.progress
-                status_label.text = search_state.status
+                # Compute elapsed time and prepend to status
+                elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
+                if elapsed >= 3600:
+                    elapsed_str = f"{int(elapsed // 3600)}:{int((elapsed % 3600) // 60):02d}:{int(elapsed % 60):02d}"
+                else:
+                    elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+                base_status = search_state.status or ""
+                if base_status and base_status != tr("Starting..."):
+                    status_label.text = f"{elapsed_str} \u2014 {base_status}"
+                else:
+                    status_label.text = elapsed_str
                 # Swap buttons: hide search, show stop (using style to avoid performance issues)
                 search_btn.style('display: none;')
                 stop_btn.style('display: inline-flex;')
@@ -1242,7 +1254,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 stop_btn.style('display: none;')
                 if search_state.progress >= 1.0:
                     progress_bar.value = 1.0
-                    status_label.text = tr("Done. Found {} results.").format(len(search_state.results))
+                    # Show summary with elapsed time (set in execute_search completion)
+                    # Only override if status_label doesn't already have a completion summary
+                    if not status_label.text or status_label.text == tr("Starting..."):
+                        status_label.text = tr("Done. Found {} results.").format(len(search_state.results))
                     progress_bar.classes(add='opacity-0')
                 else:
                     progress_bar.classes(add='opacity-0')
@@ -2054,6 +2069,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.is_cancelled = False  # Reset cancellation flag
         search_state.progress = 0
         search_state.status = tr("Starting...")
+        search_state.search_start_time = time.time()
         search_state.results = []
 
         # Show loading spinner immediately
@@ -2218,12 +2234,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass
 
+        # Compute total elapsed time for summary
+        total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
+        if total_elapsed >= 3600:
+            total_elapsed_str = f"{int(total_elapsed // 3600)}:{int((total_elapsed % 3600) // 60):02d}:{int(total_elapsed % 60):02d}"
+        else:
+            total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
+
         # Show message if results are partial (search was cancelled)
         if was_cancelled:
-            search_state.status = tr('Partial results (search stopped)')
+            status_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {len(results)} {tr('Results')}"
             ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
             results_count.text = f"{len(results)} {tr('Results')} ({tr('partial')})"
         else:
+            # Set summary line that stays visible until next search
+            status_label.text = f"{tr('Search completed in')} {total_elapsed_str} \u2014 {len(results)} {tr('Results')}"
             # Update count -- include expanded term count for Responsa mode
             expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
             if expanded_count > 0:

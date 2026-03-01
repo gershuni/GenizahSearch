@@ -15,6 +15,7 @@ from urllib.parse import unquote
 import re
 import html
 import os
+import time
 import requests
 from web.components.typography import h1, h2, h3, h4
 
@@ -149,6 +150,12 @@ def create_parallels_page(initial_text: str = None):
             self.filtered_results = []
             self.finished_animation_shown = False
             self.update_timer = None  # Track timer to prevent duplicates
+            # Search timing state
+            self.search_start_time: float = 0.0
+            self.chunks_processed: int = 0
+            self.chunks_total: int = 0
+            self.last_eta_update: float = 0.0
+            self.last_eta_text: str = ""
             # Domain filter state
             self.all_result_domains: dict = {}  # sys_id -> list of domain names
             self.domain_exclusions: set = set()
@@ -411,9 +418,13 @@ def create_parallels_page(initial_text: str = None):
                         if lab_mode.value:
                             deep_scan.style('display: inline-flex;')
                             freq_threshold_row.style('display: none;')
+                            # Higher default for composition/lab mode
+                            min_chunks_input.value = 3
                         else:
                             deep_scan.style('display: none;')
                             freq_threshold_row.style('display: block;')
+                            # Lower default for regular mode
+                            min_chunks_input.value = 1
 
                     lab_mode.on('update:model-value', on_lab_mode_change)
 
@@ -518,6 +529,15 @@ def create_parallels_page(initial_text: str = None):
                         freq_threshold = ui.slider(min=10, max=100, value=50).props('label-always')
                         ui.label(tr('Filter common phrases (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
 
+                    # Min chunk matches (for regular full-text chunk search)
+                    with ui.column().classes('gap-1') as min_chunks_row:
+                        h3(tr('Min. chunk matches'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        min_chunks_input = ui.number(
+                            min=1, max=20, value=1, step=1,
+                            format='%d'
+                        ).classes('w-24').props('outlined dense')
+                        ui.label(tr('Minimum matching chunks per manuscript')).classes('text-xs').style('color: var(--text-muted);')
+
                     ui.separator().classes('my-2')
 
                     # Run Button
@@ -544,6 +564,8 @@ def create_parallels_page(initial_text: str = None):
                     with ui.row().classes('w-full items-center justify-center gap-2').style('display: none;') as search_indicator:
                         ui.spinner('dots', size='sm', color='primary')
                         status_label = ui.label('').classes('text-sm font-medium').style('color: var(--primary-600);')
+                    # Summary label (stays visible after search completes, hidden during search)
+                    summary_label = ui.label('').classes('text-sm font-medium text-center w-full').style('color: var(--primary-600);')
 
         # === Filter Text (Collapsible) ===
         # State for loaded sources: {ref: cleaned_text}
@@ -1131,9 +1153,41 @@ def create_parallels_page(initial_text: str = None):
                 run_btn.disable()
                 cancel_btn.style('display: flex;')
                 search_indicator.style('display: flex;')
+                summary_label.text = ''  # Clear summary during active search
                 progress_bar.style('opacity: 1;')
                 progress_bar.set_value(p_state.progress)
-                status_label.text = p_state.status
+                # Compute elapsed time + ETA
+                elapsed = time.time() - p_state.search_start_time if p_state.search_start_time else 0
+                if elapsed >= 3600:
+                    elapsed_str = f"{int(elapsed // 3600)}:{int((elapsed % 3600) // 60):02d}:{int(elapsed % 60):02d}"
+                else:
+                    elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+                # Build status with elapsed, chunk count, and ETA
+                chunks_str = ""
+                eta_str = ""
+                if p_state.chunks_total > 0:
+                    chunks_str = f"{p_state.chunks_processed}/{p_state.chunks_total} {tr('chunks')}"
+                    # Compute ETA with 2-second smoothing
+                    now = time.time()
+                    if p_state.chunks_processed > 0 and elapsed > 0:
+                        if (now - p_state.last_eta_update) >= 2.0:
+                            rate = p_state.chunks_processed / elapsed
+                            remaining = (p_state.chunks_total - p_state.chunks_processed) / rate
+                            if remaining >= 3600:
+                                eta_str = f"\u223c{int(remaining // 3600)}:{int((remaining % 3600) // 60):02d}:{int(remaining % 60):02d} {tr('remaining')}"
+                            else:
+                                eta_str = f"\u223c{int(remaining // 60)}:{int(remaining % 60):02d} {tr('remaining')}"
+                            p_state.last_eta_text = eta_str
+                            p_state.last_eta_update = now
+                        else:
+                            eta_str = p_state.last_eta_text
+                # Assemble status line
+                parts = [elapsed_str]
+                if chunks_str:
+                    parts.append(chunks_str)
+                if eta_str:
+                    parts.append(eta_str)
+                status_label.text = " \u2014 ".join(parts)
             else:
                 run_btn.enable()
                 cancel_btn.style('display: none;')
@@ -1141,7 +1195,7 @@ def create_parallels_page(initial_text: str = None):
                 if p_state.progress >= 1.0 and not p_state.finished_animation_shown:
                     progress_bar.set_value(1.0)
                     p_state.finished_animation_shown = True
-                    ui.timer(2.0, lambda: progress_bar.style('opacity: 0;'), once=True)
+                    # Don't auto-hide progress bar -- summary stays visible until next search
         except (RuntimeError, Exception):
             pass  # Client may be deleted
 
@@ -1188,6 +1242,11 @@ def create_parallels_page(initial_text: str = None):
         p_state.progress = 0
         p_state.finished_animation_shown = False
         p_state.status = tr('Initializing search...')
+        p_state.search_start_time = time.time()
+        p_state.chunks_processed = 0
+        p_state.chunks_total = 0
+        p_state.last_eta_update = 0.0
+        p_state.last_eta_text = ""
         p_state.results = []
         p_state.filtered_results = []
         results_container.clear()
@@ -1221,6 +1280,8 @@ def create_parallels_page(initial_text: str = None):
                 raise InterruptedError("Search cancelled")
             if total > 0:
                 p_state.progress = current / total
+                p_state.chunks_processed = current
+                p_state.chunks_total = total
                 p_state.status = f"{current} / {total}"
 
         # Capture search mode settings in main thread
@@ -1234,8 +1295,14 @@ def create_parallels_page(initial_text: str = None):
         captured_boundary_mode = boundary_mode.value or 'full'
         captured_boundary_delimiter = boundary_delimiter.value or '\n'
         captured_boundary_boost = float(boundary_boost.value) if boundary_boost.value else 1.5
-        captured_min_boundary_matches = int(min_boundary_matches.value) if min_boundary_matches.value else 0
         captured_min_delimiter_distance = int(min_delimiter_distance.value) if min_delimiter_distance.value else 3
+        # For regular (full) mode, use min_chunks_input as the min_boundary_matches value
+        # For boundary/combined modes, use the advanced dialog's min_boundary_matches
+        captured_min_chunks = int(min_chunks_input.value) if min_chunks_input.value else 1
+        if captured_boundary_mode == 'full':
+            captured_min_boundary_matches = captured_min_chunks
+        else:
+            captured_min_boundary_matches = int(min_boundary_matches.value) if min_boundary_matches.value else 0
 
         def run_search():
             try:
@@ -1285,12 +1352,18 @@ def create_parallels_page(initial_text: str = None):
         p_state.is_running = False
         p_state.progress = 1.0
 
+        # Compute total elapsed time for summary
+        total_elapsed = time.time() - p_state.search_start_time if p_state.search_start_time else 0
+        if total_elapsed >= 3600:
+            total_elapsed_str = f"{int(total_elapsed // 3600)}:{int((total_elapsed % 3600) // 60):02d}:{int(total_elapsed % 60):02d}"
+        else:
+            total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
+
         # Hide top page loading bar
         ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
 
-        # Hide the search indicator animation
+        # Hide the search indicator animation (but keep status label visible for summary)
         search_indicator.style('display: none;')
-        progress_bar.style('opacity: 0;')
 
         if result_data:
             main_results = result_data.get('main', [])
@@ -1364,8 +1437,16 @@ def create_parallels_page(initial_text: str = None):
 
                 # Show message if results are partial (search was cancelled)
                 if is_partial:
-                    p_state.status = tr('Partial results (search cancelled)')
+                    chunks_done = p_state.chunks_processed
+                    chunks_all = p_state.chunks_total
+                    result_count = len(main_results) + len(filtered_results)
+                    summary_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {chunks_done}/{chunks_all} {tr('chunks')}, {result_count} {tr('Results')}"
                     ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+                else:
+                    # Set summary line that stays visible until next search
+                    chunks_all = p_state.chunks_total
+                    result_count = len(main_results) + len(filtered_results)
+                    summary_label.text = f"{tr('Search completed in')} {total_elapsed_str} \u2014 {chunks_all} {tr('chunks')}, {result_count} {tr('Results')}"
 
                 # Apply domain exclusions if any
                 if p_state.domain_exclusions and p_state.has_domain_data:
@@ -1375,7 +1456,7 @@ def create_parallels_page(initial_text: str = None):
                 render_results(main_results, filtered_results, is_partial=is_partial)
             else:
                 if is_partial:
-                    p_state.status = tr('Search cancelled - no results yet')
+                    summary_label.text = f"{tr('Search cancelled')} \u2014 {total_elapsed_str} \u2014 {tr('no results yet')}"
                 results_header.text = tr('No results')
                 with results_container:
                     show_empty_state()
