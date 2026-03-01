@@ -2465,4 +2465,28 @@ TRANSLATIONS = {
     "Must contain ALL terms": "חייב להכיל את כל המונחים",
     "Must contain at least ONE term": "חייב להכיל לפחות מונח אחד",
     "Must NOT contain the term": "לא יכיל את המונח",
+
+    # --- Phase 42: Search UX & Composition Polish ---
+    # Timer / progress
+    "Search completed in": "החיפוש הושלם בתוך",
+    "chunks": "מקטעים",
+    "chunks searched": "מקטעים נסרקו",
+    "searching": "מחפש",
+    "expanded terms": "ביטויים מורחבים",
+    # Cancel / partial results
+    "Partial results": "תוצאות חלקיות",
+    "no results yet": "אין תוצאות עדיין",
+    # Excluded section
+    "Excluded Results": "תוצאות שהוחרגו",
+    # Printed filter
+    "Printed": "דפוס",
+    "Hiding printed": "מסתיר דפוסים",
+    "Only printed": "דפוסים בלבד",
+    # Composition / parallels min-chunks
+    "Min. chunk matches": "מינ' התאמות מקטע",
+    "Minimum matching chunks per manuscript": "מספר מינימלי של מקטעים תואמים לכתב יד",
+    # Desktop-specific Phase 42 strings
+    "Min chunks: ": "מינ' מקטעים: ",
+    "Minimum chunk matches per manuscript": "מינימום התאמות מקטע לכתב יד",
+    "Printed material (not handwritten manuscript)": "חומר דפוס (לא כתב יד)",
 }
