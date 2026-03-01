@@ -1212,7 +1212,7 @@ class LabEngine:
         try:
             for i, (token_start_idx, chunk_tokens, chunk_crossed_bounds) in enumerate(chunks_data):
                 chunks_processed = i
-                if progress_callback and i % 5 == 0: progress_callback(i, total_chunks)
+                if progress_callback: progress_callback(i, total_chunks)
                 chunk_text = " ".join(chunk_tokens)
 
                 if self._is_phrase_statistically_weak(chunk_text): continue
@@ -6012,7 +6012,7 @@ class SearchEngine:
         # 2. Scan chunks (wrapped in try/except to support partial results on cancel)
         try:
             for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
-                if progress_callback and i % 10 == 0: progress_callback(i, total_chunks)
+                if progress_callback: progress_callback(i, total_chunks)
 
                 # Build query
                 t_query = self.build_tantivy_query(chunk, mode)
