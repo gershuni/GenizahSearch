@@ -571,6 +571,28 @@ class PGPBadgeWorker(QThread):
             self.finished.emit(set())
 
 
+class PrintedBadgeWorker(QThread):
+    """Batch check which sys_ids have FragmentMaterial=Printed for badge display."""
+    finished = pyqtSignal(set)
+
+    def __init__(self, sys_ids: list, parent=None):
+        super().__init__(parent)
+        self.sys_ids = sys_ids
+
+    def run(self):
+        try:
+            from shared.fjms_service import FjmsService
+            fjms = FjmsService(thread_safe=True)
+            if not fjms.is_available():
+                self.finished.emit(set())
+                return
+            result = fjms.get_printed_sys_ids(self.sys_ids)
+            self.finished.emit(result)
+        except Exception as e:
+            print(f"PrintedBadgeWorker error: {e}")
+            self.finished.emit(set())
+
+
 class PGPTagsWorker(QThread):
     """Fetch all distinct PGP tags for dropdown population."""
     finished = pyqtSignal(list)

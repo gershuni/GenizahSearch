@@ -56,7 +56,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -6577,6 +6577,8 @@ class GenizahGUI(QMainWindow):
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self._pgp_transcription_sys_ids = set()
         self._pgp_badge_worker = None
+        self._printed_badge_worker = None
+        self._printed_sys_ids = set()
         self._domain_worker = None
         self._pgp_tags_worker = None
         self._pgp_tag_search_worker = None
@@ -8691,11 +8693,13 @@ class GenizahGUI(QMainWindow):
         self.COL_SRC = 8
         self.COL_PGP = 9
         self.COL_DOMAIN = 10
+        self.COL_PRINTED = 11
 
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(11)
-        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP"), tr("Domain")])
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(12)
+        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP"), tr("Domain"), tr("Printed")])
         # Tooltip for PGP column header
         self.results_table.horizontalHeaderItem(self.COL_PGP).setToolTip(tr("Scholarly transcriptions/data available from the Princeton Geniza Project"))
+        self.results_table.horizontalHeaderItem(self.COL_PRINTED).setToolTip(tr("Printed material (not handwritten manuscript)"))
 
         # Custom Header
         # Disable sort for Checkbox (0), Actions (1), and Image (5)
@@ -8706,7 +8710,7 @@ class GenizahGUI(QMainWindow):
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
             star_callback=self.toggle_list_filter,
-            desc_first_cols=[self.COL_PGP]
+            desc_first_cols=[self.COL_PGP, self.COL_PRINTED]
         )
         self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
         self.results_table.setHorizontalHeader(self.chk_search_header)
@@ -8719,8 +8723,10 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnWidth(self.COL_LIBRARY, 90)  # Library column
         self.results_table.setColumnWidth(self.COL_PGP, 40)  # PGP badge column
         self.results_table.setColumnWidth(self.COL_DOMAIN, 130)  # Domain column
+        self.results_table.setColumnWidth(self.COL_PRINTED, 50)  # Printed badge column
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PGP, QHeaderView.ResizeMode.Fixed)
+        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PRINTED, QHeaderView.ResizeMode.Fixed)
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
@@ -8848,6 +8854,7 @@ class GenizahGUI(QMainWindow):
         self._comp_result_domain_counts = {}
         self._comp_result_domain_map = {}
         self._comp_has_result_domains = False
+        self._comp_printed_sys_ids = set()
 
         top_row.addWidget(btn_exclude); top_row.addWidget(btn_filter_text)
         top_row.addWidget(self.btn_comp_domain_filter)
@@ -16823,6 +16830,9 @@ class GenizahGUI(QMainWindow):
         self._comp_has_result_domains = bool(self._comp_result_domain_counts)
         self.btn_comp_domain_filter.setEnabled(self._comp_has_result_domains)
 
+        # Also fetch printed status for composition results
+        self._comp_printed_sys_ids = fjms.get_printed_sys_ids(list(all_sys_ids)) if fjms.is_available() else set()
+
     def _open_comp_domain_filter_dialog(self):
         """Open the domain filter dialog for composition results."""
         if not self._comp_result_domain_counts:
@@ -17183,6 +17193,16 @@ class GenizahGUI(QMainWindow):
                 domain_item.setForeground(QColor("#8e44ad"))
             self.results_table.setItem(row_idx, self.COL_DOMAIN, domain_item)
 
+            # Printed badge
+            if sid and sid in self._printed_sys_ids:
+                printed_label = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
+                p_item = QTableWidgetItem(printed_label)
+                p_item.setForeground(QColor("#dc2626"))
+                p_item.setToolTip(tr("Printed material (not handwritten manuscript)"))
+                self.results_table.setItem(row_idx, self.COL_PRINTED, p_item)
+            else:
+                self.results_table.setItem(row_idx, self.COL_PRINTED, QTableWidgetItem(""))
+
             self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
@@ -17226,6 +17246,7 @@ class GenizahGUI(QMainWindow):
             self._has_result_domains = False
             self._result_domain_counts = {}
             self._result_domain_map = {}
+            self._printed_sys_ids = set()
             return
 
         self.last_results = results
@@ -17297,6 +17318,14 @@ class GenizahGUI(QMainWindow):
             self._pgp_badge_worker = PGPBadgeWorker(sys_ids)
             self._pgp_badge_worker.finished.connect(self._on_pgp_badges_loaded)
             self._pgp_badge_worker.start()
+
+        # Launch Printed badge worker (FragmentMaterial=Printed)
+        if sys_ids:
+            if self._printed_badge_worker and self._printed_badge_worker.isRunning():
+                self._printed_badge_worker.wait()
+            self._printed_badge_worker = PrintedBadgeWorker(sys_ids)
+            self._printed_badge_worker.finished.connect(self._on_printed_badges_loaded)
+            self._printed_badge_worker.start()
 
     def _open_results_filter_dialog(self, column):
         if column == 1:
@@ -17410,6 +17439,22 @@ class GenizahGUI(QMainWindow):
                 else:
                     self.results_table.setItem(row, self.COL_PGP, QTableWidgetItem(""))
         self._apply_results_table_filters()
+
+    def _on_printed_badges_loaded(self, printed_sys_ids):
+        """Handle Printed badge worker results - update Printed column for all rows."""
+        self._printed_sys_ids = printed_sys_ids
+        printed_label = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
+        for row in range(self.results_table.rowCount()):
+            item = self.results_table.item(row, self.COL_SYS_ID)
+            if item:
+                sys_id = item.text().strip()
+                if sys_id in printed_sys_ids:
+                    p_item = QTableWidgetItem(printed_label)
+                    p_item.setForeground(QColor("#dc2626"))
+                    p_item.setToolTip(tr("Printed material (not handwritten manuscript)"))
+                    self.results_table.setItem(row, self.COL_PRINTED, p_item)
+                else:
+                    self.results_table.setItem(row, self.COL_PRINTED, QTableWidgetItem(""))
 
     def _on_pgp_tags_loaded(self, tags):
         """Handle PGP tags worker results - populate tag dropdown with categorized Hebrew translations."""
@@ -20167,6 +20212,17 @@ class GenizahGUI(QMainWindow):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             node.setCheckState(0, Qt.CheckState.Unchecked)
 
+        comp_printed_ids = getattr(self, '_comp_printed_sys_ids', set())
+        _printed_tag = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
+
+        def apply_printed_badge(node, sid):
+            """Add [Printed] label to title column if manuscript is printed material."""
+            if sid and sid in comp_printed_ids:
+                current_title = node.text(self.comp_col_title) or ''
+                node.setText(self.comp_col_title, f"[{_printed_tag}] {current_title}" if current_title else f"[{_printed_tag}]")
+                node.setForeground(self.comp_col_title, QColor("#dc2626"))
+                node.setToolTip(self.comp_col_title, tr("Printed material (not handwritten manuscript)"))
+
         def add_manuscript_node(parent, ms_item):
             item_type = ms_item.get('type', '')
 
@@ -20202,6 +20258,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(ms_node, self.comp_col_sysid, ms_item.get('part_id', ''))
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+                apply_printed_badge(ms_node, sid)
 
                 pages = ms_item.get('pages', [])
                 folios = ms_item.get('folios', [])
@@ -20251,6 +20308,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+                apply_printed_badge(ms_node, sid)
 
                 pages = ms_item.get('pages', [])
                 if len(pages) == 1:
@@ -20292,6 +20350,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(node, self.comp_col_sysid, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
+                apply_printed_badge(node, sid)
                 self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=True)
 
             _collect_id(ms_item)
