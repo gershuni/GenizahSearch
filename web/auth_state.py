@@ -88,6 +88,23 @@ class GlobalAuthState:
         app.storage.user[cls.USER_KEY] = user
         if profile:
             app.storage.user[cls.PROFILE_KEY] = profile
+        # Identify user in PostHog for session tracking
+        cls._posthog_identify(user, profile)
+
+    @classmethod
+    def _posthog_identify(cls, user: Dict, profile: Dict = None):
+        """Send posthog.identify() to the browser if PostHog is loaded."""
+        try:
+            uid = user.get('id', '')
+            email = user.get('email', '')
+            name = (profile or {}).get('full_name', '') or (profile or {}).get('username', '')
+            js = (
+                f"if(window.posthog)posthog.identify('{uid}',"
+                f"{{email:'{email}',name:'{name}'}})"
+            )
+            ui.run_javascript(js)
+        except Exception:
+            pass  # PostHog not loaded or no client connection yet
 
     @classmethod
     def update_profile_cache(cls, profile: Dict):
@@ -100,6 +117,11 @@ class GlobalAuthState:
         app.storage.user.pop(cls.USER_KEY, None)
         app.storage.user.pop(cls.PROFILE_KEY, None)
         app.storage.user.pop('auth_session', None)
+        # Reset PostHog identity on logout
+        try:
+            ui.run_javascript('if(window.posthog)posthog.reset()')
+        except Exception:
+            pass
         # Also sign out from Supabase client
         try:
             supabase_sign_out()
