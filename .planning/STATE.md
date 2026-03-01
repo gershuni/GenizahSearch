@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 42 of 47 (Search UX & Composition Polish) — Plan 3 of 3 complete
+Phase: 42 of 47 (Search UX & Composition Polish) -- Plan 4 of 5 complete
 Status: Executing Phase 42
-Last activity: 2026-03-01 - Completed 42-03 (printed badge)
+Last activity: 2026-03-01 - Completed 42-04 (UAT gap closure)
 
-Progress: [░░░░░░░░░░] 0/5 phases (Phase 42 plan 3/3 complete)
+Progress: [░░░░░░░░░░] 0/5 phases (Phase 42 plan 4/5 complete)
 
 ## Performance Metrics
 
@@ -34,6 +34,7 @@ Progress: [░░░░░░░░░░] 0/5 phases (Phase 42 plan 3/3 complet
 | 42-01 | 1 | 7min | 7min |
 | 42-02 | 1 | 22min | 22min |
 | 42-03 | 1 | 17min | 17min |
+| 42-04 | 1 | 7min | 7min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -55,6 +56,7 @@ Recent decisions affecting current work:
 - 42-01: Elapsed timer + ETA pattern: time.time() on state, 2s smoothing for ETA. Summary persists until next search.
 - 42-02: Cancel with partial results: InterruptedError catch in chunk loop, cancel_flag on threads, collapsible excluded sections, filter_reason annotation.
 - 42-03: Printed badge uses FragmentMaterial=Printed from catalog_fields (12,421 AlmaIds). Red attention color, parallel enrichment lookup.
+- 42-04: comp_summary_text persists across display_comp_results resets. Dedicated comp_col_printed column. progress_callback every chunk for cancel responsiveness.
 
 ### Pending Todos
 
@@ -84,6 +86,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 42-02-PLAN.md (cancel with partial results)
-Resume file: .planning/phases/42-search-ux-composition-polish/42-02-SUMMARY.md
-Notes: All 3 plans in Phase 42 complete (42-01: progress instrumentation, 42-02: cancel with partial results, 42-03: printed badge). Phase 42 fully done. Next: Phase 43.
+Stopped at: Completed 42-04-PLAN.md (UAT gap closure)
+Resume file: .planning/phases/42-search-ux-composition-polish/42-04-SUMMARY.md
+Notes: 4 of 5 plans in Phase 42 complete. 42-04 closed 6 desktop/core UAT gaps. 42-05 remains (web gaps). Next: 42-05.
