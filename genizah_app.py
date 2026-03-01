@@ -9055,7 +9055,7 @@ class GenizahGUI(QMainWindow):
         header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
-        header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.ResizeToContents) # Printed
+        header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
 
         self.comp_tree.setColumnWidth(0, 160) # Score - widened
 
@@ -9065,8 +9065,8 @@ class GenizahGUI(QMainWindow):
         context_width = self.comp_tree.fontMetrics().averageCharWidth() * 35
         self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
         self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
-        self.comp_tree.setColumnWidth(self.comp_col_printed, 60)  # Printed column - narrow
-        header.setStretchLastSection(True)
+        self.comp_tree.setColumnWidth(self.comp_col_printed, 55)  # Printed column - narrow fixed
+        header.setStretchLastSection(False)
 
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
         self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
@@ -9075,7 +9075,7 @@ class GenizahGUI(QMainWindow):
         # Use CheckBoxHeader for tree
         self.chk_comp_header = CheckBoxHeader(
             self.comp_tree,
-            filter_columns=[self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context],
+            filter_columns=[self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context, self.comp_col_printed],
             filter_callback=self._open_comp_filter_dialog,
         )
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
@@ -9087,8 +9087,8 @@ class GenizahGUI(QMainWindow):
         comp_header.setSectionResizeMode(self.comp_col_library, QHeaderView.ResizeMode.Interactive) # Library
         comp_header.setSectionResizeMode(self.comp_col_shelfmark, QHeaderView.ResizeMode.Interactive) # Shelfmark
         comp_header.setSectionResizeMode(self.comp_col_sysid, QHeaderView.ResizeMode.ResizeToContents) # System ID
-        comp_header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.ResizeToContents) # Printed
-        comp_header.setStretchLastSection(True)
+        comp_header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
+        comp_header.setStretchLastSection(False)
 
         rl.addWidget(self.comp_tree)
         
@@ -17658,7 +17658,7 @@ class GenizahGUI(QMainWindow):
             self._apply_comp_tree_filters()
 
     def _update_comp_filter_indicators(self):
-        for column in (self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context):
+        for column in (self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context, self.comp_col_printed):
             self.chk_comp_header.set_filter_active(column, column in self.comp_filters)
 
     def _apply_comp_tree_filters(self):
@@ -17706,6 +17706,8 @@ class GenizahGUI(QMainWindow):
                 text = data.get("source_ctx", "")
             elif column == self.comp_col_ms_context:
                 text = data.get("ms_ctx", "")
+            elif column == self.comp_col_printed:
+                text = node.text(self.comp_col_printed)
             else:
                 continue
             if not self._text_matches_filter(text, rule):
@@ -20522,20 +20524,24 @@ class GenizahGUI(QMainWindow):
                 root_filt.setForeground(0, QColor('#f39c12'))  # Amber color
                 make_checkable(root_filt)
 
-                # Filtered Main - add filter reason to title column
-                for item in self._sort_comp_items(clean_filt):
-                    add_manuscript_node(root_filt, item)
-                    # Add filter reason to the last added child node
-                    last_child_idx = root_filt.childCount() - 1
-                    if last_child_idx >= 0:
-                        child = root_filt.child(last_child_idx)
-                        # Determine filter reason from item's pages or direct data
-                        filter_reason = self._get_filter_reason(item)
-                        if filter_reason:
-                            existing_title = child.text(self.comp_col_title)
-                            reason_prefix = f"[{filter_reason}] "
-                            child.setText(self.comp_col_title, reason_prefix + existing_title)
-                            child.setForeground(self.comp_col_title, QColor('#f39c12'))
+                # Filtered Main - group items under reason sub-header nodes
+                reason_groups = {}
+                for item in clean_filt:
+                    reason = self._get_filter_reason(item) or tr('Filtered')
+                    if reason not in reason_groups:
+                        reason_groups[reason] = []
+                    reason_groups[reason].append(item)
+
+                for reason, r_items in reason_groups.items():
+                    reason_node = QTreeWidgetItem(root_filt, [f"{reason} ({len(r_items)})", "", "", ""])
+                    reason_node.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT_REASON")
+                    reason_node.setForeground(0, QColor('#f39c12'))  # Amber
+                    reason_node.setExpanded(False)
+                    make_checkable(reason_node)
+
+                    for item in self._sort_comp_items(r_items):
+                        add_manuscript_node(reason_node, item)
+                        # NO [reason] prefix on title -- the sub-header provides the grouping
 
                 # Filtered Appendix - Using Virtual Children for performance
                 for sig, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
@@ -20991,30 +20997,54 @@ class GenizahGUI(QMainWindow):
                          sel_appx[group_sig] = group_items
 
             elif node_type == "ROOT_FILT":
-                 # Iterate children to separate Main/Appendix in filtered
+                 # Iterate children: reason sub-headers (ROOT_FILT_REASON) or appendix groups
                  for k in range(node.childCount()):
                      child = node.child(k)
-                     c_data = child.data(0, Qt.ItemDataRole.UserRole)
-                     if c_data:
-                         # Direct item -> Filtered Main
-                         if child.checkState(0) == Qt.CheckState.Checked:
-                             sel_filt.append(c_data)
-                         elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
-                             # Reuse logic from helper
-                             import copy
-                             new_item = copy.copy(c_data)
-                             new_item['pages'] = []
-                             for p_idx in range(child.childCount()):
-                                 p_node = child.child(p_idx)
-                                 if p_node.checkState(0) == Qt.CheckState.Checked:
-                                     new_item['pages'].append(p_node.data(0, Qt.ItemDataRole.UserRole))
-                             if new_item['pages']: sel_filt.append(new_item)
+                     child_type = child.data(0, Qt.ItemDataRole.UserRole + 100)
+                     if child_type == "ROOT_FILT_REASON":
+                         # Reason sub-header -- iterate its manuscript children
+                         for j in range(child.childCount()):
+                             grandchild = child.child(j)
+                             gc_data = grandchild.data(0, Qt.ItemDataRole.UserRole)
+                             if gc_data:
+                                 if grandchild.checkState(0) == Qt.CheckState.Checked:
+                                     sel_filt.append(gc_data)
+                                 elif grandchild.checkState(0) == Qt.CheckState.PartiallyChecked:
+                                     import copy
+                                     new_item = copy.copy(gc_data)
+                                     new_item['pages'] = []
+                                     for p_idx in range(grandchild.childCount()):
+                                         p_node = grandchild.child(p_idx)
+                                         if p_node.checkState(0) == Qt.CheckState.Checked:
+                                             new_item['pages'].append(p_node.data(0, Qt.ItemDataRole.UserRole))
+                                     if new_item['pages']: sel_filt.append(new_item)
+                             else:
+                                 # Group node within reason -> Filtered Appendix
+                                 g_sig = grandchild.text(2).rpartition(' (')[0]
+                                 g_items = collect_from_node(grandchild)
+                                 if g_items:
+                                     sel_filt_appx[g_sig] = g_items
                      else:
-                         # Group node -> Filtered Appendix
-                         g_sig = child.text(2).rpartition(' (')[0]
-                         g_items = collect_from_node(child)
-                         if g_items:
-                             sel_filt_appx[g_sig] = g_items
+                         # Legacy or appendix group directly under ROOT_FILT
+                         c_data = child.data(0, Qt.ItemDataRole.UserRole)
+                         if c_data:
+                             if child.checkState(0) == Qt.CheckState.Checked:
+                                 sel_filt.append(c_data)
+                             elif child.checkState(0) == Qt.CheckState.PartiallyChecked:
+                                 import copy
+                                 new_item = copy.copy(c_data)
+                                 new_item['pages'] = []
+                                 for p_idx in range(child.childCount()):
+                                     p_node = child.child(p_idx)
+                                     if p_node.checkState(0) == Qt.CheckState.Checked:
+                                         new_item['pages'].append(p_node.data(0, Qt.ItemDataRole.UserRole))
+                                 if new_item['pages']: sel_filt.append(new_item)
+                         else:
+                             # Group node -> Filtered Appendix
+                             g_sig = child.text(2).rpartition(' (')[0]
+                             g_items = collect_from_node(child)
+                             if g_items:
+                                 sel_filt_appx[g_sig] = g_items
 
             elif node_type == "ROOT_KNOWN":
                  sel_known.extend(items)
