@@ -164,7 +164,7 @@ Plans:
 - [x] 42-06-PLAN.md — UAT gap closure: SearchThread cancel_flag, excluded reason sub-headers, printed column narrow/filterable
 - [x] 42-07-PLAN.md — UAT gap closure: web excluded clickable, printed filter label, desktop printed filter, translations
 - [ ] 42-08-PLAN.md — UAT R3 gap closure: missing Hebrew translations (Searching, reason headers) + desktop partial results notification
-- [ ] 42-09-PLAN.md — UAT R3 gap closure: comp 3-state printed filter + web cancel enrichment skip + lab mode except fix
+- [x] 42-09-PLAN.md — UAT R3 gap closure: comp 3-state printed filter + web cancel enrichment skip + lab mode except fix
 
 ### Phase 43: Session Persistence & Search History
 **Goal**: Users never lose search state (exclusions, filters, results) when the app restarts, and can recall past searches
@@ -252,7 +252,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
-| 42. Search UX & Composition Polish | 7/9 | UAT R3 gap closure | - |
+| 42. Search UX & Composition Polish | 8/9 | UAT R3 gap closure (42-08 pending) | - |
 | 43. Session Persistence & History | 0/TBD | Not started | - |
 | 44. Quick UX Wins | 0/TBD | Not started | - |
 | 45. Filtered Search Context | 0/TBD | Not started | - |
@@ -261,8 +261,8 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
 | 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
 
-**Total phases completed:** 41 (Phase 42 in gap closure)
-**Total plans completed:** ~128 (7 Phase 42 core plans complete, 2 gap closure pending)
+**Total phases completed:** 41 (Phase 42 gap closure: 8/9 plans done, 42-08 pending)
+**Total plans completed:** ~129 (8 Phase 42 plans complete, 42-08 pending)
 **Total milestones shipped:** 9
 
 ---
