@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import json
+import time
 import requests
 import urllib3
 import csv
@@ -8905,6 +8906,13 @@ class GenizahGUI(QMainWindow):
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
         self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
 
+        # Min chunk matches spinbox
+        self.spin_min_chunks = QSpinBox()
+        self.spin_min_chunks.setRange(1, 20)
+        self.spin_min_chunks.setValue(1)
+        self.spin_min_chunks.setPrefix(tr("Min chunks: "))
+        self.spin_min_chunks.setToolTip(tr("Minimum chunk matches per manuscript"))
+
         # Shortened Text
         self.chk_comp_flat = QCheckBox(tr("Sort by shelfmark only"))
         self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
@@ -8912,7 +8920,7 @@ class GenizahGUI(QMainWindow):
 
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
         cr.addWidget(self.comp_mode_combo); cr.addWidget(self.comp_variant_slider_container)
-        cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
+        cr.addWidget(self.spin_min_chunks); cr.addWidget(self.spin_filter); cr.addWidget(self.chk_comp_flat)
 
         # Boundary Search Controls Row
         boundary_row = QHBoxLayout()
@@ -8998,6 +9006,14 @@ class GenizahGUI(QMainWindow):
 
         self.comp_progress = QProgressBar(); self.comp_progress.setVisible(False)
         in_l.addWidget(self.comp_progress)
+
+        # Composition search timing state
+        self.comp_search_start_time = 0.0
+        self.comp_chunks_processed = 0
+        self.comp_chunks_total = 0
+        self.comp_last_eta_update = 0.0
+        self.comp_last_eta_text = ""
+
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
@@ -16573,6 +16589,10 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'lab_panel_comp'):
             self.lab_panel_comp.setVisible(checked)
 
+        # Update min-chunks default based on mode
+        if hasattr(self, 'spin_min_chunks'):
+            self.spin_min_chunks.setValue(3 if checked else 1)
+
         # Sync Search Button
         if hasattr(self, 'btn_lab_mode_toggle'):
             self.btn_lab_mode_toggle.blockSignals(True)
@@ -16971,6 +16991,7 @@ class GenizahGUI(QMainWindow):
         self.last_search_query = query
 
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
+        self.search_start_time = time.time()
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
 
         # Stop any previous metadata loading to prevent race conditions
@@ -17183,6 +17204,10 @@ class GenizahGUI(QMainWindow):
 
     def on_search_finished(self, results):
         self.reset_ui()
+        # Compute search elapsed time
+        search_elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
+
         self.chk_search_header.blockSignals(True)
         self.chk_search_header.setChecked(False)
         self.chk_search_header.blockSignals(False)
@@ -17230,6 +17255,11 @@ class GenizahGUI(QMainWindow):
             QTimer.singleShot(5000, _restore_status)
 
         for b in self.export_buttons: b.setEnabled(True)
+
+        # Show elapsed time in status bar (stays for 10 seconds)
+        self.statusBar().showMessage(
+            f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}", 10000
+        )
 
         # Hide Source column if secondary source file (V0.7) is missing or empty
         # If Config.FILE_V7 is missing/empty, it implies we only have one source (V0.8) in index
@@ -19471,12 +19501,17 @@ class GenizahGUI(QMainWindow):
             self.comp_title_input.setText(auto_title)
 
         self.is_comp_running = True
+        self.comp_search_start_time = time.time()
+        self.comp_chunks_processed = 0
+        self.comp_chunks_total = 0
+        self.comp_last_eta_update = 0.0
+        self.comp_last_eta_text = ""
         self.btn_comp_run.setText(tr("Stop"))
         self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
-        
+
         if hasattr(self, 'btn_comp_recursive'):
             self.btn_comp_recursive.setEnabled(False)
-            
+
         self.comp_progress.setVisible(True)
         self.comp_progress.setRange(0, 0)
         self.comp_progress.setValue(0)
@@ -19520,6 +19555,10 @@ class GenizahGUI(QMainWindow):
             boundary_boost = getattr(self, '_boundary_boost_temp', 1.5)
             min_boundary_matches = getattr(self, '_min_boundary_matches_temp', 0)
             min_delimiter_distance = getattr(self, '_min_delimiter_distance_temp', 3)
+
+        # For regular (full) mode, use min_chunks spinbox value as min_boundary_matches
+        if boundary_mode == 'full' and hasattr(self, 'spin_min_chunks'):
+            min_boundary_matches = self.spin_min_chunks.value()
 
         # 1. נתיב מעבדה (LAB MODE)
         if self.btn_lab_mode_toggle_comp.isChecked():
@@ -19654,6 +19693,26 @@ class GenizahGUI(QMainWindow):
         else:
             self.comp_progress.setRange(0, 0)
         self.comp_progress.setValue(curr)
+        self.comp_chunks_processed = curr
+        self.comp_chunks_total = total
+
+        elapsed = time.time() - self.comp_search_start_time if self.comp_search_start_time else 0
+        elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+
+        # Compute ETA with smoothing (update every 2s)
+        eta_str = ""
+        now = time.time()
+        if curr > 0 and total > 0 and (now - self.comp_last_eta_update) >= 2.0:
+            rate = curr / elapsed if elapsed > 0 else 0
+            if rate > 0:
+                remaining = (total - curr) / rate
+                eta_str = f" \u2014 \u223c{int(remaining // 60)}:{int(remaining % 60):02d} {tr('remaining')}"
+            self.comp_last_eta_text = eta_str
+            self.comp_last_eta_update = now
+        elif self.comp_last_eta_text:
+            eta_str = self.comp_last_eta_text
+
+        self.comp_progress.setFormat(f"{elapsed_str} \u2014 {curr}/{total} {tr('chunks')}{eta_str}")
 
     def on_comp_error(self, err):
         """Handle errors during composition search."""
@@ -19664,14 +19723,29 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.reset_comp_ui()
 
+        # Show completion summary in progress bar (stays visible until next search)
+        elapsed = time.time() - self.comp_search_start_time if self.comp_search_start_time else 0
+        elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+
         known_raw = []
         if isinstance(result_obj, dict):
             items = result_obj.get('main', [])
             filtered_items = result_obj.get('filtered', [])
-            known_raw = result_obj.get('known', []) 
+            known_raw = result_obj.get('known', [])
         else:
             items = result_obj or []
             filtered_items = []
+
+        result_count = len(items) + len(filtered_items)
+        chunks_total = self.comp_chunks_total
+
+        # Show summary in progress bar that persists until next search
+        self.comp_progress.setVisible(True)
+        self.comp_progress.setRange(0, 1)
+        self.comp_progress.setValue(1)
+        self.comp_progress.setFormat(
+            f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
+        )
 
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
