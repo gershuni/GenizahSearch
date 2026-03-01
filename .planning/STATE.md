@@ -61,6 +61,7 @@ Recent decisions affecting current work:
 - 42-03: Printed badge uses FragmentMaterial=Printed from catalog_fields (12,421 AlmaIds). Red attention color, parallel enrichment lookup.
 - 42-04: comp_summary_text persists across display_comp_results resets. Dedicated comp_col_printed column. progress_callback every chunk for cancel responsiveness.
 - 42-05: 3-state printed filter toggle (all/hide/only) layered on domain exclusions. 16 Hebrew translations for Phase 42 strings. Excluded section overflow fixed.
+- 42-06: SearchThread cancel_flag (safe cancel), progress_callback every 5 hits, excluded section reason sub-headers, Printed column Fixed 55px and filterable.
 - 42-07: Clickable excluded items in web, "Filter Printed" label, desktop 3-state printed filter on search results, 5 missing Hebrew translation keys.
 
 ### Pending Todos
@@ -91,6 +92,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 42-07-PLAN.md (UAT gap closure: excluded clickable, printed filter, desktop filter, translations)
-Resume file: .planning/phases/42-search-ux-composition-polish/42-07-SUMMARY.md
-Notes: All 7 plans in Phase 42 complete (42-01 through 42-07). Phase 42 fully done. Next: Phase 43 (Session Persistence & Search History).
+Stopped at: Completed 42-06-PLAN.md (UAT gap closure: cancel_flag, excluded sub-headers, printed column)
+Resume file: .planning/phases/42-search-ux-composition-polish/42-06-SUMMARY.md
+Notes: All 7 plans in Phase 42 complete (42-01 through 42-07). 42-06 executed after 42-07 (out of order). Phase 42 fully done. Next: Phase 43.
