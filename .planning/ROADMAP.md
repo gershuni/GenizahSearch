@@ -154,7 +154,11 @@ cross-links between browse and catalog browse pages. 72 tests.
   5. Min-chunks filter available for regular chunk search (not just composition mode)
   6. Clear visual separator between included results and excluded results in expanded view
   7. CreationType badge (Original/Copy/Print/etc.) visible on search results and browse results in both apps
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 42-01-PLAN.md — Progress display: elapsed timer, ETA, chunk count, summary line, min-chunks filter (both apps)
+- [ ] 42-02-PLAN.md — Cancel with partial results, collapsible excluded section with reasons (both apps)
+- [ ] 42-03-PLAN.md — CreationType badge on all result views (service layer + both apps)
 
 ### Phase 43: Session Persistence & Search History
 **Goal**: Users never lose search state (exclusions, filters, results) when the app restarts, and can recall past searches
@@ -242,7 +246,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
-| 42. Search UX & Composition Polish | 0/TBD | Not started | - |
+| 42. Search UX & Composition Polish | 0/3 | Planning complete | - |
 | 43. Session Persistence & History | 0/TBD | Not started | - |
 | 44. Quick UX Wins | 0/TBD | Not started | - |
 | 45. Filtered Search Context | 0/TBD | Not started | - |
@@ -257,4 +261,4 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-01 after v6.5.0 milestone scoped*
+*Last updated: 2026-03-01 after Phase 42 planning complete*
