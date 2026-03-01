@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 42 next
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 42 complete, Phase 43 next
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 42 of 47 (Search UX & Composition Polish) -- Plan 5 of 5 complete
+Phase: 42 of 47 (Search UX & Composition Polish) -- Plan 7 of 7 complete
 Status: Phase 42 complete
-Last activity: 2026-03-01 - Completed 42-05 (UAT gap closure: width, printed filter, translations)
+Last activity: 2026-03-01 - Completed 42-07 (UAT gap closure: excluded clickable, printed filter, desktop filter, translations)
 
-Progress: [░░░░░░░░░░] 0/5 phases (Phase 42 plan 4/5 complete)
+Progress: [##░░░░░░░░] 1/5 phases (Phase 42 complete, 7/7 plans)
 
 ## Performance Metrics
 
@@ -36,6 +36,8 @@ Progress: [░░░░░░░░░░] 0/5 phases (Phase 42 plan 4/5 complet
 | 42-03 | 1 | 17min | 17min |
 | 42-04 | 1 | 7min | 7min |
 | 42-05 | 1 | 8min | 8min |
+| 42-06 | 1 | 4min | 4min |
+| 42-07 | 1 | 3min | 3min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -59,6 +61,7 @@ Recent decisions affecting current work:
 - 42-03: Printed badge uses FragmentMaterial=Printed from catalog_fields (12,421 AlmaIds). Red attention color, parallel enrichment lookup.
 - 42-04: comp_summary_text persists across display_comp_results resets. Dedicated comp_col_printed column. progress_callback every chunk for cancel responsiveness.
 - 42-05: 3-state printed filter toggle (all/hide/only) layered on domain exclusions. 16 Hebrew translations for Phase 42 strings. Excluded section overflow fixed.
+- 42-07: Clickable excluded items in web, "Filter Printed" label, desktop 3-state printed filter on search results, 5 missing Hebrew translation keys.
 
 ### Pending Todos
 
@@ -88,6 +91,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 42-05-PLAN.md (UAT gap closure: web width, printed filter, translations)
-Resume file: .planning/phases/42-search-ux-composition-polish/42-05-SUMMARY.md
-Notes: All 5 plans in Phase 42 complete (42-01: progress, 42-02: cancel/excluded, 42-03: printed badge, 42-04: desktop gaps, 42-05: web gaps + translations). Phase 42 fully done. Next: Phase 43.
+Stopped at: Completed 42-07-PLAN.md (UAT gap closure: excluded clickable, printed filter, desktop filter, translations)
+Resume file: .planning/phases/42-search-ux-composition-polish/42-07-SUMMARY.md
+Notes: All 7 plans in Phase 42 complete (42-01 through 42-07). Phase 42 fully done. Next: Phase 43 (Session Persistence & Search History).

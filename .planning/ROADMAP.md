@@ -126,7 +126,7 @@ cross-links between browse and catalog browse pages. 72 tests.
 
 **Origin:** Power user feedback letter (2026-02-27, 17 requests) + existing roadmap items.
 
-- [x] **Phase 42: Search UX & Composition Polish** - Search duration display, ETA, partial results on cancel, chunk count, min-chunks filter, result/excluded separator, CreationType badge on search & browse results (UAT gap closure in progress)
+- [x] **Phase 42: Search UX & Composition Polish** - Search duration display, ETA, partial results on cancel, chunk count, min-chunks filter, result/excluded separator, CreationType badge on search & browse results (complete)
 - [ ] **Phase 43: Session Persistence & Search History** - Restore state + exclusions on reopen (critical: user lost 5K exclusions), search history with saved results
 - [ ] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results
 - [ ] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels
@@ -162,7 +162,7 @@ Plans:
 - [x] 42-04-PLAN.md — UAT gap closure: desktop persistent summary, search timer, cancel responsiveness, excluded grouping, printed column
 - [x] 42-05-PLAN.md — UAT gap closure: web excluded width, printed filter toggle, Hebrew translations
 - [ ] 42-06-PLAN.md — UAT gap closure: SearchThread cancel_flag, excluded reason sub-headers, printed column narrow/filterable
-- [ ] 42-07-PLAN.md — UAT gap closure: web excluded clickable, printed filter label, desktop printed filter, translations
+- [x] 42-07-PLAN.md — UAT gap closure: web excluded clickable, printed filter label, desktop printed filter, translations
 
 ### Phase 43: Session Persistence & Search History
 **Goal**: Users never lose search state (exclusions, filters, results) when the app restarts, and can recall past searches
@@ -250,7 +250,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
-| 42. Search UX & Composition Polish | 5/7 | UAT gap closure | - |
+| 42. Search UX & Composition Polish | 7/7 | Complete | 2026-03-01 |
 | 43. Session Persistence & History | 0/TBD | Not started | - |
 | 44. Quick UX Wins | 0/TBD | Not started | - |
 | 45. Filtered Search Context | 0/TBD | Not started | - |
@@ -259,10 +259,10 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
 | 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
 
-**Total phases completed:** 41 (from previous milestones including Phase 41)
-**Total plans completed:** ~121 (from previous milestones)
+**Total phases completed:** 42 (including Phase 42)
+**Total plans completed:** ~128 (including 7 Phase 42 plans)
 **Total milestones shipped:** 9
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-01 after Phase 42 UAT gap closure plans created*
+*Last updated: 2026-03-01 after Phase 42 complete (7/7 plans)*
