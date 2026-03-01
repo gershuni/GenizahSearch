@@ -4770,7 +4770,7 @@ class ResultDialog(QDialog):
                 self.meta_loader.wait()
 
             if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
-                self.search_thread.requestInterruption()
+                self.search_thread.cancel_flag = True
                 self.search_thread.wait(2000)
                 if self.search_thread.isRunning():
                     self.search_thread.terminate()
@@ -17063,7 +17063,12 @@ class GenizahGUI(QMainWindow):
         self.search_thread.start()
 
     def stop_search(self):
-        if self.search_thread.isRunning(): self.search_thread.terminate(); self.search_thread.wait()
+        if self.search_thread.isRunning():
+            self.search_thread.cancel_flag = True
+            self.search_thread.wait(5000)
+            if self.search_thread.isRunning():
+                self.search_thread.terminate()
+                self.search_thread.wait()
         self.reset_ui()
 
     def reset_ui(self):
@@ -22202,7 +22207,7 @@ class GenizahGUI(QMainWindow):
                 self.meta_loader.wait()
 
             if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
-                self.search_thread.requestInterruption()
+                self.search_thread.cancel_flag = True
                 self.search_thread.wait(2000)
                 if self.search_thread.isRunning():
                     self.search_thread.terminate()

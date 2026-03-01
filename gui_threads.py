@@ -33,10 +33,14 @@ class SearchThread(QThread):
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
         self.exclude_words = exclude_words
         self.responsa_options = responsa_options
+        self.cancel_flag = False
 
     def run(self):
         try:
-            def cb(curr, total): self.progress_signal.emit(curr, total)
+            def cb(curr, total):
+                if self.cancel_flag:
+                    raise InterruptedError("Search cancelled by user")
+                self.progress_signal.emit(curr, total)
             results = self.searcher.execute_search(
                 self.query,
                 self.mode,
@@ -46,6 +50,9 @@ class SearchThread(QThread):
                 responsa_options=self.responsa_options
             )
             self.results_signal.emit(results)
+        except InterruptedError:
+            # Emit empty list -- partial results not available from execute_search
+            self.results_signal.emit([])
         except Exception as e: self.error_signal.emit(str(e))
 
 class LabSearchThread(QThread):

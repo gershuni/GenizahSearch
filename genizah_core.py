@@ -5645,7 +5645,7 @@ class SearchEngine:
             total_ids = len(sys_ids)
 
             for i, sid in enumerate(sys_ids):
-                if progress_callback and i % 10 == 0: progress_callback(i, total_ids)
+                if progress_callback and i % 5 == 0: progress_callback(i, total_ids)
 
                 text, head, src, uid = self._get_best_text_for_id(sid)
                 if not text: continue
@@ -5861,7 +5861,7 @@ class SearchEngine:
 
         try:
             for i, (score, doc_addr) in enumerate(hits):
-                if progress_callback and i % 50 == 0:
+                if progress_callback and i % 5 == 0:
                     progress_callback(i, total_hits)
                 try:
                     doc = self.searcher.doc(doc_addr)
