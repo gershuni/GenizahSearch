@@ -126,7 +126,7 @@ cross-links between browse and catalog browse pages. 72 tests.
 
 **Origin:** Power user feedback letter (2026-02-27, 17 requests) + existing roadmap items.
 
-- [ ] **Phase 42: Search UX & Composition Polish** - Search duration display, ETA, partial results on cancel, chunk count, min-chunks filter, result/excluded separator, CreationType badge on search & browse results
+- [x] **Phase 42: Search UX & Composition Polish** - Search duration display, ETA, partial results on cancel, chunk count, min-chunks filter, result/excluded separator, CreationType badge on search & browse results (completed 2026-03-01)
 - [ ] **Phase 43: Session Persistence & Search History** - Restore state + exclusions on reopen (critical: user lost 5K exclusions), search history with saved results
 - [ ] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results
 - [ ] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels
@@ -246,7 +246,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
-| 42. Search UX & Composition Polish | 2/3 | In Progress|  |
+| 42. Search UX & Composition Polish | 3/3 | Complete   | 2026-03-01 |
 | 43. Session Persistence & History | 0/TBD | Not started | - |
 | 44. Quick UX Wins | 0/TBD | Not started | - |
 | 45. Filtered Search Context | 0/TBD | Not started | - |

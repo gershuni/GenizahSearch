@@ -32,6 +32,7 @@ Progress: [░░░░░░░░░░] 0/5 phases (Phase 42 plan 3/3 complet
 | 41-03 | 1 | 9min | 9min |
 | 41-04 | 1 | 45min | 45min |
 | 42-01 | 1 | 7min | 7min |
+| 42-02 | 1 | 22min | 22min |
 | 42-03 | 1 | 17min | 17min |
 
 **Recent Trend:**
@@ -52,6 +53,7 @@ Recent decisions affecting current work:
 - v6.5.0 scoped (2026-03-01): UX first (42-44), then filtered search (45), then Dicta translation (46). Transcription deferred to v7.0.0
 - CreationType badge added to Phase 42 scope (print vs manuscript visibility)
 - 42-01: Elapsed timer + ETA pattern: time.time() on state, 2s smoothing for ETA. Summary persists until next search.
+- 42-02: Cancel with partial results: InterruptedError catch in chunk loop, cancel_flag on threads, collapsible excluded sections, filter_reason annotation.
 - 42-03: Printed badge uses FragmentMaterial=Printed from catalog_fields (12,421 AlmaIds). Red attention color, parallel enrichment lookup.
 
 ### Pending Todos
@@ -82,6 +84,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 42-03-PLAN.md (printed badge)
-Resume file: .planning/phases/42-search-ux-composition-polish/42-03-SUMMARY.md
-Notes: Plan 42-03 complete. Printed badge added to all result views (web search, parallels, catalog browse, desktop search, desktop composition). Uses FragmentMaterial=Printed from catalog_fields (12,421 AlmaIds). Next: 42-02 (cancel with partial results) if not yet done.
+Stopped at: Completed 42-02-PLAN.md (cancel with partial results)
+Resume file: .planning/phases/42-search-ux-composition-polish/42-02-SUMMARY.md
+Notes: All 3 plans in Phase 42 complete (42-01: progress instrumentation, 42-02: cancel with partial results, 42-03: printed badge). Phase 42 fully done. Next: Phase 43.
