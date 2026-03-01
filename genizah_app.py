@@ -17017,6 +17017,7 @@ class GenizahGUI(QMainWindow):
 
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_start_time = time.time()
+        self._search_was_cancelled = False
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
 
         # Stop any previous metadata loading to prevent race conditions
@@ -17071,14 +17072,13 @@ class GenizahGUI(QMainWindow):
 
     def stop_search(self):
         if self.search_thread.isRunning():
+            self._search_was_cancelled = True
             self.search_thread.cancel_flag = True
             self.search_thread.wait(5000)
             if self.search_thread.isRunning():
                 self.search_thread.terminate()
                 self.search_thread.wait()
         self.reset_ui()
-        # Show partial results notification (GAP-R3 round 3)
-        self.statusBar().showMessage(tr('Partial results'), 5000)
 
     def reset_ui(self):
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
@@ -17243,12 +17243,13 @@ class GenizahGUI(QMainWindow):
 
         # Update Status (include expanded term count for Responsa searches)
         expanded_count = getattr(self, '_responsa_expanded_count', 0)
+        partial_suffix = f" ({tr('Partial results')})" if getattr(self, '_search_was_cancelled', False) else ""
         if expanded_count > 0:
             self.status_label.setText(tr("Showing {} of {} results (searching {} expanded terms)").format(
                 self.results_loaded, len(self.last_results), expanded_count
-            ))
+            ) + partial_suffix)
         else:
-            self.status_label.setText(tr("Showing {} of {} results").format(self.results_loaded, len(self.last_results)))
+            self.status_label.setText(tr("Showing {} of {} results").format(self.results_loaded, len(self.last_results)) + partial_suffix)
 
         # Trigger Metadata
         if ids_to_fetch:
@@ -17265,8 +17266,12 @@ class GenizahGUI(QMainWindow):
         self.chk_search_header.blockSignals(False)
         self.lbl_search_export.setText(tr("Export Results") + ":")
 
+        was_cancelled = getattr(self, '_search_was_cancelled', False)
         if not results:
-            self.status_label.setText(tr("No results found."))
+            if was_cancelled:
+                self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})")
+            else:
+                self.status_label.setText(tr("No results found."))
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
@@ -17310,8 +17315,9 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(True)
 
         # Show elapsed time in status bar (persists until next action)
+        partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
         self.statusBar().showMessage(
-            f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}", 0
+            f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
         )
 
         # Hide Source column if secondary source file (V0.7) is missing or empty
