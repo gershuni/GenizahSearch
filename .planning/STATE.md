@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 42 of 47 (Search UX & Composition Polish) -- Plan 8 of 9 complete (42-08 pending)
-Status: Phase 42 in gap closure
-Last activity: 2026-03-01 - Completed 42-09 (comp 3-state printed filter, web cancel enrichment skip, lab mode except fix)
+Phase: 42 of 47 (Search UX & Composition Polish) -- Plan 9 of 9 complete
+Status: Phase 42 complete
+Last activity: 2026-03-01 - Completed 42-08 (Hebrew translation keys + desktop partial results notification)
 
-Progress: [##░░░░░░░░] 1/5 phases (Phase 42: 8/9 plans, 42-08 pending)
+Progress: [##░░░░░░░░] 1/5 phases (Phase 42 complete, 9/9 plans)
 
 ## Performance Metrics
 
@@ -38,6 +38,7 @@ Progress: [##░░░░░░░░] 1/5 phases (Phase 42: 8/9 plans, 42-08 pe
 | 42-05 | 1 | 8min | 8min |
 | 42-06 | 1 | 4min | 4min |
 | 42-07 | 1 | 3min | 3min |
+| 42-08 | 1 | 4min | 4min |
 | 42-09 | 1 | 2min | 2min |
 
 **Recent Trend:**
@@ -64,6 +65,7 @@ Recent decisions affecting current work:
 - 42-05: 3-state printed filter toggle (all/hide/only) layered on domain exclusions. 16 Hebrew translations for Phase 42 strings. Excluded section overflow fixed.
 - 42-06: SearchThread cancel_flag (safe cancel), progress_callback every 5 hits, excluded section reason sub-headers, Printed column Fixed 55px and filterable.
 - 42-07: Clickable excluded items in web, "Filter Printed" label, desktop 3-state printed filter on search results, 5 missing Hebrew translation keys.
+- 42-08: Bare 'Searching' translation key for desktop status, 'Found in source text'/'High frequency' excluded reason sub-header translations, partial results statusbar notification on cancel.
 - 42-09: Composition tree 3-state printed filter (matching regular search), web cancel skips enrichment, lab mode InterruptedError propagation.
 
 ### Pending Todos
@@ -94,6 +96,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 42-09-PLAN.md (comp 3-state printed filter, web cancel enrichment skip, lab mode except fix)
-Resume file: .planning/phases/42-search-ux-composition-polish/42-09-SUMMARY.md
-Notes: 8 of 9 Phase 42 plans complete (42-01 through 42-07, 42-09). Plan 42-08 (Hebrew translations + desktop notification) still pending. After 42-08: Phase 43.
+Stopped at: Completed 42-08-PLAN.md (Hebrew translation keys + desktop partial results notification)
+Resume file: .planning/phases/42-search-ux-composition-polish/42-08-SUMMARY.md
+Notes: All 9 plans in Phase 42 complete (42-01 through 42-09). Phase 42 fully done. Next: Phase 43.
