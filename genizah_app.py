@@ -5033,8 +5033,18 @@ class DomainFilterDialog(QDialog):
                 child_item = parent_item.child(j)
                 child_text = child_item.text(0).lower()
                 child_match = search_text in child_text
-                child_item.setHidden(not child_match and search_text)
-                if child_match:
+                any_grandchild_match = False
+
+                for k in range(child_item.childCount()):
+                    sc_item = child_item.child(k)
+                    sc_text = sc_item.text(0).lower()
+                    sc_match = search_text in sc_text
+                    sc_item.setHidden(not sc_match and search_text)
+                    if sc_match:
+                        any_grandchild_match = True
+
+                child_item.setHidden(not (child_match or any_grandchild_match) and search_text)
+                if child_match or any_grandchild_match:
                     any_child_match = True
 
             parent_item.setHidden(not (parent_match or any_child_match) and search_text)
@@ -5047,12 +5057,15 @@ class DomainFilterDialog(QDialog):
         self._updating_checks = True
         check_state = item.checkState(0)
 
-        # If parent changed, update all visible children
-        if item.parent() is None:
-            for i in range(item.childCount()):
-                child = item.child(i)
+        # Propagate to all visible descendants (children + grandchildren)
+        def propagate_down(parent_item, state):
+            for i in range(parent_item.childCount()):
+                child = parent_item.child(i)
                 if not child.isHidden():
-                    child.setCheckState(0, check_state)
+                    child.setCheckState(0, state)
+                    propagate_down(child, state)
+
+        propagate_down(item, check_state)
 
         self._updating_checks = False
         self._update_summary()
@@ -5065,7 +5078,10 @@ class DomainFilterDialog(QDialog):
             parent_item = root.child(i)
             parent_item.setCheckState(0, Qt.CheckState.Checked)
             for j in range(parent_item.childCount()):
-                parent_item.child(j).setCheckState(0, Qt.CheckState.Checked)
+                child_item = parent_item.child(j)
+                child_item.setCheckState(0, Qt.CheckState.Checked)
+                for k in range(child_item.childCount()):
+                    child_item.child(k).setCheckState(0, Qt.CheckState.Checked)
         self.tree.blockSignals(False)
         self._update_summary()
 
@@ -5077,7 +5093,10 @@ class DomainFilterDialog(QDialog):
             parent_item = root.child(i)
             parent_item.setCheckState(0, Qt.CheckState.Unchecked)
             for j in range(parent_item.childCount()):
-                parent_item.child(j).setCheckState(0, Qt.CheckState.Unchecked)
+                child_item = parent_item.child(j)
+                child_item.setCheckState(0, Qt.CheckState.Unchecked)
+                for k in range(child_item.childCount()):
+                    child_item.child(k).setCheckState(0, Qt.CheckState.Unchecked)
         self.tree.blockSignals(False)
         self._update_summary()
 
@@ -5100,6 +5119,12 @@ class DomainFilterDialog(QDialog):
                 if child_domain in self.excluded_domains:
                     child_item.setCheckState(0, Qt.CheckState.Unchecked)
 
+                for k in range(child_item.childCount()):
+                    sc_item = child_item.child(k)
+                    sc_domain = sc_item.data(0, Qt.ItemDataRole.UserRole)
+                    if sc_domain in self.excluded_domains:
+                        sc_item.setCheckState(0, Qt.CheckState.Unchecked)
+
         self.tree.blockSignals(False)
 
     def get_excluded_domains(self):
@@ -5117,6 +5142,12 @@ class DomainFilterDialog(QDialog):
                 if child_item.checkState(0) == Qt.CheckState.Unchecked:
                     child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
                     excluded.add(child_domain)
+
+                for k in range(child_item.childCount()):
+                    sc_item = child_item.child(k)
+                    if sc_item.checkState(0) == Qt.CheckState.Unchecked:
+                        sc_domain = sc_item.data(0, Qt.ItemDataRole.UserRole)
+                        excluded.add(sc_domain)
 
         return excluded
 
