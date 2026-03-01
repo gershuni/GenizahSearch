@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 42 of 47 (Search UX & Composition Polish) — not started
-Status: Milestone scoped, ready to plan Phase 42
-Last activity: 2026-03-01 - v6.5.0 milestone scoped from user feedback
+Phase: 42 of 47 (Search UX & Composition Polish) — Plan 1 of 3 complete
+Status: Executing Phase 42
+Last activity: 2026-03-01 - Completed 42-01 (search progress instrumentation)
 
-Progress: [░░░░░░░░░░] 0/5 phases (Phase 41 shipped as v6.1.0)
+Progress: [░░░░░░░░░░] 0/5 phases (Phase 42 plan 1/3 complete)
 
 ## Performance Metrics
 
@@ -31,6 +31,7 @@ Progress: [░░░░░░░░░░] 0/5 phases (Phase 41 shipped as v6.1.
 | 41-02 | 1 | 6min | 6min |
 | 41-03 | 1 | 9min | 9min |
 | 41-04 | 1 | 45min | 45min |
+| 42-01 | 1 | 7min | 7min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -49,6 +50,7 @@ Recent decisions affecting current work:
 - Post-search domain filtering chosen over pre-search (v5.8.0) -- Phase 45 now adds bidirectional filtered search
 - v6.5.0 scoped (2026-03-01): UX first (42-44), then filtered search (45), then Dicta translation (46). Transcription deferred to v7.0.0
 - CreationType badge added to Phase 42 scope (print vs manuscript visibility)
+- 42-01: Elapsed timer + ETA pattern: time.time() on state, 2s smoothing for ETA. Summary persists until next search.
 
 ### Pending Todos
 
@@ -78,6 +80,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Phase 42 context gathered — ready to plan
-Resume file: .planning/phases/42-search-ux-composition-polish/42-CONTEXT.md
-Notes: Phase 42 context captured: progress display (timer+ETA all modes), cancel with partial results (full functionality), CreationType colored chips (Print emphasized), min-chunks all modes, collapsible excluded section with reasons. Next: /gsd:plan-phase 42.
+Stopped at: Completed 42-01-PLAN.md (search progress instrumentation)
+Resume file: .planning/phases/42-search-ux-composition-polish/42-01-SUMMARY.md
+Notes: Plan 42-01 complete. Elapsed timer, ETA, chunk count, summary line, and min-chunks filter added to both web and desktop apps. Next: 42-02 (cancel with partial results).
