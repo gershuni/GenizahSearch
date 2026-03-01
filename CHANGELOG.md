@@ -4,6 +4,29 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.1.1] - 2026-03-01
+
+### Performance: Catalog Browse & Domain Queries
+
+Massive performance optimization for catalog browse domain filtering and async desktop UI.
+
+#### Query Optimization (35s -> 0.8s)
+- **100x faster domain-filtered queries**: Replaced JOIN+OR domain filter with IN(UNION) subquery for proper SQLite index utilization
+- **Pre-dedup CTE pattern**: Deduplicate catalog rows in CTE then COUNT(*) instead of expensive COUNT(DISTINCT) on 685K-row table with 3x duplicates
+- **Benchmarks** (Halakhic Literature, 20,951 manuscripts): Authors 30s->0.27s, Works 4.4s->0.29s
+
+#### Async Desktop Catalog Browse
+- **Non-blocking UI**: All catalog browse operations (domain/author/work select, pagination, text/date filters) now run in background QThread
+- **Module-level QThread class**: Fixes PyQt6 signal delivery for locally-defined thread classes
+- **Thread-safe FjmsService**: Default `thread_safe=True` for read-only sidecar connections
+
+#### Domain Hierarchy Enhancements
+- **3-level domain nesting**: Sub-sub-domains shown in web search filter and catalog browse (both apps)
+- **Canonical FJMS ordering**: Domain tree sorted by Friedberg classification system order
+- **Browse cache v2**: Versioned disk cache invalidates stale pre-nesting caches
+
+---
+
 ## [6.1.0] - 2026-02-27
 
 ### Milestone: Catalog Browse & Navigation (Phase 41)
