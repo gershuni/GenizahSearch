@@ -14,7 +14,9 @@ Thread-safe mode (check_same_thread=False) is available for the NiceGUI
 web app which serves concurrent requests from multiple threads.
 """
 
+import json
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -351,17 +353,187 @@ def _is_int(value) -> bool:
     return False
 
 
+# Canonical FJMS domain ordering (matches Friedberg classification system, not by count)
+_FJMS_PARENT_ORDER = [
+    # 'Unknown',  # Not present in enrichment DB
+    'Bible: Texts and Translations',
+    'Biblical Exegesis',
+    'Rabbinic Literature',
+    'Halakhic Literature and Talmudic Commentaries',
+    'Derashot and Later Midrashim',
+    'Philosophy, Theology, Ethical literature',
+    'Kabbalah',
+    'Polemics',
+    'Historiography and geographical descriptions',
+    'Occult Sciences',
+    'Sciences',
+    'Liturgy and Brakhot',
+    'Piyut and its Interpretation',
+    'Secular Poetry',
+    'Stories and Belles Lettres',
+    'Philology',
+    'Documentary',
+    'Ritual Objects',
+    'Other Religions',
+    'Teaching Aids,Pen Trials,Writing Exercises,Scribblings,Jotting',
+    'Ancillaries to the Main Work',
+    'Unspecified (Nature of text unclear after initial inspection)',
+    'Unspecified Domain',
+]
+_FJMS_PARENT_IDX = {name: i for i, name in enumerate(_FJMS_PARENT_ORDER)}
+
+# Canonical FJMS sub-domain ordering per parent (sub-domains only, not sub-sub-domains)
+_FJMS_CHILD_ORDER = {
+    'Bible: Texts and Translations': [
+        'Bible: Texts', 'Aramaic Targumim', 'Arabic Tafsir',
+        'Translations into other Languages', 'Apocryphal Literature',
+        'Massorah', 'Lists of Parshiyyot and Haftarot', 'Haftarot',
+    ],
+    'Biblical Exegesis': [
+        'Biblical Exegesis- Rabbanite', 'Biblical Exegesis- Karaite',
+    ],
+    'Rabbinic Literature': [
+        'Mishnah: Texts and Translations', 'Tosefta',
+        'Talmud Bavli: Texts and Anthologies', 'Minor Tractates',
+        'Talmud Yerushalmi', 'Midrash',
+    ],
+    'Halakhic Literature and Talmudic Commentaries': [
+        'Mishnaic Commentaries', 'Talmud Bavli Commentaries',
+        'Talmud Yerushalmi Commentaries', 'Talmudic Commentaries',
+        'Halakhic', 'Sifrei Mitzvot (Rabbinical)',
+        'Responsa and Halakhic Decisions', 'Minhagim',
+        'Talmud \u2013 Introductions and Rules',
+    ],
+    'Derashot and Later Midrashim': [
+        'Derashot', 'Eulogies', 'Later Midrashim',
+    ],
+    'Philosophy, Theology, Ethical literature': [
+        'Kalam', 'Philosophy', 'Logic', 'Ethical Literature',
+        'Mystical Literature (not Kabbalah)', 'Sufi Literature',
+        'Hermetic Literature', 'Wisdom Literature',
+        'Apocalyptic Literature', 'Theology',
+    ],
+    'Kabbalah': [
+        'Heikhalot', 'Zohar literature',
+        'Spanish and Provencal Kabbalah', 'Lurianic Kabbalah',
+    ],
+    'Polemics': [
+        'Polemics Karaite-Rabbanite', 'Polemics Jewish-Christian',
+        'Polemics Jewish-Muslim', 'Polemics Rabbinical',
+    ],
+    'Occult Sciences': [
+        'Theoretical Works', 'Astrology', 'Alchemy', 'Magic Recipes',
+        'Amulets', 'Shimmush Tehillim', 'Predicting the Future',
+        'Revealing Treasures',
+    ],
+    'Sciences': [
+        'Astronomy', 'Mathematics', 'Medicine', 'Meteorology', 'Physics',
+    ],
+    'Liturgy and Brakhot': [
+        'Common Prayers', 'Brakhot', 'Prayer Commentaries',
+        'Karaite Prayers', 'Occasional prayer', 'Liturgical additions',
+        'Baqqashot and Personal Prayers', 'Passover Haggadah',
+    ],
+    'Piyut and its Interpretation': [
+        'Piyyut', 'Liturgical commentary', 'Piyyut Commentaries',
+    ],
+    'Secular Poetry': ['Dirges'],
+    'Philology': [
+        'Grammar', 'Dictionaries', 'Glossaries', 'Cantillation notes',
+    ],
+    'Documentary': [
+        'Letters', 'Personal Status Documents and Legal documents',
+        'Business Documents', 'Lists', 'Communal Documents',
+        'Court Documents', 'Governmental Documents', 'Notes/Records', 'Accounts',
+    ],
+    'Ritual Objects': [
+        'Mezuzot', 'Tefillin', 'Torah scroll', 'Esther Scroll',
+    ],
+    'Other Religions': ['Christian', 'Muslim'],
+    'Ancillaries to the Main Work': [
+        'Colophons', 'Title Pages', 'Table of contents', 'Indices',
+        'Calendars', 'Teaching Aids',
+    ],
+    'Unspecified Domain': [
+        'Blank', 'Illegible', 'Missing',
+        'Cannot be determined from the catalogue', 'Unidentified',
+    ],
+}
+_FJMS_CHILD_IDX = {
+    parent: {name: i for i, name in enumerate(children)}
+    for parent, children in _FJMS_CHILD_ORDER.items()
+}
+
+# Canonical FJMS sub-sub-domain ordering (third level)
+_FJMS_SUBCHILD_ORDER = {
+    'Massorah': [
+        'Masorah that follows the text order', 'Cumulative or Comparative Masorah',
+        'Masorah in Arabic', 'Masorah Variants',
+        "Diqduqe ha-Te'amim and Qunterese ha-Masorah", 'Lists and Counts',
+    ],
+    'Mishnah: Texts and Translations': [
+        'Mishnah: Texts', 'Mishnah: Translations',
+    ],
+    'Talmud Bavli: Texts and Anthologies': [
+        'Talmud Bavli', 'Talmud Bavli: Anthologies',
+    ],
+    'Midrash': ['Halakhic Midrashim', 'Aggadic Midrashim'],
+    'Halakhic': [
+        'Halakhic - Saadia Gaon', 'Halakhic - Shmuel ben Hofni Gaon',
+        'Halakhot ha-Rif and its Commentaries', 'Halakhic- Gaonim',
+        'Mishneh Torah and its Commentaries',
+        'Halakhic- Rishonim and Aharonim', 'Halakhic- Karaite',
+    ],
+    'Responsa and Halakhic Decisions': [
+        'Responsa- Gaonim', 'Responsa- Rishonim and Aharonim', 'Responsa- Karaite',
+    ],
+    'Kalam': ['Jewish Kalam', 'Muslim Kalam'],
+    'Philosophy': ['Aristotelian Philosophy', 'Neoplatonic Philosophy'],
+    'Theology': ['Legal theory'],
+    'Predicting the Future': [
+        'Dream interpretation', 'Goralot (Lots)', 'Goralot (Lots) in Sand',
+        'Predictions by Thunder', 'Palmistry', 'Predictions by Ticks',
+        'Physiognomy', 'Hemorology/Horology',
+    ],
+    'Astronomy': ['Calendar'],
+    'Medicine': ['Medical Works', 'Medical Prescriptions', 'Pharmacology'],
+    'Glossaries': [
+        'Biblical Glossary', 'Mishnaic Glossary',
+        'Talmudic Glossary', 'Glossary for Piyyut',
+    ],
+    'Personal Status Documents and Legal documents': [
+        'Get Halitzah', 'Ketubbot', 'Legal documents',
+    ],
+    'Business Documents': ['Monetary Issues', 'Contracts'],
+    'Lists': [
+        'Book lists', 'Shopping lists', 'Charity Lists',
+        'Genealogical Records', 'Property Lists', 'Lists of People',
+        'Lists of Debts', 'Responsa lists',
+    ],
+    'Communal Documents': [
+        'Communal Registers', 'Writs of Appointment', 'Bans and Excommunications',
+    ],
+    'Court Documents': ['Court Records', 'Court Registers'],
+}
+_FJMS_SUBCHILD_IDX = {
+    parent: {name: i for i, name in enumerate(children)}
+    for parent, children in _FJMS_SUBCHILD_ORDER.items()
+}
+
+
 class FjmsService:
     """Service for accessing FJMS enrichment data from the SQLite sidecar."""
 
-    def __init__(self, db_path: str = None, thread_safe: bool = False):
+    def __init__(self, db_path: str = None, thread_safe: bool = True):
         """
         Initialize FjmsService.
 
         Args:
             db_path: Path to fjms_enrichment.db. If None, auto-detect from project root.
-            thread_safe: If True, use check_same_thread=False for NiceGUI web app.
-                        Desktop app should leave this False (single-threaded).
+            thread_safe: If True, use check_same_thread=False. Default True because
+                        both the web app (concurrent requests) and desktop app
+                        (QThread workers for catalog browse) need cross-thread access.
+                        Safe since the connection is read-only (?mode=ro).
         """
         self._conn: Optional[sqlite3.Connection] = None
         self._db_path: Optional[str] = None
@@ -371,6 +543,8 @@ class FjmsService:
         self._authors_lock = threading.Lock()
         self._works_cache: Optional[list] = None
         self._works_lock = threading.Lock()
+        self._unclassified_cache: Optional[int] = None
+        self._unclassified_lock = threading.Lock()
         self._has_persons_titles: bool = False  # Set True if v5+ tables exist
 
         # Resolve db_path
@@ -411,16 +585,8 @@ class FjmsService:
             self._conn.row_factory = sqlite3.Row
             logger.info(f"FjmsService: Connected to {db_path}")
 
-            # Create performance indices for browse queries (idempotent)
-            try:
-                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_author ON catalog (AuthorText)")
-                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_title ON catalog (Title)")
-                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_alma ON catalog (AlmaId)")
-                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains (Domain)")
-                self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_parent ON domains (ParentDomain)")
-            except Exception as idx_err:
-                # Read-only databases will raise -- safe to ignore
-                logger.debug(f"FjmsService: Index creation skipped (read-only?): {idx_err}")
+            # Note: performance indexes are created lazily in pre_warm_caches()
+            # to avoid blocking the main thread during app startup.
 
             # Detect v5+ lookup tables (genizah_persons, genizah_titles)
             try:
@@ -620,8 +786,10 @@ class FjmsService:
                 return self._hierarchy_cache
 
             try:
-                # Optimized query: COUNT(*) instead of COUNT(DISTINCT AlmaId)
-                # No duplicate (AlmaId, Domain, ParentDomain) tuples exist in the data
+                # COUNT(*) is correct per (Domain, ParentDomain) group — no
+                # duplicate AlmaIds within a group. Cross-group overlap (e.g.,
+                # Piyyut with NULL parent AND "Piyut..." parent) is handled
+                # by the dedup step below which queries true DISTINCT counts.
                 cursor = self._conn.execute(
                     "SELECT Domain, DomainHeb, ParentDomain, ParentDomainHeb, "
                     "COUNT(*) as count "
@@ -668,35 +836,36 @@ class FjmsService:
                             hierarchy[domain]['count'] += count
                         parent_counts[domain] = parent_counts.get(domain, 0) + count
 
-                # Deduplicate: if a domain appears as both a child and a standalone
-                # root (e.g., "Piyyut" with ParentDomain=NULL AND ParentDomain="Piyut and its Interpretation"),
-                # merge the root count into the child entry and remove the standalone root.
+                # Deduplicate & nest: if a domain appears as both a child and a
+                # standalone root (e.g., "Piyyut" with ParentDomain=NULL AND
+                # ParentDomain="Piyut and its Interpretation"), fix the child's
+                # count and nest any sub-sub-domains under it (3-level hierarchy).
                 child_domains = set()
                 for info in hierarchy.values():
                     for child in info.get('children', []):
                         child_domains.add(child['domain'])
                 for child_name in child_domains:
                     if child_name in hierarchy:
-                        # Merge root count into child entry
-                        root_count = hierarchy[child_name].get('count', 0)
-                        # Find and update the child entry in its parent
+                        # Query the true distinct count for this domain
+                        try:
+                            dc = self._conn.execute(
+                                "SELECT COUNT(DISTINCT AlmaId) FROM domains WHERE Domain = ?",
+                                (child_name,)
+                            ).fetchone()[0]
+                        except Exception:
+                            dc = hierarchy[child_name].get('count', 0)
+                        # Set the child entry's count and nest sub-sub-domains
+                        orphan_children = hierarchy[child_name].get('children', [])
                         for info in hierarchy.values():
                             for child in info.get('children', []):
                                 if child['domain'] == child_name:
-                                    child['count'] += root_count
+                                    child['count'] = dc
+                                    if orphan_children:
+                                        child['children'] = orphan_children
                                     break
-                        # Also move any children of the standalone root under the parent
-                        orphan_children = hierarchy[child_name].get('children', [])
-                        if orphan_children:
-                            for info in hierarchy.values():
-                                for child in info.get('children', []):
-                                    if child['domain'] == child_name:
-                                        # Can't nest deeper, so promote orphans to same parent level
-                                        info['children'].extend(orphan_children)
-                                        break
                         del hierarchy[child_name]
 
-                # Merge duplicate children (e.g., two "Other" entries promoted from different sources)
+                # Merge duplicate children (e.g., two "Other" entries at same level)
                 for parent_name, info in hierarchy.items():
                     seen = {}
                     merged = []
@@ -709,19 +878,44 @@ class FjmsService:
                             merged.append(child)
                     info['children'] = merged
 
-                # Sort children within each parent by count descending
-                for parent in hierarchy:
-                    hierarchy[parent]['children'].sort(key=lambda x: x['count'], reverse=True)
+                # Sort children and sub-children using canonical FJMS ordering
+                fallback_pos = 9999
+                for parent_name, info in hierarchy.items():
+                    child_idx = _FJMS_CHILD_IDX.get(parent_name, {})
+                    info['children'].sort(
+                        key=lambda x: (
+                            child_idx.get(x['domain'], fallback_pos),
+                            -x['count'],
+                        )
+                    )
+                    # Sort sub-sub-domains (third level)
+                    for child in info['children']:
+                        subchildren = child.get('children', [])
+                        if subchildren:
+                            sc_idx = _FJMS_SUBCHILD_IDX.get(child['domain'], {})
+                            subchildren.sort(
+                                key=lambda x: (
+                                    sc_idx.get(x['domain'], fallback_pos),
+                                    -x['count'],
+                                )
+                            )
 
-                # Recalculate parent counts after dedup
+                # Recalculate parent counts: use sum of children's distinct counts
+                # (fast approximation — avoids 25 slow DISTINCT queries at ~100ms each)
                 for parent_name, info in hierarchy.items():
                     child_total = sum(c['count'] for c in info.get('children', []))
-                    if child_total > info.get('count', 0):
-                        info['count'] = child_total
-                        parent_counts[parent_name] = child_total
+                    own_count = info.get('count', 0)
+                    info['count'] = max(own_count, child_total)
+                    parent_counts[parent_name] = info['count']
 
-                # Cache the result before returning
-                result = dict(sorted(hierarchy.items(), key=lambda x: parent_counts.get(x[0], 0), reverse=True))
+                # Sort parents using canonical FJMS ordering (fallback: count desc)
+                result = dict(sorted(
+                    hierarchy.items(),
+                    key=lambda x: (
+                        _FJMS_PARENT_IDX.get(x[0], fallback_pos),
+                        -parent_counts.get(x[0], 0),
+                    )
+                ))
                 self._hierarchy_cache = result
                 return result
             except Exception as e:
@@ -778,42 +972,48 @@ class FjmsService:
         return self._query_browse_authors_legacy(domain)
 
     def _query_browse_authors_v5(self, domain: str = None) -> list[dict]:
-        """v5+ query: structured FK path through genizah_persons."""
-        domain_join = ""
-        domain_where = ""
+        """v5+ query: structured FK path through genizah_persons.
+
+        Optimization: pre-dedup catalog rows in a CTE so COUNT(*) replaces
+        the expensive COUNT(DISTINCT AlmaId). Domain filter uses IN+UNION
+        subquery for proper index utilization (30s -> 0.3s).
+        """
         params = []
         if domain is not None:
-            domain_join = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
-            domain_where = "AND (d.Domain = ? OR d.ParentDomain = ?)"
+            domain_filter = (
+                "AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
             params = [domain, domain]
+            cte = f"WITH dc AS (SELECT DISTINCT AlmaId, GenizahTitleId, Author FROM catalog WHERE {domain_filter})"
+        else:
+            cte = "WITH dc AS (SELECT DISTINCT AlmaId, GenizahTitleId, Author FROM catalog)"
 
         # Path 1: catalog -> genizah_titles -> genizah_persons (via GenizahTitleId)
         # Path 2: catalog.Author -> genizah_persons (direct FK, for records without GenizahTitleId)
         sql = f"""
+            {cte}
             SELECT person_id, eng_desc, heb_desc, SUM(cnt) as count FROM (
                 SELECT gp.GenizahPersonId as person_id, gp.EngDesc as eng_desc,
-                       gp.HebDesc as heb_desc, COUNT(DISTINCT c.AlmaId) as cnt
-                FROM catalog c
-                INNER JOIN genizah_titles gt ON c.GenizahTitleId = gt.GenizahTitleId
+                       gp.HebDesc as heb_desc, COUNT(*) as cnt
+                FROM dc
+                INNER JOIN genizah_titles gt ON dc.GenizahTitleId = gt.GenizahTitleId
                 INNER JOIN genizah_persons gp ON gt.AuthorId = gp.GenizahPersonId
-                {domain_join}
-                WHERE gp.GenizahPersonId > 0 {domain_where}
+                WHERE gp.GenizahPersonId > 0
                 GROUP BY gp.GenizahPersonId, gp.EngDesc, gp.HebDesc
                 UNION ALL
                 SELECT gp.GenizahPersonId as person_id, gp.EngDesc as eng_desc,
-                       gp.HebDesc as heb_desc, COUNT(DISTINCT c.AlmaId) as cnt
-                FROM catalog c
-                INNER JOIN genizah_persons gp ON c.Author = gp.GenizahPersonId
-                {domain_join}
-                WHERE c.GenizahTitleId IS NULL AND c.Author IS NOT NULL AND c.Author > 0
-                {domain_where}
+                       gp.HebDesc as heb_desc, COUNT(*) as cnt
+                FROM dc
+                INNER JOIN genizah_persons gp ON dc.Author = gp.GenizahPersonId
+                WHERE dc.GenizahTitleId IS NULL AND dc.Author IS NOT NULL AND dc.Author > 0
                 GROUP BY gp.GenizahPersonId, gp.EngDesc, gp.HebDesc
             ) grouped
             GROUP BY person_id, eng_desc, heb_desc
             ORDER BY count DESC
         """
-        all_params = list(params) + list(params)
-        cursor = self._conn.execute(sql, all_params)
+        cursor = self._conn.execute(sql, params)
         return [
             {
                 "person_id": row["person_id"],
@@ -835,12 +1035,13 @@ class FjmsService:
             )
         else:
             cursor = self._conn.execute(
-                "SELECT c.AuthorText, COUNT(DISTINCT c.AlmaId) as count "
-                "FROM catalog c "
-                "INNER JOIN domains d ON c.AlmaId = d.AlmaId "
-                "WHERE c.AuthorText IS NOT NULL AND c.AuthorText != '' "
-                "  AND (d.Domain = ? OR d.ParentDomain = ?) "
-                "GROUP BY c.AuthorText ORDER BY count DESC",
+                "SELECT AuthorText, COUNT(DISTINCT AlmaId) as count "
+                "FROM catalog "
+                "WHERE AuthorText IS NOT NULL AND AuthorText != '' "
+                "  AND AlmaId IN ("
+                "    SELECT AlmaId FROM domains WHERE Domain = ? "
+                "    UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?) "
+                "GROUP BY AuthorText ORDER BY count DESC",
                 (domain, domain),
             )
         return [
@@ -900,39 +1101,48 @@ class FjmsService:
         return self._query_browse_works_legacy(domain, author)
 
     def _query_browse_works_v5(self, domain: str = None, author=None) -> list[dict]:
-        """v5+ query: structured genizah_titles lookup."""
-        conditions = ["gt.GenizahTitleId > 0"]
-        params = []
-        domain_join = ""
+        """v5+ query: structured genizah_titles lookup.
+
+        Optimization: pre-dedup catalog in CTE, use COUNT(*), IN+UNION for domain.
+        """
+        cte_conditions = []
+        cte_params = []
 
         if domain is not None:
-            domain_join = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
-            conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
-            params.extend([domain, domain])
+            cte_conditions.append(
+                "AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
+            cte_params.extend([domain, domain])
 
         if author is not None:
-            # v5+: author is person_id (int)
             try:
                 person_id = int(author)
-                conditions.append("(gt.AuthorId = ? OR c.Author = ?)")
-                params.extend([person_id, person_id])
+                cte_conditions.append(
+                    "(GenizahTitleId IN ("
+                    "  SELECT gt.GenizahTitleId FROM genizah_titles gt WHERE gt.AuthorId = ?"
+                    ") OR Author = ?)"
+                )
+                cte_params.extend([person_id, person_id])
             except (ValueError, TypeError):
-                # Legacy string passed -- fall back to AuthorText match
-                conditions.append("c.AuthorText = ?")
-                params.append(author)
+                cte_conditions.append("AuthorText = ?")
+                cte_params.append(author)
 
-        where = " AND ".join(conditions)
+        cte_where = (" WHERE " + " AND ".join(cte_conditions)) if cte_conditions else ""
         sql = f"""
+            WITH dc AS (
+                SELECT DISTINCT AlmaId, GenizahTitleId FROM catalog{cte_where}
+            )
             SELECT gt.GenizahTitleId as title_id, gt.OrgTitle as org_title,
-                   gt.EngTitle as eng_title, COUNT(DISTINCT c.AlmaId) as count
-            FROM catalog c
-            INNER JOIN genizah_titles gt ON c.GenizahTitleId = gt.GenizahTitleId
-            {domain_join}
-            WHERE {where}
+                   gt.EngTitle as eng_title, COUNT(*) as count
+            FROM dc
+            INNER JOIN genizah_titles gt ON dc.GenizahTitleId = gt.GenizahTitleId
+            WHERE gt.GenizahTitleId > 0
             GROUP BY gt.GenizahTitleId, gt.OrgTitle, gt.EngTitle
             ORDER BY count DESC
         """
-        cursor = self._conn.execute(sql, params)
+        cursor = self._conn.execute(sql, cte_params)
         return [
             {
                 "title_id": row["title_id"],
@@ -946,27 +1156,29 @@ class FjmsService:
     def _query_browse_works_legacy(self, domain: str = None, author=None) -> list[dict]:
         """Legacy query: sparse Title/TitleHeb columns."""
         conditions = [
-            "(c.Title IS NOT NULL AND c.Title != '' "
-            "OR c.TitleHeb IS NOT NULL AND c.TitleHeb != '')"
+            "(Title IS NOT NULL AND Title != '' "
+            "OR TitleHeb IS NOT NULL AND TitleHeb != '')"
         ]
         params = []
-        join_clause = ""
 
         if domain is not None:
-            join_clause = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
-            conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
+            conditions.append(
+                "AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
             params.extend([domain, domain])
 
         if author is not None:
-            conditions.append("c.AuthorText = ?")
+            conditions.append("AuthorText = ?")
             params.append(author)
 
         where = " AND ".join(conditions)
         sql = (
-            f"SELECT c.Title, c.TitleHeb, COUNT(DISTINCT c.AlmaId) as count "
-            f"FROM catalog c {join_clause} "
+            f"SELECT Title, TitleHeb, COUNT(DISTINCT AlmaId) as count "
+            f"FROM catalog "
             f"WHERE {where} "
-            f"GROUP BY c.Title, c.TitleHeb ORDER BY count DESC"
+            f"GROUP BY Title, TitleHeb ORDER BY count DESC"
         )
         cursor = self._conn.execute(sql, params)
         return [
@@ -1025,11 +1237,13 @@ class FjmsService:
         try:
             conditions = []
             params = []
-            join_clause = ""
 
             if domain is not None:
-                join_clause = "INNER JOIN domains d ON c.AlmaId = d.AlmaId"
-                conditions.append("(d.Domain = ? OR d.ParentDomain = ?)")
+                conditions.append(
+                    "c.AlmaId IN ("
+                    "SELECT AlmaId FROM domains WHERE Domain = ? "
+                    "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+                )
                 params.extend([domain, domain])
 
             if author is not None:
@@ -1142,7 +1356,7 @@ class FjmsService:
             # Count query
             count_sql = (
                 f"SELECT COUNT(DISTINCT c.AlmaId) as total "
-                f"FROM catalog c {join_clause}{where}"
+                f"FROM catalog c{where}"
             )
             total = self._conn.execute(count_sql, params).fetchone()["total"]
 
@@ -1159,7 +1373,7 @@ class FjmsService:
                 f"  MAX(CASE WHEN c.CopyDate IS NOT NULL AND c.CopyDate != '' THEN c.CopyDate END) as CopyDate, "
                 f"  MAX(CASE WHEN c.TextualFrameHeb IS NOT NULL AND c.TextualFrameHeb != '' THEN c.TextualFrameHeb END) as TextualFrameHeb, "
                 f"  MAX(CASE WHEN c.TextualFrameEng IS NOT NULL AND c.TextualFrameEng != '' THEN c.TextualFrameEng END) as TextualFrameEng "
-                f"FROM catalog c {join_clause}{where} "
+                f"FROM catalog c{where} "
                 f"GROUP BY c.AlmaId "
                 f"ORDER BY c.AlmaId "
                 f"LIMIT ? OFFSET ?"
@@ -1229,23 +1443,113 @@ class FjmsService:
         Get count of catalog AlmaIds that have no corresponding entry in the domains table.
 
         Used for showing "Unclassified" bucket in the browse UI.
+        Cached after first computation (static data).
 
         Returns:
             Count of unclassified manuscript IDs. Returns 0 if conn is None.
         """
+        if self._unclassified_cache is not None:
+            return self._unclassified_cache
+
         if self._conn is None:
             return 0
+
+        with self._unclassified_lock:
+            if self._unclassified_cache is not None:
+                return self._unclassified_cache
+            try:
+                cursor = self._conn.execute(
+                    "SELECT COUNT(DISTINCT c.AlmaId) as count FROM catalog c "
+                    "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.AlmaId = c.AlmaId)"
+                )
+                self._unclassified_cache = cursor.fetchone()["count"]
+                return self._unclassified_cache
+            except Exception as e:
+                logger.error(f"FjmsService.get_unclassified_count error: {e}")
+                return 0
+
+    def pre_warm_caches(self):
+        """Pre-compute and cache domain hierarchy, unclassified count, authors, and works.
+
+        Uses a JSON disk cache alongside the sidecar db so only the first-ever
+        launch pays the ~5s SQL cost. Subsequent launches load from disk (<50ms).
+        Safe to call multiple times (no-op if already cached in memory).
+        """
+        if self._conn is None:
+            return
+        if self._load_browse_cache():
+            return
+        # Create performance indexes (heavy on first run, runs in background thread)
         try:
-            cursor = self._conn.execute(
-                "SELECT COUNT(DISTINCT c.AlmaId) as count "
-                "FROM catalog c "
-                "LEFT JOIN domains d ON c.AlmaId = d.AlmaId "
-                "WHERE d.AlmaId IS NULL"
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_author ON catalog (AuthorText)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_title ON catalog (Title)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_alma ON catalog (AlmaId)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains (Domain)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_parent ON domains (ParentDomain)")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_domains_group "
+                "ON domains(Domain, ParentDomain, DomainHeb, ParentDomainHeb, AlmaId)"
             )
-            return cursor.fetchone()["count"]
+            # Composite indexes for domain-filtered browse queries (JOIN + WHERE)
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_domain_alma ON domains (Domain, AlmaId)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_parent_alma ON domains (ParentDomain, AlmaId)")
+        except Exception:
+            pass
+        self.get_domain_hierarchy()
+        self.get_unclassified_count()
+        self.get_browse_authors()
+        self.get_browse_works()
+        self._save_browse_cache()
+
+    def _browse_cache_path(self) -> Optional[str]:
+        if self._db_path:
+            return self._db_path + ".browse_cache.json"
+        return None
+
+    _BROWSE_CACHE_VERSION = 2  # Bump when hierarchy format changes (v2: 3-level nesting + canonical ordering)
+
+    def _load_browse_cache(self) -> bool:
+        """Load cached browse data from disk. Returns True if loaded successfully."""
+        cache_path = self._browse_cache_path()
+        if not cache_path or not os.path.exists(cache_path):
+            return False
+        try:
+            db_mtime = os.path.getmtime(self._db_path)
+            cache_mtime = os.path.getmtime(cache_path)
+            if db_mtime > cache_mtime:
+                return False  # DB newer than cache — recompute
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("version") != self._BROWSE_CACHE_VERSION:
+                return False  # Format changed — recompute
+            self._hierarchy_cache = data["hierarchy"]
+            self._unclassified_cache = data["unclassified"]
+            self._authors_cache = data["authors"]
+            self._works_cache = data["works"]
+            logger.info("FjmsService: loaded browse cache from disk (v%s)", self._BROWSE_CACHE_VERSION)
+            return True
         except Exception as e:
-            logger.error(f"FjmsService.get_unclassified_count error: {e}")
-            return 0
+            logger.debug(f"FjmsService: disk cache load failed: {e}")
+            return False
+
+    def _save_browse_cache(self):
+        """Persist browse data to JSON file for fast subsequent startups."""
+        cache_path = self._browse_cache_path()
+        if not cache_path:
+            return
+        try:
+            data = {
+                "version": self._BROWSE_CACHE_VERSION,
+                "hierarchy": self._hierarchy_cache,
+                "unclassified": self._unclassified_cache,
+                "authors": self._authors_cache,
+                "works": self._works_cache,
+            }
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            logger.info("FjmsService: saved browse cache to disk (v%s)", self._BROWSE_CACHE_VERSION)
+        except Exception as e:
+            logger.debug(f"FjmsService: disk cache save failed: {e}")
 
     @staticmethod
     def _split_concat(val):
@@ -2125,7 +2429,7 @@ def parse_textual_frame(text: str) -> tuple[str, str]:
 _default_service: Optional[FjmsService] = None
 
 
-def get_fjms_service(thread_safe: bool = False) -> FjmsService:
+def get_fjms_service(thread_safe: bool = True) -> FjmsService:
     """Get or create the default FjmsService singleton."""
     global _default_service
     if _default_service is None:

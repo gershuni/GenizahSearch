@@ -906,12 +906,36 @@ def create_catalog_browse_page(
                                             if lang == 'he' else child['domain']
                                         )
                                         child_count = child.get('count', 0)
-                                        ui.button(
-                                            f"{child_display} ({child_count:,})",
-                                            on_click=lambda e, cn=child['domain'], cd=child_display: on_domain_selected(cn, cd),
-                                        ).props('flat dense align=left no-caps').classes(
-                                            'w-full text-left text-sm'
-                                        )
+                                        subchildren = child.get('children', [])
+
+                                        if subchildren:
+                                            # Sub-domain with sub-sub-domains: nested expansion
+                                            with ui.expansion(
+                                                f"{child_display} ({child_count:,})",
+                                            ).classes('w-full').props('dense') as sub_exp:
+                                                sub_exp.on(
+                                                    'click',
+                                                    lambda e, cn=child['domain'], cd=child_display: on_domain_selected(cn, cd),
+                                                )
+                                                for sc in subchildren:
+                                                    sc_display = (
+                                                        sc.get('domain_heb', sc['domain'])
+                                                        if lang == 'he' else sc['domain']
+                                                    )
+                                                    sc_count = sc.get('count', 0)
+                                                    ui.button(
+                                                        f"{sc_display} ({sc_count:,})",
+                                                        on_click=lambda e, sn=sc['domain'], sd=sc_display: on_domain_selected(sn, sd),
+                                                    ).props('flat dense align=left no-caps').classes(
+                                                        'w-full text-left text-sm pl-4'
+                                                    )
+                                        else:
+                                            ui.button(
+                                                f"{child_display} ({child_count:,})",
+                                                on_click=lambda e, cn=child['domain'], cd=child_display: on_domain_selected(cn, cd),
+                                            ).props('flat dense align=left no-caps').classes(
+                                                'w-full text-left text-sm'
+                                            )
                             else:
                                 ui.button(
                                     f"{parent_display} ({parent_count:,})",

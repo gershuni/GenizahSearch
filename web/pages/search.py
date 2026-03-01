@@ -1765,17 +1765,41 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             children_in_results = []
             for child in info.get('children', []):
                 qname = qualify_domain_name(child['domain'], parent_name)
+                child_key = None
                 if qname in domain_counts:
+                    child_key = qname
+                elif child['domain'] in domain_counts and child['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
+                    child_key = child['domain']
+                # Collect sub-sub-domains in results
+                subchildren_in_results = []
+                for sc in child.get('children', []):
+                    sc_qname = qualify_domain_name(sc['domain'], child['domain'])
+                    if sc_qname in domain_counts:
+                        subchildren_in_results.append({
+                            'domain': sc_qname,
+                            'domain_heb': sc.get('domain_heb', sc['domain']),
+                            'count': domain_counts[sc_qname],
+                        })
+                    elif sc['domain'] in domain_counts and sc['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
+                        subchildren_in_results.append({
+                            'domain': sc['domain'],
+                            'domain_heb': sc.get('domain_heb', sc['domain']),
+                            'count': domain_counts[sc['domain']],
+                        })
+                if child_key:
+                    children_in_results.append({
+                        'domain': child_key,
+                        'domain_heb': child.get('domain_heb', child['domain']),
+                        'count': domain_counts[child_key],
+                        'children': subchildren_in_results,
+                    })
+                elif subchildren_in_results:
+                    # Sub-sub-domains present but parent sub-domain not — still show parent
                     children_in_results.append({
                         'domain': qname,
                         'domain_heb': child.get('domain_heb', child['domain']),
-                        'count': domain_counts[qname],
-                    })
-                elif child['domain'] in domain_counts and child['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
-                    children_in_results.append({
-                        'domain': child['domain'],
-                        'domain_heb': child.get('domain_heb', child['domain']),
-                        'count': domain_counts[child['domain']],
+                        'count': sum(sc['count'] for sc in subchildren_in_results),
+                        'children': subchildren_in_results,
                     })
             if parent_in_results or children_in_results:
                 parent_count = domain_counts.get(parent_name, 0)
@@ -1793,6 +1817,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             known_domains.add(parent_name)
             for c in info['children']:
                 known_domains.add(c['domain'])
+                for sc in c.get('children', []):
+                    known_domains.add(sc['domain'])
         for domain_name, count in domain_counts.items():
             if domain_name not in known_domains:
                 result_hierarchy[domain_name] = {
@@ -1828,10 +1854,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             children = info.get('children', [])
             parent_checked = 'checked' if parent_name not in current_exclusions else ''
             parent_label = f"{_domain_display_name(parent_name)} ({info['count']})"
-            child_domain_names = [c['domain'] for c in children]
+            # Collect ALL descendant domain names for parent checkbox propagation
+            all_descendant_names = []
+            for c in children:
+                all_descendant_names.append(c['domain'])
+                for sc in c.get('children', []):
+                    all_descendant_names.append(sc['domain'])
             # Escape for HTML attributes
             parent_domain_attr = html.escape(parent_name, quote=True)
-            children_json_attr = html.escape(_json.dumps(child_domain_names), quote=True)
+            children_json_attr = html.escape(_json.dumps(all_descendant_names), quote=True)
             parent_label_html = html.escape(parent_label)
             checkbox_html_parts.append(
                 f'<label class="domain-parent" style="display:flex;align-items:center;gap:6px;'
@@ -1842,19 +1873,47 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 f'style="width:18px;height:18px;accent-color:#1976d2">'
                 f'<span>{parent_label_html}</span></label>'
             )
-            for child in sorted(children, key=lambda c: -c['count']):
+            for child in children:
                 child_checked = 'checked' if child['domain'] not in current_exclusions else ''
                 child_label = f"{_domain_display_name(child['domain'])} ({child['count']})"
                 child_domain_attr = html.escape(child['domain'], quote=True)
                 child_label_html = html.escape(child_label)
-                checkbox_html_parts.append(
-                    f'<label class="domain-child" style="display:flex;align-items:center;gap:6px;'
-                    f'padding:2px 0;padding-inline-start:2rem;cursor:pointer">'
-                    f'<input type="checkbox" data-domain="{child_domain_attr}" '
-                    f'{child_checked} '
-                    f'style="width:16px;height:16px;accent-color:#1976d2">'
-                    f'<span>{child_label_html}</span></label>'
-                )
+                subchildren = child.get('children', [])
+                if subchildren:
+                    # Sub-domain with sub-sub-domains: acts as sub-parent
+                    sc_names = [sc['domain'] for sc in subchildren]
+                    sc_json_attr = html.escape(_json.dumps(sc_names), quote=True)
+                    checkbox_html_parts.append(
+                        f'<label class="domain-child" style="display:flex;align-items:center;gap:6px;'
+                        f'font-weight:bold;padding:2px 0;padding-inline-start:2rem;cursor:pointer">'
+                        f'<input type="checkbox" data-domain="{child_domain_attr}" '
+                        f'data-children="{sc_json_attr}" '
+                        f'{child_checked} onchange="domainFilterParentChanged(this)" '
+                        f'style="width:16px;height:16px;accent-color:#1976d2">'
+                        f'<span>{child_label_html}</span></label>'
+                    )
+                    for sc in subchildren:
+                        sc_checked = 'checked' if sc['domain'] not in current_exclusions else ''
+                        sc_label = f"{_domain_display_name(sc['domain'])} ({sc['count']})"
+                        sc_domain_attr = html.escape(sc['domain'], quote=True)
+                        sc_label_html = html.escape(sc_label)
+                        checkbox_html_parts.append(
+                            f'<label class="domain-subchild" style="display:flex;align-items:center;gap:6px;'
+                            f'padding:2px 0;padding-inline-start:4rem;cursor:pointer">'
+                            f'<input type="checkbox" data-domain="{sc_domain_attr}" '
+                            f'{sc_checked} '
+                            f'style="width:14px;height:14px;accent-color:#1976d2">'
+                            f'<span>{sc_label_html}</span></label>'
+                        )
+                else:
+                    checkbox_html_parts.append(
+                        f'<label class="domain-child" style="display:flex;align-items:center;gap:6px;'
+                        f'padding:2px 0;padding-inline-start:2rem;cursor:pointer">'
+                        f'<input type="checkbox" data-domain="{child_domain_attr}" '
+                        f'{child_checked} '
+                        f'style="width:16px;height:16px;accent-color:#1976d2">'
+                        f'<span>{child_label_html}</span></label>'
+                    )
 
         checkbox_html = '\n'.join(checkbox_html_parts)
 

@@ -2020,6 +2020,58 @@ class HiddenScrollArea(QScrollArea):
         # Maintain highlight focus when column width changes
         QTimer.singleShot(10, self._center_on_match)
         
+class _CatalogRefreshWorker(QThread):
+    """Background worker for catalog browse DB queries (authors/works/results).
+
+    Must be module-level (not nested inside a method) so pyqtSignal works
+    reliably in PyQt6.
+    """
+
+    done = pyqtSignal(object)  # dict with keys: authors?, works?, data
+
+    def __init__(self, parent, domain, author, work, offset, limit,
+                 date_from=None, date_to=None, include_undated=False,
+                 text_all=None, text_any=None, text_not=None,
+                 refresh_authors=True, refresh_works=True):
+        super().__init__(parent)
+        self._domain = domain
+        self._author = author
+        self._work = work
+        self._offset = offset
+        self._limit = limit
+        self._date_from = date_from
+        self._date_to = date_to
+        self._include_undated = include_undated
+        self._text_all = text_all
+        self._text_any = text_any
+        self._text_not = text_not
+        self._refresh_authors = refresh_authors
+        self._refresh_works = refresh_works
+
+    def run(self):
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            result = {}
+            if self._refresh_authors:
+                result['authors'] = fjms.get_browse_authors(domain=self._domain)
+            if self._refresh_works:
+                result['works'] = fjms.get_browse_works(
+                    domain=self._domain, author=self._author,
+                )
+            result['data'] = fjms.get_browse_results(
+                domain=self._domain, author=self._author, work=self._work,
+                offset=self._offset, limit=self._limit,
+                date_from=self._date_from, date_to=self._date_to,
+                include_undated=self._include_undated,
+                text_all=self._text_all, text_any=self._text_any,
+                text_not=self._text_not,
+            )
+            self.done.emit(result)
+        except Exception:
+            self.done.emit({'data': {'results': [], 'total': 0}})
+
+
 class ImageLoaderThread(QThread):
     """
     Smart Image Loader:
@@ -4938,6 +4990,23 @@ class DomainFilterDialog(QDialog):
                 child_item.setData(0, Qt.ItemDataRole.UserRole, domain_key)
                 parent_item.addChild(child_item)
 
+                # Third level: sub-sub-domains in results
+                for subchild in child.get('children', []):
+                    sc_qname = qualify_domain_name(subchild['domain'], child['domain'])
+                    sc_key = None
+                    if sc_qname in self.result_domains:
+                        sc_key = sc_qname
+                    elif subchild['domain'] in self.result_domains and subchild['domain'] not in AMBIGUOUS_CHILD_DOMAINS:
+                        sc_key = subchild['domain']
+                    if sc_key:
+                        sc_count = self.result_domains.get(sc_key, 0)
+                        sc_display = subchild.get('domain_heb', subchild['domain']) if CURRENT_LANG == 'he' else sc_key
+                        sc_item = QTreeWidgetItem([sc_display, f"{sc_count:,}"])
+                        sc_item.setFlags(sc_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                        sc_item.setCheckState(0, Qt.CheckState.Checked)
+                        sc_item.setData(0, Qt.ItemDataRole.UserRole, sc_key)
+                        child_item.addChild(sc_item)
+
         # Add "Uncategorized" node for results without domain data
         if self.uncategorized_count > 0:
             uncat_display = tr("Uncategorized")
@@ -6778,6 +6847,24 @@ class GenizahGUI(QMainWindow):
 
         main_layout.addWidget(self.tabs)
         self.setCentralWidget(central_widget)
+
+        # Pre-warm FJMS caches in background so catalog browse tab opens instantly.
+        # thread_safe=True is required because the QThread will use the same connection.
+        self._fjms_warmup_thread = None
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if fjms.is_available():
+                class _FjmsWarmupThread(QThread):
+                    def run(self_t):
+                        try:
+                            fjms.pre_warm_caches()
+                        except Exception as e:
+                            logger.debug(f"FJMS warmup failed: {e}")
+                self._fjms_warmup_thread = _FjmsWarmupThread(self)
+                self._fjms_warmup_thread.start()
+        except Exception:
+            pass
 
     def _update_corner_login_state(self):
         """Update the corner login button based on login state."""
@@ -10342,22 +10429,35 @@ class GenizahGUI(QMainWindow):
         if work:
             self.catalog_work_input.setText(work)
 
-        # Ensure domain tree is loaded
+        # Ensure domain tree is loaded (async — may not be ready yet)
         if not self._catalog_tree_loaded:
             self._catalog_populate_tree()
-
-        # If domain specified, select it in the tree
-        if domain:
-            self._catalog_select_domain_in_tree(domain)
 
         # Switch to catalog browse tab
         self.tabs.setCurrentWidget(self.catalog_browse_tab)
 
-        # Refresh results with the new filters
-        self._catalog_refresh_authors()
-        self._catalog_refresh_works()
-        self._catalog_refresh()
+        # If domain specified, select it in the tree (deferred if tree still loading)
+        if domain:
+            self._pending_catalog_domain = domain
+            QTimer.singleShot(100, self._apply_pending_catalog_nav)
+        else:
+            self._catalog_start_async_refresh(refresh_authors=True, refresh_works=True)
         self._catalog_update_chips()
+
+    def _apply_pending_catalog_nav(self):
+        """Apply a pending domain selection after async tree load completes."""
+        domain = getattr(self, '_pending_catalog_domain', None)
+        if not domain:
+            return
+        # If tree still shows "Loading...", retry shortly
+        if self.catalog_domain_tree.topLevelItemCount() <= 1:
+            item = self.catalog_domain_tree.topLevelItem(0)
+            if item and not item.data(0, Qt.ItemDataRole.UserRole):
+                QTimer.singleShot(200, self._apply_pending_catalog_nav)
+                return
+        self._pending_catalog_domain = None
+        self._catalog_select_domain_in_tree(domain)
+        self._catalog_start_async_refresh(refresh_authors=True, refresh_works=True)
 
     def _catalog_select_domain_in_tree(self, domain_name):
         """Select a domain in the catalog browse domain tree by its English key."""
@@ -12040,8 +12140,6 @@ class GenizahGUI(QMainWindow):
         """Handle domain tree item click."""
         domain_key = item.data(0, Qt.ItemDataRole.UserRole)
         if domain_key == "__unclassified__":
-            # Unclassified bucket - not a real domain filter for now
-            # (Would need special query logic; skip for initial release)
             return
         self._catalog_current_domain = domain_key
         self._catalog_current_author = None
@@ -12049,9 +12147,120 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_page = 0
         self.catalog_author_input.clear()
         self.catalog_work_input.clear()
-        self._catalog_refresh_authors()
-        self._catalog_refresh_works()
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=True, refresh_works=True)
+
+    def _catalog_start_async_refresh(self, refresh_authors=True, refresh_works=True):
+        """Run catalog browse refresh in a background thread (never blocks UI).
+
+        Args:
+            refresh_authors: Re-fetch the authors sidebar list.
+            refresh_works: Re-fetch the works sidebar list.
+        Results are always re-fetched.
+        """
+        # Show loading state immediately
+        self.catalog_results_table.setRowCount(0)
+        self._catalog_count_label.setText(tr("Loading..."))
+
+        self._catalog_refresh_worker = _CatalogRefreshWorker(
+            self,
+            domain=self._catalog_current_domain,
+            author=self._catalog_current_author,
+            work=self._catalog_current_work,
+            offset=self._catalog_current_page * self._CATALOG_PAGE_SIZE,
+            limit=self._CATALOG_PAGE_SIZE,
+            date_from=self._catalog_date_from,
+            date_to=self._catalog_date_to,
+            include_undated=self._catalog_include_undated,
+            text_all=self._catalog_text_all or None,
+            text_any=self._catalog_text_any or None,
+            text_not=self._catalog_text_not or None,
+            refresh_authors=refresh_authors,
+            refresh_works=refresh_works,
+        )
+        self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
+        self._catalog_refresh_worker.start()
+
+    def _catalog_on_async_refresh_done(self, result):
+        """Handle results from background refresh thread."""
+        from PyQt6 import sip
+        if sip.isdeleted(self.catalog_results_table):
+            return
+
+        # Update authors sidebar if refreshed
+        if 'authors' in result:
+            self._catalog_authors_cache = result['authors']
+            self._catalog_filter_authors()
+
+        # Update works sidebar if refreshed
+        if 'works' in result:
+            self._catalog_works_cache = result['works']
+            self._catalog_filter_works()
+
+        # Always render results
+        data = result.get('data', {})
+        results = data.get("results", [])
+        total = data.get("total", 0)
+        self._catalog_results_data = results
+        self.catalog_results_table.setSortingEnabled(False)
+        self._catalog_hovered_row = -1
+        self.catalog_results_table.setRowCount(len(results))
+        is_hebrew = (CURRENT_LANG == 'he')
+        offset = self._catalog_current_page * self._CATALOG_PAGE_SIZE
+        for row_idx, r in enumerate(results):
+            sys_id = r.get("sys_id", "")
+            shelfmark = "Unknown"
+            library = ""
+            if self.meta_mgr:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+                library = self.meta_mgr.get_library_for_id(sys_id)
+            domains = r.get("domains_heb", []) if is_hebrew else r.get("domains", [])
+            domain_str = ", ".join(domains) if domains else ""
+            author_str = r.get("author", "")
+            title = r.get("title_heb", "") if is_hebrew else r.get("title", "")
+            if not title:
+                title = r.get("title", "") or r.get("title_heb", "")
+            ident = f"{author_str} - {title}" if author_str and title else (author_str or title or "")
+            date_str = r.get("copy_date", "")
+            align = Qt.AlignmentFlag.AlignLeft if is_hebrew else Qt.AlignmentFlag.AlignRight
+            actions_widget = ActionsHoverWidget(alignment=align)
+            actions_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+            view_btn = self._create_action_button(
+                "👁", tr("View result"),
+                lambda _, ri=row_idx: self._catalog_view_result_by_row(ri),
+                parent=self.catalog_results_table,
+            )
+            browse_btn = self._create_action_button(
+                "📖", tr("Browse manuscript"),
+                lambda _, ri=row_idx: self._catalog_browse_manuscript_by_row(ri),
+                parent=self.catalog_results_table,
+            )
+            actions_widget.add_btn(view_btn)
+            actions_widget.add_btn(browse_btn)
+            self.catalog_results_table.setCellWidget(row_idx, self._CAT_COL_ACTIONS, actions_widget)
+            item_shelf = QTableWidgetItem(shelfmark)
+            item_shelf.setData(Qt.ItemDataRole.UserRole, sys_id)
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_SHELF, item_shelf)
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_LIBRARY, QTableWidgetItem(library))
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_DOMAIN, QTableWidgetItem(domain_str))
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_IDENT, QTableWidgetItem(ident))
+            self.catalog_results_table.setItem(row_idx, self._CAT_COL_DATE, QTableWidgetItem(date_str))
+        self.catalog_results_table.setSortingEnabled(True)
+        if total > 0:
+            start = offset + 1
+            end = min(offset + self._CATALOG_PAGE_SIZE, total)
+            self._catalog_count_label.setText(
+                tr("Showing {start}-{end} of {total} manuscripts").format(start=start, end=end, total=f"{total:,}")
+            )
+        else:
+            self._catalog_count_label.setText(tr("No results"))
+        total_pages = max(1, (total + self._CATALOG_PAGE_SIZE - 1) // self._CATALOG_PAGE_SIZE)
+        self._catalog_page_label.setText(
+            tr("Page {current} of {total}").format(current=self._catalog_current_page + 1, total=total_pages)
+        )
+        self._catalog_prev_btn.setEnabled(self._catalog_current_page > 0)
+        self._catalog_next_btn.setEnabled(self._catalog_current_page + 1 < total_pages)
+        self._catalog_update_chips()
+        self._catalog_update_text_summary()
 
     def _catalog_on_author_select(self, item):
         """Handle author list item click."""
@@ -12064,8 +12273,7 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_work = None
         self._catalog_current_page = 0
         self.catalog_work_input.clear()
-        self._catalog_refresh_works()
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=True)
 
     def _catalog_on_work_select(self, item):
         """Handle work list item click."""
@@ -12076,7 +12284,7 @@ class GenizahGUI(QMainWindow):
             work_title = text.rsplit("  (", 1)[0].strip()
         self._catalog_current_work = work_title
         self._catalog_current_page = 0
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _catalog_on_date_changed(self):
         """Handle date From/To input change."""
@@ -12091,14 +12299,14 @@ class GenizahGUI(QMainWindow):
         except ValueError:
             self._catalog_date_to = None
         self._catalog_current_page = 0
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _catalog_on_undated_changed(self, checked):
         """Handle include-undated checkbox toggle."""
         self._catalog_include_undated = checked
         if self._catalog_date_from is not None or self._catalog_date_to is not None:
             self._catalog_current_page = 0
-            self._catalog_refresh()
+            self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _catalog_set_century(self, century):
         """Set date range to a single century and refresh."""
@@ -12139,7 +12347,7 @@ class GenizahGUI(QMainWindow):
         self._catalog_text_input.clear()
         self._catalog_render_text_chips()
         self._catalog_current_page = 0
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _catalog_remove_text_term(self, mode: str, term: str):
         """Remove a text filter term and refresh."""
@@ -12152,7 +12360,7 @@ class GenizahGUI(QMainWindow):
             target.remove(term)
         self._catalog_render_text_chips()
         self._catalog_current_page = 0
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _catalog_render_text_chips(self):
         """Re-render the inline text filter chips below the input in the sidebar."""
@@ -12178,6 +12386,8 @@ class GenizahGUI(QMainWindow):
 
     def _catalog_remove_filter(self, filter_type):
         """Remove a specific filter (or all) and refresh."""
+        refresh_authors = False
+        refresh_works = False
         if filter_type == "all":
             self._catalog_current_domain = None
             self._catalog_current_author = None
@@ -12191,8 +12401,8 @@ class GenizahGUI(QMainWindow):
             self._catalog_text_not.clear()
             self._catalog_text_input.clear()
             self._catalog_render_text_chips()
-            self._catalog_refresh_authors()
-            self._catalog_refresh_works()
+            refresh_authors = True
+            refresh_works = True
         elif filter_type == "domain":
             self._catalog_current_domain = None
             self._catalog_current_author = None
@@ -12200,13 +12410,13 @@ class GenizahGUI(QMainWindow):
             self.catalog_domain_tree.clearSelection()
             self.catalog_author_input.clear()
             self.catalog_work_input.clear()
-            self._catalog_refresh_authors()
-            self._catalog_refresh_works()
+            refresh_authors = True
+            refresh_works = True
         elif filter_type == "author":
             self._catalog_current_author = None
             self._catalog_current_work = None
             self.catalog_work_input.clear()
-            self._catalog_refresh_works()
+            refresh_works = True
         elif filter_type == "work":
             self._catalog_current_work = None
         elif filter_type == "date":
@@ -12218,7 +12428,7 @@ class GenizahGUI(QMainWindow):
             self._catalog_text_input.clear()
             self._catalog_render_text_chips()
         self._catalog_current_page = 0
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=refresh_authors, refresh_works=refresh_works)
 
     def _resolve_catalog_author_display(self, author_val):
         """Resolve author value to display name from cached authors list."""
@@ -12390,31 +12600,60 @@ class GenizahGUI(QMainWindow):
     def _catalog_next_page(self):
         """Go to next page of results."""
         self._catalog_current_page += 1
-        self._catalog_refresh()
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _catalog_prev_page(self):
         """Go to previous page of results."""
         if self._catalog_current_page > 0:
             self._catalog_current_page -= 1
-            self._catalog_refresh()
+            self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
-    # --- Catalog Browse: Tree Population (lazy) ---
+    # --- Catalog Browse: Tree Population (async) ---
 
     def _catalog_populate_tree(self):
-        """Populate the domain tree from FjmsService hierarchy. Called on first tab activation."""
-        from shared.fjms_service import get_fjms_service
-        fjms = get_fjms_service()
-        if not fjms.is_available():
+        """Start async population of the domain tree. Never blocks main thread."""
+        self._catalog_tree_loaded = True  # Prevent re-entry from _on_tab_changed
+        self.catalog_domain_tree.clear()
+        loading_item = QTreeWidgetItem([tr("Loading..."), ""])
+        self.catalog_domain_tree.addTopLevelItem(loading_item)
+
+        # Always fetch in a background thread so "Loading..." paints immediately
+        # Wait for warmup thread if still running (it creates indexes + caches)
+        warmup = getattr(self, '_fjms_warmup_thread', None)
+        if warmup is not None and warmup.isRunning():
+            warmup.finished.connect(self._catalog_load_tree_from_cache)
             return
 
-        hierarchy = fjms.get_domain_hierarchy()
+        # Warmup done — load directly (data is cached, instant)
+        QTimer.singleShot(0, self._catalog_load_tree_from_cache)
+
+    def _catalog_load_tree_from_cache(self):
+        """Load tree data from already-cached service (runs on main thread, instant)."""
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if fjms.is_available():
+                h = fjms.get_domain_hierarchy()
+                u = fjms.get_unclassified_count()
+                if h:
+                    self._catalog_render_tree(h, u)
+                    return
+        except Exception:
+            pass
+        # If we got here, caches weren't ready — clear loading indicator
         self.catalog_domain_tree.clear()
 
-        # Sort parents by count descending
-        sorted_parents = sorted(hierarchy.items(), key=lambda x: x[1].get('count', 0), reverse=True)
+    def _catalog_render_tree(self, hierarchy: dict, unclassified_count: int):
+        """Render tree from pre-fetched data (runs on main thread via signal)."""
+        from PyQt6 import sip
+        if sip.isdeleted(self.catalog_domain_tree):
+            return
+
+        self.catalog_domain_tree.setUpdatesEnabled(False)
+        self.catalog_domain_tree.clear()
 
         expanded_count = 0
-        for parent_name, info in sorted_parents:
+        for parent_name, info in hierarchy.items():
             parent_heb = info.get('parent_domain_heb', parent_name)
             parent_count = info.get('count', 0)
             display_name = parent_heb if CURRENT_LANG == 'he' else parent_name
@@ -12423,9 +12662,7 @@ class GenizahGUI(QMainWindow):
             parent_item.setData(0, Qt.ItemDataRole.UserRole, parent_name)
             self.catalog_domain_tree.addTopLevelItem(parent_item)
 
-            # Sort children by count descending
-            children = sorted(info.get('children', []), key=lambda c: c.get('count', 0), reverse=True)
-            for child in children:
+            for child in info.get('children', []):
                 child_name = child.get('domain', '')
                 child_heb = child.get('domain_heb', child_name)
                 child_count = child.get('count', 0)
@@ -12435,16 +12672,19 @@ class GenizahGUI(QMainWindow):
                 child_item.setData(0, Qt.ItemDataRole.UserRole, child_name)
                 parent_item.addChild(child_item)
 
-            # Expand top 3 parent domains by default
+                for subchild in child.get('children', []):
+                    sc_name = subchild.get('domain', '')
+                    sc_heb = subchild.get('domain_heb', sc_name)
+                    sc_count = subchild.get('count', 0)
+                    sc_display = sc_heb if CURRENT_LANG == 'he' else sc_name
+
+                    sc_item = QTreeWidgetItem([sc_display, f"{sc_count:,}"])
+                    sc_item.setData(0, Qt.ItemDataRole.UserRole, sc_name)
+                    child_item.addChild(sc_item)
+
             if expanded_count < 3:
                 parent_item.setExpanded(True)
                 expanded_count += 1
-
-        # Add "Unclassified" item at bottom
-        try:
-            unclassified_count = fjms.get_unclassified_count()
-        except Exception:
-            unclassified_count = 0
 
         if unclassified_count > 0:
             uncat_display = tr("Unclassified")
@@ -12452,11 +12692,11 @@ class GenizahGUI(QMainWindow):
             uncat_item.setData(0, Qt.ItemDataRole.UserRole, "__unclassified__")
             self.catalog_domain_tree.addTopLevelItem(uncat_item)
 
-        self._catalog_tree_loaded = True
+        self.catalog_domain_tree.setUpdatesEnabled(True)
 
-        # Also pre-load author and work lists (unfiltered)
-        self._catalog_refresh_authors()
-        self._catalog_refresh_works()
+        # Defer author/work list population
+        QTimer.singleShot(0, self._catalog_refresh_authors)
+        QTimer.singleShot(0, self._catalog_refresh_works)
 
     # ==========================================================================
     #  PERSONAL LISTS TAB

@@ -982,6 +982,15 @@ async def initialize_engine():
             # 5. Start background loading
             state.meta_mgr.start_background_loading()
 
+            # 6. Pre-warm FJMS caches (hierarchy, authors, works) so first page load is instant
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms = get_fjms_service(thread_safe=True)
+                if fjms.is_available():
+                    fjms.pre_warm_caches()
+            except Exception as e:
+                print(f"FJMS cache pre-warm failed (non-fatal): {e}")
+
             print("Engine initialization complete.")
             return True
         except Exception as e:
