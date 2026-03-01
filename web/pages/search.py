@@ -69,6 +69,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
             self.search_start_time: float = 0.0  # For elapsed timer display
             self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
+            self.printed_filter: str = 'all'  # 'all', 'hide_printed', 'only_printed'
             self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
 
     search_state = SearchUIState()
@@ -748,6 +749,38 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             n_excl = len(search_state.domain_exclusions)
                             domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
                             domain_filter_btn.props('outline dense no-caps color=red')
+
+                        # Printed filter toggle (hidden until search has printed data)
+                        def _toggle_printed_filter():
+                            states = ['all', 'hide_printed', 'only_printed']
+                            current_idx = states.index(search_state.printed_filter)
+                            search_state.printed_filter = states[(current_idx + 1) % 3]
+                            _update_printed_filter_btn()
+                            # Re-apply domain exclusions + printed filter and re-render
+                            if search_state.domain_exclusions and search_state.has_domain_data:
+                                _apply_domain_exclusions()
+                            elif search_state.results:
+                                _apply_printed_filter_and_render(search_state.results)
+
+                        def _update_printed_filter_btn():
+                            if search_state.printed_filter == 'all':
+                                printed_filter_btn.text = tr('Printed')
+                                printed_filter_btn.props(remove='color')
+                                printed_filter_btn.props('outline dense no-caps')
+                            elif search_state.printed_filter == 'hide_printed':
+                                printed_filter_btn.text = tr('Hiding printed')
+                                printed_filter_btn.props(remove='color')
+                                printed_filter_btn.props('outline dense no-caps color=red')
+                            elif search_state.printed_filter == 'only_printed':
+                                printed_filter_btn.text = tr('Only printed')
+                                printed_filter_btn.props(remove='color')
+                                printed_filter_btn.props('outline dense no-caps color=deep-orange')
+
+                        printed_filter_btn = ui.button(
+                            tr('Printed'), icon='local_printshop',
+                            on_click=lambda: _toggle_printed_filter()
+                        ).classes('text-sm').props('outline dense no-caps')
+                        printed_filter_btn.set_visibility(False)
 
                     with ui.row().classes('gap-2'):
                         # Bulk actions (initially hidden)
@@ -1979,6 +2012,33 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         dialog.open()
 
+    def _apply_printed_filter(results_list):
+        """Apply printed material filter to a results list and return filtered list."""
+        if search_state.printed_filter == 'all' or not search_state.printed_ids:
+            return results_list
+        filtered = []
+        for r in results_list:
+            sys_id = r.get('display', {}).get('id')
+            is_printed = sys_id and sys_id in search_state.printed_ids
+            if search_state.printed_filter == 'hide_printed' and is_printed:
+                continue
+            elif search_state.printed_filter == 'only_printed' and not is_printed:
+                continue
+            filtered.append(r)
+        return filtered
+
+    def _apply_printed_filter_and_render(results_list):
+        """Apply printed filter to results and re-render (used when no domain exclusions active)."""
+        filtered = _apply_printed_filter(results_list)
+        total = len(search_state.results)
+        showing = len(filtered)
+        if search_state.printed_filter != 'all':
+            filter_label = tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed')
+            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({filter_label})"
+        else:
+            results_count.text = f"{total} {tr('Results')}"
+        render_results(filtered, page=0)
+
     def _apply_domain_exclusions():
         """Filter displayed results based on domain exclusions without re-searching."""
         if not search_state.domain_exclusions:
@@ -2015,11 +2075,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     filtered.append(r)
             search_state.domain_excluded_results = excluded_with_reasons
 
+        # Apply printed filter on top of domain-filtered results
+        filtered = _apply_printed_filter(filtered)
+
         # Update count display
         total = len(search_state.results)
         showing = len(filtered)
+        count_parts = []
         if search_state.domain_exclusions:
-            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({len(search_state.domain_exclusions)} {tr('domains excluded')})"
+            count_parts.append(f"{len(search_state.domain_exclusions)} {tr('domains excluded')}")
+        if search_state.printed_filter != 'all':
+            count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
+        if count_parts:
+            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
         else:
             results_count.text = f"{total} {tr('Results')}"
 
@@ -2221,6 +2289,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.catalog_source_counts = catalog_counts
         search_state.printed_ids = printed_ids
 
+        # Show/hide printed filter button if there are printed items among results
+        printed_filter_btn.set_visibility(len(printed_ids) > 0)
+
         # Slice result_domains from all_result_domains for badge rendering
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(all_sys_ids)}
 
@@ -2298,10 +2369,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass  # URL update is best-effort
 
-        # Render results (apply remembered exclusions if active)
+        # Render results (apply remembered exclusions and printed filter if active)
         if search_state.domain_exclusions and search_state.has_domain_data:
             # Delegate to _apply_domain_exclusions which tracks excluded results with reasons
+            # (also applies printed filter internally)
             _apply_domain_exclusions()
+        elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            search_state.domain_excluded_results = []
+            _apply_printed_filter_and_render(results)
         else:
             search_state.domain_excluded_results = []
             render_results(results, page=0)
@@ -2373,7 +2448,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     icon='filter_alt',
                     value=False  # collapsed by default
                 ).classes('w-full').style(
-                    'border: 1px solid var(--accent-amber); border-radius: 8px; margin-top: 16px;'
+                    'border: 1px solid var(--accent-amber); border-radius: 8px; margin-top: 16px; overflow: hidden;'
                 ).props('dense header-class="text-amber-8 text-subtitle1 text-weight-medium"'):
                     # Show up to 50 excluded results with their reasons
                     EXCLUDED_DISPLAY_LIMIT = 50
@@ -2384,15 +2459,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
                         excl_title = excl_display.get('title', '')
                         with ui.row().classes('w-full items-center gap-2 py-1 px-2').style(
-                            'border-bottom: 1px solid var(--border-light);'
+                            'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
                         ):
-                            ui.label(excl_shelfmark).classes('text-sm font-medium').style(
-                                'color: var(--text-secondary); min-width: 200px;'
+                            ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
+                                'color: var(--text-secondary); max-width: 200px;'
                             )
                             if excl_title:
                                 title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
-                                ui.label(title_short).classes('text-xs flex-grow').style(
-                                    'color: var(--text-muted); direction: rtl;'
+                                ui.label(title_short).classes('text-xs truncate').style(
+                                    'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
                                 )
                             ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                 'background: #fff3cd; color: #856404; white-space: nowrap;'
