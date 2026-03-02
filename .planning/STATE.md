@@ -18,14 +18,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 45 in progress (plan 3/5 complete)
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 45 in progress (plan 4/5 complete)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 45 of 47 (Filtered Search Context) -- Plan 4 of 5 complete (01, 02, 03 done; next: 04)
+Phase: 45 of 47 (Filtered Search Context) -- Plan 5 of 5 next (01, 02, 03, 04 done; next: 05)
 Status: Phase 45 In Progress
-Last activity: 2026-03-03 - Verified 45-02 (Web search filter panel, chip bar, pre-search filtering)
+Last activity: 2026-03-03 - Completed 45-04 (Web parallels filter panel, chip bar, per-manuscript exclusion, restrict_sys_ids)
 
 Progress: [####░░░░░░] 4/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 in progress)
 
@@ -61,6 +61,7 @@ Progress: [####░░░░░░] 4/5 phases (Phase 42 complete, Phase 43 compl
 | 45-01 | 1 | 5min | 5min |
 | 45-02 | 1 | 34min | 34min |
 | 45-03 | 1 | 32min | 32min |
+| 45-04 | 1 | 9min | 9min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -96,6 +97,7 @@ Recent decisions affecting current work:
 - 45-01: get_filter_sys_ids() returns None (no filters) or set of matching sys_ids. restrict_sys_ids param on execute_search/search_composition_logic skips manuscripts BEFORE regex.search(). Material filters via catalog_fields subquery.
 - 45-02: Collapsible Advanced Filters panel (domain/author/work/date/material) on web search page. Removable chip bar with manuscript count. restrict_sys_ids wired to execute_search. Word search per-result exclusion. incoming_filters consumption for Path B. Filter-aware search history. from_browse URL param on route.
 - 45-03: PreSearchFilterDialog with domain/author/work/date/material. FilterCountWorker for async count. Chip bar on both tabs. SearchThread/CompositionThread pass restrict_sys_ids. Per-result word search exclusion. Filter state in session persistence.
+- 45-04: Collapsible Advanced Filters panel on web parallels page (domain/author/work/date/material). Removable chip bar with manuscript count. restrict_sys_ids wired to search_composition_logic. Per-manuscript exclude buttons on each group. Auto-exclude source manuscript. Import exclusions from word search. Filter-aware composition history. Excluded manuscripts in separate collapsible section.
 
 ### Pending Todos
 
@@ -125,6 +127,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Verified 45-02-PLAN.md (Web search filter panel, chip bar, pre-search filtering)
-Resume file: .planning/phases/45-filtered-search-context/45-02-SUMMARY.md
-Notes: Phase 45 plan 4/5 complete (01, 02, 03 done). Next: 45-04 (Web parallels filter) or 45-05 (Path B browse-to-search).
+Stopped at: Completed 45-04-PLAN.md (Web parallels filter panel, per-manuscript exclusion, restrict_sys_ids)
+Resume file: .planning/phases/45-filtered-search-context/45-04-SUMMARY.md
+Notes: Phase 45 plan 4/5 complete (01, 02, 03, 04 done). Next: 45-05 (Path B browse-to-search navigation, Hebrew translations).
