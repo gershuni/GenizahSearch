@@ -8406,33 +8406,27 @@ class GenizahGUI(QMainWindow):
         self.query_label = QLabel(tr("Query:"))
         row1.addWidget(self.query_label)
         row1.addWidget(self.query_input)
+
+        # Mode combo moved to row1 (next to search button)
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Responsa (R)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
+        self.MODE_RESPONSA = 2
+        self.MODE_PGP_TAGS = 7
+        row1.addWidget(self.mode_combo)
+
         row1.addWidget(self.btn_search)
 
-        # Search history dropdown
-        self.search_history_combo = QComboBox()
-        self.search_history_combo.setFixedWidth(200)
-        self.search_history_combo.setPlaceholderText(tr("Search History"))
-        self.search_history_combo.setToolTip(tr("Recent searches — click to restore"))
-        self.search_history_combo.setMaxVisibleItems(15)
-        self.search_history_combo.activated.connect(self._on_search_history_selected)
-        self.search_history_combo.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.search_history_combo.customContextMenuRequested.connect(self._show_search_history_context_menu)
-        row1.addWidget(self.search_history_combo)
-
-        btn_clear_search_history = QPushButton("×")
-        btn_clear_search_history.setFixedWidth(24)
-        btn_clear_search_history.setToolTip(tr("Clear search history"))
-        btn_clear_search_history.setStyleSheet("font-size: 10px; padding: 2px;")
-        btn_clear_search_history.clicked.connect(lambda: self._clear_search_history('regular'))
-        row1.addWidget(btn_clear_search_history)
+        # Search history button with menu
+        self.btn_search_history = QPushButton(tr("Last Searches"))
+        self.btn_search_history.setToolTip(tr("Recent searches — click to restore"))
+        self.btn_search_history.setStyleSheet("padding: 2px 8px;")
+        self.search_history_menu = QMenu(self)
+        self.search_history_menu.aboutToShow.connect(self._refresh_search_history)
+        self.btn_search_history.setMenu(self.search_history_menu)
+        row1.addWidget(self.btn_search_history)
 
         # Row 2: Search Parameters & Lab Mode
         row2 = QHBoxLayout()
-
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems([tr("Exact (=)"), tr("Variants (?)"), tr("Responsa (R)"), tr("Fuzzy (~)"), tr("Regex (/)"), tr("Title ($)"), tr("Shelfmark (#)"), tr("PGP Tags")])
-        self.MODE_RESPONSA = 2  # Index of Responsa mode
-        self.MODE_PGP_TAGS = 7  # Index of PGP Tags mode (shifted by Responsa insertion)
 
         # Feature discovery glow on mode combo (one-time hint)
         self._mode_glow_active = False
@@ -8627,8 +8621,6 @@ class GenizahGUI(QMainWindow):
         self._result_domain_map = {}  # sys_id -> list of domain names
         self._has_result_domains = False
 
-        row2.addWidget(QLabel(tr("Mode:")))
-        row2.addWidget(self.mode_combo)
         row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
         row2.addWidget(self.search_params_container)
@@ -8854,23 +8846,14 @@ class GenizahGUI(QMainWindow):
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
         top_row.addWidget(btn_load)
 
-        # Composition history dropdown
-        self.comp_history_combo = QComboBox()
-        self.comp_history_combo.setFixedWidth(200)
-        self.comp_history_combo.setPlaceholderText(tr("Composition History"))
-        self.comp_history_combo.setToolTip(tr("Recent composition searches — click to restore"))
-        self.comp_history_combo.setMaxVisibleItems(15)
-        self.comp_history_combo.activated.connect(self._on_comp_history_selected)
-        self.comp_history_combo.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.comp_history_combo.customContextMenuRequested.connect(self._show_comp_history_context_menu)
-        top_row.addWidget(self.comp_history_combo)
-
-        btn_clear_comp_history = QPushButton("×")
-        btn_clear_comp_history.setFixedWidth(24)
-        btn_clear_comp_history.setToolTip(tr("Clear composition history"))
-        btn_clear_comp_history.setStyleSheet("font-size: 10px; padding: 2px;")
-        btn_clear_comp_history.clicked.connect(lambda: self._clear_search_history('composition'))
-        top_row.addWidget(btn_clear_comp_history)
+        # Composition history button with menu
+        self.btn_comp_history = QPushButton(tr("Last Searches"))
+        self.btn_comp_history.setToolTip(tr("Recent composition searches — click to restore"))
+        self.btn_comp_history.setStyleSheet("padding: 2px 8px;")
+        self.comp_history_menu = QMenu(self)
+        self.comp_history_menu.aboutToShow.connect(self._refresh_comp_history)
+        self.btn_comp_history.setMenu(self.comp_history_menu)
+        top_row.addWidget(self.btn_comp_history)
 
         # 1. Exclude & Filter (Moved to top row)
         btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
@@ -22392,45 +22375,98 @@ class GenizahGUI(QMainWindow):
     # Search History
     # ------------------------------------------------------------------
 
+    # Mode index → short character for history display
+    _MODE_CHARS = ['=', '?', 'R', '~', '/', '$', '#', 'T']
+
     def _refresh_search_history(self):
-        """Refresh the regular search history dropdown."""
+        """Rebuild the search history menu with per-item delete buttons."""
         from shared.session_persistence import get_history
-        self.search_history_combo.clear()
-        for entry in get_history('regular'):
-            query = entry.get('query', '')[:40]
-            count = entry.get('result_count', 0)
-            self.search_history_combo.addItem(f"{query}  ({count})", entry)
-        self.search_history_combo.setCurrentIndex(-1)
+        self.search_history_menu.clear()
+        entries = get_history('regular')
+        if not entries:
+            self.search_history_menu.addAction(tr("No search history")).setEnabled(False)
+            return
+        for i, entry in enumerate(entries):
+            self._add_history_menu_item(self.search_history_menu, 'regular', i, entry)
+        self.search_history_menu.addSeparator()
+        clear_action = self.search_history_menu.addAction(tr("Clear all history"))
+        clear_action.triggered.connect(lambda: self._clear_search_history('regular'))
 
     def _refresh_comp_history(self):
-        """Refresh the composition history dropdown."""
+        """Rebuild the composition history menu with per-item delete buttons."""
         from shared.session_persistence import get_history
-        self.comp_history_combo.clear()
-        for entry in get_history('composition'):
-            title = entry.get('query', '')[:40]
-            count = entry.get('result_count', 0)
-            self.comp_history_combo.addItem(f"{title}  ({count})", entry)
-        self.comp_history_combo.setCurrentIndex(-1)
-
-    def _on_search_history_selected(self, index):
-        """Restore state from a regular search history entry."""
-        entry = self.search_history_combo.itemData(index)
-        if not entry:
+        self.comp_history_menu.clear()
+        entries = get_history('composition')
+        if not entries:
+            self.comp_history_menu.addAction(tr("No composition history")).setEnabled(False)
             return
+        for i, entry in enumerate(entries):
+            self._add_history_menu_item(self.comp_history_menu, 'composition', i, entry)
+        self.comp_history_menu.addSeparator()
+        clear_action = self.comp_history_menu.addAction(tr("Clear all history"))
+        clear_action.triggered.connect(lambda: self._clear_search_history('composition'))
+
+    def _add_history_menu_item(self, menu, search_type, index, entry):
+        """Add a single history entry to a menu with a delete button."""
+        from PyQt6.QtWidgets import QWidgetAction, QHBoxLayout
+        query = entry.get('query', '')[:35]
+        count = entry.get('result_count', 0)
+        mode_idx = entry.get('search_params', {}).get('mode_index', 0)
+        mode_char = self._MODE_CHARS[mode_idx] if mode_idx < len(self._MODE_CHARS) else '='
+
+        # Container widget: [label] [x button]
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(4, 2, 4, 2)
+        h.setSpacing(4)
+
+        if search_type == 'regular':
+            label_text = f"{mode_char}  {query}  ({count})"
+        else:
+            label_text = f"{query}  ({count})"
+
+        lbl = QPushButton(label_text)
+        lbl.setFlat(True)
+        lbl.setStyleSheet("text-align: right; padding: 2px 4px; font-size: 12px;")
+        lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        lbl.clicked.connect(lambda checked, e=entry, st=search_type: self._on_history_item_clicked(st, e))
+
+        btn_del = QPushButton("×")
+        btn_del.setFixedSize(20, 20)
+        btn_del.setStyleSheet("color: #c0392b; font-size: 12px; font-weight: bold; border: none; padding: 0px;")
+        btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_del.setToolTip(tr("Delete this entry"))
+        btn_del.clicked.connect(lambda checked, st=search_type, idx=index: self._delete_history_item(st, idx))
+
+        h.addWidget(lbl, 1)
+        h.addWidget(btn_del, 0)
+
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(w)
+        menu.addAction(wa)
+
+    def _on_history_item_clicked(self, search_type, entry):
+        """Restore state when a history menu item is clicked."""
         state = entry.get('state', {})
-        if state:
+        if not state:
+            return
+        if search_type == 'regular':
+            self.search_history_menu.close()
             self._restore_regular_search_from_state(state, entry)
-        self.search_history_combo.setCurrentIndex(-1)
-
-    def _on_comp_history_selected(self, index):
-        """Restore state from a composition history entry."""
-        entry = self.comp_history_combo.itemData(index)
-        if not entry:
-            return
-        state = entry.get('state', {})
-        if state:
+        else:
+            self.comp_history_menu.close()
             self._restore_comp_search_from_state(state, entry)
-        self.comp_history_combo.setCurrentIndex(-1)
+
+    def _delete_history_item(self, search_type, index):
+        """Delete a single history entry and refresh the menu."""
+        from shared.session_persistence import delete_history_entry
+        delete_history_entry(search_type, index)
+        if search_type == 'regular':
+            self.search_history_menu.close()
+            self._refresh_search_history()
+        else:
+            self.comp_history_menu.close()
+            self._refresh_comp_history()
 
     def _restore_regular_search_from_state(self, state, entry=None):
         """Apply a history entry's state dict to the regular search tab."""
@@ -22550,38 +22586,6 @@ class GenizahGUI(QMainWindow):
             },
         }, limit=limit)
         self._refresh_comp_history()
-
-    def _show_search_history_context_menu(self, pos):
-        """Show context menu for search history dropdown."""
-        index = self.search_history_combo.currentIndex()
-        if index < 0:
-            return
-        menu = QMenu(self)
-        delete_action = menu.addAction(tr("Delete this entry"))
-        clear_action = menu.addAction(tr("Clear all history"))
-        action = menu.exec(self.search_history_combo.mapToGlobal(pos))
-        if action == delete_action:
-            from shared.session_persistence import delete_history_entry
-            delete_history_entry('regular', index)
-            self._refresh_search_history()
-        elif action == clear_action:
-            self._clear_search_history('regular')
-
-    def _show_comp_history_context_menu(self, pos):
-        """Show context menu for composition history dropdown."""
-        index = self.comp_history_combo.currentIndex()
-        if index < 0:
-            return
-        menu = QMenu(self)
-        delete_action = menu.addAction(tr("Delete this entry"))
-        clear_action = menu.addAction(tr("Clear all history"))
-        action = menu.exec(self.comp_history_combo.mapToGlobal(pos))
-        if action == delete_action:
-            from shared.session_persistence import delete_history_entry
-            delete_history_entry('composition', index)
-            self._refresh_comp_history()
-        elif action == clear_action:
-            self._clear_search_history('composition')
 
     def _clear_search_history(self, search_type):
         """Clear all entries for a search type after confirmation."""

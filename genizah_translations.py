@@ -2529,4 +2529,5 @@ TRANSLATIONS = {
     "A composition search was interrupted last time. Resume from where it stopped?": "חיפוש מקבילות הופסק בפעם הקודמת. לחדש מהמקום שבו הופסק?",
     "History Limit:": "מגבלת היסטוריה:",
     "Maximum search history entries per type": "מספר מרבי של רשומות היסטוריה לכל סוג חיפוש",
+    "Last Searches": "חיפושים אחרונים",
 }
