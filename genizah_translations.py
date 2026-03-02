@@ -2501,4 +2501,12 @@ TRANSLATIONS = {
     # Excluded section reason sub-headers (Phase 42 R3)
     "Found in source text": "נמצא בטקסט המקור",
     "High frequency": "תדירות גבוהה",
+    # Session persistence (Phase 43)
+    "Session Persistence": "שמירת מצב",
+    "Control how search state is saved between sessions": "שליטה באופן שמירת מצב החיפוש בין מפגשים",
+    "Save search state between sessions": "שמור מצב חיפוש בין מפגשים",
+    "When enabled, your search results, exclusions, and filters are preserved when you return": "כאשר מופעל, תוצאות החיפוש, ההחרגות והמסננים נשמרים כשאתה חוזר",
+    "Search history entries": "רשומות היסטוריית חיפוש",
+    "Maximum number of past searches to remember per search type": "מספר מרבי של חיפושים קודמים לזכור לכל סוג חיפוש",
+    "Session restored": "המפגש שוחזר",
 }

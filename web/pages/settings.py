@@ -113,6 +113,38 @@ def create_settings_page():
 
                     lab_switch.on('update:model-value', toggle_lab)
 
+                    # Session Persistence Settings
+                    ui.separator().classes('my-2')
+                    h3(tr('Session Persistence'), classes='text-base font-semibold', style='color: var(--text-primary);')
+                    ui.label(tr('Control how search state is saved between sessions')).classes('text-xs').style('color: var(--text-muted);')
+
+                    # Enable/disable toggle
+                    persist_enabled = app.storage.user.get('session_persistence_enabled', True)
+                    persist_switch = ui.switch(tr('Save search state between sessions'), value=persist_enabled)
+                    ui.label(tr('When enabled, your search results, exclusions, and filters are preserved when you return')).classes('text-xs mr-10').style('color: var(--text-muted);')
+
+                    def toggle_persistence():
+                        app.storage.user['session_persistence_enabled'] = persist_switch.value
+
+                    persist_switch.on('update:model-value', toggle_persistence)
+
+                    # History limit
+                    with ui.row().classes('items-center gap-2 mt-2'):
+                        ui.label(tr('Search history entries')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                        history_limit = app.storage.user.get('search_history_limit', 20)
+                        history_limit_input = ui.number(
+                            value=history_limit,
+                            min=5,
+                            max=100
+                        ).classes('w-20').props('outlined dense')
+
+                        def change_history_limit():
+                            app.storage.user['search_history_limit'] = int(history_limit_input.value) if history_limit_input.value else 20
+
+                        history_limit_input.on('update:model-value', change_history_limit)
+
+                    ui.label(tr('Maximum number of past searches to remember per search type')).classes('text-xs mr-10').style('color: var(--text-muted);')
+
             # === Variant Settings Tab ===
             with ui.tab_panel('variants'):
                 # Get lab settings
