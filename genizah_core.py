@@ -5633,7 +5633,7 @@ class SearchEngine:
 
         return None, query
 
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None):
         if not self.searcher: return []
 
         # Strip combining diacritical marks and geresh/gershayim from query
@@ -5647,6 +5647,8 @@ class SearchEngine:
             target_field = field_map.get(mode)
 
             sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
+            if restrict_sys_ids is not None:
+                sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
             results = []
             total_ids = len(sys_ids)
 
@@ -5871,6 +5873,13 @@ class SearchEngine:
                     progress_callback(i, total_hits)
                 try:
                     doc = self.searcher.doc(doc_addr)
+
+                    # Pre-search filter: skip manuscripts outside the restrict set
+                    if restrict_sys_ids is not None:
+                        hit_sys_id = self.meta_mgr.parse_header_smart(doc['full_header'][0])[0]
+                        if hit_sys_id not in restrict_sys_ids:
+                            continue
+
                     content = self._get_field(doc, 'content', [""])[0]
                     scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
                     scope = scope_list[0]
@@ -5973,7 +5982,8 @@ class SearchEngine:
 
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None,
                                    boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
-                                   min_boundary_matches=0, min_delimiter_distance=3):
+                                   min_boundary_matches=0, min_delimiter_distance=3,
+                                   restrict_sys_ids: set = None):
         """
         Scans composition chunks against the index.
         Returns aggregated results with WIDE source context.
@@ -6040,6 +6050,13 @@ class SearchEngine:
 
                     for score, doc_addr in hits:
                         doc = self.searcher.doc(doc_addr)
+
+                        # Pre-search filter: skip manuscripts outside the restrict set
+                        if restrict_sys_ids is not None:
+                            hit_sys_id = self.meta_mgr.parse_header_smart(doc['full_header'][0])[0]
+                            if hit_sys_id not in restrict_sys_ids:
+                                continue
+
                         content = doc['content'][0]
 
                         # Verify exact Regex match
