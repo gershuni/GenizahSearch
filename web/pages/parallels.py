@@ -164,8 +164,84 @@ def create_parallels_page(initial_text: str = None):
             self.domain_name_map: dict = {}  # English domain name -> Hebrew name
             self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
             self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
+            # Pre-search filter state (Advanced Filters panel)
+            self.filter_domain: str = None
+            self.filter_author: str = None
+            self.filter_author_name: str = ''
+            self.filter_work: str = None
+            self.filter_work_name: str = ''
+            self.filter_date_from: int = None
+            self.filter_date_to: int = None
+            self.filter_material_exclude: list = []
+            self.filter_manuscript_count: int = None
+            self.restrict_sys_ids: set = None
+            self.excluded_manuscript_ids: set = set()   # Per-manuscript exclusions (NEW for web)
+            self.auto_excluded_source_id: str = None    # Auto-excluded source manuscript
 
     p_state = ParallelsState()
+
+    def _persist(key, value):
+        """Save to storage if session persistence is enabled."""
+        if app.storage.user.get('session_persistence_enabled', True):
+            app.storage.user[key] = value
+
+    # --- Incoming filters from catalog browse (Path B: browse -> parallels) ---
+    _filters_from_browse = False
+    if app.storage.user.get('incoming_filters'):
+        incoming = app.storage.user.get('incoming_filters', {})
+        if incoming:
+            if incoming.get('domain'):
+                p_state.filter_domain = incoming['domain']
+                _persist('parallels_filter_domain', incoming['domain'])
+            if incoming.get('author'):
+                p_state.filter_author = str(incoming['author'])
+                _persist('parallels_filter_author', str(incoming['author']))
+            if incoming.get('author_name'):
+                p_state.filter_author_name = incoming['author_name']
+                _persist('parallels_filter_author_name', incoming['author_name'])
+            if incoming.get('work'):
+                p_state.filter_work = str(incoming['work'])
+                _persist('parallels_filter_work', str(incoming['work']))
+            if incoming.get('work_name'):
+                p_state.filter_work_name = incoming['work_name']
+                _persist('parallels_filter_work_name', incoming['work_name'])
+            if incoming.get('date_from') is not None:
+                p_state.filter_date_from = int(incoming['date_from'])
+                _persist('parallels_filter_date_from', int(incoming['date_from']))
+            if incoming.get('date_to') is not None:
+                p_state.filter_date_to = int(incoming['date_to'])
+                _persist('parallels_filter_date_to', int(incoming['date_to']))
+            if incoming.get('material_exclude'):
+                p_state.filter_material_exclude = incoming['material_exclude']
+                _persist('parallels_filter_material_exclude', incoming['material_exclude'])
+            # Clear incoming_filters from storage after consuming
+            app.storage.user.pop('incoming_filters', None)
+            _filters_from_browse = True
+
+    # Restore filter state from session (only if NOT from browse, browse takes priority)
+    if not _filters_from_browse:
+        p_state.filter_domain = app.storage.user.get('parallels_filter_domain', None)
+        p_state.filter_author = app.storage.user.get('parallels_filter_author', None)
+        p_state.filter_author_name = app.storage.user.get('parallels_filter_author_name', '')
+        p_state.filter_work = app.storage.user.get('parallels_filter_work', None)
+        p_state.filter_work_name = app.storage.user.get('parallels_filter_work_name', '')
+        p_state.filter_date_from = app.storage.user.get('parallels_filter_date_from', None)
+        p_state.filter_date_to = app.storage.user.get('parallels_filter_date_to', None)
+        p_state.filter_material_exclude = app.storage.user.get('parallels_filter_material_exclude', [])
+
+    # Restore per-manuscript exclusions from session
+    p_state.excluded_manuscript_ids = set(app.storage.user.get('parallels_excluded_manuscript_ids', []))
+
+    def _has_active_filters() -> bool:
+        """Check if any pre-search filters are active."""
+        return any([
+            p_state.filter_domain,
+            p_state.filter_author,
+            p_state.filter_work,
+            p_state.filter_date_from is not None,
+            p_state.filter_date_to is not None,
+            p_state.filter_material_exclude,
+        ])
 
     # Restore domain exclusions for parallels
     p_state.domain_exclusions = set(app.storage.user.get('parallels_domain_exclusions', []))
@@ -182,14 +258,31 @@ def create_parallels_page(initial_text: str = None):
 
     # Decode initial text from URL or restore from storage
     decoded_text = ""
+    source_sys_id = None  # For auto-exclude source manuscript
     if initial_text:
         try:
             decoded_text = unquote(initial_text)
+            # Try to determine source sys_id from initial_text URL params
+            # The initial_text might encode sys_id info, or we check query params
+            # NiceGUI query params are available via app.storage.user or client
         except Exception:
             decoded_text = initial_text
     else:
         # Try to restore from storage
         decoded_text = app.storage.user.get('parallels_source_text', '')
+
+    # Auto-exclude source manuscript when launched from another module
+    if initial_text and state.meta_mgr:
+        try:
+            # Try to find a sys_id reference in the URL text (e.g., "99NNN...")
+            sys_match = re.search(r'(99\d{8,})', initial_text)
+            if sys_match:
+                source_sys_id = sys_match.group(1)
+                p_state.auto_excluded_source_id = source_sys_id
+                p_state.excluded_manuscript_ids.add(source_sys_id)
+                _persist('parallels_excluded_manuscript_ids', list(p_state.excluded_manuscript_ids))
+        except Exception:
+            pass
 
     # --- Composition History Management ---
     def _get_comp_history() -> list:
@@ -626,6 +719,454 @@ def create_parallels_page(initial_text: str = None):
                         ).props('flat dense no-caps').classes('text-sm')
 
                         comp_history_menu = ui.menu()
+
+        # === Advanced Filters Panel (collapsible, below source input) ===
+        _adv_filters_expanded = _has_active_filters() or _filters_from_browse
+        adv_filters_panel = ui.expansion(
+            text=tr('Advanced Filters'),
+            icon='filter_alt',
+            value=_adv_filters_expanded,
+        ).classes('w-full').style(
+            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+        ).props('dense header-class="text-subtitle2 text-weight-medium"')
+
+        # References to filter UI elements
+        _filter_refs = {}
+
+        with adv_filters_panel:
+            with ui.column().classes('w-full px-4 py-3 gap-4'):
+
+                with ui.row().classes('w-full gap-4 flex-wrap items-end'):
+                    # Domain filter
+                    with ui.column().classes('gap-1 min-w-48 flex-grow'):
+                        ui.label(tr('Domain')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+
+                        def _build_domain_options():
+                            """Build domain select options from FJMS hierarchy."""
+                            from shared.fjms_service import get_fjms_service
+                            fjms = get_fjms_service(thread_safe=True)
+                            if not fjms.is_available():
+                                return {}
+                            hierarchy = fjms.get_domain_hierarchy()
+                            options = {}
+                            for parent_name, info in hierarchy.items():
+                                parent_heb = info.get('parent_domain_heb', '')
+                                parent_count = info.get('count', 0)
+                                display = f"{parent_name}"
+                                if parent_heb:
+                                    display = f"{parent_heb} / {parent_name}"
+                                display += f" ({parent_count:,})"
+                                options[parent_name] = display
+                                for child in info.get('children', []):
+                                    child_name = child.get('domain', '')
+                                    child_heb = child.get('domain_heb', '')
+                                    child_count = child.get('count', 0)
+                                    c_display = f"  \u2514 {child_name}"
+                                    if child_heb:
+                                        c_display = f"  \u2514 {child_heb} / {child_name}"
+                                    c_display += f" ({child_count:,})"
+                                    options[child_name] = c_display
+                            return options
+
+                        domain_options = _build_domain_options()
+                        p_domain_select = ui.select(
+                            options=domain_options,
+                            value=p_state.filter_domain,
+                            with_input=True,
+                            clearable=True,
+                        ).classes('w-full').props('outlined dense')
+                        _filter_refs['domain'] = p_domain_select
+
+                    # Author filter
+                    with ui.column().classes('gap-1 min-w-48 flex-grow'):
+                        ui.label(tr('Author')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+
+                        def _build_author_options(domain=None):
+                            """Build author select options from FJMS."""
+                            from shared.fjms_service import get_fjms_service
+                            fjms = get_fjms_service(thread_safe=True)
+                            if not fjms.is_available():
+                                return {}
+                            authors = fjms.get_browse_authors(domain=domain)
+                            options = {}
+                            for a in authors:
+                                pid = a.get('person_id') or a.get('author_id')
+                                name = a.get('heb_desc') or a.get('eng_desc') or a.get('author_name', '')
+                                eng = a.get('eng_desc', '')
+                                count = a.get('count', 0)
+                                key = str(pid) if pid else name
+                                display = name
+                                if eng and eng != name:
+                                    display = f"{name} / {eng}"
+                                display += f" ({count:,})"
+                                options[key] = display
+                            return options
+
+                        author_options = _build_author_options(domain=p_state.filter_domain)
+                        p_author_select = ui.select(
+                            options=author_options,
+                            value=p_state.filter_author,
+                            with_input=True,
+                            clearable=True,
+                        ).classes('w-full').props('outlined dense')
+                        _filter_refs['author'] = p_author_select
+
+                    # Work filter
+                    with ui.column().classes('gap-1 min-w-48 flex-grow'):
+                        ui.label(tr('Work')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+
+                        def _build_work_options(domain=None, author=None):
+                            """Build work select options from FJMS."""
+                            from shared.fjms_service import get_fjms_service
+                            fjms = get_fjms_service(thread_safe=True)
+                            if not fjms.is_available():
+                                return {}
+                            works = fjms.get_browse_works(domain=domain, author=author)
+                            options = {}
+                            for w in works:
+                                tid = w.get('title_id')
+                                org = w.get('org_title', '')
+                                eng = w.get('eng_title', '')
+                                count = w.get('count', 0)
+                                key = str(tid) if tid else org
+                                display = org or eng
+                                if eng and eng != org:
+                                    display = f"{org} / {eng}"
+                                display += f" ({count:,})"
+                                options[key] = display
+                            return options
+
+                        work_options = _build_work_options(
+                            domain=p_state.filter_domain,
+                            author=p_state.filter_author
+                        )
+                        p_work_select = ui.select(
+                            options=work_options,
+                            value=p_state.filter_work,
+                            with_input=True,
+                            clearable=True,
+                        ).classes('w-full').props('outlined dense')
+                        _filter_refs['work'] = p_work_select
+
+                with ui.row().classes('w-full gap-4 flex-wrap items-end'):
+                    # Date range
+                    with ui.column().classes('gap-1 min-w-32'):
+                        ui.label(tr('Date Range')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        with ui.row().classes('items-center gap-2'):
+                            p_date_from_input = ui.number(
+                                label=tr('From Year'),
+                                value=p_state.filter_date_from,
+                            ).classes('w-28').props('outlined dense')
+                            ui.label('\u2013').style('color: var(--text-muted);')
+                            p_date_to_input = ui.number(
+                                label=tr('To Year'),
+                                value=p_state.filter_date_to,
+                            ).classes('w-28').props('outlined dense')
+                        _filter_refs['date_from'] = p_date_from_input
+                        _filter_refs['date_to'] = p_date_to_input
+
+                    # Material exclude (Printed)
+                    with ui.column().classes('gap-1 min-w-48'):
+                        ui.label(tr('Material')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        p_exclude_printed_cb = ui.checkbox(
+                            tr('Exclude Printed'),
+                            value='Printed' in p_state.filter_material_exclude,
+                        ).props('dense')
+                        _filter_refs['exclude_printed'] = p_exclude_printed_cb
+
+                    # Import exclusions button
+                    with ui.column().classes('gap-1 justify-end'):
+                        with ui.row().classes('gap-2'):
+                            def _import_exclusions_from_word_search():
+                                """Import per-manuscript exclusions from word search."""
+                                ws_excluded = app.storage.user.get('word_search_excluded_ids', [])
+                                if not ws_excluded:
+                                    ui.notify(tr('No word search exclusions to import'), type='info', timeout=2000)
+                                    return
+                                imported_count = 0
+                                for sid in ws_excluded:
+                                    if sid not in p_state.excluded_manuscript_ids:
+                                        p_state.excluded_manuscript_ids.add(sid)
+                                        imported_count += 1
+                                _persist('parallels_excluded_manuscript_ids', list(p_state.excluded_manuscript_ids))
+                                ui.notify(
+                                    f"{tr('Imported')} {imported_count} {tr('exclusions from word search')}",
+                                    type='positive', timeout=3000
+                                )
+                                _update_p_chip_bar()
+
+                            ui.button(tr('Import exclusions'), icon='download',
+                                      on_click=_import_exclusions_from_word_search).props('flat dense no-caps size=sm')
+
+                    # Clear all filters button
+                    with ui.column().classes('gap-1 justify-end'):
+                        def _clear_all_p_adv_filters():
+                            """Clear all advanced filter selections."""
+                            p_state.filter_domain = None
+                            p_state.filter_author = None
+                            p_state.filter_author_name = ''
+                            p_state.filter_work = None
+                            p_state.filter_work_name = ''
+                            p_state.filter_date_from = None
+                            p_state.filter_date_to = None
+                            p_state.filter_material_exclude = []
+                            p_state.filter_manuscript_count = None
+                            p_state.restrict_sys_ids = None
+                            # Update UI elements
+                            p_domain_select.value = None
+                            p_author_select.value = None
+                            p_work_select.value = None
+                            p_date_from_input.value = None
+                            p_date_to_input.value = None
+                            p_exclude_printed_cb.value = False
+                            # Clear storage
+                            for k in ['parallels_filter_domain', 'parallels_filter_author',
+                                      'parallels_filter_author_name', 'parallels_filter_work',
+                                      'parallels_filter_work_name', 'parallels_filter_date_from',
+                                      'parallels_filter_date_to', 'parallels_filter_material_exclude']:
+                                _persist(k, None)
+                            _update_p_chip_bar()
+
+                        ui.button(tr('Clear All'), icon='clear_all',
+                                  on_click=_clear_all_p_adv_filters).props('flat dense no-caps')
+
+        # --- Filter chip bar (always visible, even when panel is collapsed) ---
+        p_chip_bar_container = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
+            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0;'
+        )
+        p_chip_bar_container.set_visibility(False)
+
+        def _update_p_chip_bar():
+            """Rebuild chip bar from current filter state."""
+            p_chip_bar_container.clear()
+            has_any = _has_active_filters()
+            has_excl = bool(p_state.excluded_manuscript_ids)
+            p_chip_bar_container.set_visibility(has_any or has_excl)
+            if not has_any and not has_excl:
+                return
+
+            with p_chip_bar_container:
+                # Domain chip
+                if p_state.filter_domain:
+                    display_name = p_state.filter_domain
+                    opts = p_domain_select.options if hasattr(p_domain_select, 'options') else {}
+                    if isinstance(opts, dict) and p_state.filter_domain in opts:
+                        raw = opts[p_state.filter_domain]
+                        display_name = raw.split(' (')[0].strip().lstrip('\u2514 ').strip()
+                    ui.chip(
+                        display_name, icon='category', removable=True,
+                        on_click=lambda: None,
+                        color='deep-purple-2',
+                    ).on('remove', lambda: _remove_p_filter('domain'))
+
+                # Author chip
+                if p_state.filter_author:
+                    aname = p_state.filter_author_name or p_state.filter_author
+                    ui.chip(
+                        aname, icon='person', removable=True,
+                        on_click=lambda: None,
+                        color='blue-2',
+                    ).on('remove', lambda: _remove_p_filter('author'))
+
+                # Work chip
+                if p_state.filter_work:
+                    wname = p_state.filter_work_name or p_state.filter_work
+                    ui.chip(
+                        wname, icon='menu_book', removable=True,
+                        on_click=lambda: None,
+                        color='teal-2',
+                    ).on('remove', lambda: _remove_p_filter('work'))
+
+                # Date range chip
+                if p_state.filter_date_from is not None or p_state.filter_date_to is not None:
+                    df = p_state.filter_date_from or '...'
+                    dt = p_state.filter_date_to or '...'
+                    ui.chip(
+                        f"{df}\u2013{dt}", icon='date_range', removable=True,
+                        on_click=lambda: None,
+                        color='orange-2',
+                    ).on('remove', lambda: _remove_p_filter('date'))
+
+                # Material exclude chip
+                if p_state.filter_material_exclude:
+                    for mat in p_state.filter_material_exclude:
+                        ui.chip(
+                            f"{tr('Exclude')} {mat}", icon='block', removable=True,
+                            on_click=lambda: None,
+                            color='red-2',
+                        ).on('remove', lambda m=mat: _remove_p_filter('material', m))
+
+                # Per-manuscript exclusion count chip
+                if p_state.excluded_manuscript_ids:
+                    ui.chip(
+                        f"{len(p_state.excluded_manuscript_ids)} {tr('excluded')}",
+                        icon='remove_circle_outline',
+                        color='grey-4',
+                    )
+
+                # Manuscript count badge
+                if p_state.filter_manuscript_count is not None:
+                    ui.label(
+                        f"{p_state.filter_manuscript_count:,} {tr('manuscripts')}"
+                    ).classes('text-xs px-2 py-0.5 rounded ml-2').style(
+                        'background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-light);'
+                    )
+
+        def _remove_p_filter(filter_type, value=None):
+            """Remove a specific filter and update state."""
+            if filter_type == 'domain':
+                p_state.filter_domain = None
+                p_domain_select.value = None
+                _persist('parallels_filter_domain', None)
+                _refresh_p_author_options()
+                _refresh_p_work_options()
+            elif filter_type == 'author':
+                p_state.filter_author = None
+                p_state.filter_author_name = ''
+                p_author_select.value = None
+                _persist('parallels_filter_author', None)
+                _persist('parallels_filter_author_name', '')
+                _refresh_p_work_options()
+            elif filter_type == 'work':
+                p_state.filter_work = None
+                p_state.filter_work_name = ''
+                p_work_select.value = None
+                _persist('parallels_filter_work', None)
+                _persist('parallels_filter_work_name', '')
+            elif filter_type == 'date':
+                p_state.filter_date_from = None
+                p_state.filter_date_to = None
+                p_date_from_input.value = None
+                p_date_to_input.value = None
+                _persist('parallels_filter_date_from', None)
+                _persist('parallels_filter_date_to', None)
+            elif filter_type == 'material':
+                if value and value in p_state.filter_material_exclude:
+                    p_state.filter_material_exclude.remove(value)
+                    _persist('parallels_filter_material_exclude', p_state.filter_material_exclude)
+                    p_exclude_printed_cb.value = 'Printed' in p_state.filter_material_exclude
+            _recompute_p_filter_count()
+            _update_p_chip_bar()
+
+        def _refresh_p_author_options():
+            """Refresh author select options based on current domain filter."""
+            new_opts = _build_author_options(domain=p_state.filter_domain)
+            p_author_select.options = new_opts
+            p_author_select.update()
+
+        def _refresh_p_work_options():
+            """Refresh work select options based on current domain and author filters."""
+            new_opts = _build_work_options(
+                domain=p_state.filter_domain,
+                author=p_state.filter_author
+            )
+            p_work_select.options = new_opts
+            p_work_select.update()
+
+        async def _recompute_p_filter_count():
+            """Recompute manuscript count for current filters (background)."""
+            if not _has_active_filters():
+                p_state.filter_manuscript_count = None
+                p_state.restrict_sys_ids = None
+                return
+            from shared.fjms_service import get_fjms_service
+
+            def _compute():
+                fjms = get_fjms_service(thread_safe=True)
+                if not fjms.is_available():
+                    return None
+                return fjms.get_filter_sys_ids(
+                    domain=p_state.filter_domain,
+                    author=p_state.filter_author,
+                    work=p_state.filter_work,
+                    date_from=p_state.filter_date_from,
+                    date_to=p_state.filter_date_to,
+                    material_exclude=p_state.filter_material_exclude or None,
+                )
+
+            result = await run.io_bound(_compute)
+            if result is not None:
+                p_state.filter_manuscript_count = len(result)
+                p_state.restrict_sys_ids = result
+            else:
+                p_state.filter_manuscript_count = None
+                p_state.restrict_sys_ids = None
+            _update_p_chip_bar()
+
+        # --- Filter change handlers ---
+        def _on_p_domain_change(e=None):
+            val = p_domain_select.value
+            p_state.filter_domain = val
+            _persist('parallels_filter_domain', val)
+            _refresh_p_author_options()
+            _refresh_p_work_options()
+            _recompute_p_filter_count()
+            _update_p_chip_bar()
+
+        def _on_p_author_change(e=None):
+            val = p_author_select.value
+            p_state.filter_author = val
+            opts = p_author_select.options
+            if isinstance(opts, dict) and val and val in opts:
+                raw = opts[val]
+                p_state.filter_author_name = raw.split(' (')[0].strip()
+            else:
+                p_state.filter_author_name = val or ''
+            _persist('parallels_filter_author', val)
+            _persist('parallels_filter_author_name', p_state.filter_author_name)
+            _refresh_p_work_options()
+            _recompute_p_filter_count()
+            _update_p_chip_bar()
+
+        def _on_p_work_change(e=None):
+            val = p_work_select.value
+            p_state.filter_work = val
+            opts = p_work_select.options
+            if isinstance(opts, dict) and val and val in opts:
+                raw = opts[val]
+                p_state.filter_work_name = raw.split(' (')[0].strip()
+            else:
+                p_state.filter_work_name = val or ''
+            _persist('parallels_filter_work', val)
+            _persist('parallels_filter_work_name', p_state.filter_work_name)
+            _recompute_p_filter_count()
+            _update_p_chip_bar()
+
+        def _on_p_date_from_change(e=None):
+            val = p_date_from_input.value
+            p_state.filter_date_from = int(val) if val is not None and val != '' else None
+            _persist('parallels_filter_date_from', p_state.filter_date_from)
+            _recompute_p_filter_count()
+            _update_p_chip_bar()
+
+        def _on_p_date_to_change(e=None):
+            val = p_date_to_input.value
+            p_state.filter_date_to = int(val) if val is not None and val != '' else None
+            _persist('parallels_filter_date_to', p_state.filter_date_to)
+            _recompute_p_filter_count()
+            _update_p_chip_bar()
+
+        def _on_p_exclude_printed_change(e=None):
+            if p_exclude_printed_cb.value:
+                if 'Printed' not in p_state.filter_material_exclude:
+                    p_state.filter_material_exclude.append('Printed')
+            else:
+                if 'Printed' in p_state.filter_material_exclude:
+                    p_state.filter_material_exclude.remove('Printed')
+            _persist('parallels_filter_material_exclude', p_state.filter_material_exclude)
+            _recompute_p_filter_count()
+            _update_p_chip_bar()
+
+        # Wire up change handlers
+        p_domain_select.on('update:model-value', _on_p_domain_change)
+        p_author_select.on('update:model-value', _on_p_author_change)
+        p_work_select.on('update:model-value', _on_p_work_change)
+        p_date_from_input.on('blur', _on_p_date_from_change)
+        p_date_to_input.on('blur', _on_p_date_to_change)
+        p_exclude_printed_cb.on('update:model-value', _on_p_exclude_printed_change)
+
+        # Initialize chip bar on page load
+        _update_p_chip_bar()
 
         # === Filter Text (Collapsible) ===
         # State for loaded sources: {ref: cleaned_text}
@@ -1307,10 +1848,46 @@ def create_parallels_page(initial_text: str = None):
             return
         entry = history[index]
         state_snapshot = entry.get('state', {})
+        params = entry.get('params', {})
 
         # Restore source text
         if state_snapshot.get('source_text'):
             text_input.value = state_snapshot['source_text']
+
+        # Restore filter state from history entry
+        filters = params.get('filters')
+        if filters and isinstance(filters, dict):
+            p_state.filter_domain = filters.get('domain')
+            p_state.filter_author = filters.get('author')
+            p_state.filter_author_name = filters.get('author_name', '')
+            p_state.filter_work = filters.get('work')
+            p_state.filter_work_name = filters.get('work_name', '')
+            p_state.filter_date_from = filters.get('date_from')
+            p_state.filter_date_to = filters.get('date_to')
+            p_state.filter_material_exclude = filters.get('material_exclude', [])
+            # Update filter UI elements
+            p_domain_select.value = p_state.filter_domain
+            p_author_select.value = p_state.filter_author
+            p_work_select.value = p_state.filter_work
+            p_date_from_input.value = p_state.filter_date_from
+            p_date_to_input.value = p_state.filter_date_to
+            p_exclude_printed_cb.value = 'Printed' in p_state.filter_material_exclude
+            # Persist restored filters
+            _persist('parallels_filter_domain', p_state.filter_domain)
+            _persist('parallels_filter_author', p_state.filter_author)
+            _persist('parallels_filter_author_name', p_state.filter_author_name)
+            _persist('parallels_filter_work', p_state.filter_work)
+            _persist('parallels_filter_work_name', p_state.filter_work_name)
+            _persist('parallels_filter_date_from', p_state.filter_date_from)
+            _persist('parallels_filter_date_to', p_state.filter_date_to)
+            _persist('parallels_filter_material_exclude', p_state.filter_material_exclude)
+            _update_p_chip_bar()
+
+        # Restore per-manuscript exclusions
+        if state_snapshot.get('excluded_manuscript_ids'):
+            p_state.excluded_manuscript_ids = set(state_snapshot['excluded_manuscript_ids'])
+            _persist('parallels_excluded_manuscript_ids', list(p_state.excluded_manuscript_ids))
+            _update_p_chip_bar()
 
         # Restore results and state from snapshot
         if state_snapshot.get('results'):
@@ -1527,12 +2104,23 @@ def create_parallels_page(initial_text: str = None):
                         params={
                             'chunk_size': int(chunk_size.value) if chunk_size.value else 5,
                             'mode': mode_select.value or 'exact',
+                            'filters': {
+                                'domain': p_state.filter_domain,
+                                'author': p_state.filter_author,
+                                'author_name': p_state.filter_author_name,
+                                'work': p_state.filter_work,
+                                'work_name': p_state.filter_work_name,
+                                'date_from': p_state.filter_date_from,
+                                'date_to': p_state.filter_date_to,
+                                'material_exclude': p_state.filter_material_exclude,
+                            } if _has_active_filters() else None,
                         },
                         state_snapshot={
                             'source_text': source_text,
                             'results': main_results[:500],
                             'filtered_results': filtered_results[:500] if filtered_results else [],
                             'domain_exclusions': sorted(p_state.domain_exclusions),
+                            'excluded_manuscript_ids': sorted(p_state.excluded_manuscript_ids),
                         },
                     )
                 except Exception:
@@ -1855,6 +2443,15 @@ def create_parallels_page(initial_text: str = None):
             h3(tr('No parallels found'), classes='text-lg mt-4', style='color: var(--text-secondary);')
             ui.label(tr('Try adjusting your search parameters')).classes('text-sm').style('color: var(--text-muted);')
 
+    def _rerender_with_exclusions():
+        """Re-render results applying per-manuscript exclusions and domain filters."""
+        main_results = p_state.results
+        filtered_results = p_state.filtered_results
+        if p_state.domain_exclusions and p_state.has_domain_data:
+            main_results = _filter_parallels_by_domain(main_results)
+            filtered_results = _filter_parallels_by_domain(filtered_results) if filtered_results else filtered_results
+        render_results(main_results, filtered_results)
+
     def render_results(results, filtered_results=None, is_partial=False):
         try:
             _ = results_container.client
@@ -1967,6 +2564,17 @@ def create_parallels_page(initial_text: str = None):
 
         sorted_filtered_groups = sorted(filtered_grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
 
+        # Separate per-manuscript excluded groups from main results
+        excluded_ms_groups = []
+        visible_groups = []
+        for group_key, group_data in sorted_groups:
+            sid = group_data.get('sys_id')
+            if sid and sid in p_state.excluded_manuscript_ids:
+                excluded_ms_groups.append((group_key, group_data))
+            else:
+                visible_groups.append((group_key, group_data))
+        sorted_groups = visible_groups
+
         # Lazy loading configuration
         BATCH_SIZE = 50
         main_displayed = [0]  # Use list to allow modification in nested function
@@ -2050,6 +2658,40 @@ def create_parallels_page(initial_text: str = None):
 
             load_more_filtered_inner()
 
+        # Per-manuscript excluded results in collapsible section (separate from filtered)
+        if excluded_ms_groups:
+            with results_container:
+                with ui.expansion(
+                    text=f"{tr('Excluded Manuscripts')} ({len(excluded_ms_groups)})",
+                    icon='remove_circle_outline',
+                    value=False  # collapsed by default
+                ).classes('w-full').style(
+                    'border: 1px solid var(--border-light); border-radius: 8px; margin-top: 16px;'
+                ).props('dense header-class="text-grey-7 text-subtitle1 text-weight-medium"'):
+                    for group_key, group_data in excluded_ms_groups:
+                        sid = group_data.get('sys_id')
+                        with ui.row().classes('w-full items-center justify-between py-2 px-4').style(
+                            'border-bottom: 1px solid var(--border-light);'
+                        ):
+                            label_parts = [group_data['shelfmark']]
+                            if sid == p_state.auto_excluded_source_id:
+                                label_parts.append(f"({tr('Source manuscript')})")
+                            ui.label(' '.join(label_parts)).classes('text-sm').style(
+                                'color: var(--text-secondary);'
+                            )
+                            # Restore button
+                            def _restore_manuscript(restore_sid=sid):
+                                p_state.excluded_manuscript_ids.discard(restore_sid)
+                                if restore_sid == p_state.auto_excluded_source_id:
+                                    p_state.auto_excluded_source_id = None
+                                _persist('parallels_excluded_manuscript_ids', list(p_state.excluded_manuscript_ids))
+                                _update_p_chip_bar()
+                                _rerender_with_exclusions()
+
+                            ui.button(
+                                icon='undo', on_click=_restore_manuscript
+                            ).props('flat round dense size=sm color=primary').tooltip(tr('Restore'))
+
     def create_manuscript_group(group_data, is_filtered=False):
         """Create an expandable manuscript group with its parallels."""
         shelfmark = group_data['shelfmark']
@@ -2131,6 +2773,22 @@ def create_parallels_page(initial_text: str = None):
                     ui.badge(f"{tr('Max')}: {int(max_score)}", color=max_color).classes('text-xs')
                     avg_color = 'green' if avg_score > 60 else 'amber' if avg_score > 35 else 'gray'
                     ui.badge(f"{tr('Avg')}: {int(avg_score)}", color=avg_color).classes('text-xs')
+
+                    # Per-manuscript exclude button
+                    if sys_id and not is_filtered:
+                        def _exclude_manuscript(sid=sys_id):
+                            p_state.excluded_manuscript_ids.add(sid)
+                            _persist('parallels_excluded_manuscript_ids', list(p_state.excluded_manuscript_ids))
+                            _update_p_chip_bar()
+                            # Re-render results with exclusion applied
+                            _rerender_with_exclusions()
+
+                        is_auto_excluded = sys_id == p_state.auto_excluded_source_id
+                        excl_tooltip = tr('Source manuscript') if is_auto_excluded else tr('Exclude this manuscript')
+                        ui.button(
+                            icon='remove_circle_outline',
+                            on_click=_exclude_manuscript
+                        ).props('flat round dense size=sm color=grey').tooltip(excl_tooltip)
 
             # All matches (initially visible in compact form)
             with ui.column().classes('w-full').style('background: var(--bg-secondary);'):
