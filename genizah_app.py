@@ -8309,6 +8309,31 @@ class GenizahGUI(QMainWindow):
         action_discovery = menu.addAction(tr("Share Discovery..."))
         action_discovery.triggered.connect(lambda: self._context_share_discovery(sys_id, shelfmark))
 
+        # Copy actions
+        menu.addSeparator()
+
+        action_copy_shelfmark = menu.addAction(tr("Copy Shelfmark"))
+        action_copy_shelfmark.triggered.connect(lambda: QApplication.clipboard().setText(shelfmark))
+
+        title_item = self.results_table.item(row, self.COL_TITLE)
+        title_text = title_item.text() if title_item else ''
+        action_copy_title = menu.addAction(tr("Copy Title"))
+        action_copy_title.triggered.connect(lambda: QApplication.clipboard().setText(title_text))
+
+        lib_item = self.results_table.item(row, self.COL_LIBRARY)
+        lib_text = lib_item.text() if lib_item else ''
+        action_copy_library = menu.addAction(tr("Copy Library"))
+        action_copy_library.triggered.connect(lambda: QApplication.clipboard().setText(lib_text))
+
+        action_copy_sysid = menu.addAction(tr("Copy Sys ID"))
+        action_copy_sysid.triggered.connect(lambda: QApplication.clipboard().setText(sys_id))
+
+        # Copy full row as tab-separated text
+        row_parts = [shelfmark, title_text, lib_text, sys_id]
+        row_text = '\t'.join(p for p in row_parts if p)
+        action_copy_row = menu.addAction(tr("Copy Row"))
+        action_copy_row.triggered.connect(lambda: QApplication.clipboard().setText(row_text))
+
         menu.exec(self.results_table.mapToGlobal(pos))
 
     def _context_view_document(self, sys_id):
