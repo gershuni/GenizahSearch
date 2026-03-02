@@ -5012,6 +5012,18 @@ class DomainFilterDialog(QDialog):
         self.tree.blockSignals(False)
         self.tree.expandAll()
 
+    def _iter_all_items(self):
+        """Yield every item in the tree with its depth level."""
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent = root.child(i)
+            yield parent, 0
+            for j in range(parent.childCount()):
+                child = parent.child(j)
+                yield child, 1
+                for k in range(child.childCount()):
+                    yield child.child(k), 2
+
     def _filter_tree(self):
         """Filter tree items by search text."""
         search_text = self.search_input.text().lower()
@@ -5066,30 +5078,16 @@ class DomainFilterDialog(QDialog):
     def _check_all(self):
         """Check all items (no filtering)."""
         self.tree.blockSignals(True)
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            parent_item.setCheckState(0, Qt.CheckState.Checked)
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                child_item.setCheckState(0, Qt.CheckState.Checked)
-                for k in range(child_item.childCount()):
-                    child_item.child(k).setCheckState(0, Qt.CheckState.Checked)
+        for item, _ in self._iter_all_items():
+            item.setCheckState(0, Qt.CheckState.Checked)
         self.tree.blockSignals(False)
         self._update_summary()
 
     def _uncheck_all(self):
         """Uncheck all items (exclude all domains)."""
         self.tree.blockSignals(True)
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            parent_item.setCheckState(0, Qt.CheckState.Unchecked)
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                child_item.setCheckState(0, Qt.CheckState.Unchecked)
-                for k in range(child_item.childCount()):
-                    child_item.child(k).setCheckState(0, Qt.CheckState.Unchecked)
+        for item, _ in self._iter_all_items():
+            item.setCheckState(0, Qt.CheckState.Unchecked)
         self.tree.blockSignals(False)
         self._update_summary()
 
@@ -5099,49 +5097,19 @@ class DomainFilterDialog(QDialog):
             return
 
         self.tree.blockSignals(True)
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            if parent_domain in self.excluded_domains:
-                parent_item.setCheckState(0, Qt.CheckState.Unchecked)
-
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
-                if child_domain in self.excluded_domains:
-                    child_item.setCheckState(0, Qt.CheckState.Unchecked)
-
-                for k in range(child_item.childCount()):
-                    sc_item = child_item.child(k)
-                    sc_domain = sc_item.data(0, Qt.ItemDataRole.UserRole)
-                    if sc_domain in self.excluded_domains:
-                        sc_item.setCheckState(0, Qt.CheckState.Unchecked)
-
+        for item, _ in self._iter_all_items():
+            domain = item.data(0, Qt.ItemDataRole.UserRole)
+            if domain in self.excluded_domains:
+                item.setCheckState(0, Qt.CheckState.Unchecked)
         self.tree.blockSignals(False)
 
     def get_excluded_domains(self):
         """Return set of excluded (unchecked) domain names."""
         excluded = set()
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            if parent_item.checkState(0) == Qt.CheckState.Unchecked:
-                parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
-                excluded.add(parent_domain)
-
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                if child_item.checkState(0) == Qt.CheckState.Unchecked:
-                    child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
-                    excluded.add(child_domain)
-
-                for k in range(child_item.childCount()):
-                    sc_item = child_item.child(k)
-                    if sc_item.checkState(0) == Qt.CheckState.Unchecked:
-                        sc_domain = sc_item.data(0, Qt.ItemDataRole.UserRole)
-                        excluded.add(sc_domain)
-
+        for item, _ in self._iter_all_items():
+            if item.checkState(0) == Qt.CheckState.Unchecked:
+                domain = item.data(0, Qt.ItemDataRole.UserRole)
+                excluded.add(domain)
         return excluded
 
     def _update_summary(self):

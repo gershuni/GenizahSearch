@@ -27,11 +27,15 @@ from datetime import datetime
 from pathlib import Path
 
 
-def normalize_shelfmark(shelf: str) -> str:
+def normalize_pgp_shelfmark(shelf: str) -> str:
     """
-    Normalize a shelfmark for comparison.
+    Normalize a PGP shelfmark to match FIST/GenizahSearch format.
 
-    Handles variations like:
+    This is NOT the same as genizah_core.normalize_shelfmark (which does
+    simple alphanumeric normalization). This function handles PGP-specific
+    library prefix stripping and format conversion.
+
+    Examples:
     - "Cambridge University Library Ms. T-S 13J35.3" → "t-s 13j35.3"
     - "T-S 13 J 15.3" → "t-s 13j15.3"
     - "Ms. Or. 1080 J 35" → "or.1080 j35"
@@ -158,7 +162,7 @@ def load_genizahsearch_shelfmarks(libraries_path: str, fist_supplement_path: str
 
             # Split pipe-separated variants and index all
             for variant in call_numbers.split('|'):
-                normalized = normalize_shelfmark(variant)
+                normalized = normalize_pgp_shelfmark(variant)
                 if normalized:
                     # Keep first match (most specific)
                     if normalized not in gs_lookup:
@@ -173,7 +177,7 @@ def load_genizahsearch_shelfmarks(libraries_path: str, fist_supplement_path: str
                 shelfmark = row.get('shelfmark', '')
                 alma_id = row.get('alma_id', '')
                 if shelfmark and alma_id:
-                    normalized = normalize_shelfmark(shelfmark)
+                    normalized = normalize_pgp_shelfmark(shelfmark)
                     if normalized and normalized not in gs_lookup:
                         gs_lookup[normalized] = alma_id
                         fist_count += 1
@@ -265,13 +269,13 @@ def match_to_genizahsearch(shelfmark: str, gs_lookup: dict) -> tuple:
     parts = [p.strip() for p in shelfmark.split('+')]
 
     for part in parts:
-        normalized = normalize_shelfmark(part)
+        normalized = normalize_pgp_shelfmark(part)
         if normalized in gs_lookup:
             return gs_lookup[normalized], part
 
     # Try without sub-part (e.g., "T-S 13J35" instead of "T-S 13J35.3")
     for part in parts:
-        normalized = normalize_shelfmark(part)
+        normalized = normalize_pgp_shelfmark(part)
         # Remove trailing .number
         base = re.sub(r'\.\d+$', '', normalized)
         if base in gs_lookup:

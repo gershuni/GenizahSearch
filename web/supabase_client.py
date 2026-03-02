@@ -12,19 +12,21 @@ Replaces the FastAPI backend for data operations.
 """
 
 import os
+import sys
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlencode
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION - credentials centralized in shared/supabase_provider.py
 # ============================================================================
 
-# Load from environment variables (recommended for production)
-# Or use defaults for development
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from shared.supabase_provider import get_url as _get_url, get_anon_key as _get_anon_key
+
+SUPABASE_URL = _get_url()
+SUPABASE_ANON_KEY = _get_anon_key()
 
 # Singleton client instance
 _client: Optional[Client] = None
