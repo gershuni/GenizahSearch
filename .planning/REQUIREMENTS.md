@@ -26,11 +26,11 @@ Requirements for v7.0.0 Catalog Navigation & Transcription Search. Each maps to 
 
 ### Pre-Search Filtering
 
-- [ ] **FILT-01**: User can include/exclude FJMS domain classifications before running a text search
-- [ ] **FILT-02**: User can include/exclude catalog identifications (work/title) before running a text search
-- [ ] **FILT-03**: User can include/exclude author attributions before running a text search
-- [ ] **FILT-04**: Pre-search filters work with all search modes (regular, Responsa, PGP tags, parallels)
-- [ ] **FILT-05**: Pre-search filtering works in both web and desktop apps
+- [x] **FILT-01**: User can include/exclude FJMS domain classifications before running a text search
+- [x] **FILT-02**: User can include/exclude catalog identifications (work/title) before running a text search
+- [x] **FILT-03**: User can include/exclude author attributions before running a text search
+- [x] **FILT-04**: Pre-search filters work with all search modes (regular, Responsa, PGP tags, parallels)
+- [x] **FILT-05**: Pre-search filtering works in both web and desktop apps
 
 ### Transcription Import
 
@@ -94,11 +94,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CAT-03 | Phase 42 | Pending |
 | CAT-04 | Phase 42 | Pending |
 | CAT-05 | Phase 42 | Pending |
-| FILT-01 | Phase 43 | Pending |
-| FILT-02 | Phase 43 | Pending |
-| FILT-03 | Phase 43 | Pending |
-| FILT-04 | Phase 43 | Pending |
-| FILT-05 | Phase 43 | Pending |
+| FILT-01 | Phase 43 | Complete |
+| FILT-02 | Phase 43 | Complete |
+| FILT-03 | Phase 43 | Complete |
+| FILT-04 | Phase 43 | Complete |
+| FILT-05 | Phase 43 | Complete |
 | TRANS-01 | Phase 44 | Pending |
 | TRANS-02 | Phase 44 | Pending |
 | SRCH-01 | Phase 45 | Pending |
