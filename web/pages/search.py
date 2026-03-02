@@ -736,16 +736,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
                         # Selection counter (initially hidden)
                         selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
+                        # Helper: toggle CSS visibility (reserves layout space, prevents CLS)
+                        def _set_btn_visible(btn, visible):
+                            btn.style(f'visibility: {"visible" if visible else "hidden"};')
+
                         # Domain filter button (hidden until search with domain data)
                         domain_filter_btn = ui.button(
                             tr('Filter by domains'), icon='category',
                             on_click=lambda: _open_domain_filter_dialog()
                         ).classes('text-sm').props('outline dense no-caps')
-                        domain_filter_btn.set_visibility(False)
+                        _set_btn_visible(domain_filter_btn, False)
 
                         # Restore visibility if stored exclusions exist (persistence across navigation)
                         if search_state.domain_exclusions:
-                            domain_filter_btn.set_visibility(True)
+                            _set_btn_visible(domain_filter_btn, True)
                             n_excl = len(search_state.domain_exclusions)
                             domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
                             domain_filter_btn.props('outline dense no-caps color=red')
@@ -780,7 +784,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             tr('Filter Printed'), icon='local_printshop',
                             on_click=lambda: _toggle_printed_filter()
                         ).classes('text-sm').props('outline dense no-caps')
-                        printed_filter_btn.set_visibility(False)
+                        _set_btn_visible(printed_filter_btn, False)
 
                     with ui.row().classes('gap-2'):
                         # Bulk actions (initially hidden)
@@ -839,7 +843,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )
 
                 results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
-                    'background: var(--bg-secondary);'
+                    'background: var(--bg-secondary); min-height: 300px;'
                 )
 
             # === RIGHT: Result Viewer ===
@@ -2316,13 +2320,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.printed_ids = printed_ids
 
         # Show/hide printed filter button if there are printed items among results
-        printed_filter_btn.set_visibility(len(printed_ids) > 0)
+        _set_btn_visible(printed_filter_btn, len(printed_ids) > 0)
 
         # Slice result_domains from all_result_domains for badge rendering
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(all_sys_ids)}
 
         # Show/hide domain filter button and update styling
-        domain_filter_btn.set_visibility(search_state.has_domain_data)
+        _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
         _update_domain_filter_btn()
 
         # Check if search was cancelled before resetting
@@ -2442,7 +2446,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         page_results = results[start:end]
 
         with results_container:
-            # Pagination controls at top (only if more than one page)
+            # Pagination controls at top (always reserve space to prevent CLS)
             if total_pages > 1:
                 with ui.row().classes('w-full justify-between items-center px-4 pt-2'):
                     ui.label(f"{start + 1}-{end} {tr('of')} {total}").classes('text-sm').style('color: var(--text-muted);')
@@ -2451,13 +2455,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         render_results(results, page=search_state.current_page, scroll_to_top=True)
                     ui.pagination(1, total_pages, value=page_idx + 1,
                         on_change=on_page_change_top).props('max-pages=7 boundary-numbers')
+            else:
+                # Invisible placeholder reserving same height as pagination row
+                ui.element('div').style('height: 40px; visibility: hidden;')
 
             # Render only this page of results
             with ui.column().classes('w-full gap-2 p-4'):
                 for i, res in enumerate(page_results):
                     create_result_card(start + i, res)
 
-            # Pagination controls at bottom (only if more than one page)
+            # Pagination controls at bottom (always reserve space to prevent CLS)
             if total_pages > 1:
                 with ui.row().classes('w-full justify-center items-center px-4 pb-2'):
                     def on_page_change_bottom(e):
@@ -2465,6 +2472,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         render_results(results, page=search_state.current_page, scroll_to_top=True)
                     ui.pagination(1, total_pages, value=page_idx + 1,
                         on_change=on_page_change_bottom).props('max-pages=7 boundary-numbers')
+            else:
+                ui.element('div').style('height: 40px; visibility: hidden;')
 
             # Collapsible excluded results section (domain-excluded)
             excluded = search_state.domain_excluded_results

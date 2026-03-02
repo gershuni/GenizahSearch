@@ -304,9 +304,9 @@ def create_layout():
     # On mobile (< 768px), we will close it after page load via JavaScript
     drawer_open = app.storage.user.get('drawer_open', True)
 
-    # Set drawer side based on RTL mode - Quasar will handle page padding correctly
-    drawer_side = 'right' if rtl_mode else 'left'
-    main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+    # Always use side='left' — keeps drawer on the left in both LTR and RTL modes.
+    # Quasar RTL flipping is unreliable (loads after initial render), so we pin to left.
+    main_drawer = ui.drawer(side='left', value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
 
     # Close drawer on mobile by default (screen width < 768px)
     # This runs once on page load to ensure mobile users don't see the drawer overlay
@@ -533,15 +533,18 @@ def apply_theme_immediately():
 
             // Activate Quasar RTL mode when ready
             var activateQuasarRtl = function() {{
-                if (typeof Quasar !== 'undefined' && isRtl) {{
-                    // Try to use Hebrew language pack first, fallback to generic RTL
-                    if (Quasar.lang && Quasar.lang.he) {{
-                        Quasar.lang.set(Quasar.lang.he);
-                    }} else if (Quasar.lang && Quasar.lang.set) {{
-                        // Fallback: Set RTL mode without full language pack
-                        Quasar.lang.set({{ rtl: true }});
+                if (typeof Quasar !== 'undefined' && Quasar.lang && Quasar.lang.set) {{
+                    if (isRtl) {{
+                        // Try Hebrew language pack first, fallback to generic RTL
+                        if (Quasar.lang.he) {{
+                            Quasar.lang.set(Quasar.lang.he);
+                        }} else {{
+                            Quasar.lang.set({{ rtl: true }});
+                        }}
                     }}
+                    return true;
                 }}
+                return false;
             }};
 
             // Execute immediately
@@ -549,12 +552,18 @@ def apply_theme_immediately():
 
             // Backup for body element when it exists
             if (document.readyState === 'loading') {{
-                document.addEventListener('DOMContentLoaded', function() {{
-                    applyTheme();
-                    activateQuasarRtl();
-                }});
-            }} else {{
-                activateQuasarRtl();
+                document.addEventListener('DOMContentLoaded', applyTheme);
+            }}
+
+            // Poll for Quasar availability — it loads after DOMContentLoaded
+            // so the old DOMContentLoaded handler missed it on first page load.
+            // NiceGUI components render after WebSocket connect (~100-300ms),
+            // so 10ms polling activates RTL well before the drawer appears.
+            if (!activateQuasarRtl()) {{
+                var rtlPoll = setInterval(function() {{
+                    if (activateQuasarRtl()) clearInterval(rtlPoll);
+                }}, 10);
+                setTimeout(function() {{ clearInterval(rtlPoll); }}, 5000);
             }}
         }})();
     </script>'''

@@ -67,7 +67,7 @@ def create_page():
                                 if state.is_ready():
                                     val_label.text = str(value_fn())
 
-                            ui.timer(1.0, refresh, once=True)
+                            ui.timer(0.1, refresh, once=True)
 
                     def get_doc_count():
                         if state.searcher and state.searcher.searcher:
@@ -90,7 +90,7 @@ def create_page():
                 # Manuscript image thumbnail
                 ui.html(
                     '<img src="https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T-S_K5.13%29_%28cropped%29.jpg"'
-                    ' alt="" style="width: 100px; height: 80px; object-fit: cover; border-radius: 8px; opacity: 0.9;">',
+                    ' alt="" loading="lazy" style="width: 100px; height: 80px; object-fit: cover; border-radius: 8px; opacity: 0.9;">',
                     sanitize=False
                 )
                 with ui.column().classes('flex-1 gap-1'):
@@ -306,7 +306,7 @@ def create_page():
                         with ui.column().classes('w-full items-center py-8'):
                             ui.spinner(size='lg')
 
-            ui.timer(1.0, load_recent, once=True)
+            ui.timer(0.3, load_recent, once=True)
 
         # === System Status Section ===
         with ui.expansion(tr('System Status'), icon='info').classes('w-full mt-4'):
@@ -322,7 +322,7 @@ def create_page():
                             if state.is_ready():
                                 val.text = str(value_fn())
 
-                        ui.timer(1.5, refresh, once=True)
+                        ui.timer(0.5, refresh, once=True)
 
                 status_item(
                     tr('Indexed Pages'),
