@@ -598,7 +598,8 @@ def search_page_route(
     q: str = None, tag: str = None,
     mode: str = None, variants: int = None,
     ja: int = None, flex_spaces: int = None,
-    bidirectional: int = None, domain: str = None
+    bidirectional: int = None, domain: str = None,
+    from_browse: int = None
 ):
     set_current_page('/search')
     ui.add_head_html(META_TAGS)
@@ -614,7 +615,8 @@ def search_page_route(
             initial_query=q, initial_tag=tag,
             initial_mode=mode, initial_variants=variants,
             initial_ja=ja, initial_flex_spaces=flex_spaces,
-            initial_bidirectional=bidirectional, initial_domain=domain
+            initial_bidirectional=bidirectional, initial_domain=domain,
+            from_browse=from_browse
         )
 
 @ui.page('/parallels')
