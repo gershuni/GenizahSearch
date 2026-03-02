@@ -18,49 +18,42 @@ from web.components.typography import h1, h2, h3
 def create_page():
     """Create the research dashboard home page."""
 
-    with ui.column().classes('w-full max-w-7xl mx-auto gap-8 fade-in'):
+    with ui.column().classes('w-full max-w-7xl mx-auto gap-3 fade-in'):
 
-        # === OCR Disclaimer Banner (dismissible) ===
+        # === OCR Disclaimer Banner (dismissible, compact single-line) ===
         if not app.storage.user.get('ocr_disclaimer_dismissed', False):
             banner_dir = 'rtl' if is_rtl() else 'ltr'
-            with ui.card().classes('w-full p-4 border-l-4').style(
-                f'background: var(--bg-tertiary); border-left-color: var(--primary-600); direction: {banner_dir};'
+            with ui.element('div').classes('w-full px-4 py-2 flex items-center gap-3').style(
+                f'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); direction: {banner_dir};'
             ) as ocr_banner:
-                with ui.row().classes('w-full items-center gap-4'):
-                    ui.icon('psychology').classes('text-2xl').style('color: var(--primary-600);')
-                    with ui.column().classes('flex-1 gap-1'):
-                        ui.label(tr('Computer-read manuscripts — expect some reading errors!')).classes('text-sm font-medium').style('color: var(--text-primary);')
-                        with ui.row().classes('items-center gap-2 flex-wrap'):
-                            ui.label(tr('The texts were transcribed automatically by AI. Our smart search tools help find results despite mistakes.')).classes('text-xs').style('color: var(--text-secondary);')
-                            ui.link(tr('Learn more →'), '/about').classes('text-xs font-medium').style('color: var(--primary-600); text-decoration: none;')
-                    def dismiss_banner():
-                        app.storage.user['ocr_disclaimer_dismissed'] = True
-                        ocr_banner.delete()
-                    ui.button(tr('Got it'), icon='check', on_click=dismiss_banner).props('flat dense')
+                ui.icon('psychology').classes('text-base').style('color: var(--primary-600);')
+                ui.label(tr('Computer-read manuscripts — expect some reading errors!')).classes('text-xs flex-1').style('color: var(--text-secondary);')
+                ui.link(tr('Learn more →'), '/about').classes('text-xs').style('color: var(--primary-600); text-decoration: none;')
+                def dismiss_banner():
+                    app.storage.user['ocr_disclaimer_dismissed'] = True
+                    ocr_banner.delete()
+                ui.button(icon='close', on_click=dismiss_banner).props('flat dense round size=xs')
 
-        # === Hero Section ===
-        with ui.card().classes('w-full p-8 bg-gradient-to-br from-emerald-50 to-teal-50 border-0').style(
-            'background: linear-gradient(135deg, var(--primary-50) 0%, var(--bg-tertiary) 100%);'
+        # === Hero Section (compact) ===
+        with ui.element('div').classes('w-full px-6 py-3').style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
-            with ui.row().classes('w-full items-center justify-between flex-wrap gap-6'):
-                with ui.column().classes('gap-2'):
-                    # Changed to H1
+            with ui.row().classes('w-full items-center justify-between gap-4'):
+                with ui.row().classes('items-center gap-3'):
                     h1(tr('Welcome to Dicta Genizah Search'),
-                       classes='text-2xl font-bold',
-                       style='color: var(--primary-800);')
-
+                       classes='text-lg font-bold',
+                       style='color: var(--text-primary); margin: 0;')
+                    ui.label('|').style('color: var(--text-muted);')
                     ui.label(tr('Advanced research tools for Cairo Genizah manuscripts')).classes(
-                        'text-lg'
+                        'text-sm'
                     ).style('color: var(--text-secondary);')
 
-                # Quick Stats Row
-                with ui.row().classes('gap-4'):
+                # Inline stats
+                with ui.row().classes('items-center gap-4'):
                     def mini_stat(icon, value_fn, label):
-                        with ui.card().classes('px-6 py-4 text-center').style(
-                            'background: var(--bg-card); min-width: 120px;'
-                        ):
-                            ui.icon(icon).classes('text-2xl').style('color: var(--primary-600);')
-                            val_label = ui.label('...').classes('text-2xl font-bold mt-1').style('color: var(--text-primary);')
+                        with ui.row().classes('items-center gap-1'):
+                            ui.icon(icon).classes('text-base').style('color: var(--primary-600);')
+                            val_label = ui.label('...').classes('text-sm font-bold').style('color: var(--text-primary);')
                             ui.label(label).classes('text-xs').style('color: var(--text-muted);')
 
                             def refresh():
@@ -106,82 +99,114 @@ def create_page():
         # Changed to H2
         h2(tr('Research Tools'), classes='text-xl font-bold mt-4', style='color: var(--text-primary);')
 
-        with ui.row().classes('w-full gap-6 flex-wrap'):
+        with ui.element('div').classes('w-full').style(
+            'display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;'
+        ):
 
             # Search Card
-            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+            with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/search')).on('keydown.enter', lambda: ui.navigate.to('/search')).on('keydown.space', lambda: ui.navigate.to('/search')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-6 items-center gap-4').style(
+                    with ui.row().classes('w-full p-4 items-center gap-3').style(
                         'background: linear-gradient(135deg, var(--primary-600), var(--primary-700));'
                     ):
-                        ui.icon('search').classes('text-4xl text-white')
-                        with ui.column().classes('gap-1'):
-                            # Changed to H3 inside card
-                            h3(tr('Text Search'), classes='text-lg font-bold text-white')
-                            ui.label(tr('Search in manuscripts')).classes('text-sm text-white/80')
+                        ui.icon('search').classes('text-3xl text-white')
+                        with ui.column().classes('gap-0'):
+                            h3(tr('Text Search'), classes='text-base font-bold text-white')
+                            ui.label(tr('Search in manuscripts')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-6 gap-4'):
-                        ui.label(tr('Search for words and phrases in the Genizah corpus')).style(
+                    with ui.column().classes('p-4 gap-3'):
+                        ui.label(tr('Search for words and phrases in the Genizah corpus')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
-
                         with ui.row().classes('gap-2 flex-wrap'):
                             for mode in ['Exact', 'Variants', 'Regex']:
                                 ui.badge(tr(mode)).props('outline').classes('text-xs')
 
-                        ui.button(tr('Start Search'), icon='arrow_back' if is_rtl() else 'arrow_forward').classes('btn-primary mt-2').props('tabindex=-1')
-
             # Parallels Card
-            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+            with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/parallels')).on('keydown.enter', lambda: ui.navigate.to('/parallels')).on('keydown.space', lambda: ui.navigate.to('/parallels')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-6 items-center gap-4').style(
+                    with ui.row().classes('w-full p-4 items-center gap-3').style(
                         'background: linear-gradient(135deg, #3b82f6, #1d4ed8);'
                     ):
-                        ui.icon('compare_arrows').classes('text-4xl text-white')
-                        with ui.column().classes('gap-1'):
-                            # Changed to H3 inside card
-                            h3(tr('Find Parallels'), classes='text-lg font-bold text-white')
-                            ui.label(tr('Composition Search')).classes('text-sm text-white/80')
+                        ui.icon('compare_arrows').classes('text-3xl text-white')
+                        with ui.column().classes('gap-0'):
+                            h3(tr('Find Parallels'), classes='text-base font-bold text-white')
+                            ui.label(tr('Composition Search')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-6 gap-4'):
-                        ui.label(tr('Enter a long text and find parallel texts in the Genizah')).style(
+                    with ui.column().classes('p-4 gap-3'):
+                        ui.label(tr('Enter a long text and find parallel texts in the Genizah')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
-
                         with ui.row().classes('gap-2 flex-wrap'):
                             ui.badge(tr('Lab Mode')).props('outline color=blue').classes('text-xs')
                             ui.badge(tr('Chunk Analysis')).props('outline color=blue').classes('text-xs')
 
-                        ui.button(tr('Find Parallels'), icon='arrow_back' if is_rtl() else 'arrow_forward').props('color=blue tabindex=-1').classes('mt-2')
-
-            # Browse Card
-            with ui.card().classes('flex-1 min-w-80 p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+            # Browse by Shelfmark Card
+            with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/browse')).on('keydown.enter', lambda: ui.navigate.to('/browse')).on('keydown.space', lambda: ui.navigate.to('/browse')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-6 items-center gap-4').style(
+                    with ui.row().classes('w-full p-4 items-center gap-3').style(
                         'background: linear-gradient(135deg, #f59e0b, #d97706);'
                     ):
-                        ui.icon('menu_book').classes('text-4xl text-white')
-                        with ui.column().classes('gap-1'):
-                            # Changed to H3 inside card
-                            h3(tr('Browse Manuscripts'), classes='text-lg font-bold text-white')
-                            ui.label(tr('Browse by shelfmark')).classes('text-sm text-white/80')
+                        ui.icon('menu_book').classes('text-3xl text-white')
+                        with ui.column().classes('gap-0'):
+                            h3(tr('Browse by Shelfmark'), classes='text-base font-bold text-white')
+                            ui.label(tr('Navigate through manuscript pages')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-6 gap-4'):
-                        ui.label(tr('Navigate through manuscript pages')).style(
+                    with ui.column().classes('p-4 gap-3'):
+                        ui.label(tr('Navigate through manuscript pages')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
-
                         with ui.row().classes('gap-2 flex-wrap'):
                             ui.badge(tr('Transcriptions')).props('outline color=amber').classes('text-xs')
                             ui.badge(tr('Images')).props('outline color=amber').classes('text-xs')
 
-                        ui.button(tr('Browse'), icon='arrow_back' if is_rtl() else 'arrow_forward').props('color=amber tabindex=-1').classes('mt-2')
+            # Browse by Identification Card
+            with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/catalog-browse')).on('keydown.enter', lambda: ui.navigate.to('/catalog-browse')).on('keydown.space', lambda: ui.navigate.to('/catalog-browse')):
+                with ui.column().classes('w-full'):
+                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                        'background: linear-gradient(135deg, #8b5cf6, #6d28d9);'
+                    ):
+                        ui.icon('category').classes('text-3xl text-white')
+                        with ui.column().classes('gap-0'):
+                            h3(tr('Browse by Identification'), classes='text-base font-bold text-white')
+                            ui.label(tr('Domains, authors & works')).classes('text-xs text-white/80')
+
+                    with ui.column().classes('p-4 gap-3'):
+                        ui.label(tr('Browse the manuscript corpus by scholarly domain classifications, author attributions, and work identifications.')).classes('text-sm').style(
+                            'color: var(--text-secondary);'
+                        )
+                        with ui.row().classes('gap-2 flex-wrap'):
+                            ui.badge(tr('Domains')).props('outline color=purple').classes('text-xs')
+                            ui.badge(tr('Authors')).props('outline color=purple').classes('text-xs')
+
+            # Community Card
+            with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
+                'role=button tabindex=0'
+            ).on('click', lambda: ui.navigate.to('/discoveries')).on('keydown.enter', lambda: ui.navigate.to('/discoveries')).on('keydown.space', lambda: ui.navigate.to('/discoveries')):
+                with ui.column().classes('w-full'):
+                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                        'background: linear-gradient(135deg, #ec4899, #be185d);'
+                    ):
+                        ui.icon('lightbulb').classes('text-3xl text-white')
+                        with ui.column().classes('gap-0'):
+                            h3(tr('Community'), classes='text-base font-bold text-white')
+                            ui.label(tr('Community discoveries, questions, and contributions')).classes('text-xs text-white/80')
+
+                    with ui.column().classes('p-4 gap-3'):
+                        ui.label(tr('View community discoveries, questions, and share your own findings')).classes('text-sm').style(
+                            'color: var(--text-secondary);'
+                        )
+                        with ui.row().classes('gap-2 flex-wrap'):
+                            ui.badge(tr('Discoveries')).props('outline color=pink').classes('text-xs')
+                            ui.badge(tr('Corrections')).props('outline color=pink').classes('text-xs')
 
         # === Secondary Actions Row ===
         with ui.row().classes('w-full gap-6 mt-4 flex-wrap'):

@@ -304,9 +304,9 @@ def create_layout():
     # On mobile (< 768px), we will close it after page load via JavaScript
     drawer_open = app.storage.user.get('drawer_open', True)
 
-    # Always use side='left' — keeps drawer on the left in both LTR and RTL modes.
-    # Quasar RTL flipping is unreliable (loads after initial render), so we pin to left.
-    main_drawer = ui.drawer(side='left', value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
+    # Set drawer side based on RTL mode - Quasar will handle page padding correctly
+    drawer_side = 'right' if rtl_mode else 'left'
+    main_drawer = ui.drawer(side=drawer_side, value=drawer_open, bordered=True).classes('shadow-xl').props('width=280 breakpoint=768')
 
     # Close drawer on mobile by default (screen width < 768px)
     # This runs once on page load to ensure mobile users don't see the drawer overlay
@@ -327,28 +327,20 @@ def create_layout():
     # Add ID for skip link target
     content_col.props('id=main-content')
 
-    # === "What's New" Banner (dismissible, shown once per version) ===
+    # === "What's New" Banner (dismissible, compact single-line) ===
     if app.storage.user.get('whats_new_dismissed') != WHATS_NEW_VERSION:
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
-            with ui.card().classes('w-full mx-auto max-w-5xl p-4 border-l-4 mt-4').style(
-                f'background: var(--bg-tertiary); border-left-color: #10b981; direction: {banner_dir};'
+            with ui.element('div').classes('w-full mx-auto max-w-5xl px-4 py-2 flex items-center gap-3 mt-2').style(
+                f'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); border-radius: 6px; direction: {banner_dir};'
             ) as whats_new_banner:
-                with ui.row().classes('w-full items-start gap-4'):
-                    ui.icon('new_releases').classes('text-2xl mt-1').style('color: #10b981;')
-                    with ui.column().classes('flex-1 gap-2'):
-                        ui.label(tr("New Features!")).classes('text-base font-bold').style('color: var(--text-primary);')
-                        with ui.column().classes('gap-1'):
-                            with ui.row().classes('items-start gap-2'):
-                                ui.label('•').style('color: var(--text-secondary);')
-                                ui.label(tr('Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search')).classes('text-sm').style('color: var(--text-secondary);')
-                            with ui.row().classes('items-start gap-2'):
-                                ui.label('•').style('color: var(--text-secondary);')
-                                ui.label(tr('Cross-links: domain and author labels on browse pages link directly to catalog browse filtered by that value')).classes('text-sm').style('color: var(--text-secondary);')
-                    def dismiss_whats_new():
-                        app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
-                        whats_new_banner.delete()
-                    ui.button(tr('Got it!'), icon='check', on_click=dismiss_whats_new).props('flat dense')
+                ui.icon('new_releases').classes('text-base').style('color: #10b981;')
+                ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
+                ui.label(tr('Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                def dismiss_whats_new():
+                    app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
+                    whats_new_banner.delete()
+                ui.button(icon='close', on_click=dismiss_whats_new).props('flat dense round size=xs')
 
     def toggle_drawer():
         """Toggle drawer and save state."""
@@ -533,18 +525,15 @@ def apply_theme_immediately():
 
             // Activate Quasar RTL mode when ready
             var activateQuasarRtl = function() {{
-                if (typeof Quasar !== 'undefined' && Quasar.lang && Quasar.lang.set) {{
-                    if (isRtl) {{
-                        // Try Hebrew language pack first, fallback to generic RTL
-                        if (Quasar.lang.he) {{
-                            Quasar.lang.set(Quasar.lang.he);
-                        }} else {{
-                            Quasar.lang.set({{ rtl: true }});
-                        }}
+                if (typeof Quasar !== 'undefined' && isRtl) {{
+                    // Try to use Hebrew language pack first, fallback to generic RTL
+                    if (Quasar.lang && Quasar.lang.he) {{
+                        Quasar.lang.set(Quasar.lang.he);
+                    }} else if (Quasar.lang && Quasar.lang.set) {{
+                        // Fallback: Set RTL mode without full language pack
+                        Quasar.lang.set({{ rtl: true }});
                     }}
-                    return true;
                 }}
-                return false;
             }};
 
             // Execute immediately
@@ -552,18 +541,12 @@ def apply_theme_immediately():
 
             // Backup for body element when it exists
             if (document.readyState === 'loading') {{
-                document.addEventListener('DOMContentLoaded', applyTheme);
-            }}
-
-            // Poll for Quasar availability — it loads after DOMContentLoaded
-            // so the old DOMContentLoaded handler missed it on first page load.
-            // NiceGUI components render after WebSocket connect (~100-300ms),
-            // so 10ms polling activates RTL well before the drawer appears.
-            if (!activateQuasarRtl()) {{
-                var rtlPoll = setInterval(function() {{
-                    if (activateQuasarRtl()) clearInterval(rtlPoll);
-                }}, 10);
-                setTimeout(function() {{ clearInterval(rtlPoll); }}, 5000);
+                document.addEventListener('DOMContentLoaded', function() {{
+                    applyTheme();
+                    activateQuasarRtl();
+                }});
+            }} else {{
+                activateQuasarRtl();
             }}
         }})();
     </script>'''
