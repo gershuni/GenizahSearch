@@ -761,6 +761,142 @@ class FjmsService:
             logger.error(f"FjmsService.get_printed_sys_ids error: {e}")
             return set()
 
+    def get_filter_sys_ids(
+        self,
+        domain: str = None,
+        author: str = None,
+        work: str = None,
+        date_from: int = None,
+        date_to: int = None,
+        include_undated: bool = False,
+        material_include: list[str] = None,
+        material_exclude: list[str] = None,
+    ) -> Optional[set]:
+        """Return the set of sys_ids matching all provided filter criteria (intersection).
+
+        Used for pre-search filtering: callers pass the result as restrict_sys_ids
+        to execute_search / search_composition_logic so that non-matching manuscripts
+        are skipped before expensive regex verification or chunk processing.
+
+        Args:
+            domain: Domain or parent-domain name (matches Domain OR ParentDomain).
+            author: Person ID (int string, v5+) or AuthorText string (legacy).
+            work: GenizahTitleId (int string, v5+) or Title string (legacy).
+            date_from: Minimum year inclusive.
+            date_to: Maximum year inclusive.
+            include_undated: If True AND date filter active, include records with no date.
+            material_include: List of FragmentMaterial values to INCLUDE (e.g. ["Printed"]).
+            material_exclude: List of FragmentMaterial values to EXCLUDE (e.g. ["Printed"]).
+
+        Returns:
+            None when ALL filter params are None/empty (meaning "no restriction").
+            set of matching AlmaId strings when any filter is active.
+            Empty set when filters are active but match nothing.
+        """
+        # Fast path: no filters active -> None means "no restriction"
+        has_any = (
+            domain is not None
+            or author is not None
+            or work is not None
+            or date_from is not None
+            or date_to is not None
+            or material_include
+            or material_exclude
+        )
+        if not has_any:
+            return None
+
+        if self._conn is None:
+            return None
+
+        try:
+            conditions = []
+            params = []
+
+            # Domain filter (same logic as get_browse_results)
+            if domain is not None:
+                conditions.append(
+                    "c.AlmaId IN ("
+                    "SELECT AlmaId FROM domains WHERE Domain = ? "
+                    "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+                )
+                params.extend([domain, domain])
+
+            # Author filter
+            if author is not None:
+                if self._has_persons_titles and _is_int(author):
+                    person_id = int(author)
+                    conditions.append(
+                        "(c.GenizahTitleId IN ("
+                        "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                        "  WHERE gt.AuthorId = ?"
+                        ") OR c.Author = ?)"
+                    )
+                    params.extend([person_id, person_id])
+                else:
+                    conditions.append("c.AuthorText = ?")
+                    params.append(author)
+
+            # Work filter
+            if work is not None:
+                if self._has_persons_titles and _is_int(work):
+                    conditions.append("c.GenizahTitleId = ?")
+                    params.append(int(work))
+                else:
+                    conditions.append("c.Title = ?")
+                    params.append(work)
+
+            # Date range filter (same logic as get_browse_results)
+            has_date_filter = date_from is not None or date_to is not None
+            if has_date_filter:
+                _no_date = "(c.CopyDate IS NULL OR c.CopyDate = '' OR c.CopyDate = '0' OR c.CopyDate = '-99')"
+                date_parts = []
+                if date_from is not None and date_to is not None:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) BETWEEN ? AND ?")
+                    params.extend([date_from, date_to])
+                elif date_from is not None:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) >= ?")
+                    params.append(date_from)
+                else:
+                    date_parts.append("CAST(c.CopyDate AS INTEGER) <= ?")
+                    params.append(date_to)
+                dated_cond = f"(NOT {_no_date} AND {date_parts[0]})"
+                if include_undated:
+                    conditions.append(f"({dated_cond} OR {_no_date})")
+                else:
+                    conditions.append(dated_cond)
+
+            # Material include filter
+            if material_include:
+                placeholders = ','.join('?' * len(material_include))
+                conditions.append(
+                    f"c.AlmaId IN ("
+                    f"SELECT AlmaId FROM catalog_fields "
+                    f"WHERE FieldCategory = 'FragmentMaterial' "
+                    f"AND FieldValue IN ({placeholders}))"
+                )
+                params.extend(material_include)
+
+            # Material exclude filter
+            if material_exclude:
+                placeholders = ','.join('?' * len(material_exclude))
+                conditions.append(
+                    f"c.AlmaId NOT IN ("
+                    f"SELECT AlmaId FROM catalog_fields "
+                    f"WHERE FieldCategory = 'FragmentMaterial' "
+                    f"AND FieldValue IN ({placeholders}))"
+                )
+                params.extend(material_exclude)
+
+            where = " WHERE " + " AND ".join(conditions) if conditions else ""
+            sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"
+            cursor = self._conn.execute(sql, params)
+            return {row["AlmaId"] for row in cursor}
+
+        except Exception as e:
+            logger.error(f"FjmsService.get_filter_sys_ids error: {e}")
+            return set()
+
     def get_all_domains(self) -> list[dict]:
         """
         Get all unique domain names with manuscript counts.
