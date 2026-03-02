@@ -206,7 +206,13 @@ Plans:
   3. Filters work correctly with all search modes: regular, Responsa, PGP tags, and parallels
   4. Filtered search context is available and functional in both web and desktop apps
   5. Exclude manuscripts in word search works the same as in composition search (ד)
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 45-01-PLAN.md — Filter service method (get_filter_sys_ids) + core engine restrict_sys_ids parameter (FILT-01, FILT-02, FILT-03, FILT-04)
+- [ ] 45-02-PLAN.md — Web search page: Advanced Filters panel, chip bar, word search per-result exclusion, search history filter support (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
+- [ ] 45-03-PLAN.md — Desktop: PreSearchFilterDialog, chip bar, SearchThread/CompositionThread restrict_sys_ids, word search exclusion, session persistence (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
+- [ ] 45-04-PLAN.md — Web parallels: filter panel, per-manuscript exclusion, auto-exclude source, import exclusions, restrict_sys_ids integration (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
+- [ ] 45-05-PLAN.md — Path B: browse-to-search navigation buttons (web + desktop), Hebrew translations (FILT-05, FILT-06)
 
 ### Phase 46: Dicta Translation
 **Goal**: All scholarly data is available in multiple languages via Dicta Translate API, enabling non-Hebrew/non-English speakers to use the platform and improving search completeness across languages
