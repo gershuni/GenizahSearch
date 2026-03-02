@@ -2540,4 +2540,15 @@ TRANSLATIONS = {
     "Don't ask me again": "אל תשאל אותי שוב",
     "Yes": "כן",
     "No": "לא",
+
+    # Phase 44 - Notification & Copy
+    "Desktop Notifications": "התראות שולחן עבודה",
+    "Show notification when search completes while app is in background": "הצג התראה כשחיפוש מסתיים בזמן שהאפליקציה ברקע",
+    "{} results for '{}'": "{} תוצאות עבור '{}'",
+    "{} results for composition search": "{} תוצאות לחיפוש קומפוזיציה",
+    "Copy Shelfmark": "העתק מספר מדף",
+    "Copy Title": "העתק כותרת",
+    "Copy Row": "העתק שורה",
+    "Copy Library": "העתק ספרייה",
+    "Copy Sys ID": "העתק מזהה מערכת",
 }

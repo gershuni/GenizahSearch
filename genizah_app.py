@@ -15997,6 +15997,18 @@ class GenizahGUI(QMainWindow):
         app_row2.addStretch()
         app_layout.addLayout(app_row2)
 
+        # Notification toggle
+        app_row3 = QHBoxLayout()
+        self.chk_notifications = QCheckBox(tr("Desktop Notifications"))
+        self.chk_notifications.setChecked(load_app_config().get('notifications_enabled', True))
+        self.chk_notifications.setToolTip(tr("Show notification when search completes while app is in background"))
+        self.chk_notifications.stateChanged.connect(
+            lambda state: save_app_config({'notifications_enabled': state == 2})
+        )
+        app_row3.addWidget(self.chk_notifications)
+        app_row3.addStretch()
+        app_layout.addLayout(app_row3)
+
         gb_app.setLayout(app_layout)
         layout.addWidget(gb_app)
         
@@ -17309,6 +17321,34 @@ class GenizahGUI(QMainWindow):
         if ids_to_fetch:
             self.start_metadata_loading(ids_to_fetch)
 
+    def _notify_search_complete(self, result_count, search_term, search_type='search'):
+        """Show Windows toast notification if app is not focused."""
+        import platform as _platform
+        # Check if notification is enabled
+        cfg = load_app_config()
+        if not cfg.get('notifications_enabled', True):
+            return
+        # Check if app window is focused
+        if QApplication.activeWindow() is not None:
+            return  # App is focused, skip notification
+        # Show Windows toast notification
+        try:
+            if _platform.system() == 'Windows':
+                from PyQt6.QtWidgets import QSystemTrayIcon
+                if not hasattr(self, '_tray_icon') or self._tray_icon is None:
+                    self._tray_icon = QSystemTrayIcon(self)
+                    self._tray_icon.setIcon(self.windowIcon())
+                    self._tray_icon.show()
+                title = "GenizahSearch"
+                if search_type == 'composition':
+                    msg = tr("{} results for composition search").format(result_count)
+                else:
+                    truncated = (search_term[:30] + '...') if len(search_term) > 30 else search_term
+                    msg = tr("{} results for '{}'").format(result_count, truncated)
+                self._tray_icon.showMessage(title, msg, QSystemTrayIcon.MessageIcon.Information, 5000)
+        except Exception:
+            pass  # Silently fail -- notification is non-critical
+
     def on_search_finished(self, results):
         self.reset_ui()
         # Compute search elapsed time
@@ -17424,6 +17464,9 @@ class GenizahGUI(QMainWindow):
         # Add to search history (skip during session restore)
         if not getattr(self, '_restoring_session', False):
             self._add_regular_search_to_history()
+
+        # Toast notification when app is not focused
+        self._notify_search_complete(len(results), self.search_input.text())
 
     def _open_results_filter_dialog(self, column):
         if column == 1:
@@ -19977,6 +20020,9 @@ class GenizahGUI(QMainWindow):
                 f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
             )
         self.comp_progress.setFormat(self.comp_summary_text)
+
+        # Toast notification when app is not focused
+        self._notify_search_complete(result_count, '', search_type='composition')
 
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)

@@ -1,9 +1,32 @@
 """Worker threads used by the PyQt GUI for long-running operations."""
 
 # gui_threads.py
+import ctypes
+import platform
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager
+
+
+def _prevent_sleep():
+    """Prevent OS sleep while search is running (Windows only)."""
+    if platform.system() == 'Windows':
+        try:
+            ES_CONTINUOUS = 0x80000000
+            ES_SYSTEM_REQUIRED = 0x00000001
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+        except Exception:
+            pass
+
+
+def _allow_sleep():
+    """Re-allow OS sleep after search completes (Windows only)."""
+    if platform.system() == 'Windows':
+        try:
+            ES_CONTINUOUS = 0x80000000
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+        except Exception:
+            pass
 
 class IndexerThread(QThread):
     """Build or refresh the index without blocking the UI."""
@@ -36,6 +59,7 @@ class SearchThread(QThread):
         self.cancel_flag = False
 
     def run(self):
+        _prevent_sleep()
         try:
             def cb(curr, total):
                 if self.cancel_flag:
@@ -54,6 +78,8 @@ class SearchThread(QThread):
             # Emit empty list -- partial results not available from execute_search
             self.results_signal.emit([])
         except Exception as e: self.error_signal.emit(str(e))
+        finally:
+            _allow_sleep()
 
 class LabSearchThread(QThread):
     """Execute a Lab Mode search query."""
@@ -73,6 +99,7 @@ class LabSearchThread(QThread):
         self.scan_limit = scan_limit
 
     def run(self):
+        _prevent_sleep()
         try:
             # Helper to handle different callback signatures
             def cb(arg1, arg2=None):
@@ -91,6 +118,8 @@ class LabSearchThread(QThread):
             )
             self.results_signal.emit(results)
         except Exception as e: self.error_signal.emit(str(e))
+        finally:
+            _allow_sleep()
 
 class CompositionThread(QThread):
     """Scan compositions in background to keep UI responsive."""
@@ -120,6 +149,7 @@ class CompositionThread(QThread):
         self.min_delimiter_distance = min_delimiter_distance
 
     def run(self):
+        _prevent_sleep()
         try:
             self.status_signal.emit("Scanning chunks...")
             def cb(curr, total):
@@ -139,6 +169,8 @@ class CompositionThread(QThread):
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
+        finally:
+            _allow_sleep()
 
 class LabCompositionThread(QThread):
     """Execute Lab Composition Search (Broad-to-Narrow)."""
@@ -169,6 +201,7 @@ class LabCompositionThread(QThread):
         self.min_delimiter_distance = min_delimiter_distance
 
     def run(self):
+        _prevent_sleep()
         try:
             self.status_signal.emit("Lab Mode: Broad-to-Narrow Scan...")
 
@@ -198,6 +231,8 @@ class LabCompositionThread(QThread):
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
+        finally:
+            _allow_sleep()
 
 class GroupingThread(QThread):
     """Group composition results while reporting progress to the UI."""
