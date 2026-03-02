@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 42 of 47 (Search UX & Composition Polish) -- Plan 9 of 9 complete
-Status: Phase 42 complete
-Last activity: 2026-03-01 - Completed 42-08 (Hebrew translation keys + desktop partial results notification)
+Phase: 43 of 47 (Session Persistence & Search History) -- Plan 2 of 4 complete
+Status: Executing
+Last activity: 2026-03-02 - Completed 43-02 (Web session persistence extension + settings toggles)
 
-Progress: [##░░░░░░░░] 1/5 phases (Phase 42 complete, 9/9 plans)
+Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 in progress 2/4 plans)
 
 ## Performance Metrics
 
@@ -40,6 +40,7 @@ Progress: [##░░░░░░░░] 1/5 phases (Phase 42 complete, 9/9 plans)
 | 42-07 | 1 | 3min | 3min |
 | 42-08 | 1 | 4min | 4min |
 | 42-09 | 1 | 2min | 2min |
+| 43-02 | 1 | 4min | 4min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -67,6 +68,7 @@ Recent decisions affecting current work:
 - 42-07: Clickable excluded items in web, "Filter Printed" label, desktop 3-state printed filter on search results, 5 missing Hebrew translation keys.
 - 42-08: Bare 'Searching' translation key for desktop status, 'Found in source text'/'High frequency' excluded reason sub-header translations, partial results statusbar notification on cancel.
 - 42-09: Composition tree 3-state printed filter (matching regular search), web cancel skips enrichment, lab mode InterruptedError propagation.
+- 43-02: _persist() helper gates new storage writes behind session_persistence_enabled setting. Parallels has no printed_filter toggle, only badges.
 
 ### Pending Todos
 
@@ -95,7 +97,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-01
-Stopped at: Completed 42-08-PLAN.md (Hebrew translation keys + desktop partial results notification)
-Resume file: .planning/phases/42-search-ux-composition-polish/42-08-SUMMARY.md
-Notes: All 9 plans in Phase 42 complete (42-01 through 42-09). Phase 42 fully done. Next: Phase 43.
+Last session: 2026-03-02
+Stopped at: Completed 43-02-PLAN.md (Web session persistence extension + settings toggles)
+Resume file: .planning/phases/43-session-persistence-search-history/43-02-SUMMARY.md
+Notes: Phase 43 in progress. Plan 02 complete (2/4). Next: 43-03.

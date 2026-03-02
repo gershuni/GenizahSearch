@@ -258,7 +258,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 |-------|----------------|--------|-----------|
 | 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
 | 42. Search UX & Composition Polish | 9/9 | Complete | 2026-03-01 |
-| 43. Session Persistence & History | 0/TBD | Not started | - |
+| 43. Session Persistence & History | 1/4 | In Progress|  |
 | 44. Quick UX Wins | 0/TBD | Not started | - |
 | 45. Filtered Search Context | 0/TBD | Not started | - |
 | 46. Dicta Translation | 0/TBD | Not started | - |
