@@ -5157,6 +5157,330 @@ class DomainFilterDialog(QDialog):
             self.summary_label.setText(f"{tr('Excluding')} {count} {tr('domains')}")
 
 
+class FilterCountWorker(QThread):
+    """Background worker to compute manuscript count for pre-search filters."""
+    finished = pyqtSignal(object)  # set or None
+
+    def __init__(self, filters: dict, parent=None):
+        super().__init__(parent)
+        self.filters = filters
+
+    def run(self):
+        try:
+            from shared.fjms_service import FjmsService
+            fjms = FjmsService(thread_safe=True)
+            if not fjms.is_available():
+                self.finished.emit(None)
+                return
+            result = fjms.get_filter_sys_ids(
+                domain=self.filters.get('domain'),
+                author=self.filters.get('author'),
+                work=self.filters.get('work'),
+                date_from=self.filters.get('date_from'),
+                date_to=self.filters.get('date_to'),
+                include_undated=self.filters.get('include_undated', False),
+                material_include=self.filters.get('material_include'),
+                material_exclude=self.filters.get('material_exclude'),
+            )
+            self.finished.emit(result)
+        except Exception:
+            self.finished.emit(None)
+
+
+class PreSearchFilterDialog(QDialog):
+    """Pre-search filter dialog with domain, author, work, date range, and material controls.
+
+    Allows researchers to constrain the search scope BEFORE executing a search,
+    resulting in genuinely faster searches by restricting the candidate set.
+    """
+
+    def __init__(self, parent=None, current_filters: dict = None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("Pre-Search Filters"))
+        self.setMinimumSize(520, 500)
+        self._current_filters = current_filters.copy() if current_filters else {}
+        self._count_worker = None
+        self._result_set = None  # computed restrict_sys_ids
+
+        layout = QVBoxLayout(self)
+
+        # --- Domain filter ---
+        domain_group = QGroupBox(tr("Subject Domain"))
+        domain_layout = QVBoxLayout(domain_group)
+        self.domain_combo = QComboBox()
+        self.domain_combo.setEditable(True)
+        self.domain_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.domain_combo.addItem("", None)  # empty = no filter
+        completer = self.domain_combo.completer()
+        if completer:
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._populate_domains()
+        # Restore current selection
+        if self._current_filters.get('domain'):
+            idx = self.domain_combo.findData(self._current_filters['domain'])
+            if idx >= 0:
+                self.domain_combo.setCurrentIndex(idx)
+        self.domain_combo.currentIndexChanged.connect(self._on_domain_changed)
+        domain_layout.addWidget(self.domain_combo)
+        layout.addWidget(domain_group)
+
+        # --- Author filter ---
+        author_group = QGroupBox(tr("Author"))
+        author_layout = QVBoxLayout(author_group)
+        self.author_combo = QComboBox()
+        self.author_combo.setEditable(True)
+        self.author_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.author_combo.addItem("", None)
+        author_completer = self.author_combo.completer()
+        if author_completer:
+            author_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._populate_authors()
+        if self._current_filters.get('author'):
+            idx = self.author_combo.findData(self._current_filters['author'])
+            if idx >= 0:
+                self.author_combo.setCurrentIndex(idx)
+        self.author_combo.currentIndexChanged.connect(self._on_author_changed)
+        author_layout.addWidget(self.author_combo)
+        layout.addWidget(author_group)
+
+        # --- Work filter ---
+        work_group = QGroupBox(tr("Work"))
+        work_layout = QVBoxLayout(work_group)
+        self.work_combo = QComboBox()
+        self.work_combo.setEditable(True)
+        self.work_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.work_combo.addItem("", None)
+        work_completer = self.work_combo.completer()
+        if work_completer:
+            work_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._populate_works()
+        if self._current_filters.get('work'):
+            idx = self.work_combo.findData(self._current_filters['work'])
+            if idx >= 0:
+                self.work_combo.setCurrentIndex(idx)
+        self.work_combo.currentIndexChanged.connect(self._on_filter_changed)
+        work_layout.addWidget(self.work_combo)
+        layout.addWidget(work_group)
+
+        # --- Date range ---
+        date_group = QGroupBox(tr("Date Range"))
+        date_layout = QHBoxLayout(date_group)
+        self.spin_date_from = QSpinBox()
+        self.spin_date_from.setRange(0, 2000)
+        self.spin_date_from.setSpecialValueText(tr("Any"))
+        self.spin_date_from.setValue(self._current_filters.get('date_from') or 0)
+        self.spin_date_from.setPrefix(tr("From") + ": ")
+        self.spin_date_from.valueChanged.connect(self._on_filter_changed)
+        date_layout.addWidget(self.spin_date_from)
+
+        self.spin_date_to = QSpinBox()
+        self.spin_date_to.setRange(0, 2000)
+        self.spin_date_to.setSpecialValueText(tr("Any"))
+        self.spin_date_to.setValue(self._current_filters.get('date_to') or 0)
+        self.spin_date_to.setPrefix(tr("To") + ": ")
+        self.spin_date_to.valueChanged.connect(self._on_filter_changed)
+        date_layout.addWidget(self.spin_date_to)
+
+        self.chk_include_undated = QCheckBox(tr("Include undated"))
+        self.chk_include_undated.setChecked(self._current_filters.get('include_undated', False))
+        self.chk_include_undated.stateChanged.connect(self._on_filter_changed)
+        date_layout.addWidget(self.chk_include_undated)
+        layout.addWidget(date_group)
+
+        # --- Material filter ---
+        material_group = QGroupBox(tr("Material"))
+        material_layout = QVBoxLayout(material_group)
+        self.chk_exclude_printed = QCheckBox(tr("Exclude Printed"))
+        self.chk_exclude_printed.setToolTip(tr("Exclude printed materials (show only handwritten manuscripts)"))
+        material_exclude = self._current_filters.get('material_exclude', [])
+        self.chk_exclude_printed.setChecked('Printed' in material_exclude if material_exclude else False)
+        self.chk_exclude_printed.stateChanged.connect(self._on_filter_changed)
+        material_layout.addWidget(self.chk_exclude_printed)
+        layout.addWidget(material_group)
+
+        # --- Manuscript count ---
+        self.count_label = QLabel("")
+        self.count_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #2980b9; padding: 4px;")
+        layout.addWidget(self.count_label)
+
+        # --- Buttons ---
+        btn_layout = QHBoxLayout()
+        clear_btn = QPushButton(tr("Clear All"))
+        clear_btn.clicked.connect(self._clear_all)
+        btn_layout.addWidget(clear_btn)
+        btn_layout.addStretch()
+
+        ok_btn = QPushButton(tr("OK"))
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton(tr("Cancel"))
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        # Initial count update
+        self._update_count()
+
+    def _populate_domains(self):
+        """Populate domain combo with hierarchy from FJMS."""
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service()
+            if not fjms.is_available():
+                return
+            hierarchy = fjms.get_domain_hierarchy()
+            for parent_name, info in hierarchy.items():
+                display = info.get('parent_domain_heb', parent_name) if CURRENT_LANG == 'he' else parent_name
+                count = info.get('count', 0)
+                self.domain_combo.addItem(f"{display} ({count:,})", parent_name)
+                for child in info.get('children', []):
+                    child_display = child.get('domain_heb', child['domain']) if CURRENT_LANG == 'he' else child['domain']
+                    child_count = child.get('count', 0)
+                    self.domain_combo.addItem(f"  {child_display} ({child_count:,})", child['domain'])
+        except Exception:
+            pass
+
+    def _populate_authors(self, domain=None):
+        """Populate author combo, optionally filtered by domain."""
+        self.author_combo.blockSignals(True)
+        current_author = self.author_combo.currentData()
+        self.author_combo.clear()
+        self.author_combo.addItem("", None)
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service()
+            if not fjms.is_available():
+                return
+            authors = fjms.get_browse_authors(domain=domain)
+            for author in authors:
+                name = author.get('name', '')
+                count = author.get('count', 0)
+                author_id = author.get('id', name)
+                self.author_combo.addItem(f"{name} ({count:,})", author_id)
+            # Restore selection if still valid
+            if current_author:
+                idx = self.author_combo.findData(current_author)
+                if idx >= 0:
+                    self.author_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+        finally:
+            self.author_combo.blockSignals(False)
+
+    def _populate_works(self, domain=None, author=None):
+        """Populate work combo, optionally filtered by domain and author."""
+        self.work_combo.blockSignals(True)
+        current_work = self.work_combo.currentData()
+        self.work_combo.clear()
+        self.work_combo.addItem("", None)
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service()
+            if not fjms.is_available():
+                return
+            works = fjms.get_browse_works(domain=domain, author=author)
+            for work in works:
+                name = work.get('name', '')
+                count = work.get('count', 0)
+                work_id = work.get('id', name)
+                self.work_combo.addItem(f"{name} ({count:,})", work_id)
+            if current_work:
+                idx = self.work_combo.findData(current_work)
+                if idx >= 0:
+                    self.work_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+        finally:
+            self.work_combo.blockSignals(False)
+
+    def _on_domain_changed(self):
+        """When domain changes, re-populate authors and works."""
+        domain = self.domain_combo.currentData()
+        self._populate_authors(domain=domain)
+        self._populate_works(domain=domain)
+        self._on_filter_changed()
+
+    def _on_author_changed(self):
+        """When author changes, re-populate works."""
+        domain = self.domain_combo.currentData()
+        author = self.author_combo.currentData()
+        self._populate_works(domain=domain, author=author)
+        self._on_filter_changed()
+
+    def _on_filter_changed(self, *args):
+        """Any filter changed -- update count."""
+        self._update_count()
+
+    def _get_current_filter_dict(self) -> dict:
+        """Build filter dict from current dialog state."""
+        filters = {}
+        domain = self.domain_combo.currentData()
+        if domain:
+            filters['domain'] = domain
+        author = self.author_combo.currentData()
+        if author:
+            filters['author'] = author
+        work = self.work_combo.currentData()
+        if work:
+            filters['work'] = work
+        date_from = self.spin_date_from.value()
+        if date_from > 0:
+            filters['date_from'] = date_from
+        date_to = self.spin_date_to.value()
+        if date_to > 0:
+            filters['date_to'] = date_to
+        if self.chk_include_undated.isChecked():
+            filters['include_undated'] = True
+        if self.chk_exclude_printed.isChecked():
+            filters['material_exclude'] = ['Printed']
+        return filters
+
+    def _update_count(self):
+        """Recompute manuscript count in background thread."""
+        filters = self._get_current_filter_dict()
+        if not filters:
+            self.count_label.setText(tr("All manuscripts (no filters)"))
+            self._result_set = None
+            return
+        self.count_label.setText(tr("Counting..."))
+        self._count_worker = FilterCountWorker(filters, self)
+        self._count_worker.finished.connect(self._on_count_finished)
+        self._count_worker.start()
+
+    def _on_count_finished(self, result_set):
+        """Handle count worker result."""
+        self._result_set = result_set
+        if result_set is None:
+            self.count_label.setText(tr("All manuscripts (no filters)"))
+        elif len(result_set) == 0:
+            self.count_label.setText(tr("No manuscripts match"))
+            self.count_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #e74c3c; padding: 4px;")
+        else:
+            count_str = f"{len(result_set):,}"
+            self.count_label.setText(f"{count_str} {tr('manuscripts')}")
+            self.count_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #2980b9; padding: 4px;")
+
+    def _clear_all(self):
+        """Reset all filter controls to default."""
+        self.domain_combo.setCurrentIndex(0)
+        self.author_combo.setCurrentIndex(0)
+        self.work_combo.setCurrentIndex(0)
+        self.spin_date_from.setValue(0)
+        self.spin_date_to.setValue(0)
+        self.chk_include_undated.setChecked(False)
+        self.chk_exclude_printed.setChecked(False)
+        self._update_count()
+
+    def get_filters(self) -> dict:
+        """Return the current filter state dict."""
+        return self._get_current_filter_dict()
+
+    def get_restrict_sys_ids(self):
+        """Return the computed restrict_sys_ids set (or None)."""
+        return self._result_set
+
+
 class FjmsBibliographyDialog(QDialog):
     """FJMS bibliography dialog with structured table."""
 
@@ -6836,6 +7160,10 @@ class GenizahGUI(QMainWindow):
         self.excluded_raw_entries = []
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
+        # Pre-search filter state (Phase 45-03)
+        self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
+        self.pre_search_restrict_sys_ids = None  # computed set or None
+        self.word_excluded_sys_ids = set()  # per-result exclusions for word search mode
         self.filter_sources = {}  # dict of {ref: cleaned_text}
         self.filter_enabled_sources = set()  # set of enabled source refs
         self.results_filters = {}
@@ -8581,6 +8909,11 @@ class GenizahGUI(QMainWindow):
         action_discovery = menu.addAction(tr("Share Discovery..."))
         action_discovery.triggered.connect(lambda: self._context_share_discovery(sys_id, shelfmark))
 
+        # Exclude from word search results (Phase 45-03)
+        menu.addSeparator()
+        action_exclude = menu.addAction(tr("Exclude this manuscript"))
+        action_exclude.triggered.connect(lambda: self._exclude_word_search_result(sys_id, row))
+
         # Copy actions
         menu.addSeparator()
 
@@ -8962,9 +9295,16 @@ class GenizahGUI(QMainWindow):
         self._result_domain_map = {}  # sys_id -> list of domain names
         self._has_result_domains = False
 
+        # Pre-search Filters button (Phase 45-03)
+        self.btn_pre_search_filters = QPushButton(tr("Filters"))
+        self.btn_pre_search_filters.setToolTip(tr("Set pre-search filters (domain, author, date, material)"))
+        self.btn_pre_search_filters.setStyleSheet("padding: 2px 8px;")
+        self.btn_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
+
         row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
         row2.addWidget(self.search_params_container)
+        row2.addWidget(self.btn_pre_search_filters)
         row2.addWidget(self.btn_domain_filter)
         row2.addWidget(self.lbl_domain_filter)
 
@@ -9029,6 +9369,19 @@ class GenizahGUI(QMainWindow):
         top_layout.addWidget(self.search_row1_container)
         top_layout.addLayout(row2)
         top_layout.addWidget(self.responsa_sub_row)
+
+        # Pre-search filter chip bar (Phase 45-03)
+        self.filter_chip_bar = QWidget()
+        self.filter_chip_bar_layout = QHBoxLayout(self.filter_chip_bar)
+        self.filter_chip_bar_layout.setContentsMargins(0, 2, 0, 2)
+        self.filter_chip_bar_layout.setSpacing(4)
+        self.filter_chip_count_label = QLabel("")
+        self.filter_chip_count_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #2980b9;")
+        self.filter_chip_bar_layout.addWidget(self.filter_chip_count_label)
+        self.filter_chip_bar_layout.addStretch()
+        self.filter_chip_bar.setVisible(False)
+        top_layout.addWidget(self.filter_chip_bar)
+
         layout.addWidget(top_container)
 
         self.lab_panel_search = LabPanel(self, 'search')
@@ -9234,6 +9587,13 @@ class GenizahGUI(QMainWindow):
         self._comp_printed_sys_ids = set()
         self._comp_printed_filter_state = 'all'
 
+        # Pre-search Filters button for composition tab (Phase 45-03)
+        self.btn_comp_pre_search_filters = QPushButton(tr("Filters"))
+        self.btn_comp_pre_search_filters.setToolTip(tr("Set pre-search filters (domain, author, date, material)"))
+        self.btn_comp_pre_search_filters.setStyleSheet("padding: 2px 8px;")
+        self.btn_comp_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
+
+        top_row.addWidget(self.btn_comp_pre_search_filters)
         top_row.addWidget(btn_exclude); top_row.addWidget(btn_filter_text)
         top_row.addWidget(self.btn_comp_domain_filter)
         top_row.addWidget(self.lbl_comp_domain_filter)
@@ -9246,8 +9606,20 @@ class GenizahGUI(QMainWindow):
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor="composition"))
         top_row.addWidget(btn_help)
-        
+
         in_l.addLayout(top_row)
+
+        # Pre-search filter chip bar for composition tab (Phase 45-03)
+        self.comp_filter_chip_bar = QWidget()
+        self.comp_filter_chip_bar_layout = QHBoxLayout(self.comp_filter_chip_bar)
+        self.comp_filter_chip_bar_layout.setContentsMargins(0, 2, 0, 2)
+        self.comp_filter_chip_bar_layout.setSpacing(4)
+        self.comp_filter_chip_count_label = QLabel("")
+        self.comp_filter_chip_count_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #2980b9;")
+        self.comp_filter_chip_bar_layout.addWidget(self.comp_filter_chip_count_label)
+        self.comp_filter_chip_bar_layout.addStretch()
+        self.comp_filter_chip_bar.setVisible(False)
+        in_l.addWidget(self.comp_filter_chip_bar)
         self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText(tr("Paste source text..."))
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
@@ -16995,6 +17367,128 @@ class GenizahGUI(QMainWindow):
                 )
             )
 
+    # ---- Pre-search filter methods (Phase 45-03) ----
+
+    def _open_pre_search_filter_dialog(self):
+        """Open the pre-search filter dialog."""
+        dlg = PreSearchFilterDialog(self, current_filters=self.pre_search_filters)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.pre_search_filters = dlg.get_filters()
+            self.pre_search_restrict_sys_ids = dlg.get_restrict_sys_ids()
+            self._update_filter_chip_bar()
+            self._schedule_session_save()
+
+    def _update_filter_chip_bar(self):
+        """Update both search and composition chip bars to reflect active filters."""
+        for chip_bar, chip_layout, count_label in [
+            (self.filter_chip_bar, self.filter_chip_bar_layout, self.filter_chip_count_label),
+            (self.comp_filter_chip_bar, self.comp_filter_chip_bar_layout, self.comp_filter_chip_count_label),
+        ]:
+            # Clear existing chips (keep the count label and stretch)
+            while chip_layout.count() > 0:
+                item = chip_layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.deleteLater()
+
+            filters = self.pre_search_filters
+            if not filters:
+                chip_bar.setVisible(False)
+                continue
+
+            chip_bar.setVisible(True)
+
+            # Create chips for each active filter
+            if filters.get('domain'):
+                self._add_filter_chip(chip_layout, tr("Domain") + ": " + str(filters['domain']), 'domain')
+            if filters.get('author'):
+                self._add_filter_chip(chip_layout, tr("Author") + ": " + str(filters['author']), 'author')
+            if filters.get('work'):
+                self._add_filter_chip(chip_layout, tr("Work") + ": " + str(filters['work']), 'work')
+            if filters.get('date_from') or filters.get('date_to'):
+                date_str = ""
+                if filters.get('date_from') and filters.get('date_to'):
+                    date_str = f"{filters['date_from']}-{filters['date_to']}"
+                elif filters.get('date_from'):
+                    date_str = f"{filters['date_from']}+"
+                elif filters.get('date_to'):
+                    date_str = f"-{filters['date_to']}"
+                self._add_filter_chip(chip_layout, date_str, 'date')
+            if filters.get('material_exclude'):
+                self._add_filter_chip(chip_layout, tr("Exclude Printed"), 'material_exclude')
+
+            # Count label
+            restrict = self.pre_search_restrict_sys_ids
+            new_count_label = QLabel("")
+            new_count_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #2980b9;")
+            if restrict is not None:
+                count_str = f"{len(restrict):,}"
+                new_count_label.setText(f"{count_str} {tr('manuscripts')}")
+            chip_layout.addWidget(new_count_label)
+            chip_layout.addStretch()
+
+    def _add_filter_chip(self, layout, text, filter_key):
+        """Add a removable chip button to the filter chip bar layout."""
+        chip = QPushButton(f"{text}  \u00d7")
+        chip.setFlat(True)
+        chip.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        chip.setStyleSheet(
+            "QPushButton { background: #e8f0fe; color: #1a73e8; border: 1px solid #a8c7fa; "
+            "border-radius: 12px; padding: 2px 10px; font-size: 11px; } "
+            "QPushButton:hover { background: #d2e3fc; }"
+        )
+        chip.setToolTip(tr("Click to remove this filter"))
+        chip.clicked.connect(lambda: self._remove_filter(filter_key))
+        layout.addWidget(chip)
+
+    def _remove_filter(self, filter_key):
+        """Remove a single filter and recompute restrict_sys_ids."""
+        if filter_key == 'date':
+            self.pre_search_filters.pop('date_from', None)
+            self.pre_search_filters.pop('date_to', None)
+            self.pre_search_filters.pop('include_undated', None)
+        else:
+            self.pre_search_filters.pop(filter_key, None)
+
+        # Recompute restrict set
+        if self.pre_search_filters:
+            worker = FilterCountWorker(self.pre_search_filters)
+            worker.finished.connect(self._on_filter_recompute_finished)
+            # Keep reference so it doesn't get garbage collected
+            self._filter_recompute_worker = worker
+            worker.start()
+        else:
+            self.pre_search_restrict_sys_ids = None
+            self._update_filter_chip_bar()
+            self._schedule_session_save()
+
+    def _on_filter_recompute_finished(self, result_set):
+        """Handle recomputed filter set after chip removal."""
+        self.pre_search_restrict_sys_ids = result_set
+        self._update_filter_chip_bar()
+        self._schedule_session_save()
+
+    def _on_restore_filter_finished(self, result_set):
+        """Handle filter recompute after session restore."""
+        self.pre_search_restrict_sys_ids = result_set
+        self._update_filter_chip_bar()
+
+    def _exclude_word_search_result(self, sys_id, row):
+        """Exclude a single manuscript from word search results."""
+        if not sys_id:
+            return
+        self.word_excluded_sys_ids.add(sys_id)
+        self.results_table.setRowHidden(row, True)
+        # Update status
+        total = len(self.last_results) if self.last_results else 0
+        excluded_count = len(self.word_excluded_sys_ids)
+        self.status_label.setText(
+            tr("Excluded {} manuscripts from results").format(excluded_count)
+        )
+        self._schedule_session_save()
+
+    # ---- End pre-search filter methods ----
+
     def _on_domain_enrichment_loaded(self, raw_domains):
         """Handle async domain enrichment results from DomainEnrichmentWorker.
 
@@ -17345,7 +17839,7 @@ class GenizahGUI(QMainWindow):
 
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options)
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None))
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(self._on_search_progress)
@@ -20154,7 +20648,8 @@ class GenizahGUI(QMainWindow):
                 boundary_delimiter=boundary_delimiter,
                 boundary_boost=boundary_boost,
                 min_boundary_matches=min_boundary_matches,
-                min_delimiter_distance=min_delimiter_distance
+                min_delimiter_distance=min_delimiter_distance,
+                restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None)
             )
             if hasattr(self.comp_thread, 'scan_finished_signal'):
                  self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
@@ -23025,6 +23520,9 @@ class GenizahGUI(QMainWindow):
                     'sort_reverse': getattr(self, 'comp_sort_reverse', True),
                 },
                 'was_interrupted': getattr(self, 'is_comp_running', False),
+                # Pre-search filters (Phase 45-03) -- shared across search/composition
+                'pre_search_filters': getattr(self, 'pre_search_filters', {}),
+                'word_excluded_sys_ids': sorted(getattr(self, 'word_excluded_sys_ids', set())),
             }
             save_session_state(state_dict)
         except Exception as e:
@@ -23150,6 +23648,18 @@ class GenizahGUI(QMainWindow):
                     self.comp_raw_items, {}, {},
                     self.comp_raw_filtered, {}, {}
                 )
+
+            # Restore pre-search filters (Phase 45-03)
+            self.pre_search_filters = state.get('pre_search_filters', {})
+            self.word_excluded_sys_ids = set(state.get('word_excluded_sys_ids', []))
+            if self.pre_search_filters:
+                # Recompute restrict_sys_ids from saved filters
+                worker = FilterCountWorker(self.pre_search_filters)
+                worker.finished.connect(self._on_restore_filter_finished)
+                self._restore_filter_worker = worker
+                worker.start()
+            else:
+                self._update_filter_chip_bar()
 
             # Show "Session restored" notification in statusbar (fades after 5 seconds)
             saved_at = state.get('saved_at', '')

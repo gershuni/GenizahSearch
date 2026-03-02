@@ -51,11 +51,12 @@ class SearchThread(QThread):
     results_signal = pyqtSignal(list)
     progress_signal = pyqtSignal(int, int)
     error_signal = pyqtSignal(str)
-    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None):
+    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
         self.exclude_words = exclude_words
         self.responsa_options = responsa_options
+        self.restrict_sys_ids = restrict_sys_ids
         self.cancel_flag = False
 
     def run(self):
@@ -71,7 +72,8 @@ class SearchThread(QThread):
                 self.gap,
                 progress_callback=cb,
                 exclude_words=self.exclude_words,
-                responsa_options=self.responsa_options
+                responsa_options=self.responsa_options,
+                restrict_sys_ids=self.restrict_sys_ids
             )
             self.results_signal.emit(results)
         except InterruptedError:
@@ -131,7 +133,7 @@ class CompositionThread(QThread):
 
     def __init__(self, searcher, text, chunk, freq, mode, filter_text=None, threshold=5,
                  boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
-                 min_boundary_matches=0, min_delimiter_distance=3):
+                 min_boundary_matches=0, min_delimiter_distance=3, restrict_sys_ids=None):
         super().__init__()
         self.searcher = searcher
         self.text = text
@@ -141,6 +143,7 @@ class CompositionThread(QThread):
         self.filter_text = filter_text
         self.threshold = threshold
         self.cancel_flag = False
+        self.restrict_sys_ids = restrict_sys_ids
         # Boundary search parameters
         self.boundary_mode = boundary_mode
         self.boundary_delimiter = boundary_delimiter
@@ -165,7 +168,8 @@ class CompositionThread(QThread):
                 boundary_delimiter=self.boundary_delimiter,
                 boundary_boost=self.boundary_boost,
                 min_boundary_matches=self.min_boundary_matches,
-                min_delimiter_distance=self.min_delimiter_distance
+                min_delimiter_distance=self.min_delimiter_distance,
+                restrict_sys_ids=self.restrict_sys_ids
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
