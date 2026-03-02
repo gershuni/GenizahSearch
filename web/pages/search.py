@@ -30,6 +30,7 @@ import re
 import html
 import asyncio
 import time
+from datetime import datetime
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -89,6 +90,55 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Save to storage if session persistence is enabled."""
         if app.storage.user.get('session_persistence_enabled', True):
             app.storage.user[key] = value
+
+    # --- Search History Management ---
+    def _get_search_history() -> list:
+        """Get search history from storage."""
+        return app.storage.user.get('search_history', [])
+
+    def _add_to_search_history(query: str, result_count: int, mode: str, params: dict, state_snapshot: dict):
+        """Add or update a search history entry. Deduplicates by query+mode."""
+        if not app.storage.user.get('session_persistence_enabled', True):
+            return
+        limit = app.storage.user.get('search_history_limit', 20)
+        history = _get_search_history()
+
+        # Dedup: check for existing entry with same query + mode
+        existing_idx = None
+        for i, entry in enumerate(history):
+            if entry.get('query') == query and entry.get('mode') == mode:
+                existing_idx = i
+                break
+
+        entry = {
+            'query': query,
+            'result_count': result_count,
+            'mode': mode,
+            'timestamp': datetime.now().isoformat(),
+            'params': params,
+            'state': state_snapshot,
+        }
+
+        if existing_idx is not None:
+            history.pop(existing_idx)  # Remove old position
+            history.insert(0, entry)   # Move to front with updated data
+        else:
+            history.insert(0, entry)   # Add at front (newest first)
+
+        # Enforce limit
+        history = history[:limit]
+        app.storage.user['search_history'] = history
+
+    def _delete_search_history_entry(index: int):
+        """Delete a specific history entry by index."""
+        history = _get_search_history()
+        if 0 <= index < len(history):
+            history.pop(index)
+            app.storage.user['search_history'] = history
+
+    def _clear_search_history():
+        """Clear all search history."""
+        app.storage.user['search_history'] = []
 
     def _domain_display_name(en_name: str) -> str:
         """Get display name for a domain (Hebrew if UI is Hebrew, else English)."""
@@ -588,6 +638,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             on_click=lambda: cancel_search()
                         ).classes('h-10 px-4').style('display: none;').props('outline color=red')
                         stop_btn.tooltip(tr('Stops the search and shows partial results'))
+
+                    # Search History Button + Menu
+                    with ui.column().classes('items-center gap-0'):
+                        history_btn = ui.button(icon='history', on_click=lambda: (
+                            _refresh_history_menu(), history_menu.open()
+                        )).props('flat dense').tooltip(tr('Search History'))
+
+                        history_menu = ui.menu()
 
                 # === Responsa Sub-Options (visible only when mode is 'responsa') ===
                 responsa_sub_row = ui.row().classes('w-full items-center gap-4 px-2 flex-wrap')
@@ -2117,6 +2175,75 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Re-render with filtered results (resets to page 0)
         render_results(filtered, page=0)
 
+    # --- Search History UI Helpers ---
+    def _refresh_history_menu():
+        """Refresh the history dropdown menu contents."""
+        history_menu.clear()
+        history = _get_search_history()
+        if not history:
+            with history_menu:
+                ui.menu_item(tr('No search history')).props('disable')
+            return
+
+        with history_menu:
+            for i, entry in enumerate(history):
+                query_text = entry.get('query', '')
+                query_display = (query_text[:35] + '...') if len(query_text) > 35 else query_text
+                count = entry.get('result_count', 0)
+                mode = entry.get('mode', '')
+                mode_short = {'exact': '=', 'variants': '?', 'variants_extended': '??',
+                              'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
+                              'Shelfmark': '#', 'Title': '$', 'responsa': 'R'}.get(mode, mode)
+                label = f"{query_display}  ({count}) [{mode_short}]"
+
+                idx = i  # Capture for closure
+                with ui.menu_item(label, on_click=lambda e, idx=idx: _on_history_item_clicked(idx)).style('direction: rtl;'):
+                    # Delete button on each item
+                    ui.button(icon='close', on_click=lambda e, idx=idx: (
+                        _delete_search_history_entry(idx), _refresh_history_menu()
+                    )).props('flat dense size=xs round').classes('ml-auto')
+
+            ui.separator()
+            ui.menu_item(tr('Clear all'), on_click=lambda: (
+                _clear_search_history(), _refresh_history_menu()
+            ))
+
+    async def _on_history_item_clicked(index: int):
+        """Restore state from a search history entry."""
+        history = _get_search_history()
+        if index >= len(history):
+            return
+        entry = history[index]
+        state_snapshot = entry.get('state', {})
+        params = entry.get('params', {})
+
+        # Restore query and params
+        query_input.value = entry.get('query', '')
+        if params.get('mode'):
+            mode_select.value = params['mode']
+        if params.get('preset') and current_preset:
+            current_preset['value'] = params['preset']
+        if params.get('gap') is not None:
+            gap_input.value = params['gap']
+
+        # Restore results and state from snapshot
+        if state_snapshot.get('results'):
+            search_state.results = state_snapshot['results']
+            search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
+            search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
+            # Update count display
+            results_count.text = f"{len(search_state.results)} {tr('Results')}"
+            # Re-render with restored exclusions
+            if search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions()
+            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+                _apply_printed_filter_and_render(search_state.results)
+            else:
+                render_results(search_state.results, page=0)
+
+        ui.notify(tr('Search restored from history'), type='info', timeout=2000)
+        history_menu.close()
+
     async def execute_search():
         # Handle PGP tag search mode — navigate to tag results page
         if mode_select.value == 'pgp_tags':
@@ -2366,6 +2493,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     sr['display'] = d
                 storage_results.append(sr)
             app.storage.user['search_results'] = storage_results
+        except Exception:
+            pass
+
+        # Add to search history (use lightweight copies, cap at 500 for storage)
+        try:
+            hist_results = []
+            for r in results[:500]:
+                hr = dict(r)
+                hr.pop('full_text', None)
+                d = hr.get('display')
+                if d and isinstance(d, dict):
+                    d = dict(d)
+                    d.pop('full_text', None)
+                    hr['display'] = d
+                hist_results.append(hr)
+            _add_to_search_history(
+                query=query_input.value or '',
+                result_count=len(results),
+                mode=mode_select.value or 'exact',
+                params={
+                    'mode': mode_select.value,
+                    'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
+                    'gap': int(gap_input.value or 0),
+                },
+                state_snapshot={
+                    'results': hist_results,
+                    'domain_exclusions': sorted(search_state.domain_exclusions),
+                    'printed_filter': search_state.printed_filter,
+                },
+            )
         except Exception:
             pass
 
