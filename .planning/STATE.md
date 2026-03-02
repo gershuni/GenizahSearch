@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-02T09:08:41.000Z"
+last_updated: "2026-03-02T12:00:00.000Z"
 progress:
   total_phases: 46
   completed_phases: 44
-  total_plans: 149
-  completed_plans: 149
+  total_plans: 150
+  completed_plans: 150
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 44 complete, Phase 45 next
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 45 in progress (plan 1/5 complete)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 44 of 47 (Quick UX Wins) -- Plan 2 of 2 complete
-Status: Phase 44 Complete
-Last activity: 2026-03-02 - Completed 44-02 (Hebrew library names)
+Phase: 45 of 47 (Filtered Search Context) -- Plan 1 of 5 complete
+Status: Phase 45 In Progress
+Last activity: 2026-03-02 - Completed 45-01 (Filter service & core engine integration)
 
-Progress: [####░░░░░░] 4/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete)
+Progress: [####░░░░░░] 4/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 in progress)
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [####░░░░░░] 4/5 phases (Phase 42 complete, Phase 43 compl
 | 43-04 | 1 | 8min | 8min |
 | 44-01 | 1 | 4min | 4min |
 | 44-02 | 1 | 5min | 5min |
+| 45-01 | 1 | 5min | 5min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -90,6 +91,7 @@ Recent decisions affecting current work:
 - 43-04: Search history deduplicates by query+mode, composition by title. History entries store results capped at 500. Lazy menu refresh on button click.
 - 44-01: Sleep prevention via SetThreadExecutionState in 4 search threads with try/finally. Toast notification via QSystemTrayIcon when unfocused. Copy context menu (Shelfmark/Title/Library/SysID/Row).
 - 44-02: LIBRARY_CODES_HE (81 entries) with lang param on get_library_display(). Desktop uses CURRENT_LANG auto. Web callers pass get_language() explicitly. Fallback: HE->EN->code.
+- 45-01: get_filter_sys_ids() returns None (no filters) or set of matching sys_ids. restrict_sys_ids param on execute_search/search_composition_logic skips manuscripts BEFORE regex.search(). Material filters via catalog_fields subquery.
 
 ### Pending Todos
 
@@ -119,6 +121,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 44-02-PLAN.md (Hebrew library names) -- Phase 44 fully complete
-Resume file: .planning/phases/44-quick-ux-wins/44-02-SUMMARY.md
-Notes: Phase 44 fully complete (2/2 plans). Next: Phase 45 (Filtered Search Context).
+Stopped at: Completed 45-01-PLAN.md (Filter service & core engine integration)
+Resume file: .planning/phases/45-filtered-search-context/45-01-SUMMARY.md
+Notes: Phase 45 plan 1/5 complete. Next: 45-02 (Web search filter panel).
