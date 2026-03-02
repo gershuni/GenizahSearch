@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 43 of 47 (Session Persistence & Search History) -- Plan 3 of 4 complete
-Status: Executing
-Last activity: 2026-03-02 - Completed 43-01 (Desktop session persistence service + save/restore hooks)
+Phase: 43 of 47 (Session Persistence & Search History) -- Plan 4 of 4 complete
+Status: Phase 43 Complete
+Last activity: 2026-03-02 - Completed 43-04 (Web search history dropdowns)
 
-Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 in progress 3/4 plans)
+Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 complete 4/4 plans)
 
 ## Performance Metrics
 
@@ -42,6 +42,7 @@ Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 in 
 | 42-09 | 1 | 2min | 2min |
 | 43-01 | 1 | 7min | 7min |
 | 43-02 | 1 | 4min | 4min |
+| 43-04 | 1 | 8min | 8min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -71,6 +72,7 @@ Recent decisions affecting current work:
 - 42-09: Composition tree 3-state printed filter (matching regular search), web cancel skips enrichment, lab mode InterruptedError propagation.
 - 43-01: JSON session persistence with atomic writes (tempfile+os.replace). 500ms debounced saves via QTimer. 200ms deferred restore after startup. Results capped at 5K. excluded_raw_entries persisted for full restore.
 - 43-02: _persist() helper gates new storage writes behind session_persistence_enabled setting. Parallels has no printed_filter toggle, only badges.
+- 43-04: Search history deduplicates by query+mode, composition by title. History entries store results capped at 500. Lazy menu refresh on button click.
 
 ### Pending Todos
 
@@ -100,6 +102,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 43-01-PLAN.md (Desktop session persistence service + save/restore hooks)
-Resume file: .planning/phases/43-session-persistence-search-history/43-01-SUMMARY.md
-Notes: Phase 43 in progress. Plans 01 and 02 complete (3/4). Next: 43-03.
+Stopped at: Completed 43-04-PLAN.md (Web search history dropdowns)
+Resume file: .planning/phases/43-session-persistence-search-history/43-04-SUMMARY.md
+Notes: Phase 43 complete (4/4 plans). All session persistence and search history features done. Next: Phase 44.
