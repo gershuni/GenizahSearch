@@ -1730,6 +1730,7 @@ class Config:
     CACHE_META = os.path.join(INDEX_DIR, "metadata_cache.pkl")
     CACHE_NLI = os.path.join(INDEX_DIR, "nli_cache.pkl")
     CONFIG_FILE = os.path.join(INDEX_DIR, "config.pkl")
+    SESSION_FILE = os.path.join(INDEX_DIR, "session.json")
     LANGUAGE_FILE = os.path.join(INDEX_DIR, "lang.pkl")
     BROWSE_MAP = os.path.join(INDEX_DIR, "browse_map.pkl")
     LOG_FILE = os.path.join(INDEX_DIR, "genizah.log")
