@@ -2530,4 +2530,12 @@ TRANSLATIONS = {
     "History Limit:": "מגבלת היסטוריה:",
     "Maximum search history entries per type": "מספר מרבי של רשומות היסטוריה לכל סוג חיפוש",
     "Last Searches": "חיפושים אחרונים",
+    "Restore State:": "שחזור מצב:",
+    "Ask": "שאל",
+    "Always": "תמיד",
+    "Never": "אף פעם",
+    "Whether to restore previous search state on startup": "האם לשחזר מצב חיפוש קודם בהפעלה",
+    "Restore State": "שחזור מצב",
+    "Restore previous search state?": "לשחזר מצב חיפוש קודם?",
+    "Don't ask me again": "אל תשאל אותי שוב",
 }

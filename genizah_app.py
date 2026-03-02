@@ -15973,13 +15973,16 @@ class GenizahGUI(QMainWindow):
         # Session persistence toggle
         app_row2 = QHBoxLayout()
         from PyQt6.QtWidgets import QCheckBox
-        self.chk_session_persistence = QCheckBox(tr("Session Persistence"))
-        self.chk_session_persistence.setToolTip(tr("Save and restore search state across restarts"))
-        self.chk_session_persistence.setChecked(load_app_config().get('session_persistence', True))
-        self.chk_session_persistence.toggled.connect(
-            lambda checked: save_app_config({'session_persistence': checked})
+        app_row2.addWidget(QLabel(tr("Restore State:")))
+        self.combo_restore_mode = QComboBox()
+        self.combo_restore_mode.addItems([tr("Ask"), tr("Always"), tr("Never")])
+        restore_mode = load_app_config().get('restore_mode', 'ask')
+        self.combo_restore_mode.setCurrentIndex({'ask': 0, 'always': 1, 'never': 2}.get(restore_mode, 0))
+        self.combo_restore_mode.setToolTip(tr("Whether to restore previous search state on startup"))
+        self.combo_restore_mode.currentIndexChanged.connect(
+            lambda idx: save_app_config({'restore_mode': ['ask', 'always', 'never'][idx]})
         )
-        app_row2.addWidget(self.chk_session_persistence)
+        app_row2.addWidget(self.combo_restore_mode)
 
         app_row2.addWidget(QLabel(tr("History Limit:")))
         self.spin_history_limit = QSpinBox()
@@ -22611,8 +22614,8 @@ class GenizahGUI(QMainWindow):
         from shared.session_persistence import save_session_state
         try:
             cfg = load_app_config()
-            if not cfg.get('session_persistence', True):
-                return  # Persistence disabled in settings
+            if cfg.get('restore_mode', 'ask') == 'never':
+                return  # Restore disabled in settings, no need to save
 
             from datetime import datetime
             state_dict = {
@@ -22669,13 +22672,42 @@ class GenizahGUI(QMainWindow):
         self._restoring_session = True
         try:
             cfg = load_app_config()
-            if not cfg.get('session_persistence', True):
+            restore_mode = cfg.get('restore_mode', 'ask')
+
+            if restore_mode == 'never':
                 self._restoring_session = False
                 return
 
             state = load_session_state()
             if not state:
                 return
+
+            # Check if there's anything meaningful to restore
+            reg = state.get('regular_search', {})
+            comp = state.get('composition_search', {})
+            has_data = reg.get('results') or comp.get('results') or comp.get('source_text')
+            if not has_data:
+                return
+
+            if restore_mode == 'ask':
+                from PyQt6.QtWidgets import QCheckBox
+                msgbox = QMessageBox(self)
+                msgbox.setWindowTitle(tr("Restore State"))
+                msgbox.setText(tr("Restore previous search state?"))
+                msgbox.setStandardButtons(
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                msgbox.setDefaultButton(QMessageBox.StandardButton.Yes)
+                chk_remember = QCheckBox(tr("Don't ask me again"))
+                msgbox.setCheckBox(chk_remember)
+                reply = msgbox.exec()
+                if chk_remember.isChecked():
+                    new_mode = 'always' if reply == QMessageBox.StandardButton.Yes else 'never'
+                    save_app_config({'restore_mode': new_mode})
+                    if hasattr(self, 'combo_restore_mode'):
+                        self.combo_restore_mode.setCurrentIndex({'always': 1, 'never': 2}[new_mode])
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
 
             # Restore regular search state
             reg = state.get('regular_search', {})
