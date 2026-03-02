@@ -718,7 +718,7 @@ TRANSLATIONS = {
             <div style='text-align:center;'>
                 <h2 style='margin-bottom:5px;'>Genizah Search Pro {APP_VERSION}</h2>
                 <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
-                <p>אתר: <a href='https://genizahsearch.com'>GenizahSearch.com</a> &mdash; חיפוש גניזה של דיקטה</p>
+                <p>אתר: <a href='https://genizahsearch.com'>GenizahSearch.com</a> &mdash; אתר הגניזה של דיקטה</p>
             </div>
             <hr>
 
