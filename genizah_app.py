@@ -12493,6 +12493,28 @@ class GenizahGUI(QMainWindow):
         self._catalog_clear_all_btn.setVisible(False)
         top_row.addWidget(self._catalog_clear_all_btn)
 
+        # Browse-to-search buttons (Phase 45-05)
+        self._catalog_search_within_btn = QPushButton(tr("Search in these results"))
+        self._catalog_search_within_btn.setFixedHeight(26)
+        self._catalog_search_within_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView))
+        self._catalog_search_within_btn.setStyleSheet(
+            "QPushButton { font-size: 11px; padding: 2px 8px; }"
+            "QPushButton:disabled { color: #999; }"
+        )
+        self._catalog_search_within_btn.setEnabled(False)
+        self._catalog_search_within_btn.clicked.connect(self._catalog_search_in_results)
+        top_row.addWidget(self._catalog_search_within_btn)
+
+        self._catalog_parallels_within_btn = QPushButton(tr("Parallel search in these results"))
+        self._catalog_parallels_within_btn.setFixedHeight(26)
+        self._catalog_parallels_within_btn.setStyleSheet(
+            "QPushButton { font-size: 11px; padding: 2px 8px; }"
+            "QPushButton:disabled { color: #999; }"
+        )
+        self._catalog_parallels_within_btn.setEnabled(False)
+        self._catalog_parallels_within_btn.clicked.connect(self._catalog_parallels_in_results)
+        top_row.addWidget(self._catalog_parallels_within_btn)
+
         top_row.addStretch()
 
         self._catalog_count_label = QLabel("")
@@ -13348,6 +13370,66 @@ class GenizahGUI(QMainWindow):
                 self._catalog_chips_layout.addWidget(btn)
 
         self._catalog_clear_all_btn.setVisible(has_any)
+        # Enable/disable browse-to-search buttons
+        if hasattr(self, '_catalog_search_within_btn'):
+            self._catalog_search_within_btn.setEnabled(has_any)
+        if hasattr(self, '_catalog_parallels_within_btn'):
+            self._catalog_parallels_within_btn.setEnabled(has_any)
+
+    def _catalog_build_browse_filters(self) -> dict:
+        """Build pre_search_filters dict from all active catalog browse filters."""
+        filters = {}
+        if self._catalog_current_domain:
+            filters['domain'] = self._catalog_current_domain
+        if self._catalog_current_author:
+            filters['author'] = self._catalog_current_author
+        if self._catalog_current_work:
+            filters['work'] = self._catalog_current_work
+        if self._catalog_date_from is not None:
+            filters['date_from'] = self._catalog_date_from
+        if self._catalog_date_to is not None:
+            filters['date_to'] = self._catalog_date_to
+        return filters
+
+    def _catalog_search_in_results(self):
+        """Navigate to search tab with browse filters as pre-search filters."""
+        filters = self._catalog_build_browse_filters()
+        if not filters:
+            return
+        self.pre_search_filters = filters
+        # Recompute restrict_sys_ids for the filter set
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if fjms.is_available():
+            self.pre_search_restrict_sys_ids = fjms.get_filter_sys_ids(
+                domain=filters.get('domain'),
+                author=filters.get('author'),
+                work=filters.get('work'),
+                date_from=filters.get('date_from'),
+                date_to=filters.get('date_to'),
+            )
+        self._update_filter_chip_bar()
+        self.tabs.setCurrentIndex(0)  # Switch to search tab
+
+    def _catalog_parallels_in_results(self):
+        """Navigate to composition tab with browse filters as pre-search filters."""
+        filters = self._catalog_build_browse_filters()
+        if not filters:
+            return
+        self.pre_search_filters = filters
+        # Recompute restrict_sys_ids for the filter set
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service()
+        if fjms.is_available():
+            self.pre_search_restrict_sys_ids = fjms.get_filter_sys_ids(
+                domain=filters.get('domain'),
+                author=filters.get('author'),
+                work=filters.get('work'),
+                date_from=filters.get('date_from'),
+                date_to=filters.get('date_to'),
+            )
+        self._update_filter_chip_bar()
+        self.tabs.setCurrentIndex(1)  # Switch to composition tab
 
     def _catalog_view_result(self, index):
         """Double-click result row: open ResultDialog with prev/next navigation."""

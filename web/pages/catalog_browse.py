@@ -13,7 +13,7 @@ Features:
 - RTL Hebrew support
 """
 
-from nicegui import ui, run
+from nicegui import ui, run, app
 from web.services import get_service
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
@@ -352,6 +352,7 @@ def create_catalog_browse_page(
         render_results_table(rows, total)
         render_pagination(total)
         render_chips()
+        _update_search_buttons()
         update_url()
 
     # ── Render: Results table with inline expandable detail ────────
@@ -858,6 +859,78 @@ def create_catalog_browse_page(
         await fetch_works()
         await refresh_results()
 
+    # ── Browse-to-search navigation (Path B) ─────────────────────
+    search_btn_ref = {'ref': None}
+    parallels_btn_ref = {'ref': None}
+
+    def _has_active_filters() -> bool:
+        """Return True if any browse filter is currently active."""
+        return any([
+            current_domain['value'],
+            current_author['value'],
+            current_work['value'],
+            current_date_from['value'] is not None,
+            current_date_to['value'] is not None,
+            current_text_all['value'],
+            current_text_any['value'],
+            current_text_not['value'],
+        ])
+
+    def _build_incoming_filters() -> dict:
+        """Build incoming_filters dict from all active browse filters."""
+        incoming = {}
+        if current_domain['value']:
+            incoming['domain'] = current_domain['value']
+        if current_author['value']:
+            incoming['author'] = current_author['value']
+            # Include display name for chip bar on target page
+            incoming['author_name'] = _resolve_author_display(current_author['value'])
+        if current_work['value']:
+            incoming['work'] = current_work['value']
+            incoming['work_name'] = _resolve_work_display(current_work['value'])
+        if current_date_from['value'] is not None:
+            incoming['date_from'] = current_date_from['value']
+        if current_date_to['value'] is not None:
+            incoming['date_to'] = current_date_to['value']
+        # Text filters carry over as lists
+        if current_text_all['value']:
+            incoming['text_all'] = current_text_all['value']
+        if current_text_any['value']:
+            incoming['text_any'] = current_text_any['value']
+        if current_text_not['value']:
+            incoming['text_not'] = current_text_not['value']
+        return incoming
+
+    def _update_search_buttons():
+        """Enable/disable browse-to-search buttons based on active filters."""
+        active = _has_active_filters()
+        if search_btn_ref['ref']:
+            if active:
+                search_btn_ref['ref'].props(remove='disable')
+            else:
+                search_btn_ref['ref'].props('disable')
+        if parallels_btn_ref['ref']:
+            if active:
+                parallels_btn_ref['ref'].props(remove='disable')
+            else:
+                parallels_btn_ref['ref'].props('disable')
+
+    def _search_in_results():
+        """Navigate to search page with all active browse filters pre-populated."""
+        incoming = _build_incoming_filters()
+        if not incoming:
+            return
+        app.storage.user['incoming_filters'] = incoming
+        ui.navigate.to('/search?from_browse=1')
+
+    def _parallels_in_results():
+        """Navigate to parallels page with all active browse filters pre-populated."""
+        incoming = _build_incoming_filters()
+        if not incoming:
+            return
+        app.storage.user['incoming_filters'] = incoming
+        ui.navigate.to('/parallels')
+
     # ══════════════════════════════════════════════════════════════
     # Page Layout (single-pass build)
     # ══════════════════════════════════════════════════════════════
@@ -878,6 +951,22 @@ def create_catalog_browse_page(
 
         # ── Active Filter Chips ────────────────────────────────────
         chips_container['ref'] = ui.column().classes('w-full')
+
+        # ── Browse-to-Search buttons ─────────────────────────────
+        with ui.row().classes('w-full items-center gap-2 py-1'):
+            sb = ui.button(
+                tr('Search in these results'),
+                icon='search',
+                on_click=_search_in_results,
+            ).props('flat dense no-caps disable color=primary').classes('text-sm')
+            search_btn_ref['ref'] = sb
+
+            pb = ui.button(
+                tr('Parallel search in these results'),
+                icon='compare_arrows',
+                on_click=_parallels_in_results,
+            ).props('flat dense no-caps disable color=secondary').classes('text-sm')
+            parallels_btn_ref['ref'] = pb
 
         # ── Two-column layout ──────────────────────────────────────
         with ui.row().classes('w-full gap-0 flex-nowrap items-start'):
