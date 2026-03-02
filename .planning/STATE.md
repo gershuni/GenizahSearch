@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 42 complete (9/9 plans), Phase 43 next
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 43 in progress (3/4 plans)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 43 of 47 (Session Persistence & Search History) -- Plan 2 of 4 complete
+Phase: 43 of 47 (Session Persistence & Search History) -- Plan 3 of 4 complete
 Status: Executing
-Last activity: 2026-03-02 - Completed 43-02 (Web session persistence extension + settings toggles)
+Last activity: 2026-03-02 - Completed 43-01 (Desktop session persistence service + save/restore hooks)
 
-Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 in progress 2/4 plans)
+Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 in progress 3/4 plans)
 
 ## Performance Metrics
 
@@ -40,6 +40,7 @@ Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 in 
 | 42-07 | 1 | 3min | 3min |
 | 42-08 | 1 | 4min | 4min |
 | 42-09 | 1 | 2min | 2min |
+| 43-01 | 1 | 7min | 7min |
 | 43-02 | 1 | 4min | 4min |
 
 **Recent Trend:**
@@ -68,6 +69,7 @@ Recent decisions affecting current work:
 - 42-07: Clickable excluded items in web, "Filter Printed" label, desktop 3-state printed filter on search results, 5 missing Hebrew translation keys.
 - 42-08: Bare 'Searching' translation key for desktop status, 'Found in source text'/'High frequency' excluded reason sub-header translations, partial results statusbar notification on cancel.
 - 42-09: Composition tree 3-state printed filter (matching regular search), web cancel skips enrichment, lab mode InterruptedError propagation.
+- 43-01: JSON session persistence with atomic writes (tempfile+os.replace). 500ms debounced saves via QTimer. 200ms deferred restore after startup. Results capped at 5K. excluded_raw_entries persisted for full restore.
 - 43-02: _persist() helper gates new storage writes behind session_persistence_enabled setting. Parallels has no printed_filter toggle, only badges.
 
 ### Pending Todos
@@ -98,6 +100,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 43-02-PLAN.md (Web session persistence extension + settings toggles)
-Resume file: .planning/phases/43-session-persistence-search-history/43-02-SUMMARY.md
-Notes: Phase 43 in progress. Plan 02 complete (2/4). Next: 43-03.
+Stopped at: Completed 43-01-PLAN.md (Desktop session persistence service + save/restore hooks)
+Resume file: .planning/phases/43-session-persistence-search-history/43-01-SUMMARY.md
+Notes: Phase 43 in progress. Plans 01 and 02 complete (3/4). Next: 43-03.
