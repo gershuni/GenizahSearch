@@ -1999,6 +1999,42 @@ def create_parallels_page(initial_text: str = None):
         else:
             captured_min_boundary_matches = int(min_boundary_matches.value) if min_boundary_matches.value else 0
 
+        # Compute pre-search filter set from active filters
+        restrict_sys_ids = None
+        if _has_active_filters():
+            from shared.fjms_service import get_fjms_service
+
+            def _compute_restrict():
+                fjms = get_fjms_service(thread_safe=True)
+                if not fjms.is_available():
+                    return None
+                return fjms.get_filter_sys_ids(
+                    domain=p_state.filter_domain,
+                    author=p_state.filter_author,
+                    work=p_state.filter_work,
+                    date_from=p_state.filter_date_from,
+                    date_to=p_state.filter_date_to,
+                    material_exclude=p_state.filter_material_exclude or None,
+                )
+
+            restrict_sys_ids = await run.io_bound(_compute_restrict)
+            p_state.restrict_sys_ids = restrict_sys_ids
+            # If filters are active but match nothing, show message and return
+            if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
+                ui.notify(tr("No manuscripts match the current filters."), type='warning')
+                p_state.is_running = False
+                search_indicator.style('display: none;')
+                progress_bar.style('opacity: 0;')
+                ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
+                return
+
+        # Merge per-manuscript exclusions into restrict_sys_ids if both are present
+        if p_state.excluded_manuscript_ids and restrict_sys_ids is not None:
+            restrict_sys_ids = restrict_sys_ids - p_state.excluded_manuscript_ids
+
+        # Capture restrict_sys_ids for the background thread
+        captured_restrict_sys_ids = restrict_sys_ids
+
         def run_search():
             try:
                 if captured_lab_mode:
@@ -2029,7 +2065,8 @@ def create_parallels_page(initial_text: str = None):
                         boundary_delimiter=captured_boundary_delimiter,
                         boundary_boost=captured_boundary_boost,
                         min_boundary_matches=captured_min_boundary_matches,
-                        min_delimiter_distance=captured_min_delimiter_distance
+                        min_delimiter_distance=captured_min_delimiter_distance,
+                        restrict_sys_ids=captured_restrict_sys_ids,
                     )
                 return result
             except InterruptedError:
@@ -2188,18 +2225,33 @@ def create_parallels_page(initial_text: str = None):
                 p_domain_filter_btn.set_visibility(p_state.has_domain_data)
                 _update_parallels_domain_filter_btn()
 
+                # Build filter summary suffix for status line
+                _filter_suffix = ''
+                if _has_active_filters() and p_state.filter_manuscript_count is not None:
+                    filter_parts = []
+                    if p_state.filter_domain:
+                        filter_parts.append(p_state.filter_domain)
+                    if p_state.filter_author_name:
+                        filter_parts.append(p_state.filter_author_name)
+                    if p_state.filter_work_name:
+                        filter_parts.append(p_state.filter_work_name)
+                    if filter_parts:
+                        _filter_suffix = f" ({tr('filtered')}: {', '.join(filter_parts)}, {p_state.filter_manuscript_count:,} {tr('manuscripts')})"
+                    else:
+                        _filter_suffix = f" ({tr('filtered')}: {p_state.filter_manuscript_count:,} {tr('manuscripts')})"
+
                 # Show message if results are partial (search was cancelled)
                 if is_partial:
                     chunks_done = p_state.chunks_processed
                     chunks_all = p_state.chunks_total
                     result_count = len(main_results) + len(filtered_results)
-                    summary_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {chunks_done}/{chunks_all} {tr('chunks')}, {result_count} {tr('Results')}"
+                    summary_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {chunks_done}/{chunks_all} {tr('chunks')}, {result_count} {tr('Results')}{_filter_suffix}"
                     ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
                 else:
                     # Set summary line that stays visible until next search
                     chunks_all = p_state.chunks_total
                     result_count = len(main_results) + len(filtered_results)
-                    summary_label.text = f"{tr('Search completed in')} {total_elapsed_str} \u2014 {chunks_all} {tr('chunks')}, {result_count} {tr('Results')}"
+                    summary_label.text = f"{tr('Search completed in')} {total_elapsed_str} \u2014 {chunks_all} {tr('chunks')}, {result_count} {tr('Results')}{_filter_suffix}"
 
                 # Apply domain exclusions if any
                 if p_state.domain_exclusions and p_state.has_domain_data:
