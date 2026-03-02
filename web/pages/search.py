@@ -77,10 +77,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Restore domain exclusions from storage
     search_state.domain_exclusions = set(app.storage.user.get('domain_exclusions', []))
 
+    # Restore printed_filter from storage
+    search_state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
+
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:
         search_state.domain_exclusions = set()
         app.storage.user['domain_exclusions'] = []
+
+    def _persist(key, value):
+        """Save to storage if session persistence is enabled."""
+        if app.storage.user.get('session_persistence_enabled', True):
+            app.storage.user[key] = value
 
     def _domain_display_name(en_name: str) -> str:
         """Get display name for a domain (Hebrew if UI is Hebrew, else English)."""
@@ -759,6 +767,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             states = ['all', 'hide_printed', 'only_printed']
                             current_idx = states.index(search_state.printed_filter)
                             search_state.printed_filter = states[(current_idx + 1) % 3]
+                            _persist('search_printed_filter', search_state.printed_filter)
                             _update_printed_filter_btn()
                             # Re-apply domain exclusions + printed filter and re-render
                             if search_state.domain_exclusions and search_state.has_domain_data:
@@ -2078,6 +2087,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # At least one domain not excluded -- keep
                     filtered.append(r)
             search_state.domain_excluded_results = excluded_with_reasons
+            # Save excluded result reasons for restore (lightweight, capped)
+            excluded_reasons = [{'sys_id': r.get('result', {}).get('display', {}).get('id', ''), 'reason': r.get('reason', '')} for r in excluded_with_reasons[:500]]
+            _persist('search_excluded_reasons', excluded_reasons)
 
         # Apply printed filter on top of domain-filtered results
         filtered = _apply_printed_filter(filtered)
@@ -4145,3 +4157,4 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
         render_results(search_state.results, page=0)
+        ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')

@@ -2323,6 +2323,7 @@ def create_parallels_page(initial_text: str = None):
     if p_state.results:
         results_header.text = f"{len(p_state.results)} {tr('parallels found')}"
         render_results(p_state.results)
+        ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
 
     # Async function to restore filter sources from persistent storage
     async def restore_filter_sources():
