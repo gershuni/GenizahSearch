@@ -2562,6 +2562,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if results and results[0].get('responsa_warning'):
             ui.notify(results[0]['responsa_warning'], type='warning', timeout=5000)
 
+        # --- PostHog custom event ---
+        from web.main import posthog_capture
+        posthog_capture('search_executed', {
+            'query': clean_query[:100],
+            'mode': mode,
+            'result_count': len(results),
+            'duration_seconds': round(total_elapsed, 1),
+            'was_cancelled': was_cancelled,
+        })
+
         # --- URL state persistence (history.replaceState without page reload) ---
         try:
             params = f'?q={quote(clean_query)}'
@@ -2857,6 +2867,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     def open_advanced_dialog(index, result):
         """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer."""
+        # PostHog: track result clicks
+        from web.main import posthog_capture
+        display = result.get('display', {}) if isinstance(result, dict) else {}
+        posthog_capture('result_opened', {
+            'shelfmark': display.get('shelfmark', '')[:80],
+            'sys_id': display.get('id', ''),
+            'result_index': index,
+        })
+
         service = get_service()
         adv_state = AdvancedViewState()
         adv_state.current_result_idx = index

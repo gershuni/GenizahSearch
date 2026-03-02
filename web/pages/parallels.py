@@ -1491,6 +1491,19 @@ def create_parallels_page(initial_text: str = None):
             if main_results or filtered_results:
                 p_state.results = main_results
                 p_state.filtered_results = filtered_results
+
+                # PostHog: track parallels search
+                from web.main import posthog_capture
+                posthog_capture('parallels_search', {
+                    'text_length': len(text),
+                    'word_count': words,
+                    'result_count': len(main_results),
+                    'filtered_count': len(filtered_results),
+                    'duration_seconds': round(total_elapsed, 1),
+                    'is_partial': is_partial,
+                    'mode': captured_mode,
+                })
+
                 try:
                     # Store both main and filtered results for export
                     # Store in global state (for API export endpoints)

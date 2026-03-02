@@ -156,6 +156,8 @@ async def do_login(email: str, password: str) -> Dict:
     result = supabase_sign_in(email, password)
 
     if "error" in result:
+        from web.main import posthog_capture
+        posthog_capture('login_failed', {'reason': str(result.get('error', ''))[:100]})
         return result
 
     # Store session tokens for per-user Supabase client
@@ -175,6 +177,9 @@ async def do_login(email: str, password: str) -> Dict:
 
     # Update global state
     GlobalAuthState.set_auth(user, profile)
+
+    from web.main import posthog_capture
+    posthog_capture('login_success', {})
 
     return {"success": True, "user": user, "profile": profile}
 

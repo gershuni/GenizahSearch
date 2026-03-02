@@ -945,6 +945,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 except Exception:
                     pass
 
+                # PostHog: track manuscript views
+                from web.main import posthog_capture
+                posthog_capture('browse_manuscript', {
+                    'sys_id': state.sys_id,
+                    'shelfmark': page.shelfmark[:80] if page.shelfmark else '',
+                    'page_num': page.p_num,
+                })
+
                 # Track recently viewed item
                 if state.sys_id and service.is_ready:
                     try:
