@@ -2245,6 +2245,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         history_menu.close()
 
     async def execute_search():
+        # Guard against double-submit (rage-clicking while search is running)
+        if search_state.is_running:
+            return
+
         # Handle PGP tag search mode — navigate to tag results page
         if mode_select.value == 'pgp_tags':
             tag = tag_select.value
@@ -2297,6 +2301,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.status = tr("Starting...")
         search_state.search_start_time = time.time()
         search_state.results = []
+
+        # Immediate visual feedback — swap buttons before the 500ms timer tick
+        search_btn.style('display: none;')
+        stop_btn.style('display: inline-flex;')
+        progress_bar.classes(remove='opacity-0')
+        progress_bar.value = 0
 
         # Show loading spinner immediately
         render_results([])
