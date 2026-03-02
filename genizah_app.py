@@ -8408,6 +8408,24 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.query_input)
         row1.addWidget(self.btn_search)
 
+        # Search history dropdown
+        self.search_history_combo = QComboBox()
+        self.search_history_combo.setFixedWidth(200)
+        self.search_history_combo.setPlaceholderText(tr("Search History"))
+        self.search_history_combo.setToolTip(tr("Recent searches — click to restore"))
+        self.search_history_combo.setMaxVisibleItems(15)
+        self.search_history_combo.activated.connect(self._on_search_history_selected)
+        self.search_history_combo.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.search_history_combo.customContextMenuRequested.connect(self._show_search_history_context_menu)
+        row1.addWidget(self.search_history_combo)
+
+        btn_clear_search_history = QPushButton("×")
+        btn_clear_search_history.setFixedWidth(24)
+        btn_clear_search_history.setToolTip(tr("Clear search history"))
+        btn_clear_search_history.setStyleSheet("font-size: 10px; padding: 2px;")
+        btn_clear_search_history.clicked.connect(lambda: self._clear_search_history('regular'))
+        row1.addWidget(btn_clear_search_history)
+
         # Row 2: Search Parameters & Lab Mode
         row2 = QHBoxLayout()
 
@@ -8832,9 +8850,27 @@ class GenizahGUI(QMainWindow):
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
         top_row.addWidget(QLabel(tr("Title:"))); top_row.addWidget(self.comp_title_input)
         
-        # Load Button Cmoved to top row
+        # Load Button moved to top row
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
         top_row.addWidget(btn_load)
+
+        # Composition history dropdown
+        self.comp_history_combo = QComboBox()
+        self.comp_history_combo.setFixedWidth(200)
+        self.comp_history_combo.setPlaceholderText(tr("Composition History"))
+        self.comp_history_combo.setToolTip(tr("Recent composition searches — click to restore"))
+        self.comp_history_combo.setMaxVisibleItems(15)
+        self.comp_history_combo.activated.connect(self._on_comp_history_selected)
+        self.comp_history_combo.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.comp_history_combo.customContextMenuRequested.connect(self._show_comp_history_context_menu)
+        top_row.addWidget(self.comp_history_combo)
+
+        btn_clear_comp_history = QPushButton("×")
+        btn_clear_comp_history.setFixedWidth(24)
+        btn_clear_comp_history.setToolTip(tr("Clear composition history"))
+        btn_clear_comp_history.setStyleSheet("font-size: 10px; padding: 2px;")
+        btn_clear_comp_history.clicked.connect(lambda: self._clear_search_history('composition'))
+        top_row.addWidget(btn_clear_comp_history)
 
         # 1. Exclude & Filter (Moved to top row)
         btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
@@ -15961,6 +15997,17 @@ class GenizahGUI(QMainWindow):
             lambda checked: save_app_config({'session_persistence': checked})
         )
         app_row2.addWidget(self.chk_session_persistence)
+
+        app_row2.addWidget(QLabel(tr("History Limit:")))
+        self.spin_history_limit = QSpinBox()
+        self.spin_history_limit.setRange(5, 100)
+        self.spin_history_limit.setValue(load_app_config().get('history_limit', 20))
+        self.spin_history_limit.setToolTip(tr("Maximum search history entries per type"))
+        self.spin_history_limit.valueChanged.connect(
+            lambda val: save_app_config({'history_limit': val})
+        )
+        app_row2.addWidget(self.spin_history_limit)
+
         app_row2.addStretch()
         app_layout.addLayout(app_row2)
 
@@ -17388,6 +17435,9 @@ class GenizahGUI(QMainWindow):
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
+        # Add to search history (skip during session restore)
+        if not getattr(self, '_restoring_session', False):
+            self._add_regular_search_to_history()
 
     def _open_results_filter_dialog(self, column):
         if column == 1:
@@ -20297,6 +20347,10 @@ class GenizahGUI(QMainWindow):
         self.comp_raw_items = main_res
         self.comp_raw_filtered = filt_res
 
+        # Save to composition history (only on fresh results, not session restore)
+        if not getattr(self, '_restoring_session', False):
+            self._add_comp_search_to_history()
+
         clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
         clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
 
@@ -22335,6 +22389,216 @@ class GenizahGUI(QMainWindow):
             QMessageBox.critical(self, tr("Indexing Error"), str(err))
 
     # ------------------------------------------------------------------
+    # Search History
+    # ------------------------------------------------------------------
+
+    def _refresh_search_history(self):
+        """Refresh the regular search history dropdown."""
+        from shared.session_persistence import get_history
+        self.search_history_combo.clear()
+        for entry in get_history('regular'):
+            query = entry.get('query', '')[:40]
+            count = entry.get('result_count', 0)
+            self.search_history_combo.addItem(f"{query}  ({count})", entry)
+        self.search_history_combo.setCurrentIndex(-1)
+
+    def _refresh_comp_history(self):
+        """Refresh the composition history dropdown."""
+        from shared.session_persistence import get_history
+        self.comp_history_combo.clear()
+        for entry in get_history('composition'):
+            title = entry.get('query', '')[:40]
+            count = entry.get('result_count', 0)
+            self.comp_history_combo.addItem(f"{title}  ({count})", entry)
+        self.comp_history_combo.setCurrentIndex(-1)
+
+    def _on_search_history_selected(self, index):
+        """Restore state from a regular search history entry."""
+        entry = self.search_history_combo.itemData(index)
+        if not entry:
+            return
+        state = entry.get('state', {})
+        if state:
+            self._restore_regular_search_from_state(state, entry)
+        self.search_history_combo.setCurrentIndex(-1)
+
+    def _on_comp_history_selected(self, index):
+        """Restore state from a composition history entry."""
+        entry = self.comp_history_combo.itemData(index)
+        if not entry:
+            return
+        state = entry.get('state', {})
+        if state:
+            self._restore_comp_search_from_state(state, entry)
+        self.comp_history_combo.setCurrentIndex(-1)
+
+    def _restore_regular_search_from_state(self, state, entry=None):
+        """Apply a history entry's state dict to the regular search tab."""
+        if entry:
+            self.query_input.setText(entry.get('query', ''))
+            params = entry.get('search_params', {})
+            if 'mode_index' in params:
+                self.mode_combo.setCurrentIndex(params['mode_index'])
+            if 'gap' in params:
+                self.gap_input.setText(str(params['gap']))
+            if 'variant_preset' in params:
+                self._current_variant_preset = params['variant_preset']
+
+        self._domain_exclusions = set(state.get('domain_exclusions', []))
+        self._printed_filter_state = state.get('printed_filter', 'all')
+        self.excluded_sys_ids = set(state.get('excluded_sys_ids', []))
+        self.excluded_shelfmarks = set(state.get('excluded_shelfmarks', []))
+
+        results = state.get('results', [])
+        if results:
+            self.last_results = results
+            self.on_search_finished(results)
+        self._schedule_session_save()
+
+    def _restore_comp_search_from_state(self, state, entry=None):
+        """Apply a history entry's state dict to the composition tab."""
+        if entry:
+            self.comp_text_area.setPlainText(state.get('source_text', ''))
+            if entry.get('query'):
+                self.comp_title_input.setText(entry['query'])
+            params = entry.get('search_params', {})
+            if 'chunk_size' in params:
+                self.spin_chunk.setValue(params['chunk_size'])
+            if 'max_freq' in params:
+                self.spin_freq.setValue(params['max_freq'])
+            if 'mode_index' in params:
+                self.comp_mode_combo.setCurrentIndex(params['mode_index'])
+
+        self._comp_domain_exclusions = set(state.get('domain_exclusions', []))
+        self._comp_printed_filter_state = state.get('printed_filter', 'all')
+
+        results = state.get('results', [])
+        filtered = state.get('filtered_results', [])
+        if results or filtered:
+            self.comp_raw_items = results
+            self.comp_raw_filtered = filtered
+            self.comp_has_grouped_results = False
+            self.comp_grouped_main = results
+            self.comp_grouped_appendix = {}
+            self.comp_grouped_summary = {}
+            self.comp_grouped_filtered_main = filtered
+            self.comp_grouped_filtered_appendix = {}
+            self.comp_grouped_filtered_summary = {}
+            self.display_comp_results(results, {}, {}, filtered, {}, {})
+
+        # Switch to composition tab
+        self.tabs.setCurrentWidget(self.composition_tab)
+        self._schedule_session_save()
+
+    def _add_regular_search_to_history(self):
+        """Save the current regular search to history."""
+        from shared.session_persistence import add_history_entry
+        from datetime import datetime
+        query = self.query_input.text().strip()
+        if not query:
+            return
+        results = getattr(self, 'last_results', [])
+        cfg = load_app_config()
+        limit = cfg.get('history_limit', 20)
+        add_history_entry('regular', {
+            'query': query,
+            'result_count': len(results),
+            'timestamp': datetime.now().isoformat(),
+            'search_params': {
+                'mode_index': self.mode_combo.currentIndex(),
+                'gap': int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0,
+                'variant_preset': getattr(self, '_current_variant_preset', 70),
+            },
+            'state': {
+                'results': results[:5000],
+                'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
+                'printed_filter': getattr(self, '_printed_filter_state', 'all'),
+                'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
+                'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
+            },
+        }, limit=limit)
+        self._refresh_search_history()
+
+    def _add_comp_search_to_history(self):
+        """Save the current composition search to history."""
+        from shared.session_persistence import add_history_entry
+        from datetime import datetime
+        title = self.comp_title_input.text().strip()
+        source_text = self.comp_text_area.toPlainText().strip()
+        if not source_text:
+            return
+        query = title or source_text[:60]
+        results = getattr(self, 'comp_raw_items', [])
+        filtered = getattr(self, 'comp_raw_filtered', [])
+        cfg = load_app_config()
+        limit = cfg.get('history_limit', 20)
+        add_history_entry('composition', {
+            'query': query,
+            'result_count': len(results),
+            'timestamp': datetime.now().isoformat(),
+            'search_params': {
+                'chunk_size': self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5,
+                'max_freq': self.spin_freq.value() if hasattr(self, 'spin_freq') else 10,
+                'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
+            },
+            'state': {
+                'source_text': source_text,
+                'results': results[:5000],
+                'filtered_results': filtered[:5000],
+                'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
+                'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
+            },
+        }, limit=limit)
+        self._refresh_comp_history()
+
+    def _show_search_history_context_menu(self, pos):
+        """Show context menu for search history dropdown."""
+        index = self.search_history_combo.currentIndex()
+        if index < 0:
+            return
+        menu = QMenu(self)
+        delete_action = menu.addAction(tr("Delete this entry"))
+        clear_action = menu.addAction(tr("Clear all history"))
+        action = menu.exec(self.search_history_combo.mapToGlobal(pos))
+        if action == delete_action:
+            from shared.session_persistence import delete_history_entry
+            delete_history_entry('regular', index)
+            self._refresh_search_history()
+        elif action == clear_action:
+            self._clear_search_history('regular')
+
+    def _show_comp_history_context_menu(self, pos):
+        """Show context menu for composition history dropdown."""
+        index = self.comp_history_combo.currentIndex()
+        if index < 0:
+            return
+        menu = QMenu(self)
+        delete_action = menu.addAction(tr("Delete this entry"))
+        clear_action = menu.addAction(tr("Clear all history"))
+        action = menu.exec(self.comp_history_combo.mapToGlobal(pos))
+        if action == delete_action:
+            from shared.session_persistence import delete_history_entry
+            delete_history_entry('composition', index)
+            self._refresh_comp_history()
+        elif action == clear_action:
+            self._clear_search_history('composition')
+
+    def _clear_search_history(self, search_type):
+        """Clear all entries for a search type after confirmation."""
+        from shared.session_persistence import clear_history
+        reply = QMessageBox.question(
+            self, tr("Clear History"),
+            tr("Clear all search history?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            clear_history(search_type)
+            if search_type == 'regular':
+                self._refresh_search_history()
+            else:
+                self._refresh_comp_history()
+
+    # ------------------------------------------------------------------
     # Session Persistence
     # ------------------------------------------------------------------
 
@@ -22381,6 +22645,7 @@ class GenizahGUI(QMainWindow):
                     'sort_mode': getattr(self, 'comp_sort_mode', 'score'),
                     'sort_reverse': getattr(self, 'comp_sort_reverse', True),
                 },
+                'was_interrupted': getattr(self, 'is_comp_running', False),
             }
             save_session_state(state_dict)
         except Exception as e:
@@ -22397,9 +22662,11 @@ class GenizahGUI(QMainWindow):
     def _restore_session(self):
         """Restore search state from saved session on startup."""
         from shared.session_persistence import load_session_state
+        self._restoring_session = True
         try:
             cfg = load_app_config()
             if not cfg.get('session_persistence', True):
+                self._restoring_session = False
                 return
 
             state = load_session_state()
@@ -22486,6 +22753,35 @@ class GenizahGUI(QMainWindow):
 
         except Exception as e:
             logger.error("Failed to restore session: %s", e)
+        finally:
+            self._restoring_session = False
+
+        # Refresh history dropdowns
+        try:
+            self._refresh_search_history()
+            self._refresh_comp_history()
+        except Exception as e:
+            logger.error("Failed to refresh history: %s", e)
+
+        # Check for interrupted composition search
+        try:
+            from shared.session_persistence import get_interrupted_search, clear_interrupted_flag
+            interrupted = get_interrupted_search()
+            if interrupted and interrupted.get('source_text'):
+                reply = QMessageBox.question(
+                    self, tr("Resume Search"),
+                    tr("A composition search was interrupted last time. Resume from where it stopped?"),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.comp_text_area.setPlainText(interrupted['source_text'])
+                    if interrupted.get('title'):
+                        self.comp_title_input.setText(interrupted['title'])
+                    self.tabs.setCurrentWidget(self.composition_tab)
+                    QTimer.singleShot(500, self.toggle_composition)
+                clear_interrupted_flag()
+        except Exception as e:
+            logger.error("Failed to check interrupted search: %s", e)
 
     def closeEvent(self, event):
         # Save session state before closing
