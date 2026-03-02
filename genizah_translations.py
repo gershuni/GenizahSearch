@@ -2566,6 +2566,34 @@ TRANSLATIONS = {
     "Copy Title": "העתק כותרת",
     "Copy Result": "העתק תוצאה",
     "Copy Library": "העתק ספרייה",
+
+    # Phase 45 - Filtered Search Context
+    # Filter panel strings
+    "Date from": "מתאריך",
+    "Date to": "עד תאריך",
+    "Exclude Printed": "הסתר מודפסים",
+    "Material": "חומר",
+    "manuscripts match": "כתבי יד תואמים",
+    "No manuscripts match the current filters.": "אין כתבי יד התואמים לסינון הנוכחי.",
+    "No manuscripts match the current filters": "אין כתבי יד התואמים לסינון הנוכחי",
+    # Chip bar strings
+    "Clear all filters": "נקה את כל הסינונים",
+    # Per-manuscript exclusion strings
+    "Exclude this manuscript": "הסתר כתב יד זה",
+    "Source manuscript": "כתב היד המקורי",
+    "Import exclusions": "ייבא רשימת הסתרה",
+    "Import from word search": "ייבא מחיפוש מילים",
+    "Import from parallels": "ייבא ממקבילות",
+    "exclusions from word search": "הסתרות מחיפוש מילים",
+    # Path B (browse-to-search) strings
+    "Search in these results": "חפש בתוצאות אלה",
+    "Parallel search in these results": "חפש מקבילות בתוצאות אלה",
+    # Filter history strings
+    "filtered": "מסונן",
+    "with filters": "עם סינון",
+    # Pre-search filter dialog (desktop)
+    "Set pre-search filters (domain, author, date, material)": "הגדר סינון מקדים (תחום, מחבר, תאריך, חומר)",
+    "Filters": "סינון",
 }
 
 # Hebrew library display names (keyed by library_code)
