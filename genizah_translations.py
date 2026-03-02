@@ -2538,4 +2538,6 @@ TRANSLATIONS = {
     "Restore State": "שחזור מצב",
     "Restore previous search state?": "לשחזר מצב חיפוש קודם?",
     "Don't ask me again": "אל תשאל אותי שוב",
+    "Yes": "כן",
+    "No": "לא",
 }

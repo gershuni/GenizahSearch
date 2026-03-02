@@ -22697,6 +22697,8 @@ class GenizahGUI(QMainWindow):
                 msgbox.setStandardButtons(
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
+                msgbox.button(QMessageBox.StandardButton.Yes).setText(tr("Yes"))
+                msgbox.button(QMessageBox.StandardButton.No).setText(tr("No"))
                 msgbox.setDefaultButton(QMessageBox.StandardButton.Yes)
                 chk_remember = QCheckBox(tr("Don't ask me again"))
                 msgbox.setCheckBox(chk_remember)
