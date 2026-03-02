@@ -10,7 +10,7 @@ Find parallel texts in the Genizah corpus using:
 
 from nicegui import ui, run, app
 from web.state import state
-from web.translations import tr
+from web.translations import tr, get_language
 from urllib.parse import unquote
 import re
 import html
@@ -2056,7 +2056,7 @@ def create_parallels_page(initial_text: str = None):
                 library_code = state.meta_mgr.get_library_for_id(sys_id)
                 if library_code:
                     from genizah_core import get_library_display
-                    library_name = get_library_display(library_code, short=False)
+                    library_name = get_library_display(library_code, short=False, lang=get_language())
             except Exception:
                 pass
 
@@ -2280,7 +2280,7 @@ def create_parallels_page(initial_text: str = None):
                 library_code = state.meta_mgr.get_library_for_id(sys_id)
                 if library_code:
                     from genizah_core import get_library_display
-                    library_name = get_library_display(library_code, short=False)
+                    library_name = get_library_display(library_code, short=False, lang=get_language())
             except Exception:
                 pass
 
@@ -2353,7 +2353,7 @@ def create_parallels_page(initial_text: str = None):
                     library_code = state.meta_mgr.get_library_for_id(sys_id)
                     if library_code:
                         from genizah_core import get_library_display
-                        library_name = get_library_display(library_code, short=False)
+                        library_name = get_library_display(library_code, short=False, lang=get_language())
             except Exception:
                 pass
 

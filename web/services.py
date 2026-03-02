@@ -25,6 +25,7 @@ from genizah_core import (
     get_library_display,
 )
 from web.state import state
+from web.translations import get_language
 
 # ============================================================================
 # Data Classes
@@ -252,7 +253,7 @@ class GenizahService:
             actual_sys_id = result.get('sys_id', sys_id)
             shelfmark, title = state.meta_mgr.get_meta_for_id(actual_sys_id)
             library_code = state.meta_mgr.get_library_for_id(actual_sys_id)
-            library_name = get_library_display(library_code, short=False) if library_code else ''
+            library_name = get_library_display(library_code, short=False, lang=get_language()) if library_code else ''
 
             fl_id = None
             try:
@@ -438,7 +439,7 @@ class GenizahService:
             actual_sys_id = result.get('sys_id', '')
             shelfmark, title = state.meta_mgr.get_meta_for_id(actual_sys_id)
             library_code = state.meta_mgr.get_library_for_id(actual_sys_id)
-            library_name = get_library_display(library_code, short=False) if library_code else ''
+            library_name = get_library_display(library_code, short=False, lang=get_language()) if library_code else ''
 
             fl_id_parsed = None
             try:

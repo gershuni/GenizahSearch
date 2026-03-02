@@ -11,7 +11,7 @@ Provides a reusable dialog for adding items to personal lists with:
 """
 
 from nicegui import ui
-from web.translations import tr
+from web.translations import tr, get_language
 from web.components.typography import h3
 from web.auth_state import GlobalAuthState
 from web.state import state
@@ -78,7 +78,7 @@ def show_add_to_list_dialog(
         if state.meta_mgr:
             library_code = state.meta_mgr.get_library_for_id(sys_id)
             if library_code:
-                library_name = get_library_display(library_code, short=False)
+                library_name = get_library_display(library_code, short=False, lang=get_language())
         display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
         ui.label(f"{tr('Item')}: {display_shelfmark}").style('color: var(--text-secondary);')
 

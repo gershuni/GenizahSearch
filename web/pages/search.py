@@ -12,7 +12,7 @@ A comprehensive search interface with:
 
 from nicegui import ui, run, app
 from web.state import state
-from web.translations import tr, is_rtl
+from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1, h2, h3, h4
 from web.services import (
     get_service,
@@ -2722,7 +2722,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # Library badge (if available)
                         if library_code:
                             from genizah_core import get_library_display, LIBRARY_CODES
-                            full_name = get_library_display(library_code, short=False)
+                            full_name = get_library_display(library_code, short=False, lang=get_language())
                             ui.label(library_code).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                 'background: var(--primary-100); color: var(--primary-700);'
                             ).tooltip(full_name)
@@ -3238,7 +3238,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Get library display name
             library_name = ''
             if library_code:
-                library_name = get_library_display(library_code, short=False)
+                library_name = get_library_display(library_code, short=False, lang=get_language())
             display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
 
             # Use PGP transcription content if available, otherwise fall back to original
@@ -3954,7 +3954,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 display_shelfmark = shelfmark
                 if library_code:
                     from genizah_core import get_library_display
-                    library_name = get_library_display(library_code, short=False)
+                    library_name = get_library_display(library_code, short=False, lang=get_language())
                     if library_name:
                         display_shelfmark = f"{library_name}, {shelfmark}"
                 h2(display_shelfmark, classes='text-2xl font-bold', style='color: var(--primary-700);')
@@ -4031,7 +4031,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         library_name = ''
                         if library_code:
                             from genizah_core import get_library_display
-                            library_name = get_library_display(library_code, short=False)
+                            library_name = get_library_display(library_code, short=False, lang=get_language())
 
                         info_items = [
                             (tr('Library'), library_name or tr('Not available')),
@@ -4173,7 +4173,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 library_code = state.meta_mgr.get_library_for_id(sys_id)
                 if library_code:
                     from genizah_core import get_library_display
-                    library_name = get_library_display(library_code, short=False)
+                    library_name = get_library_display(library_code, short=False, lang=get_language())
 
             # Fetch first page text
             from web.services import get_service

@@ -1498,7 +1498,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         if state.current_page and state.current_page.library_code:
             library_code = state.current_page.library_code
             from genizah_core import get_library_display
-            library_name = get_library_display(library_code, short=False)
+            library_name = get_library_display(library_code, short=False, lang=get_language())
 
         # Prepare export data
         export_data = {

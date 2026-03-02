@@ -278,7 +278,8 @@ class ExportService:
             return ''
         try:
             from genizah_core import get_library_display as core_get_library_display
-            return core_get_library_display(library_code, short=short)
+            from web.translations import get_language
+            return core_get_library_display(library_code, short=short, lang=get_language())
         except Exception:
             return library_code  # Fallback to code itself
 
