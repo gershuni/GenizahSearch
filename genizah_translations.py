@@ -2510,4 +2510,11 @@ TRANSLATIONS = {
     "Maximum number of past searches to remember per search type": "מספר מרבי של חיפושים קודמים לזכור לכל סוג חיפוש",
     "Session restored": "המפגש שוחזר",
     "Save and restore search state across restarts": "שמור ושחזר מצב חיפוש בין הפעלות",
+    "Search History": "היסטוריית חיפוש",
+    "No search history": "אין היסטוריית חיפוש",
+    "Search restored from history": "חיפוש שוחזר מהיסטוריה",
+    "Clear all": "נקה הכל",
+    "Composition History": "היסטוריית חיפוש מקבילות",
+    "No composition history": "אין היסטוריית חיפוש מקבילות",
+    "Composition restored from history": "חיפוש מקבילות שוחזר מהיסטוריה",
 }

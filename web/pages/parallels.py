@@ -17,6 +17,7 @@ import html
 import os
 import time
 import requests
+from datetime import datetime
 from web.components.typography import h1, h2, h3, h4
 
 # Import Sefaria sources and text cleaning from the shared sefaria_utils module (no PyQt6 dependency)
@@ -189,6 +190,54 @@ def create_parallels_page(initial_text: str = None):
     else:
         # Try to restore from storage
         decoded_text = app.storage.user.get('parallels_source_text', '')
+
+    # --- Composition History Management ---
+    def _get_comp_history() -> list:
+        """Get composition search history from storage."""
+        return app.storage.user.get('composition_history', [])
+
+    def _add_to_comp_history(title: str, result_count: int, params: dict, state_snapshot: dict):
+        """Add or update a composition history entry. Deduplicates by title."""
+        if not app.storage.user.get('session_persistence_enabled', True):
+            return
+        limit = app.storage.user.get('search_history_limit', 20)
+        history = _get_comp_history()
+
+        # Dedup by title
+        existing_idx = None
+        for i, entry in enumerate(history):
+            if entry.get('title') == title:
+                existing_idx = i
+                break
+
+        entry = {
+            'title': title,
+            'result_count': result_count,
+            'timestamp': datetime.now().isoformat(),
+            'params': params,
+            'state': state_snapshot,
+        }
+
+        if existing_idx is not None:
+            history.pop(existing_idx)  # Remove old position
+            history.insert(0, entry)   # Move to front with updated data
+        else:
+            history.insert(0, entry)   # Add at front (newest first)
+
+        # Enforce limit
+        history = history[:limit]
+        app.storage.user['composition_history'] = history
+
+    def _delete_comp_history_entry(index: int):
+        """Delete a specific composition history entry by index."""
+        history = _get_comp_history()
+        if 0 <= index < len(history):
+            history.pop(index)
+            app.storage.user['composition_history'] = history
+
+    def _clear_comp_history():
+        """Clear all composition search history."""
+        app.storage.user['composition_history'] = []
 
     # === UI Layout ===
 
@@ -567,6 +616,16 @@ def create_parallels_page(initial_text: str = None):
                         status_label = ui.label('').classes('text-sm font-medium').style('color: var(--primary-600);')
                     # Summary label (stays visible after search completes, hidden during search)
                     summary_label = ui.label('').classes('text-sm font-medium text-center w-full').style('color: var(--primary-600);')
+
+                    # Composition History Button + Menu
+                    ui.separator().classes('my-1')
+                    with ui.row().classes('w-full items-center justify-center'):
+                        comp_history_btn = ui.button(
+                            tr('Composition History'), icon='history',
+                            on_click=lambda: (_refresh_comp_history_menu(), comp_history_menu.open())
+                        ).props('flat dense no-caps').classes('text-sm')
+
+                        comp_history_menu = ui.menu()
 
         # === Filter Text (Collapsible) ===
         # State for loaded sources: {ref: cleaned_text}
@@ -1212,6 +1271,64 @@ def create_parallels_page(initial_text: str = None):
         # Hide top page loading bar on cancel
         ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
 
+    # --- Composition History UI Helpers ---
+    def _refresh_comp_history_menu():
+        """Refresh the composition history dropdown menu contents."""
+        comp_history_menu.clear()
+        history = _get_comp_history()
+        if not history:
+            with comp_history_menu:
+                ui.menu_item(tr('No composition history')).props('disable')
+            return
+
+        with comp_history_menu:
+            for i, entry in enumerate(history):
+                title_text = entry.get('title', '')
+                title_display = (title_text[:40] + '...') if len(title_text) > 40 else title_text
+                count = entry.get('result_count', 0)
+                label = f"{title_display}  ({count})"
+
+                idx = i  # Capture for closure
+                with ui.menu_item(label, on_click=lambda e, idx=idx: _on_comp_history_clicked(idx)).style('direction: rtl;'):
+                    # Delete button on each item
+                    ui.button(icon='close', on_click=lambda e, idx=idx: (
+                        _delete_comp_history_entry(idx), _refresh_comp_history_menu()
+                    )).props('flat dense size=xs round').classes('ml-auto')
+
+            ui.separator()
+            ui.menu_item(tr('Clear all'), on_click=lambda: (
+                _clear_comp_history(), _refresh_comp_history_menu()
+            ))
+
+    async def _on_comp_history_clicked(index: int):
+        """Restore state from a composition history entry."""
+        history = _get_comp_history()
+        if index >= len(history):
+            return
+        entry = history[index]
+        state_snapshot = entry.get('state', {})
+
+        # Restore source text
+        if state_snapshot.get('source_text'):
+            text_input.value = state_snapshot['source_text']
+
+        # Restore results and state from snapshot
+        if state_snapshot.get('results'):
+            p_state.results = state_snapshot['results']
+            p_state.filtered_results = state_snapshot.get('filtered_results', [])
+            p_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
+
+            # Update global state for export
+            state.parallels_results = p_state.results
+            state.parallels_filtered = p_state.filtered_results
+
+            # Update header and render
+            results_header.text = f"{len(p_state.results)} {tr('parallels found')}"
+            render_results(p_state.results, p_state.filtered_results)
+
+        ui.notify(tr('Composition restored from history'), type='info', timeout=2000)
+        comp_history_menu.close()
+
     async def execute_parallels():
         # Prevent duplicate executions
         if p_state.is_running:
@@ -1382,6 +1499,29 @@ def create_parallels_page(initial_text: str = None):
                     # Also store in user storage (for UI persistence across page reloads)
                     app.storage.user['parallels_results'] = main_results
                     app.storage.user['parallels_filtered'] = filtered_results
+                except Exception:
+                    pass
+
+                # Add to composition history
+                try:
+                    source_text = text_input.value or ''
+                    comp_title = source_text[:50].replace('\n', ' ').strip()
+                    if len(source_text) > 50:
+                        comp_title += '...'
+                    _add_to_comp_history(
+                        title=comp_title,
+                        result_count=len(main_results),
+                        params={
+                            'chunk_size': int(chunk_size.value) if chunk_size.value else 5,
+                            'mode': mode_select.value or 'exact',
+                        },
+                        state_snapshot={
+                            'source_text': source_text,
+                            'results': main_results[:500],
+                            'filtered_results': filtered_results[:500] if filtered_results else [],
+                            'domain_exclusions': sorted(p_state.domain_exclusions),
+                        },
+                    )
                 except Exception:
                     pass
 
