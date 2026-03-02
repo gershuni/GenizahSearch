@@ -5,10 +5,19 @@ Serializes/deserializes desktop search state to JSON for crash-safe
 session restore. Uses atomic writes (write-to-tmp then os.replace)
 to prevent corruption.
 
+Also provides search history management (separate file) with dedup,
+limit enforcement, and interrupted-search detection.
+
 Exports:
     save_session_state(state_dict, path) -> bool
     load_session_state(path) -> Optional[dict]
     clear_session_state(path) -> bool
+    add_history_entry(search_type, entry, limit) -> bool
+    get_history(search_type) -> dict | list
+    delete_history_entry(search_type, index) -> bool
+    clear_history(search_type) -> bool
+    get_interrupted_search() -> Optional[dict]
+    clear_interrupted_flag() -> bool
 """
 
 from __future__ import annotations
@@ -26,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 # Schema version -- bump when SessionState shape changes
 SESSION_VERSION = 1
+
+# Search history file (separate from session.json)
+HISTORY_FILE = os.path.join(Config.INDEX_DIR, "search_history.json")
 
 
 def save_session_state(state_dict: dict, path: str | None = None) -> bool:
@@ -130,6 +142,222 @@ def clear_session_state(path: str | None = None) -> bool:
         return True
     except Exception as e:
         logger.error("Failed to clear session state: %s", e)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Search History Management
+# ---------------------------------------------------------------------------
+
+
+def _load_history_file() -> dict:
+    """Load the raw history dict from disk. Returns empty structure on error."""
+    if not os.path.exists(HISTORY_FILE):
+        return {"regular": [], "composition": []}
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"regular": [], "composition": []}
+        # Ensure both keys exist
+        data.setdefault("regular", [])
+        data.setdefault("composition", [])
+        return data
+    except Exception as e:
+        logger.error("Failed to load history file: %s", e)
+        return {"regular": [], "composition": []}
+
+
+def _save_history_file(data: dict) -> bool:
+    """Atomically write history dict to disk."""
+    try:
+        parent = os.path.dirname(HISTORY_FILE)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".tmp", prefix="history_", dir=parent
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2, default=_json_default)
+            os.replace(tmp_path, HISTORY_FILE)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+        return True
+    except Exception as e:
+        logger.error("Failed to save history file: %s", e)
+        return False
+
+
+def add_history_entry(search_type: str, entry: dict, limit: int = 20) -> bool:
+    """
+    Add or update a search history entry.
+
+    Args:
+        search_type: ``'regular'`` or ``'composition'``.
+        entry: Dict with keys: query, result_count, timestamp, search_params, state.
+        limit: Maximum entries to keep per search_type.
+
+    Dedup: if an entry with matching ``query`` AND ``search_params`` already
+    exists for this search_type, update it in place (new state, count, timestamp).
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        data = _load_history_file()
+        entries = data.get(search_type, [])
+
+        # Dedup: find existing entry with same query + search_params
+        query = entry.get("query", "")
+        params = entry.get("search_params", {})
+        found_idx = None
+        for i, existing in enumerate(entries):
+            if (existing.get("query") == query
+                    and existing.get("search_params") == params):
+                found_idx = i
+                break
+
+        if found_idx is not None:
+            # Update existing entry
+            entries[found_idx]["result_count"] = entry.get("result_count", 0)
+            entries[found_idx]["timestamp"] = entry.get("timestamp", datetime.now().isoformat())
+            entries[found_idx]["state"] = entry.get("state", {})
+        else:
+            # Add new entry at the beginning (newest first)
+            entries.insert(0, {
+                "query": query,
+                "result_count": entry.get("result_count", 0),
+                "timestamp": entry.get("timestamp", datetime.now().isoformat()),
+                "search_params": params,
+                "state": entry.get("state", {}),
+            })
+
+        # Sort by timestamp descending (newest first) after update
+        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+
+        # Enforce limit
+        if len(entries) > limit:
+            entries = entries[:limit]
+
+        data[search_type] = entries
+        return _save_history_file(data)
+
+    except Exception as e:
+        logger.error("Failed to add history entry: %s", e)
+        return False
+
+
+def get_history(search_type: str | None = None) -> dict | list:
+    """
+    Retrieve search history.
+
+    Args:
+        search_type: ``'regular'``, ``'composition'``, or None for all.
+
+    Returns:
+        If search_type is None: ``{'regular': [...], 'composition': [...]}``.
+        If search_type given: list of entries (sorted newest first).
+    """
+    try:
+        data = _load_history_file()
+        if search_type is None:
+            return data
+        entries = data.get(search_type, [])
+        # Ensure sorted newest first
+        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        return entries
+    except Exception as e:
+        logger.error("Failed to get history: %s", e)
+        if search_type is None:
+            return {"regular": [], "composition": []}
+        return []
+
+
+def delete_history_entry(search_type: str, index: int) -> bool:
+    """
+    Delete a single history entry by index.
+
+    Args:
+        search_type: ``'regular'`` or ``'composition'``.
+        index: Zero-based index in the (sorted newest-first) list.
+
+    Returns:
+        True on success, False on failure or invalid index.
+    """
+    try:
+        data = _load_history_file()
+        entries = data.get(search_type, [])
+        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        if 0 <= index < len(entries):
+            entries.pop(index)
+            data[search_type] = entries
+            return _save_history_file(data)
+        return False
+    except Exception as e:
+        logger.error("Failed to delete history entry: %s", e)
+        return False
+
+
+def clear_history(search_type: str | None = None) -> bool:
+    """
+    Clear search history.
+
+    Args:
+        search_type: ``'regular'``, ``'composition'``, or None to clear all.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        if search_type is None:
+            return _save_history_file({"regular": [], "composition": []})
+        data = _load_history_file()
+        data[search_type] = []
+        return _save_history_file(data)
+    except Exception as e:
+        logger.error("Failed to clear history: %s", e)
+        return False
+
+
+def get_interrupted_search() -> Optional[dict]:
+    """
+    Check if the last session had an interrupted composition search.
+
+    Returns:
+        The composition_search state dict if ``was_interrupted`` is True
+        in session.json, else None.
+    """
+    try:
+        state = load_session_state()
+        if state and state.get("was_interrupted"):
+            return state.get("composition_search")
+        return None
+    except Exception as e:
+        logger.error("Failed to check interrupted search: %s", e)
+        return None
+
+
+def clear_interrupted_flag() -> bool:
+    """
+    Remove the ``was_interrupted`` flag from session.json.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        state = load_session_state()
+        if state and "was_interrupted" in state:
+            state.pop("was_interrupted", None)
+            return save_session_state(state)
+        return True
+    except Exception as e:
+        logger.error("Failed to clear interrupted flag: %s", e)
         return False
 
 

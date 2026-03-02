@@ -10,16 +10,6 @@ import time
 import requests
 import urllib3
 import csv
-import openpyxl
-from docx import Document
-from docx.enum.section import WD_ORIENTATION
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import RGBColor
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.cell.rich_text import TextBlock, CellRichText
-from openpyxl.cell.text import InlineFont
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
@@ -6518,6 +6508,278 @@ class TabularQueryBuilderDialog(QDialog):
         return super().eventFilter(obj, event)
 
 
+class SettingsDialog(QDialog):
+    """Modal settings dialog with General and About tabs."""
+
+    FULL_CITATION = (
+        "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., "
+        "Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., "
+        "Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., "
+        "Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). "
+        "MiDRASH Automatic Transcriptions. Zenodo. "
+        "https://doi.org/10.5281/zenodo.17734473"
+    )
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.main_win = parent
+        is_heb = CURRENT_LANG == 'he'
+        self.setWindowTitle(tr("הגדרות") if is_heb else "Settings")
+        self.setFixedSize(650, 500)
+        self.setModal(True)
+        if is_heb:
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        # Palette-aware colors
+        pal = QApplication.palette()
+        self._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+        self._text = pal.color(QPalette.ColorRole.Text).name()
+        self._base = pal.color(QPalette.ColorRole.Base).name()
+        self._muted = '#888' if self._is_dark else '#666'
+        self._border = '#555' if self._is_dark else '#d0d0d0'
+        self._combo_w = 140
+        self._cit_bg = '#1e2a36' if self._is_dark else '#eef3f8'
+        self._cit_border = '#2c3e50' if self._is_dark else '#c8d6e0'
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_general_tab(), tr("כללי") if is_heb else "General")
+        self._tabs.addTab(self._build_about_tab(), tr("אודות") if is_heb else "About")
+        outer.addWidget(self._tabs)
+
+    # ── General Tab ──────────────────────────────────────────────
+    def _build_general_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(0)
+
+        # — Preferences —
+        layout.addWidget(self._section_label(tr("העדפות") if CURRENT_LANG == 'he' else "Preferences"))
+        layout.addSpacing(6)
+
+        # Use HBoxLayout rows so controls sit right next to labels
+        def _pref_row(label_text, widget):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            row.addWidget(QLabel(label_text))
+            row.addWidget(widget)
+            row.addStretch()
+            return row
+
+        # Language
+        self.combo_language = QComboBox()
+        self.combo_language.addItems(["עברית", "English"])
+        self.combo_language.setCurrentIndex(0 if CURRENT_LANG == 'he' else 1)
+        self.combo_language.setFixedWidth(self._combo_w)
+        self.combo_language.currentIndexChanged.connect(self.main_win._on_language_combo_changed)
+        layout.addLayout(_pref_row(tr("שפה:") if CURRENT_LANG == 'he' else "Language:", self.combo_language))
+        layout.addSpacing(4)
+
+        # Desktop Notifications
+        from PyQt6.QtWidgets import QCheckBox
+        self.main_win.chk_notifications = QCheckBox(tr("Desktop Notifications"))
+        self.main_win.chk_notifications.setChecked(load_app_config().get('notifications_enabled', True))
+        self.main_win.chk_notifications.setToolTip(tr("Flash taskbar when search completes while app is in background"))
+        self.main_win.chk_notifications.stateChanged.connect(
+            lambda state: save_app_config({'notifications_enabled': state == 2})
+        )
+        notif_row = QHBoxLayout()
+        notif_row.addWidget(self.main_win.chk_notifications)
+        notif_row.addStretch()
+        layout.addLayout(notif_row)
+        layout.addSpacing(4)
+
+        # Restore State
+        self.main_win.combo_restore_mode = QComboBox()
+        self.main_win.combo_restore_mode.addItems([tr("Ask"), tr("Always"), tr("Never")])
+        restore_mode = load_app_config().get('restore_mode', 'ask')
+        self.main_win.combo_restore_mode.setCurrentIndex({'ask': 0, 'always': 1, 'never': 2}.get(restore_mode, 0))
+        self.main_win.combo_restore_mode.setToolTip(tr("Whether to restore previous search state on startup"))
+        self.main_win.combo_restore_mode.currentIndexChanged.connect(
+            lambda idx: save_app_config({'restore_mode': ['ask', 'always', 'never'][idx]})
+        )
+        self.main_win.combo_restore_mode.setFixedWidth(self._combo_w)
+        layout.addLayout(_pref_row(tr("Restore State:"), self.main_win.combo_restore_mode))
+        layout.addSpacing(4)
+
+        # History Limit
+        self.main_win.spin_history_limit = QSpinBox()
+        self.main_win.spin_history_limit.setRange(5, 100)
+        self.main_win.spin_history_limit.setValue(load_app_config().get('history_limit', 20))
+        self.main_win.spin_history_limit.setToolTip(tr("Maximum search history entries per type"))
+        self.main_win.spin_history_limit.valueChanged.connect(
+            lambda val: save_app_config({'history_limit': val})
+        )
+        self.main_win.spin_history_limit.setFixedWidth(80)
+        layout.addLayout(_pref_row(tr("History Limit:"), self.main_win.spin_history_limit))
+
+        layout.addSpacing(12)
+
+        # — Updates —
+        sep1 = QFrame(); sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet(f"color: {self._border};")
+        layout.addWidget(sep1)
+        layout.addSpacing(8)
+        layout.addWidget(self._section_label(tr("עדכונים") if CURRENT_LANG == 'he' else "Updates"))
+        layout.addSpacing(6)
+
+        ver_row = QHBoxLayout()
+        self.main_win.lbl_version = QLabel(f"Version: {APP_VERSION}")
+        self.main_win.lbl_version.setStyleSheet(f"color: {self._muted};")
+        ver_row.addWidget(self.main_win.lbl_version)
+        ver_row.addSpacing(12)
+        self.main_win.btn_check_updates = QPushButton(tr("Check for Updates"))
+        self.main_win.btn_check_updates.clicked.connect(self.main_win.check_updates_manual)
+        ver_row.addWidget(self.main_win.btn_check_updates)
+        ver_row.addStretch()
+        layout.addLayout(ver_row)
+
+        layout.addSpacing(12)
+
+        # — Data & Indexing (bottom half) —
+        sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet(f"color: {self._border};")
+        layout.addWidget(sep2)
+        layout.addSpacing(8)
+        layout.addWidget(self._section_label(tr("Data & Index")))
+        layout.addSpacing(6)
+
+        btn_row1 = QHBoxLayout()
+        btn_dl = QPushButton(tr("Download Transcriptions (Zenodo)"))
+        btn_dl.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://doi.org/10.5281/zenodo.17734473")))
+        btn_row1.addWidget(btn_dl)
+        btn_row1.addStretch()
+        layout.addLayout(btn_row1)
+        layout.addSpacing(4)
+
+        btn_row2 = QHBoxLayout()
+        self.main_win.btn_build_index = QPushButton(tr("Build / Rebuild Index"))
+        self.main_win.btn_build_index.clicked.connect(self.main_win.run_indexing)
+        self.main_win.btn_build_index.setEnabled(False)
+        btn_row2.addWidget(self.main_win.btn_build_index)
+        btn_row2.addStretch()
+        layout.addLayout(btn_row2)
+        layout.addSpacing(4)
+
+        self.main_win.index_progress = QProgressBar()
+        self.main_win.index_progress.setVisible(False)
+        layout.addWidget(self.main_win.index_progress)
+
+        layout.addSpacing(8)
+
+        # Data Sources list
+        sources = []
+        try:
+            from shared.document_service import get_pgp_service
+            pgp_svc = get_pgp_service()
+            pgp_ver = pgp_svc.get_version() if pgp_svc.is_available() else None
+        except Exception:
+            pgp_ver = None
+        sources.append(("PGP Documents", pgp_ver))
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms_svc = get_fjms_service()
+            fjms_ver = fjms_svc.get_version() if fjms_svc.is_available() else None
+        except Exception:
+            fjms_ver = None
+        sources.append(("FJMS Catalog", fjms_ver))
+        try:
+            from shared.nli_crossref_service import get_nli_crossref_service
+            nli_svc = get_nli_crossref_service()
+            nli_ver = nli_svc.get_version() if nli_svc.is_available() else None
+        except Exception:
+            nli_ver = None
+        sources.append(("NLI Crossref", nli_ver))
+
+        for name, ver in sources:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            icon = QLabel("\u2713" if ver else "\u2014")
+            icon.setStyleSheet(("color: #27ae60; font-weight: bold;" if ver else f"color: {self._muted};") + " font-size: 13px;")
+            icon.setFixedWidth(16)
+            row.addWidget(icon)
+            row.addWidget(QLabel(name))
+            vlbl = QLabel(f"v{ver}" if ver else "")
+            vlbl.setStyleSheet(f"color: {self._muted}; font-size: 11px;")
+            row.addWidget(vlbl)
+            row.addStretch()
+            layout.addLayout(row)
+
+        layout.addStretch()
+        return page
+
+    # ── About Tab ────────────────────────────────────────────────
+    def _build_about_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        about_html_en = f"""
+        <style>
+            h3 {{ margin-bottom: 2px; margin-top: 10px; }}
+            p {{ margin-top: 4px; margin-bottom: 4px; line-height: 1.4; }}
+            a {{ color: #2980b9; text-decoration: none; }}
+        </style>
+        <div style='font-family: Arial; font-size: 12px; color: {self._text};'>
+            <div style='text-align:center;'>
+                <h2 style='margin-bottom:4px;'>Genizah Search Pro {APP_VERSION}</h2>
+                <p style='color: {self._muted};'>Developed by Hillel Gershuni
+                (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
+                <p>Web: <a href='https://genizahsearch.com'>GenizahSearch.com</a> &mdash; Dicta Genizah Search</p>
+            </div>
+            <hr>
+            <h3>Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l</h3>
+
+            <h3>Credits</h3>
+            <p>This tool was built with the coding assistance of <b>Claude</b> (Anthropic),
+            <b>Gemini</b> (Google), and <b>ChatGPT</b> (OpenAI).</p>
+            <p>Many thanks to Prof. Moshe Koppel and <a href='https://dicta.org.il/'>Dicta</a>
+            for their generous support and guidance.</p>
+            <p>Thanks also to Avi Shmidman, Josh Guedalia, Elisha Rosenzweig, Ephraim Meiri,
+            Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer
+            for their advice and support.</p>
+
+            <h3>Data Source &amp; Acknowledgments</h3>
+            <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>.
+            I am grateful to the project leaders &ndash; Daniel Stoekl Ben Ezra, Marina Rustow,
+            Nachum Dershowitz, Avi Shmidman, and Judith Olszowy-Schlanger &ndash; and to
+            Tsafra Siew and Yitzchak Gila from the National Library of Israel.
+            Many thanks also to the rest of the project team: Luigi Bambaci, Benjamin Kiessling,
+            Hayim Lapin, Nurit Ezer, Elena Lolli, Berat Kurar Barakat, Sharva Gogawale,
+            Moshe Lavee, Vered Raziel Kretzmer, and Daria Vasyutinsky Shapira.</p>
+            <p>Making such a complex and valuable dataset freely available to the public is a
+            significant step for Open Science, and I deeply appreciate their generosity.</p>
+
+            <h3>License</h3>
+            <p>The underlying dataset is licensed under the Creative Commons Attribution 4.0
+            International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>) license.</p>
+
+            <h3>Citation</h3>
+            <p style='background-color: {self._cit_bg}; border: 1px solid {self._cit_border};
+               border-radius: 4px; padding: 8px; font-size: 11px;'>
+            If you use these results in your research, please cite:<br>
+            <b>{self.FULL_CITATION}</b></p>
+        </div>
+        """
+        about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else about_html_en
+        browser = QTextBrowser()
+        browser.setHtml(about_txt)
+        browser.setOpenExternalLinks(True)
+        browser.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(browser)
+        return page
+
+    # ── Helpers ───────────────────────────────────────────────────
+    def _section_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {self._text};")
+        return lbl
+
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -6688,7 +6950,8 @@ class GenizahGUI(QMainWindow):
                 reply = QMessageBox.question(self, tr("Index Missing"), msg,
                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 if reply == QMessageBox.StandardButton.Yes:
-                    self.tabs.setCurrentWidget(self.settings_tab)
+                    self.settings_dialog._tabs.setCurrentIndex(0)  # General tab has Data & Indexing
+                    self.settings_dialog.show()
                     self.run_indexing()
 
             # Start checking for CSV bank readiness to init Autocomplete
@@ -6776,6 +7039,8 @@ class GenizahGUI(QMainWindow):
     def init_ui(self):
         if CURRENT_LANG == 'he':
             QApplication.instance().setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        else:
+            QApplication.instance().setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
         self.tabs = QTabWidget()
         self.search_tab = self.create_search_tab()
@@ -6784,49 +7049,34 @@ class GenizahGUI(QMainWindow):
         self.catalog_browse_tab = self.create_catalog_browse_tab()
         self.lists_tab = self.create_lists_tab()
         self.community_tab = self.create_community_tab()
-        self.settings_tab = self.create_settings_tab()
         self.tabs.addTab(self.search_tab, tr("Search"))
         self.tabs.addTab(self.composition_tab, tr("Composition Search"))
         self.tabs.addTab(self.browse_tab, tr("Browse by Shelfmark"))
         self.tabs.addTab(self.catalog_browse_tab, tr("Browse by Identification"))
         self.tabs.addTab(self.lists_tab, tr("Personal Lists"))
         self.tabs.addTab(self.community_tab, tr("Community"))
-        self.tabs.addTab(self.settings_tab, tr("Settings & About"))
 
-        # Corner widget with Website, Version, Login button and Language toggle
+        # Settings Dialog (persistent, created once)
+        self.settings_dialog = SettingsDialog(self)
+
+        # Corner widget — order: Login | v6.x | Language | Website | Settings(⚙)
         corner_widget = QWidget()
         corner_layout = QHBoxLayout(corner_widget)
         corner_layout.setContentsMargins(5, 0, 5, 0)
-        corner_layout.setSpacing(10)
+        corner_layout.setSpacing(8)
 
-        # Website button (highlighted)
-        self.corner_website_btn = QPushButton("🌐 GenizahSearch.com")
-        self.corner_website_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_website_btn.setToolTip(tr("Visit our website"))
-        self.corner_website_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://genizahsearch.com")))
-        self.corner_website_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e8f4fc;
-                color: #1a73e8;
-                border: 1px solid #1a73e8;
-                border-radius: 4px;
-                padding: 3px 8px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #1a73e8;
-                color: white;
-            }
-        """)
-        corner_layout.addWidget(self.corner_website_btn)
+        def _corner_sep():
+            s = QLabel("|"); s.setStyleSheet("color: gray;"); return s
 
-        # Separator
-        sep0 = QLabel("|")
-        sep0.setStyleSheet("color: gray;")
-        corner_layout.addWidget(sep0)
+        # Login/Logout
+        self.corner_login_btn = QPushButton(tr("Login"))
+        self.corner_login_btn.setFlat(True)
+        self.corner_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_login_btn.clicked.connect(self._corner_login_clicked)
+        corner_layout.addWidget(self.corner_login_btn)
+        corner_layout.addWidget(_corner_sep())
 
-        # Version button
+        # Version
         self.corner_version_btn = QPushButton(f"v{APP_VERSION}")
         self.corner_version_btn.setFlat(True)
         self.corner_version_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -6834,32 +7084,47 @@ class GenizahGUI(QMainWindow):
         self.corner_version_btn.clicked.connect(self.check_updates_manual)
         self.corner_version_btn.setStyleSheet("color: #7f8c8d; font-size: 11px;")
         corner_layout.addWidget(self.corner_version_btn)
-
-        # Separator
-        sep1 = QLabel("|")
-        sep1.setStyleSheet("color: gray;")
-        corner_layout.addWidget(sep1)
-
-        # Login/Logout button
-        self.corner_login_btn = QPushButton(tr("Login"))
-        self.corner_login_btn.setFlat(True)
-        self.corner_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_login_btn.clicked.connect(self._corner_login_clicked)
-        corner_layout.addWidget(self.corner_login_btn)
-
-        # Separator
-        sep2 = QLabel("|")
-        sep2.setStyleSheet("color: gray;")
-        corner_layout.addWidget(sep2)
+        corner_layout.addWidget(_corner_sep())
 
         # Language toggle
         self.lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
         self.lang_btn.setFlat(True)
         self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.lang_btn.clicked.connect(self.toggle_language)
+        self.lang_btn.clicked.connect(lambda: self.toggle_language())
         corner_layout.addWidget(self.lang_btn)
+        corner_layout.addWidget(_corner_sep())
 
-        self.tabs.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner if CURRENT_LANG == 'en' else Qt.Corner.TopLeftCorner)
+        # Website
+        self.corner_website_btn = QPushButton("\U0001F310 GenizahSearch.com")
+        self.corner_website_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_website_btn.setToolTip(tr("Visit our website"))
+        self.corner_website_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://genizahsearch.com")))
+        self.corner_website_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e8f4fc; color: #1a73e8;
+                border: 1px solid #1a73e8; border-radius: 4px;
+                padding: 3px 8px; font-weight: bold; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #1a73e8; color: white; }
+        """)
+        corner_layout.addWidget(self.corner_website_btn)
+        corner_layout.addWidget(_corner_sep())
+
+        # Settings gear
+        self.corner_settings_btn = QPushButton("\u2699")
+        self.corner_settings_btn.setFlat(True)
+        self.corner_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_settings_btn.setToolTip(tr("הגדרות") if CURRENT_LANG == 'he' else "Settings")
+        self.corner_settings_btn.setStyleSheet("font-size: 16px;")
+        self.corner_settings_btn.clicked.connect(self._open_settings_dialog)
+        corner_layout.addWidget(self.corner_settings_btn)
+
+        # Expand tab bar so corner widget is pushed to the far edge.
+        # Qt mirrors corner positions in RTL, so TopRightCorner works for both:
+        #   English LTR: physically right → Search far-left, gear far-right
+        #   Hebrew  RTL: mirrored to left → Search far-right, gear far-left
+        self.tabs.tabBar().setExpanding(True)
+        self.tabs.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner)
         self._update_corner_login_state()
 
         # Connect tab change to refresh community data when needed
@@ -6885,6 +7150,11 @@ class GenizahGUI(QMainWindow):
         main_layout.addWidget(self.whats_new_bar)
 
         main_layout.addWidget(self.tabs)
+
+        # Persistent Citation Bar — visible across all tabs
+        self.citation_bar = self._create_citation_bar()
+        main_layout.addWidget(self.citation_bar)
+
         self.setCentralWidget(central_widget)
 
         # Pre-warm FJMS caches in background so catalog browse tab opens instantly.
@@ -8405,10 +8675,37 @@ class GenizahGUI(QMainWindow):
         )
         dialog.exec()
 
-    def toggle_language(self):
-        new_lang = 'en' if CURRENT_LANG == 'he' else 'he'
+    def toggle_language(self, new_lang=None):
+        if not isinstance(new_lang, str):
+            from genizah_core import load_language
+            saved_lang = load_language()
+            new_lang = 'en' if saved_lang == 'he' else 'he'
         save_language(new_lang)
-        QMessageBox.information(self, tr("נדרש אתחול מחדש"), tr("אנא הפעילו מחדש את התוכנה כדי שהשינוי בשפה ייכנס לתוקף."))
+        msgbox = QMessageBox(self)
+        msgbox.setIcon(QMessageBox.Icon.Question)
+        msgbox.setWindowTitle(tr("שינוי שפה") if CURRENT_LANG == 'he' else "Language Change")
+        msgbox.setText(tr("השפה תשתנה לאחר הפעלה מחדש. להפעיל מחדש כעת?")
+                       if CURRENT_LANG == 'he'
+                       else "Language will change after restart. Restart now?")
+        msgbox.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msgbox.button(QMessageBox.StandardButton.Yes).setText(tr("Yes"))
+        msgbox.button(QMessageBox.StandardButton.No).setText(tr("No"))
+        reply = msgbox.exec()
+        if reply == QMessageBox.StandardButton.Yes:
+            import subprocess
+            subprocess.Popen([sys.executable] + sys.argv, cwd=os.getcwd())
+            QApplication.instance().quit()
+        else:
+            label = "עברית" if new_lang == 'he' else "English"
+            # Update button to show the opposite of the new pending language
+            self.lang_btn.setText("English" if new_lang == 'he' else "עברית")
+            QMessageBox.information(
+                self,
+                tr("נדרש אתחול מחדש") if CURRENT_LANG == 'he' else "Restart Required",
+                (tr("השפה תשתנה ל-{} בהפעלה הבאה.").format(label)
+                 if CURRENT_LANG == 'he'
+                 else f"Language will change to {label} on next restart.")
+            )
 
     def create_search_tab(self):
         panel = QWidget(); layout = QVBoxLayout()
@@ -15962,196 +16259,63 @@ class GenizahGUI(QMainWindow):
         dialog = JoinsFeedDialog(self, self.corrections_client, on_browse=browse_shelfmark)
         dialog.exec()
 
-    def create_settings_tab(self):
-        panel = QWidget(); layout = QVBoxLayout()
+    def _open_settings_dialog(self):
+        """Open the settings dialog."""
+        self.settings_dialog.exec()
 
-        settings_header = QHBoxLayout()
-        settings_header.addStretch()
-        btn_help = QPushButton("?")
-        btn_help.setFixedWidth(30)
-        btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
-        btn_help.clicked.connect(lambda: self.open_help_center(anchor="settings"))
-        settings_header.addWidget(btn_help)
-        layout.addLayout(settings_header)
-        
-        gb_data = QGroupBox(tr("Data & Index"))
-        dl = QVBoxLayout()
-        btn_dl = QPushButton(tr("Download Transcriptions (Zenodo)")); btn_dl.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://doi.org/10.5281/zenodo.17734473")))
-        dl.addWidget(btn_dl)
-        self.btn_build_index = QPushButton(tr("Build / Rebuild Index")); self.btn_build_index.clicked.connect(self.run_indexing)
-        self.btn_build_index.setEnabled(False)
-        dl.addWidget(self.btn_build_index)
-        self.index_progress = QProgressBar(); dl.addWidget(self.index_progress)
-        gb_data.setLayout(dl); layout.addWidget(gb_data)
+    def _on_language_combo_changed(self, index):
+        """Handle language combo box change — close settings dialog first to
+        avoid the restart prompt appearing behind the modal dialog."""
+        new_lang = 'he' if index == 0 else 'en'
+        if new_lang != CURRENT_LANG:
+            self.settings_dialog.accept()
+            self.toggle_language(new_lang)
 
-        # Application / Updates
-        gb_app = QGroupBox(tr("Application"))
-        app_layout = QVBoxLayout()
-        app_row1 = QHBoxLayout()
+    def _create_citation_bar(self):
+        """Create the persistent citation bar at the bottom of the main window."""
+        pal = QApplication.palette()
+        is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+        muted = '#999' if is_dark else '#777'
+        bar_bg = '#1e2a36' if is_dark else '#f5f7fa'
+        bar_border = '#2c3e50' if is_dark else '#e0e4e8'
+        btn_bg = '#2c3e50' if is_dark else '#e4eaf0'
+        btn_hover = '#3d566e' if is_dark else '#d0dae4'
+        txt_color = pal.color(QPalette.ColorRole.Text).name()
 
-        self.lbl_version = QLabel(f"Version: {APP_VERSION}")
-        self.btn_check_updates = QPushButton(tr("Check for Updates"))
-        self.btn_check_updates.clicked.connect(self.check_updates_manual)
+        bar = QFrame()
+        bar.setObjectName("citationBar")
+        bar.setFixedHeight(30)
+        bar.setStyleSheet(f"""
+            QFrame#citationBar {{
+                background-color: {bar_bg};
+                border-top: 1px solid {bar_border};
+            }}
+        """)
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(12, 0, 8, 0)
+        h.setSpacing(8)
 
-        app_row1.addWidget(self.lbl_version)
-        app_row1.addStretch()
-        app_row1.addWidget(self.btn_check_updates)
-        app_layout.addLayout(app_row1)
+        cit_lbl = QLabel(SettingsDialog.FULL_CITATION)
+        cit_lbl.setStyleSheet(f"color: {muted}; font-size: 10px; border: none; background: transparent;")
+        h.addWidget(cit_lbl, 1)
 
-        # Session persistence toggle
-        app_row2 = QHBoxLayout()
-        from PyQt6.QtWidgets import QCheckBox
-        app_row2.addWidget(QLabel(tr("Restore State:")))
-        self.combo_restore_mode = QComboBox()
-        self.combo_restore_mode.addItems([tr("Ask"), tr("Always"), tr("Never")])
-        restore_mode = load_app_config().get('restore_mode', 'ask')
-        self.combo_restore_mode.setCurrentIndex({'ask': 0, 'always': 1, 'never': 2}.get(restore_mode, 0))
-        self.combo_restore_mode.setToolTip(tr("Whether to restore previous search state on startup"))
-        self.combo_restore_mode.currentIndexChanged.connect(
-            lambda idx: save_app_config({'restore_mode': ['ask', 'always', 'never'][idx]})
-        )
-        app_row2.addWidget(self.combo_restore_mode)
-
-        app_row2.addWidget(QLabel(tr("History Limit:")))
-        self.spin_history_limit = QSpinBox()
-        self.spin_history_limit.setRange(5, 100)
-        self.spin_history_limit.setValue(load_app_config().get('history_limit', 20))
-        self.spin_history_limit.setToolTip(tr("Maximum search history entries per type"))
-        self.spin_history_limit.valueChanged.connect(
-            lambda val: save_app_config({'history_limit': val})
-        )
-        app_row2.addWidget(self.spin_history_limit)
-
-        app_row2.addStretch()
-        app_layout.addLayout(app_row2)
-
-        # Notification toggle
-        app_row3 = QHBoxLayout()
-        self.chk_notifications = QCheckBox(tr("Desktop Notifications"))
-        self.chk_notifications.setChecked(load_app_config().get('notifications_enabled', True))
-        self.chk_notifications.setToolTip(tr("Flash taskbar when search completes while app is in background"))
-        self.chk_notifications.stateChanged.connect(
-            lambda state: save_app_config({'notifications_enabled': state == 2})
-        )
-        app_row3.addWidget(self.chk_notifications)
-        app_row3.addStretch()
-        app_layout.addLayout(app_row3)
-
-        gb_app.setLayout(app_layout)
-        layout.addWidget(gb_app)
-        
-        gb_about = QGroupBox(tr("About"))
-        abl = QVBoxLayout()
-        about_html_en = """
-        <style>
-            h3 { margin-bottom: 0px; margin-top: 10px; }
-            p { margin-top: 5px; margin-bottom: 5px; line-height: 1.4; }
-            a { color: #2980b9; text-decoration: none; }
-        </style>
-        <div style='font-family: Arial; font-size: 13px;'>
-            <div style='text-align:center;'>
-                <h2 style='margin-bottom:5px;'>Genizah Search Pro {APP_VERSION}</h2>
-                <p style='color: #7f8c8d;'>Developed by Hillel Gershuni (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
-            </div>
-            <hr>
-
-            <h3>Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l</h3>
-            
-            <h3>Credits</h3>
-            <p>This tool was developed with the coding assistance of <b>Gemini 3.0</b> and <b>GPT 5.1</b>. My thanks to Avi Shmidman, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen and Adiel Breuer for their advice and support.</p>
-
-            <h3>Data Source & Acknowledgments</h3>
-            <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>. I am grateful to the project leaders – Daniel Stoekl Ben Ezra, Marina Rustow, Nachum Dershowitz, Avi Shmidman, and Judith Olszowy-Schlanger – and to Tsafra Siew and Yitzchak Gila from the National Library of Israel. Many thanks also to the rest of the project team: Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Berat Kurar Barakat, Sharva Gogawale, Moshe Lavee, Vered Raziel Kretzmer, and Daria Vasyutinsky Shapira.</p>
-            <p>Making such a complex and valuable dataset freely available to the public is a significant step for Open Science, and I deeply appreciate their generosity in allowing everyone to access these texts.</p>
-            <h3>License</h3> 
-            
-            <p>The underlying dataset is licensed under the Creative Commons Attribution 4.0 International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>) license</p>
-
-            <h3>Citation</h3>
-            <p>If you use these results in your research, please cite the creators of the dataset: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. You can also mention you used this program: Genizah Search Pro by Hillel Gershuni.</p>
-        </div>
-        """
-        
-        about_txt = tr("ABOUT_HTML") if CURRENT_LANG == 'he' else about_html_en.replace("{APP_VERSION}", APP_VERSION)
-        txt_about = QTextBrowser()
-        txt_about.setHtml(about_txt)
-        txt_about.setOpenExternalLinks(True)
-        abl.addWidget(txt_about)
-
-        # Citation Row
-        cit_row = QHBoxLayout()
-        cit_row.addWidget(QLabel(tr("Citation:")))
-
-        citation_str = "Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. https://doi.org/10.5281/zenodo.17734473."
-
-        self.txt_citation = QLineEdit(citation_str)
-        self.txt_citation.setReadOnly(True)
-        self.txt_citation.setCursorPosition(0)
-        cit_row.addWidget(self.txt_citation)
-
-        btn_copy = QPushButton(tr("Copy"))
-        btn_copy.setToolTip(tr("Copy Citation"))
-        btn_copy.setFixedSize(60, 24) # Small
-        btn_copy.clicked.connect(self.copy_citation)
-        cit_row.addWidget(btn_copy)
-
-        abl.addLayout(cit_row)
-
-        gb_about.setLayout(abl); layout.addWidget(gb_about)
-
-        # Data Sources section
-        gb_data = QGroupBox(tr("Data Sources"))
-        data_layout = QVBoxLayout()
-
-        data_html = "<table style='font-size: 12px; border-collapse: collapse;'>"
-        data_html += "<tr><th style='text-align:left; padding: 3px 10px 3px 0;'>Source</th>"
-        data_html += "<th style='text-align:left; padding: 3px 10px 3px 0;'>Version</th>"
-        data_html += "<th style='text-align:left; padding: 3px 10px 3px 0;'>Status</th></tr>"
-
-        # PGP
-        try:
-            from shared.document_service import get_pgp_service
-            pgp_svc = get_pgp_service()
-            pgp_ver = pgp_svc.get_version() if pgp_svc.is_available() else None
-        except Exception:
-            pgp_ver = None
-        pgp_status = f"v{pgp_ver}" if pgp_ver else "Not installed"
-        data_html += f"<tr><td style='padding: 3px 10px 3px 0;'>PGP Documents</td><td>{pgp_status}</td>"
-        data_html += f"<td>{'&#10003;' if pgp_ver else '&#8212;'}</td></tr>"
-
-        # FJMS
-        try:
-            from shared.fjms_service import get_fjms_service
-            fjms_svc = get_fjms_service()
-            fjms_ver = fjms_svc.get_version() if fjms_svc.is_available() else None
-        except Exception:
-            fjms_ver = None
-        fjms_status = f"v{fjms_ver}" if fjms_ver else "Not installed"
-        data_html += f"<tr><td style='padding: 3px 10px 3px 0;'>FJMS Catalog</td><td>{fjms_status}</td>"
-        data_html += f"<td>{'&#10003;' if fjms_ver else '&#8212;'}</td></tr>"
-
-        # NLI
-        try:
-            from shared.nli_crossref_service import get_nli_crossref_service
-            nli_svc = get_nli_crossref_service()
-            nli_ver = nli_svc.get_version() if nli_svc.is_available() else None
-        except Exception:
-            nli_ver = None
-        nli_status = f"v{nli_ver}" if nli_ver else "Not installed"
-        data_html += f"<tr><td style='padding: 3px 10px 3px 0;'>NLI Crossref</td><td>{nli_status}</td>"
-        data_html += f"<td>{'&#10003;' if nli_ver else '&#8212;'}</td></tr>"
-
-        data_html += "</table>"
-
-        txt_data = QTextBrowser()
-        txt_data.setHtml(data_html)
-        txt_data.setMaximumHeight(100)
-        data_layout.addWidget(txt_data)
-        gb_data.setLayout(data_layout)
-        layout.addWidget(gb_data)
-
-        panel.setLayout(layout)
-        return panel
+        btn = QPushButton(tr("Copy Citation"))
+        btn.setFixedHeight(22)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                color: {txt_color};
+                font-size: 10px;
+                padding: 2px 10px;
+                border-radius: 3px;
+                border: 1px solid {bar_border};
+            }}
+            QPushButton:hover {{ background-color: {btn_hover}; }}
+        """)
+        btn.clicked.connect(self.copy_citation)
+        h.addWidget(btn)
+        return bar
 
     def copy_citation(self):
         citation = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
@@ -18474,6 +18638,7 @@ class GenizahGUI(QMainWindow):
         return shared_sanitize_excel(text)
 
     def _add_docx_highlighted_runs(self, paragraph, text):
+        from docx.shared import RGBColor
         parts = str(text or "").split('*')
         for i, part in enumerate(parts):
             if not part:
@@ -18484,6 +18649,9 @@ class GenizahGUI(QMainWindow):
                 run.font.bold = True
 
     def _set_paragraph_rtl(self, paragraph):
+        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
         paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
         paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
         ppr = paragraph._p.get_or_add_pPr()
@@ -18494,6 +18662,8 @@ class GenizahGUI(QMainWindow):
         bidi.set(qn("w:val"), "1")
 
     def _set_table_rtl(self, table):
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
         tbl_pr = table._tbl.tblPr
         bidi_visual = tbl_pr.find(qn("w:bidiVisual"))
         if bidi_visual is None:
@@ -18502,6 +18672,8 @@ class GenizahGUI(QMainWindow):
         bidi_visual.set(qn("w:val"), "1")
 
     def _set_table_width_pct(self, table, pct=100):
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
         tbl_pr = table._tbl.tblPr
         tbl_w = tbl_pr.find(qn("w:tblW"))
         if tbl_w is None:
@@ -18599,6 +18771,10 @@ class GenizahGUI(QMainWindow):
         # --- XLSX with inline highlighting ---
         if fmt == 'xlsx':
             try:
+                import openpyxl
+                from openpyxl.styles import Font, PatternFill
+                from openpyxl.cell.rich_text import TextBlock, CellRichText
+                from openpyxl.cell.text import InlineFont
                 wb = openpyxl.Workbook()
                 ws = wb.active
                 ws.title = tr("Search Results")
@@ -18704,6 +18880,8 @@ class GenizahGUI(QMainWindow):
         # --- DOCX ---
         elif fmt == 'docx':
             try:
+                from docx import Document
+                from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
                 doc = Document()
                 for line in credit_text.split('\n'):
                     if not line.strip():
@@ -18979,6 +19157,10 @@ class GenizahGUI(QMainWindow):
             # --- XLSX ---
             if fmt == 'xlsx':
                 try:
+                    import openpyxl
+                    from openpyxl.styles import Alignment, Font, PatternFill
+                    from openpyxl.cell.rich_text import TextBlock, CellRichText
+                    from openpyxl.cell.text import InlineFont
                     wb = openpyxl.Workbook()
                     ws_report = wb.active
                     ws_report.title = tr("Report View")
@@ -19289,6 +19471,9 @@ class GenizahGUI(QMainWindow):
             # --- DOCX ---
             elif fmt == 'docx':
                 try:
+                    from docx import Document
+                    from docx.enum.section import WD_ORIENTATION
+                    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
                     doc = Document()
                     section = doc.sections[-1]
                     new_width, new_height = section.page_height, section.page_width
@@ -22421,6 +22606,7 @@ class GenizahGUI(QMainWindow):
         if not self.indexer: return
         
         if QMessageBox.question(self, tr("Index"), tr("Start indexing?"), QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            self.index_progress.setVisible(True)
             self.index_progress.setRange(0, 1)
             self.index_progress.setValue(0)
             self.index_progress.setFormat(tr("Indexing... %p%"))

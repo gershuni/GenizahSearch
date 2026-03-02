@@ -472,7 +472,7 @@ def _create_hebrew_content():
                 <a href="https://www.midrashproject.org/" target="_blank">פרויקט MiDRASH</a>
                 (דניאל שטוקל בן עזרא, אבי שמידמן, נחום דרשוביץ, יהודית אולשובי-שלנגר וצוות הפרויקט).
                 תודה לפרופ' משה קופל ו<a href="https://dicta.org.il/" target="_blank">דיקטה</a> על התמיכה,
-                ולאלישע רוזנצווייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר.
+                ולאבי שמידמן, ג'וש גדליה, אלישע רוזנצווייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר.
             </p>
             <p>
                 קישורים:
@@ -661,7 +661,7 @@ def _create_english_content():
                 <a href="https://www.midrashproject.org/" target="_blank">MiDRASH Project</a>
                 (Daniel Stökl Ben Ezra, Avi Shmidman, Nachum Dershowitz, Judith Olszowy-Schlanger, and team).
                 Thanks to Prof. Moshe Koppel and <a href="https://dicta.org.il/" target="_blank">Dicta</a> for their support,
-                and to Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer.
+                and to Avi Shmidman, Josh Guedalia, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer.
             </p>
             <p>
                 Links:
