@@ -1242,6 +1242,285 @@ def test_browse_graceful_degradation():
     svc.close()
 
 
+# ── Filter sys_ids tests ─────────────────────────────────────────
+
+
+@pytest.fixture
+def filter_db(tmp_path):
+    """Create a test database with v5+ schema for filter_sys_ids tests.
+
+    Schema includes genizah_persons, genizah_titles, catalog with Author/GenizahTitleId
+    columns, catalog_fields with FragmentMaterial entries, and domains.
+    """
+    db_path = str(tmp_path / "filter_test.db")
+    conn = sqlite3.connect(db_path)
+
+    # --- meta ---
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO meta VALUES ('version', '5.0.0')")
+
+    # --- genizah_persons ---
+    conn.execute("""
+        CREATE TABLE genizah_persons (
+            GenizahPersonId INTEGER PRIMARY KEY,
+            OrgName TEXT, EngName TEXT, HebName TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO genizah_persons VALUES (?, ?, ?, ?)", [
+        (10, "Maimonides", "Maimonides", "רמב\"ם"),
+        (20, "Saadia Gaon", "Saadia Gaon", "רב סעדיה גאון"),
+    ])
+
+    # --- genizah_titles ---
+    conn.execute("""
+        CREATE TABLE genizah_titles (
+            GenizahTitleId INTEGER PRIMARY KEY,
+            OrgTitle TEXT, EngTitle TEXT, HebTitle TEXT,
+            AuthorId INTEGER
+        )
+    """)
+    conn.executemany("INSERT INTO genizah_titles VALUES (?, ?, ?, ?, ?)", [
+        (100, "Mishneh Torah", "Mishneh Torah", "משנה תורה", 10),
+        (200, "Tafsir", "Tafsir Psalms", "תפסיר תהלים", 20),
+        (300, "Guide", "Guide for the Perplexed", "מורה נבוכים", 10),
+    ])
+
+    # --- catalog (v5+ with Author and GenizahTitleId columns) ---
+    conn.execute("""
+        CREATE TABLE catalog (
+            AlmaId TEXT NOT NULL,
+            UnitCatalogRecId INTEGER NOT NULL,
+            Title TEXT, TitleHeb TEXT, AuthorText TEXT,
+            CopyDate TEXT, CopyPlace TEXT,
+            TextualFrameHeb TEXT, TextualFrameEng TEXT,
+            SourceName TEXT, SourceNameHeb TEXT,
+            NumFolio REAL, NumBifolio REAL,
+            NumColumn TEXT, NumRow TEXT,
+            GenizahTitleOrgTitle TEXT, GenizahTitleEngTitle TEXT,
+            Author INTEGER, GenizahTitleId INTEGER
+        )
+    """)
+    # 8 manuscripts:
+    # SYS001: Halakha domain, author=Maimonides (via title FK 100), date 1200, Vellum
+    # SYS002: Halakha domain, author=Maimonides (via direct Author FK 10), date 1250, Printed
+    # SYS003: Bible domain, author=Saadia (via title FK 200), date 950, Paper
+    # SYS004: Liturgy domain, no author, no date, Vellum
+    # SYS005: Halakha domain, author=Maimonides (via title FK 300), date 1300, Printed
+    # SYS006: No domain, no author, date 1100, Paper
+    # SYS007: Bible domain, no author, date 1050, Vellum
+    # SYS008: Halakha+Bible domain (dual), no author, date 1150, Vellum
+    cols = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    conn.executemany(f"INSERT INTO catalog VALUES {cols}", [
+        ("SYS001", 1, "Mishneh Torah", "משנה תורה", "Maimonides",
+         "1200", "Cairo", None, None, None, None, None, None, None, None,
+         None, None, 10, 100),
+        ("SYS002", 2, "Mishneh Torah Copy", "העתק משנה תורה", "Maimonides",
+         "1250", "Fustat", None, None, None, None, None, None, None, None,
+         None, None, 10, None),
+        ("SYS003", 3, "Tafsir Psalms", "תפסיר תהלים", "Saadia Gaon",
+         "950", "Baghdad", None, None, None, None, None, None, None, None,
+         None, None, 20, 200),
+        ("SYS004", 4, "Piyyut Fragment", "קטע פיוט", None,
+         None, None, None, None, None, None, None, None, None, None,
+         None, None, None, None),
+        ("SYS005", 5, "Guide Perplexed", "מורה נבוכים", "Maimonides",
+         "1300", "Spain", None, None, None, None, None, None, None, None,
+         None, None, 10, 300),
+        ("SYS006", 6, "Unknown Fragment", "קטע", None,
+         "1100", None, None, None, None, None, None, None, None, None,
+         None, None, None, None),
+        ("SYS007", 7, "Psalms Commentary", "פירוש תהלים", None,
+         "1050", None, None, None, None, None, None, None, None, None,
+         None, None, None, None),
+        ("SYS008", 8, "Halakhic Bible", "הלכה ומקרא", None,
+         "1150", None, None, None, None, None, None, None, None, None,
+         None, None, None, None),
+    ])
+
+    # --- domains ---
+    conn.execute("""
+        CREATE TABLE domains (
+            AlmaId TEXT NOT NULL, Domain TEXT NOT NULL,
+            DomainHeb TEXT, ParentDomain TEXT, ParentDomainHeb TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO domains VALUES (?, ?, ?, ?, ?)", [
+        ("SYS001", "Halakha", "הלכה", "Rabbinic", "רבני"),
+        ("SYS002", "Halakha", "הלכה", "Rabbinic", "רבני"),
+        ("SYS003", "Bible", "מקרא", None, None),
+        ("SYS004", "Liturgy", "ליטורגיה", "Piyyut", "פיוט"),
+        ("SYS005", "Halakha", "הלכה", "Rabbinic", "רבני"),
+        ("SYS007", "Bible", "מקרא", None, None),
+        # SYS008 has TWO domains
+        ("SYS008", "Halakha", "הלכה", "Rabbinic", "רבני"),
+        ("SYS008", "Bible", "מקרא", None, None),
+    ])
+
+    # --- catalog_fields (for material filters) ---
+    conn.execute("""
+        CREATE TABLE catalog_fields (
+            AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
+            FieldCategory TEXT NOT NULL, FieldValue TEXT, FieldValueHeb TEXT
+        )
+    """)
+    conn.executemany("INSERT INTO catalog_fields VALUES (?, ?, ?, ?, ?)", [
+        ("SYS001", 1, "FragmentMaterial", "Vellum", "קלף"),
+        ("SYS002", 2, "FragmentMaterial", "Printed", "דפוס"),
+        ("SYS003", 3, "FragmentMaterial", "Paper", "נייר"),
+        ("SYS004", 4, "FragmentMaterial", "Vellum", "קלף"),
+        ("SYS005", 5, "FragmentMaterial", "Printed", "דפוס"),
+        ("SYS007", 7, "FragmentMaterial", "Vellum", "קלף"),
+        ("SYS008", 8, "FragmentMaterial", "Vellum", "קלף"),
+    ])
+
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+@pytest.fixture
+def filter_svc(filter_db):
+    """Create FjmsService for filter tests."""
+    svc = FjmsService(db_path=filter_db)
+    yield svc
+    svc.close()
+
+
+def test_get_filter_sys_ids_no_filters_returns_none(filter_svc):
+    """With no filters active, returns None (meaning 'no restriction')."""
+    result = filter_svc.get_filter_sys_ids()
+    assert result is None
+
+
+def test_get_filter_sys_ids_domain_filter(filter_svc):
+    """domain='Halakha' returns only sys_ids classified under Halakha."""
+    result = filter_svc.get_filter_sys_ids(domain="Halakha")
+    assert isinstance(result, set)
+    # SYS001, SYS002, SYS005 have Halakha domain; SYS008 has Halakha+Bible
+    assert result == {"SYS001", "SYS002", "SYS005", "SYS008"}
+
+
+def test_get_filter_sys_ids_domain_filter_parent(filter_svc):
+    """domain='Rabbinic' (parent domain) matches children classified under it."""
+    result = filter_svc.get_filter_sys_ids(domain="Rabbinic")
+    assert isinstance(result, set)
+    # Halakha has ParentDomain='Rabbinic' -> SYS001, SYS002, SYS005, SYS008
+    assert result == {"SYS001", "SYS002", "SYS005", "SYS008"}
+
+
+def test_get_filter_sys_ids_author_filter_person_id(filter_svc):
+    """author=person_id returns sys_ids where catalog Author FK or title Author FK matches."""
+    result = filter_svc.get_filter_sys_ids(author="10")  # Maimonides person_id
+    assert isinstance(result, set)
+    # SYS001 (title FK 100, AuthorId=10), SYS002 (direct Author=10), SYS005 (title FK 300, AuthorId=10)
+    assert result == {"SYS001", "SYS002", "SYS005"}
+
+
+def test_get_filter_sys_ids_author_filter_legacy_string(filter_svc):
+    """author=string (legacy) matches AuthorText."""
+    result = filter_svc.get_filter_sys_ids(author="Saadia Gaon")
+    assert isinstance(result, set)
+    assert result == {"SYS003"}
+
+
+def test_get_filter_sys_ids_work_filter(filter_svc):
+    """work=title_id returns sys_ids where GenizahTitleId matches."""
+    result = filter_svc.get_filter_sys_ids(work="100")  # Mishneh Torah
+    assert isinstance(result, set)
+    assert result == {"SYS001"}
+
+
+def test_get_filter_sys_ids_date_range(filter_svc):
+    """date_from/date_to returns sys_ids with CopyDate in range."""
+    result = filter_svc.get_filter_sys_ids(date_from=1100, date_to=1200)
+    assert isinstance(result, set)
+    # SYS001 (1200), SYS006 (1100), SYS008 (1150) are in range
+    assert result == {"SYS001", "SYS006", "SYS008"}
+
+
+def test_get_filter_sys_ids_date_from_only(filter_svc):
+    """date_from only returns sys_ids with CopyDate >= value."""
+    result = filter_svc.get_filter_sys_ids(date_from=1200)
+    assert isinstance(result, set)
+    # SYS001 (1200), SYS002 (1250), SYS005 (1300)
+    assert result == {"SYS001", "SYS002", "SYS005"}
+
+
+def test_get_filter_sys_ids_date_to_only(filter_svc):
+    """date_to only returns sys_ids with CopyDate <= value."""
+    result = filter_svc.get_filter_sys_ids(date_to=1050)
+    assert isinstance(result, set)
+    # SYS003 (950), SYS007 (1050)
+    assert result == {"SYS003", "SYS007"}
+
+
+def test_get_filter_sys_ids_date_include_undated(filter_svc):
+    """include_undated=True also includes records with no date."""
+    result = filter_svc.get_filter_sys_ids(date_from=1200, date_to=1300, include_undated=True)
+    assert isinstance(result, set)
+    # SYS001 (1200), SYS002 (1250), SYS005 (1300) + SYS004 (no date)
+    assert result == {"SYS001", "SYS002", "SYS004", "SYS005"}
+
+
+def test_get_filter_sys_ids_material_include(filter_svc):
+    """material_include=['Printed'] returns only sys_ids with matching material."""
+    result = filter_svc.get_filter_sys_ids(material_include=["Printed"])
+    assert isinstance(result, set)
+    assert result == {"SYS002", "SYS005"}
+
+
+def test_get_filter_sys_ids_material_exclude(filter_svc):
+    """material_exclude=['Printed'] returns sys_ids without Printed material."""
+    result = filter_svc.get_filter_sys_ids(material_exclude=["Printed"])
+    assert isinstance(result, set)
+    # All catalog entries minus SYS002 and SYS005 (printed)
+    # SYS006 has no material entry but has a catalog record -> included (NOT excluded)
+    assert "SYS002" not in result
+    assert "SYS005" not in result
+    assert "SYS001" in result
+    assert "SYS003" in result
+
+
+def test_get_filter_sys_ids_combined_filters(filter_svc):
+    """Combining filters uses intersection (AND logic)."""
+    # Halakha domain + Maimonides author + date >= 1200
+    result = filter_svc.get_filter_sys_ids(domain="Halakha", author="10", date_from=1200)
+    assert isinstance(result, set)
+    # SYS001 (Halakha, Maimonides, 1200), SYS002 (Halakha, Maimonides, 1250),
+    # SYS005 (Halakha, Maimonides, 1300)
+    assert result == {"SYS001", "SYS002", "SYS005"}
+
+
+def test_get_filter_sys_ids_combined_domain_material_exclude(filter_svc):
+    """Halakha domain + exclude Printed = only non-printed Halakha manuscripts."""
+    result = filter_svc.get_filter_sys_ids(domain="Halakha", material_exclude=["Printed"])
+    assert isinstance(result, set)
+    # SYS001 (Halakha, Vellum), SYS008 (Halakha+Bible, Vellum)
+    # SYS002 and SYS005 are Halakha but Printed -> excluded
+    assert result == {"SYS001", "SYS008"}
+
+
+def test_get_filter_sys_ids_no_match_returns_empty_set(filter_svc):
+    """When filters are active but match nothing, returns empty set (not None)."""
+    result = filter_svc.get_filter_sys_ids(domain="NonexistentDomain")
+    assert isinstance(result, set)
+    assert result == set()
+
+
+def test_get_filter_sys_ids_returns_set_type(filter_svc):
+    """Result is a set for O(1) membership testing."""
+    result = filter_svc.get_filter_sys_ids(domain="Bible")
+    assert isinstance(result, set)
+
+
+def test_get_filter_sys_ids_graceful_degradation():
+    """Returns None when connection is unavailable (no crash)."""
+    svc = FjmsService(db_path="nonexistent_filter_test.db")
+    result = svc.get_filter_sys_ids(domain="Halakha")
+    assert result is None
+    svc.close()
+
+
 # ── Web shim import test ─────────────────────────────────────────
 
 
