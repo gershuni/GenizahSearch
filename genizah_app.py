@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
                              QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
                              QCompleter, QAbstractItemView)
-from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF)
+from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF, QPoint)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
 from PyQt6 import sip
@@ -325,7 +325,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Catalog browse by domain, author, and work with free text filter and cross-links"))
+        self.lbl_msg.setText(tr("New: Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names"))
         self.show()
 
     def on_learn_more(self):
@@ -357,8 +357,10 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
-            f"<li><b>{tr('Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search')}</b></li>"
-            f"<li><b>{tr('Cross-links: domain and author labels on browse pages link directly to catalog browse filtered by that value')}</b></li>"
+            f"<li><b>{tr('Composition Search UX: elapsed timer, cancel with partial results, printed badge and filter')}</b></li>"
+            f"<li><b>{tr('Session Persistence: search state saved and restored across restarts, search history dropdown in search bar')}</b></li>"
+            f"<li><b>{tr('Desktop Notifications: taskbar flash on search completion, sleep prevention, copy context menu')}</b></li>"
+            f"<li><b>{tr('Hebrew Library Names: full Hebrew names for all library codes')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)
@@ -8724,6 +8726,29 @@ class GenizahGUI(QMainWindow):
         self.query_input.returnPressed.connect(self.toggle_search)
         self.query_input.textChanged.connect(self._on_query_text_changed)
 
+        # Dropdown arrow inside search input for history
+        from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor as _QColor
+        from PyQt6.QtWidgets import QStyle
+        _arrow_pm = QPixmap(16, 16)
+        _arrow_pm.fill(_QColor(0, 0, 0, 0))
+        _arrow_painter = QPainter(_arrow_pm)
+        _arrow_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        _arrow_painter.setBrush(_QColor("#666666"))
+        _arrow_painter.setPen(Qt.PenStyle.NoPen)
+        _arrow_painter.drawPolygon([
+            QPoint(3, 5), QPoint(13, 5), QPoint(8, 12)
+        ])
+        _arrow_painter.end()
+        self._search_history_action = self.query_input.addAction(
+            QIcon(_arrow_pm), QLineEdit.ActionPosition.TrailingPosition)
+        self._search_history_action.setToolTip(tr("Recent searches"))
+        self.search_history_menu = QMenu(self)
+        self.search_history_menu.aboutToShow.connect(self._refresh_search_history)
+        self._search_history_action.triggered.connect(self._show_search_history_menu)
+        self.search_history_menu.installEventFilter(self)
+        self.search_history_menu.hovered.connect(self._on_history_menu_hovered)
+        self.query_input.installEventFilter(self)
+
         self.btn_search = QPushButton(tr("Search")); self.btn_search.clicked.connect(self.toggle_search)
         self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; min-width: 80px;")
         self.btn_search.setEnabled(False)
@@ -8740,15 +8765,6 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.mode_combo)
 
         row1.addWidget(self.btn_search)
-
-        # Search history button with menu
-        self.btn_search_history = QPushButton(tr("Last Searches"))
-        self.btn_search_history.setToolTip(tr("Recent searches — click to restore"))
-        self.btn_search_history.setStyleSheet("padding: 2px 8px;")
-        self.search_history_menu = QMenu(self)
-        self.search_history_menu.aboutToShow.connect(self._refresh_search_history)
-        self.btn_search_history.setMenu(self.search_history_menu)
-        row1.addWidget(self.btn_search_history)
 
         # Row 2: Search Parameters & Lab Mode
         row2 = QHBoxLayout()
@@ -9165,20 +9181,32 @@ class GenizahGUI(QMainWindow):
         inp_w = QWidget(); in_l = QVBoxLayout()
         top_row = QHBoxLayout()
         self.comp_title_input = QLineEdit(); self.comp_title_input.setPlaceholderText(tr("Composition Title"))
+        # Dropdown arrow inside title input for composition history
+        from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor as _QColor
+        _arrow_pm2 = QPixmap(16, 16)
+        _arrow_pm2.fill(_QColor(0, 0, 0, 0))
+        _arrow_p2 = QPainter(_arrow_pm2)
+        _arrow_p2.setRenderHint(QPainter.RenderHint.Antialiasing)
+        _arrow_p2.setBrush(_QColor("#666666"))
+        _arrow_p2.setPen(Qt.PenStyle.NoPen)
+        _arrow_p2.drawPolygon([
+            QPoint(3, 5), QPoint(13, 5), QPoint(8, 12)
+        ])
+        _arrow_p2.end()
+        self._comp_history_action = self.comp_title_input.addAction(
+            QIcon(_arrow_pm2), QLineEdit.ActionPosition.TrailingPosition)
+        self._comp_history_action.setToolTip(tr("Recent composition searches"))
+        self.comp_history_menu = QMenu(self)
+        self.comp_history_menu.aboutToShow.connect(self._refresh_comp_history)
+        self._comp_history_action.triggered.connect(self._show_comp_history_menu)
+        self.comp_history_menu.installEventFilter(self)
+        self.comp_history_menu.hovered.connect(self._on_history_menu_hovered)
+        self.comp_title_input.installEventFilter(self)
         top_row.addWidget(QLabel(tr("Title:"))); top_row.addWidget(self.comp_title_input)
-        
+
         # Load Button moved to top row
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
         top_row.addWidget(btn_load)
-
-        # Composition history button with menu
-        self.btn_comp_history = QPushButton(tr("Last Searches"))
-        self.btn_comp_history.setToolTip(tr("Recent composition searches — click to restore"))
-        self.btn_comp_history.setStyleSheet("padding: 2px 8px;")
-        self.comp_history_menu = QMenu(self)
-        self.comp_history_menu.aboutToShow.connect(self._refresh_comp_history)
-        self.btn_comp_history.setMenu(self.comp_history_menu)
-        top_row.addWidget(self.btn_comp_history)
 
         # 1. Exclude & Filter (Moved to top row)
         btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
@@ -18273,8 +18301,37 @@ class GenizahGUI(QMainWindow):
             w.set_buttons_visible(True)
 
     def eventFilter(self, source, event):
+        # Down arrow in search bar → open history dropdown
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Down:
+            if source is getattr(self, 'query_input', None):
+                self._show_search_history_menu()
+                return True
+            if source is getattr(self, 'comp_title_input', None):
+                self._show_comp_history_menu()
+                return True
+        # Keyboard navigation inside history menu
+        if source in (getattr(self, 'search_history_menu', None),
+                      getattr(self, 'comp_history_menu', None)) \
+                and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            # After arrow navigation, update highlight to follow active action
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                # Let QMenu handle the navigation first, then update highlight
+                result = super().eventFilter(source, event)
+                action = source.activeAction()
+                if action:
+                    self._on_history_menu_hovered(action, menu=source)
+                return result
+            action = source.activeAction()
+            if action and hasattr(action, '_history_entry'):
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self._on_history_item_clicked(action._history_type, action._history_entry)
+                    return True
+                if key == Qt.Key.Key_Delete:
+                    self._delete_history_item(action._history_type, action._history_index, reopen=True)
+                    return True
         # Smart tooltips for truncated cell text in results table
-        if source == self.results_table.viewport() and event.type() == QEvent.Type.ToolTip:
+        if hasattr(self, 'results_table') and source == self.results_table.viewport() and event.type() == QEvent.Type.ToolTip:
             pos = event.pos()
             index = self.results_table.indexAt(pos)
             if index.isValid():
@@ -18291,7 +18348,7 @@ class GenizahGUI(QMainWindow):
                             return True
             QToolTip.hideText()
             return True
-        if source == self.results_table and event.type() == QEvent.Type.Leave:
+        if hasattr(self, 'results_table') and source == self.results_table and event.type() == QEvent.Type.Leave:
             if self.hovered_row != -1:
                 w = self.results_table.cellWidget(self.hovered_row, self.COL_ACTIONS)
                 if isinstance(w, ActionsHoverWidget):
@@ -22649,6 +22706,42 @@ class GenizahGUI(QMainWindow):
 
     # Mode index → short character for history display
     _MODE_CHARS = ['=', '?', 'R', '~', '/', '$', '#', 'T']
+    _HISTORY_HIGHLIGHT = "background-color: #3daee9;"
+    _HISTORY_LBL_HIGHLIGHT = "text-align: right; padding: 2px 4px; font-size: 12px; color: white;"
+    _HISTORY_LBL_NORMAL = "text-align: right; padding: 2px 4px; font-size: 12px;"
+    _HISTORY_DEL_HIGHLIGHT = "color: white; font-size: 12px; font-weight: bold; border: none; padding: 0px;"
+    _HISTORY_DEL_NORMAL = "color: #c0392b; font-size: 12px; font-weight: bold; border: none; padding: 0px;"
+
+    def _on_history_menu_hovered(self, action, menu=None):
+        """Highlight the active QWidgetAction container on hover/keyboard navigation."""
+        menu = menu or self.sender()
+        if not menu:
+            return
+        from PyQt6.QtWidgets import QWidgetAction
+        for a in menu.actions():
+            if isinstance(a, QWidgetAction) and a.defaultWidget():
+                w = a.defaultWidget()
+                active = a is action
+                w.setStyleSheet(self._HISTORY_HIGHLIGHT if active else "")
+                children = w.findChildren(QPushButton)
+                if len(children) >= 2:
+                    children[0].setStyleSheet(self._HISTORY_LBL_HIGHLIGHT if active else self._HISTORY_LBL_NORMAL)
+                    children[1].setStyleSheet(self._HISTORY_DEL_HIGHLIGHT if active else self._HISTORY_DEL_NORMAL)
+
+    def _show_search_history_menu(self):
+        """Show the search history dropdown below the query input."""
+        # aboutToShow signal on the menu triggers _refresh_search_history
+        input_w = self.query_input.width()
+        self.search_history_menu.setMinimumWidth(input_w)
+        pos = self.query_input.mapToGlobal(QPoint(0, self.query_input.height()))
+        self.search_history_menu.popup(pos)
+
+    def _show_comp_history_menu(self):
+        """Show the composition history dropdown below the title input."""
+        input_w = self.comp_title_input.width()
+        self.comp_history_menu.setMinimumWidth(input_w)
+        pos = self.comp_title_input.mapToGlobal(QPoint(0, self.comp_title_input.height()))
+        self.comp_history_menu.popup(pos)
 
     def _refresh_search_history(self):
         """Rebuild the search history menu with per-item delete buttons."""
@@ -22692,21 +22785,24 @@ class GenizahGUI(QMainWindow):
         h.setContentsMargins(4, 2, 4, 2)
         h.setSpacing(4)
 
+        results_word = tr("{count} results").format(count=count)
         if search_type == 'regular':
-            label_text = f"{mode_char}  {query}  ({count})"
+            label_text = f"{mode_char}  {query}  ({results_word})"
         else:
-            label_text = f"{query}  ({count})"
+            label_text = f"{query}  ({results_word})"
 
         lbl = QPushButton(label_text)
         lbl.setFlat(True)
         lbl.setStyleSheet("text-align: right; padding: 2px 4px; font-size: 12px;")
         lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         lbl.clicked.connect(lambda checked, e=entry, st=search_type: self._on_history_item_clicked(st, e))
 
         btn_del = QPushButton("×")
         btn_del.setFixedSize(20, 20)
         btn_del.setStyleSheet("color: #c0392b; font-size: 12px; font-weight: bold; border: none; padding: 0px;")
         btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_del.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn_del.setToolTip(tr("Delete this entry"))
         btn_del.clicked.connect(lambda checked, st=search_type, idx=index: self._delete_history_item(st, idx))
 
@@ -22715,6 +22811,9 @@ class GenizahGUI(QMainWindow):
 
         wa = QWidgetAction(menu)
         wa.setDefaultWidget(w)
+        wa._history_entry = entry
+        wa._history_index = index
+        wa._history_type = search_type
         menu.addAction(wa)
 
     def _on_history_item_clicked(self, search_type, entry):
@@ -22729,16 +22828,20 @@ class GenizahGUI(QMainWindow):
             self.comp_history_menu.close()
             self._restore_comp_search_from_state(state, entry)
 
-    def _delete_history_item(self, search_type, index):
+    def _delete_history_item(self, search_type, index, reopen=False):
         """Delete a single history entry and refresh the menu."""
         from shared.session_persistence import delete_history_entry
         delete_history_entry(search_type, index)
         if search_type == 'regular':
             self.search_history_menu.close()
             self._refresh_search_history()
+            if reopen:
+                self._show_search_history_menu()
         else:
             self.comp_history_menu.close()
             self._refresh_comp_history()
+            if reopen:
+                self._show_comp_history_menu()
 
     def _restore_regular_search_from_state(self, state, entry=None):
         """Apply a history entry's state dict to the regular search tab."""

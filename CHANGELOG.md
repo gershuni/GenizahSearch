@@ -4,6 +4,46 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.2.0] - 2026-03-02
+
+### Milestone: Power-User UX — Search Workflow, Session & Notifications
+
+Major UX overhaul driven by power-user feedback: composition search workflow improvements, session persistence, search history, desktop notifications, and Hebrew library names.
+
+#### Composition Search UX (Phase 42)
+- **Elapsed timer**: Real-time search duration display (both apps)
+- **Chunk count display**: Shows number of chunks processed during composition search
+- **Summary line**: Persistent search stats after completion (duration, matches, exclusions)
+- **Min-chunks filter**: Filter regular search results by minimum chunk match count
+- **Cancel with partial results**: Cancelling mid-search preserves results found so far, displayed in a collapsible "excluded" section with reason sub-headers
+- **Printed badge**: Manuscripts identified as printed editions marked with badge in search results, composition tree, and catalog browse (both apps)
+- **3-state printed filter**: All / Manuscripts only / Printed only toggle in both desktop and web, including composition tree
+- **Responsive cancel**: Progress callback checked every chunk for immediate cancel response
+- **Excluded items clickable**: Click excluded items in web to navigate to manuscript detail
+- **Full Hebrew translations**: All Phase 42 UI strings translated
+
+#### Session Persistence & Search History (Phase 43)
+- **Session persistence service**: New `shared/session_persistence.py` module saves and restores full search state (query, mode, results, exclusions) across app restarts
+- **Desktop session restore**: Automatic save on exit with restore prompt on startup; configurable via settings (Ask / Always / Never)
+- **Web session persistence**: Search and parallels state preserved in browser sessionStorage
+- **Search history dropdowns**: Dropdown arrow (▼) inside search bar with last 20 searches, showing mode indicator and result count (both apps, both search and composition)
+- **Keyboard navigation**: Down arrow opens history from search bar, arrow keys navigate, Enter selects, Delete removes entries
+
+#### Notification, Copy & Hebrew Names (Phase 44)
+- **Desktop search notifications**: Taskbar flash when search completes while app is in background
+- **Sleep prevention**: Prevents Windows sleep during long-running searches
+- **Copy context menu**: Right-click to copy cell text from desktop search results table
+- **Hebrew library names**: Full Hebrew names for all 81 library codes displayed when UI language is Hebrew (both apps)
+
+#### Web & Performance
+- **Home page redesign**: Compact notices section, hero banner, and 5 action cards for quick navigation
+- **Sidebar RTL fix**: Correct positioning in RTL mode, improved Core Web Vitals
+- **Lazy imports**: Faster desktop startup via deferred module loading
+- **PostHog EU endpoint**: Fixed analytics endpoint to match account region; logged-in user identification
+- **Language toggle fix**: Resolved bug when switching UI language
+
+---
+
 ## [6.1.1] - 2026-03-01
 
 ### Performance: Catalog Browse & Domain Queries

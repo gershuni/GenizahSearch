@@ -2323,6 +2323,18 @@ TRANSLATIONS = {
         "קישורים צולבים: תוויות תחום ומחבר בעמודי עיון מקשרות ישירות לעיון בקטלוג המסונן לפי אותו ערך",
     "New: Catalog browse by domain, author, and work with free text filter and cross-links":
         "חדש: עיון בקטלוג לפי תחום, מחבר ויצירה עם סינון טקסט חופשי וקישורים צולבים",
+    "Composition Search UX: elapsed timer, cancel with partial results, printed badge and filter":
+        "חיפוש מקבילות: טיימר, ביטול עם תוצאות חלקיות, תגית וסינון דפוס",
+    "Session Persistence: search state saved and restored across restarts, search history dropdown in search bar":
+        "שמירת מצב: מצב חיפוש נשמר ומשוחזר בין הפעלות, תפריט היסטוריית חיפושים בשורת החיפוש",
+    "Desktop Notifications: taskbar flash on search completion, sleep prevention, copy context menu":
+        "התראות שולחן עבודה: הבהוב בשורת המשימות בסיום חיפוש, מניעת שינה, תפריט העתקה",
+    "Hebrew Library Names: full Hebrew names for all library codes":
+        "שמות ספריות בעברית: שמות עבריים מלאים לכל קודי הספריות",
+    "New: Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names":
+        "חדש: שמירת מצב, תפריט היסטוריית חיפושים, שיפורי חיפוש מקבילות, התראות שולחן עבודה, שמות ספריות בעברית",
+    "Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names":
+        "שמירת מצב, תפריט היסטוריית חיפושים, שיפורי חיפוש מקבילות, התראות שולחן עבודה, שמות ספריות בעברית",
     "Got it!": "הבנתי!",
     "Learn More": "למידע נוסף",
 
@@ -2533,6 +2545,9 @@ TRANSLATIONS = {
     "History Limit:": "מגבלת היסטוריה:",
     "Maximum search history entries per type": "מספר מרבי של רשומות היסטוריה לכל סוג חיפוש",
     "Last Searches": "חיפושים אחרונים",
+    "Recent searches": "חיפושים אחרונים",
+    "Recent composition searches": "חיפושי מקבילות אחרונים",
+    "{count} results": "{count} תוצאות",
     "Restore State:": "שחזור מצב:",
     "Ask": "שאל",
     "Always": "תמיד",

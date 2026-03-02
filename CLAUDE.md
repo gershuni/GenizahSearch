@@ -185,6 +185,8 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- March 2026: v6.2.0 Power-User UX -- composition search UX (timer, ETA, cancel with partial results, printed badge/filter), session persistence, search history dropdowns, desktop notifications, sleep prevention, copy menu, Hebrew library names (both apps)
+- March 2026: v6.1.0/v6.1.1 Catalog Browse & Navigation -- faceted catalog browsing by domain/author/work, free-text filter, FIST v5.0.0 enrichment, 100x faster domain queries, async desktop catalog
 - February 2026: v6.0.0 Local Data Architecture -- PGP data migrated to pgp.db sidecar (147MB), FJMS catalog descriptions expanded, offline browsing, desktop crash fixes, paginated search, performance optimizations (both apps)
 - February 2026: v5.9.0 Multi-Source Image & Metadata Integration -- NLI crossref sidecar (815K), Cambridge/Manchester/JTS IIIF, folio navigation, bibliography, catalog refs (both apps)
 - February 2026: v5.8.0 FJMS Integration -- domain classifications, scientific joins, catalog enrichment via SQLite sidecar (both apps)

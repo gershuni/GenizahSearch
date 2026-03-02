@@ -1,4 +1,4 @@
-# Genizah Search Pro 6.1.1
+# Genizah Search Pro 6.2.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,17 +8,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 6.1.1?
+## What's New in Version 6.2.0?
 
-### v6.1.1: Catalog Browse & Navigation
+### v6.2.0: Power-User UX — Search Workflow, Session & Notifications
 
-Browse the scholarly catalog by domain, author, and work — with free-text filtering and cross-links.
+Major UX overhaul driven by power-user feedback.
 
-* **Catalog Browse:** New "Browse by Identification" page/tab for faceted browsing by domain hierarchy, author, or work title with combined filtering and free text search
-* **Cross-links:** Domain and author labels on the manuscript browse page link directly to catalog browse filtered by that value
+* **Composition Search UX:** Elapsed timer, chunk count, cancel with partial results, printed badge & filter, min-chunks filter, collapsible excluded section
+* **Session Persistence:** Search state saved and restored across restarts (desktop + web), with configurable restore mode
+* **Search History:** Dropdown arrow in search bar with last 20 searches, keyboard navigation, mode indicator and result count
+* **Desktop Notifications:** Taskbar flash on search completion, sleep prevention during long searches
+* **Copy Context Menu:** Right-click to copy cell text from desktop search results
+* **Hebrew Library Names:** Full Hebrew names for all library codes when UI language is Hebrew
 
-### Previous Features (v5.0–v6.0)
+### Previous Features (v5.0–v6.1)
 
+* **Catalog Browse (v6.1):** Browse by domain, author, and work with free-text filtering, cross-links, and FIST v5.0 enrichment
 * **Local Data Architecture (v6.0):** PGP data in local SQLite sidecar, offline browsing, paginated search, desktop crash fixes, performance optimizations
 
 * **Multi-Source Images (v5.9):** NLI, Cambridge, Manchester LUNA, JTS/Princeton Figgy with folio navigation, bibliography (542K), catalog cross-references (64K)
@@ -118,7 +123,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 6.1.1 | אתר הגניזה של דיקטה
+# Genizah Search Pro 6.2.0 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 

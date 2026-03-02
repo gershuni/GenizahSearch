@@ -3,7 +3,7 @@
 ; License: CC BY-NC-SA 4.0 (Non-commercial use only)
 
 #define MyAppName "Genizah Search Pro"
-#define MyAppVersion "6.1.1"
+#define MyAppVersion "6.2.0"
 #define MyAppPublisher "Hillel Gershuni / Dicta"
 #define MyAppURL "https://www.GenizahSearch.com/"
 #define MyAppExeName "GenizahSearchPro.exe"
