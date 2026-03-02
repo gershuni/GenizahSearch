@@ -8312,27 +8312,30 @@ class GenizahGUI(QMainWindow):
         # Copy actions
         menu.addSeparator()
 
+        # Get shelfmark from table cell (may have been fetched async)
+        shelf_item = self.results_table.item(row, self.COL_SHELF)
+        shelf_text = shelf_item.text() if shelf_item else shelfmark
         action_copy_shelfmark = menu.addAction(tr("Copy Shelfmark"))
-        action_copy_shelfmark.triggered.connect(lambda: QApplication.clipboard().setText(shelfmark))
+        action_copy_shelfmark.triggered.connect(lambda: QApplication.clipboard().setText(shelf_text))
 
         title_item = self.results_table.item(row, self.COL_TITLE)
         title_text = title_item.text() if title_item else ''
         action_copy_title = menu.addAction(tr("Copy Title"))
         action_copy_title.triggered.connect(lambda: QApplication.clipboard().setText(title_text))
 
+        # Copy full library name from tooltip
         lib_item = self.results_table.item(row, self.COL_LIBRARY)
-        lib_text = lib_item.text() if lib_item else ''
+        lib_full = lib_item.toolTip() if lib_item and lib_item.toolTip() else (lib_item.text() if lib_item else '')
         action_copy_library = menu.addAction(tr("Copy Library"))
-        action_copy_library.triggered.connect(lambda: QApplication.clipboard().setText(lib_text))
+        action_copy_library.triggered.connect(lambda: QApplication.clipboard().setText(lib_full))
 
-        action_copy_sysid = menu.addAction(tr("Copy Sys ID"))
-        action_copy_sysid.triggered.connect(lambda: QApplication.clipboard().setText(sys_id))
-
-        # Copy full row as tab-separated text
-        row_parts = [shelfmark, title_text, lib_text, sys_id]
+        # Copy full result: shelfmark, title, library, snippet
+        snippet_widget = self.results_table.cellWidget(row, self.COL_SNIPPET)
+        snippet_text = snippet_widget.property("filter_text") if snippet_widget else ''
+        row_parts = [shelf_text, title_text, lib_full, snippet_text]
         row_text = '\t'.join(p for p in row_parts if p)
-        action_copy_row = menu.addAction(tr("Copy Row"))
-        action_copy_row.triggered.connect(lambda: QApplication.clipboard().setText(row_text))
+        action_copy_result = menu.addAction(tr("Copy Result"))
+        action_copy_result.triggered.connect(lambda: QApplication.clipboard().setText(row_text))
 
         menu.exec(self.results_table.mapToGlobal(pos))
 
@@ -16026,7 +16029,7 @@ class GenizahGUI(QMainWindow):
         app_row3 = QHBoxLayout()
         self.chk_notifications = QCheckBox(tr("Desktop Notifications"))
         self.chk_notifications.setChecked(load_app_config().get('notifications_enabled', True))
-        self.chk_notifications.setToolTip(tr("Show notification when search completes while app is in background"))
+        self.chk_notifications.setToolTip(tr("Flash taskbar when search completes while app is in background"))
         self.chk_notifications.stateChanged.connect(
             lambda state: save_app_config({'notifications_enabled': state == 2})
         )
@@ -17347,30 +17350,39 @@ class GenizahGUI(QMainWindow):
             self.start_metadata_loading(ids_to_fetch)
 
     def _notify_search_complete(self, result_count, search_term, search_type='search'):
-        """Show Windows toast notification if app is not focused."""
+        """Flash taskbar icon if app is not focused when search completes."""
         import platform as _platform
+        if _platform.system() != 'Windows':
+            return
         # Check if notification is enabled
         cfg = load_app_config()
         if not cfg.get('notifications_enabled', True):
             return
-        # Check if app window is focused
-        if QApplication.activeWindow() is not None:
-            return  # App is focused, skip notification
-        # Show Windows toast notification
+        # Check if our window is the foreground window
         try:
-            if _platform.system() == 'Windows':
-                from PyQt6.QtWidgets import QSystemTrayIcon
-                if not hasattr(self, '_tray_icon') or self._tray_icon is None:
-                    self._tray_icon = QSystemTrayIcon(self)
-                    self._tray_icon.setIcon(self.windowIcon())
-                    self._tray_icon.show()
-                title = "GenizahSearch"
-                if search_type == 'composition':
-                    msg = tr("{} results for composition search").format(result_count)
-                else:
-                    truncated = (search_term[:30] + '...') if len(search_term) > 30 else search_term
-                    msg = tr("{} results for '{}'").format(result_count, truncated)
-                self._tray_icon.showMessage(title, msg, QSystemTrayIcon.MessageIcon.Information, 5000)
+            import ctypes
+            foreground_hwnd = ctypes.windll.user32.GetForegroundWindow()
+            our_hwnd = int(self.winId())
+            if foreground_hwnd == our_hwnd:
+                return  # App is focused, skip notification
+            # Flash taskbar icon to attract attention
+            FLASHW_ALL = 0x00000003
+            FLASHW_TIMERNOFG = 0x0000000C
+            class FLASHWINFO(ctypes.Structure):
+                _fields_ = [
+                    ('cbSize', ctypes.c_uint),
+                    ('hwnd', ctypes.c_void_p),
+                    ('dwFlags', ctypes.c_uint),
+                    ('uCount', ctypes.c_uint),
+                    ('dwTimeout', ctypes.c_uint),
+                ]
+            fwi = FLASHWINFO()
+            fwi.cbSize = ctypes.sizeof(FLASHWINFO)
+            fwi.hwnd = our_hwnd
+            fwi.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG
+            fwi.uCount = 3
+            fwi.dwTimeout = 0
+            ctypes.windll.user32.FlashWindowEx(ctypes.byref(fwi))
         except Exception:
             pass  # Silently fail -- notification is non-critical
 
@@ -17491,7 +17503,7 @@ class GenizahGUI(QMainWindow):
             self._add_regular_search_to_history()
 
         # Toast notification when app is not focused
-        self._notify_search_complete(len(results), self.search_input.text())
+        self._notify_search_complete(len(results), self.last_search_query)
 
     def _open_results_filter_dialog(self, column):
         if column == 1:

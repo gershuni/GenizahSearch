@@ -2755,7 +2755,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # Printed material indicator
                         if sys_id and sys_id in search_state.printed_ids:
                             from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
-                            from web.translations import get_language
                             _bg, _fg = PRINTED_BADGE_COLORS
                             _plabel = PRINTED_LABEL_HE if get_language() == 'he' else PRINTED_LABEL_EN
                             ui.label(_plabel).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
@@ -3493,7 +3492,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # Subject Domains inline
                             domains = fjms_data.get('domains')
                             if domains:
-                                from web.translations import get_language
                                 lang = get_language()
                                 all_domain_names = {d['domain'] for d in domains}
                                 for dom in domains:
@@ -3571,7 +3569,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.expansion(group='enrichment').classes('w-full fjms-expand').style(
                         'border-left: 3px solid #9b59b6; border-radius: 8px; margin-bottom: 4px;'
                     ).props('dense header-class="text-xs font-bold" label="FJMS Details"'):
-                        from web.translations import get_language
                         merged = merge_catalog_records(catalog_records)
                         lang = get_language()
 
