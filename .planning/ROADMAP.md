@@ -209,8 +209,8 @@ Plans:
 **Plans**: 5 plans
 Plans:
 - [x] 45-01-PLAN.md — Filter service method (get_filter_sys_ids) + core engine restrict_sys_ids parameter (FILT-01, FILT-02, FILT-03, FILT-04)
-- [ ] 45-02-PLAN.md — Web search page: Advanced Filters panel, chip bar, word search per-result exclusion, search history filter support (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
-- [ ] 45-03-PLAN.md — Desktop: PreSearchFilterDialog, chip bar, SearchThread/CompositionThread restrict_sys_ids, word search exclusion, session persistence (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
+- [x] 45-02-PLAN.md — Web search page: Advanced Filters panel, chip bar, word search per-result exclusion, search history filter support (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
+- [x] 45-03-PLAN.md — Desktop: PreSearchFilterDialog, chip bar, SearchThread/CompositionThread restrict_sys_ids, word search exclusion, session persistence (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
 - [ ] 45-04-PLAN.md — Web parallels: filter panel, per-manuscript exclusion, auto-exclude source, import exclusions, restrict_sys_ids integration (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
 - [ ] 45-05-PLAN.md — Path B: browse-to-search navigation buttons (web + desktop), Hebrew translations (FILT-05, FILT-06)
 
@@ -269,7 +269,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 42. Search UX & Composition Polish | 9/9 | Complete | 2026-03-01 |
 | 43. Session Persistence & History | 3/4 | Complete    | 2026-03-02 |
 | 44. Quick UX Wins | 2/2 | Complete | 2026-03-02 |
-| 45. Filtered Search Context | 1/5 | In progress | - |
+| 45. Filtered Search Context | 3/5 | In Progress|  |
 | 46. Dicta Translation | 0/TBD | Not started | - |
 | 47. Transcription Import | 0/TBD | Not started | - |
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |

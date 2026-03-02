@@ -18,14 +18,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 45 in progress (plan 1/5 complete)
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 45 in progress (plan 3/5 complete)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 45 of 47 (Filtered Search Context) -- Plan 1 of 5 complete
+Phase: 45 of 47 (Filtered Search Context) -- Plan 4 of 5 complete (01, 02, 03 done; next: 04)
 Status: Phase 45 In Progress
-Last activity: 2026-03-02 - Completed 45-01 (Filter service & core engine integration)
+Last activity: 2026-03-03 - Verified 45-02 (Web search filter panel, chip bar, pre-search filtering)
 
 Progress: [####░░░░░░] 4/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 in progress)
 
@@ -59,6 +59,8 @@ Progress: [####░░░░░░] 4/5 phases (Phase 42 complete, Phase 43 compl
 | 44-01 | 1 | 4min | 4min |
 | 44-02 | 1 | 5min | 5min |
 | 45-01 | 1 | 5min | 5min |
+| 45-02 | 1 | 34min | 34min |
+| 45-03 | 1 | 32min | 32min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -92,6 +94,8 @@ Recent decisions affecting current work:
 - 44-01: Sleep prevention via SetThreadExecutionState in 4 search threads with try/finally. Toast notification via QSystemTrayIcon when unfocused. Copy context menu (Shelfmark/Title/Library/SysID/Row).
 - 44-02: LIBRARY_CODES_HE (81 entries) with lang param on get_library_display(). Desktop uses CURRENT_LANG auto. Web callers pass get_language() explicitly. Fallback: HE->EN->code.
 - 45-01: get_filter_sys_ids() returns None (no filters) or set of matching sys_ids. restrict_sys_ids param on execute_search/search_composition_logic skips manuscripts BEFORE regex.search(). Material filters via catalog_fields subquery.
+- 45-02: Collapsible Advanced Filters panel (domain/author/work/date/material) on web search page. Removable chip bar with manuscript count. restrict_sys_ids wired to execute_search. Word search per-result exclusion. incoming_filters consumption for Path B. Filter-aware search history. from_browse URL param on route.
+- 45-03: PreSearchFilterDialog with domain/author/work/date/material. FilterCountWorker for async count. Chip bar on both tabs. SearchThread/CompositionThread pass restrict_sys_ids. Per-result word search exclusion. Filter state in session persistence.
 
 ### Pending Todos
 
@@ -120,7 +124,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-02
-Stopped at: Completed 45-01-PLAN.md (Filter service & core engine integration)
-Resume file: .planning/phases/45-filtered-search-context/45-01-SUMMARY.md
-Notes: Phase 45 plan 1/5 complete. Next: 45-02 (Web search filter panel).
+Last session: 2026-03-03
+Stopped at: Verified 45-02-PLAN.md (Web search filter panel, chip bar, pre-search filtering)
+Resume file: .planning/phases/45-filtered-search-context/45-02-SUMMARY.md
+Notes: Phase 45 plan 4/5 complete (01, 02, 03 done). Next: 45-04 (Web parallels filter) or 45-05 (Path B browse-to-search).
