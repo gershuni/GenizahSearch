@@ -1613,13 +1613,103 @@ LIBRARY_CODES = {
     'MotB': 'Museum of the Bible',
 }
 
+LIBRARY_CODES_HE = {
+    'CUL': 'ספריית אוניברסיטת קיימברידג׳',
+    'JTS': 'בית המדרש לרבנים של אמריקה',
+    'RNL': 'הספרייה הלאומית של רוסיה',
+    'Oxford': 'ספריות הבודליאנה, אוניברסיטת אוקספורד',
+    'Manchester': 'ספריית אוניברסיטת מנצ׳סטר',
+    'BL': 'הספרייה הבריטית',
+    'AIU': 'אליאנס ישראלית אוניברסלית',
+    'Westminster': 'מכללת ווסטמינסטר',
+    'Freer': 'גלריית פריר לאמנות',
+    'Mosseri': 'אוסף מוסרי',
+    'Gaster': 'אוסף גסטר',
+    'Katz': 'מרכז כ״ץ',
+    'Halper': 'קטלוג הלפר',
+    'HUC': 'ספריית המכון העברי',
+    'HAS': 'ספריית האקדמיה ההונגרית למדעים',
+    'Vienna': 'הספרייה הלאומית של אוסטריה',
+    'Strasbourg': 'הספרייה הלאומית והאוניברסיטאית של שטרסבורג',
+    'InstFrance': 'ספריית מכון צרפת',
+    'Warsaw': 'הקהילה היהודית של ורשה',
+    'ASL': 'האקדמיה למדעים ולספרות',
+    'Schoeyen': 'אוסף שויין',
+    'Harkavy': 'אוסף הרכבי',
+    'Combs': 'אוסף קומבס',
+    'Lehnardt': 'אוסף להנרדט',
+    'Allony': 'אוסף אלוני',
+    'Boesky': 'אוסף בוסקי',
+    'Bisno': 'אוסף ביסנו',
+    'UPenn': 'אוניברסיטת פנסילבניה',
+    'BnF': 'הספרייה הלאומית של צרפת',
+    # Additional libraries
+    'Toronto': 'ספריית אוניברסיטת טורונטו',
+    'Dropsie': 'מכללת דרופסי',
+    'Princeton': 'ספריית אוניברסיטת פרינסטון',
+    'Columbia': 'ספריית אוניברסיטת קולומביה',
+    'Harvard': 'ספריית אוניברסיטת הרווארד',
+    'Yale': 'ספריית אוניברסיטת ייל',
+    'Rylands': 'ספריית ג׳ון ריילנדס',
+    # European libraries
+    'Senckenberg': 'ספריית אוניברסיטת יוהאן כריסטיאן זנקנברג (פרנקפורט)',
+    'Geneva': 'ספריית ז׳נבה',
+    'Munich': 'ספריית המדינה הבוורית (מינכן)',
+    'BNF': 'הספרייה הלאומית של צרפת',
+    'RSL': 'ספריית המדינה הרוסית',
+    'SBB': 'ספריית המדינה של ברלין',
+    'Birmingham': 'ספריית אוניברסיטת בירמינגהם',
+    'Heidelberg': 'ספריית אוניברסיטת היידלברג',
+    'Turin': 'ספריית המחקר המזרחני, טורינו',
+    'Basel': 'ספריית אוניברסיטת באזל',
+    'IOM': 'המכון לכתבי יד מזרחיים (סנט פטרבורג)',
+    'Leeds': 'ספריית אוניברסיטת לידס',
+    'Chetham': 'ספריית צ׳תהם (מנצ׳סטר)',
+    'Wellcome': 'ספריית וולקאם',
+    'TCD': 'טריניטי קולג׳ דבלין',
+    # Israeli institutions
+    'TAU': 'ספריית אוניברסיטת תל אביב',
+    'Haifa': 'ספריית אוניברסיטת חיפה',
+    'BenZvi': 'מכון בן צבי',
+    'Schocken': 'מכון שוקן למחקר יהדות',
+    'BarIlan': 'ספריית אוניברסיטת בר אילן',
+    'NLI': 'הספרייה הלאומית של ישראל',
+    # North American libraries
+    'UChicago': 'ספריית אוניברסיטת שיקגו',
+    'McGill': 'ספריית אוניברסיטת מקגיל',
+    'Duke': 'ספריות אוניברסיטת דיוק',
+    'YU': 'ספריית אוניברסיטת ישיבה',
+    'UMich': 'ספריית אוניברסיטת מישיגן',
+    # Collections and foundations
+    'Sassoon': 'אוסף ששון',
+    'Wallach': 'אוסף וולך',
+    'Lutzki': 'אוסף לוצקי',
+    'Adler': 'אוסף אדלר',
+    'Lehmann': 'קרן מנפרד ואן להמן',
+    'JCBerlin': 'הקהילה היהודית של ברלין',
+    'JCErfurt': 'הקהילה היהודית של ארפורט',
+    'AllonyLoew': 'קטלוג אלוני-לוינגר',
+    'AllonyKupf': 'קטלוג אלוני-קופר',
+    'Benayahu': 'אוסף בניהו',
+    'Nahum': 'אוסף יהודה נחום',
+    'Salmon': 'אוסף חוה סלמון',
+    'Sofer': 'אוסף דוד סופר',
+    'Shapira': 'אוסף ברנרד שפירא',
+    'Weiss': 'אוסף סטיב וייס',
+    'Karp': 'אוסף אברהם קרפ',
+    'Goldsmith': 'מוזיאון גולדסמית',
+    'SOS': 'החברה האורתודוקסית הנפרדת',
+    'MotB': 'מוזיאון התנ״ך',
+}
 
-def get_library_display(code: str, short: bool = True) -> str:
+
+def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
     """Return library name for display.
 
     Args:
         code: Library code (e.g., 'CUL', 'JTS')
         short: If True, return code; if False, return full name
+        lang: Language code ('he', 'en', or None for auto-detect from CURRENT_LANG)
 
     Returns:
         Display string for the library
@@ -1628,6 +1718,9 @@ def get_library_display(code: str, short: bool = True) -> str:
         return ''
     if short:
         return code
+    effective_lang = lang if lang else CURRENT_LANG
+    if effective_lang == 'he':
+        return LIBRARY_CODES_HE.get(code, LIBRARY_CODES.get(code, code))
     return LIBRARY_CODES.get(code, code)
 
 
