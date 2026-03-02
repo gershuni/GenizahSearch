@@ -2509,4 +2509,5 @@ TRANSLATIONS = {
     "Search history entries": "רשומות היסטוריית חיפוש",
     "Maximum number of past searches to remember per search type": "מספר מרבי של חיפושים קודמים לזכור לכל סוג חיפוש",
     "Session restored": "המפגש שוחזר",
+    "Save and restore search state across restarts": "שמור ושחזר מצב חיפוש בין הפעלות",
 }

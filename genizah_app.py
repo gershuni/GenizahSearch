@@ -6703,6 +6703,9 @@ class GenizahGUI(QMainWindow):
             if cfg.get('whats_new_seen') != APP_VERSION:
                 self.whats_new_bar.show_whats_new(APP_VERSION)
 
+            # Restore session state (deferred slightly so all widgets are settled)
+            QTimer.singleShot(200, self._restore_session)
+
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
 
@@ -15936,15 +15939,31 @@ class GenizahGUI(QMainWindow):
 
         # Application / Updates
         gb_app = QGroupBox(tr("Application"))
-        app_layout = QHBoxLayout()
+        app_layout = QVBoxLayout()
+        app_row1 = QHBoxLayout()
 
         self.lbl_version = QLabel(f"Version: {APP_VERSION}")
         self.btn_check_updates = QPushButton(tr("Check for Updates"))
         self.btn_check_updates.clicked.connect(self.check_updates_manual)
 
-        app_layout.addWidget(self.lbl_version)
-        app_layout.addStretch()
-        app_layout.addWidget(self.btn_check_updates)
+        app_row1.addWidget(self.lbl_version)
+        app_row1.addStretch()
+        app_row1.addWidget(self.btn_check_updates)
+        app_layout.addLayout(app_row1)
+
+        # Session persistence toggle
+        app_row2 = QHBoxLayout()
+        from PyQt6.QtWidgets import QCheckBox
+        self.chk_session_persistence = QCheckBox(tr("Session Persistence"))
+        self.chk_session_persistence.setToolTip(tr("Save and restore search state across restarts"))
+        self.chk_session_persistence.setChecked(load_app_config().get('session_persistence', True))
+        self.chk_session_persistence.toggled.connect(
+            lambda checked: save_app_config({'session_persistence': checked})
+        )
+        app_row2.addWidget(self.chk_session_persistence)
+        app_row2.addStretch()
+        app_layout.addLayout(app_row2)
+
         gb_app.setLayout(app_layout)
         layout.addWidget(gb_app)
         
@@ -16643,6 +16662,7 @@ class GenizahGUI(QMainWindow):
             self._domain_exclusions = dlg.get_excluded_domains()
             self._update_domain_filter_label()
             self._apply_domain_exclusions()
+            self._schedule_session_save()
 
     def _update_domain_filter_label(self):
         """Update the domain filter label badge to show exclusion state."""
@@ -16875,6 +16895,7 @@ class GenizahGUI(QMainWindow):
             self._comp_domain_exclusions = dlg.get_excluded_domains()
             self._update_comp_domain_filter_label()
             self._apply_comp_domain_exclusions()
+            self._schedule_session_save()
 
     def _update_comp_domain_filter_label(self):
         """Update the composition domain filter label."""
@@ -17365,6 +17386,9 @@ class GenizahGUI(QMainWindow):
             self._printed_badge_worker.finished.connect(self._on_printed_badges_loaded)
             self._printed_badge_worker.start()
 
+        # Save session after search completes (crash-safe persistence)
+        self._schedule_session_save()
+
     def _open_results_filter_dialog(self, column):
         if column == 1:
             self.open_list_filter_dialog()
@@ -17388,6 +17412,7 @@ class GenizahGUI(QMainWindow):
             }
             self.statusBar().showMessage(state_labels.get(self._printed_filter_state, ''), 3000)
             self._apply_results_table_filters()
+            self._schedule_session_save()
             return
 
         header_item = self.results_table.horizontalHeaderItem(column)
@@ -17667,6 +17692,7 @@ class GenizahGUI(QMainWindow):
             }
             self.statusBar().showMessage(state_labels.get(self._comp_printed_filter_state, ''), 3000)
             self._apply_comp_tree_filters()
+            self._schedule_session_save()
             return
 
         header_item = self.comp_tree.headerItem()
@@ -19504,6 +19530,7 @@ class GenizahGUI(QMainWindow):
         self.excluded_sys_ids = sys_ids
         self.excluded_shelfmarks = shelves
         self.lbl_exclude_status.setText(tr("Excluded: {}").format(len(entries)))
+        self._schedule_session_save()
 
     def _normalize_shelfmark(self, shelfmark: str) -> str:
         """Normalize shelfmarks using the canonical function from genizah_core."""
@@ -20623,6 +20650,9 @@ class GenizahGUI(QMainWindow):
 
         if ids_to_fetch:
             self.start_metadata_loading(list(ids_to_fetch))
+
+        # Save session after composition results displayed (crash-safe persistence)
+        self._schedule_session_save()
 
     def _get_filter_reason(self, item):
         """Get human-readable filter reason for a composition result item."""
@@ -22304,7 +22334,162 @@ class GenizahGUI(QMainWindow):
         else:
             QMessageBox.critical(self, tr("Indexing Error"), str(err))
 
+    # ------------------------------------------------------------------
+    # Session Persistence
+    # ------------------------------------------------------------------
+
+    def _save_session(self):
+        """Save current search state to disk for session persistence."""
+        from shared.session_persistence import save_session_state
+        try:
+            cfg = load_app_config()
+            if not cfg.get('session_persistence', True):
+                return  # Persistence disabled in settings
+
+            from datetime import datetime
+            state_dict = {
+                'version': 1,
+                'saved_at': datetime.now().isoformat(),
+                'regular_search': {
+                    'query': self.query_input.text() if hasattr(self, 'query_input') else '',
+                    'mode_index': self.mode_combo.currentIndex() if hasattr(self, 'mode_combo') else 0,
+                    'gap': int(self.gap_input.text()) if hasattr(self, 'gap_input') and self.gap_input.text().isdigit() else 0,
+                    'variant_preset': getattr(self, '_current_variant_preset', 70),
+                    'results': getattr(self, 'last_results', [])[:5000],
+                    'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
+                    'printed_filter': getattr(self, '_printed_filter_state', 'all'),
+                    'printed_ids': sorted(getattr(self, '_printed_sys_ids', set())),
+                    'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
+                    'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
+                    'excluded_raw_entries': getattr(self, 'excluded_raw_entries', []),
+                    'results_filters': getattr(self, 'results_filters', {}),
+                    'filter_sources': getattr(self, 'filter_sources', {}),
+                    'filter_enabled_sources': sorted(getattr(self, 'filter_enabled_sources', set())),
+                },
+                'composition_search': {
+                    'source_text': self.comp_text_area.toPlainText() if hasattr(self, 'comp_text_area') else '',
+                    'title': self.comp_title_input.text() if hasattr(self, 'comp_title_input') else '',
+                    'chunk_size': self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5,
+                    'max_freq': self.spin_freq.value() if hasattr(self, 'spin_freq') else 10,
+                    'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
+                    'results': getattr(self, 'comp_raw_items', [])[:5000],
+                    'filtered_results': getattr(self, 'comp_raw_filtered', [])[:5000],
+                    'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
+                    'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
+                    'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
+                    'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
+                    'sort_mode': getattr(self, 'comp_sort_mode', 'score'),
+                    'sort_reverse': getattr(self, 'comp_sort_reverse', True),
+                },
+            }
+            save_session_state(state_dict)
+        except Exception as e:
+            logger.error("Failed to save session state: %s", e)
+
+    def _schedule_session_save(self):
+        """Schedule a debounced session save (500ms)."""
+        if not hasattr(self, '_session_save_timer'):
+            self._session_save_timer = QTimer(self)
+            self._session_save_timer.setSingleShot(True)
+            self._session_save_timer.timeout.connect(self._save_session)
+        self._session_save_timer.start(500)
+
+    def _restore_session(self):
+        """Restore search state from saved session on startup."""
+        from shared.session_persistence import load_session_state
+        try:
+            cfg = load_app_config()
+            if not cfg.get('session_persistence', True):
+                return
+
+            state = load_session_state()
+            if not state:
+                return
+
+            # Restore regular search state
+            reg = state.get('regular_search', {})
+            if reg.get('query'):
+                self.query_input.setText(reg['query'])
+            if reg.get('mode_index') is not None:
+                self.mode_combo.setCurrentIndex(reg['mode_index'])
+            if reg.get('gap'):
+                self.gap_input.setText(str(reg['gap']))
+            if reg.get('variant_preset') is not None:
+                self._current_variant_preset = reg['variant_preset']
+
+            # Restore exclusion state BEFORE displaying results
+            self._domain_exclusions = set(reg.get('domain_exclusions', []))
+            self._printed_filter_state = reg.get('printed_filter', 'all')
+            self._printed_sys_ids = set(reg.get('printed_ids', []))
+            self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
+            self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
+            self.excluded_raw_entries = reg.get('excluded_raw_entries', [])
+            self.results_filters = reg.get('results_filters', {})
+            self.filter_sources = reg.get('filter_sources', {})
+            self.filter_enabled_sources = set(reg.get('filter_enabled_sources', []))
+
+            # Update exclusion status label
+            if self.excluded_raw_entries:
+                self.lbl_exclude_status.setText(
+                    tr("Excluded: {}").format(len(self.excluded_raw_entries))
+                )
+
+            # Restore regular search results
+            if reg.get('results'):
+                self.last_results = reg['results']
+                self.on_search_finished(self.last_results)
+
+            # Restore composition state
+            comp = state.get('composition_search', {})
+            if comp.get('source_text'):
+                self.comp_text_area.setPlainText(comp['source_text'])
+            if comp.get('title'):
+                self.comp_title_input.setText(comp['title'])
+            if comp.get('chunk_size'):
+                self.spin_chunk.setValue(comp['chunk_size'])
+            if comp.get('max_freq'):
+                self.spin_freq.setValue(comp['max_freq'])
+            if comp.get('mode_index') is not None:
+                self.comp_mode_combo.setCurrentIndex(comp['mode_index'])
+
+            self._comp_domain_exclusions = set(comp.get('domain_exclusions', []))
+            self._comp_printed_filter_state = comp.get('printed_filter', 'all')
+            self.comp_sort_mode = comp.get('sort_mode', 'score')
+            self.comp_sort_reverse = comp.get('sort_reverse', True)
+
+            # Restore composition results (flat display, no grouping thread needed)
+            if comp.get('results'):
+                self.comp_raw_items = comp['results']
+                self.comp_raw_filtered = comp.get('filtered_results', [])
+                # Display in flat mode (grouping state was not persisted)
+                self.comp_has_grouped_results = False
+                self.comp_grouped_main = self.comp_raw_items
+                self.comp_grouped_appendix = {}
+                self.comp_grouped_summary = {}
+                self.comp_grouped_filtered_main = self.comp_raw_filtered
+                self.comp_grouped_filtered_appendix = {}
+                self.comp_grouped_filtered_summary = {}
+                self.display_comp_results(
+                    self.comp_raw_items, {}, {},
+                    self.comp_raw_filtered, {}, {}
+                )
+
+            # Show "Session restored" notification in statusbar (fades after 5 seconds)
+            saved_at = state.get('saved_at', '')
+            ts_display = saved_at[:16].replace('T', ' ') if saved_at else ''
+            self.statusBar().showMessage(
+                tr("Session restored") + (f" ({ts_display})" if ts_display else ""),
+                5000
+            )
+
+            logger.info("Session restored from %s", saved_at)
+
+        except Exception as e:
+            logger.error("Failed to restore session: %s", e)
+
     def closeEvent(self, event):
+        # Save session state before closing
+        self._save_session()
         # Ensure worker threads are stopped before the window is destroyed
         try:
             if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
