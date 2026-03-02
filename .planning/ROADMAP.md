@@ -128,7 +128,7 @@ cross-links between browse and catalog browse pages. 72 tests.
 
 - [x] **Phase 42: Search UX & Composition Polish** - Search duration display, ETA, partial results on cancel, chunk count, min-chunks filter, result/excluded separator, CreationType badge on search & browse results (complete)
 - [x] **Phase 43: Session Persistence & Search History** - Restore state + exclusions on reopen (critical: user lost 5K exclusions), search history with saved results
-- [ ] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results
+- [ ] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results (1/2 plans)
 - [ ] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels
 - [ ] **Phase 46: Dicta Translation** - Translate all data (PGP metadata, identifications, catalog, bibliography) via Dicta API for multilingual display and search completeness, careful handling of already-bilingual fields
 
@@ -191,7 +191,10 @@ Plans:
   2. OS sleep is prevented while a search is running (desktop)
   3. Hebrew library names displayed alongside English names in both apps
   4. Users can select and copy text from compact/collapsed search results without expanding
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [x] 44-01-PLAN.md -- Desktop notification, sleep prevention, copy context menu (QUX-01, QUX-02, QUX-04)
+- [ ] 44-02-PLAN.md -- Hebrew library names (QUX-03)
 
 ### Phase 45: Filtered Search Context
 **Goal**: Researchers can constrain text searches by scholarly categories (domain, author, work, date, CreationType) either before searching (Path A: search page pre-filter) or after browsing (Path B: catalog browse "search within these results"), with the same shared filter mechanism
@@ -259,7 +262,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 41. Catalog Browse & Navigation | 4/4 | Complete | 2026-02-27 |
 | 42. Search UX & Composition Polish | 9/9 | Complete | 2026-03-01 |
 | 43. Session Persistence & History | 3/4 | Complete    | 2026-03-02 |
-| 44. Quick UX Wins | 0/TBD | Not started | - |
+| 44. Quick UX Wins | 1/2 | In Progress | - |
 | 45. Filtered Search Context | 0/TBD | Not started | - |
 | 46. Dicta Translation | 0/TBD | Not started | - |
 | 47. Transcription Import | 0/TBD | Not started | - |

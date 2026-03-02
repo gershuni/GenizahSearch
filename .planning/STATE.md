@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-02T08:11:40.023Z"
+last_updated: "2026-03-02T09:08:41.000Z"
 progress:
   total_phases: 46
   completed_phases: 44
-  total_plans: 148
-  completed_plans: 147
+  total_plans: 149
+  completed_plans: 148
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 43 in progress (3/4 plans)
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 44 in progress (1/2 plans)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 43 of 47 (Session Persistence & Search History) -- Plan 4 of 4 complete
-Status: Phase 43 Complete
-Last activity: 2026-03-02 - Completed 43-04 (Web search history dropdowns)
+Phase: 44 of 47 (Quick UX Wins) -- Plan 1 of 2 complete
+Status: Phase 44 In Progress
+Last activity: 2026-03-02 - Completed 44-01 (Notification, sleep prevention, copy menu)
 
-Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 complete 4/4 plans)
+Progress: [###░░░░░░░] 3/5 phases (Phase 42 complete, Phase 43 complete, Phase 44: 1/2 plans)
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [###░░░░░░░] 2/5 phases (Phase 42 complete, Phase 43 com
 | 43-01 | 1 | 7min | 7min |
 | 43-02 | 1 | 4min | 4min |
 | 43-04 | 1 | 8min | 8min |
+| 44-01 | 1 | 4min | 4min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -86,6 +87,7 @@ Recent decisions affecting current work:
 - 43-01: JSON session persistence with atomic writes (tempfile+os.replace). 500ms debounced saves via QTimer. 200ms deferred restore after startup. Results capped at 5K. excluded_raw_entries persisted for full restore.
 - 43-02: _persist() helper gates new storage writes behind session_persistence_enabled setting. Parallels has no printed_filter toggle, only badges.
 - 43-04: Search history deduplicates by query+mode, composition by title. History entries store results capped at 500. Lazy menu refresh on button click.
+- 44-01: Sleep prevention via SetThreadExecutionState in 4 search threads with try/finally. Toast notification via QSystemTrayIcon when unfocused. Copy context menu (Shelfmark/Title/Library/SysID/Row).
 
 ### Pending Todos
 
@@ -115,6 +117,6 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 43-04-PLAN.md (Web search history dropdowns)
-Resume file: .planning/phases/43-session-persistence-search-history/43-04-SUMMARY.md
-Notes: Phase 43 complete (4/4 plans). All session persistence and search history features done. Next: Phase 44.
+Stopped at: Completed 44-01-PLAN.md (Notification, sleep prevention, copy menu)
+Resume file: .planning/phases/44-quick-ux-wins/44-01-SUMMARY.md
+Notes: Phase 44 plan 1 of 2 complete. Next: 44-02 (Hebrew library names).
