@@ -73,17 +73,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
             self.printed_filter: str = 'all'  # 'all', 'hide_printed', 'only_printed'
             self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
-            # Pre-search filter state (Advanced Filters panel)
-            self.filter_domain: str = None      # Selected domain filter
-            self.filter_author: str = None      # Selected author (person_id)
-            self.filter_author_name: str = ''   # Author display name
-            self.filter_work: str = None        # Selected work (title_id)
-            self.filter_work_name: str = ''     # Work display name
+            # Pre-search filter state (Search only in... panel)
+            self.filter_domains: list = []      # Selected domain filters (multi-select)
+            self.filter_authors: list = []      # Selected authors (person_ids, multi-select)
+            self.filter_works: list = []        # Selected works (title_ids, multi-select)
+            self.filter_include_mode: bool = True  # True=include, False=exclude
             self.filter_date_from: int = None   # Date range start
             self.filter_date_to: int = None     # Date range end
             self.filter_material_exclude: list = []  # Material types to exclude (e.g., ['Printed'])
             self.filter_manuscript_count: int = None  # Count of manuscripts matching current filters
             self.restrict_sys_ids: set = None   # Computed from filters, passed to search engine
+            self.filter_text_all: list = []     # FTS5 text: all words must match
+            self.filter_text_any: list = []     # FTS5 text: any word must match
+            self.filter_text_not: list = []     # FTS5 text: exclude these words
             self.word_search_excluded_ids: set = set()  # Per-manuscript exclusions for word search mode
             self.word_search_excluded_results: list = []  # Results hidden by word search exclusion
 
@@ -111,20 +113,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         incoming = app.storage.user.get('incoming_filters', {})
         if incoming:
             if incoming.get('domain'):
-                search_state.filter_domain = incoming['domain']
-                _persist('search_filter_domain', incoming['domain'])
+                search_state.filter_domains = [incoming['domain']]
+                _persist('search_filter_domains', [incoming['domain']])
             if incoming.get('author'):
-                search_state.filter_author = str(incoming['author'])
-                _persist('search_filter_author', str(incoming['author']))
-            if incoming.get('author_name'):
-                search_state.filter_author_name = incoming['author_name']
-                _persist('search_filter_author_name', incoming['author_name'])
+                search_state.filter_authors = [str(incoming['author'])]
+                _persist('search_filter_authors', [str(incoming['author'])])
             if incoming.get('work'):
-                search_state.filter_work = str(incoming['work'])
-                _persist('search_filter_work', str(incoming['work']))
-            if incoming.get('work_name'):
-                search_state.filter_work_name = incoming['work_name']
-                _persist('search_filter_work_name', incoming['work_name'])
+                search_state.filter_works = [str(incoming['work'])]
+                _persist('search_filter_works', [str(incoming['work'])])
             if incoming.get('date_from') is not None:
                 search_state.filter_date_from = int(incoming['date_from'])
                 _persist('search_filter_date_from', int(incoming['date_from']))
@@ -140,14 +136,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # Restore filter state from session (only if NOT from browse, browse takes priority)
     if not _filters_from_browse:
-        search_state.filter_domain = app.storage.user.get('search_filter_domain', None)
-        search_state.filter_author = app.storage.user.get('search_filter_author', None)
-        search_state.filter_author_name = app.storage.user.get('search_filter_author_name', '')
-        search_state.filter_work = app.storage.user.get('search_filter_work', None)
-        search_state.filter_work_name = app.storage.user.get('search_filter_work_name', '')
+        # Migrate from legacy single-value keys to multi-select lists
+        _legacy_domain = app.storage.user.get('search_filter_domain', None)
+        _legacy_author = app.storage.user.get('search_filter_author', None)
+        _legacy_work = app.storage.user.get('search_filter_work', None)
+        search_state.filter_domains = app.storage.user.get('search_filter_domains', [_legacy_domain] if _legacy_domain else [])
+        search_state.filter_authors = app.storage.user.get('search_filter_authors', [_legacy_author] if _legacy_author else [])
+        search_state.filter_works = app.storage.user.get('search_filter_works', [_legacy_work] if _legacy_work else [])
+        search_state.filter_include_mode = app.storage.user.get('search_filter_include_mode', True)
         search_state.filter_date_from = app.storage.user.get('search_filter_date_from', None)
         search_state.filter_date_to = app.storage.user.get('search_filter_date_to', None)
         search_state.filter_material_exclude = app.storage.user.get('search_filter_material_exclude', [])
+        search_state.filter_text_all = app.storage.user.get('search_filter_text_all', [])
+        search_state.filter_text_any = app.storage.user.get('search_filter_text_any', [])
+        search_state.filter_text_not = app.storage.user.get('search_filter_text_not', [])
 
     # Restore word search excluded ids from session
     search_state.word_search_excluded_ids = set(app.storage.user.get('word_search_excluded_ids', []))
@@ -155,12 +157,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
         return any([
-            search_state.filter_domain,
-            search_state.filter_author,
-            search_state.filter_work,
+            search_state.filter_domains,
+            search_state.filter_authors,
+            search_state.filter_works,
             search_state.filter_date_from is not None,
             search_state.filter_date_to is not None,
             search_state.filter_material_exclude,
+            search_state.filter_text_all,
+            search_state.filter_text_any,
+            search_state.filter_text_not,
         ])
 
     # --- Search History Management ---
@@ -850,141 +855,142 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             mode_select.on('update:model-value', on_mode_change)
 
-        # === Progress Bar ===
-        progress_container = ui.column().classes('w-full')
-        with progress_container:
-            with ui.linear_progress(0, show_value=False).props('stripe animate').classes('w-full opacity-0 my-2').style('height: 12px;') as progress_bar:
-                ui.label().classes('absolute-center text-xs text-white').bind_text_from(
-                    progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
-                )
-            status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
-
-        # === Advanced Filters Panel (collapsible, below search bar) ===
+        # === Search only in... Filter Panel (BEFORE Advanced Options & progress bar) ===
         _adv_filters_expanded = _has_active_filters() or _filters_from_browse
         adv_filters_panel = ui.expansion(
-            text=tr('Advanced Filters'),
+            text=tr('Search only in...'),
             icon='filter_alt',
             value=_adv_filters_expanded,
         ).classes('w-full').style(
             'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
         ).props('dense header-class="text-subtitle2 text-weight-medium"')
 
-        # References to filter UI elements (set inside with-block, used by handlers)
         _filter_refs = {}
+
+        def _build_domain_options():
+            """Build domain select options from FJMS hierarchy."""
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if not fjms.is_available():
+                return {}
+            hierarchy = fjms.get_domain_hierarchy()
+            options = {}
+            for parent_name, info in hierarchy.items():
+                parent_heb = info.get('parent_domain_heb', '')
+                parent_count = info.get('count', 0)
+                display = f"{parent_name}"
+                if parent_heb:
+                    display = f"{parent_heb} / {parent_name}"
+                display += f" ({parent_count:,})"
+                options[parent_name] = display
+                for child in info.get('children', []):
+                    child_name = child.get('domain', '')
+                    child_heb = child.get('domain_heb', '')
+                    child_count = child.get('count', 0)
+                    c_display = f"  \u2514 {child_name}"
+                    if child_heb:
+                        c_display = f"  \u2514 {child_heb} / {child_name}"
+                    c_display += f" ({child_count:,})"
+                    options[child_name] = c_display
+            return options
+
+        def _build_author_options(domain=None):
+            """Build author select options from FJMS."""
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if not fjms.is_available():
+                return {}
+            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
+            authors = fjms.get_browse_authors(domain=_first_domain)
+            options = {}
+            for a in authors:
+                pid = a.get('person_id') or a.get('author_id')
+                name = a.get('heb_desc') or a.get('eng_desc') or a.get('author_name', '')
+                eng = a.get('eng_desc', '')
+                count = a.get('count', 0)
+                key = str(pid) if pid else name
+                display = name
+                if eng and eng != name:
+                    display = f"{name} / {eng}"
+                display += f" ({count:,})"
+                options[key] = display
+            return options
+
+        def _build_work_options(domain=None, author=None):
+            """Build work select options from FJMS."""
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if not fjms.is_available():
+                return {}
+            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
+            _first_author = author[0] if isinstance(author, list) and author else author
+            works = fjms.get_browse_works(domain=_first_domain, author=_first_author)
+            options = {}
+            for w in works:
+                tid = w.get('title_id')
+                org = w.get('org_title', '')
+                eng = w.get('eng_title', '')
+                count = w.get('count', 0)
+                key = str(tid) if tid else org
+                display = org or eng
+                if eng and eng != org:
+                    display = f"{org} / {eng}"
+                display += f" ({count:,})"
+                options[key] = display
+            return options
 
         with adv_filters_panel:
             with ui.column().classes('w-full px-4 py-3 gap-4'):
 
+                # Include/Exclude toggle
+                with ui.row().classes('w-full items-center gap-2'):
+                    filter_mode_toggle = ui.toggle(
+                        {True: tr('Include'), False: tr('Exclude')},
+                        value=search_state.filter_include_mode,
+                    ).props('dense no-caps size=sm')
+                    _filter_refs['mode'] = filter_mode_toggle
+
                 with ui.row().classes('w-full gap-4 flex-wrap items-end'):
-                    # Domain filter
+                    # Domain filter (multi-select)
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Domain')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-
-                        def _build_domain_options():
-                            """Build domain select options from FJMS hierarchy."""
-                            from shared.fjms_service import get_fjms_service
-                            fjms = get_fjms_service(thread_safe=True)
-                            if not fjms.is_available():
-                                return {}
-                            hierarchy = fjms.get_domain_hierarchy()
-                            options = {}
-                            for parent_name, info in hierarchy.items():
-                                parent_heb = info.get('parent_domain_heb', '')
-                                parent_count = info.get('count', 0)
-                                display = f"{parent_name}"
-                                if parent_heb:
-                                    display = f"{parent_heb} / {parent_name}"
-                                display += f" ({parent_count:,})"
-                                options[parent_name] = display
-                                for child in info.get('children', []):
-                                    child_name = child.get('domain', '')
-                                    child_heb = child.get('domain_heb', '')
-                                    child_count = child.get('count', 0)
-                                    c_display = f"  \u2514 {child_name}"
-                                    if child_heb:
-                                        c_display = f"  \u2514 {child_heb} / {child_name}"
-                                    c_display += f" ({child_count:,})"
-                                    options[child_name] = c_display
-                            return options
-
                         domain_options = _build_domain_options()
                         domain_select = ui.select(
                             options=domain_options,
-                            value=search_state.filter_domain,
+                            value=search_state.filter_domains,
+                            multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense')
+                        ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['domain'] = domain_select
 
-                    # Author filter
+                    # Author filter (multi-select)
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Author')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-
-                        def _build_author_options(domain=None):
-                            """Build author select options from FJMS."""
-                            from shared.fjms_service import get_fjms_service
-                            fjms = get_fjms_service(thread_safe=True)
-                            if not fjms.is_available():
-                                return {}
-                            authors = fjms.get_browse_authors(domain=domain)
-                            options = {}
-                            for a in authors:
-                                pid = a.get('person_id') or a.get('author_id')
-                                name = a.get('heb_desc') or a.get('eng_desc') or a.get('author_name', '')
-                                eng = a.get('eng_desc', '')
-                                count = a.get('count', 0)
-                                key = str(pid) if pid else name
-                                display = name
-                                if eng and eng != name:
-                                    display = f"{name} / {eng}"
-                                display += f" ({count:,})"
-                                options[key] = display
-                            return options
-
-                        author_options = _build_author_options(domain=search_state.filter_domain)
+                        author_options = _build_author_options(domain=search_state.filter_domains)
                         author_select = ui.select(
                             options=author_options,
-                            value=search_state.filter_author,
+                            value=search_state.filter_authors,
+                            multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense')
+                        ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['author'] = author_select
 
-                    # Work filter
+                    # Work filter (multi-select)
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Work')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-
-                        def _build_work_options(domain=None, author=None):
-                            """Build work select options from FJMS."""
-                            from shared.fjms_service import get_fjms_service
-                            fjms = get_fjms_service(thread_safe=True)
-                            if not fjms.is_available():
-                                return {}
-                            works = fjms.get_browse_works(domain=domain, author=author)
-                            options = {}
-                            for w in works:
-                                tid = w.get('title_id')
-                                org = w.get('org_title', '')
-                                eng = w.get('eng_title', '')
-                                count = w.get('count', 0)
-                                key = str(tid) if tid else org
-                                display = org or eng
-                                if eng and eng != org:
-                                    display = f"{org} / {eng}"
-                                display += f" ({count:,})"
-                                options[key] = display
-                            return options
-
                         work_options = _build_work_options(
-                            domain=search_state.filter_domain,
-                            author=search_state.filter_author
+                            domain=search_state.filter_domains,
+                            author=search_state.filter_authors
                         )
                         work_select = ui.select(
                             options=work_options,
-                            value=search_state.filter_work,
+                            value=search_state.filter_works,
+                            multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense')
+                        ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['work'] = work_select
 
                 with ui.row().classes('w-full gap-4 flex-wrap items-end'):
@@ -1016,40 +1022,135 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # Clear all filters button
                     with ui.column().classes('gap-1 justify-end'):
                         def _clear_all_adv_filters():
-                            """Clear all advanced filter selections."""
-                            search_state.filter_domain = None
-                            search_state.filter_author = None
-                            search_state.filter_author_name = ''
-                            search_state.filter_work = None
-                            search_state.filter_work_name = ''
+                            """Clear all filter selections."""
+                            search_state.filter_domains = []
+                            search_state.filter_authors = []
+                            search_state.filter_works = []
+                            search_state.filter_include_mode = True
                             search_state.filter_date_from = None
                             search_state.filter_date_to = None
                             search_state.filter_material_exclude = []
+                            search_state.filter_text_all = []
+                            search_state.filter_text_any = []
+                            search_state.filter_text_not = []
                             search_state.filter_manuscript_count = None
                             search_state.restrict_sys_ids = None
-                            # Update UI elements
-                            domain_select.value = None
-                            author_select.value = None
-                            work_select.value = None
+                            domain_select.value = []
+                            author_select.value = []
+                            work_select.value = []
+                            filter_mode_toggle.value = True
                             date_from_input.value = None
                             date_to_input.value = None
                             exclude_printed_cb.value = False
-                            # Clear storage
-                            for k in ['search_filter_domain', 'search_filter_author',
-                                      'search_filter_author_name', 'search_filter_work',
-                                      'search_filter_work_name', 'search_filter_date_from',
-                                      'search_filter_date_to', 'search_filter_material_exclude']:
+                            if _filter_refs.get('text_input'):
+                                _filter_refs['text_input'].value = ''
+                            for k in ['search_filter_domains', 'search_filter_authors',
+                                      'search_filter_works', 'search_filter_include_mode',
+                                      'search_filter_date_from', 'search_filter_date_to',
+                                      'search_filter_material_exclude',
+                                      'search_filter_text_all', 'search_filter_text_any',
+                                      'search_filter_text_not']:
                                 _persist(k, None)
                             _update_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',
                                   on_click=_clear_all_adv_filters).props('flat dense no-caps')
 
+                # Text filter row
+                with ui.row().classes('w-full gap-2 items-end'):
+                    with ui.column().classes('gap-1 flex-grow'):
+                        ui.label(tr('Text Filter')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            text_mode_select = ui.select(
+                                options={
+                                    'all': tr('All words'),
+                                    'any': tr('Any word'),
+                                    'not': tr('Not these words'),
+                                },
+                                value='all',
+                            ).classes('w-36').props('outlined dense')
+                            _filter_refs['text_mode'] = text_mode_select
+
+                            text_filter_input = ui.input(
+                                placeholder=tr('Add term'),
+                            ).classes('flex-grow').props('outlined dense').on(
+                                'keydown.enter', lambda e: _add_text_term()
+                            )
+                            _filter_refs['text_input'] = text_filter_input
+
+                            ui.button(icon='add', on_click=lambda: _add_text_term()).props('flat dense round')
+
+                    # Display current text filter chips
+                    with ui.row().classes('w-full gap-1 flex-wrap') as text_chip_row:
+                        _filter_refs['text_chips'] = text_chip_row
+
+                def _add_text_term():
+                    """Add a text filter term from the input."""
+                    term = text_filter_input.value.strip() if text_filter_input.value else ''
+                    if not term:
+                        return
+                    mode = text_mode_select.value
+                    if mode == 'all':
+                        if term not in search_state.filter_text_all:
+                            search_state.filter_text_all.append(term)
+                    elif mode == 'any':
+                        if term not in search_state.filter_text_any:
+                            search_state.filter_text_any.append(term)
+                    elif mode == 'not':
+                        if term not in search_state.filter_text_not:
+                            search_state.filter_text_not.append(term)
+                    text_filter_input.value = ''
+                    _persist('search_filter_text_all', search_state.filter_text_all)
+                    _persist('search_filter_text_any', search_state.filter_text_any)
+                    _persist('search_filter_text_not', search_state.filter_text_not)
+                    asyncio.ensure_future(_recompute_filter_count())
+                    _update_chip_bar()
+                    _rebuild_text_chips()
+
+                def _remove_text_term(mode, term):
+                    """Remove a text filter term."""
+                    target = getattr(search_state, f'filter_text_{mode}')
+                    if term in target:
+                        target.remove(term)
+                    _persist(f'search_filter_text_{mode}', target)
+                    asyncio.ensure_future(_recompute_filter_count())
+                    _update_chip_bar()
+                    _rebuild_text_chips()
+
+                def _rebuild_text_chips():
+                    """Rebuild text filter chip display."""
+                    text_chip_row = _filter_refs.get('text_chips')
+                    if not text_chip_row:
+                        return
+                    text_chip_row.clear()
+                    with text_chip_row:
+                        for t in search_state.filter_text_all:
+                            ui.chip(f"+ {t}", icon='check_circle', removable=True,
+                                    color='green-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_text_term('all', _t))
+                        for t in search_state.filter_text_any:
+                            ui.chip(f"~ {t}", icon='help_outline', removable=True,
+                                    color='blue-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_text_term('any', _t))
+                        for t in search_state.filter_text_not:
+                            ui.chip(f"- {t}", icon='block', removable=True,
+                                    color='red-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_text_term('not', _t))
+
+                # Initialize text chips on page load
+                _rebuild_text_chips()
+
         # --- Filter chip bar (always visible, even when panel is collapsed) ---
         chip_bar_container = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
-            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0;'
+            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0; margin-bottom: 16px; position: relative; z-index: 1;'
         )
-        chip_bar_container.set_visibility(False)  # Hidden when no filters
+        chip_bar_container.set_visibility(False)
+
+        def _get_display_name(key, opts_dict):
+            """Extract display name from options dict (strip count suffix)."""
+            if isinstance(opts_dict, dict) and key in opts_dict:
+                return opts_dict[key].split(' (')[0].strip().lstrip('\u2514 ').strip()
+            return key
 
         def _update_chip_bar():
             """Rebuild chip bar from current filter state."""
@@ -1059,39 +1160,41 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if not has_any:
                 return
 
-            with chip_bar_container:
-                # Domain chip
-                if search_state.filter_domain:
-                    display_name = search_state.filter_domain
-                    # Try to get display name from domain_select options
-                    opts = domain_select.options if hasattr(domain_select, 'options') else {}
-                    if isinstance(opts, dict) and search_state.filter_domain in opts:
-                        # Extract just the name part (before the count)
-                        raw = opts[search_state.filter_domain]
-                        display_name = raw.split(' (')[0].strip().lstrip('\u2514 ').strip()
-                    ui.chip(
-                        display_name, icon='category', removable=True,
-                        on_click=lambda: None,
-                        color='deep-purple-2',
-                    ).on('remove', lambda: _remove_filter('domain'))
+            mode_prefix = tr('Exclude') + ': ' if not search_state.filter_include_mode else ''
+            opts_d = domain_select.options if hasattr(domain_select, 'options') else {}
+            opts_a = author_select.options if hasattr(author_select, 'options') else {}
+            opts_w = work_select.options if hasattr(work_select, 'options') else {}
 
-                # Author chip
-                if search_state.filter_author:
-                    aname = search_state.filter_author_name or search_state.filter_author
+            with chip_bar_container:
+                # Mode indicator
+                if not search_state.filter_include_mode and (
+                    search_state.filter_domains or search_state.filter_authors or search_state.filter_works
+                ):
+                    ui.chip(tr('Exclude selected'), icon='block', color='red-2')
+
+                # Domain chips
+                for d in search_state.filter_domains:
+                    dname = _get_display_name(d, opts_d)
+                    ui.chip(
+                        dname, icon='category', removable=True,
+                        on_click=lambda: None, color='deep-purple-2',
+                    ).on('remove', lambda _d=d: _remove_filter('domain', _d))
+
+                # Author chips
+                for a in search_state.filter_authors:
+                    aname = _get_display_name(a, opts_a)
                     ui.chip(
                         aname, icon='person', removable=True,
-                        on_click=lambda: None,
-                        color='blue-2',
-                    ).on('remove', lambda: _remove_filter('author'))
+                        on_click=lambda: None, color='blue-2',
+                    ).on('remove', lambda _a=a: _remove_filter('author', _a))
 
-                # Work chip
-                if search_state.filter_work:
-                    wname = search_state.filter_work_name or search_state.filter_work
+                # Work chips
+                for w in search_state.filter_works:
+                    wname = _get_display_name(w, opts_w)
                     ui.chip(
                         wname, icon='menu_book', removable=True,
-                        on_click=lambda: None,
-                        color='teal-2',
-                    ).on('remove', lambda: _remove_filter('work'))
+                        on_click=lambda: None, color='teal-2',
+                    ).on('remove', lambda _w=w: _remove_filter('work', _w))
 
                 # Date range chip
                 if search_state.filter_date_from is not None or search_state.filter_date_to is not None:
@@ -1099,8 +1202,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     dt = search_state.filter_date_to or '...'
                     ui.chip(
                         f"{df}\u2013{dt}", icon='date_range', removable=True,
-                        on_click=lambda: None,
-                        color='orange-2',
+                        on_click=lambda: None, color='orange-2',
                     ).on('remove', lambda: _remove_filter('date'))
 
                 # Material exclude chip
@@ -1108,9 +1210,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     for mat in search_state.filter_material_exclude:
                         ui.chip(
                             f"{tr('Exclude')} {mat}", icon='block', removable=True,
-                            on_click=lambda: None,
-                            color='red-2',
+                            on_click=lambda: None, color='red-2',
                         ).on('remove', lambda m=mat: _remove_filter('material', m))
+
+                # Text filter chips
+                for t in search_state.filter_text_all:
+                    ui.chip(f"+ {t}", icon='check_circle', removable=True,
+                            color='green-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_text_term('all', _t))
+                for t in search_state.filter_text_any:
+                    ui.chip(f"~ {t}", icon='help_outline', removable=True,
+                            color='blue-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_text_term('any', _t))
+                for t in search_state.filter_text_not:
+                    ui.chip(f"- {t}", icon='block', removable=True,
+                            color='red-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_text_term('not', _t))
 
                 # Manuscript count badge
                 if search_state.filter_manuscript_count is not None:
@@ -1123,26 +1238,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def _remove_filter(filter_type, value=None):
             """Remove a specific filter and update state."""
             if filter_type == 'domain':
-                search_state.filter_domain = None
-                domain_select.value = None
-                _persist('search_filter_domain', None)
-                # Cross-filter: refresh author/work options
+                if value and value in search_state.filter_domains:
+                    search_state.filter_domains.remove(value)
+                else:
+                    search_state.filter_domains = []
+                domain_select.value = search_state.filter_domains
+                _persist('search_filter_domains', search_state.filter_domains)
                 _refresh_author_options()
                 _refresh_work_options()
             elif filter_type == 'author':
-                search_state.filter_author = None
-                search_state.filter_author_name = ''
-                author_select.value = None
-                _persist('search_filter_author', None)
-                _persist('search_filter_author_name', '')
-                # Cross-filter: refresh work options
+                if value and value in search_state.filter_authors:
+                    search_state.filter_authors.remove(value)
+                else:
+                    search_state.filter_authors = []
+                author_select.value = search_state.filter_authors
+                _persist('search_filter_authors', search_state.filter_authors)
                 _refresh_work_options()
             elif filter_type == 'work':
-                search_state.filter_work = None
-                search_state.filter_work_name = ''
-                work_select.value = None
-                _persist('search_filter_work', None)
-                _persist('search_filter_work_name', '')
+                if value and value in search_state.filter_works:
+                    search_state.filter_works.remove(value)
+                else:
+                    search_state.filter_works = []
+                work_select.value = search_state.filter_works
+                _persist('search_filter_works', search_state.filter_works)
             elif filter_type == 'date':
                 search_state.filter_date_from = None
                 search_state.filter_date_to = None
@@ -1155,20 +1273,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_material_exclude.remove(value)
                     _persist('search_filter_material_exclude', search_state.filter_material_exclude)
                     exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
-            _recompute_filter_count()
+            asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
         def _refresh_author_options():
             """Refresh author select options based on current domain filter."""
-            new_opts = _build_author_options(domain=search_state.filter_domain)
+            new_opts = _build_author_options(domain=search_state.filter_domains)
             author_select.options = new_opts
             author_select.update()
 
         def _refresh_work_options():
             """Refresh work select options based on current domain and author filters."""
             new_opts = _build_work_options(
-                domain=search_state.filter_domain,
-                author=search_state.filter_author
+                domain=search_state.filter_domains,
+                author=search_state.filter_authors
             )
             work_select.options = new_opts
             work_select.update()
@@ -1181,18 +1299,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 return
             from shared.fjms_service import get_fjms_service
 
+            include_mode = search_state.filter_include_mode
+            _domains = search_state.filter_domains or None
+            _authors = search_state.filter_authors or None
+            _works = search_state.filter_works or None
+
             def _compute():
                 fjms = get_fjms_service(thread_safe=True)
                 if not fjms.is_available():
                     return None
-                return fjms.get_filter_sys_ids(
-                    domain=search_state.filter_domain,
-                    author=search_state.filter_author,
-                    work=search_state.filter_work,
+                kwargs = dict(
                     date_from=search_state.filter_date_from,
                     date_to=search_state.filter_date_to,
                     material_exclude=search_state.filter_material_exclude or None,
+                    text_all=search_state.filter_text_all or None,
+                    text_any=search_state.filter_text_any or None,
+                    text_not=search_state.filter_text_not or None,
                 )
+                if include_mode:
+                    kwargs['domains'] = _domains
+                    kwargs['authors'] = _authors
+                    kwargs['works'] = _works
+                else:
+                    kwargs['domains_exclude'] = _domains
+                    kwargs['authors_exclude'] = _authors
+                    kwargs['works_exclude'] = _works
+                return fjms.get_filter_sys_ids(**kwargs)
 
             result = await run.io_bound(_compute)
             if result is not None:
@@ -1205,58 +1337,47 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # --- Filter change handlers ---
         def _on_domain_change(e=None):
-            val = domain_select.value
-            search_state.filter_domain = val
-            _persist('search_filter_domain', val)
-            # Cross-filter dependent selects
+            val = domain_select.value or []
+            search_state.filter_domains = val if isinstance(val, list) else [val] if val else []
+            _persist('search_filter_domains', search_state.filter_domains)
             _refresh_author_options()
             _refresh_work_options()
-            _recompute_filter_count()
+            asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
         def _on_author_change(e=None):
-            val = author_select.value
-            search_state.filter_author = val
-            # Capture display name
-            opts = author_select.options
-            if isinstance(opts, dict) and val and val in opts:
-                raw = opts[val]
-                search_state.filter_author_name = raw.split(' (')[0].strip()
-            else:
-                search_state.filter_author_name = val or ''
-            _persist('search_filter_author', val)
-            _persist('search_filter_author_name', search_state.filter_author_name)
-            # Cross-filter work
+            val = author_select.value or []
+            search_state.filter_authors = val if isinstance(val, list) else [val] if val else []
+            _persist('search_filter_authors', search_state.filter_authors)
             _refresh_work_options()
-            _recompute_filter_count()
+            asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
         def _on_work_change(e=None):
-            val = work_select.value
-            search_state.filter_work = val
-            opts = work_select.options
-            if isinstance(opts, dict) and val and val in opts:
-                raw = opts[val]
-                search_state.filter_work_name = raw.split(' (')[0].strip()
-            else:
-                search_state.filter_work_name = val or ''
-            _persist('search_filter_work', val)
-            _persist('search_filter_work_name', search_state.filter_work_name)
-            _recompute_filter_count()
+            val = work_select.value or []
+            search_state.filter_works = val if isinstance(val, list) else [val] if val else []
+            _persist('search_filter_works', search_state.filter_works)
+            asyncio.ensure_future(_recompute_filter_count())
+            _update_chip_bar()
+
+        def _on_mode_change(e=None):
+            search_state.filter_include_mode = filter_mode_toggle.value
+            _persist('search_filter_include_mode', search_state.filter_include_mode)
+            asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
         def _on_date_from_change(e=None):
             val = date_from_input.value
             search_state.filter_date_from = int(val) if val is not None and val != '' else None
             _persist('search_filter_date_from', search_state.filter_date_from)
-            _recompute_filter_count()
+            asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
         def _on_date_to_change(e=None):
             val = date_to_input.value
             search_state.filter_date_to = int(val) if val is not None and val != '' else None
             _persist('search_filter_date_to', search_state.filter_date_to)
-            _recompute_filter_count()
+            asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
         def _on_exclude_printed_change(e=None):
@@ -1267,19 +1388,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if 'Printed' in search_state.filter_material_exclude:
                     search_state.filter_material_exclude.remove('Printed')
             _persist('search_filter_material_exclude', search_state.filter_material_exclude)
-            _recompute_filter_count()
+            asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
         # Wire up change handlers
         domain_select.on('update:model-value', _on_domain_change)
         author_select.on('update:model-value', _on_author_change)
         work_select.on('update:model-value', _on_work_change)
+        filter_mode_toggle.on('update:model-value', _on_mode_change)
         date_from_input.on('blur', _on_date_from_change)
         date_to_input.on('blur', _on_date_to_change)
         exclude_printed_cb.on('update:model-value', _on_exclude_printed_change)
 
         # Initialize chip bar on page load
         _update_chip_bar()
+
+        # === Progress Bar ===
+        progress_container = ui.column().classes('w-full mt-2')
+        with progress_container:
+            with ui.linear_progress(0, show_value=False).props('stripe animate').classes('w-full opacity-0 my-2').style('height: 12px;') as progress_bar:
+                ui.label().classes('absolute-center text-xs text-white').bind_text_from(
+                    progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
+                )
+            status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
 
         # === Main Content Area (Splitter) ===
         with ui.splitter(value=35).classes('w-full flex-grow search-splitter') as splitter:
@@ -2721,6 +2852,53 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ui.menu_item(tr('No search history')).props('disable')
             return
 
+        def _build_web_filter_summary(filters: dict, max_len: int = 50) -> str:
+            """Build compact filter summary like [כולל: תנ״ך, תוספתא. 1000-1300]."""
+            if not filters:
+                return ''
+            prefix = tr('include') if filters.get('include_mode', True) else tr('exclude')
+            # Build en->heb domain name map from cached hierarchy
+            domain_heb_map = {}
+            if get_language() == 'he' and filters.get('domains'):
+                try:
+                    from shared.fjms_service import get_fjms_service
+                    fjms = get_fjms_service(thread_safe=True)
+                    if fjms.is_available():
+                        for pn, info in fjms.get_domain_hierarchy().items():
+                            if info.get('parent_domain_heb'):
+                                domain_heb_map[pn] = info['parent_domain_heb']
+                            for ch in info.get('children', []):
+                                if ch.get('domain_heb'):
+                                    domain_heb_map[ch['domain']] = ch['domain_heb']
+                except Exception:
+                    pass
+            parts = []
+            for d in filters.get('domains', []):
+                parts.append(domain_heb_map.get(str(d), str(d)))
+            n_auth = len(filters.get('authors', []))
+            if n_auth:
+                parts.append(f"{tr('Author')} \u00d7{n_auth}")
+            n_work = len(filters.get('works', []))
+            if n_work:
+                parts.append(f"{tr('Work')} \u00d7{n_work}")
+            df, dt = filters.get('date_from'), filters.get('date_to')
+            if df and dt:
+                parts.append(f"{df}-{dt}")
+            elif df:
+                parts.append(f"{df}+")
+            elif dt:
+                parts.append(f"-{dt}")
+            if filters.get('material_exclude'):
+                parts.append(tr("No printed"))
+            elif filters.get('material_include'):
+                parts.append(tr("Printed only"))
+            if not parts:
+                return ''
+            summary = f"[{prefix}: {', '.join(parts)}]"
+            if len(summary) > max_len:
+                summary = summary[:max_len - 4] + '...]'
+            return summary
+
         with history_menu:
             for i, entry in enumerate(history):
                 query_text = entry.get('query', '')
@@ -2730,15 +2908,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 mode_short = {'exact': '=', 'variants': '?', 'variants_extended': '??',
                               'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
                               'Shelfmark': '#', 'Title': '$', 'responsa': 'R'}.get(mode, mode)
-                # Show filter icon if entry had active filters
-                has_filters = bool(entry.get('params', {}).get('filters'))
-                filter_marker = ' \u25C9' if has_filters else ''  # Unicode filled circle for filter indicator
-                label = f"{query_display}  ({count}) [{mode_short}]{filter_marker}"
+                # Build filter summary text from params
+                filters = entry.get('params', {}).get('filters')
+                filter_text = _build_web_filter_summary(filters) if filters else ''
+                label = f"{query_display}  ({count}) [{mode_short}]"
 
                 idx = i  # Capture for closure
                 with ui.menu_item(label, on_click=lambda e, idx=idx: _on_history_item_clicked(idx)).style('direction: rtl;'):
-                    if has_filters:
-                        ui.icon('filter_list').classes('text-xs').style('color: var(--primary-600);')
+                    if filter_text:
+                        ui.label(filter_text).style('font-size: 0.7rem; color: var(--primary-600); direction: ltr;')
                     # Delete button on each item
                     ui.button(icon='close', on_click=lambda e, idx=idx: (
                         _delete_search_history_entry(idx), _refresh_history_menu()
@@ -2770,31 +2948,41 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore filters if present
         filters = params.get('filters')
         if filters and isinstance(filters, dict):
-            search_state.filter_domain = filters.get('domain')
-            search_state.filter_author = filters.get('author')
-            search_state.filter_author_name = filters.get('author_name', '')
-            search_state.filter_work = filters.get('work')
-            search_state.filter_work_name = filters.get('work_name', '')
+            # Migrate from legacy single-value to lists
+            _d = filters.get('domains') or ([filters['domain']] if filters.get('domain') else [])
+            _a = filters.get('authors') or ([filters['author']] if filters.get('author') else [])
+            _w = filters.get('works') or ([filters['work']] if filters.get('work') else [])
+            search_state.filter_domains = _d
+            search_state.filter_authors = _a
+            search_state.filter_works = _w
+            search_state.filter_include_mode = filters.get('include_mode', True)
             search_state.filter_date_from = filters.get('date_from')
             search_state.filter_date_to = filters.get('date_to')
             search_state.filter_material_exclude = filters.get('material_exclude', [])
+            search_state.filter_text_all = filters.get('text_all', [])
+            search_state.filter_text_any = filters.get('text_any', [])
+            search_state.filter_text_not = filters.get('text_not', [])
             # Update filter UI elements
-            domain_select.value = search_state.filter_domain
-            author_select.value = search_state.filter_author
-            work_select.value = search_state.filter_work
+            domain_select.value = search_state.filter_domains
+            author_select.value = search_state.filter_authors
+            work_select.value = search_state.filter_works
+            filter_mode_toggle.value = search_state.filter_include_mode
             date_from_input.value = search_state.filter_date_from
             date_to_input.value = search_state.filter_date_to
             exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
             # Persist restored filters
-            _persist('search_filter_domain', search_state.filter_domain)
-            _persist('search_filter_author', search_state.filter_author)
-            _persist('search_filter_author_name', search_state.filter_author_name)
-            _persist('search_filter_work', search_state.filter_work)
-            _persist('search_filter_work_name', search_state.filter_work_name)
+            _persist('search_filter_domains', search_state.filter_domains)
+            _persist('search_filter_authors', search_state.filter_authors)
+            _persist('search_filter_works', search_state.filter_works)
+            _persist('search_filter_include_mode', search_state.filter_include_mode)
             _persist('search_filter_date_from', search_state.filter_date_from)
             _persist('search_filter_date_to', search_state.filter_date_to)
             _persist('search_filter_material_exclude', search_state.filter_material_exclude)
+            _persist('search_filter_text_all', search_state.filter_text_all)
+            _persist('search_filter_text_any', search_state.filter_text_any)
+            _persist('search_filter_text_not', search_state.filter_text_not)
             _update_chip_bar()
+            _rebuild_text_chips()
         else:
             # Clear filters if history entry had none
             _clear_all_adv_filters()
@@ -2880,6 +3068,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         stop_btn.style('display: inline-flex;')
         progress_bar.classes(remove='opacity-0')
         progress_bar.value = 0
+        # Collapse filter panel — chips summarize active filters
+        adv_filters_panel.value = False
+        # Scroll progress into view
+        ui.run_javascript(f'document.getElementById("c{progress_container.id}").scrollIntoView({{behavior: "smooth", block: "start"}})')
 
         # Show loading spinner immediately
         render_results([])
@@ -2918,13 +3110,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 fjms = get_fjms_service(thread_safe=True)
                 if not fjms.is_available():
                     return None
-                return fjms.get_filter_sys_ids(
-                    domain=search_state.filter_domain,
-                    author=search_state.filter_author,
-                    work=search_state.filter_work,
+                _inc = search_state.filter_include_mode
+                kwargs = dict(
                     date_from=search_state.filter_date_from,
                     date_to=search_state.filter_date_to,
                     material_exclude=search_state.filter_material_exclude or None,
+                    text_all=search_state.filter_text_all or None,
+                    text_any=search_state.filter_text_any or None,
+                    text_not=search_state.filter_text_not or None,
+                )
+                if _inc:
+                    kwargs['domains'] = search_state.filter_domains or None
+                    kwargs['authors'] = search_state.filter_authors or None
+                    kwargs['works'] = search_state.filter_works or None
+                else:
+                    kwargs['domains_exclude'] = search_state.filter_domains or None
+                    kwargs['authors_exclude'] = search_state.filter_authors or None
+                    kwargs['works_exclude'] = search_state.filter_works or None
+                return fjms.get_filter_sys_ids(**kwargs
                 )
 
             restrict_sys_ids = await run.io_bound(_compute_restrict)
@@ -3132,14 +3335,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
                     'gap': int(gap_input.value or 0),
                     'filters': {
-                        'domain': search_state.filter_domain,
-                        'author': search_state.filter_author,
-                        'author_name': search_state.filter_author_name,
-                        'work': search_state.filter_work,
-                        'work_name': search_state.filter_work_name,
+                        'domains': search_state.filter_domains,
+                        'authors': search_state.filter_authors,
+                        'works': search_state.filter_works,
+                        'include_mode': search_state.filter_include_mode,
                         'date_from': search_state.filter_date_from,
                         'date_to': search_state.filter_date_to,
                         'material_exclude': search_state.filter_material_exclude,
+                        'text_all': search_state.filter_text_all,
+                        'text_any': search_state.filter_text_any,
+                        'text_not': search_state.filter_text_not,
                     } if _has_active_filters() else None,
                 },
                 state_snapshot={
@@ -3162,12 +3367,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _filter_suffix = ''
         if _has_active_filters() and search_state.filter_manuscript_count is not None:
             filter_parts = []
-            if search_state.filter_domain:
-                filter_parts.append(search_state.filter_domain)
-            if search_state.filter_author_name:
-                filter_parts.append(search_state.filter_author_name)
-            if search_state.filter_work_name:
-                filter_parts.append(search_state.filter_work_name)
+            opts_d = domain_select.options if hasattr(domain_select, 'options') else {}
+            opts_a = author_select.options if hasattr(author_select, 'options') else {}
+            opts_w = work_select.options if hasattr(work_select, 'options') else {}
+            for d in search_state.filter_domains:
+                filter_parts.append(_get_display_name(d, opts_d))
+            for a in search_state.filter_authors:
+                filter_parts.append(_get_display_name(a, opts_a))
+            for w in search_state.filter_works:
+                filter_parts.append(_get_display_name(w, opts_w))
             if filter_parts:
                 _filter_suffix = f" ({tr('filtered')}: {', '.join(filter_parts)}, {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
             else:
@@ -3193,7 +3401,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             ui.notify(results[0]['responsa_warning'], type='warning', timeout=5000)
 
         # --- PostHog custom event ---
-        from web.main import posthog_capture
+        from web.analytics import posthog_capture
         posthog_capture('search_executed', {
             'query': clean_query[:100],
             'mode': mode,
@@ -3579,7 +3787,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def open_advanced_dialog(index, result):
         """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer."""
         # PostHog: track result clicks
-        from web.main import posthog_capture
+        from web.analytics import posthog_capture
         display = result.get('display', {}) if isinstance(result, dict) else {}
         posthog_capture('result_opened', {
             'shelfmark': display.get('shelfmark', '')[:80],

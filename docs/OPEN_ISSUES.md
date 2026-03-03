@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-01 (v6.1.1 — async catalog browse, 100x faster domain queries)
+> **Last Updated:** 2026-03-03 (v6.2.x — filter panel layout fix)
 > **Status:** Active working document
 
 ---
@@ -85,6 +85,7 @@ Move to "Completed Issues" section at bottom with date
 | **Auto-save not working** | `text_editor.py:374` | ✅ Fixed (2026-02-03) | Auto-save implemented at lines 443-454 using NiceGUI timer |
 | **Race conditions in UI timers** | `parallels.py`, `search.py` | ✅ Fixed (2026-02-04) | Added timer tracking and deactivation to prevent duplicates |
 | **Cache thread-safety** | `joins_panel.py:17-19` | ✅ Fixed (2026-02-04) | Added threading.Lock for cache access |
+| **Filter panel overlap with progress bar** | `web/pages/search.py`, `parallels.py` | ✅ Fixed (2026-03-03) | Chip bar, progress bar, results overlapped when filter panel open. Auto-collapse panel on search start + scroll to progress + spacing/z-index fix |
 | **CSRF protection missing** | API endpoints | ❌ Deferred | Low risk - NiceGUI uses WebSocket |
 
 ---

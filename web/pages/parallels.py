@@ -12,6 +12,7 @@ from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, get_language
 from urllib.parse import unquote
+import asyncio
 import re
 import html
 import os
@@ -165,14 +166,16 @@ def create_parallels_page(initial_text: str = None):
             self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
             self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
             # Pre-search filter state (Advanced Filters panel)
-            self.filter_domain: str = None
-            self.filter_author: str = None
-            self.filter_author_name: str = ''
-            self.filter_work: str = None
-            self.filter_work_name: str = ''
+            self.filter_domains: list = []
+            self.filter_authors: list = []
+            self.filter_works: list = []
+            self.filter_include_mode: bool = True
             self.filter_date_from: int = None
             self.filter_date_to: int = None
             self.filter_material_exclude: list = []
+            self.filter_text_all: list = []
+            self.filter_text_any: list = []
+            self.filter_text_not: list = []
             self.filter_manuscript_count: int = None
             self.restrict_sys_ids: set = None
             self.excluded_manuscript_ids: set = set()   # Per-manuscript exclusions (NEW for web)
@@ -191,20 +194,14 @@ def create_parallels_page(initial_text: str = None):
         incoming = app.storage.user.get('incoming_filters', {})
         if incoming:
             if incoming.get('domain'):
-                p_state.filter_domain = incoming['domain']
-                _persist('parallels_filter_domain', incoming['domain'])
+                p_state.filter_domains = [incoming['domain']]
+                _persist('parallels_filter_domains', p_state.filter_domains)
             if incoming.get('author'):
-                p_state.filter_author = str(incoming['author'])
-                _persist('parallels_filter_author', str(incoming['author']))
-            if incoming.get('author_name'):
-                p_state.filter_author_name = incoming['author_name']
-                _persist('parallels_filter_author_name', incoming['author_name'])
+                p_state.filter_authors = [str(incoming['author'])]
+                _persist('parallels_filter_authors', p_state.filter_authors)
             if incoming.get('work'):
-                p_state.filter_work = str(incoming['work'])
-                _persist('parallels_filter_work', str(incoming['work']))
-            if incoming.get('work_name'):
-                p_state.filter_work_name = incoming['work_name']
-                _persist('parallels_filter_work_name', incoming['work_name'])
+                p_state.filter_works = [str(incoming['work'])]
+                _persist('parallels_filter_works', p_state.filter_works)
             if incoming.get('date_from') is not None:
                 p_state.filter_date_from = int(incoming['date_from'])
                 _persist('parallels_filter_date_from', int(incoming['date_from']))
@@ -220,14 +217,20 @@ def create_parallels_page(initial_text: str = None):
 
     # Restore filter state from session (only if NOT from browse, browse takes priority)
     if not _filters_from_browse:
-        p_state.filter_domain = app.storage.user.get('parallels_filter_domain', None)
-        p_state.filter_author = app.storage.user.get('parallels_filter_author', None)
-        p_state.filter_author_name = app.storage.user.get('parallels_filter_author_name', '')
-        p_state.filter_work = app.storage.user.get('parallels_filter_work', None)
-        p_state.filter_work_name = app.storage.user.get('parallels_filter_work_name', '')
+        # Migrate from legacy single-value keys to multi-select lists
+        _legacy_domain = app.storage.user.get('parallels_filter_domain', None)
+        _legacy_author = app.storage.user.get('parallels_filter_author', None)
+        _legacy_work = app.storage.user.get('parallels_filter_work', None)
+        p_state.filter_domains = app.storage.user.get('parallels_filter_domains', [_legacy_domain] if _legacy_domain else [])
+        p_state.filter_authors = app.storage.user.get('parallels_filter_authors', [_legacy_author] if _legacy_author else [])
+        p_state.filter_works = app.storage.user.get('parallels_filter_works', [_legacy_work] if _legacy_work else [])
+        p_state.filter_include_mode = app.storage.user.get('parallels_filter_include_mode', True)
         p_state.filter_date_from = app.storage.user.get('parallels_filter_date_from', None)
         p_state.filter_date_to = app.storage.user.get('parallels_filter_date_to', None)
         p_state.filter_material_exclude = app.storage.user.get('parallels_filter_material_exclude', [])
+        p_state.filter_text_all = app.storage.user.get('parallels_filter_text_all', [])
+        p_state.filter_text_any = app.storage.user.get('parallels_filter_text_any', [])
+        p_state.filter_text_not = app.storage.user.get('parallels_filter_text_not', [])
 
     # Restore per-manuscript exclusions from session
     p_state.excluded_manuscript_ids = set(app.storage.user.get('parallels_excluded_manuscript_ids', []))
@@ -235,12 +238,15 @@ def create_parallels_page(initial_text: str = None):
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
         return any([
-            p_state.filter_domain,
-            p_state.filter_author,
-            p_state.filter_work,
+            p_state.filter_domains,
+            p_state.filter_authors,
+            p_state.filter_works,
             p_state.filter_date_from is not None,
             p_state.filter_date_to is not None,
             p_state.filter_material_exclude,
+            p_state.filter_text_all,
+            p_state.filter_text_any,
+            p_state.filter_text_not,
         ])
 
     # Restore domain exclusions for parallels
@@ -723,7 +729,7 @@ def create_parallels_page(initial_text: str = None):
         # === Advanced Filters Panel (collapsible, below source input) ===
         _adv_filters_expanded = _has_active_filters() or _filters_from_browse
         adv_filters_panel = ui.expansion(
-            text=tr('Advanced Filters'),
+            text=tr('Search only in...'),
             icon='filter_alt',
             value=_adv_filters_expanded,
         ).classes('w-full').style(
@@ -736,8 +742,16 @@ def create_parallels_page(initial_text: str = None):
         with adv_filters_panel:
             with ui.column().classes('w-full px-4 py-3 gap-4'):
 
+                # Include/Exclude toggle
+                with ui.row().classes('w-full items-center gap-2'):
+                    p_filter_mode_toggle = ui.toggle(
+                        {True: tr('Include'), False: tr('Exclude')},
+                        value=p_state.filter_include_mode,
+                    ).props('dense no-caps size=sm')
+                    _filter_refs['mode'] = p_filter_mode_toggle
+
                 with ui.row().classes('w-full gap-4 flex-wrap items-end'):
-                    # Domain filter
+                    # Domain filter (multi-select)
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Domain')).classes('text-xs font-medium').style('color: var(--text-secondary);')
 
@@ -771,13 +785,14 @@ def create_parallels_page(initial_text: str = None):
                         domain_options = _build_domain_options()
                         p_domain_select = ui.select(
                             options=domain_options,
-                            value=p_state.filter_domain,
+                            value=p_state.filter_domains,
+                            multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense')
+                        ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['domain'] = p_domain_select
 
-                    # Author filter
+                    # Author filter (multi-select)
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Author')).classes('text-xs font-medium').style('color: var(--text-secondary);')
 
@@ -787,7 +802,8 @@ def create_parallels_page(initial_text: str = None):
                             fjms = get_fjms_service(thread_safe=True)
                             if not fjms.is_available():
                                 return {}
-                            authors = fjms.get_browse_authors(domain=domain)
+                            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
+                            authors = fjms.get_browse_authors(domain=_first_domain)
                             options = {}
                             for a in authors:
                                 pid = a.get('person_id') or a.get('author_id')
@@ -802,16 +818,17 @@ def create_parallels_page(initial_text: str = None):
                                 options[key] = display
                             return options
 
-                        author_options = _build_author_options(domain=p_state.filter_domain)
+                        author_options = _build_author_options(domain=p_state.filter_domains)
                         p_author_select = ui.select(
                             options=author_options,
-                            value=p_state.filter_author,
+                            value=p_state.filter_authors,
+                            multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense')
+                        ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['author'] = p_author_select
 
-                    # Work filter
+                    # Work filter (multi-select)
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Work')).classes('text-xs font-medium').style('color: var(--text-secondary);')
 
@@ -821,7 +838,9 @@ def create_parallels_page(initial_text: str = None):
                             fjms = get_fjms_service(thread_safe=True)
                             if not fjms.is_available():
                                 return {}
-                            works = fjms.get_browse_works(domain=domain, author=author)
+                            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
+                            _first_author = author[0] if isinstance(author, list) and author else author
+                            works = fjms.get_browse_works(domain=_first_domain, author=_first_author)
                             options = {}
                             for w in works:
                                 tid = w.get('title_id')
@@ -837,15 +856,16 @@ def create_parallels_page(initial_text: str = None):
                             return options
 
                         work_options = _build_work_options(
-                            domain=p_state.filter_domain,
-                            author=p_state.filter_author
+                            domain=p_state.filter_domains,
+                            author=p_state.filter_authors
                         )
                         p_work_select = ui.select(
                             options=work_options,
-                            value=p_state.filter_work,
+                            value=p_state.filter_works,
+                            multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense')
+                        ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['work'] = p_work_select
 
                 with ui.row().classes('w-full gap-4 flex-wrap items-end'):
@@ -902,39 +922,133 @@ def create_parallels_page(initial_text: str = None):
                     with ui.column().classes('gap-1 justify-end'):
                         def _clear_all_p_adv_filters():
                             """Clear all advanced filter selections."""
-                            p_state.filter_domain = None
-                            p_state.filter_author = None
-                            p_state.filter_author_name = ''
-                            p_state.filter_work = None
-                            p_state.filter_work_name = ''
+                            p_state.filter_domains = []
+                            p_state.filter_authors = []
+                            p_state.filter_works = []
+                            p_state.filter_include_mode = True
                             p_state.filter_date_from = None
                             p_state.filter_date_to = None
                             p_state.filter_material_exclude = []
+                            p_state.filter_text_all = []
+                            p_state.filter_text_any = []
+                            p_state.filter_text_not = []
                             p_state.filter_manuscript_count = None
                             p_state.restrict_sys_ids = None
                             # Update UI elements
-                            p_domain_select.value = None
-                            p_author_select.value = None
-                            p_work_select.value = None
+                            p_domain_select.value = []
+                            p_author_select.value = []
+                            p_work_select.value = []
+                            p_filter_mode_toggle.value = True
                             p_date_from_input.value = None
                             p_date_to_input.value = None
                             p_exclude_printed_cb.value = False
+                            if _filter_refs.get('text_input'):
+                                _filter_refs['text_input'].value = ''
                             # Clear storage
-                            for k in ['parallels_filter_domain', 'parallels_filter_author',
-                                      'parallels_filter_author_name', 'parallels_filter_work',
-                                      'parallels_filter_work_name', 'parallels_filter_date_from',
-                                      'parallels_filter_date_to', 'parallels_filter_material_exclude']:
+                            for k in ['parallels_filter_domains', 'parallels_filter_authors',
+                                      'parallels_filter_works', 'parallels_filter_include_mode',
+                                      'parallels_filter_date_from', 'parallels_filter_date_to',
+                                      'parallels_filter_material_exclude',
+                                      'parallels_filter_text_all', 'parallels_filter_text_any',
+                                      'parallels_filter_text_not']:
                                 _persist(k, None)
                             _update_p_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',
                                   on_click=_clear_all_p_adv_filters).props('flat dense no-caps')
 
+                # Text filter row
+                with ui.row().classes('w-full gap-2 items-end'):
+                    with ui.column().classes('gap-1 flex-grow'):
+                        ui.label(tr('Text Filter')).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            p_text_mode_select = ui.select(
+                                options={
+                                    'all': tr('All words'),
+                                    'any': tr('Any word'),
+                                    'not': tr('Not these words'),
+                                },
+                                value='all',
+                            ).classes('w-36').props('outlined dense')
+                            _filter_refs['text_mode'] = p_text_mode_select
+
+                            p_text_filter_input = ui.input(
+                                placeholder=tr('Add term'),
+                            ).classes('flex-grow').props('outlined dense').on(
+                                'keydown.enter', lambda e: _add_p_text_term()
+                            )
+                            _filter_refs['text_input'] = p_text_filter_input
+
+                            ui.button(icon='add', on_click=lambda: _add_p_text_term()).props('flat dense round')
+
+                    # Display current text filter chips
+                    with ui.row().classes('w-full gap-1 flex-wrap') as p_text_chip_row:
+                        _filter_refs['text_chips'] = p_text_chip_row
+
+                def _add_p_text_term():
+                    """Add a text filter term from the input."""
+                    term = p_text_filter_input.value.strip() if p_text_filter_input.value else ''
+                    if not term:
+                        return
+                    mode = p_text_mode_select.value
+                    if mode == 'all':
+                        if term not in p_state.filter_text_all:
+                            p_state.filter_text_all.append(term)
+                    elif mode == 'any':
+                        if term not in p_state.filter_text_any:
+                            p_state.filter_text_any.append(term)
+                    elif mode == 'not':
+                        if term not in p_state.filter_text_not:
+                            p_state.filter_text_not.append(term)
+                    p_text_filter_input.value = ''
+                    _persist('parallels_filter_text_all', p_state.filter_text_all)
+                    _persist('parallels_filter_text_any', p_state.filter_text_any)
+                    _persist('parallels_filter_text_not', p_state.filter_text_not)
+                    asyncio.ensure_future(_recompute_p_filter_count())
+                    _update_p_chip_bar()
+                    _rebuild_p_text_chips()
+
+                def _remove_p_text_term(mode, term):
+                    """Remove a text filter term."""
+                    target = getattr(p_state, f'filter_text_{mode}')
+                    if term in target:
+                        target.remove(term)
+                    _persist(f'parallels_filter_text_{mode}', target)
+                    asyncio.ensure_future(_recompute_p_filter_count())
+                    _update_p_chip_bar()
+                    _rebuild_p_text_chips()
+
+                def _rebuild_p_text_chips():
+                    """Rebuild text filter chip display."""
+                    text_chip_row = _filter_refs.get('text_chips')
+                    if not text_chip_row:
+                        return
+                    text_chip_row.clear()
+                    with text_chip_row:
+                        for t in p_state.filter_text_all:
+                            ui.chip(f"+ {t}", icon='check_circle', removable=True,
+                                    color='green-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_p_text_term('all', _t))
+                        for t in p_state.filter_text_any:
+                            ui.chip(f"~ {t}", icon='help_outline', removable=True,
+                                    color='blue-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_p_text_term('any', _t))
+                        for t in p_state.filter_text_not:
+                            ui.chip(f"- {t}", icon='block', removable=True,
+                                    color='red-2', on_click=lambda: None,
+                            ).on('remove', lambda _t=t: _remove_p_text_term('not', _t))
+
         # --- Filter chip bar (always visible, even when panel is collapsed) ---
         p_chip_bar_container = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
-            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0;'
+            'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0; margin-bottom: 16px; position: relative; z-index: 1;'
         )
         p_chip_bar_container.set_visibility(False)
+
+        def _get_p_display_name(key, opts_dict):
+            """Extract display name from options dict (strip count suffix)."""
+            if isinstance(opts_dict, dict) and key in opts_dict:
+                return opts_dict[key].split(' (')[0].strip().lstrip('\u2514 ').strip()
+            return key
 
         def _update_p_chip_bar():
             """Rebuild chip bar from current filter state."""
@@ -945,37 +1059,40 @@ def create_parallels_page(initial_text: str = None):
             if not has_any and not has_excl:
                 return
 
-            with p_chip_bar_container:
-                # Domain chip
-                if p_state.filter_domain:
-                    display_name = p_state.filter_domain
-                    opts = p_domain_select.options if hasattr(p_domain_select, 'options') else {}
-                    if isinstance(opts, dict) and p_state.filter_domain in opts:
-                        raw = opts[p_state.filter_domain]
-                        display_name = raw.split(' (')[0].strip().lstrip('\u2514 ').strip()
-                    ui.chip(
-                        display_name, icon='category', removable=True,
-                        on_click=lambda: None,
-                        color='deep-purple-2',
-                    ).on('remove', lambda: _remove_p_filter('domain'))
+            opts_d = p_domain_select.options if hasattr(p_domain_select, 'options') else {}
+            opts_a = p_author_select.options if hasattr(p_author_select, 'options') else {}
+            opts_w = p_work_select.options if hasattr(p_work_select, 'options') else {}
 
-                # Author chip
-                if p_state.filter_author:
-                    aname = p_state.filter_author_name or p_state.filter_author
+            with p_chip_bar_container:
+                # Mode indicator
+                if not p_state.filter_include_mode and (
+                    p_state.filter_domains or p_state.filter_authors or p_state.filter_works
+                ):
+                    ui.chip(tr('Exclude selected'), icon='block', color='red-2')
+
+                # Domain chips
+                for d in p_state.filter_domains:
+                    dname = _get_p_display_name(d, opts_d)
+                    ui.chip(
+                        dname, icon='category', removable=True,
+                        on_click=lambda: None, color='deep-purple-2',
+                    ).on('remove', lambda _d=d: _remove_p_filter('domain', _d))
+
+                # Author chips
+                for a in p_state.filter_authors:
+                    aname = _get_p_display_name(a, opts_a)
                     ui.chip(
                         aname, icon='person', removable=True,
-                        on_click=lambda: None,
-                        color='blue-2',
-                    ).on('remove', lambda: _remove_p_filter('author'))
+                        on_click=lambda: None, color='blue-2',
+                    ).on('remove', lambda _a=a: _remove_p_filter('author', _a))
 
-                # Work chip
-                if p_state.filter_work:
-                    wname = p_state.filter_work_name or p_state.filter_work
+                # Work chips
+                for w in p_state.filter_works:
+                    wname = _get_p_display_name(w, opts_w)
                     ui.chip(
                         wname, icon='menu_book', removable=True,
-                        on_click=lambda: None,
-                        color='teal-2',
-                    ).on('remove', lambda: _remove_p_filter('work'))
+                        on_click=lambda: None, color='teal-2',
+                    ).on('remove', lambda _w=w: _remove_p_filter('work', _w))
 
                 # Date range chip
                 if p_state.filter_date_from is not None or p_state.filter_date_to is not None:
@@ -996,6 +1113,20 @@ def create_parallels_page(initial_text: str = None):
                             color='red-2',
                         ).on('remove', lambda m=mat: _remove_p_filter('material', m))
 
+                # Text filter chips
+                for t in p_state.filter_text_all:
+                    ui.chip(f"+ {t}", icon='check_circle', removable=True,
+                            color='green-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_p_text_term('all', _t))
+                for t in p_state.filter_text_any:
+                    ui.chip(f"~ {t}", icon='help_outline', removable=True,
+                            color='blue-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_p_text_term('any', _t))
+                for t in p_state.filter_text_not:
+                    ui.chip(f"- {t}", icon='block', removable=True,
+                            color='red-2', on_click=lambda: None,
+                    ).on('remove', lambda _t=t: _remove_p_text_term('not', _t))
+
                 # Per-manuscript exclusion count chip
                 if p_state.excluded_manuscript_ids:
                     ui.chip(
@@ -1015,24 +1146,29 @@ def create_parallels_page(initial_text: str = None):
         def _remove_p_filter(filter_type, value=None):
             """Remove a specific filter and update state."""
             if filter_type == 'domain':
-                p_state.filter_domain = None
-                p_domain_select.value = None
-                _persist('parallels_filter_domain', None)
+                if value and value in p_state.filter_domains:
+                    p_state.filter_domains.remove(value)
+                else:
+                    p_state.filter_domains = []
+                p_domain_select.value = p_state.filter_domains
+                _persist('parallels_filter_domains', p_state.filter_domains)
                 _refresh_p_author_options()
                 _refresh_p_work_options()
             elif filter_type == 'author':
-                p_state.filter_author = None
-                p_state.filter_author_name = ''
-                p_author_select.value = None
-                _persist('parallels_filter_author', None)
-                _persist('parallels_filter_author_name', '')
+                if value and value in p_state.filter_authors:
+                    p_state.filter_authors.remove(value)
+                else:
+                    p_state.filter_authors = []
+                p_author_select.value = p_state.filter_authors
+                _persist('parallels_filter_authors', p_state.filter_authors)
                 _refresh_p_work_options()
             elif filter_type == 'work':
-                p_state.filter_work = None
-                p_state.filter_work_name = ''
-                p_work_select.value = None
-                _persist('parallels_filter_work', None)
-                _persist('parallels_filter_work_name', '')
+                if value and value in p_state.filter_works:
+                    p_state.filter_works.remove(value)
+                else:
+                    p_state.filter_works = []
+                p_work_select.value = p_state.filter_works
+                _persist('parallels_filter_works', p_state.filter_works)
             elif filter_type == 'date':
                 p_state.filter_date_from = None
                 p_state.filter_date_to = None
@@ -1045,20 +1181,20 @@ def create_parallels_page(initial_text: str = None):
                     p_state.filter_material_exclude.remove(value)
                     _persist('parallels_filter_material_exclude', p_state.filter_material_exclude)
                     p_exclude_printed_cb.value = 'Printed' in p_state.filter_material_exclude
-            _recompute_p_filter_count()
+            asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
         def _refresh_p_author_options():
             """Refresh author select options based on current domain filter."""
-            new_opts = _build_author_options(domain=p_state.filter_domain)
+            new_opts = _build_author_options(domain=p_state.filter_domains)
             p_author_select.options = new_opts
             p_author_select.update()
 
         def _refresh_p_work_options():
             """Refresh work select options based on current domain and author filters."""
             new_opts = _build_work_options(
-                domain=p_state.filter_domain,
-                author=p_state.filter_author
+                domain=p_state.filter_domains,
+                author=p_state.filter_authors
             )
             p_work_select.options = new_opts
             p_work_select.update()
@@ -1071,18 +1207,32 @@ def create_parallels_page(initial_text: str = None):
                 return
             from shared.fjms_service import get_fjms_service
 
+            include_mode = p_state.filter_include_mode
+            _domains = p_state.filter_domains or None
+            _authors = p_state.filter_authors or None
+            _works = p_state.filter_works or None
+
             def _compute():
                 fjms = get_fjms_service(thread_safe=True)
                 if not fjms.is_available():
                     return None
-                return fjms.get_filter_sys_ids(
-                    domain=p_state.filter_domain,
-                    author=p_state.filter_author,
-                    work=p_state.filter_work,
+                kwargs = dict(
                     date_from=p_state.filter_date_from,
                     date_to=p_state.filter_date_to,
                     material_exclude=p_state.filter_material_exclude or None,
+                    text_all=p_state.filter_text_all or None,
+                    text_any=p_state.filter_text_any or None,
+                    text_not=p_state.filter_text_not or None,
                 )
+                if include_mode:
+                    kwargs['domains'] = _domains
+                    kwargs['authors'] = _authors
+                    kwargs['works'] = _works
+                else:
+                    kwargs['domains_exclude'] = _domains
+                    kwargs['authors_exclude'] = _authors
+                    kwargs['works_exclude'] = _works
+                return fjms.get_filter_sys_ids(**kwargs)
 
             result = await run.io_bound(_compute)
             if result is not None:
@@ -1095,55 +1245,47 @@ def create_parallels_page(initial_text: str = None):
 
         # --- Filter change handlers ---
         def _on_p_domain_change(e=None):
-            val = p_domain_select.value
-            p_state.filter_domain = val
-            _persist('parallels_filter_domain', val)
+            val = p_domain_select.value or []
+            p_state.filter_domains = val if isinstance(val, list) else [val] if val else []
+            _persist('parallels_filter_domains', p_state.filter_domains)
             _refresh_p_author_options()
             _refresh_p_work_options()
-            _recompute_p_filter_count()
+            asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
         def _on_p_author_change(e=None):
-            val = p_author_select.value
-            p_state.filter_author = val
-            opts = p_author_select.options
-            if isinstance(opts, dict) and val and val in opts:
-                raw = opts[val]
-                p_state.filter_author_name = raw.split(' (')[0].strip()
-            else:
-                p_state.filter_author_name = val or ''
-            _persist('parallels_filter_author', val)
-            _persist('parallels_filter_author_name', p_state.filter_author_name)
+            val = p_author_select.value or []
+            p_state.filter_authors = val if isinstance(val, list) else [val] if val else []
+            _persist('parallels_filter_authors', p_state.filter_authors)
             _refresh_p_work_options()
-            _recompute_p_filter_count()
+            asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
         def _on_p_work_change(e=None):
-            val = p_work_select.value
-            p_state.filter_work = val
-            opts = p_work_select.options
-            if isinstance(opts, dict) and val and val in opts:
-                raw = opts[val]
-                p_state.filter_work_name = raw.split(' (')[0].strip()
-            else:
-                p_state.filter_work_name = val or ''
-            _persist('parallels_filter_work', val)
-            _persist('parallels_filter_work_name', p_state.filter_work_name)
-            _recompute_p_filter_count()
+            val = p_work_select.value or []
+            p_state.filter_works = val if isinstance(val, list) else [val] if val else []
+            _persist('parallels_filter_works', p_state.filter_works)
+            asyncio.ensure_future(_recompute_p_filter_count())
+            _update_p_chip_bar()
+
+        def _on_p_mode_change(e=None):
+            p_state.filter_include_mode = p_filter_mode_toggle.value
+            _persist('parallels_filter_include_mode', p_state.filter_include_mode)
+            asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
         def _on_p_date_from_change(e=None):
             val = p_date_from_input.value
             p_state.filter_date_from = int(val) if val is not None and val != '' else None
             _persist('parallels_filter_date_from', p_state.filter_date_from)
-            _recompute_p_filter_count()
+            asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
         def _on_p_date_to_change(e=None):
             val = p_date_to_input.value
             p_state.filter_date_to = int(val) if val is not None and val != '' else None
             _persist('parallels_filter_date_to', p_state.filter_date_to)
-            _recompute_p_filter_count()
+            asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
         def _on_p_exclude_printed_change(e=None):
@@ -1154,13 +1296,14 @@ def create_parallels_page(initial_text: str = None):
                 if 'Printed' in p_state.filter_material_exclude:
                     p_state.filter_material_exclude.remove('Printed')
             _persist('parallels_filter_material_exclude', p_state.filter_material_exclude)
-            _recompute_p_filter_count()
+            asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
         # Wire up change handlers
         p_domain_select.on('update:model-value', _on_p_domain_change)
         p_author_select.on('update:model-value', _on_p_author_change)
         p_work_select.on('update:model-value', _on_p_work_change)
+        p_filter_mode_toggle.on('update:model-value', _on_p_mode_change)
         p_date_from_input.on('blur', _on_p_date_from_change)
         p_date_to_input.on('blur', _on_p_date_to_change)
         p_exclude_printed_cb.on('update:model-value', _on_p_exclude_printed_change)
@@ -1822,15 +1965,67 @@ def create_parallels_page(initial_text: str = None):
                 ui.menu_item(tr('No composition history')).props('disable')
             return
 
+        def _build_web_filter_summary(filters: dict, max_len: int = 50) -> str:
+            """Build compact filter summary like [כולל: תנ״ך, תוספתא. 1000-1300]."""
+            if not filters:
+                return ''
+            prefix = tr('include') if filters.get('include_mode', True) else tr('exclude')
+            # Build en->heb domain name map from cached hierarchy
+            domain_heb_map = {}
+            if get_language() == 'he' and filters.get('domains'):
+                try:
+                    from shared.fjms_service import get_fjms_service
+                    fjms = get_fjms_service(thread_safe=True)
+                    if fjms.is_available():
+                        for pn, info in fjms.get_domain_hierarchy().items():
+                            if info.get('parent_domain_heb'):
+                                domain_heb_map[pn] = info['parent_domain_heb']
+                            for ch in info.get('children', []):
+                                if ch.get('domain_heb'):
+                                    domain_heb_map[ch['domain']] = ch['domain_heb']
+                except Exception:
+                    pass
+            parts = []
+            for d in filters.get('domains', []):
+                parts.append(domain_heb_map.get(str(d), str(d)))
+            n_auth = len(filters.get('authors', []))
+            if n_auth:
+                parts.append(f"{tr('Author')} \u00d7{n_auth}")
+            n_work = len(filters.get('works', []))
+            if n_work:
+                parts.append(f"{tr('Work')} \u00d7{n_work}")
+            df, dt = filters.get('date_from'), filters.get('date_to')
+            if df and dt:
+                parts.append(f"{df}-{dt}")
+            elif df:
+                parts.append(f"{df}+")
+            elif dt:
+                parts.append(f"-{dt}")
+            if filters.get('material_exclude'):
+                parts.append(tr("No printed"))
+            elif filters.get('material_include'):
+                parts.append(tr("Printed only"))
+            if not parts:
+                return ''
+            summary = f"[{prefix}: {', '.join(parts)}]"
+            if len(summary) > max_len:
+                summary = summary[:max_len - 4] + '...]'
+            return summary
+
         with comp_history_menu:
             for i, entry in enumerate(history):
                 title_text = entry.get('title', '')
                 title_display = (title_text[:40] + '...') if len(title_text) > 40 else title_text
                 count = entry.get('result_count', 0)
+                # Build filter summary text from params
+                filters = entry.get('params', {}).get('filters')
+                filter_text = _build_web_filter_summary(filters) if filters else ''
                 label = f"{title_display}  ({count})"
 
                 idx = i  # Capture for closure
                 with ui.menu_item(label, on_click=lambda e, idx=idx: _on_comp_history_clicked(idx)).style('direction: rtl;'):
+                    if filter_text:
+                        ui.label(filter_text).style('font-size: 0.7rem; color: var(--primary-600); direction: ltr;')
                     # Delete button on each item
                     ui.button(icon='close', on_click=lambda e, idx=idx: (
                         _delete_comp_history_entry(idx), _refresh_comp_history_menu()
@@ -1857,31 +2052,44 @@ def create_parallels_page(initial_text: str = None):
         # Restore filter state from history entry
         filters = params.get('filters')
         if filters and isinstance(filters, dict):
-            p_state.filter_domain = filters.get('domain')
-            p_state.filter_author = filters.get('author')
-            p_state.filter_author_name = filters.get('author_name', '')
-            p_state.filter_work = filters.get('work')
-            p_state.filter_work_name = filters.get('work_name', '')
+            # Migrate from legacy single-value to lists
+            _d = filters.get('domains') or ([filters['domain']] if filters.get('domain') else [])
+            _a = filters.get('authors') or ([filters['author']] if filters.get('author') else [])
+            _w = filters.get('works') or ([filters['work']] if filters.get('work') else [])
+            p_state.filter_domains = _d
+            p_state.filter_authors = _a
+            p_state.filter_works = _w
+            p_state.filter_include_mode = filters.get('include_mode', True)
             p_state.filter_date_from = filters.get('date_from')
             p_state.filter_date_to = filters.get('date_to')
             p_state.filter_material_exclude = filters.get('material_exclude', [])
+            p_state.filter_text_all = filters.get('text_all', [])
+            p_state.filter_text_any = filters.get('text_any', [])
+            p_state.filter_text_not = filters.get('text_not', [])
             # Update filter UI elements
-            p_domain_select.value = p_state.filter_domain
-            p_author_select.value = p_state.filter_author
-            p_work_select.value = p_state.filter_work
+            p_domain_select.value = p_state.filter_domains
+            p_author_select.value = p_state.filter_authors
+            p_work_select.value = p_state.filter_works
+            p_filter_mode_toggle.value = p_state.filter_include_mode
             p_date_from_input.value = p_state.filter_date_from
             p_date_to_input.value = p_state.filter_date_to
             p_exclude_printed_cb.value = 'Printed' in p_state.filter_material_exclude
             # Persist restored filters
-            _persist('parallels_filter_domain', p_state.filter_domain)
-            _persist('parallels_filter_author', p_state.filter_author)
-            _persist('parallels_filter_author_name', p_state.filter_author_name)
-            _persist('parallels_filter_work', p_state.filter_work)
-            _persist('parallels_filter_work_name', p_state.filter_work_name)
+            _persist('parallels_filter_domains', p_state.filter_domains)
+            _persist('parallels_filter_authors', p_state.filter_authors)
+            _persist('parallels_filter_works', p_state.filter_works)
+            _persist('parallels_filter_include_mode', p_state.filter_include_mode)
             _persist('parallels_filter_date_from', p_state.filter_date_from)
             _persist('parallels_filter_date_to', p_state.filter_date_to)
             _persist('parallels_filter_material_exclude', p_state.filter_material_exclude)
+            _persist('parallels_filter_text_all', p_state.filter_text_all)
+            _persist('parallels_filter_text_any', p_state.filter_text_any)
+            _persist('parallels_filter_text_not', p_state.filter_text_not)
             _update_p_chip_bar()
+            _rebuild_p_text_chips()
+        else:
+            # Clear filters if history entry had none
+            _clear_all_p_adv_filters()
 
         # Restore per-manuscript exclusions
         if state_snapshot.get('excluded_manuscript_ids'):
@@ -1958,6 +2166,10 @@ def create_parallels_page(initial_text: str = None):
         search_indicator.style('display: flex;')
         progress_bar.style('opacity: 1;')
         progress_bar.set_value(0)
+        # Collapse filter panel — chips summarize active filters
+        adv_filters_panel.value = False
+        # Scroll results area into view
+        ui.run_javascript(f'document.getElementById("c{results_container.id}").scrollIntoView({{behavior: "smooth", block: "start"}})')
         status_label.text = tr('Initializing search...')
 
         # Show top page loading bar during search
@@ -2004,18 +2216,32 @@ def create_parallels_page(initial_text: str = None):
         if _has_active_filters():
             from shared.fjms_service import get_fjms_service
 
+            include_mode = p_state.filter_include_mode
+            _domains = p_state.filter_domains or None
+            _authors = p_state.filter_authors or None
+            _works = p_state.filter_works or None
+
             def _compute_restrict():
                 fjms = get_fjms_service(thread_safe=True)
                 if not fjms.is_available():
                     return None
-                return fjms.get_filter_sys_ids(
-                    domain=p_state.filter_domain,
-                    author=p_state.filter_author,
-                    work=p_state.filter_work,
+                kwargs = dict(
                     date_from=p_state.filter_date_from,
                     date_to=p_state.filter_date_to,
                     material_exclude=p_state.filter_material_exclude or None,
+                    text_all=p_state.filter_text_all or None,
+                    text_any=p_state.filter_text_any or None,
+                    text_not=p_state.filter_text_not or None,
                 )
+                if include_mode:
+                    kwargs['domains'] = _domains
+                    kwargs['authors'] = _authors
+                    kwargs['works'] = _works
+                else:
+                    kwargs['domains_exclude'] = _domains
+                    kwargs['authors_exclude'] = _authors
+                    kwargs['works_exclude'] = _works
+                return fjms.get_filter_sys_ids(**kwargs)
 
             restrict_sys_ids = await run.io_bound(_compute_restrict)
             p_state.restrict_sys_ids = restrict_sys_ids
@@ -2107,7 +2333,7 @@ def create_parallels_page(initial_text: str = None):
                 p_state.filtered_results = filtered_results
 
                 # PostHog: track parallels search
-                from web.main import posthog_capture
+                from web.analytics import posthog_capture
                 posthog_capture('parallels_search', {
                     'text_length': len(text),
                     'word_count': words,
@@ -2142,14 +2368,16 @@ def create_parallels_page(initial_text: str = None):
                             'chunk_size': int(chunk_size.value) if chunk_size.value else 5,
                             'mode': mode_select.value or 'exact',
                             'filters': {
-                                'domain': p_state.filter_domain,
-                                'author': p_state.filter_author,
-                                'author_name': p_state.filter_author_name,
-                                'work': p_state.filter_work,
-                                'work_name': p_state.filter_work_name,
+                                'domains': p_state.filter_domains,
+                                'authors': p_state.filter_authors,
+                                'works': p_state.filter_works,
+                                'include_mode': p_state.filter_include_mode,
                                 'date_from': p_state.filter_date_from,
                                 'date_to': p_state.filter_date_to,
                                 'material_exclude': p_state.filter_material_exclude,
+                                'text_all': p_state.filter_text_all,
+                                'text_any': p_state.filter_text_any,
+                                'text_not': p_state.filter_text_not,
                             } if _has_active_filters() else None,
                         },
                         state_snapshot={
@@ -2229,12 +2457,15 @@ def create_parallels_page(initial_text: str = None):
                 _filter_suffix = ''
                 if _has_active_filters() and p_state.filter_manuscript_count is not None:
                     filter_parts = []
-                    if p_state.filter_domain:
-                        filter_parts.append(p_state.filter_domain)
-                    if p_state.filter_author_name:
-                        filter_parts.append(p_state.filter_author_name)
-                    if p_state.filter_work_name:
-                        filter_parts.append(p_state.filter_work_name)
+                    opts_d = p_domain_select.options if hasattr(p_domain_select, 'options') else {}
+                    opts_a = p_author_select.options if hasattr(p_author_select, 'options') else {}
+                    opts_w = p_work_select.options if hasattr(p_work_select, 'options') else {}
+                    for d in p_state.filter_domains:
+                        filter_parts.append(_get_p_display_name(d, opts_d))
+                    for a in p_state.filter_authors:
+                        filter_parts.append(_get_p_display_name(a, opts_a))
+                    for w in p_state.filter_works:
+                        filter_parts.append(_get_p_display_name(w, opts_w))
                     if filter_parts:
                         _filter_suffix = f" ({tr('filtered')}: {', '.join(filter_parts)}, {p_state.filter_manuscript_count:,} {tr('manuscripts')})"
                     else:
