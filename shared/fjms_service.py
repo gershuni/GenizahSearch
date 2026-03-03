@@ -771,6 +771,16 @@ class FjmsService:
         include_undated: bool = False,
         material_include: list[str] = None,
         material_exclude: list[str] = None,
+        # Multi-select params (backward compatible)
+        domains: list[str] = None,
+        domains_exclude: list[str] = None,
+        authors: list[str] = None,
+        authors_exclude: list[str] = None,
+        works: list[str] = None,
+        works_exclude: list[str] = None,
+        text_all: list[str] = None,
+        text_any: list[str] = None,
+        text_not: list[str] = None,
     ) -> Optional[set]:
         """Return the set of sys_ids matching all provided filter criteria (intersection).
 
@@ -778,30 +788,57 @@ class FjmsService:
         to execute_search / search_composition_logic so that non-matching manuscripts
         are skipped before expensive regex verification or chunk processing.
 
+        Supports both legacy single-value params and multi-select lists.
+        If a legacy single param is provided alongside its list counterpart,
+        the single value is prepended to the list.
+
         Args:
-            domain: Domain or parent-domain name (matches Domain OR ParentDomain).
-            author: Person ID (int string, v5+) or AuthorText string (legacy).
-            work: GenizahTitleId (int string, v5+) or Title string (legacy).
+            domain: Legacy single domain (auto-converts to domains=[domain]).
+            author: Legacy single author.
+            work: Legacy single work.
+            domains: Multiple domains to include (matches Domain OR ParentDomain).
+            domains_exclude: Multiple domains to exclude.
+            authors: Multiple author IDs or names to include.
+            authors_exclude: Multiple author IDs or names to exclude.
+            works: Multiple work IDs or titles to include.
+            works_exclude: Multiple work IDs or titles to exclude.
             date_from: Minimum year inclusive.
             date_to: Maximum year inclusive.
             include_undated: If True AND date filter active, include records with no date.
-            material_include: List of FragmentMaterial values to INCLUDE (e.g. ["Printed"]).
-            material_exclude: List of FragmentMaterial values to EXCLUDE (e.g. ["Printed"]).
+            material_include: List of FragmentMaterial values to INCLUDE.
+            material_exclude: List of FragmentMaterial values to EXCLUDE.
+            text_all: FTS5 terms that must ALL appear (AND).
+            text_any: FTS5 terms where ANY must appear (OR).
+            text_not: FTS5 terms that must NOT appear.
 
         Returns:
             None when ALL filter params are None/empty (meaning "no restriction").
             set of matching AlmaId strings when any filter is active.
             Empty set when filters are active but match nothing.
         """
+        # Legacy single-value -> list conversion
+        if domain is not None and not domains:
+            domains = [domain]
+        if author is not None and not authors:
+            authors = [author]
+        if work is not None and not works:
+            works = [work]
+
         # Fast path: no filters active -> None means "no restriction"
         has_any = (
-            domain is not None
-            or author is not None
-            or work is not None
+            domains
+            or domains_exclude
+            or authors
+            or authors_exclude
+            or works
+            or works_exclude
             or date_from is not None
             or date_to is not None
             or material_include
             or material_exclude
+            or text_all
+            or text_any
+            or text_not
         )
         if not has_any:
             return None
@@ -813,38 +850,134 @@ class FjmsService:
             conditions = []
             params = []
 
-            # Domain filter (same logic as get_browse_results)
-            if domain is not None:
-                conditions.append(
-                    "c.AlmaId IN ("
-                    "SELECT AlmaId FROM domains WHERE Domain = ? "
-                    "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
-                )
-                params.extend([domain, domain])
-
-            # Author filter
-            if author is not None:
-                if self._has_persons_titles and _is_int(author):
-                    person_id = int(author)
-                    conditions.append(
-                        "(c.GenizahTitleId IN ("
-                        "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
-                        "  WHERE gt.AuthorId = ?"
-                        ") OR c.Author = ?)"
+            # Domain include filter (handles qualified names like "Other (Bible)")
+            if domains:
+                bare, qualified = [], []
+                for d in domains:
+                    dom, par = unqualify_domain_name(d)
+                    if par:
+                        qualified.append((dom, par))
+                    else:
+                        bare.append(dom)
+                parts = []
+                if bare:
+                    ph = ','.join('?' * len(bare))
+                    parts.append(
+                        f"SELECT AlmaId FROM domains WHERE Domain IN ({ph}) "
+                        f"UNION SELECT AlmaId FROM domains WHERE ParentDomain IN ({ph})"
                     )
-                    params.extend([person_id, person_id])
-                else:
-                    conditions.append("c.AuthorText = ?")
-                    params.append(author)
+                    params.extend(bare)
+                    params.extend(bare)
+                for dom, par in qualified:
+                    parts.append(
+                        "SELECT AlmaId FROM domains WHERE Domain = ? AND ParentDomain = ?"
+                    )
+                    params.extend([dom, par])
+                conditions.append(f"c.AlmaId IN ({' UNION '.join(parts)})")
 
-            # Work filter
-            if work is not None:
-                if self._has_persons_titles and _is_int(work):
-                    conditions.append("c.GenizahTitleId = ?")
-                    params.append(int(work))
+            # Domain exclude filter (handles qualified names)
+            if domains_exclude:
+                bare, qualified = [], []
+                for d in domains_exclude:
+                    dom, par = unqualify_domain_name(d)
+                    if par:
+                        qualified.append((dom, par))
+                    else:
+                        bare.append(dom)
+                parts = []
+                if bare:
+                    ph = ','.join('?' * len(bare))
+                    parts.append(
+                        f"SELECT AlmaId FROM domains WHERE Domain IN ({ph}) "
+                        f"UNION SELECT AlmaId FROM domains WHERE ParentDomain IN ({ph})"
+                    )
+                    params.extend(bare)
+                    params.extend(bare)
+                for dom, par in qualified:
+                    parts.append(
+                        "SELECT AlmaId FROM domains WHERE Domain = ? AND ParentDomain = ?"
+                    )
+                    params.extend([dom, par])
+                conditions.append(f"c.AlmaId NOT IN ({' UNION '.join(parts)})")
+
+            # Author include filter (multi)
+            if authors:
+                author_parts = []
+                for a in authors:
+                    if self._has_persons_titles and _is_int(a):
+                        pid = int(a)
+                        author_parts.append(
+                            "(c.GenizahTitleId IN ("
+                            "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                            "  WHERE gt.AuthorId = ?"
+                            ") OR c.Author = ?)"
+                        )
+                        params.extend([pid, pid])
+                    else:
+                        author_parts.append("c.AuthorText = ?")
+                        params.append(a)
+                if len(author_parts) == 1:
+                    conditions.append(author_parts[0])
                 else:
-                    conditions.append("c.Title = ?")
-                    params.append(work)
+                    conditions.append("(" + " OR ".join(author_parts) + ")")
+
+            # Author exclude filter (multi) — use AlmaId NOT IN subquery
+            # so that manuscripts with ANY matching row are fully excluded
+            if authors_exclude:
+                author_excl_parts = []
+                excl_params = []
+                for a in authors_exclude:
+                    if self._has_persons_titles and _is_int(a):
+                        pid = int(a)
+                        author_excl_parts.append(
+                            "(ce.GenizahTitleId IN ("
+                            "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                            "  WHERE gt.AuthorId = ?"
+                            ") OR ce.Author = ?)"
+                        )
+                        excl_params.extend([pid, pid])
+                    else:
+                        author_excl_parts.append("ce.AuthorText = ?")
+                        excl_params.append(a)
+                conditions.append(
+                    "c.AlmaId NOT IN ("
+                    "SELECT ce.AlmaId FROM catalog ce WHERE "
+                    + " OR ".join(author_excl_parts) + ")"
+                )
+                params.extend(excl_params)
+
+            # Work include filter (multi)
+            if works:
+                work_parts = []
+                for w in works:
+                    if self._has_persons_titles and _is_int(w):
+                        work_parts.append("c.GenizahTitleId = ?")
+                        params.append(int(w))
+                    else:
+                        work_parts.append("c.Title = ?")
+                        params.append(w)
+                if len(work_parts) == 1:
+                    conditions.append(work_parts[0])
+                else:
+                    conditions.append("(" + " OR ".join(work_parts) + ")")
+
+            # Work exclude filter (multi) — use AlmaId NOT IN subquery
+            if works_exclude:
+                work_excl_parts = []
+                excl_params = []
+                for w in works_exclude:
+                    if self._has_persons_titles and _is_int(w):
+                        work_excl_parts.append("ce.GenizahTitleId = ?")
+                        excl_params.append(int(w))
+                    else:
+                        work_excl_parts.append("ce.Title = ?")
+                        excl_params.append(w)
+                conditions.append(
+                    "c.AlmaId NOT IN ("
+                    "SELECT ce.AlmaId FROM catalog ce WHERE "
+                    + " OR ".join(work_excl_parts) + ")"
+                )
+                params.extend(excl_params)
 
             # Date range filter (same logic as get_browse_results)
             has_date_filter = date_from is not None or date_to is not None
@@ -887,6 +1020,62 @@ class FjmsService:
                     f"AND FieldValue IN ({placeholders}))"
                 )
                 params.extend(material_exclude)
+
+            # Text filters (FTS5 hybrid: catalog_fts + domain LIKE)
+            if text_all or text_any or text_not:
+                def _fts_escape(term: str) -> str:
+                    escaped = term.replace('"', '""')
+                    return f'"{escaped}"'
+
+                _TEXT_MATCH = (
+                    "c.rowid IN ("
+                    "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                    "UNION "
+                    "SELECT c2.rowid FROM catalog c2 "
+                    "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                    "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+                    ")"
+                )
+                _TEXT_NOT_MATCH = (
+                    "c.rowid NOT IN ("
+                    "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                    "UNION "
+                    "SELECT c2.rowid FROM catalog c2 "
+                    "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                    "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+                    ")"
+                )
+
+                if text_all:
+                    for term in text_all:
+                        conditions.append(_TEXT_MATCH)
+                        like_pat = f"%{term}%"
+                        params.extend([_fts_escape(term), like_pat, like_pat])
+
+                if text_any:
+                    fts_expr = " OR ".join(_fts_escape(t) for t in text_any)
+                    like_parts = []
+                    like_params = []
+                    for t in text_any:
+                        like_parts.append("dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?")
+                        like_params.extend([f"%{t}%", f"%{t}%"])
+                    conditions.append(
+                        "c.rowid IN ("
+                        "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                        "UNION "
+                        "SELECT c2.rowid FROM catalog c2 "
+                        "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                        f"WHERE {' OR '.join(like_parts)}"
+                        ")"
+                    )
+                    params.append(fts_expr)
+                    params.extend(like_params)
+
+                if text_not:
+                    for term in text_not:
+                        conditions.append(_TEXT_NOT_MATCH)
+                        like_pat = f"%{term}%"
+                        params.extend([_fts_escape(term), like_pat, like_pat])
 
             where = " WHERE " + " AND ".join(conditions) if conditions else ""
             sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"

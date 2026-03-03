@@ -5468,7 +5468,7 @@ class PreSearchFilterDialog(QDialog):
 
     @staticmethod
     def _get_checked_tree_items(tree_widget):
-        """Return list of data values for all checked leaf/child items in a QTreeWidget."""
+        """Return list of data values for all checked leaf/child items in a QTreeWidget (up to 3 levels)."""
         result = []
         root = tree_widget.invisibleRootItem()
         for i in range(root.childCount()):
@@ -5482,24 +5482,34 @@ class PreSearchFilterDialog(QDialog):
             else:
                 for j in range(parent.childCount()):
                     child = parent.child(j)
-                    if child.checkState(0) == Qt.CheckState.Checked:
-                        data = child.data(0, Qt.ItemDataRole.UserRole)
-                        if data is not None:
-                            result.append(data)
+                    if child.childCount() == 0:
+                        if child.checkState(0) == Qt.CheckState.Checked:
+                            data = child.data(0, Qt.ItemDataRole.UserRole)
+                            if data is not None:
+                                result.append(data)
+                    else:
+                        # Third level: grandchildren
+                        for k in range(child.childCount()):
+                            grandchild = child.child(k)
+                            if grandchild.checkState(0) == Qt.CheckState.Checked:
+                                data = grandchild.data(0, Qt.ItemDataRole.UserRole)
+                                if data is not None:
+                                    result.append(data)
         return result
 
     def _populate_domains(self):
         """Populate domain tree with hierarchy from FJMS."""
         from PyQt6.QtWidgets import QTreeWidgetItem
         try:
-            from shared.fjms_service import get_fjms_service
+            from shared.fjms_service import get_fjms_service, qualify_domain_name
             fjms = get_fjms_service()
             if not fjms.is_available():
                 return
             self.domain_tree.blockSignals(True)
             hierarchy = fjms.get_domain_hierarchy()
             for parent_name, info in hierarchy.items():
-                display = info.get('parent_domain_heb', parent_name) if CURRENT_LANG == 'he' else parent_name
+                parent_heb = info.get('parent_domain_heb', '')
+                display = parent_heb if CURRENT_LANG == 'he' and parent_heb else parent_name
                 count = info.get('count', 0)
                 display_text = f"{display} ({count:,})"
                 parent_item = QTreeWidgetItem([display, f"{count:,}"])
@@ -5509,15 +5519,36 @@ class PreSearchFilterDialog(QDialog):
                 self.domain_tree.addTopLevelItem(parent_item)
                 self._domain_data[parent_name] = display_text
                 for child in info.get('children', []):
-                    child_display = child.get('domain_heb', child['domain']) if CURRENT_LANG == 'he' else child['domain']
+                    child_heb = child.get('domain_heb', '')
                     child_count = child.get('count', 0)
+                    qname = qualify_domain_name(child['domain'], parent_name)
+                    if CURRENT_LANG == 'he' and child_heb:
+                        child_display = f"{child_heb} ({parent_heb})" if qname != child['domain'] else child_heb
+                    else:
+                        child_display = qname
                     child_text = f"{child_display} ({child_count:,})"
                     child_item = QTreeWidgetItem([child_display, f"{child_count:,}"])
                     child_item.setFlags(child_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                     child_item.setCheckState(0, Qt.CheckState.Unchecked)
-                    child_item.setData(0, Qt.ItemDataRole.UserRole, child['domain'])
+                    child_item.setData(0, Qt.ItemDataRole.UserRole, qname)
                     parent_item.addChild(child_item)
-                    self._domain_data[child['domain']] = child_text
+                    self._domain_data[qname] = child_text
+                    # Third level: sub-sub-domains
+                    for sc in child.get('children', []):
+                        sc_heb = sc.get('domain_heb', '')
+                        sc_count = sc.get('count', 0)
+                        sc_qname = qualify_domain_name(sc['domain'], child['domain'])
+                        if CURRENT_LANG == 'he' and sc_heb:
+                            sc_display = f"{sc_heb} ({child_heb})" if sc_qname != sc['domain'] else sc_heb
+                        else:
+                            sc_display = sc_qname
+                        sc_text = f"{sc_display} ({sc_count:,})"
+                        sc_item = QTreeWidgetItem([sc_display, f"{sc_count:,}"])
+                        sc_item.setFlags(sc_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                        sc_item.setCheckState(0, Qt.CheckState.Unchecked)
+                        sc_item.setData(0, Qt.ItemDataRole.UserRole, sc_qname)
+                        child_item.addChild(sc_item)
+                        self._domain_data[sc_qname] = sc_text
             self.domain_tree.blockSignals(False)
             self.domain_tree.expandAll()
         except Exception:
@@ -5606,11 +5637,14 @@ class PreSearchFilterDialog(QDialog):
             return
         self._updating_domain_checks = True
         state = item.checkState(0)
-        # Propagate to children
-        for i in range(item.childCount()):
-            child = item.child(i)
-            if not child.isHidden():
-                child.setCheckState(0, state)
+        # Propagate to all visible descendants (children + grandchildren)
+        def propagate_down(parent_item, st):
+            for i in range(parent_item.childCount()):
+                child = parent_item.child(i)
+                if not child.isHidden():
+                    child.setCheckState(0, st)
+                    propagate_down(child, st)
+        propagate_down(item, state)
         self._updating_domain_checks = False
         self._on_domain_changed()
 
@@ -17875,13 +17909,37 @@ class GenizahGUI(QMainWindow):
                 )
                 chip_layout.addWidget(mode_chip)
 
-            # Domain chips (multi-select: per-item)
+            # Domain chips (multi-select: per-item) — build Hebrew name map
+            domain_display_map = {}
+            if filters.get('domains') or filters.get('domain'):
+                try:
+                    from shared.fjms_service import get_fjms_service, qualify_domain_name
+                    _fjms = get_fjms_service(thread_safe=True)
+                    if _fjms.is_available():
+                        for _pn, _info in _fjms.get_domain_hierarchy().items():
+                            p_heb = _info.get('parent_domain_heb', '')
+                            if CURRENT_LANG == 'he' and p_heb:
+                                domain_display_map[_pn] = p_heb
+                            for _ch in _info.get('children', []):
+                                _qn = qualify_domain_name(_ch['domain'], _pn)
+                                c_heb = _ch.get('domain_heb', '')
+                                if CURRENT_LANG == 'he' and c_heb:
+                                    domain_display_map[_qn] = f"{c_heb} ({p_heb})" if _qn != _ch['domain'] else c_heb
+                                for _sc in _ch.get('children', []):
+                                    _sq = qualify_domain_name(_sc['domain'], _ch['domain'])
+                                    s_heb = _sc.get('domain_heb', '')
+                                    if CURRENT_LANG == 'he' and s_heb:
+                                        domain_display_map[_sq] = f"{s_heb} ({c_heb})" if _sq != _sc['domain'] else s_heb
+                except Exception:
+                    pass
             for d in filters.get('domains', []):
-                display = str(d)
+                display = domain_display_map.get(str(d), str(d))
                 self._add_filter_chip(chip_layout, tr("Domain") + ": " + display, ('domains', d))
             # Legacy single-value fallback
             if filters.get('domain') and not filters.get('domains'):
-                self._add_filter_chip(chip_layout, tr("Domain") + ": " + str(filters['domain']), ('domains', filters['domain']))
+                _d_legacy = str(filters['domain'])
+                display = domain_display_map.get(_d_legacy, _d_legacy)
+                self._add_filter_chip(chip_layout, tr("Domain") + ": " + display, ('domains', filters['domain']))
 
             # Author chips (multi-select: per-item)
             for a in filters.get('authors', []):
@@ -23976,19 +24034,27 @@ class GenizahGUI(QMainWindow):
         if not filters or not any(k != 'include_mode' for k in filters):
             return ''
         prefix = tr('include') if filters.get('include_mode', True) else tr('exclude')
-        # Build en->heb domain name map from cached hierarchy
+        # Build en->heb domain name map from cached hierarchy (handles qualified names & 3rd level)
         domain_heb_map = {}
         if CURRENT_LANG == 'he' and filters.get('domains'):
             try:
-                from shared.fjms_service import get_fjms_service
+                from shared.fjms_service import get_fjms_service, qualify_domain_name
                 fjms = get_fjms_service(thread_safe=True)
                 if fjms.is_available():
                     for pn, info in fjms.get_domain_hierarchy().items():
-                        if info.get('parent_domain_heb'):
-                            domain_heb_map[pn] = info['parent_domain_heb']
+                        p_heb = info.get('parent_domain_heb', '')
+                        if p_heb:
+                            domain_heb_map[pn] = p_heb
                         for ch in info.get('children', []):
-                            if ch.get('domain_heb'):
-                                domain_heb_map[ch['domain']] = ch['domain_heb']
+                            c_heb = ch.get('domain_heb', '')
+                            qn = qualify_domain_name(ch['domain'], pn)
+                            if c_heb:
+                                domain_heb_map[qn] = f"{c_heb} ({p_heb})" if qn != ch['domain'] else c_heb
+                            for sc in ch.get('children', []):
+                                s_heb = sc.get('domain_heb', '')
+                                sq = qualify_domain_name(sc['domain'], ch['domain'])
+                                if s_heb:
+                                    domain_heb_map[sq] = f"{s_heb} ({c_heb})" if sq != sc['domain'] else s_heb
             except Exception:
                 pass
         parts = []

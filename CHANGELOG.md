@@ -4,6 +4,20 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.2.1] - 2026-03-03
+
+### Bug Fix: Pre-Search Domain Filter Parity
+
+- **Language-conditional display**: Pre-search domain dropdown now shows only the current UI language (Hebrew or English), matching post-search filter behavior (web + desktop)
+- **"Other" disambiguation**: Ambiguous child domains like "Other" now display with parent prefix (e.g., "Other (Bible)" / "אחר (מקרא)") in both dropdown and chip bar
+- **Sub-sub-domain support**: 3rd-level domains now appear in pre-search filter tree/dropdown (previously only 2 levels shown)
+- **Recursive checkbox propagation**: Desktop domain tree now propagates check/uncheck to all descendants (grandchildren), matching post-search filter
+- **Chip bar display fix**: Web chip bar strips only trailing count `(N,NNN)` instead of all parenthesized text, preserving qualified domain names
+- **Chip bar refresh**: Web chip bar re-renders after deferred filter init completes, showing proper display names
+- **Qualified-name SQL filtering**: `get_filter_sys_ids()` now handles qualified domain names like "Other (Bible)" correctly, generating parent-scoped SQL queries
+
+---
+
 ## [6.2.0] - 2026-03-02
 
 ### Milestone: Power-User UX — Search Workflow, Session & Notifications

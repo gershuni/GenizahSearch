@@ -879,29 +879,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         def _build_domain_options():
             """Build domain select options from FJMS hierarchy."""
-            from shared.fjms_service import get_fjms_service
+            from shared.fjms_service import get_fjms_service, qualify_domain_name
             fjms = get_fjms_service(thread_safe=True)
             if not fjms.is_available():
                 return {}
             hierarchy = fjms.get_domain_hierarchy()
+            is_heb = get_language() == 'he'
             options = {}
             for parent_name, info in hierarchy.items():
                 parent_heb = info.get('parent_domain_heb', '')
                 parent_count = info.get('count', 0)
-                display = f"{parent_name}"
-                if parent_heb:
-                    display = f"{parent_heb} / {parent_name}"
+                display = parent_heb if is_heb and parent_heb else parent_name
                 display += f" ({parent_count:,})"
                 options[parent_name] = display
                 for child in info.get('children', []):
                     child_name = child.get('domain', '')
                     child_heb = child.get('domain_heb', '')
                     child_count = child.get('count', 0)
-                    c_display = f"  \u2514 {child_name}"
-                    if child_heb:
-                        c_display = f"  \u2514 {child_heb} / {child_name}"
-                    c_display += f" ({child_count:,})"
-                    options[child_name] = c_display
+                    qname = qualify_domain_name(child_name, parent_name)
+                    if is_heb and child_heb:
+                        c_label = f"{child_heb} ({parent_heb})" if qname != child_name else child_heb
+                    else:
+                        c_label = qname
+                    c_display = f"  \u2514 {c_label} ({child_count:,})"
+                    options[qname] = c_display
+                    # Third level: sub-sub-domains
+                    for sc in child.get('children', []):
+                        sc_name = sc.get('domain', '')
+                        sc_heb = sc.get('domain_heb', '')
+                        sc_count = sc.get('count', 0)
+                        sc_qname = qualify_domain_name(sc_name, child_name)
+                        if is_heb and sc_heb:
+                            sc_label = f"{sc_heb} ({child_heb})" if sc_qname != sc_name else sc_heb
+                        else:
+                            sc_label = sc_qname
+                        sc_display = f"    \u2514 {sc_label} ({sc_count:,})"
+                        options[sc_qname] = sc_display
             return options
 
         def _build_author_options(domain=None):
@@ -1155,9 +1168,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         chip_bar_container.set_visibility(False)
 
         def _get_display_name(key, opts_dict):
-            """Extract display name from options dict (strip count suffix)."""
+            """Extract display name from options dict (strip trailing count suffix only)."""
             if isinstance(opts_dict, dict) and key in opts_dict:
-                return opts_dict[key].split(' (')[0].strip().lstrip('\u2514 ').strip()
+                import re
+                # Strip only the trailing " (N,NNN)" count, preserving qualified names like "Other (Bible)"
+                raw = opts_dict[key].lstrip(' \u2514').strip()
+                return re.sub(r'\s*\([\d,]+\)\s*$', '', raw).strip()
             return key
 
         def _update_chip_bar():
@@ -2931,19 +2947,27 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if not filters:
                 return ''
             prefix = tr('include') if filters.get('include_mode', True) else tr('exclude')
-            # Build en->heb domain name map from cached hierarchy
+            # Build en->heb domain name map from cached hierarchy (handles qualified names & 3rd level)
             domain_heb_map = {}
             if get_language() == 'he' and filters.get('domains'):
                 try:
-                    from shared.fjms_service import get_fjms_service
+                    from shared.fjms_service import get_fjms_service, qualify_domain_name
                     fjms = get_fjms_service(thread_safe=True)
                     if fjms.is_available():
                         for pn, info in fjms.get_domain_hierarchy().items():
-                            if info.get('parent_domain_heb'):
-                                domain_heb_map[pn] = info['parent_domain_heb']
+                            p_heb = info.get('parent_domain_heb', '')
+                            if p_heb:
+                                domain_heb_map[pn] = p_heb
                             for ch in info.get('children', []):
-                                if ch.get('domain_heb'):
-                                    domain_heb_map[ch['domain']] = ch['domain_heb']
+                                c_heb = ch.get('domain_heb', '')
+                                qn = qualify_domain_name(ch['domain'], pn)
+                                if c_heb:
+                                    domain_heb_map[qn] = f"{c_heb} ({p_heb})" if qn != ch['domain'] else c_heb
+                                for sc in ch.get('children', []):
+                                    s_heb = sc.get('domain_heb', '')
+                                    sq = qualify_domain_name(sc['domain'], ch['domain'])
+                                    if s_heb:
+                                        domain_heb_map[sq] = f"{s_heb} ({c_heb})" if sq != sc['domain'] else s_heb
                 except Exception:
                     pass
             parts = []
@@ -5346,6 +5370,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         w = await run.io_bound(_build_work_options, search_state.filter_domains, search_state.filter_authors)
         work_select.options = w
         work_select.update()
+        _update_chip_bar()
 
     ui.timer(0.1, _deferred_filter_init, once=True)
 
