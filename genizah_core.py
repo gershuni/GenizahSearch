@@ -471,7 +471,7 @@ class LabSettings:
                     self.boundary_boost = data.get('boundary_boost', 1.5)
                     self.min_boundary_matches = data.get('min_boundary_matches', 0)
                     self.min_delimiter_distance = data.get('min_delimiter_distance', 3)
-            except Exception: pass
+            except Exception as e: logger.debug(f"Ignored exception: {e}")
 
     def save(self):
         try:
@@ -516,7 +516,7 @@ class LabSettings:
                     'min_boundary_matches': self.min_boundary_matches,
                     'min_delimiter_distance': self.min_delimiter_distance
                 }, f, indent=4)
-        except Exception: pass
+        except Exception as e: logger.debug(f"Ignored exception: {e}")
 
 # ==============================================================================
 #  LAB ENGINE 
@@ -540,8 +540,9 @@ class LabEngine:
             try:
                 with open(Config.LAB_WEIGHTS_FILE, 'r', encoding='utf-8') as f:
                     self.dynamic_rank_map = json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         self._reload_lab_index()
 
@@ -555,12 +556,14 @@ class LabEngine:
         """Register analyzers safely."""
         try:
             index.register_tokenizer("whitespace", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         try:
             index.register_tokenizer("simple", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build())
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     def _reload_lab_index(self):
         """Loads index with heavy debug logging."""
@@ -634,7 +637,7 @@ class LabEngine:
                     for line in f:
                         if label == "V0.8" and line.startswith("==>"): count += 1
                         elif label == "V0.7" and line.startswith("###"): count += 1
-            except Exception: pass
+            except Exception as e: logger.debug(f"Ignored exception: {e}")
             return count
 
         estimated_total = count_documents(Config.FILE_V8, "V0.8") + count_documents(Config.FILE_V7, "V0.7")
@@ -780,8 +783,9 @@ class LabEngine:
                     progress_callback(i, total_hits)
                 except (InterruptedError, KeyboardInterrupt):
                     raise
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).debug(f"Ignored exception: {e}")
                 # Send text status for Label
                 progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
 
@@ -1047,8 +1051,9 @@ class LabEngine:
                 if progress_callback:
                     try:
                         progress_callback(*args)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
             iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
         else:
@@ -1181,7 +1186,7 @@ class LabEngine:
         token_matches = list(re.finditer(r"[\w\u0590-\u05FF\']+", full_text))
         tokens = [strip_nikud(m.group()) for m in token_matches]  # Strip nikud from tokens
         token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
-        c_size = chunk_size if chunk_size else 15
+        c_size = chunk_size if chunk_size else Config.DEFAULT_CHUNK_SIZE
         step = max(1, int(c_size * 0.5))
 
         # Strip nikud from filter text for consistent matching
@@ -1220,7 +1225,7 @@ class LabEngine:
                 if self._is_phrase_statistically_weak(chunk_text): continue
 
                 fp_str = text_to_fingerprint(chunk_text, freq_map=target_map)
-                if not fp_str or len(chunk_tokens) < 4: continue
+                if not fp_str or len(chunk_tokens) < Config.MIN_CHUNK_TOKENS: continue
 
                 fp_list = fp_str.split()
                 needed_unique_fps = set(fp_list)
@@ -1234,10 +1239,10 @@ class LabEngine:
                 q_obj = None
                 try:
                     q_obj = self.lab_index.parse_query(final_query_str)
-                except:
+                except Exception:
                     try:
                         q_obj = self.lab_index.parse_query(core_query)
-                    except: continue
+                    except Exception: continue
 
                 if not q_obj: continue
 
@@ -1307,7 +1312,7 @@ class LabEngine:
                         if matches:
                             rec['ms_matches'].append((matches[start_m]['start'], matches[end_m]['end']))
                             for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
-                    except: pass
+                    except Exception as e: logger.debug(f"Ignored exception: {e}")
         except InterruptedError:
             was_interrupted = True
 
@@ -1328,11 +1333,11 @@ class LabEngine:
                 clusters = []
                 curr_cluster = [src_indices[0]]
                 for idx in src_indices[1:]:
-                    if idx - curr_cluster[-1] < 60: curr_cluster.append(idx)
+                    if idx - curr_cluster[-1] < Config.CLUSTER_DISTANCE: curr_cluster.append(idx)
                     else: clusters.append(curr_cluster); curr_cluster = [idx]
                 clusters.append(curr_cluster)
                 for cl in clusters:
-                    start_ctx = max(0, cl[0] - 50); end_ctx = min(len(tokens), cl[-1] + 51)
+                    start_ctx = max(0, cl[0] - Config.CONTEXT_WINDOW); end_ctx = min(len(tokens), cl[-1] + Config.CONTEXT_WINDOW + 1)
                     cl_set = set(cl)
 
                     # Get character positions from token_positions - preserve original formatting
@@ -1361,13 +1366,13 @@ class LabEngine:
             if spans:
                 curr_s, curr_e = spans[0]
                 for s, e in spans[1:]:
-                    if s <= curr_e + 20: curr_e = max(curr_e, e)
+                    if s <= curr_e + Config.SPAN_MERGE_DISTANCE: curr_e = max(curr_e, e)
                     else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
                 merged.append((curr_s, curr_e))
             
             content = data['content']
             for s, e in merged:
-                start = max(0, s - 60); end = min(len(content), e + 60)
+                start = max(0, s - Config.CLUSTER_DISTANCE); end = min(len(content), e + Config.CLUSTER_DISTANCE)
                 snip = content[start:end]
                 rs = max(0, s - start); re_ = min(len(snip), e - start)
                 if re_ > rs:
@@ -1654,8 +1659,9 @@ class Config:
                 f.write("ok")
             os.remove(test_path)
             return primary
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         # Fallback
         os.makedirs(fallback, exist_ok=True)
@@ -1673,8 +1679,9 @@ class Config:
             ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, 0, buf)
             if buf.value:
                 documents_dir = buf.value
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         if not documents_dir or not os.path.isdir(documents_dir):
             for folder_name in ["Documents", "My Documents"]:
@@ -1756,6 +1763,15 @@ class Config:
     REGEX_VARIANTS_LIMIT = 8000
     WORD_TOKEN_PATTERN = r"[\w\u0590-\u05FF\']+"
     MAX_EXPANDED_TERMS = 500
+
+    # Composition search constants
+    DEFAULT_CHUNK_SIZE = 15
+    MIN_CHUNK_TOKENS = 4
+    CLUSTER_DISTANCE = 60
+    CONTEXT_WINDOW = 50
+    SPAN_MERGE_DISTANCE = 20
+    FALLBACK_PAGE_NUM = 999_999
+    FALLBACK_PAGE_VAL = -999
     NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     HTTP_HEADERS = {"User-Agent": USER_AGENT}
@@ -1912,8 +1928,9 @@ def load_app_config():
         try:
             with open(Config.CONFIG_FILE, 'rb') as f:
                 cfg = pickle.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
     return cfg
 
 def save_app_config(new_data):
@@ -2724,8 +2741,9 @@ def _get_crossref_service():
         try:
             from shared.nli_crossref_service import NliCrossrefService
             _nli_crossref_svc = NliCrossrefService(thread_safe=True)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
     return _nli_crossref_svc
 
 
@@ -2741,8 +2759,9 @@ def _get_fjms_service():
         try:
             from shared.fjms_service import FjmsService
             _fjms_svc = FjmsService(thread_safe=True)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
     return _fjms_svc
 
 
@@ -5403,7 +5422,7 @@ class SearchEngine:
         # --- Existing path (unchanged) ---
         if mode == 'Regex':
             try: return re.compile(" ".join(terms), re.IGNORECASE)
-            except: return None
+            except re.error: return None
 
         parts = []
         for term in terms:
@@ -5437,7 +5456,7 @@ class SearchEngine:
 
         try:
             return re.compile(sep.join(parts), re.IGNORECASE)
-        except:
+        except re.error:
             return None
 
     def highlight(self, text, regex, for_file=False):
@@ -5548,7 +5567,7 @@ class SearchEngine:
             q = self.index.parse_query(f'full_header:"{sys_id}"', ["full_header"])
             # Fetch enough docs to cover a manuscript
             res = self.searcher.search(q, 2000)
-        except:
+        except Exception:
             return "", "", "", ""
 
         pages = []
@@ -5563,7 +5582,7 @@ class SearchEngine:
 
             p_num_str = parsed[1]
             try: p_num = int(p_num_str)
-            except: p_num = 999999
+            except (ValueError, TypeError): p_num = Config.FALLBACK_PAGE_NUM
 
             content = doc['content'][0]
             uid = doc['unique_id'][0]
@@ -6131,7 +6150,7 @@ class SearchEngine:
                 if spans:
                     curr_s, curr_e = spans[0]
                     for s, e in spans[1:]:
-                        if s <= curr_e + 20: curr_e = max(curr_e, e)
+                        if s <= curr_e + Config.SPAN_MERGE_DISTANCE: curr_e = max(curr_e, e)
                         else: merged.append((curr_s, curr_e)); curr_s, curr_e = s, e
                     merged.append((curr_s, curr_e))
 
@@ -6469,7 +6488,7 @@ class SearchEngine:
         if target_idx == -1 and p_num is not None:
             # Robust casting
             try: p_val = int(p_num)
-            except: p_val = -999
+            except (ValueError, TypeError): p_val = Config.FALLBACK_PAGE_VAL
             
             for i, p in enumerate(pages):
                 if p['p_num'] == p_val: 
@@ -7440,8 +7459,9 @@ class ListsManager:
             from lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             sync.clear_user()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     def sync_from_cloud(self):
         """Pull lists from cloud and merge with local data."""

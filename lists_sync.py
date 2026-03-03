@@ -25,24 +25,11 @@ except ImportError:
     SUPABASE_AVAILABLE = False
     Client = None
 
-# Configuration
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE')
+# Credentials centralized in shared/supabase_provider.py
+from shared.supabase_provider import get_url as _get_url, get_anon_key as _get_anon_key
 
-# Try to load from .env file if not in environment
-if not SUPABASE_ANON_KEY:
-    env_file = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_file):
-        try:
-            with open(env_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('SUPABASE_ANON_KEY='):
-                        SUPABASE_ANON_KEY = line.split('=', 1)[1].strip().strip('"\'')
-                    elif line.startswith('SUPABASE_URL='):
-                        SUPABASE_URL = line.split('=', 1)[1].strip().strip('"\'')
-        except Exception:
-            pass
+SUPABASE_URL = _get_url()
+SUPABASE_ANON_KEY = _get_anon_key()
 
 
 class ListsCloudSync:

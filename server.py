@@ -38,8 +38,9 @@ def get_pid_on_port(port: int) -> Optional[int]:
             if f":{port}" in line and "LISTENING" in line:
                 parts = line.split()
                 return int(parts[-1])
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Ignored exception: {e}")
     return None
 
 

@@ -36,21 +36,7 @@ except ImportError:
     keyring = None
     KEYRING_AVAILABLE = False
 
-try:
-    from genizah_core import normalize_shelfmark
-except ImportError:
-    # Fallback if genizah_core not available
-    import re
-    def normalize_shelfmark(shelfmark: str) -> str:
-        if not shelfmark:
-            return ""
-        temp = shelfmark.replace('/', '.')
-        temp = re.sub(r'(\d)\.(\d)', r'\1DOTMARKER\2', temp)
-        cleaned = re.sub(r'\W+', '', temp).casefold()
-        cleaned = cleaned.replace('dotmarker', '.')
-        if cleaned.startswith("ms"):
-            cleaned = cleaned[2:]
-        return cleaned
+from genizah_core import normalize_shelfmark
 
 logger = logging.getLogger(__name__)
 
@@ -59,24 +45,11 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # ============================================================================
 
-# Load from environment variables or use defaults
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE')
+# Credentials centralized in shared/supabase_provider.py
+from shared.supabase_provider import get_url as _get_url, get_anon_key as _get_anon_key
 
-# Try to load from .env file if not in environment
-if not SUPABASE_ANON_KEY:
-    env_file = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_file):
-        try:
-            with open(env_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('SUPABASE_ANON_KEY='):
-                        SUPABASE_ANON_KEY = line.split('=', 1)[1].strip().strip('"\'')
-                    elif line.startswith('SUPABASE_URL='):
-                        SUPABASE_URL = line.split('=', 1)[1].strip().strip('"\'')
-        except Exception as e:
-            logger.warning(f"Failed to load .env file: {e}")
+SUPABASE_URL = _get_url()
+SUPABASE_ANON_KEY = _get_anon_key()
 
 
 # ============================================================================
@@ -465,8 +438,8 @@ class SupabaseCorrectionsClient:
                 if KEYRING_AVAILABLE and email:
                     try:
                         keyring.delete_password(self.KEYRING_SERVICE, email)
-                    except Exception:
-                        pass  # Password may not exist in keyring
+                    except Exception as e:
+                        import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
             logger.info("Saved login credentials cleared")
 
@@ -510,8 +483,8 @@ class SupabaseCorrectionsClient:
         if self.cache_file.exists():
             try:
                 self.cache_file.unlink()
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     def is_server_available(self, force_check: bool = False) -> bool:
         """Check if Supabase is reachable."""
@@ -556,7 +529,7 @@ class SupabaseCorrectionsClient:
         try:
             user = client.auth.get_user()
             return user is not None and user.user is not None
-        except:
+        except Exception:
             return self.current_user is not None
 
     def login(self, email: str, password: str) -> Tuple[bool, str]:
@@ -654,15 +627,15 @@ class SupabaseCorrectionsClient:
         if client:
             try:
                 client.auth.sign_out()
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         self.current_user = None
         if self.credentials_file.exists():
             try:
                 self.credentials_file.unlink()
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     def request_password_reset(self, email: str) -> Dict[str, Any]:
         """
@@ -740,8 +713,8 @@ class SupabaseCorrectionsClient:
                 self._load_user_profile(str(auth_user.user.id))
                 self._save_credentials()
                 return self.current_user
-        except:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         return self.current_user
 
@@ -1544,7 +1517,7 @@ class SupabaseCorrectionsClient:
                 status = item.get('status', 'unknown')
                 stats[status] = stats.get(status, 0) + 1
             return stats
-        except:
+        except Exception:
             return {}
 
     def get_discovery_stats(self) -> Dict:
@@ -1560,7 +1533,7 @@ class SupabaseCorrectionsClient:
                 dtype = item.get('type', 'discovery')
                 stats[dtype] = stats.get(dtype, 0) + 1
             return stats
-        except:
+        except Exception:
             return {}
 
     # ==================== Additional Methods ====================
@@ -1724,7 +1697,7 @@ class SupabaseCorrectionsClient:
                 'corrections_count': corrections.count or 0,
                 'comments_count': comments.count or 0
             }
-        except:
+        except Exception:
             return {}
 
     def get_corrected_text(self, document_id: str, original_text: str) -> str:
@@ -1766,7 +1739,7 @@ class SupabaseCorrectionsClient:
                 reputation_score=u.get('reputation', 0),
                 _uuid=u.get('id')
             ) for u in response.data or []]
-        except:
+        except Exception:
             return []
 
     def get_join_by_id(self, join_id: int) -> Optional[FragmentJoin]:
@@ -1780,7 +1753,7 @@ class SupabaseCorrectionsClient:
             if response.data:
                 return self._parse_join(response.data)
             return None
-        except:
+        except Exception:
             return None
 
     def delete_join(self, join_id: int) -> Tuple[bool, str]:

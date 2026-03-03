@@ -118,8 +118,8 @@ def posthog_capture(event: str, properties: dict = None):
         ui.run_javascript(
             f"if(window.posthog)posthog.capture('{event}',{props_js})"
         )
-    except Exception:
-        pass  # No client connection or PostHog not loaded
+    except Exception as e:
+        import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
 
 # ============================================================================
@@ -141,8 +141,9 @@ def create_layout():
         saved_lang = app.storage.user.get('ui_language')
         if saved_lang in ('he', 'en'):
             set_language(saved_lang)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     current_page = app.storage.user.get('current_page', '/')
     rtl_mode = is_rtl()
@@ -335,8 +336,8 @@ def create_layout():
             screen_width = await ui.run_javascript('window.innerWidth')
             if screen_width and screen_width < 768:
                 main_drawer.set_value(False)
-        except Exception:
-            pass  # Silently ignore if JavaScript fails
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     # Use a short timer to run after page is fully loaded
     ui.timer(0.5, close_drawer_on_mobile, once=True)
@@ -424,8 +425,9 @@ def create_layout():
                     new_lang = 'en' if current == 'he' else 'he'
                     try:
                         app.storage.user['ui_language'] = new_lang
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).debug(f"Ignored exception: {e}")
                     set_language(new_lang)
                     ui.navigate.reload()
 

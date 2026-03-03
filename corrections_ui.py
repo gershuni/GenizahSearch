@@ -18,12 +18,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QAction, QPalette, QStandardItem, QStandardItemModel
 
+from genizah_core import normalize_shelfmark
+
 try:
-    from genizah_core import tr, CURRENT_LANG, normalize_shelfmark
+    from genizah_core import tr, CURRENT_LANG
 except ImportError:
     def tr(text): return text
     CURRENT_LANG = 'en'
-    def normalize_shelfmark(s): return s.lower().replace(' ', '') if s else ''
 
 from corrections_client import (
     CorrectionsClient, get_corrections_client,

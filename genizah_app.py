@@ -86,8 +86,8 @@ def _setup_crash_handler():
                 f.write(f"\n{'='*60}\n")
                 f.write(f"Crash at {datetime.now().isoformat()}\n")
                 f.write(''.join(traceback.format_exception(exc_type, exc_value, exc_tb)))
-        except:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         # Also print to console
         traceback.print_exception(exc_type, exc_value, exc_tb)
         # Call default handler
@@ -556,8 +556,8 @@ class UpdateProgressDialog(QDialog):
             reset_pgp_service()
             reset_fjms_service()
             reset_nli_crossref_service()
-        except Exception:
-            pass  # Best-effort — installer's CloseApplications=force is fallback
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         # Run the installer with silent mode
         # The installer will:
@@ -1857,8 +1857,8 @@ class ManuscriptViewerWidget(QWidget):
                         if image.loadFromData(data):
                             pix = QPixmap.fromImage(image)
                             signal.emit(pix, current_idx)
-            except Exception:
-                pass  # Thumbnail load failed, full image will replace it
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         # Run in background thread to avoid blocking UI
         threading.Thread(target=fetch_and_emit, daemon=True).start()
@@ -3214,8 +3214,8 @@ class ResultDialog(QDialog):
                         title_preview = ' '.join(words)
                         if len(title.split()) > 4:
                             title_preview += "..."
-                except:
-                    pass
+                except Exception as e:
+                    import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
             if is_current:
                 label = f"• {frag}"
@@ -3283,7 +3283,7 @@ class ResultDialog(QDialog):
                 self.btn_view_comments.setVisible(True)
             else:
                 self.btn_view_comments.setVisible(False)
-        except:
+        except Exception:
             self.btn_view_comments.setVisible(False)
 
         # Fetch versions and corrections using shared method
@@ -3741,8 +3741,8 @@ class ResultDialog(QDialog):
         self._rd_draft_correction_id = None
         try:
             self.text_ms.textChanged.disconnect(self._rd_on_text_changed)
-        except:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         self.text_ms.setReadOnly(True)
         self.text_ms.setStyleSheet("")
         # Hide edit action buttons
@@ -3905,8 +3905,8 @@ class ResultDialog(QDialog):
             try:
                 regex = re.compile(pattern_str, re.IGNORECASE)
                 text = regex.sub(r'*\g<0>*', text)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         return text
 
     def open_external_link(self):
@@ -3973,7 +3973,7 @@ class ResultDialog(QDialog):
             # Fallback for tag search results: get sys_id from display dict
             self.current_sys_id = data.get('display', {}).get('id', '')
         try: p = int(ids['p_num'])
-        except: p = 1
+        except Exception: p = 1
 
         # Add to Recently Viewed
         parent = self.parent()
@@ -3991,8 +3991,8 @@ class ResultDialog(QDialog):
                 # Apply Regex to clean full-text to verify highlighting on load
                 regex = re.compile(pattern_str, re.IGNORECASE)
                 ms_raw = regex.sub(r'*\g<0>*', ms_raw)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         self.text_ms.setHtml(self._htmlify(ms_raw))
         self._refresh_find_highlights()
@@ -4063,7 +4063,7 @@ class ResultDialog(QDialog):
 
             try:
                 shelfmark_display, title = self.meta_mgr.get_meta_for_id(sys_id)
-            except:
+            except Exception:
                 shelfmark_display = shelfmark
                 title = ""
 
@@ -4090,7 +4090,7 @@ class ResultDialog(QDialog):
             self.load_result_by_index(new_idx)
             return True
         except Exception as e:
-            print(f"[ERROR] load_by_shelfmark failed: {e}", flush=True)
+            logger.info(f"[ERROR] load_by_shelfmark failed: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -4108,7 +4108,7 @@ class ResultDialog(QDialog):
         if target is not None:
             # Jump by number (user typed in box)
             try: p = int(target)
-            except: p = 1
+            except Exception: p = 1
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0, allow_cross=True)
         else:
             # Relative Navigation (Next/Prev)
@@ -4176,7 +4176,7 @@ class ResultDialog(QDialog):
                 regex = re.compile(pattern_str, re.IGNORECASE)
                 highlighted_text = regex.sub(r'*\g<0>*', raw_text)
                 raw_text = highlighted_text
-            except: pass
+            except Exception as e: logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         
         self.text_ms.setHtml(self._htmlify(raw_text))
         self._refresh_find_highlights()
@@ -4209,7 +4209,7 @@ class ResultDialog(QDialog):
                     self._rd_pgp_worker.finished_signal.disconnect(self._on_rd_pgp_loaded)
                     self._rd_pgp_worker.error_signal.disconnect(self._on_rd_pgp_error)
                 except (TypeError, RuntimeError):
-                    pass
+                    import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self._rd_pgp_worker = PGPSourceWorker(self.current_sys_id, self.current_p_num or 1)
             self._rd_pgp_worker.finished_signal.connect(self._on_rd_pgp_loaded)
             self._rd_pgp_worker.error_signal.connect(self._on_rd_pgp_error)
@@ -4264,7 +4264,7 @@ class ResultDialog(QDialog):
                 try:
                     self.enrich_worker.finished_signal.disconnect(self.on_enriched_data_loaded)
                 except (TypeError, RuntimeError):
-                    pass
+                    import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self.enrich_worker = EnrichMetadataThread(self.meta_mgr, self.current_sys_id)
             self.enrich_worker.finished_signal.connect(self.on_enriched_data_loaded)
             self.enrich_worker.start()
@@ -4347,8 +4347,9 @@ class ResultDialog(QDialog):
                 fjms_svc = get_fjms_service()
                 if fjms_svc.is_available():
                     self._rd_catalog_detail = fjms_svc.get_catalog_detail(self.current_sys_id)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         if not self._rd_catalog_detail:
             return
@@ -5012,6 +5013,18 @@ class DomainFilterDialog(QDialog):
         self.tree.blockSignals(False)
         self.tree.expandAll()
 
+    def _iter_all_items(self):
+        """Yield every item in the tree with its depth level."""
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent = root.child(i)
+            yield parent, 0
+            for j in range(parent.childCount()):
+                child = parent.child(j)
+                yield child, 1
+                for k in range(child.childCount()):
+                    yield child.child(k), 2
+
     def _filter_tree(self):
         """Filter tree items by search text."""
         search_text = self.search_input.text().lower()
@@ -5066,30 +5079,16 @@ class DomainFilterDialog(QDialog):
     def _check_all(self):
         """Check all items (no filtering)."""
         self.tree.blockSignals(True)
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            parent_item.setCheckState(0, Qt.CheckState.Checked)
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                child_item.setCheckState(0, Qt.CheckState.Checked)
-                for k in range(child_item.childCount()):
-                    child_item.child(k).setCheckState(0, Qt.CheckState.Checked)
+        for item, _ in self._iter_all_items():
+            item.setCheckState(0, Qt.CheckState.Checked)
         self.tree.blockSignals(False)
         self._update_summary()
 
     def _uncheck_all(self):
         """Uncheck all items (exclude all domains)."""
         self.tree.blockSignals(True)
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            parent_item.setCheckState(0, Qt.CheckState.Unchecked)
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                child_item.setCheckState(0, Qt.CheckState.Unchecked)
-                for k in range(child_item.childCount()):
-                    child_item.child(k).setCheckState(0, Qt.CheckState.Unchecked)
+        for item, _ in self._iter_all_items():
+            item.setCheckState(0, Qt.CheckState.Unchecked)
         self.tree.blockSignals(False)
         self._update_summary()
 
@@ -5099,49 +5098,19 @@ class DomainFilterDialog(QDialog):
             return
 
         self.tree.blockSignals(True)
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            if parent_domain in self.excluded_domains:
-                parent_item.setCheckState(0, Qt.CheckState.Unchecked)
-
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
-                if child_domain in self.excluded_domains:
-                    child_item.setCheckState(0, Qt.CheckState.Unchecked)
-
-                for k in range(child_item.childCount()):
-                    sc_item = child_item.child(k)
-                    sc_domain = sc_item.data(0, Qt.ItemDataRole.UserRole)
-                    if sc_domain in self.excluded_domains:
-                        sc_item.setCheckState(0, Qt.CheckState.Unchecked)
-
+        for item, _ in self._iter_all_items():
+            domain = item.data(0, Qt.ItemDataRole.UserRole)
+            if domain in self.excluded_domains:
+                item.setCheckState(0, Qt.CheckState.Unchecked)
         self.tree.blockSignals(False)
 
     def get_excluded_domains(self):
         """Return set of excluded (unchecked) domain names."""
         excluded = set()
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            parent_item = root.child(i)
-            if parent_item.checkState(0) == Qt.CheckState.Unchecked:
-                parent_domain = parent_item.data(0, Qt.ItemDataRole.UserRole)
-                excluded.add(parent_domain)
-
-            for j in range(parent_item.childCount()):
-                child_item = parent_item.child(j)
-                if child_item.checkState(0) == Qt.CheckState.Unchecked:
-                    child_domain = child_item.data(0, Qt.ItemDataRole.UserRole)
-                    excluded.add(child_domain)
-
-                for k in range(child_item.childCount()):
-                    sc_item = child_item.child(k)
-                    if sc_item.checkState(0) == Qt.CheckState.Unchecked:
-                        sc_domain = sc_item.data(0, Qt.ItemDataRole.UserRole)
-                        excluded.add(sc_domain)
-
+        for item, _ in self._iter_all_items():
+            if item.checkState(0) == Qt.CheckState.Unchecked:
+                domain = item.data(0, Qt.ItemDataRole.UserRole)
+                excluded.add(domain)
         return excluded
 
     def _update_summary(self):
@@ -6320,11 +6289,11 @@ class TabularQueryBuilderDialog(QDialog):
             try:
                 cw['btn_add_word'].clicked.disconnect()
             except TypeError:
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             try:
                 cw['btn_remove'].clicked.disconnect()
             except TypeError:
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             cw['btn_add_word'].clicked.connect(lambda checked=False, idx=i: self._show_next_word(idx))
             cw['btn_remove'].clicked.connect(lambda checked=False, idx=i: self._remove_component(idx))
 
@@ -7022,7 +6991,7 @@ class GenizahGUI(QMainWindow):
                 self.shelf_model.appendRow(item)
         except Exception as e:
             # Parts might not be loaded yet, that's OK
-            pass
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         # 3. Setup Completer
         # Note: We use ShelfmarkCompleter which overrides splitPath to normalize input
@@ -7174,8 +7143,9 @@ class GenizahGUI(QMainWindow):
                             logger.debug(f"FJMS warmup failed: {e}")
                 self._fjms_warmup_thread = _FjmsWarmupThread(self)
                 self._fjms_warmup_thread.start()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     def _update_corner_login_state(self):
         """Update the corner login button based on login state."""
@@ -7209,7 +7179,7 @@ class GenizahGUI(QMainWindow):
                     self._catalog_populate_tree()
         except Exception as e:
             import traceback
-            print(f"Error in _on_tab_changed: {e}", flush=True)
+            logger.info(f"Error in _on_tab_changed: {e}")
             traceback.print_exc()
             sys.stdout.flush()
 
@@ -7533,8 +7503,8 @@ class GenizahGUI(QMainWindow):
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
                 page_number = self.current_browse_p
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         dialog = CreateDiscoveryDialog(
             self, self.corrections_client,
             document_id=doc_id, shelfmark=shelfmark, page_number=page_number,
@@ -7639,8 +7609,8 @@ class GenizahGUI(QMainWindow):
         self._browse_draft_correction_id = None
         try:
             self.browse_text.textChanged.disconnect(self._browse_on_text_changed)
-        except:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         # Restore to original text before editing
         original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
         self.browse_text.setPlainText(original)
@@ -7657,8 +7627,8 @@ class GenizahGUI(QMainWindow):
         self._browse_draft_correction_id = None
         try:
             self.browse_text.textChanged.disconnect(self._browse_on_text_changed)
-        except:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         self.browse_text.setReadOnly(True)
         self.browse_text.setStyleSheet("")
         self.browse_edit_bar.hide()
@@ -7691,8 +7661,8 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         # Ask for notes/reason (only for submit)
         notes = None
@@ -8038,7 +8008,7 @@ class GenizahGUI(QMainWindow):
                 self.btn_b_view_comments.setEnabled(True)
             else:
                 self.btn_b_view_comments.setVisible(False)
-        except:
+        except Exception:
             self.btn_b_view_comments.setVisible(False)
 
         # Fetch versions from API
@@ -8191,8 +8161,8 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         dialog = CommentDialog(
             self, self.corrections_client,
@@ -8213,8 +8183,8 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         dialog = CorrectionsViewerDialog(
             self, self.corrections_client,
@@ -8236,8 +8206,8 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         dialog = CommentsViewerDialog(
             self, self.corrections_client,
@@ -8257,8 +8227,8 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         if not shelfmark:
             QMessageBox.warning(self, tr("No Shelfmark"), tr("Could not determine shelfmark for this document."))
@@ -8297,8 +8267,8 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         if not shelfmark:
             return
@@ -8358,8 +8328,9 @@ class GenizahGUI(QMainWindow):
                             if self.meta_mgr:
                                 try:
                                     shelf, _ = self.meta_mgr.get_meta_for_id(alma_id)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    import logging
+                                    logging.getLogger(__name__).debug(f"Ignored exception: {e}")
                             if not shelf or shelf == 'Unknown':
                                 continue
                             valid_members.append((shelf, member))
@@ -8442,8 +8413,8 @@ class GenizahGUI(QMainWindow):
                         title_preview = ' '.join(words)
                         if len(title.split()) > 4:
                             title_preview += "..."
-                except:
-                    pass
+                except Exception as e:
+                    import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
             if frag.upper() == shelfmark.upper():
                 # Current fragment - mark but don't make clickable
@@ -8479,8 +8450,9 @@ class GenizahGUI(QMainWindow):
                     if self.meta_mgr:
                         try:
                             shelf, _ = self.meta_mgr.get_meta_for_id(alma_id)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            import logging
+                            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
                     if not shelf or shelf == 'Unknown':
                         continue
                     # Deduplicate against existing fragments
@@ -8550,8 +8522,8 @@ class GenizahGUI(QMainWindow):
         if not shelfmark and self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
-            except:
-                pass
+            except Exception as e:
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         menu = QMenu(self)
 
@@ -10314,7 +10286,7 @@ class GenizahGUI(QMainWindow):
                 self._browse_pgp_worker.finished_signal.disconnect(self._on_browse_pgp_loaded)
                 self._browse_pgp_worker.error_signal.disconnect(self._on_browse_pgp_error)
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
@@ -10815,8 +10787,9 @@ class GenizahGUI(QMainWindow):
                 fjms_svc = get_fjms_service()
                 if fjms_svc.is_available():
                     self._browse_catalog_detail = fjms_svc.get_catalog_detail(self.current_browse_sid)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self.statusBar().clearMessage()
 
         if not self._browse_catalog_detail or not self._browse_catalog_detail.get("records"):
@@ -10941,7 +10914,7 @@ class GenizahGUI(QMainWindow):
                 self._browse_pgp_worker.finished_signal.disconnect(self._on_browse_pgp_loaded)
                 self._browse_pgp_worker.error_signal.disconnect(self._on_browse_pgp_error)
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         # Start a new PGP worker for the current page
         self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
@@ -11079,7 +11052,7 @@ class GenizahGUI(QMainWindow):
                     self._browse_rd_worker.finished.disconnect()
                     self._browse_rd_worker.error.disconnect()
                 except (TypeError, RuntimeError):
-                    pass
+                    import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self._browse_rd_worker = ReadingDeskWorker(sys_ids)
             self._browse_rd_worker.finished.connect(self._browse_rd_on_sources_loaded)
             self._browse_rd_worker.error.connect(
@@ -11118,7 +11091,7 @@ class GenizahGUI(QMainWindow):
                 self._browse_rd_worker.finished.disconnect()
                 self._browse_rd_worker.error.disconnect()
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self._browse_rd_worker = None
 
         # Clean up image widgets
@@ -11206,7 +11179,7 @@ class GenizahGUI(QMainWindow):
                 self._browse_rd_worker.finished.disconnect()
                 self._browse_rd_worker.error.disconnect()
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         self._browse_rd_worker = ReadingDeskWorker([sys_id])
         self._browse_rd_worker.finished.connect(self._browse_rd_on_sources_loaded)
         self._browse_rd_worker.error.connect(
@@ -11279,8 +11252,9 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(document_id)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         if not shelfmark:
             return
@@ -11340,8 +11314,9 @@ class GenizahGUI(QMainWindow):
             doc_data = get_document_for_fragment(document_id)
             if doc_data:
                 pgpid = doc_data.get('pgpid')
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         self._browse_enter_reading_desk(fragments_info, pgpid=pgpid)
 
@@ -11611,7 +11586,7 @@ class GenizahGUI(QMainWindow):
             try:
                 self.browse_text.verticalScrollBar().valueChanged.disconnect(self._rd_text_sync_handler)
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self._rd_text_sync_handler = None
 
         if self._rd_image_sync_handler is not None:
@@ -11619,7 +11594,7 @@ class GenizahGUI(QMainWindow):
                 if self._browse_rd_image_scroll:
                     self._browse_rd_image_scroll.verticalScrollBar().valueChanged.disconnect(self._rd_image_sync_handler)
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self._rd_image_sync_handler = None
 
     def _browse_rd_setup_sync_scroll(self):
@@ -13079,8 +13054,9 @@ class GenizahGUI(QMainWindow):
                 if h:
                     self._catalog_render_tree(h, u)
                     return
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         # If we got here, caches weren't ready — clear loading indicator
         self.catalog_domain_tree.clear()
 
@@ -15511,13 +15487,13 @@ class GenizahGUI(QMainWindow):
             self._update_community_header()
             logger.debug("_update_community_header completed")
         except Exception as e:
-            print(f"Error in _update_community_header: {e}", flush=True)
+            logger.info(f"Error in _update_community_header: {e}")
         try:
             logger.debug("Calling _refresh_discoveries_panel...")
             self._refresh_discoveries_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_discoveries_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_discoveries_panel: {e}", flush=True)
+            logger.info(f"Error in _refresh_discoveries_panel: {e}")
             import traceback
             traceback.print_exc()
         try:
@@ -15525,19 +15501,19 @@ class GenizahGUI(QMainWindow):
             self._refresh_corrections_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_corrections_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_corrections_panel: {e}", flush=True)
+            logger.info(f"Error in _refresh_corrections_panel: {e}")
         try:
             logger.debug("Calling _refresh_comments_panel...")
             self._refresh_comments_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_comments_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_comments_panel: {e}", flush=True)
+            logger.info(f"Error in _refresh_comments_panel: {e}")
         try:
             logger.debug("Calling _refresh_joins_panel...")
             self._refresh_joins_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_joins_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_joins_panel: {e}", flush=True)
+            logger.info(f"Error in _refresh_joins_panel: {e}")
         logger.debug("_refresh_community_panels finished")
 
     def _update_community_header(self):
@@ -16424,8 +16400,9 @@ class GenizahGUI(QMainWindow):
             ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, 0, buf)
             if buf.value:
                 documents_folder = buf.value
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         # Fallback: try common locations
         if not documents_folder or not os.path.isdir(documents_folder):
@@ -16802,7 +16779,7 @@ class GenizahGUI(QMainWindow):
                     combo_idx = modes.index(target_mode)
                     self.mode_combo.setCurrentIndex(combo_idx)
                 except ValueError:
-                    pass
+                    import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
                 break
         self._update_variant_count_preview()
 
@@ -17276,7 +17253,7 @@ class GenizahGUI(QMainWindow):
                 self.mode_combo.setCurrentIndex(combo_idx)
                 query = clean_query
             except ValueError:
-                pass # Mode not found in UI list
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}") # Mode not found in UI list
 
         mode_idx = self.mode_combo.currentIndex()
         # Map combo index to mode string (Responsa uses 'exact' as base mode)
@@ -17575,8 +17552,8 @@ class GenizahGUI(QMainWindow):
             fwi.uCount = 3
             fwi.dwTimeout = 0
             ctypes.windll.user32.FlashWindowEx(ctypes.byref(fwi))
-        except Exception:
-            pass  # Silently fail -- notification is non-critical
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     def on_search_finished(self, results):
         self.reset_ui()
@@ -18165,13 +18142,13 @@ class GenizahGUI(QMainWindow):
             try:
                 self.shelfmark_items_by_sid[sid].setText(shelf)
             except RuntimeError:
-                pass # Item deleted
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}") # Item deleted
 
         if sid in self.title_items_by_sid:
             try:
                 self.title_items_by_sid[sid].setText(title)
             except RuntimeError:
-                pass # Item deleted
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}") # Item deleted
 
         if not hasattr(self, '_res_map_by_sid'):
             self._res_map_by_sid = {r['display']['id']: r for r in self.last_results} # Lazy build or build in search_finished
@@ -19989,9 +19966,9 @@ class GenizahGUI(QMainWindow):
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
                 # Disconnect signals to prevent race conditions during stop
                 try: self.group_thread.finished_signal.disconnect()
-                except: pass
+                except Exception as e: logging.getLogger(__name__).debug(f"Ignored exception: {e}")
                 try: self.group_thread.error_signal.disconnect()
-                except: pass
+                except Exception as e: logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
                 self.group_thread.requestInterruption()
                 self.group_thread.wait()
@@ -20531,7 +20508,7 @@ class GenizahGUI(QMainWindow):
                 if node.treeWidget():
                     self._apply_comp_node_previews(node)
             except RuntimeError:
-                pass # Node deleted
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}") # Node deleted
             count += 1
 
         if self.snippet_queue:
@@ -20605,8 +20582,9 @@ class GenizahGUI(QMainWindow):
                 # Only apply if not already highlighted (simple check)
                 if '*' not in source_text:
                     source_text = regex.sub(r'*\g<0>*', source_text)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         match = re.search(r'\*(.*?)\*', source_text or "")
         anchor = match.group(1) if match else None
@@ -21631,7 +21609,7 @@ class GenizahGUI(QMainWindow):
                 target_item = item.child(0)
             else:
                 # Single-page: The manuscript node IS the target
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
         # Helper to process a page node or a single-page manuscript/part
         def process_page_data(node_data, node_ref):
@@ -21981,7 +21959,7 @@ class GenizahGUI(QMainWindow):
             try:
                 self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
         self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
         self.enrich_browse_worker.start()
@@ -22139,7 +22117,7 @@ class GenizahGUI(QMainWindow):
             try:
                 self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
             except (TypeError, RuntimeError):
-                pass
+                import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, target_sid_for_enrich)
         self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
         self.enrich_browse_worker.start()
@@ -22152,7 +22130,7 @@ class GenizahGUI(QMainWindow):
         p_arg = None
         if self.current_browse_p is not None:
             try: p_arg = int(self.current_browse_p)
-            except: p_arg = 0
+            except Exception: p_arg = 0
 
         page_data = self.searcher.get_browse_page(
             self.current_browse_sid, 
@@ -22187,7 +22165,7 @@ class GenizahGUI(QMainWindow):
                 try:
                     self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
                 except (TypeError, RuntimeError):
-                    pass
+                    import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
             self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
             self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
             self.enrich_browse_worker.start()
@@ -22230,8 +22208,9 @@ class GenizahGUI(QMainWindow):
             try:
                 regex = re.compile(self.browse_highlight_pattern, re.IGNORECASE)
                 page_text = regex.sub(r'*\g<0>*', page_text)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         browse_html_text = page_text.replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())

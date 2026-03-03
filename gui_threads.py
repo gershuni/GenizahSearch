@@ -15,8 +15,9 @@ def _prevent_sleep():
             ES_CONTINUOUS = 0x80000000
             ES_SYSTEM_REQUIRED = 0x00000001
             ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
 
 def _allow_sleep():
@@ -25,8 +26,9 @@ def _allow_sleep():
         try:
             ES_CONTINUOUS = 0x80000000
             ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
 class IndexerThread(QThread):
     """Build or refresh the index without blocking the UI."""
@@ -476,8 +478,8 @@ class UpdateDownloaderThread(QThread):
                         try:
                             import os
                             os.remove(self.target_path)
-                        except:
-                            pass
+                        except Exception as e:
+                            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
                         self.finished_signal.emit(False, "Download cancelled")
                         return
 
@@ -769,8 +771,8 @@ class SidecarUpdateThread(QThread):
             if updates:
                 self.update_available.emit(updates)
 
-        except Exception:
-            pass  # Silent failure -- this is a background convenience check
+        except Exception as e:
+            import logging; logging.getLogger(__name__).debug(f"Ignored exception: {e}")
 
     def _get_local_version(self, sidecar_name, service_info):
         """Get local sidecar version from the service singleton."""
@@ -781,8 +783,9 @@ class SidecarUpdateThread(QThread):
             svc = getattr(mod, factory_name)()
             if svc.is_available():
                 return svc.get_version()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Ignored exception: {e}")
         return None
 
     @staticmethod

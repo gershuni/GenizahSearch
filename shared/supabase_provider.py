@@ -25,6 +25,16 @@ SUPABASE_ANON_KEY = os.environ.get(
 _client: Optional[Client] = None
 
 
+def get_url() -> str:
+    """Return the Supabase project URL."""
+    return SUPABASE_URL
+
+
+def get_anon_key() -> str:
+    """Return the Supabase anonymous key."""
+    return SUPABASE_ANON_KEY
+
+
 def get_client() -> Client:
     """Get or create the Supabase client singleton."""
     global _client
