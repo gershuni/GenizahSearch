@@ -26,11 +26,14 @@ from web.components.translate_button import create_translatable_text
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
+import logging
 import re
 import html
 import asyncio
 import time
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -92,7 +95,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     search_state = SearchUIState()
 
     # Restore domain exclusions from storage
-    search_state.domain_exclusions = set(app.storage.user.get('domain_exclusions', []))
+    _de = app.storage.user.get('domain_exclusions')
+    search_state.domain_exclusions = set(_de) if _de is not None else set()
 
     # Restore printed_filter from storage
     search_state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
@@ -140,19 +144,27 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _legacy_domain = app.storage.user.get('search_filter_domain', None)
         _legacy_author = app.storage.user.get('search_filter_author', None)
         _legacy_work = app.storage.user.get('search_filter_work', None)
-        search_state.filter_domains = app.storage.user.get('search_filter_domains', [_legacy_domain] if _legacy_domain else [])
-        search_state.filter_authors = app.storage.user.get('search_filter_authors', [_legacy_author] if _legacy_author else [])
-        search_state.filter_works = app.storage.user.get('search_filter_works', [_legacy_work] if _legacy_work else [])
+        _fd = app.storage.user.get('search_filter_domains')
+        search_state.filter_domains = _fd if _fd is not None else ([_legacy_domain] if _legacy_domain else [])
+        _fa = app.storage.user.get('search_filter_authors')
+        search_state.filter_authors = _fa if _fa is not None else ([_legacy_author] if _legacy_author else [])
+        _fw = app.storage.user.get('search_filter_works')
+        search_state.filter_works = _fw if _fw is not None else ([_legacy_work] if _legacy_work else [])
         search_state.filter_include_mode = app.storage.user.get('search_filter_include_mode', True)
         search_state.filter_date_from = app.storage.user.get('search_filter_date_from', None)
         search_state.filter_date_to = app.storage.user.get('search_filter_date_to', None)
-        search_state.filter_material_exclude = app.storage.user.get('search_filter_material_exclude', [])
-        search_state.filter_text_all = app.storage.user.get('search_filter_text_all', [])
-        search_state.filter_text_any = app.storage.user.get('search_filter_text_any', [])
-        search_state.filter_text_not = app.storage.user.get('search_filter_text_not', [])
+        _fme = app.storage.user.get('search_filter_material_exclude')
+        search_state.filter_material_exclude = _fme if _fme is not None else []
+        _fta = app.storage.user.get('search_filter_text_all')
+        search_state.filter_text_all = _fta if _fta is not None else []
+        _ftany = app.storage.user.get('search_filter_text_any')
+        search_state.filter_text_any = _ftany if _ftany is not None else []
+        _ftn = app.storage.user.get('search_filter_text_not')
+        search_state.filter_text_not = _ftn if _ftn is not None else []
 
     # Restore word search excluded ids from session
-    search_state.word_search_excluded_ids = set(app.storage.user.get('word_search_excluded_ids', []))
+    _wse = app.storage.user.get('word_search_excluded_ids')
+    search_state.word_search_excluded_ids = set(_wse) if _wse is not None else set()
 
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
@@ -389,19 +401,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     </style>
     '''
 
-    # Restore previous results
+    # Restore previous results (transcription lookup deferred to after UI renders)
     if 'search_results' in app.storage.user:
         try:
-            search_state.results = app.storage.user.get('search_results', [])
-            # Also restore transcription indicators for saved results
-            if search_state.results:
-                result_sys_ids = [
-                    r.get('display', {}).get('id')
-                    for r in search_state.results
-                    if r.get('display', {}).get('id')
-                ]
-                if result_sys_ids:
-                    search_state.transcription_sys_ids = get_sys_ids_with_transcriptions(result_sys_ids)
+            _sr = app.storage.user.get('search_results')
+            search_state.results = _sr if _sr is not None else []
         except Exception:
             pass
 
@@ -716,6 +720,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ).classes('h-10 px-4').style('display: none;').props('outline color=red')
                         stop_btn.tooltip(tr('Stops the search and shows partial results'))
 
+                    # New Search (reset) button
+                    with ui.column().classes('items-center gap-0'):
+                        ui.button(icon='restart_alt', on_click=lambda: _reset_search()).props(
+                            'flat dense round'
+                        ).tooltip(tr('New Search'))
+
                     # Search History Button + Menu
                     with ui.column().classes('items-center gap-0'):
                         history_btn = ui.button(icon='history', on_click=lambda: (
@@ -900,7 +910,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             fjms = get_fjms_service(thread_safe=True)
             if not fjms.is_available():
                 return {}
-            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
+            _first_domain = domain[0] if isinstance(domain, list) and domain else (domain or None)
             authors = fjms.get_browse_authors(domain=_first_domain)
             options = {}
             for a in authors:
@@ -922,8 +932,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             fjms = get_fjms_service(thread_safe=True)
             if not fjms.is_available():
                 return {}
-            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
-            _first_author = author[0] if isinstance(author, list) and author else author
+            _first_domain = domain[0] if isinstance(domain, list) and domain else (domain or None)
+            _first_author = author[0] if isinstance(author, list) and author else (author or None)
             works = fjms.get_browse_works(domain=_first_domain, author=_first_author)
             options = {}
             for w in works:
@@ -951,12 +961,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _filter_refs['mode'] = filter_mode_toggle
 
                 with ui.row().classes('w-full gap-4 flex-wrap items-end'):
-                    # Domain filter (multi-select)
+                    # Domain filter (multi-select) — options loaded asynchronously after page renders
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Domain')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-                        domain_options = _build_domain_options()
                         domain_select = ui.select(
-                            options=domain_options,
+                            options={},
                             value=search_state.filter_domains,
                             multiple=True,
                             with_input=True,
@@ -964,12 +973,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['domain'] = domain_select
 
-                    # Author filter (multi-select)
+                    # Author filter (multi-select) — options loaded asynchronously after page renders
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Author')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-                        author_options = _build_author_options(domain=search_state.filter_domains)
                         author_select = ui.select(
-                            options=author_options,
+                            options={},
                             value=search_state.filter_authors,
                             multiple=True,
                             with_input=True,
@@ -977,15 +985,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['author'] = author_select
 
-                    # Work filter (multi-select)
+                    # Work filter (multi-select) — options loaded asynchronously after page renders
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Work')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-                        work_options = _build_work_options(
-                            domain=search_state.filter_domains,
-                            author=search_state.filter_authors
-                        )
                         work_select = ui.select(
-                            options=work_options,
+                            options={},
                             value=search_state.filter_works,
                             multiple=True,
                             with_input=True,
@@ -1044,13 +1048,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             exclude_printed_cb.value = False
                             if _filter_refs.get('text_input'):
                                 _filter_refs['text_input'].value = ''
-                            for k in ['search_filter_domains', 'search_filter_authors',
-                                      'search_filter_works', 'search_filter_include_mode',
-                                      'search_filter_date_from', 'search_filter_date_to',
-                                      'search_filter_material_exclude',
-                                      'search_filter_text_all', 'search_filter_text_any',
-                                      'search_filter_text_not']:
-                                _persist(k, None)
+                            # Reset filter storage to clean defaults
+                            app.storage.user['search_filter_domains'] = []
+                            app.storage.user['search_filter_authors'] = []
+                            app.storage.user['search_filter_works'] = []
+                            app.storage.user['search_filter_include_mode'] = True
+                            app.storage.user['search_filter_date_from'] = None
+                            app.storage.user['search_filter_date_to'] = None
+                            app.storage.user['search_filter_material_exclude'] = []
+                            app.storage.user['search_filter_text_all'] = []
+                            app.storage.user['search_filter_text_any'] = []
+                            app.storage.user['search_filter_text_not'] = []
                             _update_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',
@@ -1244,8 +1252,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_domains = []
                 domain_select.value = search_state.filter_domains
                 _persist('search_filter_domains', search_state.filter_domains)
-                _refresh_author_options()
-                _refresh_work_options()
+                asyncio.ensure_future(_refresh_author_options())
+                asyncio.ensure_future(_refresh_work_options())
             elif filter_type == 'author':
                 if value and value in search_state.filter_authors:
                     search_state.filter_authors.remove(value)
@@ -1253,7 +1261,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_authors = []
                 author_select.value = search_state.filter_authors
                 _persist('search_filter_authors', search_state.filter_authors)
-                _refresh_work_options()
+                asyncio.ensure_future(_refresh_work_options())
             elif filter_type == 'work':
                 if value and value in search_state.filter_works:
                     search_state.filter_works.remove(value)
@@ -1276,18 +1284,31 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
-        def _refresh_author_options():
-            """Refresh author select options based on current domain filter."""
-            new_opts = _build_author_options(domain=search_state.filter_domains)
+        _filter_refresh_seq = {'author': 0, 'work': 0}
+
+        async def _refresh_author_options():
+            """Refresh author select options based on current domain filter (async)."""
+            _filter_refresh_seq['author'] += 1
+            seq = _filter_refresh_seq['author']
+            author_select.props('loading')
+            new_opts = await run.io_bound(_build_author_options, search_state.filter_domains)
+            if _filter_refresh_seq['author'] != seq:
+                return  # Stale -- newer request in flight
+            author_select.props(remove='loading')
             author_select.options = new_opts
             author_select.update()
 
-        def _refresh_work_options():
-            """Refresh work select options based on current domain and author filters."""
-            new_opts = _build_work_options(
-                domain=search_state.filter_domains,
-                author=search_state.filter_authors
+        async def _refresh_work_options():
+            """Refresh work select options based on current domain and author filters (async)."""
+            _filter_refresh_seq['work'] += 1
+            seq = _filter_refresh_seq['work']
+            work_select.props('loading')
+            new_opts = await run.io_bound(
+                _build_work_options, search_state.filter_domains, search_state.filter_authors
             )
+            if _filter_refresh_seq['work'] != seq:
+                return  # Stale -- newer request in flight
+            work_select.props(remove='loading')
             work_select.options = new_opts
             work_select.update()
 
@@ -1340,8 +1361,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             val = domain_select.value or []
             search_state.filter_domains = val if isinstance(val, list) else [val] if val else []
             _persist('search_filter_domains', search_state.filter_domains)
-            _refresh_author_options()
-            _refresh_work_options()
+            asyncio.ensure_future(_refresh_author_options())
+            asyncio.ensure_future(_refresh_work_options())
             asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
@@ -1349,7 +1370,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             val = author_select.value or []
             search_state.filter_authors = val if isinstance(val, list) else [val] if val else []
             _persist('search_filter_authors', search_state.filter_authors)
-            _refresh_work_options()
+            asyncio.ensure_future(_refresh_work_options())
             asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
 
@@ -1734,6 +1755,59 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results(search_state.results, page=0)
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
             ui.notify(tr('Filters cleared'), type='info')
+
+    # === Reset Search ===
+
+    def _reset_search():
+        """Reset all search state, clear results, filters, exclusions, and persistent storage."""
+        # Clear query input
+        query_input.value = ''
+        # Reset mode to exact
+        mode_select.value = 'exact'
+        # Clear results
+        search_state.results = []
+        search_state.displayed_results = []
+        search_state.selected_indices.clear()
+        search_state.transcription_sys_ids = set()
+        search_state.total_count = 0
+        search_state.current_page = 0
+        search_state.result_domains = {}
+        search_state.all_result_domains = {}
+        search_state.has_domain_data = False
+        search_state.domain_name_map = {}
+        search_state.catalog_source_counts = {}
+        search_state.printed_ids = set()
+        search_state.domain_excluded_results = []
+        search_state.word_search_excluded_results = []
+        # Clear domain exclusions
+        search_state.domain_exclusions = set()
+        # Clear word search exclusions
+        search_state.word_search_excluded_ids = set()
+        # Reset printed filter
+        search_state.printed_filter = 'all'
+        # Clear pre-search filters
+        _clear_all_adv_filters()
+        # Clear post-search filters
+        clear_filters()
+        # Clear results container
+        results_container.clear()
+        with results_container:
+            with ui.column().classes('w-full h-64 items-center justify-center'):
+                ui.icon('search').classes('text-6xl').style('color: var(--text-muted);')
+                ui.label(tr('Enter a search query')).classes('mt-4').style('color: var(--text-muted);')
+        # Reset results count label
+        results_count.text = tr('Results')
+        # Hide domain filter and printed filter buttons
+        _set_btn_visible(domain_filter_btn, False)
+        _set_btn_visible(printed_filter_btn, False)
+        # Reset persistent storage to clean defaults (use explicit values, not None or pop)
+        app.storage.user['search_results'] = []
+        app.storage.user['search_query'] = ''
+        app.storage.user['search_mode'] = 'exact'
+        app.storage.user['domain_exclusions'] = []
+        app.storage.user['search_printed_filter'] = 'all'
+        app.storage.user['word_search_excluded_ids'] = []
+        ui.notify(tr('Search reset'), type='info', timeout=2000)
 
     # === Bulk Operations ===
 
@@ -3167,12 +3241,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             except ValueError as e:
                 # Explosion guard or other validation error — surface to user
                 error_msg = str(e)
-                print(f"Search Validation Error: {error_msg}")
+                logger.error(f"Search Validation Error: {error_msg}")
                 return {'error': error_msg}
             except Exception as e:
-                print(f"Search Error: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.exception(f"Search Error: {e}")
                 return []
 
         results = await run.io_bound(run_core_search)
@@ -4156,7 +4228,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'pgpid': pgpid
                             }
                 except Exception as pgp_err:
-                    print(f"Advanced View: Failed to fetch PGP transcription: {pgp_err}")
+                    logger.error(f"Advanced View: Failed to fetch PGP transcription: {pgp_err}")
 
             # Extract FL ID
             fl_id = adv_state.current_fl_id
@@ -5260,3 +5332,35 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
         render_results(search_state.results, page=0)
         ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
+
+    # --- Deferred initialization (runs after UI renders) ---
+
+    async def _deferred_filter_init():
+        """Load filter select options asynchronously after page renders."""
+        d = await run.io_bound(_build_domain_options)
+        domain_select.options = d
+        domain_select.update()
+        a = await run.io_bound(_build_author_options, search_state.filter_domains)
+        author_select.options = a
+        author_select.update()
+        w = await run.io_bound(_build_work_options, search_state.filter_domains, search_state.filter_authors)
+        work_select.options = w
+        work_select.update()
+
+    ui.timer(0.1, _deferred_filter_init, once=True)
+
+    async def _deferred_transcription_restore():
+        """Restore transcription indicators for saved results asynchronously."""
+        if search_state.results:
+            sys_ids = [
+                r.get('display', {}).get('id')
+                for r in search_state.results
+                if r.get('display', {}).get('id')
+            ]
+            if sys_ids:
+                search_state.transcription_sys_ids = await run.io_bound(
+                    get_sys_ids_with_transcriptions, sys_ids
+                )
+                render_results(search_state.results, page=search_state.current_page)
+
+    ui.timer(0.2, _deferred_transcription_restore, once=True)

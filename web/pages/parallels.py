@@ -8,6 +8,8 @@ Find parallel texts in the Genizah corpus using:
 - Advanced filtering options
 """
 
+import logging
+
 from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, get_language
@@ -20,6 +22,8 @@ import time
 import requests
 from datetime import datetime
 from web.components.typography import h1, h2, h3, h4
+
+logger = logging.getLogger(__name__)
 
 # Import Sefaria sources and text cleaning from the shared sefaria_utils module (no PyQt6 dependency)
 from sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
@@ -131,9 +135,9 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
                     pass
                 return cleaned
     except requests.Timeout:
-        print(f"Timeout fetching {ref}")
+        logger.error(f"Timeout fetching {ref}")
     except Exception as e:
-        print(f"Error fetching {ref}: {e}")
+        logger.error(f"Error fetching {ref}: {e}")
 
     return ""
 
@@ -221,19 +225,27 @@ def create_parallels_page(initial_text: str = None):
         _legacy_domain = app.storage.user.get('parallels_filter_domain', None)
         _legacy_author = app.storage.user.get('parallels_filter_author', None)
         _legacy_work = app.storage.user.get('parallels_filter_work', None)
-        p_state.filter_domains = app.storage.user.get('parallels_filter_domains', [_legacy_domain] if _legacy_domain else [])
-        p_state.filter_authors = app.storage.user.get('parallels_filter_authors', [_legacy_author] if _legacy_author else [])
-        p_state.filter_works = app.storage.user.get('parallels_filter_works', [_legacy_work] if _legacy_work else [])
+        _fd = app.storage.user.get('parallels_filter_domains')
+        p_state.filter_domains = _fd if _fd is not None else ([_legacy_domain] if _legacy_domain else [])
+        _fa = app.storage.user.get('parallels_filter_authors')
+        p_state.filter_authors = _fa if _fa is not None else ([_legacy_author] if _legacy_author else [])
+        _fw = app.storage.user.get('parallels_filter_works')
+        p_state.filter_works = _fw if _fw is not None else ([_legacy_work] if _legacy_work else [])
         p_state.filter_include_mode = app.storage.user.get('parallels_filter_include_mode', True)
         p_state.filter_date_from = app.storage.user.get('parallels_filter_date_from', None)
         p_state.filter_date_to = app.storage.user.get('parallels_filter_date_to', None)
-        p_state.filter_material_exclude = app.storage.user.get('parallels_filter_material_exclude', [])
-        p_state.filter_text_all = app.storage.user.get('parallels_filter_text_all', [])
-        p_state.filter_text_any = app.storage.user.get('parallels_filter_text_any', [])
-        p_state.filter_text_not = app.storage.user.get('parallels_filter_text_not', [])
+        _fme = app.storage.user.get('parallels_filter_material_exclude')
+        p_state.filter_material_exclude = _fme if _fme is not None else []
+        _fta = app.storage.user.get('parallels_filter_text_all')
+        p_state.filter_text_all = _fta if _fta is not None else []
+        _ftany = app.storage.user.get('parallels_filter_text_any')
+        p_state.filter_text_any = _ftany if _ftany is not None else []
+        _ftn = app.storage.user.get('parallels_filter_text_not')
+        p_state.filter_text_not = _ftn if _ftn is not None else []
 
     # Restore per-manuscript exclusions from session
-    p_state.excluded_manuscript_ids = set(app.storage.user.get('parallels_excluded_manuscript_ids', []))
+    _emi = app.storage.user.get('parallels_excluded_manuscript_ids')
+    p_state.excluded_manuscript_ids = set(_emi) if _emi is not None else set()
 
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
@@ -250,7 +262,8 @@ def create_parallels_page(initial_text: str = None):
         ])
 
     # Restore domain exclusions for parallels
-    p_state.domain_exclusions = set(app.storage.user.get('parallels_domain_exclusions', []))
+    _pde = app.storage.user.get('parallels_domain_exclusions')
+    p_state.domain_exclusions = set(_pde) if _pde is not None else set()
 
     # Restore previous results
     if 'parallels_results' in app.storage.user:
@@ -689,12 +702,17 @@ def create_parallels_page(initial_text: str = None):
 
                     ui.separator().classes('my-2')
 
-                    # Run Button
-                    run_btn = ui.button(
-                        tr('Find Parallels'),
-                        icon='compare_arrows',
-                        on_click=lambda: execute_parallels()
-                    ).classes('btn-primary w-full')
+                    # Run Button + New Search Reset
+                    with ui.row().classes('w-full items-center gap-2'):
+                        run_btn = ui.button(
+                            tr('Find Parallels'),
+                            icon='compare_arrows',
+                            on_click=lambda: execute_parallels()
+                        ).classes('btn-primary flex-grow')
+
+                        ui.button(icon='restart_alt', on_click=lambda: _reset_parallels()).props(
+                            'flat dense round'
+                        ).tooltip(tr('New Composition Search'))
 
                     # Stop Button (hidden by default) - shows partial results
                     with ui.column().classes('w-full items-center gap-0').style('display: none;') as cancel_btn:
@@ -782,9 +800,8 @@ def create_parallels_page(initial_text: str = None):
                                     options[child_name] = c_display
                             return options
 
-                        domain_options = _build_domain_options()
                         p_domain_select = ui.select(
-                            options=domain_options,
+                            options={},
                             value=p_state.filter_domains,
                             multiple=True,
                             with_input=True,
@@ -792,7 +809,7 @@ def create_parallels_page(initial_text: str = None):
                         ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['domain'] = p_domain_select
 
-                    # Author filter (multi-select)
+                    # Author filter (multi-select) — options loaded asynchronously after page renders
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Author')).classes('text-xs font-medium').style('color: var(--text-secondary);')
 
@@ -802,7 +819,7 @@ def create_parallels_page(initial_text: str = None):
                             fjms = get_fjms_service(thread_safe=True)
                             if not fjms.is_available():
                                 return {}
-                            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
+                            _first_domain = domain[0] if isinstance(domain, list) and domain else (domain or None)
                             authors = fjms.get_browse_authors(domain=_first_domain)
                             options = {}
                             for a in authors:
@@ -818,9 +835,8 @@ def create_parallels_page(initial_text: str = None):
                                 options[key] = display
                             return options
 
-                        author_options = _build_author_options(domain=p_state.filter_domains)
                         p_author_select = ui.select(
-                            options=author_options,
+                            options={},
                             value=p_state.filter_authors,
                             multiple=True,
                             with_input=True,
@@ -828,7 +844,7 @@ def create_parallels_page(initial_text: str = None):
                         ).classes('w-full').props('outlined dense use-chips')
                         _filter_refs['author'] = p_author_select
 
-                    # Work filter (multi-select)
+                    # Work filter (multi-select) — options loaded asynchronously after page renders
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Work')).classes('text-xs font-medium').style('color: var(--text-secondary);')
 
@@ -838,8 +854,8 @@ def create_parallels_page(initial_text: str = None):
                             fjms = get_fjms_service(thread_safe=True)
                             if not fjms.is_available():
                                 return {}
-                            _first_domain = domain[0] if isinstance(domain, list) and domain else domain
-                            _first_author = author[0] if isinstance(author, list) and author else author
+                            _first_domain = domain[0] if isinstance(domain, list) and domain else (domain or None)
+                            _first_author = author[0] if isinstance(author, list) and author else (author or None)
                             works = fjms.get_browse_works(domain=_first_domain, author=_first_author)
                             options = {}
                             for w in works:
@@ -855,12 +871,8 @@ def create_parallels_page(initial_text: str = None):
                                 options[key] = display
                             return options
 
-                        work_options = _build_work_options(
-                            domain=p_state.filter_domains,
-                            author=p_state.filter_authors
-                        )
                         p_work_select = ui.select(
-                            options=work_options,
+                            options={},
                             value=p_state.filter_works,
                             multiple=True,
                             with_input=True,
@@ -944,14 +956,17 @@ def create_parallels_page(initial_text: str = None):
                             p_exclude_printed_cb.value = False
                             if _filter_refs.get('text_input'):
                                 _filter_refs['text_input'].value = ''
-                            # Clear storage
-                            for k in ['parallels_filter_domains', 'parallels_filter_authors',
-                                      'parallels_filter_works', 'parallels_filter_include_mode',
-                                      'parallels_filter_date_from', 'parallels_filter_date_to',
-                                      'parallels_filter_material_exclude',
-                                      'parallels_filter_text_all', 'parallels_filter_text_any',
-                                      'parallels_filter_text_not']:
-                                _persist(k, None)
+                            # Reset filter storage to clean defaults
+                            app.storage.user['parallels_filter_domains'] = []
+                            app.storage.user['parallels_filter_authors'] = []
+                            app.storage.user['parallels_filter_works'] = []
+                            app.storage.user['parallels_filter_include_mode'] = True
+                            app.storage.user['parallels_filter_date_from'] = None
+                            app.storage.user['parallels_filter_date_to'] = None
+                            app.storage.user['parallels_filter_material_exclude'] = []
+                            app.storage.user['parallels_filter_text_all'] = []
+                            app.storage.user['parallels_filter_text_any'] = []
+                            app.storage.user['parallels_filter_text_not'] = []
                             _update_p_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',
@@ -1152,8 +1167,8 @@ def create_parallels_page(initial_text: str = None):
                     p_state.filter_domains = []
                 p_domain_select.value = p_state.filter_domains
                 _persist('parallels_filter_domains', p_state.filter_domains)
-                _refresh_p_author_options()
-                _refresh_p_work_options()
+                asyncio.ensure_future(_refresh_p_author_options())
+                asyncio.ensure_future(_refresh_p_work_options())
             elif filter_type == 'author':
                 if value and value in p_state.filter_authors:
                     p_state.filter_authors.remove(value)
@@ -1161,7 +1176,7 @@ def create_parallels_page(initial_text: str = None):
                     p_state.filter_authors = []
                 p_author_select.value = p_state.filter_authors
                 _persist('parallels_filter_authors', p_state.filter_authors)
-                _refresh_p_work_options()
+                asyncio.ensure_future(_refresh_p_work_options())
             elif filter_type == 'work':
                 if value and value in p_state.filter_works:
                     p_state.filter_works.remove(value)
@@ -1184,18 +1199,31 @@ def create_parallels_page(initial_text: str = None):
             asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
-        def _refresh_p_author_options():
-            """Refresh author select options based on current domain filter."""
-            new_opts = _build_author_options(domain=p_state.filter_domains)
+        _p_filter_refresh_seq = {'author': 0, 'work': 0}
+
+        async def _refresh_p_author_options():
+            """Refresh author select options based on current domain filter (async)."""
+            _p_filter_refresh_seq['author'] += 1
+            seq = _p_filter_refresh_seq['author']
+            p_author_select.props('loading')
+            new_opts = await run.io_bound(_build_author_options, p_state.filter_domains)
+            if _p_filter_refresh_seq['author'] != seq:
+                return  # Stale -- newer request in flight
+            p_author_select.props(remove='loading')
             p_author_select.options = new_opts
             p_author_select.update()
 
-        def _refresh_p_work_options():
-            """Refresh work select options based on current domain and author filters."""
-            new_opts = _build_work_options(
-                domain=p_state.filter_domains,
-                author=p_state.filter_authors
+        async def _refresh_p_work_options():
+            """Refresh work select options based on current domain and author filters (async)."""
+            _p_filter_refresh_seq['work'] += 1
+            seq = _p_filter_refresh_seq['work']
+            p_work_select.props('loading')
+            new_opts = await run.io_bound(
+                _build_work_options, p_state.filter_domains, p_state.filter_authors
             )
+            if _p_filter_refresh_seq['work'] != seq:
+                return  # Stale -- newer request in flight
+            p_work_select.props(remove='loading')
             p_work_select.options = new_opts
             p_work_select.update()
 
@@ -1248,8 +1276,8 @@ def create_parallels_page(initial_text: str = None):
             val = p_domain_select.value or []
             p_state.filter_domains = val if isinstance(val, list) else [val] if val else []
             _persist('parallels_filter_domains', p_state.filter_domains)
-            _refresh_p_author_options()
-            _refresh_p_work_options()
+            asyncio.ensure_future(_refresh_p_author_options())
+            asyncio.ensure_future(_refresh_p_work_options())
             asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
@@ -1257,7 +1285,7 @@ def create_parallels_page(initial_text: str = None):
             val = p_author_select.value or []
             p_state.filter_authors = val if isinstance(val, list) else [val] if val else []
             _persist('parallels_filter_authors', p_state.filter_authors)
-            _refresh_p_work_options()
+            asyncio.ensure_future(_refresh_p_work_options())
             asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
@@ -2114,6 +2142,44 @@ def create_parallels_page(initial_text: str = None):
         ui.notify(tr('Composition restored from history'), type='info', timeout=2000)
         comp_history_menu.close()
 
+    def _reset_parallels():
+        """Reset all composition search state, clear results, filters, exclusions, and persistent storage."""
+        # Clear source text
+        text_input.value = ''
+        # Clear results
+        p_state.results = []
+        p_state.filtered_results = []
+        p_state.domain_exclusions = set()
+        p_state.excluded_manuscript_ids = set()
+        p_state.printed_ids = set()
+        p_state.is_running = False
+        p_state.is_cancelled = False
+        p_state.progress = 0
+        p_state.chunks_processed = 0
+        p_state.chunks_total = 0
+        # Clear pre-search filters
+        _clear_all_p_adv_filters()
+        # Clear results container
+        results_container.clear()
+        with results_container:
+            with ui.column().classes('w-full h-64 items-center justify-center'):
+                ui.icon('compare_arrows').classes('text-6xl').style('color: var(--text-muted);')
+                ui.label(tr('Enter text to search for parallels')).classes('mt-4').style('color: var(--text-muted);')
+        # Reset results header
+        results_header.text = tr('Results')
+        # Reset summary label
+        summary_label.text = ''
+        # Reset persistent storage to clean defaults
+        app.storage.user['parallels_results'] = []
+        app.storage.user['parallels_filtered'] = []
+        app.storage.user['parallels_source_text'] = ''
+        app.storage.user['parallels_domain_exclusions'] = []
+        app.storage.user['parallels_excluded_manuscript_ids'] = []
+        # Also clear from global state
+        state.parallels_results = []
+        state.parallels_filtered = []
+        ui.notify(tr('Composition reset'), type='info', timeout=2000)
+
     async def execute_parallels():
         # Prevent duplicate executions
         if p_state.is_running:
@@ -2300,9 +2366,7 @@ def create_parallels_page(initial_text: str = None):
                 # that catch InterruptedError internally and return accumulated results
                 return None
             except Exception as e:
-                print(f"Parallels Error: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.exception(f"Parallels Error: {e}")
                 return None
 
         result_data = await run.io_bound(run_search)
@@ -3484,3 +3548,19 @@ def create_parallels_page(initial_text: str = None):
 
     # Schedule async restore on page load
     ui.timer(0.1, restore_filter_sources, once=True)
+
+    # --- Deferred filter option loading (runs after UI renders) ---
+
+    async def _deferred_p_filter_init():
+        """Load filter select options asynchronously after page renders."""
+        d = await run.io_bound(_build_domain_options)
+        p_domain_select.options = d
+        p_domain_select.update()
+        a = await run.io_bound(_build_author_options, p_state.filter_domains)
+        p_author_select.options = a
+        p_author_select.update()
+        w = await run.io_bound(_build_work_options, p_state.filter_domains, p_state.filter_authors)
+        p_work_select.options = w
+        p_work_select.update()
+
+    ui.timer(0.1, _deferred_p_filter_init, once=True)

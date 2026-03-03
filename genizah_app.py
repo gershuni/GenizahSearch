@@ -86,7 +86,7 @@ def _setup_crash_handler():
                 f.write(f"\n{'='*60}\n")
                 f.write(f"Crash at {datetime.now().isoformat()}\n")
                 f.write(''.join(traceback.format_exception(exc_type, exc_value, exc_tb)))
-        except:
+        except OSError:
             pass
         # Also print to console
         traceback.print_exception(exc_type, exc_value, exc_tb)
@@ -3214,7 +3214,7 @@ class ResultDialog(QDialog):
                         title_preview = ' '.join(words)
                         if len(title.split()) > 4:
                             title_preview += "..."
-                except:
+                except (KeyError, AttributeError, IndexError):
                     pass
 
             if is_current:
@@ -3283,7 +3283,7 @@ class ResultDialog(QDialog):
                 self.btn_view_comments.setVisible(True)
             else:
                 self.btn_view_comments.setVisible(False)
-        except:
+        except Exception:
             self.btn_view_comments.setVisible(False)
 
         # Fetch versions and corrections using shared method
@@ -3741,7 +3741,7 @@ class ResultDialog(QDialog):
         self._rd_draft_correction_id = None
         try:
             self.text_ms.textChanged.disconnect(self._rd_on_text_changed)
-        except:
+        except (RuntimeError, AttributeError):
             pass
         self.text_ms.setReadOnly(True)
         self.text_ms.setStyleSheet("")
@@ -3905,7 +3905,7 @@ class ResultDialog(QDialog):
             try:
                 regex = re.compile(pattern_str, re.IGNORECASE)
                 text = regex.sub(r'*\g<0>*', text)
-            except:
+            except re.error:
                 pass
         return text
 
@@ -3973,7 +3973,7 @@ class ResultDialog(QDialog):
             # Fallback for tag search results: get sys_id from display dict
             self.current_sys_id = data.get('display', {}).get('id', '')
         try: p = int(ids['p_num'])
-        except: p = 1
+        except (ValueError, TypeError, KeyError): p = 1
 
         # Add to Recently Viewed
         parent = self.parent()
@@ -3991,7 +3991,7 @@ class ResultDialog(QDialog):
                 # Apply Regex to clean full-text to verify highlighting on load
                 regex = re.compile(pattern_str, re.IGNORECASE)
                 ms_raw = regex.sub(r'*\g<0>*', ms_raw)
-            except:
+            except re.error:
                 pass
 
         self.text_ms.setHtml(self._htmlify(ms_raw))
@@ -4063,7 +4063,7 @@ class ResultDialog(QDialog):
 
             try:
                 shelfmark_display, title = self.meta_mgr.get_meta_for_id(sys_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 shelfmark_display = shelfmark
                 title = ""
 
@@ -4090,9 +4090,7 @@ class ResultDialog(QDialog):
             self.load_result_by_index(new_idx)
             return True
         except Exception as e:
-            print(f"[ERROR] load_by_shelfmark failed: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+            logger.exception("load_by_shelfmark failed: %s", e)
             return False
 
     def load_page(self, offset=0, target=None):
@@ -4108,7 +4106,7 @@ class ResultDialog(QDialog):
         if target is not None:
             # Jump by number (user typed in box)
             try: p = int(target)
-            except: p = 1
+            except (ValueError, TypeError): p = 1
             page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0, allow_cross=True)
         else:
             # Relative Navigation (Next/Prev)
@@ -4176,7 +4174,7 @@ class ResultDialog(QDialog):
                 regex = re.compile(pattern_str, re.IGNORECASE)
                 highlighted_text = regex.sub(r'*\g<0>*', raw_text)
                 raw_text = highlighted_text
-            except: pass
+            except re.error: pass
         
         self.text_ms.setHtml(self._htmlify(raw_text))
         self._refresh_find_highlights()
@@ -5032,15 +5030,15 @@ class DomainFilterDialog(QDialog):
                     sc_item = child_item.child(k)
                     sc_text = sc_item.text(0).lower()
                     sc_match = search_text in sc_text
-                    sc_item.setHidden(not sc_match and search_text)
+                    sc_item.setHidden(bool(search_text and not sc_match))
                     if sc_match:
                         any_grandchild_match = True
 
-                child_item.setHidden(not (child_match or any_grandchild_match) and search_text)
+                child_item.setHidden(bool(search_text and not (child_match or any_grandchild_match)))
                 if child_match or any_grandchild_match:
                     any_child_match = True
 
-            parent_item.setHidden(not (parent_match or any_child_match) and search_text)
+            parent_item.setHidden(bool(search_text and not (parent_match or any_child_match)))
 
     def _handle_item_changed(self, item, column):
         """Handle checkbox state changes with parent-child propagation."""
@@ -5172,97 +5170,157 @@ class FilterCountWorker(QThread):
             if not fjms.is_available():
                 self.finished.emit(None)
                 return
-            result = fjms.get_filter_sys_ids(
-                domain=self.filters.get('domain'),
-                author=self.filters.get('author'),
-                work=self.filters.get('work'),
+            include_mode = self.filters.get('include_mode', True)
+            kwargs = dict(
                 date_from=self.filters.get('date_from'),
                 date_to=self.filters.get('date_to'),
                 include_undated=self.filters.get('include_undated', False),
                 material_include=self.filters.get('material_include'),
                 material_exclude=self.filters.get('material_exclude'),
+                text_all=self.filters.get('text_all') or None,
+                text_any=self.filters.get('text_any') or None,
+                text_not=self.filters.get('text_not') or None,
             )
+            _domains = self.filters.get('domains') or None
+            _authors = self.filters.get('authors') or None
+            _works = self.filters.get('works') or None
+            # Legacy single-value fallback
+            if not _domains and self.filters.get('domain'):
+                _domains = [self.filters['domain']]
+            if not _authors and self.filters.get('author'):
+                _authors = [self.filters['author']]
+            if not _works and self.filters.get('work'):
+                _works = [self.filters['work']]
+            if include_mode:
+                kwargs['domains'] = _domains
+                kwargs['authors'] = _authors
+                kwargs['works'] = _works
+            else:
+                kwargs['domains_exclude'] = _domains
+                kwargs['authors_exclude'] = _authors
+                kwargs['works_exclude'] = _works
+            result = fjms.get_filter_sys_ids(**kwargs)
             self.finished.emit(result)
         except Exception:
             self.finished.emit(None)
 
 
 class PreSearchFilterDialog(QDialog):
-    """Pre-search filter dialog with domain, author, work, date range, and material controls.
+    """Pre-search filter dialog with multi-select domain, author, work, date range,
+    include/exclude mode, text filters, and material controls.
 
     Allows researchers to constrain the search scope BEFORE executing a search,
     resulting in genuinely faster searches by restricting the candidate set.
     """
 
     def __init__(self, parent=None, current_filters: dict = None):
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
         super().__init__(parent)
-        self.setWindowTitle(tr("Pre-Search Filters"))
-        self.setMinimumSize(520, 500)
+        self.setWindowTitle(tr("Search only in..."))
+        self.setMinimumSize(780, 620)
         self._current_filters = current_filters.copy() if current_filters else {}
         self._count_worker = None
         self._result_set = None  # computed restrict_sys_ids
+        # Store all domain/author/work data for display name lookup
+        self._domain_data = {}  # data_key -> display_text
+        self._author_data = {}
+        self._work_data = {}
 
         layout = QVBoxLayout(self)
 
-        # --- Domain filter ---
+        # --- Include/Exclude mode ---
+        mode_layout = QHBoxLayout()
+        self._mode_group = QButtonGroup(self)
+        self._rb_include = QRadioButton(tr("Include"))
+        self._rb_exclude = QRadioButton(tr("Exclude"))
+        self._mode_group.addButton(self._rb_include, 1)
+        self._mode_group.addButton(self._rb_exclude, 2)
+        include_mode = self._current_filters.get('include_mode', True)
+        self._rb_include.setChecked(include_mode)
+        self._rb_exclude.setChecked(not include_mode)
+        self._mode_group.buttonToggled.connect(self._on_filter_changed)
+        mode_layout.addWidget(self._rb_include)
+        mode_layout.addWidget(self._rb_exclude)
+        mode_layout.addStretch()
+        layout.addLayout(mode_layout)
+
+        # --- 2-column body layout ---
+        from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QScrollArea
+        self._updating_domain_checks = False
+
+        body_layout = QHBoxLayout()
+
+        # LEFT column: Domain tree
         domain_group = QGroupBox(tr("Subject Domain"))
         domain_layout = QVBoxLayout(domain_group)
-        self.domain_combo = QComboBox()
-        self.domain_combo.setEditable(True)
-        self.domain_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.domain_combo.addItem("", None)  # empty = no filter
-        completer = self.domain_combo.completer()
-        if completer:
-            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.domain_filter_edit = QLineEdit()
+        self.domain_filter_edit.setPlaceholderText(tr("Filter domains..."))
+        self.domain_filter_edit.textChanged.connect(self._filter_domain_list)
+        domain_layout.addWidget(self.domain_filter_edit)
+        self.domain_tree = QTreeWidget()
+        self.domain_tree.setHeaderLabels([tr("Domain"), tr("Manuscripts")])
+        self.domain_tree.setColumnWidth(0, 250)
         self._populate_domains()
-        # Restore current selection
-        if self._current_filters.get('domain'):
-            idx = self.domain_combo.findData(self._current_filters['domain'])
-            if idx >= 0:
-                self.domain_combo.setCurrentIndex(idx)
-        self.domain_combo.currentIndexChanged.connect(self._on_domain_changed)
-        domain_layout.addWidget(self.domain_combo)
-        layout.addWidget(domain_group)
+        # Restore selections
+        for d in self._current_filters.get('domains', []):
+            self._check_tree_item(self.domain_tree, d, True)
+        if not self._current_filters.get('domains') and self._current_filters.get('domain'):
+            self._check_tree_item(self.domain_tree, self._current_filters['domain'], True)
+        domain_layout.addWidget(self.domain_tree)
+        body_layout.addWidget(domain_group, 1)  # stretch factor 1
 
-        # --- Author filter ---
+        # RIGHT column: Author, Work, Date, Material, Text
+        right_layout = QVBoxLayout()
+
+        # Author filter (type-ahead dropdown)
         author_group = QGroupBox(tr("Author"))
         author_layout = QVBoxLayout(author_group)
+        self._selected_authors = []
         self.author_combo = QComboBox()
         self.author_combo.setEditable(True)
         self.author_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.author_combo.setPlaceholderText(tr("Type to select author..."))
         self.author_combo.addItem("", None)
-        author_completer = self.author_combo.completer()
-        if author_completer:
-            author_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        _ac = self.author_combo.completer()
+        if _ac:
+            _ac.setFilterMode(Qt.MatchFlag.MatchContains)
         self._populate_authors()
-        if self._current_filters.get('author'):
-            idx = self.author_combo.findData(self._current_filters['author'])
-            if idx >= 0:
-                self.author_combo.setCurrentIndex(idx)
-        self.author_combo.currentIndexChanged.connect(self._on_author_changed)
+        for a in self._current_filters.get('authors', []):
+            if a not in self._selected_authors:
+                self._selected_authors.append(a)
+        if not self._current_filters.get('authors') and self._current_filters.get('author'):
+            a = self._current_filters['author']
+            if a not in self._selected_authors:
+                self._selected_authors.append(a)
+        self.author_combo.activated.connect(self._on_author_selected)
         author_layout.addWidget(self.author_combo)
-        layout.addWidget(author_group)
+        right_layout.addWidget(author_group)
 
-        # --- Work filter ---
+        # Work filter (type-ahead dropdown)
         work_group = QGroupBox(tr("Work"))
         work_layout = QVBoxLayout(work_group)
+        self._selected_works = []
         self.work_combo = QComboBox()
         self.work_combo.setEditable(True)
         self.work_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.work_combo.setPlaceholderText(tr("Type to select work..."))
         self.work_combo.addItem("", None)
-        work_completer = self.work_combo.completer()
-        if work_completer:
-            work_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        _wc = self.work_combo.completer()
+        if _wc:
+            _wc.setFilterMode(Qt.MatchFlag.MatchContains)
         self._populate_works()
-        if self._current_filters.get('work'):
-            idx = self.work_combo.findData(self._current_filters['work'])
-            if idx >= 0:
-                self.work_combo.setCurrentIndex(idx)
-        self.work_combo.currentIndexChanged.connect(self._on_filter_changed)
+        for w in self._current_filters.get('works', []):
+            if w not in self._selected_works:
+                self._selected_works.append(w)
+        if not self._current_filters.get('works') and self._current_filters.get('work'):
+            w = self._current_filters['work']
+            if w not in self._selected_works:
+                self._selected_works.append(w)
+        self.work_combo.activated.connect(self._on_work_selected)
         work_layout.addWidget(self.work_combo)
-        layout.addWidget(work_group)
+        right_layout.addWidget(work_group)
 
-        # --- Date range ---
+        # Date range
         date_group = QGroupBox(tr("Date Range"))
         date_layout = QHBoxLayout(date_group)
         self.spin_date_from = QSpinBox()
@@ -5272,7 +5330,6 @@ class PreSearchFilterDialog(QDialog):
         self.spin_date_from.setPrefix(tr("From") + ": ")
         self.spin_date_from.valueChanged.connect(self._on_filter_changed)
         date_layout.addWidget(self.spin_date_from)
-
         self.spin_date_to = QSpinBox()
         self.spin_date_to.setRange(0, 2000)
         self.spin_date_to.setSpecialValueText(tr("Any"))
@@ -5280,23 +5337,73 @@ class PreSearchFilterDialog(QDialog):
         self.spin_date_to.setPrefix(tr("To") + ": ")
         self.spin_date_to.valueChanged.connect(self._on_filter_changed)
         date_layout.addWidget(self.spin_date_to)
-
         self.chk_include_undated = QCheckBox(tr("Include undated"))
         self.chk_include_undated.setChecked(self._current_filters.get('include_undated', False))
         self.chk_include_undated.stateChanged.connect(self._on_filter_changed)
         date_layout.addWidget(self.chk_include_undated)
-        layout.addWidget(date_group)
+        right_layout.addWidget(date_group)
 
-        # --- Material filter ---
-        material_group = QGroupBox(tr("Material"))
+        # Type filter (3-way dropdown)
+        material_group = QGroupBox(tr("Type"))
         material_layout = QVBoxLayout(material_group)
-        self.chk_exclude_printed = QCheckBox(tr("Exclude Printed"))
-        self.chk_exclude_printed.setToolTip(tr("Exclude printed materials (show only handwritten manuscripts)"))
+        self.material_combo = QComboBox()
+        self.material_combo.addItem(tr("Show all"), "all")
+        self.material_combo.addItem(tr("Exclude printed"), "mss_only")
+        self.material_combo.addItem(tr("Printed only"), "printed_only")
+        # Restore from current filters
         material_exclude = self._current_filters.get('material_exclude', [])
-        self.chk_exclude_printed.setChecked('Printed' in material_exclude if material_exclude else False)
-        self.chk_exclude_printed.stateChanged.connect(self._on_filter_changed)
-        material_layout.addWidget(self.chk_exclude_printed)
-        layout.addWidget(material_group)
+        material_include = self._current_filters.get('material_include', [])
+        if 'Printed' in (material_exclude or []):
+            self.material_combo.setCurrentIndex(1)  # Manuscripts only
+        elif 'Printed' in (material_include or []):
+            self.material_combo.setCurrentIndex(2)  # Printed only
+        self.material_combo.currentIndexChanged.connect(self._on_filter_changed)
+        material_layout.addWidget(self.material_combo)
+        right_layout.addWidget(material_group)
+
+        # Text filter (catalog data)
+        text_group = QGroupBox(tr("Catalog Data Text"))
+        text_layout = QVBoxLayout(text_group)
+        text_input_layout = QHBoxLayout()
+        self.text_mode_combo = QComboBox()
+        self.text_mode_combo.addItem(tr("All words"), "all")
+        self.text_mode_combo.addItem(tr("Any word"), "any")
+        self.text_mode_combo.addItem(tr("Not these words"), "not")
+        text_input_layout.addWidget(self.text_mode_combo)
+        self.text_term_edit = QLineEdit()
+        self.text_term_edit.setPlaceholderText(tr("Add term"))
+        self.text_term_edit.returnPressed.connect(self._add_text_term)
+        text_input_layout.addWidget(self.text_term_edit)
+        add_term_btn = QPushButton("+")
+        add_term_btn.setFixedWidth(30)
+        add_term_btn.clicked.connect(self._add_text_term)
+        text_input_layout.addWidget(add_term_btn)
+        text_layout.addLayout(text_input_layout)
+        right_layout.addWidget(text_group)
+
+        body_layout.addLayout(right_layout, 1)  # stretch factor 1
+        layout.addLayout(body_layout)
+
+        # Initialize text filter state
+        self._text_all = list(self._current_filters.get('text_all', []))
+        self._text_any = list(self._current_filters.get('text_any', []))
+        self._text_not = list(self._current_filters.get('text_not', []))
+
+        # --- Unified chip bar (all active filters) ---
+        chip_scroll = QScrollArea()
+        chip_scroll.setWidgetResizable(True)
+        chip_scroll.setMaximumHeight(50)
+        chip_scroll.setFrameShape(chip_scroll.Shape.NoFrame)
+        chip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.chip_bar_widget = QWidget()
+        self.chip_bar_layout = QHBoxLayout(self.chip_bar_widget)
+        self.chip_bar_layout.setContentsMargins(0, 2, 0, 2)
+        self.chip_bar_layout.setSpacing(4)
+        self.chip_bar_layout.addStretch()
+        chip_scroll.setWidget(self.chip_bar_widget)
+        layout.addWidget(chip_scroll)
+        self.domain_tree.itemChanged.connect(self._on_domain_tree_changed)
+        self._rebuild_dialog_chips()
 
         # --- Manuscript count ---
         self.count_label = QLabel("")
@@ -5322,108 +5429,347 @@ class PreSearchFilterDialog(QDialog):
         # Initial count update
         self._update_count()
 
+    @staticmethod
+    def _check_list_item(list_widget, data_value, checked):
+        """Check/uncheck a QListWidget item by its data value."""
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == data_value:
+                item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+                break
+
+    @staticmethod
+    def _check_tree_item(tree_widget, data_value, checked):
+        """Check/uncheck a QTreeWidget item by its data value (searches all levels)."""
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        root = tree_widget.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent = root.child(i)
+            if parent.data(0, Qt.ItemDataRole.UserRole) == data_value:
+                parent.setCheckState(0, state)
+                return
+            for j in range(parent.childCount()):
+                child = parent.child(j)
+                if child.data(0, Qt.ItemDataRole.UserRole) == data_value:
+                    child.setCheckState(0, state)
+                    return
+
+    @staticmethod
+    def _get_checked_items(list_widget):
+        """Return list of data values for all checked items."""
+        result = []
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if data is not None:
+                    result.append(data)
+        return result
+
+    @staticmethod
+    def _get_checked_tree_items(tree_widget):
+        """Return list of data values for all checked leaf/child items in a QTreeWidget."""
+        result = []
+        root = tree_widget.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent = root.child(i)
+            if parent.childCount() == 0:
+                # Leaf parent (no children)
+                if parent.checkState(0) == Qt.CheckState.Checked:
+                    data = parent.data(0, Qt.ItemDataRole.UserRole)
+                    if data is not None:
+                        result.append(data)
+            else:
+                for j in range(parent.childCount()):
+                    child = parent.child(j)
+                    if child.checkState(0) == Qt.CheckState.Checked:
+                        data = child.data(0, Qt.ItemDataRole.UserRole)
+                        if data is not None:
+                            result.append(data)
+        return result
+
     def _populate_domains(self):
-        """Populate domain combo with hierarchy from FJMS."""
+        """Populate domain tree with hierarchy from FJMS."""
+        from PyQt6.QtWidgets import QTreeWidgetItem
         try:
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service()
             if not fjms.is_available():
                 return
+            self.domain_tree.blockSignals(True)
             hierarchy = fjms.get_domain_hierarchy()
             for parent_name, info in hierarchy.items():
                 display = info.get('parent_domain_heb', parent_name) if CURRENT_LANG == 'he' else parent_name
                 count = info.get('count', 0)
-                self.domain_combo.addItem(f"{display} ({count:,})", parent_name)
+                display_text = f"{display} ({count:,})"
+                parent_item = QTreeWidgetItem([display, f"{count:,}"])
+                parent_item.setFlags(parent_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                parent_item.setCheckState(0, Qt.CheckState.Unchecked)
+                parent_item.setData(0, Qt.ItemDataRole.UserRole, parent_name)
+                self.domain_tree.addTopLevelItem(parent_item)
+                self._domain_data[parent_name] = display_text
                 for child in info.get('children', []):
                     child_display = child.get('domain_heb', child['domain']) if CURRENT_LANG == 'he' else child['domain']
                     child_count = child.get('count', 0)
-                    self.domain_combo.addItem(f"  {child_display} ({child_count:,})", child['domain'])
+                    child_text = f"{child_display} ({child_count:,})"
+                    child_item = QTreeWidgetItem([child_display, f"{child_count:,}"])
+                    child_item.setFlags(child_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    child_item.setCheckState(0, Qt.CheckState.Unchecked)
+                    child_item.setData(0, Qt.ItemDataRole.UserRole, child['domain'])
+                    parent_item.addChild(child_item)
+                    self._domain_data[child['domain']] = child_text
+            self.domain_tree.blockSignals(False)
+            self.domain_tree.expandAll()
         except Exception:
             pass
 
     def _populate_authors(self, domain=None):
-        """Populate author combo, optionally filtered by domain."""
+        """Populate author dropdown, optionally filtered by first selected domain."""
         self.author_combo.blockSignals(True)
-        current_author = self.author_combo.currentData()
         self.author_combo.clear()
-        self.author_combo.addItem("", None)
+        self._author_data = {}
+        self.author_combo.addItem("", None)  # placeholder
         try:
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service()
             if not fjms.is_available():
                 return
-            authors = fjms.get_browse_authors(domain=domain)
+            _first = domain[0] if isinstance(domain, list) and domain else (None if isinstance(domain, list) else domain)
+            authors = fjms.get_browse_authors(domain=_first)
             for author in authors:
-                name = author.get('name', '')
+                heb = author.get('heb_desc', '')
+                eng = author.get('eng_desc', '')
+                name = heb or eng or author.get('author_name', '')
+                if eng and eng != name:
+                    name = f"{name} / {eng}"
                 count = author.get('count', 0)
-                author_id = author.get('id', name)
-                self.author_combo.addItem(f"{name} ({count:,})", author_id)
-            # Restore selection if still valid
-            if current_author:
-                idx = self.author_combo.findData(current_author)
-                if idx >= 0:
-                    self.author_combo.setCurrentIndex(idx)
+                author_id = str(author.get('person_id') or author.get('author_id') or name)
+                display_text = f"{name} ({count:,})"
+                self.author_combo.addItem(display_text, author_id)
+                self._author_data[author_id] = display_text
         except Exception:
             pass
         finally:
+            self.author_combo.setCurrentIndex(0)
             self.author_combo.blockSignals(False)
 
     def _populate_works(self, domain=None, author=None):
-        """Populate work combo, optionally filtered by domain and author."""
+        """Populate work dropdown, optionally filtered by domain and author."""
         self.work_combo.blockSignals(True)
-        current_work = self.work_combo.currentData()
         self.work_combo.clear()
-        self.work_combo.addItem("", None)
+        self._work_data = {}
+        self.work_combo.addItem("", None)  # placeholder
         try:
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service()
             if not fjms.is_available():
                 return
-            works = fjms.get_browse_works(domain=domain, author=author)
+            _first_d = domain[0] if isinstance(domain, list) and domain else (None if isinstance(domain, list) else domain)
+            _first_a = author[0] if isinstance(author, list) and author else (None if isinstance(author, list) else author)
+            works = fjms.get_browse_works(domain=_first_d, author=_first_a)
             for work in works:
-                name = work.get('name', '')
+                org = work.get('org_title', '')
+                eng = work.get('eng_title', '')
+                name = org or eng
+                if eng and eng != org:
+                    name = f"{org} / {eng}"
                 count = work.get('count', 0)
-                work_id = work.get('id', name)
-                self.work_combo.addItem(f"{name} ({count:,})", work_id)
-            if current_work:
-                idx = self.work_combo.findData(current_work)
-                if idx >= 0:
-                    self.work_combo.setCurrentIndex(idx)
+                work_id = str(work.get('title_id') or name)
+                display_text = f"{name} ({count:,})"
+                self.work_combo.addItem(display_text, work_id)
+                self._work_data[work_id] = display_text
         except Exception:
             pass
         finally:
+            self.work_combo.setCurrentIndex(0)
             self.work_combo.blockSignals(False)
 
-    def _on_domain_changed(self):
-        """When domain changes, re-populate authors and works."""
-        domain = self.domain_combo.currentData()
-        self._populate_authors(domain=domain)
-        self._populate_works(domain=domain)
+    def _filter_domain_list(self, text):
+        """Filter domain tree items by search text."""
+        search_text = text.lower() if text else ''
+        root = self.domain_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent_item = root.child(i)
+            parent_match = search_text in parent_item.text(0).lower() if search_text else True
+            any_child_match = False
+            for j in range(parent_item.childCount()):
+                child_item = parent_item.child(j)
+                child_match = search_text in child_item.text(0).lower() if search_text else True
+                child_item.setHidden(not child_match and not parent_match)
+                if child_match:
+                    any_child_match = True
+            parent_item.setHidden(not parent_match and not any_child_match)
+
+    def _on_domain_tree_changed(self, item, column):
+        """Handle domain tree checkbox with parent-child propagation."""
+        if self._updating_domain_checks or column != 0:
+            return
+        self._updating_domain_checks = True
+        state = item.checkState(0)
+        # Propagate to children
+        for i in range(item.childCount()):
+            child = item.child(i)
+            if not child.isHidden():
+                child.setCheckState(0, state)
+        self._updating_domain_checks = False
+        self._on_domain_changed()
+
+    def _on_domain_changed(self, item=None):
+        """When domain selection changes, re-populate authors and works."""
+        domains = self._get_checked_tree_items(self.domain_tree)
+        self._populate_authors(domain=domains)
+        self._populate_works(domain=domains)
         self._on_filter_changed()
 
-    def _on_author_changed(self):
-        """When author changes, re-populate works."""
-        domain = self.domain_combo.currentData()
-        author = self.author_combo.currentData()
-        self._populate_works(domain=domain, author=author)
+    def _on_author_selected(self, index):
+        """Handle author dropdown selection — add to selected list."""
+        if index <= 0:
+            return
+        author_id = self.author_combo.itemData(index)
+        if author_id and author_id not in self._selected_authors:
+            self._selected_authors.append(author_id)
+        self.author_combo.setCurrentIndex(0)
+        self._on_author_changed()
+
+    def _on_work_selected(self, index):
+        """Handle work dropdown selection — add to selected list."""
+        if index <= 0:
+            return
+        work_id = self.work_combo.itemData(index)
+        if work_id and work_id not in self._selected_works:
+            self._selected_works.append(work_id)
+        self.work_combo.setCurrentIndex(0)
+        self._on_filter_changed()
+
+    def _on_author_changed(self, item=None):
+        """When author selection changes, re-populate works."""
+        domains = self._get_checked_tree_items(self.domain_tree)
+        self._populate_works(domain=domains, author=self._selected_authors)
         self._on_filter_changed()
 
     def _on_filter_changed(self, *args):
-        """Any filter changed -- update count."""
+        """Any filter changed -- update count and chip bar."""
+        self._rebuild_dialog_chips()
         self._update_count()
+
+    def _add_text_term(self):
+        """Add a text filter term from the input."""
+        term = self.text_term_edit.text().strip()
+        if not term:
+            return
+        mode = self.text_mode_combo.currentData()
+        target = {'all': self._text_all, 'any': self._text_any, 'not': self._text_not}.get(mode, self._text_all)
+        if term not in target:
+            target.append(term)
+        self.text_term_edit.clear()
+        self._on_filter_changed()
+
+    def _remove_text_term(self, mode, term):
+        """Remove a text filter term."""
+        target = {'all': self._text_all, 'any': self._text_any, 'not': self._text_not}.get(mode)
+        if target and term in target:
+            target.remove(term)
+        self._on_filter_changed()
+
+    def _make_chip(self, text, bg_color, on_click):
+        """Create a removable chip button (dark-mode aware)."""
+        chip = QPushButton(f"{text}  \u00d7")
+        chip.setFlat(True)
+        chip.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        # Detect dark mode via palette brightness
+        palette = chip.palette()
+        is_dark = palette.color(palette.ColorRole.Window).lightness() < 128
+        if is_dark:
+            # Darken the background for dark mode, use light text
+            from PyQt6.QtGui import QColor as _QC
+            c = _QC(bg_color)
+            dark_bg = c.darker(250).name()
+            hover_bg = c.darker(180).name()
+            chip.setStyleSheet(
+                f"QPushButton {{ background: {dark_bg}; color: #e0e0e0; border: 1px solid #555; "
+                "border-radius: 10px; padding: 2px 8px; font-size: 11px; } "
+                f"QPushButton:hover {{ background: {hover_bg}; }}"
+            )
+        else:
+            chip.setStyleSheet(
+                f"QPushButton {{ background: {bg_color}; border: 1px solid #ccc; "
+                "border-radius: 10px; padding: 2px 8px; font-size: 11px; } "
+                "QPushButton:hover { background: #ddd; }"
+            )
+        chip.clicked.connect(on_click)
+        return chip
+
+    def _rebuild_dialog_chips(self):
+        """Rebuild unified chip bar showing all active filters."""
+        while self.chip_bar_layout.count() > 0:
+            item = self.chip_bar_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        # Domain chips
+        for d in self._get_checked_tree_items(self.domain_tree):
+            name = self._get_display_name(d, self._domain_data)
+            self.chip_bar_layout.addWidget(self._make_chip(
+                name, '#e8f4fd',
+                lambda checked=False, key=d: (self._check_tree_item(self.domain_tree, key, False), self._on_domain_changed())))
+
+        # Author chips
+        for a in self._selected_authors:
+            name = self._get_display_name(a, self._author_data)
+            self.chip_bar_layout.addWidget(self._make_chip(
+                name, '#f3e5f5',
+                lambda checked=False, key=a: (self._selected_authors.remove(key), self._on_author_changed())))
+
+        # Work chips
+        for w in self._selected_works:
+            name = self._get_display_name(w, self._work_data)
+            self.chip_bar_layout.addWidget(self._make_chip(
+                name, '#fff3e0',
+                lambda checked=False, key=w: (self._selected_works.remove(key), self._on_filter_changed())))
+
+        # Date chip
+        date_from = self.spin_date_from.value()
+        date_to = self.spin_date_to.value()
+        if date_from > 0 or date_to > 0:
+            f_str = str(date_from) if date_from > 0 else '...'
+            t_str = str(date_to) if date_to > 0 else '...'
+            self.chip_bar_layout.addWidget(self._make_chip(
+                f"{f_str}-{t_str}", '#e8f5e9',
+                lambda: (self.spin_date_from.setValue(0), self.spin_date_to.setValue(0))))
+
+        # Material chip
+        mat_mode = self.material_combo.currentData()
+        if mat_mode == 'mss_only':
+            self.chip_bar_layout.addWidget(self._make_chip(
+                tr("Exclude printed"), '#ffebee',
+                lambda: self.material_combo.setCurrentIndex(0)))
+        elif mat_mode == 'printed_only':
+            self.chip_bar_layout.addWidget(self._make_chip(
+                tr("Printed only"), '#ffebee',
+                lambda: self.material_combo.setCurrentIndex(0)))
+
+        # Text term chips
+        for mode, prefix, terms in [('all', '+', self._text_all), ('any', '~', self._text_any), ('not', '-', self._text_not)]:
+            for t in terms:
+                color = '#e8f5e9' if mode == 'all' else '#e3f2fd' if mode == 'any' else '#ffebee'
+                self.chip_bar_layout.addWidget(self._make_chip(
+                    f"{prefix} {t}", color,
+                    lambda checked=False, m=mode, term=t: self._remove_text_term(m, term)))
+
+        self.chip_bar_layout.addStretch()
 
     def _get_current_filter_dict(self) -> dict:
         """Build filter dict from current dialog state."""
         filters = {}
-        domain = self.domain_combo.currentData()
-        if domain:
-            filters['domain'] = domain
-        author = self.author_combo.currentData()
-        if author:
-            filters['author'] = author
-        work = self.work_combo.currentData()
-        if work:
-            filters['work'] = work
+        domains = self._get_checked_tree_items(self.domain_tree)
+        if domains:
+            filters['domains'] = domains
+        if self._selected_authors:
+            filters['authors'] = list(self._selected_authors)
+        if self._selected_works:
+            filters['works'] = list(self._selected_works)
+        filters['include_mode'] = self._rb_include.isChecked()
         date_from = self.spin_date_from.value()
         if date_from > 0:
             filters['date_from'] = date_from
@@ -5432,14 +5778,30 @@ class PreSearchFilterDialog(QDialog):
             filters['date_to'] = date_to
         if self.chk_include_undated.isChecked():
             filters['include_undated'] = True
-        if self.chk_exclude_printed.isChecked():
+        mat_mode = self.material_combo.currentData()
+        if mat_mode == 'mss_only':
             filters['material_exclude'] = ['Printed']
+        elif mat_mode == 'printed_only':
+            filters['material_include'] = ['Printed']
+        if self._text_all:
+            filters['text_all'] = list(self._text_all)
+        if self._text_any:
+            filters['text_any'] = list(self._text_any)
+        if self._text_not:
+            filters['text_not'] = list(self._text_not)
         return filters
+
+    def _get_display_name(self, key, data_map):
+        """Get display name (without count) from data map."""
+        text = data_map.get(key, key)
+        return text.rsplit(' (', 1)[0].strip().lstrip().strip() if isinstance(text, str) else str(key)
 
     def _update_count(self):
         """Recompute manuscript count in background thread."""
         filters = self._get_current_filter_dict()
-        if not filters:
+        # Check if any actual filter is set (not just include_mode)
+        has_filter = any(k != 'include_mode' for k in filters)
+        if not has_filter:
             self.count_label.setText(tr("All manuscripts (no filters)"))
             self._result_set = None
             return
@@ -5463,13 +5825,29 @@ class PreSearchFilterDialog(QDialog):
 
     def _clear_all(self):
         """Reset all filter controls to default."""
-        self.domain_combo.setCurrentIndex(0)
+        # Clear domain tree
+        self.domain_tree.blockSignals(True)
+        root = self.domain_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            parent = root.child(i)
+            parent.setCheckState(0, Qt.CheckState.Unchecked)
+            for j in range(parent.childCount()):
+                parent.child(j).setCheckState(0, Qt.CheckState.Unchecked)
+        self.domain_tree.blockSignals(False)
+        # Clear author/work selections
+        self._selected_authors.clear()
+        self._selected_works.clear()
         self.author_combo.setCurrentIndex(0)
         self.work_combo.setCurrentIndex(0)
+        self._rb_include.setChecked(True)
         self.spin_date_from.setValue(0)
         self.spin_date_to.setValue(0)
         self.chk_include_undated.setChecked(False)
-        self.chk_exclude_printed.setChecked(False)
+        self.material_combo.setCurrentIndex(0)
+        self._text_all.clear()
+        self._text_any.clear()
+        self._text_not.clear()
+        self._rebuild_dialog_chips()
         self._update_count()
 
     def get_filters(self) -> dict:
@@ -7536,10 +7914,7 @@ class GenizahGUI(QMainWindow):
                 if not getattr(self, '_catalog_tree_loaded', False):
                     self._catalog_populate_tree()
         except Exception as e:
-            import traceback
-            print(f"Error in _on_tab_changed: {e}", flush=True)
-            traceback.print_exc()
-            sys.stdout.flush()
+            logger.exception("Error in _on_tab_changed: %s", e)
 
     def _corner_login_clicked(self):
         """Handle corner login button click."""
@@ -7647,9 +8022,7 @@ class GenizahGUI(QMainWindow):
             self._show_lists_sync_dialog(local_lists, cloud_lists, cloud_error)
 
         except Exception as e:
-            logger.warning(f"Cloud sync dialog error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("Cloud sync dialog error: %s", e)
 
     def _show_lists_sync_dialog(self, local_lists, cloud_lists, cloud_error=None):
         """Show dialog to let user choose how to sync lists."""
@@ -7861,7 +8234,7 @@ class GenizahGUI(QMainWindow):
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
                 page_number = self.current_browse_p
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
         dialog = CreateDiscoveryDialog(
             self, self.corrections_client,
@@ -7967,7 +8340,7 @@ class GenizahGUI(QMainWindow):
         self._browse_draft_correction_id = None
         try:
             self.browse_text.textChanged.disconnect(self._browse_on_text_changed)
-        except:
+        except (RuntimeError, AttributeError):
             pass
         # Restore to original text before editing
         original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
@@ -7985,7 +8358,7 @@ class GenizahGUI(QMainWindow):
         self._browse_draft_correction_id = None
         try:
             self.browse_text.textChanged.disconnect(self._browse_on_text_changed)
-        except:
+        except (RuntimeError, AttributeError):
             pass
         self.browse_text.setReadOnly(True)
         self.browse_text.setStyleSheet("")
@@ -8019,7 +8392,7 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
 
         # Ask for notes/reason (only for submit)
@@ -8366,7 +8739,7 @@ class GenizahGUI(QMainWindow):
                 self.btn_b_view_comments.setEnabled(True)
             else:
                 self.btn_b_view_comments.setVisible(False)
-        except:
+        except Exception:
             self.btn_b_view_comments.setVisible(False)
 
         # Fetch versions from API
@@ -8519,7 +8892,7 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
 
         dialog = CommentDialog(
@@ -8541,7 +8914,7 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
 
         dialog = CorrectionsViewerDialog(
@@ -8564,7 +8937,7 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
 
         dialog = CommentsViewerDialog(
@@ -8585,7 +8958,7 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(doc_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
 
         if not shelfmark:
@@ -8625,7 +8998,7 @@ class GenizahGUI(QMainWindow):
         if self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
 
         if not shelfmark:
@@ -8770,7 +9143,7 @@ class GenizahGUI(QMainWindow):
                         title_preview = ' '.join(words)
                         if len(title.split()) > 4:
                             title_preview += "..."
-                except:
+                except (KeyError, AttributeError, IndexError):
                     pass
 
             if frag.upper() == shelfmark.upper():
@@ -8878,7 +9251,7 @@ class GenizahGUI(QMainWindow):
         if not shelfmark and self.meta_mgr:
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
 
         menu = QMenu(self)
@@ -9099,6 +9472,13 @@ class GenizahGUI(QMainWindow):
 
         row1.addWidget(self.btn_search)
 
+        # "New" button to reset/clear search state
+        self.btn_reset_search = QPushButton(tr("New"))
+        self.btn_reset_search.setToolTip(tr("Clear and start a new search"))
+        self.btn_reset_search.setStyleSheet("padding: 2px 8px;")
+        self.btn_reset_search.clicked.connect(self._reset_search)
+        row1.addWidget(self.btn_reset_search)
+
         # Row 2: Search Parameters & Lab Mode
         row2 = QHBoxLayout()
 
@@ -9296,15 +9676,17 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
 
         # Pre-search Filters button (Phase 45-03)
-        self.btn_pre_search_filters = QPushButton(tr("Filters"))
-        self.btn_pre_search_filters.setToolTip(tr("Set pre-search filters (domain, author, date, material)"))
+        self.btn_pre_search_filters = QPushButton(tr("Focus Search"))
+        self.btn_pre_search_filters.setToolTip(tr("Narrow search scope by domain, author, date, material"))
         self.btn_pre_search_filters.setStyleSheet("padding: 2px 8px;")
         self.btn_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
+
+        # Insert Focus Search button in row1, right before the Search button
+        row1.insertWidget(row1.indexOf(self.btn_search), self.btn_pre_search_filters)
 
         row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
         row2.addWidget(self.search_params_container)
-        row2.addWidget(self.btn_pre_search_filters)
         row2.addWidget(self.btn_domain_filter)
         row2.addWidget(self.lbl_domain_filter)
 
@@ -9588,8 +9970,8 @@ class GenizahGUI(QMainWindow):
         self._comp_printed_filter_state = 'all'
 
         # Pre-search Filters button for composition tab (Phase 45-03)
-        self.btn_comp_pre_search_filters = QPushButton(tr("Filters"))
-        self.btn_comp_pre_search_filters.setToolTip(tr("Set pre-search filters (domain, author, date, material)"))
+        self.btn_comp_pre_search_filters = QPushButton(tr("Focus Search"))
+        self.btn_comp_pre_search_filters.setToolTip(tr("Narrow search scope by domain, author, date, material"))
         self.btn_comp_pre_search_filters.setStyleSheet("padding: 2px 8px;")
         self.btn_comp_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
 
@@ -9751,10 +10133,17 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_comp_recursive.setEnabled(True)
 
+        # "New" button to reset/clear composition search state
+        self.btn_reset_comp = QPushButton(tr("New"))
+        self.btn_reset_comp.setToolTip(tr("Clear and start a new composition search"))
+        self.btn_reset_comp.setStyleSheet("padding: 2px 8px;")
+        self.btn_reset_comp.clicked.connect(self._reset_composition)
+
         cr.addWidget(self.btn_lab_mode_toggle_comp)
         cr.addWidget(self.chk_lab_deep_comp)
         cr.addWidget(self.btn_comp_run)
         cr.addWidget(self.btn_comp_recursive)
+        cr.addWidget(self.btn_reset_comp)
 
         in_l.addLayout(cr)
 
@@ -15130,9 +15519,7 @@ class GenizahGUI(QMainWindow):
             ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
             logger.debug("ResultDialog closed")
         except Exception as e:
-            logger.debug("Error in _open_document_result_dialog: %s", e)
-            import traceback
-            traceback.print_exc()
+            logger.exception("Error in _open_document_result_dialog: %s", e)
 
     def _browse_document_by_shelfmark(self, shelfmark, page_num=1):
         """Browse a document by shelfmark in the Browse tab."""
@@ -15965,33 +16352,31 @@ class GenizahGUI(QMainWindow):
             self._update_community_header()
             logger.debug("_update_community_header completed")
         except Exception as e:
-            print(f"Error in _update_community_header: {e}", flush=True)
+            logger.error("Error in _update_community_header: %s", e)
         try:
             logger.debug("Calling _refresh_discoveries_panel...")
             self._refresh_discoveries_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_discoveries_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_discoveries_panel: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+            logger.exception("Error in _refresh_discoveries_panel: %s", e)
         try:
             logger.debug("Calling _refresh_corrections_panel...")
             self._refresh_corrections_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_corrections_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_corrections_panel: {e}", flush=True)
+            logger.error("Error in _refresh_corrections_panel: %s", e)
         try:
             logger.debug("Calling _refresh_comments_panel...")
             self._refresh_comments_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_comments_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_comments_panel: {e}", flush=True)
+            logger.error("Error in _refresh_comments_panel: %s", e)
         try:
             logger.debug("Calling _refresh_joins_panel...")
             self._refresh_joins_panel(use_cache_first, skip_api_calls=skip_api_calls)
             logger.debug("_refresh_joins_panel completed")
         except Exception as e:
-            print(f"Error in _refresh_joins_panel: {e}", flush=True)
+            logger.error("Error in _refresh_joins_panel: %s", e)
         logger.debug("_refresh_community_panels finished")
 
     def _update_community_header(self):
@@ -16526,9 +16911,7 @@ class GenizahGUI(QMainWindow):
                 logger.debug("sys_id=%s, shelfmark=%s, page_num=%s", sys_id, shelfmark, page_num)
                 self._open_document_result_dialog(shelfmark=shelfmark, sys_id=sys_id, page_num=page_num)
         except Exception as e:
-            logger.debug("Error in _on_correction_clicked: %s", e)
-            import traceback
-            traceback.print_exc()
+            logger.exception("Error in _on_correction_clicked: %s", e)
 
     def _on_comment_clicked(self, item):
         """Handle comment item double-click - open ResultDialog."""
@@ -17118,7 +17501,7 @@ class GenizahGUI(QMainWindow):
                 else:
                     self.boundary_stats_label.setText("")
         except Exception as e:
-            traceback.print_exc()
+            logger.exception("Error updating boundary stats: %s", e)
             self.boundary_stats_label.setText("")
 
     def _open_boundary_advanced_dialog(self):
@@ -17480,13 +17863,42 @@ class GenizahGUI(QMainWindow):
 
             chip_bar.setVisible(True)
 
-            # Create chips for each active filter
-            if filters.get('domain'):
-                self._add_filter_chip(chip_layout, tr("Domain") + ": " + str(filters['domain']), 'domain')
-            if filters.get('author'):
-                self._add_filter_chip(chip_layout, tr("Author") + ": " + str(filters['author']), 'author')
-            if filters.get('work'):
-                self._add_filter_chip(chip_layout, tr("Work") + ": " + str(filters['work']), 'work')
+            # Mode indicator chip
+            if not filters.get('include_mode', True) and (
+                filters.get('domains') or filters.get('authors') or filters.get('works')
+            ):
+                mode_chip = QPushButton(tr("Exclude selected"))
+                mode_chip.setFlat(True)
+                mode_chip.setStyleSheet(
+                    "QPushButton { background: #ffcdd2; color: #c62828; border: 1px solid #ef9a9a; "
+                    "border-radius: 12px; padding: 2px 10px; font-size: 11px; }"
+                )
+                chip_layout.addWidget(mode_chip)
+
+            # Domain chips (multi-select: per-item)
+            for d in filters.get('domains', []):
+                display = str(d)
+                self._add_filter_chip(chip_layout, tr("Domain") + ": " + display, ('domains', d))
+            # Legacy single-value fallback
+            if filters.get('domain') and not filters.get('domains'):
+                self._add_filter_chip(chip_layout, tr("Domain") + ": " + str(filters['domain']), ('domains', filters['domain']))
+
+            # Author chips (multi-select: per-item)
+            for a in filters.get('authors', []):
+                display = str(a)
+                self._add_filter_chip(chip_layout, tr("Author") + ": " + display, ('authors', a))
+            if filters.get('author') and not filters.get('authors'):
+                author_display = filters.get('author_name') or str(filters['author'])
+                self._add_filter_chip(chip_layout, tr("Author") + ": " + author_display, ('authors', filters['author']))
+
+            # Work chips (multi-select: per-item)
+            for w in filters.get('works', []):
+                display = str(w)
+                self._add_filter_chip(chip_layout, tr("Work") + ": " + display, ('works', w))
+            if filters.get('work') and not filters.get('works'):
+                work_display = filters.get('work_name') or str(filters['work'])
+                self._add_filter_chip(chip_layout, tr("Work") + ": " + work_display, ('works', filters['work']))
+
             if filters.get('date_from') or filters.get('date_to'):
                 date_str = ""
                 if filters.get('date_from') and filters.get('date_to'):
@@ -17498,6 +17910,14 @@ class GenizahGUI(QMainWindow):
                 self._add_filter_chip(chip_layout, date_str, 'date')
             if filters.get('material_exclude'):
                 self._add_filter_chip(chip_layout, tr("Exclude Printed"), 'material_exclude')
+
+            # Text filter chips
+            for t in filters.get('text_all', []):
+                self._add_filter_chip(chip_layout, f"+ {t}", ('text_all', t))
+            for t in filters.get('text_any', []):
+                self._add_filter_chip(chip_layout, f"~ {t}", ('text_any', t))
+            for t in filters.get('text_not', []):
+                self._add_filter_chip(chip_layout, f"- {t}", ('text_not', t))
 
             # Count label
             restrict = self.pre_search_restrict_sys_ids
@@ -17520,26 +17940,37 @@ class GenizahGUI(QMainWindow):
             "QPushButton:hover { background: #d2e3fc; }"
         )
         chip.setToolTip(tr("Click to remove this filter"))
-        chip.clicked.connect(lambda: self._remove_filter(filter_key))
+        chip.clicked.connect(lambda checked=False, fk=filter_key: self._remove_filter(fk))
         layout.addWidget(chip)
 
     def _remove_filter(self, filter_key):
         """Remove a single filter and recompute restrict_sys_ids."""
-        if filter_key == 'date':
+        if isinstance(filter_key, tuple):
+            # Multi-select: remove individual item from list
+            field, value = filter_key
+            if field in self.pre_search_filters and isinstance(self.pre_search_filters[field], list):
+                if value in self.pre_search_filters[field]:
+                    self.pre_search_filters[field].remove(value)
+                if not self.pre_search_filters[field]:
+                    del self.pre_search_filters[field]
+            else:
+                self.pre_search_filters.pop(field, None)
+        elif filter_key == 'date':
             self.pre_search_filters.pop('date_from', None)
             self.pre_search_filters.pop('date_to', None)
             self.pre_search_filters.pop('include_undated', None)
         else:
             self.pre_search_filters.pop(filter_key, None)
 
-        # Recompute restrict set
-        if self.pre_search_filters:
+        # Check if any real filters remain (not just include_mode)
+        has_real = any(k != 'include_mode' for k in self.pre_search_filters)
+        if has_real:
             worker = FilterCountWorker(self.pre_search_filters)
             worker.finished.connect(self._on_filter_recompute_finished)
-            # Keep reference so it doesn't get garbage collected
             self._filter_recompute_worker = worker
             worker.start()
         else:
+            self.pre_search_filters = {}
             self.pre_search_restrict_sys_ids = None
             self._update_filter_chip_bar()
             self._schedule_session_save()
@@ -17947,6 +18378,89 @@ class GenizahGUI(QMainWindow):
         self.search_progress.setVisible(False)
 
     def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
+
+    def _reset_search(self):
+        """Clear all search state and start fresh."""
+        # 1. Stop any running search thread
+        if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
+            self.search_thread.cancel_flag = True
+            self.search_thread.wait(3000)
+            if self.search_thread.isRunning():
+                self.search_thread.terminate()
+                self.search_thread.wait()
+
+        # 2. Reset search UI state
+        self.reset_ui()
+
+        # 3. Clear query input
+        self.query_input.setText("")
+
+        # 4. Reset mode combo to Exact (index 0)
+        self.mode_combo.setCurrentIndex(0)
+
+        # 5. Clear results table and related state
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
+        self.results_table.setRowCount(0)
+        self.result_row_by_sys_id = {}
+        self.last_results = []
+        self.last_search_query = ""
+        self.results_loaded = 0
+        self.hovered_row = -1
+        for b in self.export_buttons:
+            b.setEnabled(False)
+        if hasattr(self, 'btn_add_to_list'):
+            self.btn_add_to_list.setEnabled(False)
+
+        # 6. Clear domain exclusions and result domain data (post-search)
+        self._domain_exclusions = set()
+        self._result_domain_counts = {}
+        self._result_domain_map = {}
+        self._has_result_domains = False
+        self.btn_domain_filter.setEnabled(False)
+        self.lbl_domain_filter.setVisible(False)
+
+        # 7. Clear printed filter state
+        self._printed_sys_ids = set()
+        self._printed_filter_state = 'all'
+        if hasattr(self, 'chk_search_header'):
+            self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
+
+        # 8. Clear per-result word exclusions
+        self.word_excluded_sys_ids = set()
+
+        # 9. Clear pre-search filter state (domain, author, work filters)
+        self.pre_search_filters = {}
+        self.pre_search_restrict_sys_ids = None
+        self._update_filter_chip_bar()
+
+        # 10. Clear manuscript exclusions (shared with composition)
+        self.excluded_sys_ids = set()
+        self.excluded_shelfmarks = set()
+        self.excluded_raw_entries = []
+
+        # 11. Clear list filter state
+        self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
+
+        # 12. Clear gap and exclude inputs
+        if hasattr(self, 'gap_input'):
+            self.gap_input.setText("0")
+        if hasattr(self, 'exclude_input'):
+            self.exclude_input.setText("")
+
+        # 13. Update status bar
+        self.status_label.setText(tr("Ready."))
+        self.status_label.setStyleSheet("")
+
+        # 14. Clear session state file for fresh start
+        try:
+            from shared.session_persistence import clear_session_state
+            clear_session_state()
+        except Exception:
+            pass
+
+        # 15. Save the cleared state
+        self._schedule_session_save()
 
     def _on_search_progress(self, current, total):
         """Handle regular search progress: update bar and show elapsed timer (GAP-3)."""
@@ -20565,9 +21079,9 @@ class GenizahGUI(QMainWindow):
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
                 # Disconnect signals to prevent race conditions during stop
                 try: self.group_thread.finished_signal.disconnect()
-                except: pass
+                except (RuntimeError, AttributeError): pass
                 try: self.group_thread.error_signal.disconnect()
-                except: pass
+                except (RuntimeError, AttributeError): pass
 
                 self.group_thread.requestInterruption()
                 self.group_thread.wait()
@@ -20598,6 +21112,114 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self.comp_progress.setVisible(False)
         self.comp_summary_text = ""  # Clear persistent summary on reset
+
+    def _reset_composition(self):
+        """Clear all composition search state and start fresh."""
+        # 1. Stop any running composition thread
+        if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
+            self.comp_thread.cancel_flag = True
+            self.comp_thread.wait(3000)
+            if self.comp_thread.isRunning():
+                self.comp_thread.terminate()
+                self.comp_thread.wait()
+
+        # 2. Stop any running grouping thread
+        if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
+            try: self.group_thread.finished_signal.disconnect()
+            except (RuntimeError, AttributeError): pass
+            try: self.group_thread.error_signal.disconnect()
+            except (RuntimeError, AttributeError): pass
+            self.group_thread.requestInterruption()
+            self.group_thread.wait(2000)
+            if self.group_thread.isRunning():
+                self.group_thread.terminate()
+                self.group_thread.wait()
+
+        # 3. Reset composition UI state
+        self.reset_comp_ui()
+
+        # 4. Clear source text and title
+        self.comp_text_area.clear()
+        self.comp_title_input.setText("")
+
+        # 5. Clear composition results tree
+        self.comp_tree.clear()
+
+        # 6. Reset composition result state
+        self.comp_main = []
+        self.comp_appendix = {}
+        self.comp_summary = {}
+        self.comp_filtered_main = []
+        self.comp_filtered_appendix = {}
+        self.comp_filtered_summary = {}
+        self.comp_raw_items = []
+        self.comp_raw_filtered = []
+        self.comp_grouped_main = []
+        self.comp_grouped_appendix = {}
+        self.comp_grouped_summary = {}
+        self.comp_sort_mode = "score"
+        self.comp_sort_reverse = True
+        self.comp_grouped_filtered_main = []
+        self.comp_grouped_filtered_appendix = {}
+        self.comp_grouped_filtered_summary = {}
+        self.comp_has_grouped_results = False
+        self.comp_known = []
+        self.pending_recursive_search = False
+
+        # 7. Clear manuscript exclusions (shared with search)
+        self.excluded_raw_entries = []
+        self.excluded_sys_ids = set()
+        self.excluded_shelfmarks = set()
+        self.lbl_exclude_status.setText(tr("Excluded: {}").format(0))
+
+        # 8. Clear composition domain exclusions
+        self._comp_domain_exclusions = set()
+        self._comp_result_domain_counts = {}
+        self._comp_result_domain_map = {}
+        self._comp_has_result_domains = False
+        self._comp_printed_sys_ids = set()
+        self._comp_printed_filter_state = 'all'
+        self.btn_comp_domain_filter.setEnabled(False)
+        self.lbl_comp_domain_filter.setVisible(False)
+
+        # 9. Clear pre-search filter state (shared)
+        self.pre_search_filters = {}
+        self.pre_search_restrict_sys_ids = None
+        self._update_filter_chip_bar()
+
+        # 10. Disable export buttons
+        for b in self.comp_export_buttons:
+            b.setEnabled(False)
+        if hasattr(self, 'btn_comp_add_to_list'):
+            self.btn_comp_add_to_list.setEnabled(False)
+
+        # 11. Re-enable recursive search button
+        if hasattr(self, 'btn_comp_recursive'):
+            self.btn_comp_recursive.setEnabled(True)
+
+        # 12. Reset composition mode combo to Exact (index 0)
+        self.comp_mode_combo.setCurrentIndex(0)
+
+        # 13. Reset composition timing state
+        self.comp_search_start_time = 0.0
+        self.comp_chunks_processed = 0
+        self.comp_chunks_total = 0
+        self.comp_last_eta_update = 0.0
+        self.comp_last_eta_text = ""
+
+        # 14. Update status label
+        if hasattr(self, 'lbl_comp_status'):
+            self.lbl_comp_status.setText("")
+
+        # 15. Clear session state file for fresh start
+        try:
+            from shared.session_persistence import clear_session_state
+            clear_session_state()
+        except Exception:
+            pass
+
+        # 16. Save the cleared state
+        self._schedule_session_save()
 
     def run_composition(self, custom_text=None):
         """
@@ -22729,7 +23351,7 @@ class GenizahGUI(QMainWindow):
         p_arg = None
         if self.current_browse_p is not None:
             try: p_arg = int(self.current_browse_p)
-            except: p_arg = 0
+            except (ValueError, TypeError): p_arg = 0
 
         page_data = self.searcher.get_browse_page(
             self.current_browse_sid, 
@@ -23348,15 +23970,63 @@ class GenizahGUI(QMainWindow):
         clear_action = self.comp_history_menu.addAction(tr("Clear all history"))
         clear_action.triggered.connect(lambda: self._clear_search_history('composition'))
 
+    @staticmethod
+    def _build_filter_summary(filters: dict, max_len: int = 50) -> str:
+        """Build a compact filter summary string like [כולל: תנ״ך, תוספתא. 1000-1300]."""
+        if not filters or not any(k != 'include_mode' for k in filters):
+            return ''
+        prefix = tr('include') if filters.get('include_mode', True) else tr('exclude')
+        # Build en->heb domain name map from cached hierarchy
+        domain_heb_map = {}
+        if CURRENT_LANG == 'he' and filters.get('domains'):
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms = get_fjms_service(thread_safe=True)
+                if fjms.is_available():
+                    for pn, info in fjms.get_domain_hierarchy().items():
+                        if info.get('parent_domain_heb'):
+                            domain_heb_map[pn] = info['parent_domain_heb']
+                        for ch in info.get('children', []):
+                            if ch.get('domain_heb'):
+                                domain_heb_map[ch['domain']] = ch['domain_heb']
+            except Exception:
+                pass
+        parts = []
+        for d in filters.get('domains', []):
+            parts.append(domain_heb_map.get(str(d), str(d)))
+        n_auth = len(filters.get('authors', []))
+        if n_auth:
+            parts.append(f"{tr('Author')} \u00d7{n_auth}")
+        n_work = len(filters.get('works', []))
+        if n_work:
+            parts.append(f"{tr('Work')} \u00d7{n_work}")
+        df, dt = filters.get('date_from'), filters.get('date_to')
+        if df and dt:
+            parts.append(f"{df}-{dt}")
+        elif df:
+            parts.append(f"{df}+")
+        elif dt:
+            parts.append(f"-{dt}")
+        if filters.get('material_exclude'):
+            parts.append(tr("No printed"))
+        elif filters.get('material_include'):
+            parts.append(tr("Printed only"))
+        if not parts:
+            return ''
+        summary = f"[{prefix}: {', '.join(parts)}]"
+        if len(summary) > max_len:
+            summary = summary[:max_len - 4] + '...]'
+        return summary
+
     def _add_history_menu_item(self, menu, search_type, index, entry):
         """Add a single history entry to a menu with a delete button."""
-        from PyQt6.QtWidgets import QWidgetAction, QHBoxLayout
+        from PyQt6.QtWidgets import QWidgetAction, QHBoxLayout, QVBoxLayout
         query = entry.get('query', '')[:35]
         count = entry.get('result_count', 0)
         mode_idx = entry.get('search_params', {}).get('mode_index', 0)
         mode_char = self._MODE_CHARS[mode_idx] if mode_idx < len(self._MODE_CHARS) else '='
 
-        # Container widget: [label] [x button]
+        # Container widget: [labels column] [x button]
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(4, 2, 4, 2)
@@ -23368,12 +24038,27 @@ class GenizahGUI(QMainWindow):
         else:
             label_text = f"{query}  ({results_word})"
 
+        # Build filter summary from pre_search_filters
+        psf = entry.get('pre_search_filters', {})
+        filter_summary = self._build_filter_summary(psf)
+
+        labels_col = QVBoxLayout()
+        labels_col.setContentsMargins(0, 0, 0, 0)
+        labels_col.setSpacing(0)
+
         lbl = QPushButton(label_text)
         lbl.setFlat(True)
         lbl.setStyleSheet("text-align: right; padding: 2px 4px; font-size: 12px;")
         lbl.setCursor(Qt.CursorShape.PointingHandCursor)
         lbl.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         lbl.clicked.connect(lambda checked, e=entry, st=search_type: self._on_history_item_clicked(st, e))
+        labels_col.addWidget(lbl)
+
+        if filter_summary:
+            filter_lbl = QLabel(filter_summary)
+            filter_lbl.setStyleSheet("color: #2980b9; font-size: 10px; padding: 0 4px 2px 4px;")
+            filter_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+            labels_col.addWidget(filter_lbl)
 
         btn_del = QPushButton("×")
         btn_del.setFixedSize(20, 20)
@@ -23383,7 +24068,7 @@ class GenizahGUI(QMainWindow):
         btn_del.setToolTip(tr("Delete this entry"))
         btn_del.clicked.connect(lambda checked, st=search_type, idx=index: self._delete_history_item(st, idx))
 
-        h.addWidget(lbl, 1)
+        h.addLayout(labels_col, 1)
         h.addWidget(btn_del, 0)
 
         wa = QWidgetAction(menu)
@@ -23431,6 +24116,18 @@ class GenizahGUI(QMainWindow):
                 self.gap_input.setText(str(params['gap']))
             if 'variant_preset' in params:
                 self._current_variant_preset = params['variant_preset']
+            # Restore pre-search filters
+            psf = entry.get('pre_search_filters', {})
+            self.pre_search_filters = psf
+            if psf and any(k != 'include_mode' for k in psf):
+                from genizah_app import FilterCountWorker
+                worker = FilterCountWorker(psf)
+                worker.finished.connect(self._on_restore_filter_finished)
+                worker.start()
+                self._filter_restore_worker = worker
+            else:
+                self.pre_search_restrict_sys_ids = None
+            self._update_filter_chip_bar()
 
         self._domain_exclusions = set(state.get('domain_exclusions', []))
         self._printed_filter_state = state.get('printed_filter', 'all')
@@ -23456,6 +24153,18 @@ class GenizahGUI(QMainWindow):
                 self.spin_freq.setValue(params['max_freq'])
             if 'mode_index' in params:
                 self.comp_mode_combo.setCurrentIndex(params['mode_index'])
+            # Restore pre-search filters
+            psf = entry.get('pre_search_filters', {})
+            self.pre_search_filters = psf
+            if psf and any(k != 'include_mode' for k in psf):
+                from genizah_app import FilterCountWorker
+                worker = FilterCountWorker(psf)
+                worker.finished.connect(self._on_restore_filter_finished)
+                worker.start()
+                self._filter_restore_worker = worker
+            else:
+                self.pre_search_restrict_sys_ids = None
+            self._update_filter_chip_bar()
 
         self._comp_domain_exclusions = set(state.get('domain_exclusions', []))
         self._comp_printed_filter_state = state.get('printed_filter', 'all')
@@ -23497,6 +24206,7 @@ class GenizahGUI(QMainWindow):
                 'gap': int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0,
                 'variant_preset': getattr(self, '_current_variant_preset', 70),
             },
+            'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             'state': {
                 'results': results[:5000],
                 'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
@@ -23529,6 +24239,7 @@ class GenizahGUI(QMainWindow):
                 'max_freq': self.spin_freq.value() if hasattr(self, 'spin_freq') else 10,
                 'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
             },
+            'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             'state': {
                 'source_text': source_text,
                 'results': results[:5000],
