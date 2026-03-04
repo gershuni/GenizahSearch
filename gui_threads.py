@@ -77,6 +77,33 @@ class SearchThread(QThread):
                 responsa_options=self.responsa_options,
                 restrict_sys_ids=self.restrict_sys_ids
             )
+
+            # Tag translated matches if show_translations is enabled
+            if results and not self.cancel_flag:
+                try:
+                    from genizah_core import load_app_config
+                    if load_app_config().get('show_translations', False):
+                        from shared.translation_service import TranslationService
+                        trans_svc = TranslationService(thread_safe=True)
+                        if trans_svc.is_available():
+                            sys_ids = [
+                                r.get('display', {}).get('id')
+                                for r in results
+                                if r.get('display', {}).get('id')
+                            ]
+                            if sys_ids:
+                                matched_sids = trans_svc.get_translated_match_sys_ids(
+                                    self.query, sys_ids
+                                )
+                                if matched_sids:
+                                    for r in results:
+                                        sid = r.get('display', {}).get('id')
+                                        if sid and sid in matched_sids:
+                                            r['translated_match'] = True
+                            trans_svc.close()
+                except Exception as e:
+                    logger.warning("Translation match tagging failed: %s", e)
+
             self.results_signal.emit(results)
         except InterruptedError:
             # Emit empty list -- partial results not available from execute_search

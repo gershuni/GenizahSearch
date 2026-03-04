@@ -3619,7 +3619,7 @@ class ResultDialog(QDialog):
                     pal = self.txt_extended_info.palette()
                     tc = pal.color(QPalette.ColorRole.Text).name()
                     bc = pal.color(QPalette.ColorRole.Base).name()
-                    ph = parent_win._build_pgp_extended_info_html(pgp_doc, palette=pal)
+                    ph = parent_win._build_pgp_extended_info_html(pgp_doc, palette=pal, sys_id=getattr(self, 'current_sys_id', None))
                     if ph:
                         h = f"<div style='font-family:Arial; color:{tc}; background-color:{bc};'>{ph}</div>"
                         self.txt_extended_info.setHtml(h)
@@ -3678,7 +3678,7 @@ class ResultDialog(QDialog):
         if not parent or not hasattr(parent, '_build_pgp_extended_info_html'):
             return
         palette = self.txt_extended_info.palette()
-        pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette)
+        pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None))
         if not pgp_html:
             return
         # Append PGP section to existing HTML content
@@ -4594,7 +4594,7 @@ class ResultDialog(QDialog):
         pgp_doc = getattr(self, '_rd_pgp_doc', None)
         if pgp_doc:
             if parent and hasattr(parent, '_build_pgp_extended_info_html'):
-                pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette)
+                pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None))
                 if pgp_html:
                     html += pgp_html
 
@@ -6407,16 +6407,48 @@ class FjmsCatalogDialog(QDialog):
             html_parts.append(self._section_row(tr('Miscellaneous'), total_cols if num_teams > 0 else 2))
 
             col_span = total_cols if num_teams > 0 else 2
+            # Check for FJMS translations if show_translations is enabled
+            _fjms_trans_map = {}
+            _show_trans = load_app_config().get('show_translations', False)
+            if _show_trans:
+                try:
+                    from shared.translation_service import TranslationService
+                    _trans_svc = TranslationService()
+                    if _trans_svc.fjms_available():
+                        # Collect alma_ids from free_descriptions
+                        _desc_alma_ids = list({d.get('alma_id', '') for d in free_descriptions if d.get('alma_id')})
+                        if _desc_alma_ids:
+                            _fjms_trans_map = _trans_svc.get_fjms_translations_batch(_desc_alma_ids)
+                    _trans_svc.close()
+                except Exception:
+                    pass
+
             for desc in free_descriptions:
                 text = desc.get("text", "")
                 if text and str(text).strip():
                     eng_source = desc.get("source_name")
                     source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
                     source_html = f'<div style="font-weight:bold; font-size:11px; color:{c["section_text"]}; margin-bottom:2px;">{source}</div>' if source else ''
+
+                    # Show FJMS translation if available
+                    trans_html = ''
+                    if _show_trans:
+                        alma_id = desc.get('alma_id', '')
+                        if alma_id and alma_id in _fjms_trans_map:
+                            trans_text = _fjms_trans_map[alma_id].get('FreeDesc')
+                            if trans_text:
+                                trans_html = (
+                                    f'<div style="color:{c["muted"]}; font-size:12px; margin-top:4px;" '
+                                    f'title="{tr("Machine translated via Dicta")}">'
+                                    f'{trans_text} '
+                                    f'<span style="font-size:10px;">({tr("Translated")})</span>'
+                                    f'</div>'
+                                )
+
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
                         f'style="padding:8px; border-bottom:1px solid {c["border"]};"'
-                        f'>{source_html}{str(text).strip()}</td></tr>'
+                        f'>{source_html}{str(text).strip()}{trans_html}</td></tr>'
                     )
 
             # Full texts (scholarly descriptions) with distinct styling
@@ -7353,6 +7385,19 @@ class SettingsDialog(QDialog):
         )
         self.main_win.spin_history_limit.setFixedWidth(80)
         layout.addLayout(_pref_row(tr("History Limit:"), self.main_win.spin_history_limit))
+        layout.addSpacing(4)
+
+        # Show Translations toggle (Phase 46)
+        self.main_win.chk_show_translations = QCheckBox(tr("Show translations"))
+        self.main_win.chk_show_translations.setChecked(load_app_config().get('show_translations', False))
+        self.main_win.chk_show_translations.setToolTip(tr("Show translated descriptions when available"))
+        self.main_win.chk_show_translations.stateChanged.connect(
+            lambda state: save_app_config({'show_translations': state == 2})
+        )
+        trans_row = QHBoxLayout()
+        trans_row.addWidget(self.main_win.chk_show_translations)
+        trans_row.addStretch()
+        layout.addLayout(trans_row)
 
         layout.addSpacing(12)
 
@@ -11132,7 +11177,7 @@ class GenizahGUI(QMainWindow):
         self._browse_pgp_doc = pgp_doc
 
         # Update extended info panel with PGP metadata combined with enrichment
-        pgp_html = self._build_pgp_extended_info_html(pgp_doc) or ''
+        pgp_html = self._build_pgp_extended_info_html(pgp_doc, sys_id=self.current_browse_sid) or ''
         enriched_html = getattr(self, '_browse_enriched_html', '') or ''
 
         combined = enriched_html + pgp_html
@@ -11192,12 +11237,13 @@ class GenizahGUI(QMainWindow):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP source fetch error for %s: %s", sys_id, error_message)
 
-    def _build_pgp_extended_info_html(self, pgp_doc, palette=None):
+    def _build_pgp_extended_info_html(self, pgp_doc, palette=None, sys_id=None):
         """Build HTML for PGP metadata section in extended info panels.
 
         Args:
             pgp_doc: dict from PGPSourceWorker (document metadata)
             palette: optional QPalette for text color; defaults to app palette
+            sys_id: optional sys_id for translation lookup
 
         Returns:
             HTML string for the PGP section, or empty string if no PGP data.
@@ -11209,6 +11255,20 @@ class GenizahGUI(QMainWindow):
             palette = self.palette()
         text_color = palette.color(QPalette.ColorRole.Text).name()
 
+        # Check if translations should be shown
+        show_trans = load_app_config().get('show_translations', False)
+        trans_data = None
+        if show_trans and sys_id:
+            try:
+                from shared.translation_service import TranslationService
+                trans_svc = TranslationService()
+                if trans_svc.is_available():
+                    trans_map = trans_svc.get_pgp_translations_by_sys_ids([sys_id])
+                    trans_data = trans_map.get(sys_id)
+                    trans_svc.close()
+            except Exception:
+                pass
+
         pgp_html = (
             f"<div style='background-color: transparent; color:{text_color}; "
             "padding: 10px; margin-bottom: 10px; "
@@ -11218,7 +11278,16 @@ class GenizahGUI(QMainWindow):
 
         doc_type = pgp_doc.get('document_type')
         if doc_type:
-            pgp_html += f"<p><b>{tr('Document Type')}:</b> {doc_type}</p>"
+            # Show translated document type if available
+            if show_trans and trans_data and trans_data.get('document_type_he'):
+                trans_type = trans_data['document_type_he']
+                pgp_html += (
+                    f"<p><b>{tr('Document Type')}:</b> {trans_type} "
+                    f"<span style='color: #888; font-size: 11px;' title='{doc_type}'>"
+                    f"({tr('Translated')})</span></p>"
+                )
+            else:
+                pgp_html += f"<p><b>{tr('Document Type')}:</b> {doc_type}</p>"
 
         tags = pgp_doc.get('tags', [])
         if tags:
@@ -11231,7 +11300,17 @@ class GenizahGUI(QMainWindow):
 
         description = pgp_doc.get('description')
         if description:
-            pgp_html += f"<p><b>{tr('Description')}:</b> {description}</p>"
+            # Show translated description if available
+            if show_trans and trans_data and trans_data.get('description_he'):
+                trans_desc = trans_data['description_he']
+                pgp_html += (
+                    f"<p><b>{tr('Description')}:</b> "
+                    f"<span dir='rtl' title='{description}'>{trans_desc}</span> "
+                    f"<span style='color: #888; font-size: 11px;'>"
+                    f"({tr('Translated')})</span></p>"
+                )
+            else:
+                pgp_html += f"<p><b>{tr('Description')}:</b> {description}</p>"
 
         date = pgp_doc.get('inferred_date_display') or pgp_doc.get('doc_date_standard')
         if date:
@@ -18632,8 +18711,15 @@ class GenizahGUI(QMainWindow):
             self.title_items_by_sid[sid] = item_title
             self.result_row_by_sys_id[sid] = row_idx
 
-            # Snippet
+            # Snippet (with translated match badge if applicable)
             html_snippet = self.render_asterisks_to_html(res.get('snippet', ''))
+            if res.get('translated_match'):
+                badge_text = tr("Translated match")
+                html_snippet = (
+                    f"<span style='background-color: #dbeafe; color: #1e40af; "
+                    f"font-size: 10px; padding: 1px 4px; border-radius: 3px; "
+                    f"margin-right: 4px;'>{badge_text}</span> " + html_snippet
+                )
             lbl = QLabel(html_snippet)
             lbl.setProperty("filter_text", res.get('snippet', ''))
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
