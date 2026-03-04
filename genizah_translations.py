@@ -1656,6 +1656,7 @@ TRANSLATIONS = {
     "Showing first 100 of": "מציג 100 ראשונות מתוך",
     "Export coming soon": "ייצוא בקרוב",
     "Enter shelfmark": "הזן מספר מדף",
+    "Enter shelfmark or NLI system ID": "הזן מספר מדף או מספר מערכת של הספרייה הלאומית",
     "e.g. T-S 8J6.1": "לדוגמה: T-S 8J6.1",
     "First page": "עמוד ראשון",
     "Last page": "עמוד אחרון",
@@ -2629,12 +2630,14 @@ TRANSLATIONS = {
     "Show translations": "הצג תרגומים",
     "Hide translations": "הסתר תרגומים",
     "Translated": "מתורגם",
+    "Original": "מקור",
     "Translated match": "התאמה בתרגום",
     "Original text": "טקסט מקורי",
     "Machine translated via Dicta": "תורגם אוטומטית באמצעות דיקטה",
     "Translation": "תרגום",
     "Translations ON": "תרגומים מופעלים",
     "Translations OFF": "תרגומים כבויים",
+    "Show translated descriptions when available": "הצג תיאורים מתורגמים כאשר זמינים",
 }
 
 # Hebrew library display names (keyed by library_code)
@@ -2720,13 +2723,4 @@ LIBRARY_CODES_HE = {
     'Goldsmith': 'מוזיאון גולדסמית',
     'SOS': 'החברה האורתודוקסית הנפרדת',
     'MotB': 'מוזיאון התנ״ך',
-
-    # --- Phase 46: Translation Feature ---
-    "Show translations": "הצג תרגומים",
-    "Translated": "מתורגם",
-    "Translated match": "התאמה בתרגום",
-    "Original text": "טקסט מקורי",
-    "Machine translated via Dicta": "תורגם אוטומטית באמצעות דיקטה",
-    "Translation": "תרגום",
-    "Show translated descriptions when available": "הצג תיאורים מתורגמים כאשר זמינים",
 }

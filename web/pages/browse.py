@@ -735,7 +735,7 @@ class BrowseState:
 _crossref_cache: Dict[str, dict] = {}
 
 
-def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None):
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None):
     """Create the professional manuscript viewer page UI."""
     state = BrowseState()
     service = get_service()
@@ -757,6 +757,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.sys_id = initial_sys_id
     if highlight:
         state.highlight_terms = highlight
+    # If a shelfmark was passed via URL (not already resolved to sys_id), set it for auto-search on load
+    _pending_shelfmark = initial_shelfmark
 
     # Add custom styles
     ui.add_head_html(VIEWER_STYLES)
@@ -772,7 +774,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.label(state.search_error).classes('text-red-500 text-sm ml-1')
 
     async def search_shelfmark():
-        """Search for manuscripts by shelfmark."""
+        """Search for manuscripts by shelfmark or sys_id."""
         if not state.shelfmark_query.strip():
             return
 
@@ -784,6 +786,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         try:
             _query = state.shelfmark_query.strip()
+
+            # If input looks like a sys_id (starts with 99, all digits), load directly
+            if _query.isdigit() and _query.startswith('99'):
+                state.sys_id = _query
+                state.current_page = None
+                state.view_joined = False
+                state.reading_desk_entries = []
+                state.active_source = 'nli'
+                enrichment_refs.clear()
+                await load_page(p_num=1)
+                return
+
             results, exact_match = await run.io_bound(
                 lambda: service.search_by_shelfmark(_query, limit=20)
             )
@@ -2300,13 +2314,31 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     except Exception:
                                         pass
                                 if _trans_desc_he:
+                                    _br_st = {'showing_original': False}
                                     with ui.row().classes('w-full items-start gap-1'):
-                                        ui.label(_trans_desc_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
+                                        _br_lbl = ui.label(_trans_desc_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
                                             'color: var(--text-primary); direction: rtl;'
-                                        ).tooltip(description)  # Hover shows original English
-                                        ui.label(tr('Translated')).classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
-                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem;'
                                         )
+                                        _br_badge_ref = [None]
+                                        def _make_browse_toggle(lbl, badge_ref, orig, trans, flag):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                if flag['showing_original']:
+                                                    lbl.text = orig
+                                                    lbl.style('color: var(--text-primary); direction: ltr; white-space: pre-wrap;')
+                                                    badge_ref[0].text = tr('Original')
+                                                else:
+                                                    lbl.text = trans
+                                                    lbl.style('color: var(--text-primary); direction: rtl; white-space: pre-wrap;')
+                                                    badge_ref[0].text = tr('Translated')
+                                            return handler
+                                        _br_btn = ui.button(tr('Translated')).props(
+                                            'flat dense no-caps size=xs'
+                                        ).classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
+                                            'background: #e0f2fe !important; color: #0369a1 !important; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                        )
+                                        _br_btn.on('click.stop', _make_browse_toggle(_br_lbl, _br_badge_ref, description, _trans_desc_he, _br_st))
+                                        _br_badge_ref[0] = _br_btn
                                 else:
                                     create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
 
@@ -4367,7 +4399,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Simple input that works
                 search_input = ui.input(
                     placeholder=tr('e.g. T-S 8J6.1'),
-                    label=tr('Enter shelfmark')
+                    label=tr('Enter shelfmark or NLI system ID')
                 ).classes('flex-1').props('outlined dense clearable color=green')
 
                 # Store reference for updates from other functions (e.g. suggestion dialog)
@@ -4445,6 +4477,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.is_loading = True
                 update_content()
                 asyncio.ensure_future(load_page(p_num=initial_page))
+        elif _pending_shelfmark:
+            # Shelfmark passed via URL param — auto-search on load
+            state.shelfmark_query = _pending_shelfmark
+            asyncio.ensure_future(search_shelfmark())
         else:
             # No sys_id in URL -- try to restore reading desk (language-switch case)
             if _restore_reading_desk_state():

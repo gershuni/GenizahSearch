@@ -653,7 +653,7 @@ def parallels_page_route(text: str = None):
         create_parallels_page(initial_text=text)
 
 @ui.page('/browse')
-def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None):
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None):
     set_current_page('/browse')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -661,10 +661,14 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
 
+    # If shelfmark param looks like a sys_id (starts with 99, all digits), use it directly
+    if not sys_id and shelfmark and shelfmark.strip().isdigit() and shelfmark.strip().startswith('99'):
+        sys_id = shelfmark.strip()
+
     content = create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page)
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None)
 
 @ui.page('/catalog-browse')
 def catalog_browse_page_route(

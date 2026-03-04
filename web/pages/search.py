@@ -3845,16 +3845,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         pass
                     _trans_info = search_state.translation_data.get(sys_id) if sys_id and _show_trans else None
                     if _trans_info and _trans_info.get('description_he'):
-                        # Show translated description with indicator
+                        # Show translated description with click-to-toggle original
                         _desc_he = _trans_info['description_he']
                         _desc_short = (_desc_he[:80] + '...') if len(_desc_he) > 80 else _desc_he
+                        _orig = title if title else ''
+                        _ts = {'showing_original': False}
                         with ui.row().classes('items-center gap-1'):
-                            ui.label(_desc_short).classes('text-xs').style(
+                            _tl = ui.label(_desc_short).classes('text-xs').style(
                                 'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
-                            ).tooltip(title if title else '')  # Hover shows original English title
-                            ui.label(tr('Translated')).classes('text-xs px-1 py-0 rounded shrink-0').style(
-                                'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem;'
                             )
+                            def _make_compact_toggle(label_el, badge_el_ref, orig_text, trans_text, flag):
+                                def handler():
+                                    flag['showing_original'] = not flag['showing_original']
+                                    if flag['showing_original']:
+                                        label_el.text = orig_text
+                                        label_el.style('color: var(--text-tertiary); direction: ltr; word-wrap: break-word;')
+                                        badge_el_ref[0].text = tr('Original')
+                                    else:
+                                        label_el.text = trans_text
+                                        label_el.style('color: var(--text-tertiary); direction: rtl; word-wrap: break-word;')
+                                        badge_el_ref[0].text = tr('Translated')
+                                return handler
+                            _tb_ref = [None]
+                            _toggle_fn = _make_compact_toggle(_tl, _tb_ref, _orig, _desc_short, _ts)
+                            _tb = ui.button(tr('Translated')).props(
+                                'flat dense no-caps size=xs'
+                            ).classes('text-xs px-1 py-0 rounded shrink-0').style(
+                                'background: #e0f2fe !important; color: #0369a1 !important; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                            )
+                            _tb.on('click.stop', _toggle_fn)
+                            _tb_ref[0] = _tb
                     elif title_short:
                         ui.label(title_short).classes('text-xs').style(
                             'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
@@ -4688,12 +4708,26 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     except Exception:
                                         pass
                                 if _adv_trans_he:
+                                    _adv_st = {'showing_original': False, 'label': None, 'badge': None}
+                                    def _make_adv_toggle(st, orig, trans):
+                                        def handler():
+                                            st['showing_original'] = not st['showing_original']
+                                            if st['showing_original']:
+                                                st['label'].set_text(orig)
+                                                st['label'].style('color: var(--text-primary); direction: ltr; white-space: pre-wrap;')
+                                                st['badge'].set_text(tr('Original'))
+                                            else:
+                                                st['label'].set_text(trans)
+                                                st['label'].style('color: var(--text-primary); direction: rtl; white-space: pre-wrap;')
+                                                st['badge'].set_text(tr('Translated'))
+                                        return handler
+                                    _adv_handler = _make_adv_toggle(_adv_st, description, _adv_trans_he)
                                     with ui.row().classes('w-full items-start gap-1'):
-                                        ui.label(_adv_trans_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
+                                        _adv_st['label'] = ui.label(_adv_trans_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
                                             'color: var(--text-primary); direction: rtl;'
-                                        ).tooltip(description)  # Hover shows original English
-                                        ui.label(tr('Translated')).classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
-                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem;'
+                                        )
+                                        _adv_st['badge'] = ui.button(tr('Translated'), on_click=_adv_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
+                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
                                         )
                                 else:
                                     create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
