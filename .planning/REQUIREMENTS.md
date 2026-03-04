@@ -34,7 +34,7 @@ Requirements for v7.0.0 Catalog Navigation & Transcription Search. Each maps to 
 
 ### Transcription Import
 
-- [ ] **TRANS-01**: FJMS ~30K transcriptions imported into fjms_enrichment.db sidecar
+- [x] **TRANS-01**: FJMS ~30K transcriptions imported into fjms_enrichment.db sidecar
 - [ ] **TRANS-02**: FJMS transcriptions accessible via shared service layer (both apps)
 
 ### Transcription Search
@@ -99,7 +99,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FILT-03 | Phase 43 | Complete |
 | FILT-04 | Phase 43 | Complete |
 | FILT-05 | Phase 43 | Complete |
-| TRANS-01 | Phase 44 | Pending |
+| TRANS-01 | Phase 44 | Complete |
 | TRANS-02 | Phase 44 | Pending |
 | SRCH-01 | Phase 45 | Pending |
 | SRCH-02 | Phase 45 | Pending |
