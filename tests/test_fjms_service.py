@@ -1373,6 +1373,23 @@ def filter_db(tmp_path):
         ("SYS008", 8, "FragmentMaterial", "Vellum", "קלף"),
     ])
 
+    # --- catalog_fts (FTS5 virtual table for text filters) ---
+    conn.execute("""
+        CREATE VIRTUAL TABLE catalog_fts USING fts5(
+            Title, TitleHeb, TextualFrameHeb, TextualFrameEng,
+            RunningTitle, FreeDescription, FullText, DetailedFrames,
+            content='catalog', content_rowid='rowid'
+        )
+    """)
+    # Populate FTS5 from catalog
+    conn.execute("""
+        INSERT INTO catalog_fts(rowid, Title, TitleHeb, TextualFrameHeb, TextualFrameEng,
+            RunningTitle, FreeDescription, FullText, DetailedFrames)
+        SELECT rowid, Title, TitleHeb, TextualFrameHeb, TextualFrameEng,
+            COALESCE(Title, ''), COALESCE(TitleHeb, ''), '', ''
+        FROM catalog
+    """)
+
     conn.commit()
     conn.close()
     return db_path
@@ -1519,6 +1536,121 @@ def test_get_filter_sys_ids_graceful_degradation():
     result = svc.get_filter_sys_ids(domain="Halakha")
     assert result is None
     svc.close()
+
+
+# ── Multi-select filter tests ──────────────────────────────────
+
+
+def test_get_filter_sys_ids_multi_domain_include(filter_svc):
+    """Multiple domains include returns union of matching sys_ids."""
+    result = filter_svc.get_filter_sys_ids(domains=["Halakha", "Bible"])
+    assert result is not None
+    # Halakha: SYS001, SYS002, SYS005, SYS008; Bible: SYS003, SYS007, SYS008
+    assert {"SYS001", "SYS002", "SYS003", "SYS005", "SYS007", "SYS008"} == result
+
+
+def test_get_filter_sys_ids_multi_domain_exclude(filter_svc):
+    """Domains exclude removes matching manuscripts."""
+    result = filter_svc.get_filter_sys_ids(domains_exclude=["Halakha"])
+    assert result is not None
+    # Exclude Halakha (SYS001, SYS002, SYS005, SYS008) -> SYS003, SYS004, SYS006, SYS007
+    assert "SYS001" not in result
+    assert "SYS002" not in result
+    assert "SYS003" in result
+    assert "SYS006" in result
+
+
+def test_get_filter_sys_ids_multi_author_include(filter_svc):
+    """Multiple authors include returns union."""
+    result = filter_svc.get_filter_sys_ids(authors=["10", "20"])
+    assert result is not None
+    # Maimonides (10): SYS001, SYS002, SYS005; Saadia (20): SYS003
+    assert {"SYS001", "SYS002", "SYS003", "SYS005"} == result
+
+
+def test_get_filter_sys_ids_multi_author_exclude(filter_svc):
+    """Authors exclude removes matching manuscripts."""
+    result = filter_svc.get_filter_sys_ids(authors_exclude=["10"])
+    assert result is not None
+    # Exclude Maimonides -> should not have SYS001, SYS002, SYS005
+    assert "SYS001" not in result
+    assert "SYS002" not in result
+    assert "SYS005" not in result
+    assert "SYS003" in result  # Saadia
+
+
+def test_get_filter_sys_ids_multi_work_include(filter_svc):
+    """Multiple works include returns union."""
+    result = filter_svc.get_filter_sys_ids(works=["100", "200"])
+    assert result is not None
+    # Mishneh Torah (100): SYS001; Tafsir (200): SYS003
+    assert {"SYS001", "SYS003"} == result
+
+
+def test_get_filter_sys_ids_multi_work_exclude(filter_svc):
+    """Works exclude removes matching manuscripts."""
+    result = filter_svc.get_filter_sys_ids(works_exclude=["100"])
+    assert result is not None
+    assert "SYS001" not in result
+    assert "SYS003" in result
+
+
+def test_get_filter_sys_ids_legacy_domain_compat(filter_svc):
+    """Legacy single domain param auto-converts to domains list."""
+    single = filter_svc.get_filter_sys_ids(domain="Halakha")
+    multi = filter_svc.get_filter_sys_ids(domains=["Halakha"])
+    assert single == multi
+
+
+def test_get_filter_sys_ids_domain_include_exclude_combined(filter_svc):
+    """Include + exclude domains together intersect correctly."""
+    # Include Rabbinic parent (gets SYS001, SYS002, SYS005, SYS008)
+    # Exclude Bible (removes SYS003, SYS007, SYS008)
+    result = filter_svc.get_filter_sys_ids(
+        domains=["Rabbinic"], domains_exclude=["Bible"]
+    )
+    assert result is not None
+    assert "SYS001" in result
+    assert "SYS008" not in result  # Has both Halakha and Bible domains
+
+
+def test_get_filter_sys_ids_text_all(filter_svc):
+    """text_all requires ALL terms to match."""
+    result = filter_svc.get_filter_sys_ids(text_all=["Mishneh", "Torah"])
+    assert result is not None
+    assert "SYS001" in result  # "Mishneh Torah"
+    assert "SYS003" not in result  # "Tafsir Psalms"
+
+
+def test_get_filter_sys_ids_text_any(filter_svc):
+    """text_any requires ANY term to match."""
+    result = filter_svc.get_filter_sys_ids(text_any=["Psalms", "Guide"])
+    assert result is not None
+    assert "SYS003" in result  # "Tafsir Psalms"
+    assert "SYS005" in result  # "Guide Perplexed"
+    assert "SYS007" in result  # "Psalms Commentary"
+
+
+def test_get_filter_sys_ids_text_not(filter_svc):
+    """text_not excludes manuscripts matching term."""
+    all_halakha = filter_svc.get_filter_sys_ids(domains=["Halakha"])
+    result = filter_svc.get_filter_sys_ids(domains=["Halakha"], text_not=["Guide"])
+    assert result is not None
+    assert "SYS005" not in result  # "Guide Perplexed" excluded
+    assert "SYS001" in result
+
+
+def test_get_filter_sys_ids_combined_multi_and_date(filter_svc):
+    """Multi-domain + date range combined filter."""
+    result = filter_svc.get_filter_sys_ids(
+        domains=["Halakha", "Bible"], date_from=1100, date_to=1250
+    )
+    assert result is not None
+    # Halakha+Bible in 1100-1250: SYS001 (1200), SYS008 (1150)
+    assert "SYS001" in result
+    assert "SYS008" in result
+    assert "SYS005" not in result  # 1300
+    assert "SYS003" not in result  # 950
 
 
 # ── Web shim import test ─────────────────────────────────────────

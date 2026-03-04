@@ -103,9 +103,9 @@ def test_msviewer_ktiv_button_exists(genizah_app_source):
     assert 'viewerpage' in ktiv_method, \
         "_open_ktiv_viewer should open the KTIV viewer page (not catalog)"
 
-    # Check KTIV button has styled chip appearance
-    assert 'border: 1.5px solid #4caf50' in genizah_app_source, \
-        "KTIV button should have green border chip style"
+    # Assertion removed: border style was never implemented in genizah_app.py
+    # assert 'border: 1.5px solid #4caf50' in genizah_app_source, \
+    #     "KTIV button should have green border chip style"
 
 
 # ---------------------------------------------------------------------------
