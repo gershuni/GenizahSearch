@@ -404,3 +404,225 @@ class TestSchemaCreation:
         assert "idx_fjms_trans_field" in index_names
 
         conn.close()
+
+
+# =============================================================================
+# Plan 46-02: PGP Batch Translation Script Tests
+# =============================================================================
+
+
+class TestPgpBatchFlowE2E:
+    """End-to-end test for PGP batch translation flow with mocked API."""
+
+    def test_pgp_batch_flow_e2e(self, tmp_path):
+        """Full batch flow: reads docs, filters by length, translates, writes pgp_translations."""
+        from shared.dicta_client import PGP_DOCUMENT_TYPE_HE
+        from shared.translation_service import ensure_pgp_translations_table
+
+        # Create a minimal documents table in a test db
+        db_path = str(tmp_path / "pgp.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE documents ("
+            "  pgpid INTEGER PRIMARY KEY,"
+            "  description TEXT,"
+            "  document_type TEXT"
+            ")"
+        )
+        # Row 1: normal description (>= 20 chars, should be translated)
+        conn.execute(
+            "INSERT INTO documents VALUES (?, ?, ?)",
+            (1001, "Letter from a merchant requesting payment for goods shipped from Fustat to Alexandria", "Letter"),
+        )
+        # Row 2: short description (< 20 chars, should be skipped)
+        conn.execute(
+            "INSERT INTO documents VALUES (?, ?, ?)",
+            (1002, "Short desc", "Letter"),
+        )
+        # Row 3: NULL description (should be skipped)
+        conn.execute(
+            "INSERT INTO documents VALUES (?, ?, ?)",
+            (1003, None, "Legal document"),
+        )
+        # Row 4: normal description, different type
+        conn.execute(
+            "INSERT INTO documents VALUES (?, ?, ?)",
+            (1004, "Legal document concerning a debt between two parties witnessed by judges", "Legal document"),
+        )
+        conn.commit()
+        conn.close()
+
+        # Create pgp_translations table
+        write_conn = sqlite3.connect(db_path)
+        ensure_pgp_translations_table(write_conn)
+
+        # Import batch script functions
+        from scripts.translate_pgp_descriptions import flush_batch, get_candidates
+
+        # Get candidates with min_length=20
+        candidates = get_candidates(db_path, min_length=20)
+
+        # Should only include rows with description >= 20 chars
+        pgpids = [c[0] for c in candidates]
+        assert 1001 in pgpids, "Normal description should be a candidate"
+        assert 1002 not in pgpids, "Short description should be filtered out"
+        assert 1003 not in pgpids, "NULL description should be filtered out"
+        assert 1004 in pgpids, "Second normal description should be a candidate"
+
+        # Simulate translation: mock API for descriptions, manual mapping for types
+        mock_translations = {
+            1001: "\u05de\u05db\u05ea\u05d1 \u05de\u05e1\u05d5\u05d7\u05e8 \u05d4\u05de\u05d1\u05e7\u05e9 \u05ea\u05e9\u05dc\u05d5\u05dd",
+            1004: "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9 \u05d1\u05e0\u05d5\u05e9\u05d0 \u05d7\u05d5\u05d1",
+        }
+
+        batch_results = []
+        for pgpid, desc, dtype in candidates:
+            desc_he = mock_translations.get(pgpid)
+            dtype_he = PGP_DOCUMENT_TYPE_HE.get(dtype) if dtype else None
+            if desc_he is not None:
+                batch_results.append((pgpid, desc_he, dtype_he))
+
+        # Flush to database
+        flush_batch(write_conn, batch_results)
+
+        # Verify results in pgp_translations table
+        rows = write_conn.execute(
+            "SELECT pgpid, description_he, document_type_he FROM pgp_translations ORDER BY pgpid"
+        ).fetchall()
+
+        assert len(rows) == 2, f"Expected 2 translated rows, got {len(rows)}"
+
+        # Row 1001: Letter
+        assert rows[0][0] == 1001
+        assert "\u05de\u05db\u05ea\u05d1" in rows[0][1]  # description contains "michtav"
+        assert rows[0][2] == "\u05de\u05db\u05ea\u05d1"  # document_type_he = Letter in Hebrew
+
+        # Row 1004: Legal document
+        assert rows[1][0] == 1004
+        assert "\u05de\u05e1\u05de\u05da" in rows[1][1]  # description contains "mismakh"
+        assert rows[1][2] == "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9"  # Legal document in Hebrew
+
+        write_conn.close()
+
+    def test_candidates_exclude_empty_strings(self, tmp_path):
+        """get_candidates excludes rows with empty string descriptions."""
+        db_path = str(tmp_path / "pgp.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE documents ("
+            "  pgpid INTEGER PRIMARY KEY,"
+            "  description TEXT,"
+            "  document_type TEXT"
+            ")"
+        )
+        conn.execute("INSERT INTO documents VALUES (?, ?, ?)", (1, "", "Letter"))
+        conn.execute(
+            "INSERT INTO documents VALUES (?, ?, ?)",
+            (2, "A valid description of sufficient length for translation", "Letter"),
+        )
+        conn.commit()
+        conn.close()
+
+        from scripts.translate_pgp_descriptions import get_candidates
+
+        candidates = get_candidates(db_path, min_length=20)
+        pgpids = [c[0] for c in candidates]
+        assert 1 not in pgpids, "Empty string description should be excluded"
+        assert 2 in pgpids
+
+    def test_document_type_manual_mapping(self):
+        """All 9 PGP document types map correctly via PGP_DOCUMENT_TYPE_HE without API."""
+        from shared.dicta_client import PGP_DOCUMENT_TYPE_HE
+
+        # Every known type should have a non-empty Hebrew translation
+        test_types = [
+            "Letter", "Legal document", "List or table", "Literary text",
+            "State document", "Paraliterary text",
+            "Credit instrument or private receipt",
+            "Legal query or responsum", "Inscription",
+        ]
+        for dt in test_types:
+            he = PGP_DOCUMENT_TYPE_HE.get(dt)
+            assert he is not None, f"Missing HE translation for '{dt}'"
+            assert len(he) > 0, f"Empty HE translation for '{dt}'"
+
+        # Unknown type should return None
+        assert PGP_DOCUMENT_TYPE_HE.get("Unknown type") is None
+
+
+class TestCheckpointSaveLoad:
+    """Tests for checkpoint save and load functions."""
+
+    def test_checkpoint_round_trip(self, tmp_path):
+        """Save and load checkpoint preserves the set of completed IDs."""
+        from scripts.translate_pgp_descriptions import load_checkpoint, save_checkpoint
+
+        checkpoint_path = str(tmp_path / "checkpoint.json")
+
+        # Initially empty
+        ids = load_checkpoint(checkpoint_path)
+        assert ids == set()
+
+        # Save some IDs
+        test_ids = {100, 200, 300, 42, 9999}
+        save_checkpoint(checkpoint_path, test_ids)
+
+        # Load back
+        loaded = load_checkpoint(checkpoint_path)
+        assert loaded == test_ids
+
+    def test_checkpoint_atomic_write(self, tmp_path):
+        """Checkpoint write is atomic -- no .tmp files left behind."""
+        from scripts.translate_pgp_descriptions import save_checkpoint
+
+        checkpoint_path = str(tmp_path / "checkpoint.json")
+        save_checkpoint(checkpoint_path, {1, 2, 3})
+
+        # Verify no .tmp files in directory
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert len(tmp_files) == 0, f"Leftover .tmp files: {tmp_files}"
+
+        # Verify the checkpoint file exists and is valid JSON
+        assert os.path.isfile(checkpoint_path)
+        with open(checkpoint_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["count"] == 3
+        assert set(data["completed_ids"]) == {1, 2, 3}
+        assert "saved_at" in data
+
+    def test_checkpoint_incremental_update(self, tmp_path):
+        """Checkpoint can be incrementally updated with more IDs."""
+        from scripts.translate_pgp_descriptions import load_checkpoint, save_checkpoint
+
+        checkpoint_path = str(tmp_path / "checkpoint.json")
+
+        # First batch
+        ids = {1, 2, 3}
+        save_checkpoint(checkpoint_path, ids)
+
+        # Load, add more, save again
+        loaded = load_checkpoint(checkpoint_path)
+        loaded.update({4, 5, 6})
+        save_checkpoint(checkpoint_path, loaded)
+
+        # Final load
+        final = load_checkpoint(checkpoint_path)
+        assert final == {1, 2, 3, 4, 5, 6}
+
+    def test_checkpoint_load_missing_file(self, tmp_path):
+        """Loading from non-existent file returns empty set."""
+        from scripts.translate_pgp_descriptions import load_checkpoint
+
+        result = load_checkpoint(str(tmp_path / "nonexistent.json"))
+        assert result == set()
+
+    def test_checkpoint_load_corrupt_file(self, tmp_path):
+        """Loading from corrupt JSON file returns empty set (graceful degradation)."""
+        from scripts.translate_pgp_descriptions import load_checkpoint
+
+        corrupt_path = str(tmp_path / "corrupt.json")
+        with open(corrupt_path, "w") as f:
+            f.write("not valid json {{{")
+
+        result = load_checkpoint(corrupt_path)
+        assert result == set()
