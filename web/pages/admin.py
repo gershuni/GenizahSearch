@@ -6,12 +6,15 @@ User management, corrections review, and system administration for admins.
 Uses Supabase directly for all data operations.
 """
 
+import logging
 from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState
 from web.state import state
 from web.components.typography import h1, h2, h3
 from web.supabase_client import get_client, get_user_client
+
+logger = logging.getLogger(__name__)
 
 
 def get_shelfmark_for_id(sys_id: str) -> tuple:
@@ -51,7 +54,7 @@ def get_pending_corrections():
                 c['profiles'] = profiles_map.get(c.get('author_id'), {})
         return corrections
     except Exception as e:
-        print(f"Error fetching pending corrections: {e}")
+        logger.error("Error fetching pending corrections: %s", e)
         return []
 
 
@@ -62,7 +65,7 @@ def get_all_users():
         response = client.table('profiles').select('*').order('created_at', desc=True).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error fetching users: {e}")
+        logger.error("Error fetching users: %s", e)
         return []
 
 
@@ -73,7 +76,7 @@ def get_all_corrections_count():
         response = client.table('corrections').select('id', count='exact').execute()
         return response.count or 0
     except Exception as e:
-        print(f"Error fetching corrections count: {e}")
+        logger.error("Error fetching corrections count: %s", e)
         return 0
 
 
@@ -110,7 +113,7 @@ def update_correction_status(correction_id: int, status: str, review_notes: str 
                     # Increment reputation by 1
                     client.table('profiles').update({'reputation': current_reputation + 1}).eq('id', author_id).execute()
             except Exception as e:
-                print(f"Warning: Failed to update reputation for correction {correction_id}: {e}")
+                logger.warning("Failed to update reputation for correction %s: %s", correction_id, e)
                 # Don't fail the approval if reputation update fails
 
         return {'success': True} if response.data else {'error': 'Update failed'}
