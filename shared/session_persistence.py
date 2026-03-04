@@ -228,15 +228,20 @@ def add_history_entry(search_type: str, entry: dict, limit: int = 20) -> bool:
             entries[found_idx]["result_count"] = entry.get("result_count", 0)
             entries[found_idx]["timestamp"] = entry.get("timestamp", datetime.now().isoformat())
             entries[found_idx]["state"] = entry.get("state", {})
+            if "pre_search_filters" in entry:
+                entries[found_idx]["pre_search_filters"] = entry["pre_search_filters"]
         else:
             # Add new entry at the beginning (newest first)
-            entries.insert(0, {
+            new_entry = {
                 "query": query,
                 "result_count": entry.get("result_count", 0),
                 "timestamp": entry.get("timestamp", datetime.now().isoformat()),
                 "search_params": params,
                 "state": entry.get("state", {}),
-            })
+            }
+            if "pre_search_filters" in entry:
+                new_entry["pre_search_filters"] = entry["pre_search_filters"]
+            entries.insert(0, new_entry)
 
         # Sort by timestamp descending (newest first) after update
         entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
