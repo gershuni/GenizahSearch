@@ -3,6 +3,7 @@ GenizahService - Thread-safe wrapper for genizah_core.
 Updated to proxy web.state.state for backward compatibility.
 """
 
+import logging
 import sys
 import os
 import re
@@ -10,6 +11,8 @@ import threading
 import time
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for importing genizah_core
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -239,7 +242,7 @@ class GenizahService:
             return manuscripts, False
 
         except Exception as e:
-            print(f"Search by shelfmark error: {e}")
+            logger.error("Search by shelfmark error: %s", e)
             return [], False
 
     def get_browse_page(self, sys_id: str, p_num: Optional[int] = None, direction: int = 0, absolute_index: Optional[int] = None, allow_cross: bool = False) -> Optional[BrowsePage]:
@@ -383,7 +386,7 @@ class GenizahService:
                     # Library digital collection URL
                     library_viewer_url = crossref_svc.get_library_viewer_url(actual_sys_id)
             except Exception as crossref_err:
-                print(f"NLI crossref enrichment error: {crossref_err}")
+                logger.error("NLI crossref enrichment error: %s", crossref_err)
 
             # External images from nli_cache (populated by enrich_metadata)
             # images_ext may come from Cambridge, Manchester LUNA, or JTS Figgy
@@ -426,7 +429,7 @@ class GenizahService:
                 library_viewer_url=library_viewer_url,
             )
         except Exception as e:
-            print(f"Browse page error: {e}")
+            logger.error("Browse page error: %s", e)
             return None
 
     def get_browse_page_by_fl(self, fl_id: str, sys_id: Optional[str] = None) -> Optional[BrowsePage]:
@@ -542,7 +545,7 @@ class GenizahService:
                     # Library digital collection URL
                     library_viewer_url = crossref_svc.get_library_viewer_url(actual_sys_id)
             except Exception as crossref_err:
-                print(f"NLI crossref enrichment error (by_fl): {crossref_err}")
+                logger.error("NLI crossref enrichment error (by_fl): %s", crossref_err)
 
             # External images from nli_cache (populated by enrich_metadata)
             cambridge_images = []
@@ -584,7 +587,7 @@ class GenizahService:
                 library_viewer_url=library_viewer_url,
             )
         except Exception as e:
-            print(f"Browse page by FL error: {e}")
+            logger.error("Browse page by FL error: %s", e)
             return None
 
     def get_full_manuscript(self, sys_id: str) -> List[DocumentPage]:
@@ -611,7 +614,7 @@ class GenizahService:
                 ))
             return result
         except Exception as e:
-            print(f"Get full manuscript error: {e}")
+            logger.error("Get full manuscript error: %s", e)
             return []
 
     def get_adjacent_shelfmark(self, sys_id: str, direction: int) -> Optional[str]:
@@ -628,7 +631,7 @@ class GenizahService:
         try:
             return state.searcher.get_adjacent_sys_id_by_file_order(sys_id, direction)
         except Exception as e:
-            print(f"Get adjacent shelfmark error: {e}")
+            logger.error("Get adjacent shelfmark error: %s", e)
             return None
 
 _service_instance = GenizahService()

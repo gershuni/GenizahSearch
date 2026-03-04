@@ -13,6 +13,8 @@ Features:
 - Per-device storage (for anonymous users)
 """
 
+import logging
+
 from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl, get_language
@@ -23,6 +25,8 @@ from genizah_core import get_library_display
 from typing import Optional
 import time
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 
 def create_inline_edit_label(
@@ -129,7 +133,7 @@ def create_lists_page():
             try:
                 await state.lists_mgr.refresh_data()
             except Exception as e:
-                print(f"Error refreshing lists data: {e}")
+                logger.error(f"Error refreshing lists data: {e}")
         refresh_ui()
 
     # --- Create New List Dialog ---
@@ -541,7 +545,7 @@ def create_lists_page():
                                             if page_data and page_data.text:
                                                 text_snippet = page_data.text
                                     except Exception as e:
-                                        print(f"Error fetching snippet: {e}")
+                                        logger.error(f"Error fetching snippet: {e}")
 
                                     if text_snippet:
                                         # Show snippet or full text

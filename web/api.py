@@ -1,3 +1,5 @@
+import logging
+
 from nicegui import app
 from fastapi import Response
 from fastapi.responses import RedirectResponse
@@ -8,6 +10,8 @@ import re
 import os
 from genizah_core import Config
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 # NOTE: Backend API routes removed - now using Supabase directly
 # Auth, users, corrections, comments, discoveries all go through Supabase
@@ -31,15 +35,15 @@ ALLOWED_IMAGE_DOMAINS = [
 def init_api_routes():
     """Register API routes for image proxy and exports."""
     # NOTE: Backend database and routers removed - using Supabase now
-    print("API routes initialized (Supabase mode)")
+    logger.info("API routes initialized (Supabase mode)")
 
     # Initialize NLI crossref service for local FL ID resolution (Phase 30)
     from shared.nli_crossref_service import get_nli_crossref_service
     nli_svc = get_nli_crossref_service(thread_safe=True)
     if nli_svc.is_available():
-        print(f"NLI crossref sidecar loaded (local FL ID resolution enabled)")
+        logger.info("NLI crossref sidecar loaded (local FL ID resolution enabled)")
     else:
-        print("NLI crossref sidecar not available (will use network manifest fetch)")
+        logger.info("NLI crossref sidecar not available (will use network manifest fetch)")
 
     def fetch_fl_ids_from_nli(system_id: str, _cache={}, _cache_time={}) -> list:
         """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached.
@@ -89,10 +93,10 @@ def init_api_routes():
                     # Cache successful result
                     _cache[system_id] = fl_ids
                     _cache_time[system_id] = _time.time()
-                    print(f"Resolved {len(fl_ids)} FL IDs for {system_id} from network IIIF manifest")
+                    logger.info(f"Resolved {len(fl_ids)} FL IDs for {system_id} from network IIIF manifest")
                     return fl_ids
         except Exception as e:
-            print(f"Failed to fetch FL IDs from IIIF manifest for {system_id}: {e}")
+            logger.error(f"Failed to fetch FL IDs from IIIF manifest for {system_id}: {e}")
 
         # Fallback to MARC API (only has 1 FL ID typically)
         try:
@@ -109,10 +113,10 @@ def init_api_routes():
                 if unique_fl_ids:
                     _cache[system_id] = unique_fl_ids
                     _cache_time[system_id] = _time.time()
-                    print(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
+                    logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
                 return unique_fl_ids
         except Exception as e:
-            print(f"MARC fallback also failed for {system_id}: {e}")
+            logger.error(f"MARC fallback also failed for {system_id}: {e}")
 
         return []
 
@@ -149,7 +153,7 @@ def init_api_routes():
                         media_type=resp.headers.get('Content-Type', 'image/jpeg')
                     )
         except Exception as e:
-            print(f"IIIF failed for FL{digits}: {e}")
+            logger.error(f"IIIF failed for FL{digits}: {e}")
 
         # Fallback to Rosetta - but filter out the "no image" placeholder
         rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
@@ -163,7 +167,7 @@ def init_api_routes():
                         media_type=resp.headers.get('Content-Type', 'image/png')
                     )
         except Exception as e:
-            print(f"Rosetta failed for FL{digits}: {e}")
+            logger.error(f"Rosetta failed for FL{digits}: {e}")
 
         return Response(content="Image not found", status_code=404)
 
@@ -529,12 +533,12 @@ def init_api_routes():
                 )
             else:
                 # Production fallback: if server-side fetch fails, let browser fetch directly.
-                print(f"Oxford proxy fetch failed ({resp.status_code}) for {sys_id} page={page}; redirecting to direct URL")
+                logger.info(f"Oxford proxy fetch failed ({resp.status_code}) for {sys_id} page={page}; redirecting to direct URL")
                 return RedirectResponse(url=img_url, status_code=307)
         except Exception as e:
             # Production fallback: network/SSL differences can break server fetches while
             # direct browser access still works.
-            print(f"Oxford proxy exception for {sys_id} page={page}: {e}; redirecting to direct URL")
+            logger.error(f"Oxford proxy exception for {sys_id} page={page}: {e}; redirecting to direct URL")
             return RedirectResponse(url=img_url, status_code=307)
 
     @app.get('/api/oxford_image_url/{sys_id}')
@@ -729,13 +733,13 @@ def init_api_routes():
                     media_type=resp.headers.get('Content-Type', 'image/jpeg')
                 )
             else:
-                print(f"Proxy got status {resp.status_code} for URL: {url}")
+                logger.info(f"Proxy got status {resp.status_code} for URL: {url}")
                 return Response(status_code=resp.status_code)
         except requests.Timeout:
-            print(f"Proxy timeout for URL: {url}")
+            logger.error(f"Proxy timeout for URL: {url}")
             return Response(content="Request timeout", status_code=504)
         except Exception as e:
-            print(f"Proxy error for {url}: {e}")
+            logger.error(f"Proxy error for {url}: {e}")
             return Response(status_code=500)
 
     @app.get('/api/export/excel')
@@ -758,7 +762,7 @@ def init_api_routes():
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            print(f"Export Excel error: {e}")
+            logger.error(f"Export Excel error: {e}")
             return Response("Export failed", status_code=500)
 
     @app.get('/api/export/word')
@@ -781,7 +785,7 @@ def init_api_routes():
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            print(f"Export Word error: {e}")
+            logger.error(f"Export Word error: {e}")
             return Response("Export failed", status_code=500)
 
     @app.get('/api/export/parallels/excel')
@@ -810,7 +814,7 @@ def init_api_routes():
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            print(f"Export Parallels Excel error: {e}")
+            logger.error(f"Export Parallels Excel error: {e}")
             return Response("Export failed", status_code=500)
 
     @app.get('/api/export/parallels/word')
@@ -839,7 +843,7 @@ def init_api_routes():
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            print(f"Export Parallels Word error: {e}")
+            logger.error(f"Export Parallels Word error: {e}")
             return Response("Export failed", status_code=500)
 
     @app.get('/api/export/browse/word')
@@ -862,7 +866,7 @@ def init_api_routes():
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            print(f"Export Browse Word error: {e}")
+            logger.error(f"Export Browse Word error: {e}")
             return Response("Export failed", status_code=500)
 
     @app.get('/api/export/list/{list_id}/excel')
@@ -893,7 +897,7 @@ def init_api_routes():
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            print(f"Export List Excel error: {e}")
+            logger.error(f"Export List Excel error: {e}")
             return Response("Export failed", status_code=500)
 
     @app.post('/api/auth/oauth-callback')
@@ -943,5 +947,5 @@ def init_api_routes():
             return JSONResponse({'error': 'No user returned'}, status_code=400)
 
         except Exception as e:
-            print(f"OAuth callback error: {e}")
+            logger.error(f"OAuth callback error: {e}")
             return JSONResponse({'error': str(e)}, status_code=500)

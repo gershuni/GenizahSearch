@@ -7,11 +7,14 @@ Uses MyMemory free translation API (no API key required).
 Supports Hebrew <-> English translation.
 """
 
+import logging
 import requests
 from nicegui import ui
 from web.translations import tr, get_language
 from typing import Optional, Callable
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def detect_language(text: str) -> str:
@@ -73,7 +76,7 @@ def translate_text(text: str, source_lang: str, target_lang: str) -> Optional[st
                     return translated
         return None
     except Exception as e:
-        print(f"Translation error: {e}")
+        logger.error("Translation error: %s", e)
         return None
 
 

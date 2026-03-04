@@ -325,7 +325,7 @@ class CorrectionsClient:
         if self.cache_file.exists():
             try:
                 self.cache_file.unlink()
-            except:
+            except OSError:
                 pass
 
     def is_server_available(self, force_check: bool = False) -> bool:

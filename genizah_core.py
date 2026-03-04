@@ -1234,10 +1234,10 @@ class LabEngine:
                 q_obj = None
                 try:
                     q_obj = self.lab_index.parse_query(final_query_str)
-                except:
+                except (ValueError, RuntimeError):
                     try:
                         q_obj = self.lab_index.parse_query(core_query)
-                    except: continue
+                    except (ValueError, RuntimeError): continue
 
                 if not q_obj: continue
 
@@ -1307,7 +1307,7 @@ class LabEngine:
                         if matches:
                             rec['ms_matches'].append((matches[start_m]['start'], matches[end_m]['end']))
                             for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
-                    except: pass
+                    except (KeyError, IndexError, TypeError): pass
         except InterruptedError:
             was_interrupted = True
 
@@ -5403,7 +5403,7 @@ class SearchEngine:
         # --- Existing path (unchanged) ---
         if mode == 'Regex':
             try: return re.compile(" ".join(terms), re.IGNORECASE)
-            except: return None
+            except re.error: return None
 
         parts = []
         for term in terms:
@@ -5437,7 +5437,7 @@ class SearchEngine:
 
         try:
             return re.compile(sep.join(parts), re.IGNORECASE)
-        except:
+        except re.error:
             return None
 
     def highlight(self, text, regex, for_file=False):
@@ -5548,7 +5548,7 @@ class SearchEngine:
             q = self.index.parse_query(f'full_header:"{sys_id}"', ["full_header"])
             # Fetch enough docs to cover a manuscript
             res = self.searcher.search(q, 2000)
-        except:
+        except (ValueError, RuntimeError):
             return "", "", "", ""
 
         pages = []
@@ -5563,7 +5563,7 @@ class SearchEngine:
 
             p_num_str = parsed[1]
             try: p_num = int(p_num_str)
-            except: p_num = 999999
+            except (ValueError, TypeError): p_num = 999999
 
             content = doc['content'][0]
             uid = doc['unique_id'][0]
@@ -5853,6 +5853,12 @@ class SearchEngine:
         # Save pattern string for passing to results
         pattern_str = regex.pattern
 
+        # Augment Tantivy query with sys_id filter so the index only returns
+        # hits from the restricted manuscripts (avoids iterating 50K hits).
+        if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
+            sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
+            t_query_str = f'({t_query_str}) AND ({sid_clauses})'
+
         try:
             query = self.index.parse_query(t_query_str, ["content"])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
@@ -5867,6 +5873,16 @@ class SearchEngine:
         regex_filtered_count = 0
         was_interrupted = False
 
+        # Pre-compute allowed unique_ids for fast O(1) filtering
+        # instead of running parse_header_smart regex on every hit
+        restrict_uids = None
+        if restrict_sys_ids is not None:
+            browse_map = self._load_browse_map()
+            restrict_uids = set()
+            for sid in restrict_sys_ids:
+                for page in browse_map.get(sid, []):
+                    restrict_uids.add(page['uid'])
+
         try:
             for i, (score, doc_addr) in enumerate(hits):
                 if progress_callback and i % 5 == 0:
@@ -5875,9 +5891,8 @@ class SearchEngine:
                     doc = self.searcher.doc(doc_addr)
 
                     # Pre-search filter: skip manuscripts outside the restrict set
-                    if restrict_sys_ids is not None:
-                        hit_sys_id = self.meta_mgr.parse_header_smart(doc['full_header'][0])[0]
-                        if hit_sys_id not in restrict_sys_ids:
+                    if restrict_uids is not None:
+                        if doc['unique_id'][0] not in restrict_uids:
                             continue
 
                     content = self._get_field(doc, 'content', [""])[0]
@@ -6025,6 +6040,21 @@ class SearchEngine:
         total_chunks = len(chunks_data)
         was_cancelled = False
 
+        # Pre-compute allowed unique_ids for fast O(1) filtering
+        restrict_uids = None
+        _sid_filter_clause = None
+        if restrict_sys_ids is not None:
+            browse_map = self._load_browse_map()
+            restrict_uids = set()
+            for sid in restrict_sys_ids:
+                for page in browse_map.get(sid, []):
+                    restrict_uids.add(page['uid'])
+            # Pre-build Tantivy filter clause for small restrict sets
+            if len(restrict_sys_ids) <= 500:
+                _sid_filter_clause = '(' + ' OR '.join(
+                    f'full_header:"{sid}"' for sid in restrict_sys_ids
+                ) + ')'
+
         # 2. Scan chunks (wrapped in try/except to support partial results on cancel)
         try:
             for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
@@ -6034,6 +6064,10 @@ class SearchEngine:
                 t_query = self.build_tantivy_query(chunk, mode)
                 regex = self.build_regex_pattern(chunk, mode, 0)
                 if not regex: continue
+
+                # Augment chunk query with sys_id filter
+                if _sid_filter_clause:
+                    t_query = f'({t_query}) AND {_sid_filter_clause}'
 
                 # Check: Is phrase in "Filter Text"?
                 is_text_filtered = False
@@ -6052,9 +6086,8 @@ class SearchEngine:
                         doc = self.searcher.doc(doc_addr)
 
                         # Pre-search filter: skip manuscripts outside the restrict set
-                        if restrict_sys_ids is not None:
-                            hit_sys_id = self.meta_mgr.parse_header_smart(doc['full_header'][0])[0]
-                            if hit_sys_id not in restrict_sys_ids:
+                        if restrict_uids is not None:
+                            if doc['unique_id'][0] not in restrict_uids:
                                 continue
 
                         content = doc['content'][0]
@@ -6486,7 +6519,7 @@ class SearchEngine:
         if target_idx == -1 and p_num is not None:
             # Robust casting
             try: p_val = int(p_num)
-            except: p_val = -999
+            except (ValueError, TypeError): p_val = -999
             
             for i, p in enumerate(pages):
                 if p['p_num'] == p_val: 

@@ -2288,7 +2288,7 @@ class CreateDiscoveryDialog(QDialog):
         if isinstance(page, str):
             try:
                 page = int(page)
-            except:
+            except (ValueError, TypeError):
                 page = 0
 
         # Add to list
@@ -3277,7 +3277,7 @@ class JoinsDialog(QDialog):
         if self.document_id and self.meta_mgr:
             try:
                 header_shelfmark, _ = self.meta_mgr.get_meta_for_id(self.document_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
         if not header_shelfmark or header_shelfmark == "Unknown":
             header_shelfmark = self.shelfmark
@@ -3348,7 +3348,7 @@ class JoinsDialog(QDialog):
         if self.document_id and self.meta_mgr:
             try:
                 canonical_shelfmark_a, _ = self.meta_mgr.get_meta_for_id(self.document_id)
-            except:
+            except (KeyError, AttributeError, IndexError):
                 pass
         # Fallback to extracting plain shelfmark if meta_mgr lookup failed
         if not canonical_shelfmark_a or canonical_shelfmark_a == "Unknown":
@@ -3963,7 +3963,7 @@ class JoinsDialog(QDialog):
                     _, title = self.meta_mgr.get_meta_for_id(doc_id)
                     if title and len(title) > 35:
                         title = title[:35] + "..."
-                except:
+                except (KeyError, AttributeError, IndexError):
                     pass
 
             display_text = f"{frag} - {title}" if title else frag
@@ -4083,7 +4083,7 @@ class JoinsDialog(QDialog):
                     _, title = self.meta_mgr.get_meta_for_id(doc_id)
                     if title and len(title) > 35:
                         title = title[:35] + "..."
-                except:
+                except (KeyError, AttributeError, IndexError):
                     pass
 
             display_text = f"{frag} - {title}" if title else frag
@@ -4165,7 +4165,7 @@ class JoinsDialog(QDialog):
                     _, title = self.meta_mgr.get_meta_for_id(doc_id)
                     if title and len(title) > 35:
                         title = title[:35] + "..."
-                except:
+                except (KeyError, AttributeError, IndexError):
                     pass
 
             display_text = f"{frag} - {title}" if title else frag
@@ -4281,7 +4281,7 @@ class JoinsDialog(QDialog):
                     _, title = self.meta_mgr.get_meta_for_id(doc_id)
                     if title and len(title) > 35:
                         title = title[:35] + "..."
-                except:
+                except (KeyError, AttributeError, IndexError):
                     pass
 
             display_text = f"{frag} - {title}" if title else frag
@@ -4555,7 +4555,7 @@ class JoinsDialog(QDialog):
                         title = cached.get('title', '')
                         if title and len(title) > 40:
                             title = title[:40] + "..."
-                    except:
+                    except (KeyError, AttributeError, IndexError):
                         pass
 
                 display = shelfmark

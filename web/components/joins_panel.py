@@ -7,6 +7,7 @@ Uses the simplified pairwise joins model with connected components.
 """
 
 import asyncio
+import logging
 from nicegui import ui
 from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
@@ -16,6 +17,8 @@ from typing import Optional, Callable, Dict, List
 from urllib.parse import quote
 import time
 import threading
+
+logger = logging.getLogger(__name__)
 
 # Simple in-memory cache for joins data (key -> (timestamp, data))
 _joins_cache: Dict[str, tuple] = {}
@@ -231,7 +234,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                         'join_group_id': member.get('join_group_ids', []),
                     })
         except Exception as e:
-            print(f"FJMS joins merge error: {e}")
+            logger.error("FJMS joins merge error: %s", e)
 
         # Ensure current shelfmark is in fragments_set
         if shelfmark and shelfmark.upper() not in fragments_upper:
@@ -257,7 +260,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
             _joins_cache[cache_key] = (time.time(), result)
         return result
     except Exception as e:
-        print(f"Error fetching connected fragments: {e}")
+        logger.error("Error fetching connected fragments: %s", e)
         return {"fragments": [], "joins": [], "total_fragments": 1, "total_joins": 0, "fragment_details": []}
 
 
@@ -297,7 +300,7 @@ def delete_join(join_id: int) -> bool:
         client.table('fragment_joins').delete().eq('id', join_id).execute()
         return True
     except Exception as e:
-        print(f"Error deleting join: {e}")
+        logger.error("Error deleting join: %s", e)
         return False
 
 

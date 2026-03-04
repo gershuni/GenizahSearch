@@ -5,10 +5,13 @@ Settings Page - Dicta Genizah Search
 General settings for search behavior, display preferences, and Lab Mode configuration.
 """
 
+import logging
 from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr
 from web.components.typography import h1, h2, h3
+
+logger = logging.getLogger(__name__)
 
 
 def create_settings_page():
@@ -235,7 +238,7 @@ def create_settings_page():
                                     if hasattr(lab_settings, 'save'):
                                         lab_settings.save()
                                 except Exception as e:
-                                    print(f"Custom variants error: {e}")
+                                    logger.error("Custom variants error: %s", e)
                             custom_textarea.on('blur', apply_custom_variants)
 
                 else:

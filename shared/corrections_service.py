@@ -10,7 +10,10 @@ All functions handle errors gracefully, returning empty lists
 rather than raising exceptions.
 """
 
+import logging
 from typing import Optional, List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 def get_pending_corrections_for_page(
@@ -59,5 +62,5 @@ def get_pending_corrections_for_page(
         return response.data or []
 
     except Exception as e:
-        print(f"Error getting pending corrections for {sys_id} page {page_number}: {e}")
+        logger.error(f"Error getting pending corrections for {sys_id} page {page_number}: {e}")
         return []

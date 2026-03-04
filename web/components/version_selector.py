@@ -10,6 +10,7 @@ Allows users to switch between different versions of a transcription:
 """
 
 import asyncio
+import logging
 from nicegui import ui
 from web.translations import tr
 from web.supabase_client import get_corrections
@@ -17,6 +18,8 @@ from web.auth_state import GlobalAuthState
 from web.corrections_service import get_pending_corrections_for_page
 from web.supabase_client import get_user_client
 from typing import Optional, Callable, List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_page_versions(sys_id: str, page_num: int = 1) -> dict:
@@ -56,7 +59,7 @@ def fetch_page_versions(sys_id: str, page_num: int = 1) -> dict:
             'total': len(versions)
         }
     except Exception as e:
-        print(f"Error fetching versions: {e}")
+        logger.error("Error fetching versions: %s", e)
         return default_response
 
 
@@ -82,7 +85,7 @@ def fetch_document_corrections(document_id: str, page_number: int = None) -> Lis
             })
         return formatted
     except Exception as e:
-        print(f"Error fetching corrections: {e}")
+        logger.error("Error fetching corrections: %s", e)
         return []
 
 
@@ -217,7 +220,7 @@ def create_version_selector(
                             user_id=user_id
                         )
                     except Exception as e:
-                        print(f"Error fetching pending corrections: {e}")
+                        logger.error("Error fetching pending corrections: %s", e)
 
                 # Rebuild the menu
                 menu.clear()

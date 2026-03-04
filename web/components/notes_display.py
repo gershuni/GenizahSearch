@@ -10,6 +10,7 @@ Supports:
 - Shelfmark mentions in format [[shelfmark:T-S 8J6.1|id:123456]]
 """
 
+import logging
 import re
 import asyncio
 from nicegui import ui
@@ -18,6 +19,8 @@ from web.auth_state import GlobalAuthState
 from web.supabase_client import get_comments
 from web.components.translate_button import create_translatable_text, detect_language, translate_text
 from typing import Optional, List
+
+logger = logging.getLogger(__name__)
 
 
 # Pattern to match shelfmark mentions: [[shelfmark:xxx|id:yyy]]
@@ -213,7 +216,7 @@ def fetch_document_comments(document_id: str, page_number: int = None) -> List[d
 
         return formatted_comments
     except Exception as e:
-        print(f"Error fetching comments: {e}")
+        logger.error("Error fetching comments: %s", e)
         return []
 
 

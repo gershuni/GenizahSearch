@@ -5,7 +5,9 @@ import ctypes
 import platform
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
-from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager
+from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
+
+logger = get_logger(__name__)
 
 
 def _prevent_sleep():
@@ -326,7 +328,7 @@ class ShelfmarkLoaderThread(QThread):
             else:
                 self.finished_signal.emit(False)
         except Exception as e:
-            print(f"Error in background loader: {e}")
+            logger.error("Error in background loader: %s", e)
             self.finished_signal.emit(False)
 
 class StartupThread(QThread):
@@ -480,7 +482,7 @@ class UpdateDownloaderThread(QThread):
                         try:
                             import os
                             os.remove(self.target_path)
-                        except:
+                        except OSError:
                             pass
                         self.finished_signal.emit(False, "Download cancelled")
                         return
@@ -620,7 +622,7 @@ class PGPBadgeWorker(QThread):
             result = get_sys_ids_with_transcriptions(self.sys_ids)
             self.finished.emit(result)
         except Exception as e:
-            print(f"PGPBadgeWorker error: {e}")
+            logger.error("PGPBadgeWorker error: %s", e)
             self.finished.emit(set())
 
 
@@ -642,7 +644,7 @@ class PrintedBadgeWorker(QThread):
             result = fjms.get_printed_sys_ids(self.sys_ids)
             self.finished.emit(result)
         except Exception as e:
-            print(f"PrintedBadgeWorker error: {e}")
+            logger.error("PrintedBadgeWorker error: %s", e)
             self.finished.emit(set())
 
 
@@ -659,7 +661,7 @@ class PGPTagsWorker(QThread):
             result = get_all_distinct_tags()
             self.finished.emit(result)
         except Exception as e:
-            print(f"PGPTagsWorker error: {e}")
+            logger.error("PGPTagsWorker error: %s", e)
             self.finished.emit([])
 
 
@@ -677,7 +679,7 @@ class PGPTagSearchWorker(QThread):
             result = get_fragments_by_tag(self.tag)
             self.finished.emit(self.tag, result)
         except Exception as e:
-            print(f"PGPTagSearchWorker error: {e}")
+            logger.error("PGPTagSearchWorker error: %s", e)
             self.finished.emit(self.tag, [])
 
 
@@ -707,7 +709,7 @@ class ReadingDeskWorker(QThread):
                     pgp_doc = get_document_for_fragment(sys_id)
                     results.append((sys_id, sources, pgp_doc or {}))
                 except Exception as e:
-                    print(f"ReadingDeskWorker: error loading {sys_id}: {e}")
+                    logger.error("ReadingDeskWorker: error loading %s: %s", sys_id, e)
                     results.append((sys_id, [], {}))
             self.finished.emit(results)
         except Exception as e:

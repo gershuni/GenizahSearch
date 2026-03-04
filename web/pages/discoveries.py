@@ -12,6 +12,7 @@ Shows:
 import asyncio
 import difflib
 import html
+import logging
 from nicegui import ui, app, run
 from web.translations import tr, is_rtl
 from web.auth_state import GlobalAuthState
@@ -27,6 +28,8 @@ from typing import Optional
 from datetime import datetime
 from web.components.typography import h1, h2, h3
 from web.components.translate_button import detect_language, translate_text
+
+logger = logging.getLogger(__name__)
 
 
 def create_translatable_content(content: str, container_style: str = ''):
@@ -273,7 +276,7 @@ def create_discoveries_page():
                         'active_contributors': profiles.count or 0,
                     }
                 except Exception as e:
-                    print(f"Error loading stats: {e}")
+                    logger.error("Error loading stats: %s", e)
                     return {
                         'words_corrected': 0, 'documents_edited': 0,
                         'total_discoveries': 0, 'open_questions': 0,
@@ -367,7 +370,7 @@ def load_stats(container):
             'active_contributors': profiles.count or 0
         }
     except Exception as e:
-        print(f"Error loading stats: {e}")
+        logger.error("Error loading stats: %s", e)
         stats = {
             'words_corrected': 0,
             'documents_edited': 0,

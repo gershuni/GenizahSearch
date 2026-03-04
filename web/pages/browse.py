@@ -10,12 +10,16 @@ Features:
 - Metadata header with external links
 """
 
+import logging
+
 from nicegui import ui, app, run
 from typing import Optional, List, Dict, Any
 import asyncio
 import re
 import html as html_module
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 from web.services import (
     get_service,
@@ -946,7 +950,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     pass
 
                 # PostHog: track manuscript views
-                from web.main import posthog_capture
+                from web.analytics import posthog_capture
                 posthog_capture('browse_manuscript', {
                     'sys_id': state.sys_id,
                     'shelfmark': page.shelfmark[:80] if page.shelfmark else '',
@@ -960,7 +964,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if app_state.lists_mgr:
                             app_state.lists_mgr.add_to_recent_sync(state.sys_id, fl_id=page.fl_id)
                     except Exception as track_err:
-                        print(f"Failed to track recent item: {track_err}")
+                        logger.error(f"Failed to track recent item: {track_err}")
             else:
                 if fl_id:
                     state.error = tr('No text available') + f" (fl_id: {fl_id})"
@@ -995,7 +999,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             try:
                 return await run.io_bound(_pgp_sync)
             except Exception as e:
-                print(f"Failed to fetch PGP data: {e}")
+                logger.error(f"Failed to fetch PGP data: {e}")
                 return None, None
 
         async def fetch_fjms():
@@ -1017,7 +1021,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             try:
                 return await run.io_bound(_fjms_sync)
             except Exception as e:
-                print(f"Failed to fetch FJMS data: {e}")
+                logger.error(f"Failed to fetch FJMS data: {e}")
                 return None
 
         async def fetch_crossref():
@@ -1038,7 +1042,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _crossref_cache[_page_sys_id] = result  # Cache for session
                 return result
             except Exception as e:
-                print(f"Failed to fetch crossref data: {e}")
+                logger.error(f"Failed to fetch crossref data: {e}")
                 return {}
 
         try:
@@ -1046,7 +1050,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 fetch_pgp(), fetch_fjms(), fetch_crossref()
             )
         except Exception as e:
-            print(f"Enrichment fetch failed: {e}")
+            logger.error(f"Enrichment fetch failed: {e}")
             state.enrichment_loaded = True
             state.enrichment_loading = False
             return
@@ -1437,13 +1441,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             else:
                 app.storage.user.pop('reading_desk_state', None)
         except Exception as e:
-            print(f"[ReadingDesk] Error persisting state: {e}")
+            logger.error(f"[ReadingDesk] Error persisting state: {e}")
 
     def _restore_reading_desk_state():
         """Restore reading desk state from app.storage.user after language switch."""
         try:
             saved = app.storage.user.get('reading_desk_state')
-            print(f"[ReadingDesk] Attempting restore, saved state: {bool(saved)}")
+            logger.info(f"[ReadingDesk] Attempting restore, saved state: {bool(saved)}")
             if saved and saved.get('entries'):
                 frag_info = saved['entries']
                 pgpid = saved.get('pgpid')
@@ -1455,10 +1459,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Restore selected source preferences after enter_joined_view resets them
                 if selected_sources:
                     state.reading_desk_selected_sources = selected_sources
-                print(f"[ReadingDesk] Restored {len(frag_info)} entries")
+                logger.info(f"[ReadingDesk] Restored {len(frag_info)} entries")
                 return True
         except Exception as e:
-            print(f"[ReadingDesk] Error restoring state: {e}")
+            logger.error(f"[ReadingDesk] Error restoring state: {e}")
         return False
 
     def search_for_parallels():
@@ -1486,7 +1490,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             encoded_text = quote(text_content)
             ui.navigate.to(f'/parallels?text={encoded_text}')
         except Exception as e:
-            print(f"Error navigating to parallels: {e}")
+            logger.error(f"Error navigating to parallels: {e}")
             ui.notify(tr('Error'), type='negative')
 
     def toggle_metadata():
@@ -1735,7 +1739,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 )
         except Exception as e:
             ui.notify(f'{tr("Error")}: {e}', type='negative')
-            print(f"Submit error: {e}")
+            logger.error(f"Submit error: {e}")
             return
 
         if "error" in result:
@@ -1829,7 +1833,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # Sort by created_at desc
                         my_corrections.sort(key=lambda x: x.get('created_at', ''), reverse=True)
                     except Exception as e:
-                        print(f"Error fetching corrections: {e}")
+                        logger.error(f"Error fetching corrections: {e}")
 
                 latest = my_corrections[0] if my_corrections else None
 

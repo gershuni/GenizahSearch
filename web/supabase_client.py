@@ -11,20 +11,23 @@ This module provides the Supabase client and helper functions for:
 Replaces the FastAPI backend for data operations.
 """
 
+import logging
 import os
 from typing import Optional, Dict, List, Any
 from urllib.parse import urlencode
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
+from shared.supabase_provider import get_url, get_anon_key
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
-# Load from environment variables (recommended for production)
-# Or use defaults for development
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE')
+# Load from centralized provider (reads from environment variables)
+SUPABASE_URL = get_url()
+SUPABASE_ANON_KEY = get_anon_key()
 
 # Singleton client instance
 _client: Optional[Client] = None
@@ -71,16 +74,16 @@ def get_user_client() -> Client:
                     }
                 return user_client
             except Exception as e:
-                print(f"[get_user_client] set_session failed: {e}")
+                logger.error(f"[get_user_client] set_session failed: {e}")
                 # Try re-login via singleton as last resort
                 return get_client()
         else:
             # No tokens stored — user may have logged in before token storage was deployed.
             # Try to use the singleton, which may still hold their session from sign_in.
-            print("[get_user_client] No auth_session tokens in user storage — user should re-login")
+            logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
             return get_client()
     except Exception as e:
-        print(f"[get_user_client] Error creating per-user client: {e}")
+        logger.error(f"[get_user_client] Error creating per-user client: {e}")
         return get_client()
 
 
@@ -384,9 +387,9 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
                 response = client.table('user_lists').select('*').eq('user_id', user_id).order('created_at').execute()
                 return response.data or []
             except Exception as e2:
-                print(f"Error getting lists (fallback): {e2}")
+                logger.error(f"Error getting lists (fallback): {e2}")
                 return []
-        print(f"Error getting lists: {e}")
+        logger.error(f"Error getting lists: {e}")
         return []
 
 
@@ -400,7 +403,7 @@ def get_deleted_lists(user_id: str) -> List[Dict]:
         # Return empty if deleted_at column doesn't exist yet
         if 'deleted_at' in str(e):
             return []  # No trash feature until migration is run
-        print(f"Error getting deleted lists: {e}")
+        logger.error(f"Error getting deleted lists: {e}")
         return []
 
 
@@ -513,7 +516,7 @@ def get_list_items(list_id: int) -> List[Dict]:
         response = client.table('list_items').select('*').eq('list_id', list_id).order('added_at', desc=True).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error getting list items: {e}")
+        logger.error(f"Error getting list items: {e}")
         return []
 
 
@@ -572,7 +575,7 @@ def get_recent_items(user_id: str, limit: int = 50) -> List[Dict]:
         response = client.table('recent_items').select('*').eq('user_id', user_id).order('viewed_at', desc=True).limit(limit).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error getting recent items: {e}")
+        logger.error(f"Error getting recent items: {e}")
         return []
 
 
@@ -618,7 +621,7 @@ def get_projects(user_id: str) -> List[Dict]:
         response = client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute()
         return response.data or []
     except Exception as e:
-        print(f"Error getting projects: {e}")
+        logger.error(f"Error getting projects: {e}")
         return []
 
 
@@ -701,7 +704,7 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
 
         return corrections
     except Exception as e:
-        print(f"Error getting corrections: {e}")
+        logger.error(f"Error getting corrections: {e}")
         return []
 
 
@@ -761,7 +764,7 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
         response = query.order('created_at', desc=True).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error getting comments: {e}")
+        logger.error(f"Error getting comments: {e}")
         return []
 
 
@@ -809,7 +812,7 @@ def get_discoveries(user_id: str = None, type: str = None, status: str = None) -
         response = query.order('created_at', desc=True).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error getting discoveries: {e}")
+        logger.error(f"Error getting discoveries: {e}")
         return []
 
 
@@ -887,7 +890,7 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
         response = query.order('created_at', desc=True).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error getting joins: {e}")
+        logger.error(f"Error getting joins: {e}")
         return []
 
 
@@ -986,7 +989,7 @@ def get_discovery_responses(discovery_id: int) -> List[Dict]:
         ).order('created_at', desc=False).execute()
         return response.data or []
     except Exception as e:
-        print(f"Error getting discovery responses: {e}")
+        logger.error(f"Error getting discovery responses: {e}")
         return []
 
 
@@ -1134,7 +1137,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                         }
                     })
             except Exception as e:
-                print(f"Error loading discoveries: {e}")
+                logger.error(f"Error loading discoveries: {e}")
 
         # Get corrections
         if not item_type or item_type == 'correction':
@@ -1156,7 +1159,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                         'author': {'id': c.get('author_id')}  # corrections uses author_id
                     })
             except Exception as e:
-                print(f"Error loading corrections: {e}")
+                logger.error(f"Error loading corrections: {e}")
 
         # Get comments
         if not item_type or item_type == 'comment':
@@ -1177,7 +1180,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                         'author': {'id': c.get('author_id')}  # comments uses author_id
                     })
             except Exception as e:
-                print(f"Error loading comments: {e}")
+                logger.error(f"Error loading comments: {e}")
 
         # Get joins
         if not item_type or item_type == 'join':
@@ -1199,7 +1202,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                         'author': {'id': j.get('user_id')}
                     })
             except Exception as e:
-                print(f"Error loading joins: {e}")
+                logger.error(f"Error loading joins: {e}")
 
         # Sort by created_at descending
         items.sort(key=lambda x: x.get('created_at', '') or '', reverse=True)
@@ -1230,11 +1233,9 @@ def get_feed_items(item_type: str = None, period: str = None,
                         author['username'] = profile.get('username')
                         author['affiliation'] = profile.get('affiliation')
         except Exception as e:
-            print(f"Error fetching profiles for feed: {e}")
+            logger.error(f"Error fetching profiles for feed: {e}")
 
         return {'items': items, 'total': total}
     except Exception as e:
-        print(f"Error getting feed items: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"Error getting feed items: {e}")
         return {'items': [], 'total': 0, 'error': str(e)}
