@@ -91,6 +91,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.filter_text_not: list = []     # FTS5 text: exclude these words
             self.word_search_excluded_ids: set = set()  # Per-manuscript exclusions for word search mode
             self.word_search_excluded_results: list = []  # Results hidden by word search exclusion
+            # Translation enrichment (Phase 46)
+            self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
+            self.translation_match_sys_ids: set = set()  # sys_ids found via translated description match
 
     search_state = SearchUIState()
 
@@ -1793,6 +1796,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.domain_name_map = {}
         search_state.catalog_source_counts = {}
         search_state.printed_ids = set()
+        search_state.translation_data = {}
+        search_state.translation_match_sys_ids = set()
         search_state.domain_excluded_results = []
         search_state.word_search_excluded_results = []
         # Clear domain exclusions
@@ -3329,12 +3334,34 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             fjms = get_fjms_service(thread_safe=True)
             return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
 
-        # Run four independent enrichment queries in parallel
-        raw_domains, transcription_ids, catalog_counts, printed_ids = await asyncio.gather(
+        def collect_translations(sys_ids):
+            """Batch-fetch PGP translations by sys_id for search results (Phase 46)."""
+            try:
+                show_trans = app.storage.user.get('show_translations', False)
+            except Exception:
+                show_trans = False
+            if not show_trans:
+                return {}
+            try:
+                from shared.translation_service import TranslationService
+                svc = TranslationService(thread_safe=True)
+                if not svc.pgp_available():
+                    svc.close()
+                    return {}
+                result = svc.get_pgp_translations_by_sys_ids(sys_ids)
+                svc.close()
+                return result
+            except Exception as e:
+                logger.warning("Translation batch lookup failed: %s", e)
+                return {}
+
+        # Run five independent enrichment queries in parallel
+        raw_domains, transcription_ids, catalog_counts, printed_ids, trans_data = await asyncio.gather(
             run.io_bound(collect_all_domains, all_sys_ids),
             run.io_bound(get_sys_ids_with_transcriptions, all_sys_ids),
             run.io_bound(collect_catalog_counts, all_sys_ids),
             run.io_bound(collect_printed_ids, all_sys_ids),
+            run.io_bound(collect_translations, all_sys_ids),
         )
 
         # Process domains into deduplicated domain names per sys_id
@@ -3371,6 +3398,27 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.transcription_sys_ids = transcription_ids
         search_state.catalog_source_counts = catalog_counts
         search_state.printed_ids = printed_ids
+        search_state.translation_data = trans_data  # Phase 46: sys_id -> {description_he, ...}
+
+        # Phase 46: Detect "translated match" sys_ids (results whose translations match query)
+        if trans_data and query:
+            def find_translation_matches(q, sids):
+                try:
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    if svc.pgp_available():
+                        result = svc.get_translated_match_sys_ids(q, sids)
+                        svc.close()
+                        return result
+                    svc.close()
+                except Exception as e:
+                    logger.warning("Translation match detection failed: %s", e)
+                return set()
+            search_state.translation_match_sys_ids = await run.io_bound(
+                find_translation_matches, query, all_sys_ids
+            )
+        else:
+            search_state.translation_match_sys_ids = set()
 
         # Show/hide printed filter button if there are printed items among results
         _set_btn_visible(printed_filter_btn, len(printed_ids) > 0)
@@ -3783,8 +3831,31 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             ui.label(_plabel).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
                                 f'background: {_bg}; color: {_fg};'
                             )
+                        # Translated match badge (Phase 46)
+                        if sys_id and sys_id in search_state.translation_match_sys_ids:
+                            ui.label(tr('Translated match')).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
+                                'background: #dbeafe; color: #1d4ed8;'  # Light blue bg, blue text
+                            ).tooltip(tr('Machine translated via Dicta'))
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
-                    if title_short:
+                    # Title and optional translated description (Phase 46)
+                    _show_trans = False
+                    try:
+                        _show_trans = app.storage.user.get('show_translations', False)
+                    except Exception:
+                        pass
+                    _trans_info = search_state.translation_data.get(sys_id) if sys_id and _show_trans else None
+                    if _trans_info and _trans_info.get('description_he'):
+                        # Show translated description with indicator
+                        _desc_he = _trans_info['description_he']
+                        _desc_short = (_desc_he[:80] + '...') if len(_desc_he) > 80 else _desc_he
+                        with ui.row().classes('items-center gap-1'):
+                            ui.label(_desc_short).classes('text-xs').style(
+                                'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
+                            ).tooltip(title if title else '')  # Hover shows original English title
+                            ui.label(tr('Translated')).classes('text-xs px-1 py-0 rounded shrink-0').style(
+                                'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem;'
+                            )
+                    elif title_short:
                         ui.label(title_short).classes('text-xs').style(
                             'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
                         )
@@ -4600,7 +4671,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if description:
                             with ui.column().classes('gap-1 mt-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
+                                # Phase 46: Show translated description when toggle is on
+                                _show_trans_adv = False
+                                try:
+                                    _show_trans_adv = app.storage.user.get('show_translations', False)
+                                except Exception:
+                                    pass
+                                _adv_pgpid = pgp_metadata.get('pgpid')
+                                _adv_trans_he = None
+                                if _show_trans_adv and _adv_pgpid:
+                                    try:
+                                        from shared.translation_service import TranslationService
+                                        _tsvc_adv = TranslationService(thread_safe=True)
+                                        _adv_trans_he = _tsvc_adv.get_pgp_description_he(_adv_pgpid)
+                                        _tsvc_adv.close()
+                                    except Exception:
+                                        pass
+                                if _adv_trans_he:
+                                    with ui.row().classes('w-full items-start gap-1'):
+                                        ui.label(_adv_trans_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
+                                            'color: var(--text-primary); direction: rtl;'
+                                        ).tooltip(description)  # Hover shows original English
+                                        ui.label(tr('Translated')).classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
+                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem;'
+                                        )
+                                else:
+                                    create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
 
                         if pgp_metadata.get('pgp_url'):
                             ui.link(tr('View on PGP'), pgp_metadata['pgp_url'], new_tab=True).classes(

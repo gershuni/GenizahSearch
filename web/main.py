@@ -427,6 +427,34 @@ def create_layout():
                     ui.icon('translate').classes('text-lg')
                     ui.label(lang_btn_text).classes('text-sm font-medium')
 
+                # Translation Toggle (show/hide machine translations)
+                show_translations = False
+                try:
+                    show_translations = app.storage.user.get('show_translations', False)
+                except Exception:
+                    pass
+
+                def toggle_translations():
+                    try:
+                        current = app.storage.user.get('show_translations', False)
+                        app.storage.user['show_translations'] = not current
+                    except Exception:
+                        pass
+                    ui.navigate.reload()
+
+                trans_icon = 'g_translate' if show_translations else 'translate'
+                trans_label = tr('Translations ON') if show_translations else tr('Translations OFF')
+                trans_opacity = 'opacity-100' if show_translations else 'opacity-60'
+                with ui.row().classes(f'w-full items-center justify-center gap-2 cursor-pointer {trans_opacity} hover:opacity-100').props(
+                    'role=button tabindex=0'
+                ).on('click', toggle_translations).on('keydown.enter', toggle_translations).on('keydown.space', toggle_translations):
+                    ui.icon(trans_icon).classes('text-lg').style(
+                        'color: var(--primary-600);' if show_translations else ''
+                    )
+                    ui.label(trans_label).classes('text-xs font-medium')
+                    if show_translations:
+                        ui.icon('check_circle').classes('text-xs').style('color: var(--primary-600);')
+
                 # Theme Switcher
                 with ui.row().classes('theme-switcher w-full'):
                     def set_theme(theme_name):

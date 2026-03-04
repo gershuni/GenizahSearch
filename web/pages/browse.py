@@ -2278,12 +2278,37 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             'text-xs cursor-pointer'
                                         ).on('click', lambda t=tag: ui.navigate.to(f'/search?tag={quote(t)}'))
 
-                        # Description (full length, with translate button)
+                        # Description (full length, with translate button or pre-translated)
                         description = (state.pgp_metadata.get('description') or '').strip()
                         if description:
                             with ui.column().classes('gap-1 mb-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
+                                # Phase 46: Show translated description when toggle is on
+                                _show_trans_browse = False
+                                try:
+                                    _show_trans_browse = app.storage.user.get('show_translations', False)
+                                except Exception:
+                                    pass
+                                _pgpid_browse = state.pgp_metadata.get('pgpid')
+                                _trans_desc_he = None
+                                if _show_trans_browse and _pgpid_browse:
+                                    try:
+                                        from shared.translation_service import TranslationService
+                                        _tsvc = TranslationService(thread_safe=True)
+                                        _trans_desc_he = _tsvc.get_pgp_description_he(_pgpid_browse)
+                                        _tsvc.close()
+                                    except Exception:
+                                        pass
+                                if _trans_desc_he:
+                                    with ui.row().classes('w-full items-start gap-1'):
+                                        ui.label(_trans_desc_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
+                                            'color: var(--text-primary); direction: rtl;'
+                                        ).tooltip(description)  # Hover shows original English
+                                        ui.label(tr('Translated')).classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
+                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem;'
+                                        )
+                                else:
+                                    create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
 
                         # Dates
                         inferred_display = state.pgp_metadata.get('inferred_date_display')

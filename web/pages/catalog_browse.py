@@ -333,6 +333,35 @@ def create_catalog_browse_page(
             if not textual_frame:
                 textual_frame = r.get('textual_frame_eng', '') or r.get('textual_frame_heb', '')
 
+            # Phase 46: Gap-fill empty fields from FJMS translations when toggle is on
+            _show_cat_trans = False
+            try:
+                _show_cat_trans = app.storage.user.get('show_translations', False)
+            except Exception:
+                pass
+            _is_translated_title = False
+            if _show_cat_trans:
+                alma_id = r.get('alma_id', '')
+                if alma_id:
+                    try:
+                        from shared.translation_service import TranslationService
+                        _tsvc_cat = TranslationService(thread_safe=True)
+                        if _tsvc_cat.fjms_available():
+                            _fjms_trans = _tsvc_cat.get_fjms_translations_batch([alma_id])
+                            _trans_fields = _fjms_trans.get(alma_id, {})
+                            # Fill empty title from translations
+                            if not title and _trans_fields.get('Title'):
+                                title = _trans_fields['Title']
+                                identification = f"{author} - {title}" if author and title else (author or title)
+                                _is_translated_title = True
+                            elif not title and _trans_fields.get('TitleHeb'):
+                                title = _trans_fields['TitleHeb']
+                                identification = f"{author} - {title}" if author and title else (author or title)
+                                _is_translated_title = True
+                        _tsvc_cat.close()
+                    except Exception:
+                        pass
+
             rows.append({
                 'sys_id': sid,
                 'shelfmark': shelfmark or sid,

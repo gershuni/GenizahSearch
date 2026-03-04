@@ -364,6 +364,150 @@ class TranslationService:
             return {}
 
     # -------------------------------------------------------------------------
+    # Translation Search Methods (SQLite metadata search, NOT Tantivy)
+    # -------------------------------------------------------------------------
+
+    def search_pgp_by_translation(
+        self, query: str, lang: str
+    ) -> set:
+        """Search PGP translations for descriptions matching query.
+
+        Simple LIKE search on pgp_translations table. This is an additional
+        metadata lookup, NOT a replacement for Tantivy full-text search.
+
+        Args:
+            query: Search query string.
+            lang: Target language ('he' for Hebrew descriptions, 'en' for English).
+
+        Returns:
+            Set of pgpid integers matching the query.
+        """
+        if not self._pgp_has_translations or not self._pgp_conn:
+            return set()
+        if lang == 'en':
+            # PGP descriptions are already in English, no translation search needed
+            return set()
+        if not query or not query.strip():
+            return set()
+        try:
+            pattern = f"%{query.strip()}%"
+            rows = self._pgp_conn.execute(
+                "SELECT pgpid FROM pgp_translations WHERE description_he LIKE ?",
+                (pattern,),
+            ).fetchall()
+            return {row[0] for row in rows}
+        except Exception as e:
+            logger.warning("Error searching PGP translations: %s", e)
+            return set()
+
+    def search_fjms_by_translation(
+        self, query: str, lang: str
+    ) -> set:
+        """Search FJMS translations for matching translated_text.
+
+        Simple LIKE search on fjms_translations table.
+
+        Args:
+            query: Search query string.
+            lang: Target language ('he' or 'en').
+
+        Returns:
+            Set of alma_id strings matching the query.
+        """
+        if not self._fjms_has_translations or not self._fjms_conn:
+            return set()
+        if not query or not query.strip():
+            return set()
+        try:
+            pattern = f"%{query.strip()}%"
+            rows = self._fjms_conn.execute(
+                "SELECT DISTINCT alma_id FROM fjms_translations WHERE translated_text LIKE ?",
+                (pattern,),
+            ).fetchall()
+            return {row[0] for row in rows}
+        except Exception as e:
+            logger.warning("Error searching FJMS translations: %s", e)
+            return set()
+
+    def get_pgp_translations_by_sys_ids(
+        self, sys_ids: List[str]
+    ) -> Dict[str, dict]:
+        """Get PGP translations keyed by sys_id (for search result display).
+
+        Joins document_fragments with pgp_translations to map sys_id -> translation data.
+
+        Args:
+            sys_ids: List of sys_ids to look up.
+
+        Returns:
+            Dict of {sys_id: {"description_he": str, "document_type_he": str}}
+        """
+        if not self._pgp_has_translations or not self._pgp_conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            batch_size = 400
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                rows = self._pgp_conn.execute(
+                    f"SELECT df.sys_id, pt.description_he, pt.document_type_he "
+                    f"FROM document_fragments df "
+                    f"JOIN pgp_translations pt ON df.document_id = pt.pgpid "
+                    f"WHERE df.sys_id IN ({placeholders})",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    result[row[0]] = {
+                        "description_he": row[1],
+                        "document_type_he": row[2],
+                    }
+            return result
+        except Exception as e:
+            logger.warning("Error in PGP translations by sys_id lookup: %s", e)
+            return {}
+
+    def get_translated_match_sys_ids(
+        self, query: str, sys_ids: List[str]
+    ) -> set:
+        """Find sys_ids whose PGP translations match the query.
+
+        Joins document_fragments with pgp_translations to map sys_id -> pgpid,
+        then checks if the translated description matches the query via LIKE.
+
+        Args:
+            query: Search query string.
+            sys_ids: List of sys_ids to check (from search results).
+
+        Returns:
+            Set of sys_id strings that have a translated match.
+        """
+        if not self._pgp_has_translations or not self._pgp_conn:
+            return set()
+        if not query or not query.strip() or not sys_ids:
+            return set()
+        try:
+            pattern = f"%{query.strip()}%"
+            result_set = set()
+            batch_size = 400
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                rows = self._pgp_conn.execute(
+                    f"SELECT DISTINCT df.sys_id "
+                    f"FROM document_fragments df "
+                    f"JOIN pgp_translations pt ON df.document_id = pt.pgpid "
+                    f"WHERE df.sys_id IN ({placeholders}) "
+                    f"AND pt.description_he LIKE ?",
+                    batch + [pattern],
+                ).fetchall()
+                result_set.update(row[0] for row in rows)
+            return result_set
+        except Exception as e:
+            logger.warning("Error finding translated match sys_ids: %s", e)
+            return set()
+
+    # -------------------------------------------------------------------------
     # No-Overwrite Safety Check
     # -------------------------------------------------------------------------
 

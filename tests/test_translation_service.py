@@ -626,3 +626,209 @@ class TestCheckpointSaveLoad:
 
         result = load_checkpoint(corrupt_path)
         assert result == set()
+
+
+# =============================================================================
+# Plan 46-04: Search Integration Tests (search methods + sys_id mapping)
+# =============================================================================
+
+
+class TestSearchPgpByTranslation:
+    """Tests for search_pgp_by_translation method."""
+
+    @pytest.fixture
+    def pgp_service(self, tmp_path):
+        from shared.translation_service import (
+            TranslationService,
+            ensure_pgp_translations_table,
+        )
+
+        pgp_db = tmp_path / "pgp.db"
+        conn = sqlite3.connect(str(pgp_db))
+        ensure_pgp_translations_table(conn)
+
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he, translated_at) VALUES (?, ?, ?)",
+            (1001, "\u05de\u05db\u05ea\u05d1 \u05de\u05e1\u05d5\u05d7\u05e8 \u05de\u05e4\u05d5\u05e1\u05d8\u05d0\u05d8", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he, translated_at) VALUES (?, ?, ?)",
+            (1002, "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9 \u05d1\u05d9\u05df \u05e9\u05e0\u05d9 \u05e6\u05d3\u05d3\u05d9\u05dd", "2026-03-04"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(pgp_db_path=str(pgp_db))
+        yield svc
+        svc.close()
+
+    def test_search_he_finds_matching_descriptions(self, pgp_service):
+        """search_pgp_by_translation for Hebrew query finds matching pgpids."""
+        result = pgp_service.search_pgp_by_translation("\u05de\u05e1\u05d5\u05d7\u05e8", "he")
+        assert 1001 in result
+        assert 1002 not in result
+
+    def test_search_en_returns_empty(self, pgp_service):
+        """search_pgp_by_translation for English language returns empty set (descriptions already in EN)."""
+        result = pgp_service.search_pgp_by_translation("merchant", "en")
+        assert result == set()
+
+    def test_search_empty_query_returns_empty(self, pgp_service):
+        """search_pgp_by_translation with empty query returns empty set."""
+        result = pgp_service.search_pgp_by_translation("", "he")
+        assert result == set()
+
+
+class TestSearchFjmsByTranslation:
+    """Tests for search_fjms_by_translation method."""
+
+    @pytest.fixture
+    def fjms_service(self, tmp_path):
+        from shared.translation_service import (
+            TranslationService,
+            ensure_fjms_translations_table,
+        )
+
+        fjms_db = tmp_path / "fjms.db"
+        conn = sqlite3.connect(str(fjms_db))
+        ensure_fjms_translations_table(conn)
+
+        conn.execute(
+            "INSERT INTO fjms_translations (alma_id, field_name, original_text, translated_text, direction, translated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("ALMA001", "Title", "\u05ea\u05d5\u05e8\u05d4 \u05e4\u05e8\u05e9\u05ea \u05d1\u05e8\u05d0\u05e9\u05d9\u05ea", "Torah Parashat Bereshit", "he2en", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO fjms_translations (alma_id, field_name, original_text, translated_text, direction, translated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("ALMA002", "FreeDesc", "\u05e7\u05d8\u05e2 \u05de\u05ea\u05dc\u05de\u05d5\u05d3", "Talmud Fragment", "he2en", "2026-03-04"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(fjms_db_path=str(fjms_db))
+        yield svc
+        svc.close()
+
+    def test_search_finds_matching_alma_ids(self, fjms_service):
+        """search_fjms_by_translation finds alma_ids with matching translated text."""
+        result = fjms_service.search_fjms_by_translation("Torah", "en")
+        assert "ALMA001" in result
+        assert "ALMA002" not in result
+
+    def test_search_empty_returns_empty(self, fjms_service):
+        """search_fjms_by_translation with empty query returns empty set."""
+        result = fjms_service.search_fjms_by_translation("", "en")
+        assert result == set()
+
+
+class TestGetPgpTranslationsBySysIds:
+    """Tests for get_pgp_translations_by_sys_ids method."""
+
+    @pytest.fixture
+    def svc_with_fragments(self, tmp_path):
+        from shared.translation_service import (
+            TranslationService,
+            ensure_pgp_translations_table,
+        )
+
+        pgp_db = tmp_path / "pgp.db"
+        conn = sqlite3.connect(str(pgp_db))
+
+        # Create document_fragments table (exists in pgp.db)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS document_fragments ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  document_id INTEGER,"
+            "  sys_id TEXT,"
+            "  sequence_order INTEGER"
+            ")"
+        )
+        conn.execute("INSERT INTO document_fragments (document_id, sys_id) VALUES (?, ?)", (1001, "SYS_A"))
+        conn.execute("INSERT INTO document_fragments (document_id, sys_id) VALUES (?, ?)", (1002, "SYS_B"))
+        conn.execute("INSERT INTO document_fragments (document_id, sys_id) VALUES (?, ?)", (1003, "SYS_C"))
+
+        ensure_pgp_translations_table(conn)
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he, document_type_he) VALUES (?, ?, ?)",
+            (1001, "\u05de\u05db\u05ea\u05d1 \u05de\u05e1\u05d5\u05d7\u05e8", "\u05de\u05db\u05ea\u05d1"),
+        )
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he, document_type_he) VALUES (?, ?, ?)",
+            (1002, "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9", "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(pgp_db_path=str(pgp_db))
+        yield svc
+        svc.close()
+
+    def test_maps_sys_ids_to_translations(self, svc_with_fragments):
+        """get_pgp_translations_by_sys_ids maps sys_ids through document_fragments."""
+        result = svc_with_fragments.get_pgp_translations_by_sys_ids(["SYS_A", "SYS_B", "SYS_C"])
+        assert "SYS_A" in result
+        assert "SYS_B" in result
+        assert "SYS_C" not in result  # pgpid 1003 has no translation
+        assert "\u05de\u05db\u05ea\u05d1" in result["SYS_A"]["description_he"]
+
+    def test_empty_sys_ids_returns_empty(self, svc_with_fragments):
+        """get_pgp_translations_by_sys_ids with empty list returns empty dict."""
+        result = svc_with_fragments.get_pgp_translations_by_sys_ids([])
+        assert result == {}
+
+
+class TestGetTranslatedMatchSysIds:
+    """Tests for get_translated_match_sys_ids method."""
+
+    @pytest.fixture
+    def svc_with_fragments(self, tmp_path):
+        from shared.translation_service import (
+            TranslationService,
+            ensure_pgp_translations_table,
+        )
+
+        pgp_db = tmp_path / "pgp.db"
+        conn = sqlite3.connect(str(pgp_db))
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS document_fragments ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  document_id INTEGER,"
+            "  sys_id TEXT"
+            ")"
+        )
+        conn.execute("INSERT INTO document_fragments (document_id, sys_id) VALUES (?, ?)", (1001, "SYS_A"))
+        conn.execute("INSERT INTO document_fragments (document_id, sys_id) VALUES (?, ?)", (1002, "SYS_B"))
+
+        ensure_pgp_translations_table(conn)
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he) VALUES (?, ?)",
+            (1001, "\u05de\u05db\u05ea\u05d1 \u05de\u05e1\u05d5\u05d7\u05e8 \u05de\u05e4\u05d5\u05e1\u05d8\u05d0\u05d8"),
+        )
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he) VALUES (?, ?)",
+            (1002, "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9 \u05d1\u05d9\u05df \u05e9\u05e0\u05d9"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(pgp_db_path=str(pgp_db))
+        yield svc
+        svc.close()
+
+    def test_finds_matching_sys_ids(self, svc_with_fragments):
+        """get_translated_match_sys_ids returns sys_ids with matching translations."""
+        result = svc_with_fragments.get_translated_match_sys_ids("\u05de\u05e1\u05d5\u05d7\u05e8", ["SYS_A", "SYS_B"])
+        assert "SYS_A" in result
+        assert "SYS_B" not in result
+
+    def test_empty_query_returns_empty(self, svc_with_fragments):
+        """get_translated_match_sys_ids with empty query returns empty set."""
+        result = svc_with_fragments.get_translated_match_sys_ids("", ["SYS_A"])
+        assert result == set()
+
+    def test_no_sys_ids_returns_empty(self, svc_with_fragments):
+        """get_translated_match_sys_ids with no sys_ids returns empty set."""
+        result = svc_with_fragments.get_translated_match_sys_ids("\u05de\u05e1\u05d5\u05d7\u05e8", [])
+        assert result == set()

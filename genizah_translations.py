@@ -2624,6 +2624,17 @@ TRANSLATIONS = {
     "include": "כולל",
     "exclude": "ללא",
     "Work": "חיבור",
+
+    # Phase 46 - Dicta Translation Integration
+    "Show translations": "הצג תרגומים",
+    "Hide translations": "הסתר תרגומים",
+    "Translated": "מתורגם",
+    "Translated match": "התאמה בתרגום",
+    "Original text": "טקסט מקורי",
+    "Machine translated via Dicta": "תורגם אוטומטית באמצעות דיקטה",
+    "Translation": "תרגום",
+    "Translations ON": "תרגומים מופעלים",
+    "Translations OFF": "תרגומים כבויים",
 }
 
 # Hebrew library display names (keyed by library_code)
@@ -2709,4 +2720,13 @@ LIBRARY_CODES_HE = {
     'Goldsmith': 'מוזיאון גולדסמית',
     'SOS': 'החברה האורתודוקסית הנפרדת',
     'MotB': 'מוזיאון התנ״ך',
+
+    # --- Phase 46: Translation Feature ---
+    "Show translations": "הצג תרגומים",
+    "Translated": "מתורגם",
+    "Translated match": "התאמה בתרגום",
+    "Original text": "טקסט מקורי",
+    "Machine translated via Dicta": "תורגם אוטומטית באמצעות דיקטה",
+    "Translation": "תרגום",
+    "Show translated descriptions when available": "הצג תיאורים מתורגמים כאשר זמינים",
 }
