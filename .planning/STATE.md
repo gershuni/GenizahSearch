@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 46-02-PLAN.md (PGP batch translation script with checkpointing)
-last_updated: "2026-03-04T06:55:28.610Z"
-last_activity: 2026-03-04 - Completed 46-02 (PGP batch translation script with checkpointing)
+stopped_at: Completed 46-03-PLAN.md (FJMS batch translation scripts)
+last_updated: "2026-03-04T06:56:16.000Z"
+last_activity: 2026-03-04 - Completed 46-03 (FJMS batch translation scripts)
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 25
-  completed_plans: 22
+  completed_plans: 23
 ---
 
 ---
@@ -64,14 +64,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 46 in progress (2/5 plans done)
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 46 in progress (3/5 plans done)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 46 of 47 (Dicta Translation) -- Plan 2 of 5 complete
+Phase: 46 of 47 (Dicta Translation) -- Plan 3 of 5 complete
 Status: Phase 46 In Progress
-Last activity: 2026-03-04 - Completed 46-02 (PGP batch translation script with checkpointing)
+Last activity: 2026-03-04 - Completed 46-03 (FJMS batch translation scripts)
 
 Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 complete, Phase 46 in progress)
 
@@ -111,6 +111,7 @@ Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complet
 | 45-05 | 1 | 9min | 9min |
 | 46-01 | 1 | 11min | 11min |
 | 46-02 | 1 | 3min | 3min |
+| 46-03 | 1 | 5min | 5min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -150,6 +151,7 @@ Recent decisions affecting current work:
 - 45-05: Browse-to-search buttons on web and desktop catalog browse. Web: incoming_filters via app.storage.user + /search?from_browse=1 or /parallels. Desktop: pre_search_filters + restrict_sys_ids + tab switch. 20 Hebrew translations for Phase 45 strings.
 - 46-01: Dicta API client (shared/dicta_client.py) with translate_text, build_few_shot_prompt, batch_translate, PGP_DOCUMENT_TYPE_HE. TranslationService (shared/translation_service.py) with sidecar queries. Scholarly few-shots validated on 20 samples vs defaults -- scholarly adopted for domain consistency. Schema helpers for pgp_translations/fjms_translations.
 - 46-02: PGP batch translation script (scripts/translate_pgp_descriptions.py) with checkpointing, resume, parallel API calls, retry with backoff. 34,954 candidates. Document types via manual PGP_DOCUMENT_TYPE_HE mapping. Atomic checkpoint writes (tempfile+os.replace). 8 new integration tests.
+- 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations.
 
 ### Pending Todos
 
@@ -178,7 +180,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-04T06:55:28.607Z
-Stopped at: Completed 46-02-PLAN.md (PGP batch translation script with checkpointing)
-Resume file: None
-Notes: Phase 46 plan 2 of 5 complete. Batch script ready for user execution. Next: 46-03 (FJMS batch translation).
+Last session: 2026-03-04T06:56:16Z
+Stopped at: Completed 46-03-PLAN.md (FJMS batch translation scripts)
+Resume file: .planning/phases/46-dicta-translation/46-03-SUMMARY.md
+Notes: Phase 46 plan 3 of 5 complete. FJMS catalog gap-fill and free description scripts ready. Next: 46-04 (web search integration).
