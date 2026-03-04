@@ -3621,7 +3621,9 @@ class ResultDialog(QDialog):
                     bc = pal.color(QPalette.ColorRole.Base).name()
                     ph = parent_win._build_pgp_extended_info_html(pgp_doc, palette=pal, sys_id=getattr(self, 'current_sys_id', None))
                     if ph:
-                        h = f"<div style='font-family:Arial; color:{tc}; background-color:{bc};'>{ph}</div>"
+                        # Store empty prefix so _rd_refresh_extended_info can rebuild
+                        self._rd_enriched_html_prefix = f"<div style='font-family:Arial; color:{tc}; background-color:{bc};'>"
+                        h = self._rd_enriched_html_prefix + ph + "</div>"
                         self.txt_extended_info.setHtml(h)
                         self.btn_ext_info.setVisible(True)
                         if hasattr(self, 'btn_compact_ext_info'):
@@ -3696,6 +3698,24 @@ class ResultDialog(QDialog):
         self.btn_ext_info.setVisible(True)
         if hasattr(self, 'btn_compact_ext_info'):
             self.btn_compact_ext_info.setVisible(True)
+
+    def _rd_refresh_extended_info(self):
+        """Rebuild ResultDialog extended info with current toggle state."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, '_build_pgp_extended_info_html'):
+            return
+        pgp_doc = getattr(self, '_rd_pgp_doc', None)
+        prefix = getattr(self, '_rd_enriched_html_prefix', None)
+        if not pgp_doc or not prefix:
+            return
+        scrollbar = self.txt_extended_info.verticalScrollBar()
+        scroll_pos = scrollbar.value() if scrollbar else 0
+        palette = self.txt_extended_info.palette()
+        pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None)) or ''
+        html = prefix + pgp_html + "</div>"
+        self.txt_extended_info.setHtml(html)
+        if scrollbar:
+            scrollbar.setValue(scroll_pos)
 
     def _rd_toggle_edit_mode(self):
         """Toggle edit mode in ResultDialog."""
@@ -4307,6 +4327,25 @@ class ResultDialog(QDialog):
             if parent and hasattr(parent, '_search_by_pgp_tag'):
                 self.close()
                 parent._search_by_pgp_tag(tag)
+        elif url_str.startswith('toggle-trans:'):
+            parent = self.parent()
+            if parent:
+                parts = url_str[len('toggle-trans:'):].split(':', 1)
+                if len(parts) == 2:
+                    field = parts[0]
+                    if not hasattr(parent, '_trans_toggle_state'):
+                        parent._trans_toggle_state = {}
+                    parent._trans_toggle_state[field] = not parent._trans_toggle_state.get(field, False)
+                    # Rebuild this dialog's extended info
+                    self._rd_refresh_extended_info()
+        elif url_str.startswith('toggle-always:'):
+            action = url_str[len('toggle-always:'):]
+            new_val = action == 'on'
+            save_app_config({'show_translations': new_val})
+            parent = self.parent()
+            if parent:
+                parent._trans_toggle_state = {}
+            self._rd_refresh_extended_info()
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
 
@@ -4589,6 +4628,9 @@ class ResultDialog(QDialog):
             fjms_catalog = parent._build_fjms_catalog_html(self.current_sys_id, text_color)
             if fjms_catalog:
                 html += fjms_catalog
+
+        # Store pre-PGP HTML for refresh capability
+        self._rd_enriched_html_prefix = html
 
         # Append PGP metadata section if available
         pgp_doc = getattr(self, '_rd_pgp_doc', None)
@@ -7311,6 +7353,9 @@ class SettingsDialog(QDialog):
         self._cit_bg = '#1e2a36' if self._is_dark else '#eef3f8'
         self._cit_border = '#2c3e50' if self._is_dark else '#c8d6e0'
 
+        # Snapshot config on open so Cancel can restore it
+        self._config_snapshot = dict(load_app_config())
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -7318,6 +7363,26 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_general_tab(), tr("כללי") if is_heb else "General")
         self._tabs.addTab(self._build_about_tab(), tr("אודות") if is_heb else "About")
         outer.addWidget(self._tabs)
+
+        # OK / Cancel buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(12, 4, 12, 12)
+        btn_layout.addStretch()
+        btn_cancel = QPushButton(tr("ביטול") if is_heb else tr("Cancel"))
+        btn_cancel.setFixedWidth(90)
+        btn_cancel.clicked.connect(self._on_cancel)
+        btn_layout.addWidget(btn_cancel)
+        btn_ok = QPushButton(tr("אישור") if is_heb else tr("OK"))
+        btn_ok.setFixedWidth(90)
+        btn_ok.setDefault(True)
+        btn_ok.clicked.connect(self.accept)
+        btn_layout.addWidget(btn_ok)
+        outer.addLayout(btn_layout)
+
+    def _on_cancel(self):
+        """Restore config snapshot and close."""
+        save_app_config(self._config_snapshot)
+        self.reject()
 
     # ── General Tab ──────────────────────────────────────────────
     def _build_general_tab(self):
@@ -11274,17 +11339,49 @@ class GenizahGUI(QMainWindow):
             "padding: 10px; margin-bottom: 10px; "
             "border-left: 3px solid #27ae60; text-align: left;' dir='ltr'>"
         )
-        pgp_html += f"<p style='margin-top:0;'><b>Princeton Geniza Project</b></p>"
+        pgp_html += f"<p style='margin-top:0;'><b>Princeton Geniza Project</b>"
+        # Translation toggle link
+        if show_trans:
+            _dont_show = tr("Don't show translations")
+            pgp_html += (
+                f" <a href='toggle-always:off' style='color: #888; font-size: 10px; "
+                f"text-decoration: none;'>({_dont_show})</a>"
+            )
+        else:
+            # Check if translations are available for this document
+            _has_trans = trans_data and (trans_data.get('description_he') or trans_data.get('document_type_he'))
+            if not _has_trans and sys_id:
+                try:
+                    from shared.translation_service import TranslationService
+                    _check_svc = TranslationService()
+                    if _check_svc.pgp_available():
+                        _check_map = _check_svc.get_pgp_translations_by_sys_ids([sys_id])
+                        _has_trans = bool(_check_map.get(sys_id))
+                    _check_svc.close()
+                except Exception:
+                    pass
+            if _has_trans:
+                pgp_html += (
+                    f" <a href='toggle-always:on' style='color: #888; font-size: 10px; "
+                    f"text-decoration: none;'>({tr('Show translations')})</a>"
+                )
+        pgp_html += "</p>"
+
+        import html as html_mod
+        _toggle = getattr(self, '_trans_toggle_state', {})
+        _badge_style = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
 
         doc_type = pgp_doc.get('document_type')
         if doc_type:
-            # Show translated document type if available
             if show_trans and trans_data and trans_data.get('document_type_he'):
-                trans_type = trans_data['document_type_he']
+                _esc_orig_type = html_mod.escape(doc_type)
+                _doctype_toggled = _toggle.get('doctype', False)
+                _show_text = doc_type if _doctype_toggled else trans_data['document_type_he']
+                _badge_label = tr('Original') if _doctype_toggled else tr('Translated')
                 pgp_html += (
-                    f"<p><b>{tr('Document Type')}:</b> {trans_type} "
-                    f"<span style='color: #888; font-size: 11px;' title='{doc_type}'>"
-                    f"({tr('Translated')})</span></p>"
+                    f"<p><b>{tr('Document Type')}:</b> {html_mod.escape(_show_text)} "
+                    f"<a href='toggle-trans:doctype:{_esc_orig_type}' "
+                    f"style='{_badge_style}'>{_badge_label}</a></p>"
                 )
             else:
                 pgp_html += f"<p><b>{tr('Document Type')}:</b> {doc_type}</p>"
@@ -11300,14 +11397,17 @@ class GenizahGUI(QMainWindow):
 
         description = pgp_doc.get('description')
         if description:
-            # Show translated description if available
             if show_trans and trans_data and trans_data.get('description_he'):
-                trans_desc = trans_data['description_he']
+                _esc_orig_desc = html_mod.escape(description)
+                _desc_toggled = _toggle.get('desc', False)
+                _show_desc = description if _desc_toggled else trans_data['description_he']
+                _desc_dir = 'ltr' if _desc_toggled else 'rtl'
+                _desc_badge = tr('Original') if _desc_toggled else tr('Translated')
                 pgp_html += (
                     f"<p><b>{tr('Description')}:</b> "
-                    f"<span dir='rtl' title='{description}'>{trans_desc}</span> "
-                    f"<span style='color: #888; font-size: 11px;'>"
-                    f"({tr('Translated')})</span></p>"
+                    f"<span dir='{_desc_dir}'>{html_mod.escape(_show_desc)}</span> "
+                    f"<a href='toggle-trans:desc:{_esc_orig_desc}' "
+                    f"style='{_badge_style}'>{_desc_badge}</a></p>"
                 )
             else:
                 pgp_html += f"<p><b>{tr('Description')}:</b> {description}</p>"
@@ -11718,8 +11818,60 @@ class GenizahGUI(QMainWindow):
         elif url_str.startswith('author:'):
             author = url_str[7:]
             self._navigate_to_catalog_browse(author=author)
+        elif url_str.startswith('toggle-trans:'):
+            self._handle_toggle_trans(self.txt_b_extended_info, url_str)
+        elif url_str.startswith('toggle-always:'):
+            # "Always show translations" / "Don't show translations" from context
+            action = url_str[len('toggle-always:'):]
+            new_val = action == 'on'
+            save_app_config({'show_translations': new_val})
+            # Sync the settings checkbox if it exists
+            if hasattr(self, 'chk_show_translations'):
+                self.chk_show_translations.setChecked(new_val)
+            # Reset per-field toggle state and refresh
+            self._refresh_browse_extended_info(reset_toggles=True)
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
+
+    def _handle_toggle_trans(self, text_browser, url_str):
+        """Toggle translated/original text by rebuilding the PGP HTML section.
+
+        URL format: toggle-trans:<field>:<original_text>
+        Toggles per-field state and rebuilds the extended info panel.
+        """
+        parts = url_str[len('toggle-trans:'):].split(':', 1)
+        if len(parts) != 2:
+            return
+        field = parts[0]
+
+        # Track toggle state per field
+        if not hasattr(self, '_trans_toggle_state'):
+            self._trans_toggle_state = {}
+        old = self._trans_toggle_state.get(field, False)
+        self._trans_toggle_state[field] = not old
+
+        # Rebuild the entire extended info panel
+        self._refresh_browse_extended_info()
+
+    def _refresh_browse_extended_info(self, reset_toggles=False):
+        """Refresh the browse extended info panel (after toggling show_translations)."""
+        if reset_toggles:
+            self._trans_toggle_state = {}
+        pgp_doc = getattr(self, '_browse_pgp_doc', None)
+        if pgp_doc:
+            scrollbar = self.txt_b_extended_info.verticalScrollBar()
+            scroll_pos = scrollbar.value() if scrollbar else 0
+            pgp_html = self._build_pgp_extended_info_html(pgp_doc, sys_id=self.current_browse_sid) or ''
+            enriched_html = getattr(self, '_browse_enriched_html', '') or ''
+            combined = enriched_html + pgp_html
+            if combined.strip():
+                palette = self.txt_b_extended_info.palette()
+                text_color = palette.color(QPalette.ColorRole.Text).name()
+                base_color = palette.color(QPalette.ColorRole.Base).name()
+                full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{combined}</div>"
+                self.txt_b_extended_info.setHtml(full_html)
+            if scrollbar:
+                scrollbar.setValue(scroll_pos)
 
     def _navigate_to_catalog_browse(self, domain=None, author=None, work=None):
         """Navigate to the catalog browse tab with the specified filter pre-set.
