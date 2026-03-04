@@ -3,18 +3,69 @@
 Translation Button Component
 
 Provides a translate button that can be added to any text content.
-Uses MyMemory free translation API (no API key required).
-Supports Hebrew <-> English translation.
+Uses the Dicta Translation API (via shared.dicta_client) for scholarly-quality
+Hebrew <-> English translation. Replaces the previous MyMemory API.
+
+For community content (corrections, comments, notes) -- on-demand translation
+powered by Dicta LM 2.0 with scholarly few-shot prompts.
 """
 
 import logging
-import requests
+import os
 from nicegui import ui
 from web.translations import tr, get_language
 from typing import Optional, Callable
 import re
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Lazy-loaded few-shot prompts (singleton, loaded once on first use)
+# =============================================================================
+
+_few_shot_cache = {}
+
+
+def _get_few_shot_prompt(direction: str) -> str:
+    """Get the cached few-shot prompt for the given direction.
+
+    Args:
+        direction: 'en2he' or 'he2en'.
+
+    Returns:
+        Pre-built few-shot prompt string. Empty string if templates not found.
+    """
+    if direction in _few_shot_cache:
+        return _few_shot_cache[direction]
+
+    try:
+        from shared.dicta_client import load_few_shot_template, build_few_shot_prompt
+
+        # Find template files relative to project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if direction == 'en2he':
+            template_path = os.path.join(project_root, 'data', 'few_shot_en2he_scholarly.json')
+        else:
+            template_path = os.path.join(project_root, 'data', 'few_shot_he2en_scholarly.json')
+
+        if os.path.isfile(template_path):
+            template = load_few_shot_template(template_path)
+            prompt = build_few_shot_prompt(template, direction=direction)
+            _few_shot_cache[direction] = prompt
+            return prompt
+        else:
+            logger.warning("Few-shot template not found: %s", template_path)
+            _few_shot_cache[direction] = ''
+            return ''
+    except Exception as e:
+        logger.warning("Failed to load few-shot template for %s: %s", direction, e)
+        _few_shot_cache[direction] = ''
+        return ''
+
+
+# =============================================================================
+# Language Detection
+# =============================================================================
 
 
 def detect_language(text: str) -> str:
@@ -38,9 +89,17 @@ def detect_language(text: str) -> str:
     return 'en'
 
 
+# =============================================================================
+# Translation Function (Dicta API)
+# =============================================================================
+
+
 def translate_text(text: str, source_lang: str, target_lang: str) -> Optional[str]:
     """
-    Translate text using MyMemory free API.
+    Translate text using the Dicta Translation API.
+
+    Uses scholarly few-shot prompts for domain-appropriate translation
+    of Genizah-related content. Replaces the previous MyMemory API.
 
     Args:
         text: Text to translate
@@ -49,35 +108,39 @@ def translate_text(text: str, source_lang: str, target_lang: str) -> Optional[st
 
     Returns:
         Translated text or None if translation failed
+
+    Note:
+        Text longer than 2000 characters is truncated before translation
+        to keep on-demand UX responsive.
     """
     if not text or not text.strip():
         return None
 
-    # MyMemory uses ISO language codes
-    lang_map = {'he': 'he', 'en': 'en'}
-    src = lang_map.get(source_lang, 'en')
-    tgt = lang_map.get(target_lang, 'he')
+    # Determine direction
+    if source_lang == 'he':
+        direction = 'he2en'
+    else:
+        direction = 'en2he'
+
+    # Truncate very long text for on-demand UX (Dicta handles longer, but keep responsive)
+    translate_text_input = text.strip()
+    if len(translate_text_input) > 2000:
+        translate_text_input = translate_text_input[:2000] + '...'
 
     try:
-        response = requests.get(
-            'https://api.mymemory.translated.net/get',
-            params={
-                'q': text[:500],  # API limit
-                'langpair': f'{src}|{tgt}'
-            },
-            timeout=10
-        )
+        from shared.dicta_client import translate_text as dicta_translate
 
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('responseStatus') == 200:
-                translated = data.get('responseData', {}).get('translatedText')
-                if translated:
-                    return translated
-        return None
+        few_shot_prompt = _get_few_shot_prompt(direction)
+        result = dicta_translate(translate_text_input, few_shot_prompt, direction=direction)
+        return result
     except Exception as e:
-        logger.error("Translation error: %s", e)
+        logger.error("Dicta translation error: %s", e)
         return None
+
+
+# =============================================================================
+# UI Components
+# =============================================================================
 
 
 def create_translate_button(
@@ -127,7 +190,7 @@ def create_translate_button(
                 if on_translate:
                     on_translate(state['translated_text'])
             else:
-                # Fetch translation
+                # Fetch translation via Dicta API
                 state['is_loading'] = True
                 btn.props('loading')
 
@@ -210,7 +273,7 @@ def create_translatable_text(
                     btn.props('icon=undo')
                     btn.tooltip(tr('Show original'))
                 else:
-                    # Fetch translation
+                    # Fetch translation via Dicta API
                     state['is_loading'] = True
                     btn.props('loading')
 
