@@ -191,3 +191,216 @@ class TestLoadFewShotTemplate:
         assert len(result["prompts"]) == 1
         assert result["en_category"] == "English"
         assert result["he_category"] == "Hebrew"
+
+
+# =============================================================================
+# Task 2: TranslationService Tests (in-memory SQLite)
+# =============================================================================
+
+import sqlite3
+
+
+class TestTranslationServiceAvailability:
+    """Tests for TranslationService availability checks."""
+
+    def test_service_not_available_without_tables(self, tmp_path):
+        """TranslationService.is_available() returns False when translation tables don't exist."""
+        from shared.translation_service import TranslationService
+
+        # Create empty databases without translation tables
+        pgp_db = tmp_path / "pgp.db"
+        fjms_db = tmp_path / "fjms.db"
+        sqlite3.connect(str(pgp_db)).close()
+        sqlite3.connect(str(fjms_db)).close()
+
+        svc = TranslationService(
+            pgp_db_path=str(pgp_db), fjms_db_path=str(fjms_db)
+        )
+        try:
+            assert svc.is_available() is False
+            assert svc.pgp_available() is False
+            assert svc.fjms_available() is False
+        finally:
+            svc.close()
+
+
+class TestTranslationServicePgp:
+    """Tests for PGP translation queries."""
+
+    @pytest.fixture
+    def pgp_service(self, tmp_path):
+        """Create a TranslationService with a PGP database containing test data."""
+        from shared.translation_service import (
+            TranslationService,
+            ensure_pgp_translations_table,
+        )
+
+        pgp_db = tmp_path / "pgp.db"
+        conn = sqlite3.connect(str(pgp_db))
+        ensure_pgp_translations_table(conn)
+
+        # Insert test data
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he, document_type_he, translated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (1001, "\u05de\u05db\u05ea\u05d1 \u05de\u05e1\u05d5\u05d7\u05e8", "\u05de\u05db\u05ea\u05d1", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he, document_type_he, translated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (1002, "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9", "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9", "2026-03-04"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(pgp_db_path=str(pgp_db))
+        yield svc
+        svc.close()
+
+    def test_get_pgp_description_he(self, pgp_service):
+        """Returns Hebrew translation for known pgpid from pgp_translations table."""
+        result = pgp_service.get_pgp_description_he(1001)
+        assert result == "\u05de\u05db\u05ea\u05d1 \u05de\u05e1\u05d5\u05d7\u05e8"
+
+    def test_get_pgp_description_he_missing(self, pgp_service):
+        """Returns None for unknown pgpid."""
+        result = pgp_service.get_pgp_description_he(9999)
+        assert result is None
+
+    def test_get_translations_batch(self, pgp_service):
+        """Batch lookup returns dict of pgpid -> translation dict for multiple pgpids."""
+        result = pgp_service.get_pgp_translations_batch([1001, 1002, 9999])
+        assert 1001 in result
+        assert 1002 in result
+        assert 9999 not in result
+        assert result[1001]["description_he"] == "\u05de\u05db\u05ea\u05d1 \u05de\u05e1\u05d5\u05d7\u05e8"
+        assert result[1002]["document_type_he"] == "\u05de\u05e1\u05de\u05da \u05de\u05e9\u05e4\u05d8\u05d9"
+
+
+class TestTranslationServiceFjms:
+    """Tests for FJMS translation queries."""
+
+    @pytest.fixture
+    def fjms_service(self, tmp_path):
+        """Create a TranslationService with an FJMS database containing test data."""
+        from shared.translation_service import (
+            TranslationService,
+            ensure_fjms_translations_table,
+        )
+
+        fjms_db = tmp_path / "fjms.db"
+        conn = sqlite3.connect(str(fjms_db))
+        ensure_fjms_translations_table(conn)
+
+        # Insert test data
+        conn.execute(
+            "INSERT INTO fjms_translations (alma_id, field_name, signature_id, original_text, translated_text, direction, translated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("ALMA001", "Title", None, "\u05ea\u05d5\u05e8\u05d4 \u05e4\u05e8\u05e9\u05ea \u05d1\u05e8\u05d0\u05e9\u05d9\u05ea", "Torah Parashat Bereshit", "he2en", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO fjms_translations (alma_id, field_name, signature_id, original_text, translated_text, direction, translated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("ALMA001", "FreeDesc", 42, "\u05e7\u05d8\u05e2 \u05de\u05ea\u05d5\u05e8\u05d4", "Fragment from the Torah", "he2en", "2026-03-04"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(fjms_db_path=str(fjms_db))
+        yield svc
+        svc.close()
+
+    def test_get_fjms_translation(self, fjms_service):
+        """Returns translated text for known alma_id + field_name."""
+        result = fjms_service.get_fjms_translation("ALMA001", "Title")
+        assert result == "Torah Parashat Bereshit"
+
+    def test_get_fjms_free_desc_en(self, fjms_service):
+        """Returns English translation for known free description."""
+        result = fjms_service.get_fjms_free_desc_en("ALMA001", 42)
+        assert result == "Fragment from the Torah"
+
+    def test_get_fjms_translation_missing(self, fjms_service):
+        """Returns None for unknown alma_id."""
+        result = fjms_service.get_fjms_translation("UNKNOWN", "Title")
+        assert result is None
+
+
+class TestNoOverwriteCheck:
+    """Tests for the no-overwrite safety check."""
+
+    def test_has_existing_translation(self, tmp_path):
+        """has_existing_translation returns True when target field already has content."""
+        from shared.translation_service import (
+            TranslationService,
+            ensure_pgp_translations_table,
+        )
+
+        pgp_db = tmp_path / "pgp.db"
+        conn = sqlite3.connect(str(pgp_db))
+        ensure_pgp_translations_table(conn)
+        conn.execute(
+            "INSERT INTO pgp_translations (pgpid, description_he) VALUES (?, ?)",
+            (1001, "\u05de\u05db\u05ea\u05d1 \u05e7\u05d9\u05d9\u05dd"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(pgp_db_path=str(pgp_db))
+        try:
+            assert svc.has_existing_translation(1001, "description_he") is True
+            assert svc.has_existing_translation(9999, "description_he") is False
+        finally:
+            svc.close()
+
+
+class TestSchemaCreation:
+    """Tests for schema creation helpers."""
+
+    def test_create_pgp_translations_schema(self):
+        """DDL creates correct pgp_translations table."""
+        from shared.translation_service import ensure_pgp_translations_table
+
+        conn = sqlite3.connect(":memory:")
+        ensure_pgp_translations_table(conn)
+
+        # Verify table exists with correct columns
+        cursor = conn.execute("PRAGMA table_info(pgp_translations)")
+        columns = {row[1]: row[2] for row in cursor.fetchall()}
+
+        assert "pgpid" in columns
+        assert "description_he" in columns
+        assert "document_type_he" in columns
+        assert "translated_at" in columns
+        assert "model_version" in columns
+
+        conn.close()
+
+    def test_create_fjms_translations_schema(self):
+        """DDL creates correct fjms_translations table with indexes."""
+        from shared.translation_service import ensure_fjms_translations_table
+
+        conn = sqlite3.connect(":memory:")
+        ensure_fjms_translations_table(conn)
+
+        # Verify table exists with correct columns
+        cursor = conn.execute("PRAGMA table_info(fjms_translations)")
+        columns = {row[1]: row[2] for row in cursor.fetchall()}
+
+        assert "id" in columns
+        assert "alma_id" in columns
+        assert "field_name" in columns
+        assert "signature_id" in columns
+        assert "original_text" in columns
+        assert "translated_text" in columns
+        assert "direction" in columns
+        assert "translated_at" in columns
+        assert "model_version" in columns
+
+        # Verify indexes exist
+        cursor = conn.execute("PRAGMA index_list(fjms_translations)")
+        index_names = [row[1] for row in cursor.fetchall()]
+        assert "idx_fjms_trans_alma" in index_names
+        assert "idx_fjms_trans_field" in index_names
+
+        conn.close()
