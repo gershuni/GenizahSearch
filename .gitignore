@@ -30,7 +30,9 @@ web.log
 .claude/settings.local.json
 פקודת אריזה.txt
 .nicegui/
-data/
+data/*
+!data/few_shot_*.json
+!data/FEW_SHOT_NOTES.md
 
 # Runtime files
 app.log
@@ -39,3 +41,6 @@ app.pid
 /big_data_files
 .env
 backend_legacy/
+
+# API keys / test files
+TestLLMAPIsProgram.cs
