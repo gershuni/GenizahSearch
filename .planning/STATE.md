@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 46-03-PLAN.md (FJMS batch translation scripts)
-last_updated: "2026-03-04T06:56:16.000Z"
-last_activity: 2026-03-04 - Completed 46-03 (FJMS batch translation scripts)
+stopped_at: Completed 46-04-PLAN.md (Web search integration, translation toggle, Dicta translate buttons)
+last_updated: "2026-03-04T13:36:00.000Z"
+last_activity: 2026-03-04 - Completed 46-04 (Web search integration, translation toggle, Dicta translate buttons)
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 25
-  completed_plans: 23
+  completed_plans: 24
 ---
 
 ---
@@ -64,14 +64,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 46 in progress (3/5 plans done)
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 46 in progress (4/5 plans done)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 46 of 47 (Dicta Translation) -- Plan 3 of 5 complete
+Phase: 46 of 47 (Dicta Translation) -- Plan 4 of 5 complete
 Status: Phase 46 In Progress
-Last activity: 2026-03-04 - Completed 46-03 (FJMS batch translation scripts)
+Last activity: 2026-03-04 - Completed 46-04 (Web search integration, translation toggle, Dicta translate buttons)
 
 Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 complete, Phase 46 in progress)
 
@@ -112,6 +112,7 @@ Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complet
 | 46-01 | 1 | 11min | 11min |
 | 46-02 | 1 | 3min | 3min |
 | 46-03 | 1 | 5min | 5min |
+| 46-04 | 1 | 14min | 14min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -152,6 +153,7 @@ Recent decisions affecting current work:
 - 46-01: Dicta API client (shared/dicta_client.py) with translate_text, build_few_shot_prompt, batch_translate, PGP_DOCUMENT_TYPE_HE. TranslationService (shared/translation_service.py) with sidecar queries. Scholarly few-shots validated on 20 samples vs defaults -- scholarly adopted for domain consistency. Schema helpers for pgp_translations/fjms_translations.
 - 46-02: PGP batch translation script (scripts/translate_pgp_descriptions.py) with checkpointing, resume, parallel API calls, retry with backoff. 34,954 candidates. Document types via manual PGP_DOCUMENT_TYPE_HE mapping. Atomic checkpoint writes (tempfile+os.replace). 8 new integration tests.
 - 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations.
+- 46-04: Web translation integration: global toggle (show_translations user pref), translated match badge (light blue), clickable Translated/Original toggle badges, sys_id-based translation lookup via document_fragments JOIN (batched 400), 5th parallel enrichment query in asyncio.gather. MyMemory replaced with Dicta API + lazy few-shot singleton. Browse page shelfmark URL param + sys_id detection. 12 new translation UI strings. 10 new tests (35 total).
 
 ### Pending Todos
 
@@ -180,7 +182,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-04T06:56:16Z
-Stopped at: Completed 46-03-PLAN.md (FJMS batch translation scripts)
-Resume file: .planning/phases/46-dicta-translation/46-03-SUMMARY.md
-Notes: Phase 46 plan 3 of 5 complete. FJMS catalog gap-fill and free description scripts ready. Next: 46-04 (web search integration).
+Last session: 2026-03-04T13:36:00Z
+Stopped at: Completed 46-04-PLAN.md (Web search integration, translation toggle, Dicta translate buttons)
+Resume file: .planning/phases/46-dicta-translation/46-04-SUMMARY.md
+Notes: Phase 46 plan 4 of 5 complete. Web translation integration done -- toggle, badges, Dicta translate buttons, browse URL params. Next: 46-05 (desktop translation toggle and display).

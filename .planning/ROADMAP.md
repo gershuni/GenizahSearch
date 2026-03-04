@@ -229,7 +229,7 @@ Plans:
 - [x] 46-01-PLAN.md — Dicta API client, few-shot templates, TranslationService, schema definitions, tests (TRANS-01, TRANS-02, TRANS-04)
 - [x] 46-02-PLAN.md — PGP batch translation script: 35K descriptions EN->HE + document_type mapping (TRANS-01, TRANS-04)
 - [x] 46-03-PLAN.md — FJMS batch translation scripts: catalog gap-fill + 303K free descriptions HE->EN + bibliography scaffold (TRANS-02, TRANS-03, TRANS-04)
-- [ ] 46-04-PLAN.md — Web search integration, translation toggle, translated match badges, replace MyMemory with Dicta (TRANS-05, TRANS-01, TRANS-02)
+- [x] 46-04-PLAN.md — Web search integration, translation toggle, translated match badges, replace MyMemory with Dicta (TRANS-05, TRANS-01, TRANS-02)
 - [ ] 46-05-PLAN.md — Desktop translation toggle, translated text display, Hebrew UI strings (TRANS-05, TRANS-01, TRANS-02)
 
 ### Phase 47: Transcription Import
@@ -276,7 +276,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 43. Session Persistence & History | 3/4 | Complete    | 2026-03-02 |
 | 44. Quick UX Wins | 2/2 | Complete | 2026-03-02 |
 | 45. Filtered Search Context | 5/5 | Complete   | 2026-03-02 |
-| 46. Dicta Translation | 3/5 | In progress | - |
+| 46. Dicta Translation | 4/5 | In progress | - |
 | 47. Transcription Import | 0/TBD | Not started | - |
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
 | 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
