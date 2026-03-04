@@ -510,7 +510,7 @@ class SupabaseCorrectionsClient:
         if self.cache_file.exists():
             try:
                 self.cache_file.unlink()
-            except:
+            except OSError:
                 pass
 
     def is_server_available(self, force_check: bool = False) -> bool:
@@ -556,7 +556,7 @@ class SupabaseCorrectionsClient:
         try:
             user = client.auth.get_user()
             return user is not None and user.user is not None
-        except:
+        except Exception:
             return self.current_user is not None
 
     def login(self, email: str, password: str) -> Tuple[bool, str]:
@@ -654,14 +654,14 @@ class SupabaseCorrectionsClient:
         if client:
             try:
                 client.auth.sign_out()
-            except:
+            except Exception:
                 pass
 
         self.current_user = None
         if self.credentials_file.exists():
             try:
                 self.credentials_file.unlink()
-            except:
+            except OSError:
                 pass
 
     def request_password_reset(self, email: str) -> Dict[str, Any]:
@@ -740,7 +740,7 @@ class SupabaseCorrectionsClient:
                 self._load_user_profile(str(auth_user.user.id))
                 self._save_credentials()
                 return self.current_user
-        except:
+        except Exception:
             pass
 
         return self.current_user
@@ -1544,7 +1544,7 @@ class SupabaseCorrectionsClient:
                 status = item.get('status', 'unknown')
                 stats[status] = stats.get(status, 0) + 1
             return stats
-        except:
+        except Exception:
             return {}
 
     def get_discovery_stats(self) -> Dict:
@@ -1560,7 +1560,7 @@ class SupabaseCorrectionsClient:
                 dtype = item.get('type', 'discovery')
                 stats[dtype] = stats.get(dtype, 0) + 1
             return stats
-        except:
+        except Exception:
             return {}
 
     # ==================== Additional Methods ====================
@@ -1724,7 +1724,7 @@ class SupabaseCorrectionsClient:
                 'corrections_count': corrections.count or 0,
                 'comments_count': comments.count or 0
             }
-        except:
+        except Exception:
             return {}
 
     def get_corrected_text(self, document_id: str, original_text: str) -> str:
@@ -1766,7 +1766,7 @@ class SupabaseCorrectionsClient:
                 reputation_score=u.get('reputation', 0),
                 _uuid=u.get('id')
             ) for u in response.data or []]
-        except:
+        except Exception:
             return []
 
     def get_join_by_id(self, join_id: int) -> Optional[FragmentJoin]:
@@ -1780,7 +1780,7 @@ class SupabaseCorrectionsClient:
             if response.data:
                 return self._parse_join(response.data)
             return None
-        except:
+        except Exception:
             return None
 
     def delete_join(self, join_id: int) -> Tuple[bool, str]:

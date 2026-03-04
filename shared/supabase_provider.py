@@ -42,3 +42,13 @@ def reset_client():
     """Reset the client singleton (useful for testing)."""
     global _client
     _client = None
+
+
+def get_url() -> str:
+    """Get Supabase URL from environment."""
+    return os.environ.get("SUPABASE_URL", "")
+
+
+def get_anon_key() -> str:
+    """Get Supabase anonymous key from environment."""
+    return os.environ.get("SUPABASE_ANON_KEY", "")

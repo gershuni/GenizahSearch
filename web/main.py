@@ -10,6 +10,7 @@ with an intuitive, accessible interface.
 Run with: python -m web.main (from project root)
 """
 
+import logging
 import os
 import sys
 import asyncio
@@ -22,6 +23,8 @@ load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nicegui import ui, app, run
+
+logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
 from web.translations import tr, is_rtl, get_dir, set_language, get_language
@@ -106,20 +109,8 @@ POSTHOG_SCRIPT = f'''
 ''' if _posthog_key else ''
 
 
-def posthog_capture(event: str, properties: dict = None):
-    """Send a custom PostHog event from the server side via JS injection.
-
-    Safe to call even if PostHog isn't loaded (no-ops gracefully).
-    Properties are JSON-serialized and passed to posthog.capture().
-    """
-    import json
-    props_js = json.dumps(properties or {})
-    try:
-        ui.run_javascript(
-            f"if(window.posthog)posthog.capture('{event}',{props_js})"
-        )
-    except Exception:
-        pass  # No client connection or PostHog not loaded
+# posthog_capture moved to web/analytics.py to avoid circular imports
+from web.analytics import posthog_capture  # noqa: F401 — re-export
 
 
 # ============================================================================
@@ -881,9 +872,9 @@ async def auth_callback_route(code: str = None):
     try:
         # Method 1: PKCE flow - code in query parameter (fallback if implicit not available)
         if code:
-            print(f"OAuth callback: exchanging code {code[:20]}...")
+            logger.info(f"OAuth callback: exchanging code {code[:20]}...")
             result = exchange_code_for_session(code)
-            print(f"Code exchange result: {result}")
+            logger.info(f"Code exchange result: {result}")
 
             if 'error' in result:
                 show_error(result['error'])
@@ -921,7 +912,7 @@ async def auth_callback_route(code: str = None):
             })();
         ''')
 
-        print(f"OAuth callback received: {tokens_json}")
+        logger.info(f"OAuth callback received: {tokens_json}")
         tokens = json.loads(tokens_json) if tokens_json else {}
 
         if tokens.get('error'):
@@ -941,7 +932,7 @@ async def auth_callback_route(code: str = None):
             return
 
         result = set_session_from_url(access_token, refresh_token)
-        print(f"set_session_from_url result: {result}")
+        logger.info(f"set_session_from_url result: {result}")
 
         if 'error' in result:
             show_error(result['error'])
@@ -955,9 +946,7 @@ async def auth_callback_route(code: str = None):
             show_error('Login failed - no user returned')
 
     except Exception as e:
-        print(f"OAuth callback error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"OAuth callback error: {e}")
         spinner.set_visibility(False)
         status_label.set_visibility(False)
         error_label.text = f'Error: {str(e)}'
@@ -971,7 +960,7 @@ async def auth_callback_route(code: str = None):
 
 async def initialize_engine():
     """Heavy initialization running in a separate thread via run.io_bound."""
-    print("Starting background initialization...")
+    logger.info("Starting background initialization...")
 
     def _init_sync():
         try:
@@ -1002,14 +991,12 @@ async def initialize_engine():
                 if fjms.is_available():
                     fjms.pre_warm_caches()
             except Exception as e:
-                print(f"FJMS cache pre-warm failed (non-fatal): {e}")
+                logger.error(f"FJMS cache pre-warm failed (non-fatal): {e}")
 
-            print("Engine initialization complete.")
+            logger.info("Engine initialization complete.")
             return True
         except Exception as e:
-            print(f"Engine init failed: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"Engine init failed: {e}")
             return False
 
     await run.io_bound(_init_sync)
