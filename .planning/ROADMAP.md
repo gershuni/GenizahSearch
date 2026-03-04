@@ -129,7 +129,7 @@ cross-links between browse and catalog browse pages. 72 tests.
 - [x] **Phase 42: Search UX & Composition Polish** - Search duration display, ETA, partial results on cancel, chunk count, min-chunks filter, result/excluded separator, CreationType badge on search & browse results (complete)
 - [x] **Phase 43: Session Persistence & Search History** - Restore state + exclusions on reopen (critical: user lost 5K exclusions), search history with saved results
 - [x] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results (complete)
-- [x] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels (completed 2026-03-02)
+- [x] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels (completed 2026-03-02)
 - [ ] **Phase 46: Dicta Translation** - Translate all data (PGP metadata, identifications, catalog, bibliography) via Dicta API for multilingual display and search completeness, careful handling of already-bilingual fields
 
 ### v7.0.0 Transcription Search (Planned)
@@ -211,8 +211,8 @@ Plans:
 - [x] 45-01-PLAN.md — Filter service method (get_filter_sys_ids) + core engine restrict_sys_ids parameter (FILT-01, FILT-02, FILT-03, FILT-04)
 - [x] 45-02-PLAN.md — Web search page: Advanced Filters panel, chip bar, word search per-result exclusion, search history filter support (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
 - [x] 45-03-PLAN.md — Desktop: PreSearchFilterDialog, chip bar, SearchThread/CompositionThread restrict_sys_ids, word search exclusion, session persistence (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
-- [ ] 45-04-PLAN.md — Web parallels: filter panel, per-manuscript exclusion, auto-exclude source, import exclusions, restrict_sys_ids integration (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
-- [ ] 45-05-PLAN.md — Path B: browse-to-search navigation buttons (web + desktop), Hebrew translations (FILT-05, FILT-06)
+- [x] 45-04-PLAN.md — Web parallels: filter panel, per-manuscript exclusion, auto-exclude source, import exclusions, restrict_sys_ids integration (FILT-01, FILT-02, FILT-03, FILT-04, FILT-06)
+- [x] 45-05-PLAN.md — Path B: browse-to-search navigation buttons (web + desktop), Hebrew translations (FILT-05, FILT-06)
 
 ### Phase 46: Dicta Translation
 **Goal**: All scholarly data is available in multiple languages via Dicta Translate API, enabling non-Hebrew/non-English speakers to use the platform and improving search completeness across languages
@@ -224,7 +224,13 @@ Plans:
   3. Already-bilingual fields are preserved and not double-translated
   4. Translated data improves search coverage (searching in either language finds results regardless of original language)
   5. Translation pipeline is repeatable for future data updates
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 46-01-PLAN.md — Dicta API client, few-shot templates, TranslationService, schema definitions, tests (TRANS-01, TRANS-02, TRANS-04)
+- [ ] 46-02-PLAN.md — PGP batch translation script: 35K descriptions EN->HE + document_type mapping (TRANS-01, TRANS-04)
+- [ ] 46-03-PLAN.md — FJMS batch translation scripts: catalog gap-fill + 303K free descriptions HE->EN + bibliography scaffold (TRANS-02, TRANS-03, TRANS-04)
+- [ ] 46-04-PLAN.md — Web search integration, translation toggle, translated match badges, replace MyMemory with Dicta (TRANS-05, TRANS-01, TRANS-02)
+- [ ] 46-05-PLAN.md — Desktop translation toggle, translated text display, Hebrew UI strings (TRANS-05, TRANS-01, TRANS-02)
 
 ### Phase 47: Transcription Import
 **Goal**: FJMS transcription text (~30K transcriptions) is imported from FIST.db into fjms_enrichment.db and accessible through the shared service layer for both apps
@@ -270,7 +276,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 43. Session Persistence & History | 3/4 | Complete    | 2026-03-02 |
 | 44. Quick UX Wins | 2/2 | Complete | 2026-03-02 |
 | 45. Filtered Search Context | 5/5 | Complete   | 2026-03-02 |
-| 46. Dicta Translation | 0/TBD | Not started | - |
+| 46. Dicta Translation | 0/5 | Planning complete | - |
 | 47. Transcription Import | 0/TBD | Not started | - |
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
 | 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
@@ -281,4 +287,4 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-01 after Phase 42 fully complete (42-08 last plan)*
+*Last updated: 2026-03-04 after Phase 46 planning complete (5 plans)*
