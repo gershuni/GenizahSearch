@@ -33,16 +33,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 45 complete (5/5 plans done)
+**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 46 in progress (1/5 plans done)
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 45 of 47 (Filtered Search Context) -- Plan 5 of 5 complete (all done)
-Status: Phase 45 Complete
-Last activity: 2026-03-03 - Completed 45-05 (Browse-to-search navigation & Hebrew translations)
+Phase: 46 of 47 (Dicta Translation) -- Plan 1 of 5 complete
+Status: Phase 46 In Progress
+Last activity: 2026-03-04 - Completed 46-01 (Dicta API client, few-shot templates, TranslationService)
 
-Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 complete)
+Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 complete, Phase 46 in progress)
 
 ## Performance Metrics
 
@@ -78,6 +78,7 @@ Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complet
 | 45-03 | 1 | 32min | 32min |
 | 45-04 | 1 | 9min | 9min |
 | 45-05 | 1 | 9min | 9min |
+| 46-01 | 1 | 11min | 11min |
 
 **Recent Trend:**
 - v6.0.0: 21 plans, 6 phases, 6 days
@@ -115,6 +116,7 @@ Recent decisions affecting current work:
 - 45-03: PreSearchFilterDialog with domain/author/work/date/material. FilterCountWorker for async count. Chip bar on both tabs. SearchThread/CompositionThread pass restrict_sys_ids. Per-result word search exclusion. Filter state in session persistence.
 - 45-04: Collapsible Advanced Filters panel on web parallels page (domain/author/work/date/material). Removable chip bar with manuscript count. restrict_sys_ids wired to search_composition_logic. Per-manuscript exclude buttons on each group. Auto-exclude source manuscript. Import exclusions from word search. Filter-aware composition history. Excluded manuscripts in separate collapsible section.
 - 45-05: Browse-to-search buttons on web and desktop catalog browse. Web: incoming_filters via app.storage.user + /search?from_browse=1 or /parallels. Desktop: pre_search_filters + restrict_sys_ids + tab switch. 20 Hebrew translations for Phase 45 strings.
+- 46-01: Dicta API client (shared/dicta_client.py) with translate_text, build_few_shot_prompt, batch_translate, PGP_DOCUMENT_TYPE_HE. TranslationService (shared/translation_service.py) with sidecar queries. Scholarly few-shots validated on 20 samples vs defaults -- scholarly adopted for domain consistency. Schema helpers for pgp_translations/fjms_translations.
 
 ### Pending Todos
 
@@ -143,7 +145,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-03
-Stopped at: Completed 45-05-PLAN.md (Browse-to-search navigation & Hebrew translations)
-Resume file: .planning/phases/45-filtered-search-context/45-05-SUMMARY.md
-Notes: Phase 45 complete (5/5 plans done). All filtered search features shipped. Next: Phase 46 (Dicta Translation).
+Last session: 2026-03-04
+Stopped at: Completed 46-01-PLAN.md (Dicta API client, few-shot templates, TranslationService)
+Resume file: .planning/phases/46-dicta-translation/46-01-SUMMARY.md
+Notes: Phase 46 plan 1 of 5 complete. API client, service layer, few-shot templates validated. Next: 46-02 (PGP batch translation).
