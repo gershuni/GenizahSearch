@@ -4,6 +4,24 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.2.2] - 2026-03-05
+
+### Bug Fixes: Parallels Search & Small-Screen Layout
+
+#### Parallels Search Fix
+- **Critical: parallels search returning "No results"** — Two bugs combined to break all parallels searches:
+  1. Server was on stale branch missing `restrict_sys_ids` parameter, causing silent `TypeError` on every search
+  2. "Min. chunk matches" filter was incorrectly filtering on paragraph boundary crossings (always 0 for most input text), discarding all results even when matches existed
+- **Missing `web/analytics.py`** — PostHog analytics module was never committed, causing server startup failure after deployment
+
+#### Small-Screen Layout Fix
+- **Browse button visibility** — ~40% of users (viewport height <700px) couldn't see the "Browse Full Manuscript" button, which was buried below tabs at the bottom of the right panel
+- **Result card browse button** — Added green browse (📖) button directly on each search result card for one-click manuscript access
+- **Right panel header actions** — Moved Browse, Find Parallels, and Advanced View buttons to the header row (always visible), removed old bottom action section
+- **PGP tag viewer** — Same fix applied to PGP tag result viewer
+
+---
+
 ## [6.2.1] - 2026-03-03
 
 ### Bug Fix: Pre-Search Domain Filter Parity
