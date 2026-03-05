@@ -40,6 +40,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.dicta_client import (
+    GOD_MODE,
+    MAX_WORKERS,
     build_few_shot_prompt,
     load_few_shot_template,
     translate_text,
@@ -402,8 +404,9 @@ def run_freedesc(args: argparse.Namespace) -> None:
 
     pbar = tqdm(total=total_pending, desc="Translating", unit="desc") if tqdm else None
 
+    workers = min(args.workers, MAX_WORKERS)
     try:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {}
             for sig_id, alma_id, text in pending:
                 f = pool.submit(translate_with_retry, text, few_shot_prompt, "he2en")
@@ -605,8 +608,9 @@ def run_bibliography(args: argparse.Namespace) -> None:
 
     pbar = tqdm(total=total_pending, desc="Bib translate", unit="entry") if tqdm else None
 
+    bib_workers = min(args.workers, MAX_WORKERS)
     try:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        with ThreadPoolExecutor(max_workers=bib_workers) as pool:
             futures = {}
             for bib_id, alma_id, text in pending:
                 f = pool.submit(translate_with_retry, text, few_shot_prompt, "he2en")
@@ -732,8 +736,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--workers",
         type=int,
-        default=5,
-        help="Concurrent API workers (default: 5, recommend starting conservative)",
+        default=MAX_WORKERS,
+        help=f"Concurrent API workers (default: {MAX_WORKERS}, max: {MAX_WORKERS})",
     )
     parser.add_argument(
         "--batch-size",

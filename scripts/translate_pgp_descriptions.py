@@ -43,6 +43,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.dicta_client import (
+    MAX_WORKERS,
     PGP_DOCUMENT_TYPE_HE,
     build_few_shot_prompt,
     load_few_shot_template,
@@ -286,7 +287,7 @@ def run_batch(args: argparse.Namespace) -> None:
         return pgpid, desc_he, dtype_he
 
     try:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        with ThreadPoolExecutor(max_workers=min(args.workers, MAX_WORKERS)) as pool:
             futures = {}
             for pgpid, desc, dtype in pending:
                 f = pool.submit(process_one, pgpid, desc, dtype)
@@ -393,10 +394,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--workers",
         type=int,
-        default=5,
-        choices=range(1, 11),
+        default=MAX_WORKERS,
         metavar="N",
-        help="Concurrent API workers, 1-10 (default: 5)",
+        help=f"Concurrent API workers (default: {MAX_WORKERS}, max: {MAX_WORKERS})",
     )
     parser.add_argument(
         "--batch-size",

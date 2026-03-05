@@ -33,6 +33,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,6 +42,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.dicta_client import (
+    GOD_MODE,
+    MAX_WORKERS,
     build_few_shot_prompt,
     load_few_shot_template,
     translate_text,
@@ -54,7 +57,7 @@ DEFAULT_FJMS_DB = str(PROJECT_ROOT / "fist_data" / "fjms_enrichment.db")
 DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "translate_fjms_catalog_checkpoint.json")
 DEFAULT_FEW_SHOT_HE2EN = str(PROJECT_ROOT / "data" / "few_shot_he2en_scholarly.json")
 DEFAULT_FEW_SHOT_EN2HE = str(PROJECT_ROOT / "data" / "few_shot_en2he_scholarly.json")
-REQUEST_DELAY = 3.0  # seconds between API calls to avoid 429
+REQUEST_DELAY = 0.0 if GOD_MODE else 3.0  # seconds between API calls to avoid 429
 
 
 # =============================================================================
@@ -391,41 +394,54 @@ def run_batch(args: argparse.Namespace) -> None:
         translated = 0
         failed = 0
         batch_count = 0
+        workers = min(MAX_WORKERS, 5) if GOD_MODE else 1
 
         pbar = tqdm(total=len(unique_pending), desc=f"  {display}", unit="item") if tqdm else None
 
         try:
-            for rep_id, original_text in unique_pending:
-                result = translate_text(original_text, few_shot, direction)
-                if result is not None:
-                    # Write for all IDs sharing this text
-                    all_ids = text_to_ids[original_text]
-                    for cid in all_ids:
-                        write_translation(
-                            conn, cid, field_name,
-                            original_text, result, direction,
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {}
+                for rep_id, original_text in unique_pending:
+                    f = pool.submit(translate_text, original_text, few_shot, direction)
+                    futures[f] = (rep_id, original_text)
+
+                for f in as_completed(futures):
+                    rep_id, original_text = futures[f]
+                    try:
+                        result = f.result()
+                    except Exception as e:
+                        result = None
+                        logger.error("Exception translating %s id=%s: %s", cat_name, rep_id, e)
+
+                    if result is not None:
+                        all_ids = text_to_ids[original_text]
+                        for cid in all_ids:
+                            write_translation(
+                                conn, cid, field_name,
+                                original_text, result, direction,
+                            )
+                            cat_completed.add(cid)
+                        translated += len(all_ids)
+                        batch_count += len(all_ids)
+                    else:
+                        failed += 1
+                        logger.warning(
+                            "Translation failed for %s id=%s", cat_name, rep_id
                         )
-                        cat_completed.add(cid)
-                    translated += len(all_ids)
-                    batch_count += len(all_ids)
-                else:
-                    failed += 1
-                    logger.warning(
-                        "Translation failed for %s id=%s", cat_name, rep_id
-                    )
 
-                if pbar:
-                    pbar.update(1)
+                    if pbar:
+                        pbar.update(1)
 
-                # Checkpoint at batch interval
-                if batch_count >= args.batch_size:
-                    conn.commit()
-                    checkpoint[cat_name] = cat_completed
-                    save_checkpoint(args.checkpoint_file, checkpoint)
-                    batch_count = 0
+                    # Checkpoint at batch interval
+                    if batch_count >= args.batch_size:
+                        conn.commit()
+                        checkpoint[cat_name] = cat_completed
+                        save_checkpoint(args.checkpoint_file, checkpoint)
+                        batch_count = 0
 
-                # Throttle to avoid rate limits
-                time.sleep(REQUEST_DELAY)
+                    # Throttle to avoid rate limits (0 in god mode)
+                    if REQUEST_DELAY > 0:
+                        time.sleep(REQUEST_DELAY)
 
         except KeyboardInterrupt:
             print(f"\n\nInterrupted during {display}! Saving checkpoint...")

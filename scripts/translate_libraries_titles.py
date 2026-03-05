@@ -26,6 +26,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +40,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.dicta_client import (
+    GOD_MODE,
+    MAX_WORKERS,
     build_few_shot_prompt,
     load_few_shot_template,
     translate_text,
@@ -49,7 +52,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DB = str(PROJECT_ROOT / "libraries_translations.db")
 DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "translate_libraries_titles_checkpoint.json")
 DEFAULT_FEW_SHOT = str(PROJECT_ROOT / "data" / "few_shot_he2en_scholarly.json")
-REQUEST_DELAY = 9.5  # Dicta limit: 100 requests per 900s (15min) → ~9s between calls
+REQUEST_DELAY = 0.0 if GOD_MODE else 9.5  # Dicta limit: 100 req/900s unless god mode
 
 # Graceful shutdown
 _shutdown_requested = False
@@ -157,6 +160,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="Checkpoint file path")
     parser.add_argument("--few-shot", default=DEFAULT_FEW_SHOT,
                         help="Few-shot template file")
+    parser.add_argument("--workers", type=int, default=MAX_WORKERS,
+                        help=f"Concurrent API workers (default: {MAX_WORKERS}, max: {MAX_WORKERS})")
     parser.add_argument("--delay", type=float, default=REQUEST_DELAY,
                         help=f"Seconds between API calls (default: {REQUEST_DELAY})")
     parser.add_argument("--limit", type=int, default=0,
@@ -230,48 +235,58 @@ def main(argv: list[str] | None = None) -> None:
     }
 
     start_time = time.time()
+    workers = min(MAX_WORKERS, 5) if GOD_MODE else 1
 
     try:
-        for i, (title, row_count) in enumerate(pending):
-            if _shutdown_requested:
-                logger.info("Shutdown requested — saving checkpoint and exiting")
-                break
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {}
+            for title, row_count in pending:
+                f = pool.submit(translate_text, title, few_shot, "he2en")
+                futures[f] = (title, row_count)
 
-            stats["api_calls"] += 1
-            try:
-                result = translate_text(title, few_shot, direction="he2en")
-            except Exception as e:
-                logger.error(f"[{i+1}] Exception translating: {e}", exc_info=True)
-                stats["failed"] += 1
-                time.sleep(args.delay)
-                continue
+            for i, f in enumerate(as_completed(futures)):
+                if _shutdown_requested:
+                    logger.info("Shutdown requested — cancelling remaining and saving")
+                    for remaining_f in futures:
+                        remaining_f.cancel()
+                    break
 
-            if result:
-                updated = apply_translation(args.db, title, result)
-                completed.add(title)
-                stats["translated"] += 1
-                stats["rows_updated"] += updated
+                title, row_count = futures[f]
+                stats["api_calls"] += 1
 
-                if (i + 1) % 100 == 0:
-                    elapsed = time.time() - start_time
-                    rate = stats["translated"] / elapsed * 3600 if elapsed > 0 else 0
-                    remaining = (len(pending) - i - 1) / rate * 3600 if rate > 0 else 0
-                    logger.info(
-                        f"[{i+1}/{len(pending)}] "
-                        f"translated={stats['translated']:,} rows={stats['rows_updated']:,} "
-                        f"[{rate:.0f}/hr, ~{remaining/3600:.1f}h left]"
-                    )
-            else:
-                stats["failed"] += 1
-                logger.warning(f"[{i+1}] FAILED: {title[:80]}")
+                try:
+                    result = f.result()
+                except Exception as e:
+                    logger.error(f"[{i+1}] Exception translating: {e}", exc_info=True)
+                    stats["failed"] += 1
+                    continue
 
-            # Save checkpoint periodically
-            if (i + 1) % args.batch_size == 0:
-                save_checkpoint(args.checkpoint, completed, stats)
+                if result:
+                    updated = apply_translation(args.db, title, result)
+                    completed.add(title)
+                    stats["translated"] += 1
+                    stats["rows_updated"] += updated
 
-            # Throttle
-            if i < len(pending) - 1:
-                time.sleep(args.delay)
+                    if (i + 1) % 100 == 0:
+                        elapsed = time.time() - start_time
+                        rate = stats["translated"] / elapsed * 3600 if elapsed > 0 else 0
+                        remaining_est = (len(pending) - i - 1) / rate * 3600 if rate > 0 else 0
+                        logger.info(
+                            f"[{i+1}/{len(pending)}] "
+                            f"translated={stats['translated']:,} rows={stats['rows_updated']:,} "
+                            f"[{rate:.0f}/hr, ~{remaining_est/3600:.1f}h left]"
+                        )
+                else:
+                    stats["failed"] += 1
+                    logger.warning(f"[{i+1}] FAILED: {title[:80]}")
+
+                # Save checkpoint periodically
+                if (i + 1) % args.batch_size == 0:
+                    save_checkpoint(args.checkpoint, completed, stats)
+
+                # Throttle (0 in god mode)
+                if REQUEST_DELAY > 0 and i < len(pending) - 1:
+                    time.sleep(REQUEST_DELAY)
     except Exception as e:
         logger.error(f"Fatal error in translation loop: {e}", exc_info=True)
 

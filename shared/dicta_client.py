@@ -17,12 +17,20 @@ API Details:
 
 import json
 import logging
+import os
 import random
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +40,29 @@ logger = logging.getLogger(__name__)
 
 DICTA_BASE = "https://dicta-translation.loadbalancer3.dicta.org.il"
 DICTA_ENDPOINT = f"{DICTA_BASE}/whatcanthisbe/completions"
-DICTA_HEADERS = {
+DICTA_MODEL = "dicta-il/dictalm2.0"
+
+# God mode: bypasses rate limits. Set DICTA_GOD_MODE in .env
+_GOD_MODE_KEY = os.environ.get("DICTA_GOD_MODE", "")
+GOD_MODE = bool(_GOD_MODE_KEY)
+
+DICTA_HEADERS: Dict[str, str] = {
     "Content-Type": "application/json",
     "Authorization": "Bearer x-no-api-key",
 }
-DICTA_MODEL = "dicta-il/dictalm2.0"
+if GOD_MODE:
+    DICTA_HEADERS["x-god-mode"] = _GOD_MODE_KEY
 
 # Retry settings for 429 rate limiting
 MAX_RETRIES_429 = 5
-RETRY_BASE_DELAY = 10.0  # seconds
-RETRY_MAX_DELAY = 120.0  # Dicta rate limit: 100 req/15min, RateLimit-Reset can be up to 900s
+RETRY_BASE_DELAY = 10.0 if not GOD_MODE else 2.0  # seconds
+RETRY_MAX_DELAY = 120.0 if not GOD_MODE else 15.0
+
+# Word limit per API request (god mode constraint: max 100 words)
+MAX_WORDS_PER_REQUEST = 100
+
+# Max concurrent workers (god mode constraint: max 5)
+MAX_WORKERS = 5
 
 # =============================================================================
 # PGP Document Type Manual Translations
@@ -116,33 +137,72 @@ def build_few_shot_prompt(template: dict, direction: str = "en2he") -> str:
 # =============================================================================
 
 
-def translate_text(
-    text: str,
-    few_shot_prompt: str,
-    direction: str = "en2he",
-    timeout: int = 60,
-) -> Optional[str]:
-    """Translate text using Dicta LM 2.0 Completions API.
+def _sanitize_text(text: str) -> str:
+    """Remove line breaks and collapse whitespace for API submission."""
+    return re.sub(r"\s+", " ", text.replace("\n", " ").replace("\r", " ")).strip()
 
-    Builds full prompt from few-shot prefix + source text + target category,
-    then POSTs to the Dicta endpoint. Retries with exponential backoff on
-    429 rate limit responses.
 
-    Args:
-        text: Text to translate.
-        few_shot_prompt: Pre-built few-shot prefix (from build_few_shot_prompt).
-        direction: "en2he" or "he2en".
-        timeout: HTTP request timeout in seconds.
+def _split_by_words(text: str, max_words: int = MAX_WORDS_PER_REQUEST) -> List[str]:
+    """Split text into chunks of at most max_words words.
+
+    Splits on sentence boundaries (. ! ? ;) when possible, falling back to
+    word-boundary splits.
 
     Returns:
-        Translated text string, stripped of whitespace. None on error.
+        List of text chunks, each with at most max_words words.
     """
-    if direction == "en2he":
-        src_cat, tgt_cat = "English", "Hebrew"
-    else:
-        src_cat, tgt_cat = "Hebrew", "English"
+    words = text.split()
+    if len(words) <= max_words:
+        return [text]
 
-    prompt = f"{few_shot_prompt}\n\n{src_cat}: {text.strip()}\n{tgt_cat}:"
+    # Split on sentence boundaries first
+    sentences = re.split(r"(?<=[.!?;])\s+", text)
+    chunks: List[str] = []
+    current: List[str] = []
+    current_wc = 0
+
+    for sentence in sentences:
+        s_words = sentence.split()
+        s_wc = len(s_words)
+
+        if s_wc > max_words:
+            # Sentence itself is too long — flush current, then split sentence by word count
+            if current:
+                chunks.append(" ".join(current))
+                current = []
+                current_wc = 0
+            for i in range(0, s_wc, max_words):
+                chunks.append(" ".join(s_words[i : i + max_words]))
+        elif current_wc + s_wc > max_words:
+            # Adding this sentence would exceed limit — flush
+            chunks.append(" ".join(current))
+            current = [sentence]
+            current_wc = s_wc
+        else:
+            current.append(sentence)
+            current_wc += s_wc
+
+    if current:
+        chunks.append(" ".join(current))
+
+    return chunks
+
+
+def _translate_single(
+    text: str,
+    few_shot_prompt: str,
+    src_cat: str,
+    tgt_cat: str,
+    timeout: int = 60,
+) -> Optional[str]:
+    """Send a single translation request to the Dicta API.
+
+    Retries with exponential backoff on 429 rate limit responses.
+
+    Returns:
+        Translated text string, or None on error.
+    """
+    prompt = f"{few_shot_prompt}\n\n{src_cat}: {text}\n{tgt_cat}:"
 
     payload = {
         "model": DICTA_MODEL,
@@ -159,7 +219,6 @@ def translate_text(
             )
 
             if resp.status_code == 429:
-                # Prefer RateLimit-Reset (seconds until window resets) over Retry-After
                 reset = resp.headers.get("RateLimit-Reset")
                 retry_after = resp.headers.get("Retry-After")
                 if reset:
@@ -181,7 +240,6 @@ def translate_text(
             resp.raise_for_status()
             return resp.json()["choices"][0]["text"].strip()
         except requests.exceptions.HTTPError:
-            # Non-429 HTTP errors — don't retry
             logger.warning("Translation failed for text (%.50s...): %s", text[:50], resp.status_code)
             return None
         except Exception as e:
@@ -190,6 +248,50 @@ def translate_text(
 
     logger.warning("Translation failed after %d retries for: %.50s...", MAX_RETRIES_429, text[:50])
     return None
+
+
+def translate_text(
+    text: str,
+    few_shot_prompt: str,
+    direction: str = "en2he",
+    timeout: int = 60,
+) -> Optional[str]:
+    """Translate text using Dicta LM 2.0 Completions API.
+
+    Sanitizes input (strips line breaks), splits long texts (>100 words) into
+    chunks, translates each, and joins results.
+
+    Args:
+        text: Text to translate.
+        few_shot_prompt: Pre-built few-shot prefix (from build_few_shot_prompt).
+        direction: "en2he" or "he2en".
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        Translated text string, stripped of whitespace. None on error.
+    """
+    if direction == "en2he":
+        src_cat, tgt_cat = "English", "Hebrew"
+    else:
+        src_cat, tgt_cat = "Hebrew", "English"
+
+    clean = _sanitize_text(text)
+    if not clean:
+        return None
+
+    chunks = _split_by_words(clean)
+    if len(chunks) == 1:
+        return _translate_single(clean, few_shot_prompt, src_cat, tgt_cat, timeout)
+
+    # Translate each chunk and join
+    translated_parts = []
+    for chunk in chunks:
+        result = _translate_single(chunk, few_shot_prompt, src_cat, tgt_cat, timeout)
+        if result is None:
+            return None  # Fail entire text if any chunk fails
+        translated_parts.append(result)
+
+    return " ".join(translated_parts)
 
 
 def batch_translate(
@@ -214,6 +316,7 @@ def batch_translate(
     """
     results = []
     total = len(texts)
+    max_workers = min(max_workers, MAX_WORKERS)
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {}
