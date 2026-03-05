@@ -278,20 +278,21 @@ fist_data/fjms_enrichment.db (EXISTING)
 
 ## Execution Timeline
 
-### Wave 1: Quick Wins (Day 1)
+### Wave 1: Quick Wins (Day 1) — DONE
 - [x] FJMS catalog titles (done — 1,152/1,773)
-- [ ] FJMS catalog authors (54 remaining — minutes)
-- [ ] Phase A: Extract English from bilingual titles (scripting — hours)
+- [x] Phase A: Extract English from bilingual titles (112,361 extracted, libraries_translations.db)
+- [x] Dicta rate limit fix (100 req/15min, RateLimit-Reset header, 9.5s delay)
+- [x] ResultDialog toggle refactor (_rd_build_extended_html extracted)
 
-### Wave 2: Core Translation (Days 2–5)
-- [ ] Phase B: FJMS genizah_titles + persons (2,841 strings — ~2.4h)
-- [ ] Phase C: libraries.csv Hebrew-only titles (34,709 strings — ~29h, 2 overnight runs)
-- [ ] Phase D: PGP descriptions (31,735 strings — ~26h, 2 overnight runs)
+### Wave 2: Core Translation (Days 2–5) — IN PROGRESS
+- [ ] FJMS catalog authors + persons + titles (2,841 remaining — `python scripts/translate_fjms_catalog.py`)
+- [ ] Phase C: libraries.csv Hebrew-only titles (34,700 unique — `python scripts/translate_libraries_titles.py`, ~91h)
+- [ ] Phase D: PGP descriptions (31,735 unique — needs script refactor first)
 
 ### Wave 3: Integration (Days 6–7)
-- [ ] Phase E: TranslationService extensions + UI wiring
-- [ ] Fix 46-05 ResultDialog toggle (desktop)
-- [ ] Verification and testing
+- [ ] Phase E: TranslationService extensions + UI wiring (libraries_translations.db)
+- [ ] Test 46-05 ResultDialog toggle fix (human verification)
+- [ ] Post-translation polish (Piyyut normalization, terminology alignment)
 
 ### Wave 4: Optional (Week 2+)
 - [ ] Phase F: FJMS free descriptions (117,959 strings — ~98h, 4+ days)
@@ -303,9 +304,9 @@ fist_data/fjms_enrichment.db (EXISTING)
 
 | Script | Status | Execution Model | Needs Fix? |
 |--------|--------|----------------|------------|
-| `scripts/extract_libraries_english.py` | **NEW — to build** | Parse only | — |
-| `scripts/translate_libraries_titles.py` | **NEW — to build** | Sequential + throttle | — |
-| `scripts/translate_fjms_catalog.py` | Working | Sequential + throttle | No |
+| `scripts/extract_libraries_english.py` | **Done** — 112,361 titles extracted | Parse only | No |
+| `scripts/translate_libraries_titles.py` | **Ready to run** — 34,700 unique pending | Sequential + 9.5s throttle | No |
+| `scripts/translate_fjms_catalog.py` | **Partial** — 1,260/~6,000 done | Sequential + 3s throttle | No |
 | `scripts/translate_fjms_free_desc.py` | Broken | Parallel (ThreadPoolExecutor) | **Yes — refactor to sequential** |
 | `scripts/translate_pgp_descriptions.py` | Untested | Parallel (ThreadPoolExecutor) | **Yes — refactor to sequential** |
 
