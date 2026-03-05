@@ -33,7 +33,6 @@ import sqlite3
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,8 +54,7 @@ DEFAULT_FJMS_DB = str(PROJECT_ROOT / "fist_data" / "fjms_enrichment.db")
 DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "translate_fjms_catalog_checkpoint.json")
 DEFAULT_FEW_SHOT_HE2EN = str(PROJECT_ROOT / "data" / "few_shot_he2en_scholarly.json")
 DEFAULT_FEW_SHOT_EN2HE = str(PROJECT_ROOT / "data" / "few_shot_en2he_scholarly.json")
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 2.0  # seconds, exponential backoff
+REQUEST_DELAY = 3.0  # seconds between API calls to avoid 429
 
 
 # =============================================================================
@@ -115,38 +113,6 @@ def save_checkpoint(path: str, completed: dict[str, set]) -> None:
 
 
 # =============================================================================
-# Translation with Retry
-# =============================================================================
-
-
-def translate_with_retry(
-    text: str, few_shot_prompt: str, direction: str = "he2en"
-) -> str | None:
-    """Translate text with exponential backoff retry on failure.
-
-    Args:
-        text: Text to translate.
-        few_shot_prompt: Pre-built few-shot prefix.
-        direction: Translation direction ("he2en" or "en2he").
-
-    Returns:
-        Translated text, or None after all retries exhausted.
-    """
-    for attempt in range(MAX_RETRIES):
-        result = translate_text(text, few_shot_prompt, direction)
-        if result is not None:
-            return result
-        if attempt < MAX_RETRIES - 1:
-            delay = RETRY_BASE_DELAY * (2 ** attempt)
-            logger.info(
-                "Retry %d/%d after %.1fs for text: %.50s...",
-                attempt + 2, MAX_RETRIES, delay, text[:50],
-            )
-            time.sleep(delay)
-    return None
-
-
-# =============================================================================
 # Gap Detection Queries
 # =============================================================================
 
@@ -166,7 +132,10 @@ def get_title_gaps_he2en(conn: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def get_title_gaps_en2he(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    """Get catalog rows where Title exists but TitleHeb is missing.
+    """Get catalog rows where Title exists in English but TitleHeb is missing.
+
+    Filters to titles that actually contain Latin characters (real English).
+    Many Title values are already in Hebrew/JA script and don't need translation.
 
     Returns:
         List of (AlmaId, Title) tuples.
@@ -176,7 +145,8 @@ def get_title_gaps_en2he(conn: sqlite3.Connection) -> list[tuple[str, str]]:
         "WHERE Title IS NOT NULL AND Title != '' "
         "AND (TitleHeb IS NULL OR TitleHeb = '')"
     ).fetchall()
-    return [(r[0], r[1]) for r in rows]
+    # Only include titles with actual Latin chars (real English)
+    return [(r[0], r[1]) for r in rows if any("a" <= c.lower() <= "z" for c in r[1])]
 
 
 def get_author_gaps(conn: sqlite3.Connection) -> list[tuple[str, str]]:
@@ -397,14 +367,24 @@ def run_batch(args: argparse.Namespace) -> None:
 
         # Filter out completed
         pending = [(cid, text) for cid, text in candidates if cid not in cat_completed]
+
+        # Deduplicate: group by text, translate each unique string once
+        text_to_ids: dict[str, list[str]] = {}
+        for cid, text in pending:
+            text_to_ids.setdefault(text, []).append(cid)
+        unique_pending = [(ids[0], text) for text, ids in text_to_ids.items()]
+
         if args.limit:
-            pending = pending[: args.limit]
+            unique_pending = unique_pending[: args.limit]
 
         skipped = len(candidates) - len(pending)
         grand_skipped += skipped
-        print(f"  Candidates: {len(candidates)}, Previously done: {skipped}, Pending: {len(pending)}")
+        print(
+            f"  Candidates: {len(candidates)}, Previously done: {skipped}, "
+            f"Pending: {len(pending)} ({len(unique_pending)} unique strings)"
+        )
 
-        if not pending:
+        if not unique_pending:
             continue
 
         few_shot = he2en_prompt if direction == "he2en" else en2he_prompt
@@ -412,47 +392,40 @@ def run_batch(args: argparse.Namespace) -> None:
         failed = 0
         batch_count = 0
 
-        pbar = tqdm(total=len(pending), desc=f"  {display}", unit="item") if tqdm else None
+        pbar = tqdm(total=len(unique_pending), desc=f"  {display}", unit="item") if tqdm else None
 
         try:
-            with ThreadPoolExecutor(max_workers=args.workers) as pool:
-                futures = {}
-                for item_id, text in pending:
-                    f = pool.submit(translate_with_retry, text, few_shot, direction)
-                    futures[f] = (item_id, text)
-
-                for f in as_completed(futures):
-                    item_id, original_text = futures[f]
-                    try:
-                        result = f.result()
-                        if result is not None:
-                            write_translation(
-                                conn, item_id, field_name,
-                                original_text, result, direction,
-                            )
-                            cat_completed.add(item_id)
-                            translated += 1
-                            batch_count += 1
-                        else:
-                            failed += 1
-                            logger.warning(
-                                "Translation failed for %s id=%s", cat_name, item_id
-                            )
-                    except Exception as e:
-                        failed += 1
-                        logger.error(
-                            "Error processing %s id=%s: %s", cat_name, item_id, e
+            for rep_id, original_text in unique_pending:
+                result = translate_text(original_text, few_shot, direction)
+                if result is not None:
+                    # Write for all IDs sharing this text
+                    all_ids = text_to_ids[original_text]
+                    for cid in all_ids:
+                        write_translation(
+                            conn, cid, field_name,
+                            original_text, result, direction,
                         )
+                        cat_completed.add(cid)
+                    translated += len(all_ids)
+                    batch_count += len(all_ids)
+                else:
+                    failed += 1
+                    logger.warning(
+                        "Translation failed for %s id=%s", cat_name, rep_id
+                    )
 
-                    if pbar:
-                        pbar.update(1)
+                if pbar:
+                    pbar.update(1)
 
-                    # Checkpoint at batch interval
-                    if batch_count >= args.batch_size:
-                        conn.commit()
-                        checkpoint[cat_name] = cat_completed
-                        save_checkpoint(args.checkpoint_file, checkpoint)
-                        batch_count = 0
+                # Checkpoint at batch interval
+                if batch_count >= args.batch_size:
+                    conn.commit()
+                    checkpoint[cat_name] = cat_completed
+                    save_checkpoint(args.checkpoint_file, checkpoint)
+                    batch_count = 0
+
+                # Throttle to avoid rate limits
+                time.sleep(REQUEST_DELAY)
 
         except KeyboardInterrupt:
             print(f"\n\nInterrupted during {display}! Saving checkpoint...")
@@ -524,12 +497,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--fjms-db",
         default=DEFAULT_FJMS_DB,
         help=f"Path to fjms_enrichment.db (default: {DEFAULT_FJMS_DB})",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=5,
-        help="Concurrent API workers (default: 5)",
     )
     parser.add_argument(
         "--batch-size",

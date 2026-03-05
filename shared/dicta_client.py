@@ -17,6 +17,8 @@ API Details:
 
 import json
 import logging
+import random
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -35,6 +37,11 @@ DICTA_HEADERS = {
     "Authorization": "Bearer x-no-api-key",
 }
 DICTA_MODEL = "dicta-il/dictalm2.0"
+
+# Retry settings for 429 rate limiting
+MAX_RETRIES_429 = 3
+RETRY_BASE_DELAY = 3.0  # seconds
+RETRY_MAX_DELAY = 30.0  # seconds
 
 # =============================================================================
 # PGP Document Type Manual Translations
@@ -118,7 +125,8 @@ def translate_text(
     """Translate text using Dicta LM 2.0 Completions API.
 
     Builds full prompt from few-shot prefix + source text + target category,
-    then POSTs to the Dicta endpoint.
+    then POSTs to the Dicta endpoint. Retries with exponential backoff on
+    429 rate limit responses.
 
     Args:
         text: Text to translate.
@@ -144,15 +152,41 @@ def translate_text(
         "max_tokens": 1024,
     }
 
-    try:
-        resp = requests.post(
-            DICTA_ENDPOINT, json=payload, headers=DICTA_HEADERS, timeout=timeout
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["text"].strip()
-    except Exception as e:
-        logger.warning("Translation failed for text (%.50s...): %s", text[:50], e)
-        return None
+    for attempt in range(MAX_RETRIES_429):
+        try:
+            resp = requests.post(
+                DICTA_ENDPOINT, json=payload, headers=DICTA_HEADERS, timeout=timeout
+            )
+
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    # Cap server's Retry-After — often wildly inflated
+                    delay = min(float(retry_after), RETRY_MAX_DELAY)
+                else:
+                    delay = min(
+                        RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1),
+                        RETRY_MAX_DELAY,
+                    )
+                logger.warning(
+                    "429 rate limit (attempt %d/%d), retrying in %.1fs for: %.50s...",
+                    attempt + 1, MAX_RETRIES_429, delay, text[:50],
+                )
+                time.sleep(delay)
+                continue
+
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["text"].strip()
+        except requests.exceptions.HTTPError:
+            # Non-429 HTTP errors — don't retry
+            logger.warning("Translation failed for text (%.50s...): %s", text[:50], resp.status_code)
+            return None
+        except Exception as e:
+            logger.warning("Translation failed for text (%.50s...): %s", text[:50], e)
+            return None
+
+    logger.warning("Translation failed after %d retries for: %.50s...", MAX_RETRIES_429, text[:50])
+    return None
 
 
 def batch_translate(

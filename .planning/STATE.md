@@ -69,9 +69,9 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 46 of 47 (Dicta Translation) -- Plan 4 of 5 complete
-Status: Phase 46 In Progress
-Last activity: 2026-03-04 - Completed 46-04 (Web search integration, translation toggle, Dicta translate buttons)
+Phase: 46 of 47 (Dicta Translation) -- Plan 4 of 5 complete, 46-03 batch re-executing
+Status: Phase 46 In Progress (batch translation 1,210/3,835 rows)
+Last activity: 2026-03-05 - 46-03 batch translation: few-shot rebuild, dedup, throttle, 429 handling. 1,210 rows done.
 
 Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 complete, Phase 46 in progress)
 
@@ -152,7 +152,7 @@ Recent decisions affecting current work:
 - 45-05: Browse-to-search buttons on web and desktop catalog browse. Web: incoming_filters via app.storage.user + /search?from_browse=1 or /parallels. Desktop: pre_search_filters + restrict_sys_ids + tab switch. 20 Hebrew translations for Phase 45 strings.
 - 46-01: Dicta API client (shared/dicta_client.py) with translate_text, build_few_shot_prompt, batch_translate, PGP_DOCUMENT_TYPE_HE. TranslationService (shared/translation_service.py) with sidecar queries. Scholarly few-shots validated on 20 samples vs defaults -- scholarly adopted for domain consistency. Schema helpers for pgp_translations/fjms_translations.
 - 46-02: PGP batch translation script (scripts/translate_pgp_descriptions.py) with checkpointing, resume, parallel API calls, retry with backoff. 34,954 candidates. Document types via manual PGP_DOCUMENT_TYPE_HE mapping. Atomic checkpoint writes (tempfile+os.replace). 8 new integration tests.
-- 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations.
+- 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations. **RE-EXECUTED 2026-03-05**: Rebuilt few-shot with 16 real genizah_titles pairs (JA transliteration), added dedup (265→20 unique for titles), sequential+3s throttle, 429 retry in dicta_client. EN→HE filtered to 9 real English candidates. translate_fjms_free_desc.py still needs same fixes (parallel→sequential, dedup, throttle).
 - 46-04: Web translation integration: global toggle (show_translations user pref), translated match badge (light blue), clickable Translated/Original toggle badges, sys_id-based translation lookup via document_fragments JOIN (batched 400), 5th parallel enrichment query in asyncio.gather. MyMemory replaced with Dicta API + lazy few-shot singleton. Browse page shelfmark URL param + sys_id detection. 12 new translation UI strings. 10 new tests (35 total).
 
 ### Pending Todos
@@ -182,7 +182,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-04T13:36:00Z
-Stopped at: Completed 46-04-PLAN.md (Web search integration, translation toggle, Dicta translate buttons)
-Resume file: .planning/phases/46-dicta-translation/46-04-SUMMARY.md
-Notes: Phase 46 plan 4 of 5 complete. Web translation integration done -- toggle, badges, Dicta translate buttons, browse URL params. Next: 46-05 (desktop translation toggle and display).
+Last session: 2026-03-05T10:00:00Z
+Stopped at: 46-03 batch translation re-execution (in progress)
+Resume file: .planning/phases/46-dicta-translation/HANDOFF.md
+Notes: 46-03 batch scripts were created but never run. Re-executed with major fixes: rebuilt few-shot templates with real scholarly data (16 HE→EN pairs from genizah_titles for JA transliteration), added 429 retry/backoff to dicta_client, deduplication, sequential+throttle. 1,210/3,835 translations done (titles complete, authors partial). CRITICAL: translate_fjms_free_desc.py needs same fixes before running. Next: finish catalog gap-fill, then 46-05 (desktop translation toggle).

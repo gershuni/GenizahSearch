@@ -1,24 +1,68 @@
 {
     "prompts": [
         {
-            "Hebrew": "\u05ea\u05d5\u05e8\u05d4, \u05e4\u05e8\u05e9\u05ea \u05d1\u05e8\u05d0\u05e9\u05d9\u05ea, \u05e4\u05e8\u05e7 \u05d0 \u05e4\u05e8\u05e7 \u05d1 \u05e2\u05d3 \u05e4\u05e8\u05e7 \u05d9\u05d1 (27:1-28:5)",
-            "English": "Torah, Parashat Bereshit, Chapter 1 verse 2 through Chapter 11 verse 27:1-28:5"
+            "Hebrew": "תפסיר רס\"ג",
+            "English": "Tafsir R. Saadya Gaon"
         },
         {
-            "Hebrew": "\u05e4\u05d9\u05e8\u05d5\u05e9 \u05e2\u05dc \u05de\u05e1\u05db\u05ea \u05e1\u05e0\u05d4\u05d3\u05e8\u05d9\u05df, \u05e4\u05e8\u05e7 \u05d0\u05d9\u05e0\u05d5 \u05d3\u05d9\u05df, \u05d3\u05e3 \u05db\u05d3-\u05db\u05d5",
-            "English": "Commentary on Tractate Sanhedrin, chapter Eino Din, folios 24-26"
+            "Hebrew": "תפסיר לאיכה",
+            "English": "Tafsir on Lamentations"
         },
         {
-            "Hebrew": "\u05e4\u05d9\u05d5\u05d8, \u05e7\u05d9\u05e0\u05d5\u05ea \u05dc\u05e9\u05d1\u05ea, \u05d7\u05ea\u05d9\u05de\u05ea \u05d7\u05d6\u05df",
-            "English": "Liturgical poem (piyyut), Qinot for Shabbat, signed by the cantor (hazzan)"
+            "Hebrew": "כתאב אלאינאס (פירוש מגלת אסתר)",
+            "English": "Kitab al-Inas (Commentary on the Book of Esther)"
         },
         {
-            "Hebrew": "\u05ea\u05e9\u05d5\u05d1\u05d5\u05ea \u05d4\u05e8\u05de\u05d1\"\u05dd \u05dc\u05d1\u05e0\u05d9 \u05d4\u05e7\u05d4\u05d9\u05dc\u05d4 \u05d1\u05de\u05e6\u05e8\u05d9\u05dd \u05d1\u05e2\u05e0\u05d9\u05d9\u05e0\u05d9 \u05d0\u05d9\u05e1\u05d5\u05e8\u05d9 \u05e2\u05d1\u05d5\u05d3\u05d4 \u05d6\u05e8\u05d4",
-            "English": "Responsa of the Rambam (Maimonides) to the community of Egypt regarding the prohibition of foreign worship"
+            "Hebrew": "כתאב אלשראיע [רס\"ג]",
+            "English": "Kitab al-Shara'i [R. Saadya Gaon]"
         },
         {
-            "Hebrew": "\u05e9\u05d8\u05e8 \u05de\u05db\u05e8, \u05e2\u05e1\u05e7\u05ea \u05de\u05e7\u05e8\u05e7\u05e2\u05d9\u05df \u05d1\u05d9\u05df \u05e1\u05d5\u05d7\u05e8\u05d9\u05dd \u05d1\u05e4\u05d5\u05e1\u05d8\u05d0\u05d8",
-            "English": "Deed of sale, a real estate transaction between merchants in Fustat"
+            "Hebrew": "דלאלה אלחאירין",
+            "English": "Dalālat al-Ḥā'irīn (Guide for the Perplexed)"
+        },
+        {
+            "Hebrew": "שרח אלמקדמאת",
+            "English": "Sharḥ al-Muqaddimāt (Interpretation of Introductions)"
+        },
+        {
+            "Hebrew": "מקאלה פי אלדביחה",
+            "English": "Maqāla fi al-Dhabīḥa (Treatise on Slaughtering)"
+        },
+        {
+            "Hebrew": "קצת זיין אלמואצף",
+            "English": "Qiṣṣat Zayn al-Mawāṣif"
+        },
+        {
+            "Hebrew": "משנה תורה",
+            "English": "Mishneh Torah"
+        },
+        {
+            "Hebrew": "פירוש רש\"י לתלמוד",
+            "English": "Rashi's Talmud Commentary"
+        },
+        {
+            "Hebrew": "פירוש המשנה לרמב\"ם [ערבית]",
+            "English": "Maimonides Mishna Commentary [Arabic]"
+        },
+        {
+            "Hebrew": "הלכות הרי\"ף",
+            "English": "Hilkhot ha-Rif"
+        },
+        {
+            "Hebrew": "בראשית רבה",
+            "English": "Midrash Rabbah Genesis"
+        },
+        {
+            "Hebrew": "מכילתא דרבי ישמעאל",
+            "English": "Mekhilta de-Rabbi Yishma'el"
+        },
+        {
+            "Hebrew": "מאמר תחיית המתים",
+            "English": "Treatise on the Resurrection of the Dead"
+        },
+        {
+            "Hebrew": "ברכות מהר\"ם",
+            "English": "Berakhot of Maharam (R. Meir of Rothenburg)"
         }
     ],
     "en_category": "English",
