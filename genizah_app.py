@@ -19173,13 +19173,13 @@ class GenizahGUI(QMainWindow):
         if bar.maximum() > 0 and value >= bar.maximum() * 0.95:
             self.load_next_batch()
 
-    def load_next_batch(self):
+    def load_next_batch(self, batch_size=None):
         if self.results_loaded >= len(self.last_results):
             return
 
         # Determine range
         start_idx = self.results_loaded
-        end_idx = min(start_idx + BATCH_SIZE, len(self.last_results))
+        end_idx = min(start_idx + (batch_size or BATCH_SIZE), len(self.last_results))
         batch = self.last_results[start_idx:end_idx]
 
         if not batch: return
@@ -19428,10 +19428,12 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(True)
 
         # Show elapsed time in status bar (persists until next action)
+        # Skip during session restore -- the "Restoring..." message is more relevant
         partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
-        self.statusBar().showMessage(
-            f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
-        )
+        if not getattr(self, '_restoring_session', False):
+            self.statusBar().showMessage(
+                f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
+            )
 
         # Hide Source column if secondary source file (V0.7) is missing or empty
         # If Config.FILE_V7 is missing/empty, it implies we only have one source (V0.8) in index
@@ -19445,38 +19447,17 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
 
-        self.load_next_batch()
+        # Use smaller initial batch during session restore for faster first paint
+        restore_batch = 50 if getattr(self, '_restoring_session', False) else None
+        self.load_next_batch(batch_size=restore_batch)
 
         # Auto-fit columns to content (like double-clicking the column border)
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
 
-        # Launch domain enrichment worker (async -- results appear first, domains fill in later)
-        from gui_threads import DomainEnrichmentWorker
-        sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
-        if sys_ids:
-            if self._domain_worker and self._domain_worker.isRunning():
-                self._domain_worker.wait()
-            self._domain_worker = DomainEnrichmentWorker(results)
-            self._domain_worker.finished.connect(self._on_domain_enrichment_loaded)
-            self._domain_worker.start()
-
-        # Launch PGP badge worker to mark results with transcriptions
-        sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
-        if sys_ids:
-            if self._pgp_badge_worker and self._pgp_badge_worker.isRunning():
-                self._pgp_badge_worker.wait()
-            self._pgp_badge_worker = PGPBadgeWorker(sys_ids)
-            self._pgp_badge_worker.finished.connect(self._on_pgp_badges_loaded)
-            self._pgp_badge_worker.start()
-
-        # Launch Printed badge worker (FragmentMaterial=Printed)
-        if sys_ids:
-            if self._printed_badge_worker and self._printed_badge_worker.isRunning():
-                self._printed_badge_worker.wait()
-            self._printed_badge_worker = PrintedBadgeWorker(sys_ids)
-            self._printed_badge_worker.finished.connect(self._on_printed_badges_loaded)
-            self._printed_badge_worker.start()
+        # Launch enrichment workers (async -- results appear first, enrichment fills in later)
+        # During session restore, defer workers to keep UI responsive
+        self._launch_enrichment_workers(results, defer=getattr(self, '_restoring_session', False))
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
@@ -19486,6 +19467,35 @@ class GenizahGUI(QMainWindow):
 
         # Toast notification when app is not focused
         self._notify_search_complete(len(results), self.last_search_query)
+
+    def _launch_enrichment_workers(self, results, defer=False):
+        """Launch domain, PGP badge, and printed badge enrichment workers."""
+        def _start():
+            from gui_threads import DomainEnrichmentWorker
+            sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+            if sys_ids:
+                if self._domain_worker and self._domain_worker.isRunning():
+                    self._domain_worker.wait()
+                self._domain_worker = DomainEnrichmentWorker(results)
+                self._domain_worker.finished.connect(self._on_domain_enrichment_loaded)
+                self._domain_worker.start()
+
+                if self._pgp_badge_worker and self._pgp_badge_worker.isRunning():
+                    self._pgp_badge_worker.wait()
+                self._pgp_badge_worker = PGPBadgeWorker(sys_ids)
+                self._pgp_badge_worker.finished.connect(self._on_pgp_badges_loaded)
+                self._pgp_badge_worker.start()
+
+                if self._printed_badge_worker and self._printed_badge_worker.isRunning():
+                    self._printed_badge_worker.wait()
+                self._printed_badge_worker = PrintedBadgeWorker(sys_ids)
+                self._printed_badge_worker.finished.connect(self._on_printed_badges_loaded)
+                self._printed_badge_worker.start()
+
+        if defer:
+            QTimer.singleShot(500, _start)
+        else:
+            _start()
 
     def _open_results_filter_dialog(self, column):
         if column == 1:
@@ -25082,6 +25092,18 @@ class GenizahGUI(QMainWindow):
                 if reply != QMessageBox.StandardButton.Yes:
                     return
 
+            # Show loading indicator now that we're committed to restoring
+            n_reg = len(reg.get('results', []))
+            n_comp = len(comp.get('results', []))
+            n_total = n_reg + n_comp
+            restore_msg = tr("Restoring previous session...") + f"  ({n_total:,} {tr('Results')})"
+            self.search_progress.setRange(0, n_total or 1)
+            self.search_progress.setValue(0)
+            self.search_progress.setFormat(restore_msg)
+            self.search_progress.setVisible(True)
+            self.status_label.setText(restore_msg)
+            QApplication.processEvents()
+
             # Restore regular search state
             reg = state.get('regular_search', {})
             if reg.get('query'):
@@ -25114,6 +25136,8 @@ class GenizahGUI(QMainWindow):
             if reg.get('results'):
                 self.last_results = reg['results']
                 self.on_search_finished(self.last_results)
+                self.search_progress.setValue(n_reg)
+                QApplication.processEvents()  # Let UI paint before composition restore
 
             # Restore composition state
             comp = state.get('composition_search', {})
@@ -25149,6 +25173,8 @@ class GenizahGUI(QMainWindow):
                     self.comp_raw_items, {}, {},
                     self.comp_raw_filtered, {}, {}
                 )
+                self.search_progress.setValue(n_total)
+                QApplication.processEvents()
 
             # Restore pre-search filters (Phase 45-03)
             self.pre_search_filters = state.get('pre_search_filters', {})
@@ -25162,7 +25188,8 @@ class GenizahGUI(QMainWindow):
             else:
                 self._update_filter_chip_bar()
 
-            # Show "Session restored" notification in statusbar (fades after 5 seconds)
+            # Hide restore progress bar and show "Session restored" in statusbar
+            self.search_progress.setVisible(False)
             saved_at = state.get('saved_at', '')
             ts_display = saved_at[:16].replace('T', ' ') if saved_at else ''
             self.statusBar().showMessage(
@@ -25176,6 +25203,7 @@ class GenizahGUI(QMainWindow):
             logger.error("Failed to restore session: %s", e)
         finally:
             self._restoring_session = False
+            self.search_progress.setVisible(False)
 
         # Refresh history dropdowns
         try:
