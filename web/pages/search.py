@@ -3893,6 +3893,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 # Actions
                 with ui.row().classes('gap-1'):
+                    # Browse manuscript button (most important action)
+                    if sys_id:
+                        _card_fl_id = None
+                        if 'raw_header' in result and state.meta_mgr:
+                            try:
+                                _card_fl_id = state.meta_mgr.parse_full_id_components(result['raw_header']).get('fl_id')
+                            except Exception:
+                                pass
+                        _card_browse_url = f'/browse?sys_id={sys_id}'
+                        if _card_fl_id:
+                            _card_browse_url += f'&fl_id={_card_fl_id}'
+                        with ui.link(target=_card_browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
+                            ui.button(icon='menu_book').props('flat round dense size=sm color=green')
+
                     ui.button(
                         icon='open_in_full',
                         on_click=lambda idx=index, r=result: open_advanced_dialog(idx, r)
@@ -5118,22 +5132,55 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except (ValueError, TypeError):
             search_state.current_page_idx = 1
 
+        # Extract FL ID early for browse URL
+        fl_id = None
+        if 'raw_header' in result and state.meta_mgr:
+            try:
+                parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                fl_id = parsed.get('fl_id')
+            except Exception:
+                pass
+
         with viewer_container:
             # Header
             with ui.column().classes('w-full gap-2 mb-4'):
-                # Shelfmark with Library Name - H2
-                display_shelfmark = shelfmark
-                if library_code:
-                    from genizah_core import get_library_display
-                    library_name = get_library_display(library_code, short=False, lang=get_language())
-                    if library_name:
-                        display_shelfmark = f"{library_name}, {shelfmark}"
-                h2(display_shelfmark, classes='text-2xl font-bold', style='color: var(--primary-700);')
-                if title:
-                    ui.label(title).style('color: var(--text-secondary); direction: rtl;')
+                # Row 1: Shelfmark + action buttons
+                with ui.row().classes('w-full items-start justify-between gap-2'):
+                    # Left: Shelfmark with Library Name
+                    with ui.column().classes('min-w-0 flex-shrink gap-1'):
+                        display_shelfmark = shelfmark
+                        if library_code:
+                            from genizah_core import get_library_display
+                            library_name = get_library_display(library_code, short=False, lang=get_language())
+                            if library_name:
+                                display_shelfmark = f"{library_name}, {shelfmark}"
+                        h2(display_shelfmark, classes='text-lg font-bold', style='color: var(--primary-700);')
+                        if title:
+                            ui.label(title).classes('text-sm').style('color: var(--text-secondary); direction: rtl;')
+
+                    # Right: Action buttons (always visible)
+                    with ui.row().classes('items-center gap-1 shrink-0'):
+                        if sys_id:
+                            browse_url = f'/browse?sys_id={sys_id}'
+                            if fl_id:
+                                browse_url += f'&fl_id={fl_id}'
+                            with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
+                                ui.button(icon='menu_book').props('flat round size=sm color=green')
+
+                        text_for_parallels = full_text or snippet.replace('*', '')
+                        if text_for_parallels.strip():
+                            ui.button(
+                                icon='compare_arrows',
+                                on_click=lambda t=text_for_parallels: ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
+                            ).props('flat round size=sm').tooltip(tr('Find Parallels'))
+
+                        ui.button(
+                            icon='open_in_full',
+                            on_click=lambda idx=0, r=result: open_advanced_dialog(idx, r)
+                        ).props('flat round size=sm').tooltip(tr('Advanced View'))
 
                 # Metadata badges
-                with ui.row().classes('gap-2 flex-wrap mt-2'):
+                with ui.row().classes('gap-2 flex-wrap'):
                     if display.get('source'):
                         ui.badge(display['source']).props('outline')
                     if display.get('img'):
@@ -5217,35 +5264,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.label(label).classes('font-bold w-32').style('color: var(--text-secondary);')
                                 ui.label(value).style('color: var(--text-primary); direction: rtl;')
 
-            # Actions
-            with ui.row().classes('w-full gap-3 mt-6 pt-6').style('border-top: 1px solid var(--border-light);'):
-                if sys_id:
-                    # Extract FL ID from result to jump to correct page
-                    fl_id = None
-                    if 'raw_header' in result and state.meta_mgr:
-                        try:
-                            parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
-                            fl_id = parsed.get('fl_id')
-                        except Exception:
-                            pass
-
-                    # Build browse URL with FL ID if available
-                    browse_url = f'/browse?sys_id={sys_id}'
-                    if fl_id:
-                        browse_url += f'&fl_id={fl_id}'
-
-                    # Use link styled as button for full page reload
-                    with ui.link(target=browse_url).classes('btn-primary no-underline'):
-                        ui.icon('menu_book').classes('mr-2')
-                        ui.label(tr('Browse Full Manuscript'))
-
-                # Find Parallels - pass the full text to parallels page
-                text_for_parallels = full_text or snippet.replace('*', '')
-                ui.button(
-                    tr('Find Parallels'),
-                    icon='compare_arrows',
-                    on_click=lambda t=text_for_parallels: ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
-                ).props('outline')
 
     async def browse_prev():
         """Navigate to previous page in current manuscript (within viewer)."""
@@ -5355,12 +5373,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             viewer_container.clear()
             with viewer_container:
                 with ui.column().classes('w-full gap-2 mb-4'):
-                    # Shelfmark header
-                    display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
-                    h2(display_shelfmark, classes='text-2xl font-bold', style='color: var(--primary-700);')
+                    # Row 1: Shelfmark + action buttons
+                    with ui.row().classes('w-full items-start justify-between gap-2'):
+                        with ui.column().classes('min-w-0 flex-shrink gap-1'):
+                            display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
+                            h2(display_shelfmark, classes='text-lg font-bold', style='color: var(--primary-700);')
+
+                        with ui.row().classes('items-center gap-1 shrink-0'):
+                            if sys_id:
+                                with ui.link(target=f'/browse?sys_id={sys_id}').classes('no-underline').tooltip(tr('Browse Full Manuscript')):
+                                    ui.button(icon='menu_book').props('flat round size=sm color=green')
 
                     # Metadata badges
-                    with ui.row().classes('gap-2 flex-wrap mt-2'):
+                    with ui.row().classes('gap-2 flex-wrap'):
                         if doc_type:
                             ui.badge(doc_type).props('outline')
                         ui.badge('PGP', color='green').props('outline')
@@ -5407,11 +5432,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 pgp_url = f'https://geniza.princeton.edu/documents/{pgpid}'
                                 ui.link(tr('View on PGP'), pgp_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
 
-                # Actions
-                with ui.row().classes('w-full gap-3 mt-6 pt-6').style('border-top: 1px solid var(--border-light);'):
-                    with ui.link(target=f'/browse?sys_id={sys_id}').classes('btn-primary no-underline'):
-                        ui.icon('menu_book').classes('mr-2')
-                        ui.label(tr('Browse Full Manuscript'))
 
         async def load_tag_results():
             """Load results for a tag-based search."""
