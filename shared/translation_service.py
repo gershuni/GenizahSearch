@@ -140,8 +140,10 @@ class TranslationService:
         """
         self._pgp_conn: Optional[sqlite3.Connection] = None
         self._fjms_conn: Optional[sqlite3.Connection] = None
+        self._titles_conn: Optional[sqlite3.Connection] = None
         self._pgp_has_translations = False
         self._fjms_has_translations = False
+        self._titles_has_translations = False
 
         # Resolve PGP database path
         if pgp_db_path is None:
@@ -172,6 +174,20 @@ class TranslationService:
                 )
             except Exception as e:
                 logger.warning("Failed to connect to FJMS sidecar: %s", e)
+
+        # Resolve libraries_translations.db path
+        titles_db_path = self._find_titles_db()
+        if titles_db_path and os.path.isfile(titles_db_path):
+            try:
+                self._titles_conn = sqlite3.connect(
+                    titles_db_path, check_same_thread=not thread_safe
+                )
+                self._titles_conn.row_factory = sqlite3.Row
+                self._titles_has_translations = self._table_exists(
+                    self._titles_conn, "title_translations"
+                )
+            except Exception as e:
+                logger.warning("Failed to connect to titles sidecar: %s", e)
 
     # -------------------------------------------------------------------------
     # Availability Checks
@@ -508,6 +524,79 @@ class TranslationService:
             return set()
 
     # -------------------------------------------------------------------------
+    # Title Translation Methods (from libraries_translations.db)
+    # -------------------------------------------------------------------------
+
+    def titles_available(self) -> bool:
+        """True if libraries_translations.db has title_translations table."""
+        return self._titles_has_translations
+
+    def get_title_translations_batch(
+        self, sys_ids: List[str]
+    ) -> Dict[str, dict]:
+        """Batch lookup of title translations by system_number.
+
+        Args:
+            sys_ids: List of system_number strings to look up.
+
+        Returns:
+            Dict of {system_number: {"original_title": str, "english_title": str,
+            "hebrew_title": str, "source": str}} for found entries only.
+        """
+        if not self._titles_has_translations or not self._titles_conn or not sys_ids:
+            return {}
+        try:
+            result = {}
+            batch_size = 400
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                rows = self._titles_conn.execute(
+                    f"SELECT system_number, original_title, english_title, "
+                    f"hebrew_title, source "
+                    f"FROM title_translations WHERE system_number IN ({placeholders})",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    result[row[0]] = {
+                        "original_title": row[1],
+                        "english_title": row[2],
+                        "hebrew_title": row[3],
+                        "source": row[4],
+                    }
+            return result
+        except Exception as e:
+            logger.warning("Error in title translations batch lookup: %s", e)
+            return {}
+
+    def get_title_translation(self, sys_id: str) -> Optional[dict]:
+        """Get title translation for a single system_number.
+
+        Returns:
+            Dict with original_title, english_title, hebrew_title, source
+            or None if not found.
+        """
+        if not self._titles_has_translations or not self._titles_conn:
+            return None
+        try:
+            row = self._titles_conn.execute(
+                "SELECT original_title, english_title, hebrew_title, source "
+                "FROM title_translations WHERE system_number = ?",
+                (sys_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "original_title": row[0],
+                "english_title": row[1],
+                "hebrew_title": row[2],
+                "source": row[3],
+            }
+        except Exception as e:
+            logger.warning("Error reading title translation for %s: %s", sys_id, e)
+            return None
+
+    # -------------------------------------------------------------------------
     # No-Overwrite Safety Check
     # -------------------------------------------------------------------------
 
@@ -557,6 +646,12 @@ class TranslationService:
             except Exception:
                 pass
             self._fjms_conn = None
+        if self._titles_conn:
+            try:
+                self._titles_conn.close()
+            except Exception:
+                pass
+            self._titles_conn = None
 
     # -------------------------------------------------------------------------
     # Internal Helpers
@@ -592,6 +687,27 @@ class TranslationService:
         root = _find_project_root()
         if root:
             candidate = root / "pgp_data" / "pgp.db"
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
+    @staticmethod
+    def _find_titles_db() -> Optional[str]:
+        """Auto-detect libraries_translations.db location."""
+        # Check LOCALAPPDATA first
+        user_path = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "GenizahSearchPro",
+            "data",
+            "libraries_translations.db",
+        )
+        if os.path.isfile(user_path):
+            return user_path
+
+        # Fall back to project root
+        root = _find_project_root()
+        if root:
+            candidate = root / "libraries_translations.db"
             if candidate.is_file():
                 return str(candidate)
         return None

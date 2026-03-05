@@ -4433,7 +4433,14 @@ class ResultDialog(QDialog):
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
         self.lbl_img_label.setText("")
-        
+
+        # Clear field translation cache when navigating to a new manuscript
+        from gui_threads import _field_translation_cache
+        _field_translation_cache.clear()
+        parent = self.parent()
+        if parent:
+            parent._trans_toggle_state = {}
+
         if self.ext_data and self.current_sys_id not in self.meta_mgr.nli_cache:
              self.ext_data = None
              self.ext_canvases = []
@@ -4476,7 +4483,9 @@ class ResultDialog(QDialog):
         self.lbl_shelf.setText(shelf)
         if hasattr(self, 'lbl_compact_shelf'):
             self.lbl_compact_shelf.setText(shelf)
-        _set_label_with_tooltip(self.lbl_title, meta.get('title', ''))
+        _set_label_with_tooltip(self.lbl_title, _resolve_display_title(
+            self.current_sys_id, meta.get('title', '')
+        ))
         self.lbl_meta_loading.setVisible(False)
 
         # 2. Trigger Image Fetch using the FRESH metadata
@@ -4568,12 +4577,10 @@ class ResultDialog(QDialog):
         if not rd_meta:
             return
         marc = rd_meta.get('marc', {})
-        _display_title = rd_meta.get('title', '') or ''
-        _eng_title = marc.get('english_title', '')
-        if (not _display_title or not _display_title.strip()) and _eng_title:
-            _display_title = _eng_title
-        elif _eng_title and _eng_title.strip() and load_app_config().get('show_translations', False):
-            _display_title = f"{_display_title}  |  {_eng_title}"
+        _display_title = _resolve_display_title(
+            self.current_sys_id, rd_meta.get('title', '') or '',
+            marc.get('english_title', '')
+        )
         _set_label_with_tooltip(self.lbl_title, _display_title)
 
     def _rd_auto_translate_all(self):
@@ -4797,14 +4804,10 @@ class ResultDialog(QDialog):
         # Store flag so PGP late-arrival handler knows enriched data was processed
         self._rd_enriched_data_loaded = True
 
-        # Title display: prefer Hebrew title, gap-fill/complement with english_title from MARC
-        _display_title = meta.get('title', '')
-        _eng_title = marc.get('english_title', '')
-        if (not _display_title or not _display_title.strip()) and _eng_title:
-            _display_title = _eng_title
-        elif _eng_title and _eng_title.strip() and load_app_config().get('show_translations', False):
-            # When translations ON, show English title complement alongside Hebrew
-            _display_title = f"{_display_title}  |  {_eng_title}"
+        # Title display: use libraries_translations.db for clean split title
+        _display_title = _resolve_display_title(
+            self.current_sys_id, meta.get('title', ''), marc.get('english_title', '')
+        )
         _set_label_with_tooltip(self.lbl_title, _display_title)
         shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
@@ -5062,6 +5065,51 @@ def _truncate_title(text, max_chars=100):
     if len(text) <= max_chars:
         return text, None
     return text[:max_chars].rstrip() + "...", text
+
+
+_title_svc_singleton = None
+
+def _get_title_svc():
+    """Get or create a cached TranslationService for title lookups."""
+    global _title_svc_singleton
+    if _title_svc_singleton is None:
+        try:
+            from shared.translation_service import TranslationService
+            _title_svc_singleton = TranslationService()
+        except Exception:
+            return None
+    return _title_svc_singleton
+
+def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translations=None):
+    """Resolve the display title using libraries_translations.db if available.
+
+    When translations OFF: show hebrew_title from DB (or raw_title fallback).
+    When translations ON: show hebrew_title | english_title.
+    Falls back to raw title + marc english_title if no DB entry.
+    """
+    if show_translations is None:
+        show_translations = load_app_config().get('show_translations', False)
+    try:
+        svc = _get_title_svc()
+        if svc and svc.titles_available() and sys_id:
+            tt = svc.get_title_translation(sys_id)
+            if tt:
+                he = tt.get('hebrew_title') or ''
+                en = tt.get('english_title') or ''
+                if he.strip():
+                    if show_translations and en.strip():
+                        return f"{he}  |  {en}"
+                    return he
+                elif en.strip():
+                    return en
+    except Exception:
+        pass
+    # Fallback: original behavior
+    if (not raw_title or not raw_title.strip()) and eng_title_marc:
+        return eng_title_marc
+    if eng_title_marc and eng_title_marc.strip() and show_translations:
+        return f"{raw_title}  |  {eng_title_marc}"
+    return raw_title or ''
 
 
 def _set_label_with_tooltip(label, text, max_chars=100):
@@ -11206,6 +11254,13 @@ class GenizahGUI(QMainWindow):
         if sid != self.current_browse_sid: return
         if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
+        # Clear field translation cache for new manuscript
+        from gui_threads import _field_translation_cache
+        for k in list(_field_translation_cache):
+            if k.startswith('br_'):
+                del _field_translation_cache[k]
+        self._trans_toggle_state = {}
+
         # Reset extended info panel for new manuscript
         self.btn_b_ext_info.setVisible(False)
         self.btn_b_ext_info.setChecked(False)
@@ -11225,13 +11280,9 @@ class GenizahGUI(QMainWindow):
         # 1. Update Info Label (Top Bar)
         marc = meta.get('marc', {})
         shelf = meta.get('shelfmark')
-        title = meta.get('title')
-        # Gap-fill/complement: use english_title from MARC
-        _eng_title_b = marc.get('english_title', '')
-        if (not title or not title.strip()) and _eng_title_b:
-            title = _eng_title_b
-        elif _eng_title_b and _eng_title_b.strip() and load_app_config().get('show_translations', False):
-            title = f"{title}  |  {_eng_title_b}"
+        title = _resolve_display_title(
+            sid, meta.get('title', ''), marc.get('english_title', '')
+        )
         if shelf and shelf != "Unknown":
             # Try CSV library_code first, then MARC as fallback
             library_code = self.meta_mgr.get_library_for_id(sid)

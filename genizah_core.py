@@ -7080,30 +7080,14 @@ class JoinsManager:
             self._sync_thread.join(timeout=2)
 
     def _sync_loop(self):
-        """Background sync loop."""
-        # Immediate sync on startup
+        """Background sync — runs once at startup only."""
         try:
-            LOGGER.info("Starting immediate joins sync on startup...")
+            LOGGER.info("Starting joins sync on startup...")
             self.sync_with_server()
             self._last_sync = time.time()
             LOGGER.info("Startup joins sync completed")
         except Exception as e:
             LOGGER.warning(f"Startup joins sync error: {e}")
-
-        while not self._stop_sync:
-            try:
-                # Check if enough time has passed since last sync
-                if time.time() - self._last_sync >= self.SYNC_INTERVAL:
-                    self.sync_with_server()
-                    self._last_sync = time.time()
-            except Exception as e:
-                LOGGER.warning(f"Joins sync error: {e}")
-
-            # Sleep in small increments to allow quick shutdown
-            for _ in range(30):  # 30 seconds total
-                if self._stop_sync:
-                    break
-                time.sleep(1)
 
     def sync_with_server(self, force: bool = False):
         """
