@@ -182,7 +182,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-05T10:00:00Z
-Stopped at: 46-03 batch translation re-execution (in progress)
+Last session: 2026-03-05T16:00:00Z
+Stopped at: 46-05 title wiring committed, needs UAT
 Resume file: .planning/phases/46-dicta-translation/HANDOFF.md
-Notes: 46-03 batch scripts were created but never run. Re-executed with major fixes: rebuilt few-shot templates with real scholarly data (16 HE→EN pairs from genizah_titles for JA transliteration), added 429 retry/backoff to dicta_client, deduplication, sequential+throttle. 1,210/3,835 translations done (titles complete, authors partial). CRITICAL: translate_fjms_free_desc.py needs same fixes before running. Next: finish catalog gap-fill, then 46-05 (desktop translation toggle).
+Notes: Title display now uses libraries_translations.db (clean hebrew_title/english_title split). Stale field translation cache bug fixed (Oxford parts showing wrong cached translations). Joins sync changed to startup-only. All committed and pushed (7fb59c4c). NOT FULLY TESTED — user will review title display across libraries and Oxford parts. Remaining: search results translations, batch translation scripts still running, web parity.
