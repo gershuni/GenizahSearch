@@ -1430,10 +1430,14 @@ class LabEngine:
             if boundary_mode == 'boundary' and not item.get('has_boundary_matches', False):
                 continue
 
-            # Apply min_boundary_matches filter (applies to all modes as a post-hoc filter)
+            # Apply min_boundary_matches filter
             if min_boundary_matches > 0:
-                if item.get('boundary_match_count', 0) < min_boundary_matches:
-                    continue
+                if boundary_mode == 'full':
+                    if item.get('hits_count', 0) < min_boundary_matches:
+                        continue
+                else:
+                    if item.get('boundary_match_count', 0) < min_boundary_matches:
+                        continue
 
             # Check if manuscript is excluded
             is_excluded = False
@@ -6034,6 +6038,7 @@ class SearchEngine:
         doc_hits = defaultdict(lambda: {
             'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
             'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set(),
+            'chunk_hits': 0,  # Number of distinct chunks that matched this document
             'is_filtered': False  # True if ANY match came from filtered chunk
         })
 
@@ -6115,6 +6120,7 @@ class SearchEngine:
                             # Save indices of found words in *source* text
                             rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
                             rec['patterns'].add(regex.pattern)
+                            rec['chunk_hits'] += 1
 
                             # Track boundary-crossing matches - each boundary counted once
                             if chunk_crossed_bounds:
@@ -6228,6 +6234,7 @@ class SearchEngine:
                     'has_boundary_matches': has_boundary_matches,
                     'boundary_match_count': len(data.get('crossed_boundaries', set())),
                     'boundary_quality': boundary_quality_normalized,
+                    'chunk_hits': data.get('chunk_hits', 0),
                     # Filtering flag and reason
                     'is_filtered': data.get('is_filtered', False),
                     'filter_reason': data.get('filter_reason', '')
@@ -6249,8 +6256,13 @@ class SearchEngine:
             all_items = [item for item in all_items if item.get('has_boundary_matches', False)]
 
         # Apply min_boundary_matches filter
+        # In 'full' mode, this acts as min chunk hits (total matching chunks per document)
+        # In 'boundary'/'combined' modes, this filters on actual boundary crossings
         if min_boundary_matches > 0:
-            all_items = [item for item in all_items if item.get('boundary_match_count', 0) >= min_boundary_matches]
+            if boundary_mode == 'full':
+                all_items = [item for item in all_items if item.get('chunk_hits', 0) >= min_boundary_matches]
+            else:
+                all_items = [item for item in all_items if item.get('boundary_match_count', 0) >= min_boundary_matches]
 
         # Separate into main and filtered lists
         main_list = [item for item in all_items if not item.get('is_filtered', False)]
