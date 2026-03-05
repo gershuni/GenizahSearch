@@ -3727,15 +3727,6 @@ class ResultDialog(QDialog):
         base_color = palette.color(QPalette.ColorRole.Base).name()
         part_bg = QColor(base_color).lighter(115).name()
 
-        kti_html = ""
-        date_val = marc.get('date')
-        if date_val:
-            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
-
-        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
-        if dims or phys:
-            kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
-
         # Check show_translations for on-demand translate badges
         from genizah_core import load_app_config as _lac
         _show_trans = _lac().get('show_translations', False)
@@ -3746,10 +3737,14 @@ class ResultDialog(QDialog):
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
 
+        # Fields where original is Hebrew (translation direction is he2en)
+        _he_fields = {'rd_phys_desc', 'br_phys_desc'}
+
         def _trans_or_badge(field_key, text, label):
             """Return text with translate badge or cached translation."""
             if not _show_trans or not text or len(text.strip()) < 10:
                 return text
+            is_he_orig = field_key in _he_fields
             cached = _ft_cache.get(field_key)
             if cached:
                 parent = self.parent()
@@ -3757,7 +3752,10 @@ class ResultDialog(QDialog):
                 showing_orig = _toggle.get(field_key, False)
                 show_text = text if showing_orig else cached
                 badge_label = tr('Original') if not showing_orig else tr('Translated')
-                _dir = 'ltr' if showing_orig else 'rtl'
+                if is_he_orig:
+                    _dir = 'rtl' if showing_orig else 'ltr'
+                else:
+                    _dir = 'ltr' if showing_orig else 'rtl'
                 return (
                     f"<span dir='{_dir}'>{_html_mod.escape(show_text)}</span> "
                     f"<a href='toggle-trans:{field_key}:{_html_mod.escape(text)}' style='{_tbadge}'>{badge_label}</a>"
@@ -3766,6 +3764,16 @@ class ResultDialog(QDialog):
                 f"{_html_mod.escape(text)} "
                 f"<a href='translate-field:{field_key}' style='{_tbadge}'>{tr('Translate')}</a>"
             )
+
+        kti_html = ""
+        date_val = marc.get('date')
+        if date_val:
+            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+
+        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
+        if dims or phys:
+            phys_text = f"{phys or ''} {dims or ''}".strip()
+            kti_html += f"<p><b>{tr('Physical Description')}:</b> {_trans_or_badge('rd_phys_desc', phys_text, tr('Physical Description'))}</p>"
 
         eng_title = marc.get('english_title')
         if eng_title:
@@ -4548,6 +4556,62 @@ class ResultDialog(QDialog):
         finally:
             self._rd_trans_syncing = False
         self._rd_refresh_extended_info()
+        # Refresh title (may add/remove English complement)
+        self._rd_refresh_title()
+        # Auto-translate all pending fields when toggled ON
+        if checked:
+            self._rd_auto_translate_all()
+
+    def _rd_refresh_title(self):
+        """Refresh the ResultDialog title label based on current translation toggle."""
+        rd_meta = getattr(self, '_rd_enrichment_meta', None)
+        if not rd_meta:
+            return
+        marc = rd_meta.get('marc', {})
+        _display_title = rd_meta.get('title', '') or ''
+        _eng_title = marc.get('english_title', '')
+        if (not _display_title or not _display_title.strip()) and _eng_title:
+            _display_title = _eng_title
+        elif _eng_title and _eng_title.strip() and load_app_config().get('show_translations', False):
+            _display_title = f"{_display_title}  |  {_eng_title}"
+        _set_label_with_tooltip(self.lbl_title, _display_title)
+
+    def _rd_auto_translate_all(self):
+        """Auto-fire translations for all translatable fields that aren't cached yet."""
+        from gui_threads import _field_translation_cache
+        rd_meta = getattr(self, '_rd_enrichment_meta', None)
+        if not rd_meta:
+            return
+        parent = self.parent()
+        if not parent:
+            return
+        marc = rd_meta.get('marc', {})
+        part_meta = rd_meta.get('_part_meta') or {}
+
+        # Collect all translatable field keys
+        field_keys = []
+        if marc.get('english_title') and len(marc['english_title'].strip()) >= 10:
+            field_keys.append('rd_eng_title')
+        phys = rd_meta.get('physical_desc', '')
+        dims = marc.get('dimensions', '')
+        phys_text = f"{phys or ''} {dims or ''}".strip()
+        if phys_text and len(phys_text) >= 10:
+            field_keys.append('rd_phys_desc')
+        for i, n in enumerate(marc.get('notes', [])):
+            if n and len(n.strip()) >= 10:
+                field_keys.append(f'rd_note_{i}')
+        if part_meta.get('title') and len(part_meta['title'].strip()) >= 10:
+            field_keys.append('rd_part_title')
+        if part_meta.get('contents') and len(part_meta['contents'].strip()) >= 10:
+            field_keys.append('rd_part_contents')
+        for k, v in rd_meta.get('external_meta', {}).items():
+            if v and len(str(v).strip()) >= 10:
+                field_keys.append(f'rd_ext_{k}')
+
+        # Fire translation for any field not already cached
+        for fk in field_keys:
+            if fk not in _field_translation_cache:
+                parent._start_field_translation(fk, 'rd', self)
 
     def _show_rd_fjms_bib(self):
         """Open FJMS bibliography dialog from ResultDialog."""
@@ -11763,16 +11827,6 @@ class GenizahGUI(QMainWindow):
             lib_url = library_viewer_url['url']
             phys_html += f"<p style='margin-left:12px;'><a href='{lib_url}' style='color:#1976d2;'>{lib_label}</a></p>"
 
-        kti_html = ""
-        date_val = marc.get('date')
-        if date_val:
-            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
-
-        dims = marc.get('dimensions')
-        phys = marc.get('physical_desc') or marc.get('physical_description')
-        if dims or phys:
-            kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
-
         # Check show_translations for on-demand translate badges
         from genizah_core import load_app_config as _lac2
         _show_trans = _lac2().get('show_translations', False)
@@ -11783,17 +11837,22 @@ class GenizahGUI(QMainWindow):
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
         _toggle = getattr(self, '_trans_toggle_state', {})
+        _he_fields_b = {'br_phys_desc'}
 
         def _trans_or_badge_b(field_key, text, label):
             """Return text with translate badge or cached translation (browse)."""
             if not _show_trans or not text or len(text.strip()) < 10:
                 return text
+            is_he_orig = field_key in _he_fields_b
             cached = _ft_cache.get(field_key)
             if cached:
                 showing_orig = _toggle.get(field_key, False)
                 show_text = text if showing_orig else cached
                 badge_label = tr('Original') if not showing_orig else tr('Translated')
-                _dir = 'ltr' if showing_orig else 'rtl'
+                if is_he_orig:
+                    _dir = 'rtl' if showing_orig else 'ltr'
+                else:
+                    _dir = 'ltr' if showing_orig else 'rtl'
                 return (
                     f"<span dir='{_dir}'>{_html_mod.escape(show_text)}</span> "
                     f"<a href='toggle-trans:{field_key}:{_html_mod.escape(text)}' style='{_tbadge}'>{badge_label}</a>"
@@ -11802,6 +11861,17 @@ class GenizahGUI(QMainWindow):
                 f"{_html_mod.escape(text)} "
                 f"<a href='translate-field:{field_key}' style='{_tbadge}'>{tr('Translate')}</a>"
             )
+
+        kti_html = ""
+        date_val = marc.get('date')
+        if date_val:
+            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+
+        dims = marc.get('dimensions')
+        phys = marc.get('physical_desc') or marc.get('physical_description')
+        if dims or phys:
+            phys_text_b = f"{phys or ''} {dims or ''}".strip()
+            kti_html += f"<p><b>{tr('Physical Description')}:</b> {_trans_or_badge_b('br_phys_desc', phys_text_b, tr('Physical Description'))}</p>"
 
         eng_title = marc.get('english_title')
         if eng_title:
@@ -12096,7 +12166,10 @@ class GenizahGUI(QMainWindow):
         if not text:
             return
 
-        thread = TranslateTextThread(field_key, text, 'en2he')
+        # Hebrew fields translate HE->EN, everything else EN->HE
+        suffix = field_key[3:] if field_key.startswith(('rd_', 'br_')) else field_key
+        direction = 'he2en' if suffix == 'phys_desc' else 'en2he'
+        thread = TranslateTextThread(field_key, text, direction)
         thread.finished_signal.connect(
             lambda fk, orig, translated: self._on_field_translated(fk, orig, translated, context, rd_dialog)
         )
@@ -12123,6 +12196,10 @@ class GenizahGUI(QMainWindow):
         suffix = field_key[3:] if field_key.startswith(('rd_', 'br_')) else field_key
         if suffix == 'eng_title':
             return marc.get('english_title', '')
+        elif suffix == 'phys_desc':
+            phys = meta.get('physical_desc', '') or marc.get('physical_desc', '') or marc.get('physical_description', '')
+            dims = marc.get('dimensions', '')
+            return f"{phys or ''} {dims or ''}".strip() or None
         elif suffix.startswith('note_'):
             idx = int(suffix[5:]) if suffix[5:].isdigit() else -1
             notes = marc.get('notes', [])
