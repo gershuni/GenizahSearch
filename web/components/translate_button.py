@@ -169,7 +169,7 @@ def create_translate_button(
         'is_loading': False
     }
 
-    def toggle_translation():
+    async def toggle_translation():
         if state['is_loading']:
             return
 
@@ -190,7 +190,7 @@ def create_translate_button(
                 if on_translate:
                     on_translate(state['translated_text'])
             else:
-                # Fetch translation via Dicta API
+                # Fetch translation via Dicta API (async to avoid blocking)
                 state['is_loading'] = True
                 btn.props('loading')
 
@@ -198,7 +198,10 @@ def create_translate_button(
                 src_lang = detect_language(state['original_text'])
                 tgt_lang = 'en' if src_lang == 'he' else 'he'
 
-                translated = translate_text(state['original_text'], src_lang, tgt_lang)
+                from nicegui import run
+                translated = await run.io_bound(
+                    translate_text, state['original_text'], src_lang, tgt_lang
+                )
 
                 state['is_loading'] = False
                 btn.props(remove='loading')
@@ -255,7 +258,7 @@ def create_translatable_text(
         text_label = ui.label(text_content).classes('flex-1 text-sm whitespace-pre-wrap').style(container_style)
 
         # Translate button
-        def toggle_translation():
+        async def toggle_translation():
             if state['is_loading']:
                 return
 
@@ -273,14 +276,17 @@ def create_translatable_text(
                     btn.props('icon=undo')
                     btn.tooltip(tr('Show original'))
                 else:
-                    # Fetch translation via Dicta API
+                    # Fetch translation via Dicta API (async to avoid blocking)
                     state['is_loading'] = True
                     btn.props('loading')
 
                     src_lang = detect_language(state['original_text'])
                     tgt_lang = 'en' if src_lang == 'he' else 'he'
 
-                    translated = translate_text(state['original_text'], src_lang, tgt_lang)
+                    from nicegui import run
+                    translated = await run.io_bound(
+                        translate_text, state['original_text'], src_lang, tgt_lang
+                    )
 
                     state['is_loading'] = False
                     btn.props(remove='loading')

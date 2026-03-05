@@ -2207,19 +2207,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             if page.oxford_part_metadata.get('title'):
                                 with ui.column().classes('gap-1 col-span-2'):
                                     ui.label(tr('Part Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(page.oxford_part_metadata['title']).classes('text-sm').style('color: var(--text-primary);')
-                            
+                                    create_translatable_text(
+                                        page.oxford_part_metadata['title'],
+                                        container_style='color: var(--text-primary);'
+                                    )
+
                             # Contents
                             if page.oxford_part_metadata.get('contents'):
                                 with ui.column().classes('gap-1 col-span-2'):
                                     ui.label(tr('Contents')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(page.oxford_part_metadata['contents']).classes('text-sm').style('color: var(--text-primary);')
+                                    create_translatable_text(
+                                        page.oxford_part_metadata['contents'],
+                                        container_style='color: var(--text-primary);'
+                                    )
 
                             # Provenance
                             if page.oxford_part_metadata.get('provenance'):
                                 with ui.column().classes('gap-1 col-span-2'):
                                     ui.label(tr('Provenance')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(page.oxford_part_metadata['provenance']).classes('text-sm').style('color: var(--text-primary);')
+                                    create_translatable_text(
+                                        page.oxford_part_metadata['provenance'],
+                                        container_style='color: var(--text-primary);'
+                                    )
 
                     # External Links
                     ui.separator().classes('my-3')

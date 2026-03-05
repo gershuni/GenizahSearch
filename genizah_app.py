@@ -2638,6 +2638,19 @@ class ResultDialog(QDialog):
         self.btn_compact_joins.clicked.connect(self._rd_view_joins)
         compact_layout.addWidget(self.btn_compact_joins)
 
+        # Translation toggle (compact)
+        self.btn_compact_translations = QPushButton()
+        self.btn_compact_translations.setCheckable(True)
+        _trans_on_c = load_app_config().get('show_translations', False)
+        self.btn_compact_translations.setChecked(_trans_on_c)
+        self.btn_compact_translations.setText(tr('Translations ON') if _trans_on_c else tr('Translations OFF'))
+        self.btn_compact_translations.setStyleSheet(
+            "QPushButton { background-color: #0369a1; color: white; border-radius: 4px; padding: 2px 8px; font-size: 11px; }"
+            "QPushButton:checked { background-color: #059669; }"
+        )
+        self.btn_compact_translations.toggled.connect(self._rd_toggle_translations)
+        compact_layout.addWidget(self.btn_compact_translations)
+
         compact_layout.addStretch()
 
         main_layout.addWidget(self.compact_bar)
@@ -2725,6 +2738,18 @@ class ResultDialog(QDialog):
         self._rd_marc_bib = []
         self._rd_catalog_detail = None
 
+        # Translation toggle button
+        self.btn_rd_translations = QPushButton()
+        self.btn_rd_translations.setCheckable(True)
+        _trans_on = load_app_config().get('show_translations', False)
+        self.btn_rd_translations.setChecked(_trans_on)
+        self.btn_rd_translations.setText(tr('Translations ON') if _trans_on else tr('Translations OFF'))
+        self.btn_rd_translations.setStyleSheet(
+            "QPushButton { background-color: #0369a1; color: white; border-radius: 4px; padding: 2px 8px; }"
+            "QPushButton:checked { background-color: #059669; }"
+        )
+        self.btn_rd_translations.toggled.connect(self._rd_toggle_translations)
+
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_add_to_list)
@@ -2733,6 +2758,7 @@ class ResultDialog(QDialog):
         action_row.addWidget(self.btn_rd_bib_nli)
         action_row.addWidget(self.btn_rd_catalog)
         action_row.addWidget(self.btn_toggle_image)
+        action_row.addWidget(self.btn_rd_translations)
 
         action_row.addStretch()
 
@@ -3711,6 +3737,19 @@ class ResultDialog(QDialog):
         scrollbar = self.txt_extended_info.verticalScrollBar()
         scroll_pos = scrollbar.value() if scrollbar else 0
         palette = self.txt_extended_info.palette()
+
+        # If enrichment meta is stored, rebuild prefix from scratch (for translate badge updates)
+        rd_meta = getattr(self, '_rd_enrichment_meta', None)
+        if rd_meta:
+            # Re-trigger the enrichment HTML builder via on_enriched_data_loaded path
+            # by simply regenerating the full HTML
+            text_color = palette.color(QPalette.ColorRole.Text).name()
+            base_color = palette.color(QPalette.ColorRole.Base).name()
+            self.on_enriched_data_loaded(self.current_sys_id, rd_meta)
+            if scrollbar:
+                scrollbar.setValue(scroll_pos)
+            return
+
         pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None)) or ''
         html = prefix + pgp_html + "</div>"
         self.txt_extended_info.setHtml(html)
@@ -4338,6 +4377,11 @@ class ResultDialog(QDialog):
                     parent._trans_toggle_state[field] = not parent._trans_toggle_state.get(field, False)
                     # Rebuild this dialog's extended info
                     self._rd_refresh_extended_info()
+        elif url_str.startswith('translate-field:'):
+            field_key = url_str[len('translate-field:'):]
+            parent = self.parent()
+            if parent:
+                parent._start_field_translation(field_key, 'rd', self)
         elif url_str.startswith('toggle-always:'):
             action = url_str[len('toggle-always:'):]
             new_val = action == 'on'
@@ -4348,6 +4392,33 @@ class ResultDialog(QDialog):
             self._rd_refresh_extended_info()
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
+
+    def _rd_toggle_translations(self, checked):
+        """Toggle show_translations from ResultDialog toolbar button."""
+        if getattr(self, '_rd_trans_syncing', False):
+            return
+        self._rd_trans_syncing = True
+        try:
+            save_app_config({'show_translations': checked})
+            _label = tr('Translations ON') if checked else tr('Translations OFF')
+            self.btn_rd_translations.setChecked(checked)
+            self.btn_rd_translations.setText(_label)
+            if hasattr(self, 'btn_compact_translations'):
+                self.btn_compact_translations.setChecked(checked)
+                self.btn_compact_translations.setText(_label)
+            # Sync Settings checkbox
+            parent = self.parent()
+            if parent:
+                if hasattr(parent, 'chk_show_translations'):
+                    parent.chk_show_translations.setChecked(checked)
+                # Sync browse tab button if it exists
+                if hasattr(parent, 'btn_b_translations'):
+                    parent.btn_b_translations.setChecked(checked)
+                    parent.btn_b_translations.setText(_label)
+                parent._trans_toggle_state = {}
+        finally:
+            self._rd_trans_syncing = False
+        self._rd_refresh_extended_info()
 
     def _show_rd_fjms_bib(self):
         """Open FJMS bibliography dialog from ResultDialog."""
@@ -4518,6 +4589,8 @@ class ResultDialog(QDialog):
 
         # 4. Build Extended Info HTML (Text)
         external_meta = meta.get('external_meta', {})
+        # Store enrichment meta for translate badge rebuild
+        self._rd_enrichment_meta = {**meta, '_part_id': oxford_part_id, '_part_meta': part_meta}
         has_pgp = bool(getattr(self, '_rd_pgp_doc', None))
         if not marc and not meta.get('physical_desc') and not part_meta and not external_meta and not has_pgp:
             self.btn_ext_info.setVisible(False)
@@ -4539,9 +4612,40 @@ class ResultDialog(QDialog):
         if dims or phys:
             kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
 
+        # Check show_translations for on-demand translate badges
+        from genizah_core import load_app_config as _lac
+        _show_trans = _lac().get('show_translations', False)
+        _ft_cache = {}
+        if _show_trans:
+            from gui_threads import _field_translation_cache
+            _ft_cache = _field_translation_cache
+        import html as _html_mod
+        _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
+
+        def _trans_or_badge(field_key, text, label):
+            """Return text with translate badge or cached translation."""
+            if not _show_trans or not text or len(text.strip()) < 10:
+                return text
+            cached = _ft_cache.get(field_key)
+            if cached:
+                parent = self.parent()
+                _toggle = getattr(parent, '_trans_toggle_state', {}) if parent else {}
+                showing_orig = _toggle.get(field_key, False)
+                show_text = text if showing_orig else cached
+                badge_label = tr('Original') if not showing_orig else tr('Translated')
+                _dir = 'ltr' if showing_orig else 'rtl'
+                return (
+                    f"<span dir='{_dir}'>{_html_mod.escape(show_text)}</span> "
+                    f"<a href='toggle-trans:{field_key}:{_html_mod.escape(text)}' style='{_tbadge}'>{badge_label}</a>"
+                )
+            return (
+                f"{_html_mod.escape(text)} "
+                f"<a href='translate-field:{field_key}' style='{_tbadge}'>{tr('Translate')}</a>"
+            )
+
         eng_title = marc.get('english_title')
         if eng_title:
-            kti_html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+            kti_html += f"<p><b>{tr('English Title')}:</b> {_trans_or_badge('rd_eng_title', eng_title, tr('English Title'))}</p>"
 
         subjects = marc.get('subjects', [])
         if subjects:
@@ -4550,8 +4654,8 @@ class ResultDialog(QDialog):
         notes = marc.get('notes', [])
         if notes:
             kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for n in notes:
-                kti_html += f"<li>{n}</li>"
+            for _ni, n in enumerate(notes):
+                kti_html += f"<li>{_trans_or_badge(f'rd_note_{_ni}', n, tr('Notes'))}</li>"
             kti_html += "</ul></p>"
 
         people = marc.get('people', [])
@@ -4576,18 +4680,19 @@ class ResultDialog(QDialog):
 
             part_title = part_meta.get('title', '')
             if part_title:
-                external_html += f"<p><b>{tr('Oxford Title')}:</b> {part_title}</p>"
+                external_html += f"<p><b>{tr('Oxford Title')}:</b> {_trans_or_badge('rd_part_title', part_title, tr('Oxford Title'))}</p>"
 
             part_contents = part_meta.get('contents', '')
             if part_contents:
-                external_html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
+                external_html += f"<p><b>{tr('Contents')}:</b> {_trans_or_badge('rd_part_contents', part_contents, tr('Contents'))}</p>"
 
             external_html += "</div>"
 
         if external_meta:
             external_html += f"<div style='margin-bottom: 10px; text-align: left;' dir='ltr'><ul>"
             for k, v in external_meta.items():
-                external_html += f"<li><b>{k}:</b> {v}</li>"
+                ext_key = f"rd_ext_{k}"
+                external_html += f"<li><b>{tr(k)}:</b> {_trans_or_badge(ext_key, v, k)}</li>"
             external_html += "</ul></div>"
 
         is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
@@ -4648,7 +4753,15 @@ class ResultDialog(QDialog):
         # Store flag so PGP late-arrival handler knows enriched data was processed
         self._rd_enriched_data_loaded = True
 
-        _set_label_with_tooltip(self.lbl_title, meta.get('title', ''))
+        # Title display: prefer Hebrew title, gap-fill/complement with english_title from MARC
+        _display_title = meta.get('title', '')
+        _eng_title = marc.get('english_title', '')
+        if (not _display_title or not _display_title.strip()) and _eng_title:
+            _display_title = _eng_title
+        elif _eng_title and _eng_title.strip() and load_app_config().get('show_translations', False):
+            # When translations ON, show English title complement alongside Hebrew
+            _display_title = f"{_display_title}  |  {_eng_title}"
+        _set_label_with_tooltip(self.lbl_title, _display_title)
         shelf = meta.get('shelfmark')
         if shelf and shelf != "Unknown":
             # Try CSV library_code first, then MARC as fallback
@@ -7456,9 +7569,14 @@ class SettingsDialog(QDialog):
         self.main_win.chk_show_translations = QCheckBox(tr("Show translations"))
         self.main_win.chk_show_translations.setChecked(load_app_config().get('show_translations', False))
         self.main_win.chk_show_translations.setToolTip(tr("Show translated descriptions when available"))
-        self.main_win.chk_show_translations.stateChanged.connect(
-            lambda state: save_app_config({'show_translations': state == 2})
-        )
+        def _on_settings_trans_changed(state):
+            checked = state == 2
+            save_app_config({'show_translations': checked})
+            _label = tr('Translations ON') if checked else tr('Translations OFF')
+            if hasattr(self.main_win, 'btn_b_translations'):
+                self.main_win.btn_b_translations.setChecked(checked)
+                self.main_win.btn_b_translations.setText(_label)
+        self.main_win.chk_show_translations.stateChanged.connect(_on_settings_trans_changed)
         trans_row = QHBoxLayout()
         trans_row.addWidget(self.main_win.chk_show_translations)
         trans_row.addStretch()
@@ -10519,6 +10637,20 @@ class GenizahGUI(QMainWindow):
         self.btn_b_ext_info.toggled.connect(self._browse_toggle_extended_info)
         self.btn_b_ext_info.setVisible(False)
         ext_info_row.addWidget(self.btn_b_ext_info)
+
+        # Translation toggle button (browse tab)
+        self.btn_b_translations = QPushButton()
+        self.btn_b_translations.setCheckable(True)
+        _trans_on_b = load_app_config().get('show_translations', False)
+        self.btn_b_translations.setChecked(_trans_on_b)
+        self.btn_b_translations.setText(tr('Translations ON') if _trans_on_b else tr('Translations OFF'))
+        self.btn_b_translations.setStyleSheet(
+            "QPushButton { background-color: #0369a1; color: white; border-radius: 4px; padding: 2px 8px; }"
+            "QPushButton:checked { background-color: #059669; }"
+        )
+        self.btn_b_translations.toggled.connect(self._browse_toggle_translations)
+        ext_info_row.addWidget(self.btn_b_translations)
+
         ext_info_row.addStretch()
         self.btn_b_bibliography_fjms = QPushButton()
         self.btn_b_bibliography_fjms.setVisible(False)
@@ -11050,6 +11182,12 @@ class GenizahGUI(QMainWindow):
         marc = meta.get('marc', {})
         shelf = meta.get('shelfmark')
         title = meta.get('title')
+        # Gap-fill/complement: use english_title from MARC
+        _eng_title_b = marc.get('english_title', '')
+        if (not title or not title.strip()) and _eng_title_b:
+            title = _eng_title_b
+        elif _eng_title_b and _eng_title_b.strip() and load_app_config().get('show_translations', False):
+            title = f"{title}  |  {_eng_title_b}"
         if shelf and shelf != "Unknown":
             # Try CSV library_code first, then MARC as fallback
             library_code = self.meta_mgr.get_library_for_id(sid)
@@ -11146,6 +11284,9 @@ class GenizahGUI(QMainWindow):
         part_id_for_ext = self.current_browse_part_id or self.meta_mgr.get_part_for_folio(sid)
         part_meta_ext = self.meta_mgr.get_part_metadata(part_id_for_ext) if part_id_for_ext else None
         external_meta = meta.get('external_meta', {})
+
+        # Store enrichment meta for translate badge rebuild
+        self._browse_enrichment_meta = {**meta, '_part_id': part_id_for_ext, '_part_meta': part_meta_ext}
 
         palette = self.txt_b_extended_info.palette()
         text_color = palette.color(QPalette.ColorRole.Text).name()
@@ -11339,33 +11480,7 @@ class GenizahGUI(QMainWindow):
             "padding: 10px; margin-bottom: 10px; "
             "border-left: 3px solid #27ae60; text-align: left;' dir='ltr'>"
         )
-        pgp_html += f"<p style='margin-top:0;'><b>Princeton Geniza Project</b>"
-        # Translation toggle link
-        if show_trans:
-            _dont_show = tr("Don't show translations")
-            pgp_html += (
-                f" <a href='toggle-always:off' style='color: #888; font-size: 10px; "
-                f"text-decoration: none;'>({_dont_show})</a>"
-            )
-        else:
-            # Check if translations are available for this document
-            _has_trans = trans_data and (trans_data.get('description_he') or trans_data.get('document_type_he'))
-            if not _has_trans and sys_id:
-                try:
-                    from shared.translation_service import TranslationService
-                    _check_svc = TranslationService()
-                    if _check_svc.pgp_available():
-                        _check_map = _check_svc.get_pgp_translations_by_sys_ids([sys_id])
-                        _has_trans = bool(_check_map.get(sys_id))
-                    _check_svc.close()
-                except Exception:
-                    pass
-            if _has_trans:
-                pgp_html += (
-                    f" <a href='toggle-always:on' style='color: #888; font-size: 10px; "
-                    f"text-decoration: none;'>({tr('Show translations')})</a>"
-                )
-        pgp_html += "</p>"
+        pgp_html += f"<p style='margin-top:0;'><b>Princeton Geniza Project</b></p>"
 
         import html as html_mod
         _toggle = getattr(self, '_trans_toggle_state', {})
@@ -11488,8 +11603,25 @@ class GenizahGUI(QMainWindow):
             f"<p style='margin-top:0;'><b>{tr('FJMS Catalog')}</b></p>"
         )
 
-        # Title (language-aware)
+        # Title (language-aware, with gap-fill translation when show_translations is on)
         title = merged.get('title_heb') if CURRENT_LANG == 'he' else merged.get('title')
+        if (not title or not title.strip()) and CURRENT_LANG == 'he':
+            # Gap-fill: try English title when Hebrew is missing
+            eng_title = merged.get('title')
+            if eng_title and eng_title.strip():
+                from genizah_core import load_app_config as _lac_fjms
+                if _lac_fjms().get('show_translations', False):
+                    try:
+                        from shared.translation_service import TranslationService
+                        ts = TranslationService(thread_safe=True)
+                        he_title = ts.get_fjms_translation(sys_id, 'Title')
+                        ts.close()
+                        if he_title:
+                            title = he_title
+                        else:
+                            title = eng_title  # Fallback to English
+                    except Exception:
+                        title = eng_title
         if title and title.strip():
             html += f"<p><b>{tr('Title')}:</b> {title}</p>"
 
@@ -11661,9 +11793,39 @@ class GenizahGUI(QMainWindow):
         if dims or phys:
             kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
 
+        # Check show_translations for on-demand translate badges
+        from genizah_core import load_app_config as _lac2
+        _show_trans = _lac2().get('show_translations', False)
+        _ft_cache = {}
+        if _show_trans:
+            from gui_threads import _field_translation_cache
+            _ft_cache = _field_translation_cache
+        import html as _html_mod
+        _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
+        _toggle = getattr(self, '_trans_toggle_state', {})
+
+        def _trans_or_badge_b(field_key, text, label):
+            """Return text with translate badge or cached translation (browse)."""
+            if not _show_trans or not text or len(text.strip()) < 10:
+                return text
+            cached = _ft_cache.get(field_key)
+            if cached:
+                showing_orig = _toggle.get(field_key, False)
+                show_text = text if showing_orig else cached
+                badge_label = tr('Original') if not showing_orig else tr('Translated')
+                _dir = 'ltr' if showing_orig else 'rtl'
+                return (
+                    f"<span dir='{_dir}'>{_html_mod.escape(show_text)}</span> "
+                    f"<a href='toggle-trans:{field_key}:{_html_mod.escape(text)}' style='{_tbadge}'>{badge_label}</a>"
+                )
+            return (
+                f"{_html_mod.escape(text)} "
+                f"<a href='translate-field:{field_key}' style='{_tbadge}'>{tr('Translate')}</a>"
+            )
+
         eng_title = marc.get('english_title')
         if eng_title:
-            kti_html += f"<p><b>{tr('English Title')}:</b> {eng_title}</p>"
+            kti_html += f"<p><b>{tr('English Title')}:</b> {_trans_or_badge_b('br_eng_title', eng_title, tr('English Title'))}</p>"
 
         subjects = marc.get('subjects', [])
         if subjects:
@@ -11672,8 +11834,8 @@ class GenizahGUI(QMainWindow):
         notes = marc.get('notes', [])
         if notes:
             kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for n in notes:
-                kti_html += f"<li>{n}</li>"
+            for _ni, n in enumerate(notes):
+                kti_html += f"<li>{_trans_or_badge_b(f'br_note_{_ni}', n, tr('Notes'))}</li>"
             kti_html += "</ul></p>"
 
         people = marc.get('people', [])
@@ -11698,18 +11860,19 @@ class GenizahGUI(QMainWindow):
 
             part_title = part_meta.get('title', '')
             if part_title:
-                external_html += f"<p><b>{tr('Oxford Title')}:</b> {part_title}</p>"
+                external_html += f"<p><b>{tr('Oxford Title')}:</b> {_trans_or_badge_b('br_part_title', part_title, tr('Oxford Title'))}</p>"
 
             part_contents = part_meta.get('contents', '')
             if part_contents:
-                external_html += f"<p><b>{tr('Contents')}:</b> {part_contents}</p>"
+                external_html += f"<p><b>{tr('Contents')}:</b> {_trans_or_badge_b('br_part_contents', part_contents, tr('Contents'))}</p>"
 
             external_html += "</div>"
 
         if external_meta:
             external_html += f"<div style='margin-bottom: 10px; text-align: left;' dir='ltr'><ul>"
             for k, v in external_meta.items():
-                external_html += f"<li><b>{k}:</b> {v}</li>"
+                ext_key = f"br_ext_{k}"
+                external_html += f"<li><b>{tr(k)}:</b> {_trans_or_badge_b(ext_key, v, k)}</li>"
             external_html += "</ul></div>"
 
         is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
@@ -11820,6 +11983,9 @@ class GenizahGUI(QMainWindow):
             self._navigate_to_catalog_browse(author=author)
         elif url_str.startswith('toggle-trans:'):
             self._handle_toggle_trans(self.txt_b_extended_info, url_str)
+        elif url_str.startswith('translate-field:'):
+            field_key = url_str[len('translate-field:'):]
+            self._start_field_translation(field_key, 'browse')
         elif url_str.startswith('toggle-always:'):
             # "Always show translations" / "Don't show translations" from context
             action = url_str[len('toggle-always:'):]
@@ -11832,6 +11998,36 @@ class GenizahGUI(QMainWindow):
             self._refresh_browse_extended_info(reset_toggles=True)
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
+
+    def _browse_toggle_translations(self, checked):
+        """Toggle show_translations from browse tab toolbar button."""
+        if getattr(self, '_b_trans_syncing', False):
+            return
+        self._b_trans_syncing = True
+        try:
+            save_app_config({'show_translations': checked})
+            _label = tr('Translations ON') if checked else tr('Translations OFF')
+            self.btn_b_translations.setText(_label)
+            # Sync Settings checkbox
+            if hasattr(self, 'chk_show_translations'):
+                self.chk_show_translations.setChecked(checked)
+            self._trans_toggle_state = {}
+        finally:
+            self._b_trans_syncing = False
+        self._refresh_browse_extended_info(reset_toggles=True)
+        # Also refresh browse title with english_title complement
+        self._refresh_browse_title()
+
+    def _refresh_browse_title(self):
+        """Refresh the browse info label to reflect current show_translations state."""
+        stored_meta = getattr(self, '_browse_enrichment_meta', None)
+        if not stored_meta:
+            return
+        sid = self.current_browse_sid
+        if not sid:
+            return
+        # Re-run on_browse_enriched_loaded which rebuilds the info label
+        self.on_browse_enriched_loaded(sid, stored_meta)
 
     def _handle_toggle_trans(self, text_browser, url_str):
         """Toggle translated/original text by rebuilding the PGP HTML section.
@@ -11857,21 +12053,121 @@ class GenizahGUI(QMainWindow):
         """Refresh the browse extended info panel (after toggling show_translations)."""
         if reset_toggles:
             self._trans_toggle_state = {}
-        pgp_doc = getattr(self, '_browse_pgp_doc', None)
-        if pgp_doc:
-            scrollbar = self.txt_b_extended_info.verticalScrollBar()
-            scroll_pos = scrollbar.value() if scrollbar else 0
-            pgp_html = self._build_pgp_extended_info_html(pgp_doc, sys_id=self.current_browse_sid) or ''
+
+        scrollbar = self.txt_b_extended_info.verticalScrollBar()
+        scroll_pos = scrollbar.value() if scrollbar else 0
+        palette = self.txt_b_extended_info.palette()
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+        base_color = palette.color(QPalette.ColorRole.Base).name()
+
+        # Rebuild enrichment HTML if stored meta is available (for translate badge updates)
+        stored_meta = getattr(self, '_browse_enrichment_meta', None)
+        if stored_meta:
+            marc = stored_meta.get('marc', {})
+            part_id = stored_meta.get('_part_id')
+            part_meta = stored_meta.get('_part_meta')
+            external_meta = stored_meta.get('external_meta', {})
+            physical_metadata = stored_meta.get('physical_metadata')
+            library_viewer_url = stored_meta.get('library_viewer_url')
+            enriched_html = self._build_browse_enriched_html(
+                marc, part_id, part_meta, external_meta, text_color, base_color,
+                physical_metadata=physical_metadata, library_viewer_url=library_viewer_url
+            )
+            # Prepend FJMS/catalog sections (rebuilt from stored sid)
+            sid = self.current_browse_sid
+            fjms_catalog_html = self._build_fjms_catalog_html(sid, text_color) if sid else ''
+            fjms_domain_html = self._build_fjms_domain_html(sid, text_color) if sid else ''
+            catalog_refs_html = self._build_catalog_refs_html(stored_meta, text_color)
+            secondary_meta_html = self._build_secondary_metadata_html(stored_meta, text_color)
+            enriched_html = fjms_domain_html + fjms_catalog_html + catalog_refs_html + secondary_meta_html + enriched_html
+            self._browse_enriched_html = enriched_html
+        else:
             enriched_html = getattr(self, '_browse_enriched_html', '') or ''
-            combined = enriched_html + pgp_html
-            if combined.strip():
-                palette = self.txt_b_extended_info.palette()
-                text_color = palette.color(QPalette.ColorRole.Text).name()
-                base_color = palette.color(QPalette.ColorRole.Base).name()
-                full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{combined}</div>"
-                self.txt_b_extended_info.setHtml(full_html)
-            if scrollbar:
-                scrollbar.setValue(scroll_pos)
+
+        pgp_doc = getattr(self, '_browse_pgp_doc', None)
+        pgp_html = self._build_pgp_extended_info_html(pgp_doc, sys_id=self.current_browse_sid) if pgp_doc else ''
+        combined = enriched_html + (pgp_html or '')
+        if combined.strip():
+            full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{combined}</div>"
+            self.txt_b_extended_info.setHtml(full_html)
+        if scrollbar:
+            scrollbar.setValue(scroll_pos)
+
+    def _start_field_translation(self, field_key, context, rd_dialog=None):
+        """Start an on-demand field translation via Dicta API.
+
+        Args:
+            field_key: Cache key like 'rd_eng_title', 'br_note_0', 'rd_ext_Abstract'
+            context: 'rd' for ResultDialog, 'browse' for browse tab
+            rd_dialog: ResultDialog instance (when context='rd')
+        """
+        from gui_threads import _field_translation_cache, TranslateTextThread
+
+        # Already cached — just refresh
+        if field_key in _field_translation_cache:
+            if context == 'rd' and rd_dialog:
+                rd_dialog._rd_refresh_extended_info()
+            else:
+                self._refresh_browse_extended_info()
+            return
+
+        # Extract original text from stored meta
+        text = self._get_field_original_text(field_key, context, rd_dialog)
+        if not text:
+            return
+
+        thread = TranslateTextThread(field_key, text, 'en2he')
+        thread.finished_signal.connect(
+            lambda fk, orig, translated: self._on_field_translated(fk, orig, translated, context, rd_dialog)
+        )
+        # Store reference to prevent GC
+        if not hasattr(self, '_translate_threads'):
+            self._translate_threads = []
+        self._translate_threads.append(thread)
+        thread.finished.connect(lambda: self._translate_threads.remove(thread) if thread in self._translate_threads else None)
+        thread.start()
+
+    def _get_field_original_text(self, field_key, context, rd_dialog=None):
+        """Extract the original English text for a field key from stored metadata."""
+        if context == 'rd':
+            meta = getattr(rd_dialog, '_rd_enrichment_meta', None) if rd_dialog else None
+        else:
+            meta = getattr(self, '_browse_enrichment_meta', None)
+        if not meta:
+            return None
+
+        marc = meta.get('marc', {})
+        part_meta = meta.get('_part_meta') or {}
+
+        # Determine field from key (strip prefix rd_/br_)
+        suffix = field_key[3:] if field_key.startswith(('rd_', 'br_')) else field_key
+        if suffix == 'eng_title':
+            return marc.get('english_title', '')
+        elif suffix.startswith('note_'):
+            idx = int(suffix[5:]) if suffix[5:].isdigit() else -1
+            notes = marc.get('notes', [])
+            return notes[idx] if 0 <= idx < len(notes) else None
+        elif suffix == 'part_title':
+            return part_meta.get('title', '')
+        elif suffix == 'part_contents':
+            return part_meta.get('contents', '')
+        elif suffix.startswith('ext_'):
+            ext_key = suffix[4:]
+            return meta.get('external_meta', {}).get(ext_key, '')
+        return None
+
+    def _on_field_translated(self, field_key, original, translated, context, rd_dialog=None):
+        """Handle completed field translation — refresh the relevant panel."""
+        if not translated:
+            return
+        if context == 'rd' and rd_dialog:
+            # Rebuild ResultDialog extended info
+            try:
+                rd_dialog._rd_refresh_extended_info()
+            except RuntimeError:
+                pass  # Dialog may have been closed
+        else:
+            self._refresh_browse_extended_info()
 
     def _navigate_to_catalog_browse(self, domain=None, author=None, work=None):
         """Navigate to the catalog browse tab with the specified filter pre-set.

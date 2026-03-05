@@ -2629,6 +2629,7 @@ TRANSLATIONS = {
     # Phase 46 - Dicta Translation Integration
     "Show translations": "הצג תרגומים",
     "Hide translations": "הסתר תרגומים",
+    "Don't show translations": "אל תציג תרגומים",
     "Translated": "מתורגם",
     "Original": "מקור",
     "Translated match": "התאמה בתרגום",
@@ -2638,6 +2639,15 @@ TRANSLATIONS = {
     "Translations ON": "תרגומים מופעלים",
     "Translations OFF": "תרגומים כבויים",
     "Show translated descriptions when available": "הצג תיאורים מתורגמים כאשר זמינים",
+
+    # Phase 46-06 - Extended field translations
+    "Abstract": "תקציר",
+    "Condition": "מצב",
+    "Provenance": "מקור",
+    "Language": "שפה",
+    "Script": "כתב",
+    "Decoration": "עיטור",
+    "Translating...": "מתרגם...",
 }
 
 # Hebrew library display names (keyed by library_code)

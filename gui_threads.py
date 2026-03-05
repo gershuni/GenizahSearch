@@ -413,6 +413,39 @@ class ExternalResourceThread(QThread):
         except Exception:
             self.finished_signal.emit({})
 
+_field_translation_cache: dict = {}  # Module-level cache: {field_key: translated_text}
+
+
+class TranslateTextThread(QThread):
+    """Translate a single text field via Dicta API in the background."""
+
+    finished_signal = pyqtSignal(str, str, str)  # field_key, original_text, translated_text
+
+    def __init__(self, field_key: str, text: str, direction: str = 'en2he'):
+        super().__init__()
+        self.field_key = field_key
+        self.text = text
+        self.direction = direction
+
+    def run(self):
+        try:
+            import os
+            from shared.dicta_client import translate_text, load_few_shot_template, build_few_shot_prompt
+            template_name = 'few_shot_en2he_scholarly.json' if self.direction == 'en2he' else 'few_shot_he2en_scholarly.json'
+            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+            template = load_few_shot_template(os.path.join(data_dir, template_name))
+            prompt = build_few_shot_prompt(template, self.direction)
+            result = translate_text(self.text, prompt, self.direction)
+            if result:
+                _field_translation_cache[self.field_key] = result
+                self.finished_signal.emit(self.field_key, self.text, result)
+            else:
+                self.finished_signal.emit(self.field_key, self.text, '')
+        except Exception as e:
+            logger.warning("TranslateTextThread error for %s: %s", self.field_key, e)
+            self.finished_signal.emit(self.field_key, self.text, '')
+
+
 class UpdateCheckerThread(QThread):
     """Check for updates on GitHub."""
 
