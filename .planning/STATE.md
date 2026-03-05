@@ -182,7 +182,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-05T16:00:00Z
-Stopped at: 46-05 title wiring committed, needs UAT
+Last session: 2026-03-05T17:00:00Z
+Stopped at: 46-05 title wiring committed, needs UAT. Batch translations running on server.
 Resume file: .planning/phases/46-dicta-translation/HANDOFF.md
-Notes: Title display now uses libraries_translations.db (clean hebrew_title/english_title split). Stale field translation cache bug fixed (Oxford parts showing wrong cached translations). Joins sync changed to startup-only. All committed and pushed (7fb59c4c). NOT FULLY TESTED — user will review title display across libraries and Oxford parts. Remaining: search results translations, batch translation scripts still running, web parity.
+Notes: Title display wired to libraries_translations.db (7fb59c4c). Stale cache fix for Oxford parts. Joins sync startup-only. All 4 batch translation scripts deployed to server and running in tmux session `translations` (FJMS catalog done, libraries titles in progress at ~18K/hr, PGP descriptions + FJMS free desc queued). When scripts finish: download updated DBs back. Remaining: UAT title display, search results translations, web parity.

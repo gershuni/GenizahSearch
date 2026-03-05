@@ -50,11 +50,25 @@ Translations should also work on:
 | Phase | Status | Details |
 |-------|--------|---------|
 | A: Extract bilingual English | **DONE** | 112,361 titles, zero API |
-| B: FJMS catalog fields | Partial (1,576 done) | Resume: `python scripts/translate_fjms_catalog.py` |
-| C: Hebrew-only titles | Partial (23,715 done, 48K pending) | Run: `python scripts/translate_libraries_titles.py` |
-| D: PGP descriptions | 8 done, 35,830 pending | Run: `python scripts/translate_pgp_descriptions.py` |
+| B: FJMS catalog fields | **DONE** | 3,835 complete |
+| C: Hebrew-only titles | **RUNNING ON SERVER** | 7,859 done, ~27K remaining (~1.5h) |
+| D: PGP descriptions | **QUEUED ON SERVER** | 100 done, ~35K remaining (runs after C) |
 | E: Service + UI integration | In progress | Title wiring done, search results needed |
-| F: FJMS free desc | Not started (255K) | Run: `python scripts/translate_fjms_free_desc.py` |
+| F: FJMS free desc | **QUEUED ON SERVER** | ~255K (runs after D, ~14h est) |
+
+All 4 scripts running sequentially on server in tmux session `translations`.
+Server: `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com`, then `tmux attach -t translations`.
+When done, download updated DBs back to dev machine (see bottom of this file).
+
+### Downloading Results
+After all scripts complete, from PowerShell:
+```powershell
+$SERVER = "ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com"
+$REMOTE = "/home/ubuntu/GenizahSearch"
+scp ${SERVER}:${REMOTE}/pgp_data/pgp.db pgp_data/pgp.db
+scp ${SERVER}:${REMOTE}/fist_data/fjms_enrichment.db fist_data/fjms_enrichment.db
+scp ${SERVER}:${REMOTE}/libraries_translations.db libraries_translations.db
+```
 
 ### Post-Translation Polish
 - Piyyut->Poem normalization, terminology alignment (see Translation Master Plan)
