@@ -3647,9 +3647,7 @@ class ResultDialog(QDialog):
                     bc = pal.color(QPalette.ColorRole.Base).name()
                     ph = parent_win._build_pgp_extended_info_html(pgp_doc, palette=pal, sys_id=getattr(self, 'current_sys_id', None))
                     if ph:
-                        # Store empty prefix so _rd_refresh_extended_info can rebuild
-                        self._rd_enriched_html_prefix = f"<div style='font-family:Arial; color:{tc}; background-color:{bc};'>"
-                        h = self._rd_enriched_html_prefix + ph + "</div>"
+                        h = f"<div style='font-family:Arial; color:{tc}; background-color:{bc};'>{ph}</div>"
                         self.txt_extended_info.setHtml(h)
                         self.btn_ext_info.setVisible(True)
                         if hasattr(self, 'btn_compact_ext_info'):
@@ -3694,65 +3692,196 @@ class ResultDialog(QDialog):
         logger.debug("PGP fetch error for %s: %s", sys_id, error_msg)
 
     def _rd_update_extended_info_with_pgp(self):
-        """Append PGP metadata to existing extended info HTML (race condition handler).
+        """Rebuild extended info HTML after PGP data arrives late.
 
         Called when PGP data arrives after on_enriched_data_loaded() already built
-        the extended info HTML. Rebuilds the HTML with PGP section appended.
+        the extended info. Now simply rebuilds via _rd_build_extended_html which
+        includes the PGP section since _rd_pgp_doc is set.
         """
-        pgp_doc = getattr(self, '_rd_pgp_doc', None)
-        if not pgp_doc:
+        rd_meta = getattr(self, '_rd_enrichment_meta', None)
+        if not rd_meta:
             return
-        parent = self.parent()
-        if not parent or not hasattr(parent, '_build_pgp_extended_info_html'):
-            return
+        oxford_part_id = rd_meta.get('_part_id')
+        part_meta = rd_meta.get('_part_meta')
+        html = self._rd_build_extended_html(rd_meta, oxford_part_id, part_meta)
+        if html:
+            self.txt_extended_info.setHtml(html)
+            self.btn_ext_info.setVisible(True)
+            if hasattr(self, 'btn_compact_ext_info'):
+                self.btn_compact_ext_info.setVisible(True)
+
+    def _rd_build_extended_html(self, meta, oxford_part_id=None, part_meta=None):
+        """Build the full extended info HTML for ResultDialog.
+
+        Returns the complete HTML string, or None if there's nothing to display.
+        Called by on_enriched_data_loaded() and _rd_refresh_extended_info().
+        """
+        marc = meta.get('marc', {})
+        external_meta = meta.get('external_meta', {})
+        has_pgp = bool(getattr(self, '_rd_pgp_doc', None))
+        if not marc and not meta.get('physical_desc') and not part_meta and not external_meta and not has_pgp:
+            return None
+
         palette = self.txt_extended_info.palette()
-        pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None))
-        if not pgp_html:
-            return
-        # Append PGP section to existing HTML content
-        current_html = self.txt_extended_info.toHtml()
-        # Insert PGP HTML before the final closing </div> of the wrapper
-        # The wrapper div is: <div style='font-family:Arial; ...'>...</div>
-        # We inject the PGP section before the last </div>
-        close_idx = current_html.rfind('</div>')
-        if close_idx >= 0:
-            updated_html = current_html[:close_idx] + pgp_html + current_html[close_idx:]
-            self.txt_extended_info.setHtml(updated_html)
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+        base_color = palette.color(QPalette.ColorRole.Base).name()
+        part_bg = QColor(base_color).lighter(115).name()
+
+        kti_html = ""
+        date_val = marc.get('date')
+        if date_val:
+            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+
+        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
+        if dims or phys:
+            kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
+
+        # Check show_translations for on-demand translate badges
+        from genizah_core import load_app_config as _lac
+        _show_trans = _lac().get('show_translations', False)
+        _ft_cache = {}
+        if _show_trans:
+            from gui_threads import _field_translation_cache
+            _ft_cache = _field_translation_cache
+        import html as _html_mod
+        _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
+
+        def _trans_or_badge(field_key, text, label):
+            """Return text with translate badge or cached translation."""
+            if not _show_trans or not text or len(text.strip()) < 10:
+                return text
+            cached = _ft_cache.get(field_key)
+            if cached:
+                parent = self.parent()
+                _toggle = getattr(parent, '_trans_toggle_state', {}) if parent else {}
+                showing_orig = _toggle.get(field_key, False)
+                show_text = text if showing_orig else cached
+                badge_label = tr('Original') if not showing_orig else tr('Translated')
+                _dir = 'ltr' if showing_orig else 'rtl'
+                return (
+                    f"<span dir='{_dir}'>{_html_mod.escape(show_text)}</span> "
+                    f"<a href='toggle-trans:{field_key}:{_html_mod.escape(text)}' style='{_tbadge}'>{badge_label}</a>"
+                )
+            return (
+                f"{_html_mod.escape(text)} "
+                f"<a href='translate-field:{field_key}' style='{_tbadge}'>{tr('Translate')}</a>"
+            )
+
+        eng_title = marc.get('english_title')
+        if eng_title:
+            kti_html += f"<p><b>{tr('English Title')}:</b> {_trans_or_badge('rd_eng_title', eng_title, tr('English Title'))}</p>"
+
+        subjects = marc.get('subjects', [])
+        if subjects:
+            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+
+        notes = marc.get('notes', [])
+        if notes:
+            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
+            for _ni, n in enumerate(notes):
+                kti_html += f"<li>{_trans_or_badge(f'rd_note_{_ni}', n, tr('Notes'))}</li>"
+            kti_html += "</ul></p>"
+
+        people = marc.get('people', [])
+        if people:
+            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+
+        external_html = ""
+        if part_meta:
+            part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
+            external_html += (
+                f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; "
+                "margin-bottom: 10px; border-left: 3px solid #3498db; text-align: left;' dir='ltr'>"
+            )
+            external_html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
+
+            folio_range = part_meta.get('folio_range', [])
+            if len(folio_range) == 2:
+                if folio_range[0] == folio_range[1]:
+                    external_html += f"<p><b>{tr('Folio')}:</b> {folio_range[0]}</p>"
+                else:
+                    external_html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
+
+            part_title = part_meta.get('title', '')
+            if part_title:
+                external_html += f"<p><b>{tr('Oxford Title')}:</b> {_trans_or_badge('rd_part_title', part_title, tr('Oxford Title'))}</p>"
+
+            part_contents = part_meta.get('contents', '')
+            if part_contents:
+                external_html += f"<p><b>{tr('Contents')}:</b> {_trans_or_badge('rd_part_contents', part_contents, tr('Contents'))}</p>"
+
+            external_html += "</div>"
+
+        if external_meta:
+            external_html += f"<div style='margin-bottom: 10px; text-align: left;' dir='ltr'><ul>"
+            for k, v in external_meta.items():
+                ext_key = f"rd_ext_{k}"
+                external_html += f"<li><b>{tr(k)}:</b> {_trans_or_badge(ext_key, v, k)}</li>"
+            external_html += "</ul></div>"
+
+        is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
+        dir_attr = "rtl" if is_rtl else "ltr"
+        header_align = "right" if is_rtl else "left"
+        kti_header = tr("Ktiv Info")
+        if oxford_part_id:
+            external_header = tr("Oxford Info")
         else:
-            # Fallback: just append
-            self.txt_extended_info.setHtml(current_html + pgp_html)
-        self.btn_ext_info.setVisible(True)
-        if hasattr(self, 'btn_compact_ext_info'):
-            self.btn_compact_ext_info.setVisible(True)
+            external_header = tr("Cambridge Info")
+
+        html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>"
+        if external_html:
+            if is_rtl:
+                first_title, first_html = kti_header, kti_html
+                second_title, second_html = external_header, external_html
+            else:
+                first_title, first_html = external_header, external_html
+                second_title, second_html = kti_header, kti_html
+
+            html += (
+                f"<table style='width:100%; border-collapse:collapse;' dir='{dir_attr}'>"
+                f"<tr>"
+                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{first_title}</th>"
+                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{second_title}</th>"
+                f"</tr>"
+                f"<tr>"
+                f"<td style='vertical-align:top; padding:6px;'>{first_html}</td>"
+                f"<td style='vertical-align:top; padding:6px;'>{second_html}</td>"
+                f"</tr></table>"
+            )
+        else:
+            html += kti_html
+
+        # Append FJMS catalog section
+        parent = self.parent()
+        if parent and hasattr(parent, '_build_fjms_catalog_html'):
+            fjms_catalog = parent._build_fjms_catalog_html(self.current_sys_id, text_color)
+            if fjms_catalog:
+                html += fjms_catalog
+
+        # Append PGP metadata section if available
+        pgp_doc = getattr(self, '_rd_pgp_doc', None)
+        if pgp_doc:
+            if parent and hasattr(parent, '_build_pgp_extended_info_html'):
+                pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None))
+                if pgp_html:
+                    html += pgp_html
+
+        html += "</div>"
+        return html
 
     def _rd_refresh_extended_info(self):
         """Rebuild ResultDialog extended info with current toggle state."""
-        parent = self.parent()
-        if not parent or not hasattr(parent, '_build_pgp_extended_info_html'):
-            return
-        pgp_doc = getattr(self, '_rd_pgp_doc', None)
-        prefix = getattr(self, '_rd_enriched_html_prefix', None)
-        if not pgp_doc or not prefix:
+        rd_meta = getattr(self, '_rd_enrichment_meta', None)
+        if not rd_meta:
             return
         scrollbar = self.txt_extended_info.verticalScrollBar()
         scroll_pos = scrollbar.value() if scrollbar else 0
-        palette = self.txt_extended_info.palette()
 
-        # If enrichment meta is stored, rebuild prefix from scratch (for translate badge updates)
-        rd_meta = getattr(self, '_rd_enrichment_meta', None)
-        if rd_meta:
-            # Re-trigger the enrichment HTML builder via on_enriched_data_loaded path
-            # by simply regenerating the full HTML
-            text_color = palette.color(QPalette.ColorRole.Text).name()
-            base_color = palette.color(QPalette.ColorRole.Base).name()
-            self.on_enriched_data_loaded(self.current_sys_id, rd_meta)
-            if scrollbar:
-                scrollbar.setValue(scroll_pos)
-            return
-
-        pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None)) or ''
-        html = prefix + pgp_html + "</div>"
-        self.txt_extended_info.setHtml(html)
+        oxford_part_id = rd_meta.get('_part_id')
+        part_meta = rd_meta.get('_part_meta')
+        html = self._rd_build_extended_html(rd_meta, oxford_part_id, part_meta)
+        if html:
+            self.txt_extended_info.setHtml(html)
         if scrollbar:
             scrollbar.setValue(scroll_pos)
 
@@ -4588,164 +4717,15 @@ class ResultDialog(QDialog):
                 self.btn_compact_catalog.setVisible(False)
 
         # 4. Build Extended Info HTML (Text)
-        external_meta = meta.get('external_meta', {})
         # Store enrichment meta for translate badge rebuild
         self._rd_enrichment_meta = {**meta, '_part_id': oxford_part_id, '_part_meta': part_meta}
-        has_pgp = bool(getattr(self, '_rd_pgp_doc', None))
-        if not marc and not meta.get('physical_desc') and not part_meta and not external_meta and not has_pgp:
+
+        html = self._rd_build_extended_html(meta, oxford_part_id, part_meta)
+        if html is None:
             self.btn_ext_info.setVisible(False)
             if hasattr(self, 'btn_compact_ext_info'):
                 self.btn_compact_ext_info.setVisible(False)
             return
-
-        palette = self.txt_extended_info.palette()
-        text_color = palette.color(QPalette.ColorRole.Text).name()
-        base_color = palette.color(QPalette.ColorRole.Base).name()
-        part_bg = QColor(base_color).lighter(115).name()
-
-        kti_html = ""
-        date_val = marc.get('date')
-        if date_val:
-            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
-
-        dims = marc.get('dimensions'); phys = meta.get('physical_desc')
-        if dims or phys:
-            kti_html += f"<p><b>{tr('Physical Description')}:</b> {phys or ''} {dims or ''}</p>"
-
-        # Check show_translations for on-demand translate badges
-        from genizah_core import load_app_config as _lac
-        _show_trans = _lac().get('show_translations', False)
-        _ft_cache = {}
-        if _show_trans:
-            from gui_threads import _field_translation_cache
-            _ft_cache = _field_translation_cache
-        import html as _html_mod
-        _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
-
-        def _trans_or_badge(field_key, text, label):
-            """Return text with translate badge or cached translation."""
-            if not _show_trans or not text or len(text.strip()) < 10:
-                return text
-            cached = _ft_cache.get(field_key)
-            if cached:
-                parent = self.parent()
-                _toggle = getattr(parent, '_trans_toggle_state', {}) if parent else {}
-                showing_orig = _toggle.get(field_key, False)
-                show_text = text if showing_orig else cached
-                badge_label = tr('Original') if not showing_orig else tr('Translated')
-                _dir = 'ltr' if showing_orig else 'rtl'
-                return (
-                    f"<span dir='{_dir}'>{_html_mod.escape(show_text)}</span> "
-                    f"<a href='toggle-trans:{field_key}:{_html_mod.escape(text)}' style='{_tbadge}'>{badge_label}</a>"
-                )
-            return (
-                f"{_html_mod.escape(text)} "
-                f"<a href='translate-field:{field_key}' style='{_tbadge}'>{tr('Translate')}</a>"
-            )
-
-        eng_title = marc.get('english_title')
-        if eng_title:
-            kti_html += f"<p><b>{tr('English Title')}:</b> {_trans_or_badge('rd_eng_title', eng_title, tr('English Title'))}</p>"
-
-        subjects = marc.get('subjects', [])
-        if subjects:
-            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
-
-        notes = marc.get('notes', [])
-        if notes:
-            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for _ni, n in enumerate(notes):
-                kti_html += f"<li>{_trans_or_badge(f'rd_note_{_ni}', n, tr('Notes'))}</li>"
-            kti_html += "</ul></p>"
-
-        people = marc.get('people', [])
-        if people:
-            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
-
-        external_html = ""
-        if part_meta:
-            part_display = self.meta_mgr.codico_mgr.get_part_display_name(oxford_part_id)
-            external_html += (
-                f"<div style='background-color: {part_bg}; color:{text_color}; padding: 10px; "
-                "margin-bottom: 10px; border-left: 3px solid #3498db; text-align: left;' dir='ltr'>"
-            )
-            external_html += f"<p><b>📖 {tr('Codicological Part')}:</b> {part_display}</p>"
-
-            folio_range = part_meta.get('folio_range', [])
-            if len(folio_range) == 2:
-                if folio_range[0] == folio_range[1]:
-                    external_html += f"<p><b>{tr('Folio')}:</b> {folio_range[0]}</p>"
-                else:
-                    external_html += f"<p><b>{tr('Folio Range')}:</b> {folio_range[0]} - {folio_range[1]}</p>"
-
-            part_title = part_meta.get('title', '')
-            if part_title:
-                external_html += f"<p><b>{tr('Oxford Title')}:</b> {_trans_or_badge('rd_part_title', part_title, tr('Oxford Title'))}</p>"
-
-            part_contents = part_meta.get('contents', '')
-            if part_contents:
-                external_html += f"<p><b>{tr('Contents')}:</b> {_trans_or_badge('rd_part_contents', part_contents, tr('Contents'))}</p>"
-
-            external_html += "</div>"
-
-        if external_meta:
-            external_html += f"<div style='margin-bottom: 10px; text-align: left;' dir='ltr'><ul>"
-            for k, v in external_meta.items():
-                ext_key = f"rd_ext_{k}"
-                external_html += f"<li><b>{tr(k)}:</b> {_trans_or_badge(ext_key, v, k)}</li>"
-            external_html += "</ul></div>"
-
-        is_rtl = self.layoutDirection() == Qt.LayoutDirection.RightToLeft
-        dir_attr = "rtl" if is_rtl else "ltr"
-        header_align = "right" if is_rtl else "left"
-        kti_header = tr("Ktiv Info")
-        if oxford_part_id:
-            external_header = tr("Oxford Info")
-        else:
-            external_header = tr("Cambridge Info")
-
-        html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>"
-        if external_html:
-            if is_rtl:
-                first_title, first_html = kti_header, kti_html
-                second_title, second_html = external_header, external_html
-            else:
-                first_title, first_html = external_header, external_html
-                second_title, second_html = kti_header, kti_html
-
-            html += (
-                f"<table style='width:100%; border-collapse:collapse;' dir='{dir_attr}'>"
-                f"<tr>"
-                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{first_title}</th>"
-                f"<th style='text-align:{header_align}; padding:4px; border-bottom:1px solid #ccc;'>{second_title}</th>"
-                f"</tr>"
-                f"<tr>"
-                f"<td style='vertical-align:top; padding:6px;'>{first_html}</td>"
-                f"<td style='vertical-align:top; padding:6px;'>{second_html}</td>"
-                f"</tr></table>"
-            )
-        else:
-            html += kti_html
-
-        # Append FJMS catalog section
-        parent = self.parent()
-        if parent and hasattr(parent, '_build_fjms_catalog_html'):
-            fjms_catalog = parent._build_fjms_catalog_html(self.current_sys_id, text_color)
-            if fjms_catalog:
-                html += fjms_catalog
-
-        # Store pre-PGP HTML for refresh capability
-        self._rd_enriched_html_prefix = html
-
-        # Append PGP metadata section if available
-        pgp_doc = getattr(self, '_rd_pgp_doc', None)
-        if pgp_doc:
-            if parent and hasattr(parent, '_build_pgp_extended_info_html'):
-                pgp_html = parent._build_pgp_extended_info_html(pgp_doc, palette=palette, sys_id=getattr(self, 'current_sys_id', None))
-                if pgp_html:
-                    html += pgp_html
-
-        html += "</div>"
         self.txt_extended_info.setHtml(html)
         self.btn_ext_info.setVisible(True)
         if hasattr(self, 'btn_compact_ext_info'):
