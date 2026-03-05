@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import io
 import json
 import logging
 import os
@@ -27,6 +28,12 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Force UTF-8 stdout/stderr on Windows (needed for nohup/redirect with Hebrew text)
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+if hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -42,7 +49,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DB = str(PROJECT_ROOT / "libraries_translations.db")
 DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "translate_libraries_titles_checkpoint.json")
 DEFAULT_FEW_SHOT = str(PROJECT_ROOT / "data" / "few_shot_he2en_scholarly.json")
-REQUEST_DELAY = 3.0
+REQUEST_DELAY = 9.5  # Dicta limit: 100 requests per 900s (15min) → ~9s between calls
 
 # Graceful shutdown
 _shutdown_requested = False
@@ -161,9 +168,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
+    # Log to both console and file for reliable output on Windows
+    log_file = str(PROJECT_ROOT / "translate_libraries_log.txt")
+    handlers = [
+        logging.StreamHandler(sys.stderr),
+        logging.FileHandler(log_file, encoding='utf-8', mode='w'),
+    ]
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=handlers,
     )
 
     if not os.path.isfile(args.db):
@@ -217,41 +231,49 @@ def main(argv: list[str] | None = None) -> None:
 
     start_time = time.time()
 
-    for i, (title, row_count) in enumerate(pending):
-        if _shutdown_requested:
-            logger.info("Shutdown requested — saving checkpoint and exiting")
-            break
+    try:
+        for i, (title, row_count) in enumerate(pending):
+            if _shutdown_requested:
+                logger.info("Shutdown requested — saving checkpoint and exiting")
+                break
 
-        stats["api_calls"] += 1
-        result = translate_text(title, few_shot, direction="he2en")
+            stats["api_calls"] += 1
+            try:
+                result = translate_text(title, few_shot, direction="he2en")
+            except Exception as e:
+                logger.error(f"[{i+1}] Exception translating: {e}", exc_info=True)
+                stats["failed"] += 1
+                time.sleep(args.delay)
+                continue
 
-        if result:
-            updated = apply_translation(args.db, title, result)
-            completed.add(title)
-            stats["translated"] += 1
-            stats["rows_updated"] += updated
+            if result:
+                updated = apply_translation(args.db, title, result)
+                completed.add(title)
+                stats["translated"] += 1
+                stats["rows_updated"] += updated
 
-            if args.verbose or (i + 1) % 100 == 0:
-                elapsed = time.time() - start_time
-                rate = stats["translated"] / elapsed * 3600 if elapsed > 0 else 0
-                remaining = (len(pending) - i - 1) / rate * 3600 if rate > 0 else 0
-                logger.info(
-                    f"[{i+1}/{len(pending)}] "
-                    f"({row_count}x) {title[:50]} -> {result[:50]} "
-                    f"[{rate:.0f}/hr, ~{remaining/3600:.1f}h left]"
-                )
-        else:
-            stats["failed"] += 1
-            logger.warning(f"[{i+1}] FAILED: {title[:80]}")
+                if (i + 1) % 100 == 0:
+                    elapsed = time.time() - start_time
+                    rate = stats["translated"] / elapsed * 3600 if elapsed > 0 else 0
+                    remaining = (len(pending) - i - 1) / rate * 3600 if rate > 0 else 0
+                    logger.info(
+                        f"[{i+1}/{len(pending)}] "
+                        f"translated={stats['translated']:,} rows={stats['rows_updated']:,} "
+                        f"[{rate:.0f}/hr, ~{remaining/3600:.1f}h left]"
+                    )
+            else:
+                stats["failed"] += 1
+                logger.warning(f"[{i+1}] FAILED: {title[:80]}")
 
-        # Save checkpoint periodically
-        if (i + 1) % args.batch_size == 0:
-            save_checkpoint(args.checkpoint, completed, stats)
-            logger.debug(f"Checkpoint saved at item {i+1}")
+            # Save checkpoint periodically
+            if (i + 1) % args.batch_size == 0:
+                save_checkpoint(args.checkpoint, completed, stats)
 
-        # Throttle
-        if i < len(pending) - 1:
-            time.sleep(args.delay)
+            # Throttle
+            if i < len(pending) - 1:
+                time.sleep(args.delay)
+    except Exception as e:
+        logger.error(f"Fatal error in translation loop: {e}", exc_info=True)
 
     # Final checkpoint
     save_checkpoint(args.checkpoint, completed, stats)

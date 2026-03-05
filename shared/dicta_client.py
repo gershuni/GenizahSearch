@@ -39,9 +39,9 @@ DICTA_HEADERS = {
 DICTA_MODEL = "dicta-il/dictalm2.0"
 
 # Retry settings for 429 rate limiting
-MAX_RETRIES_429 = 3
-RETRY_BASE_DELAY = 3.0  # seconds
-RETRY_MAX_DELAY = 30.0  # seconds
+MAX_RETRIES_429 = 5
+RETRY_BASE_DELAY = 10.0  # seconds
+RETRY_MAX_DELAY = 120.0  # Dicta rate limit: 100 req/15min, RateLimit-Reset can be up to 900s
 
 # =============================================================================
 # PGP Document Type Manual Translations
@@ -159,10 +159,13 @@ def translate_text(
             )
 
             if resp.status_code == 429:
+                # Prefer RateLimit-Reset (seconds until window resets) over Retry-After
+                reset = resp.headers.get("RateLimit-Reset")
                 retry_after = resp.headers.get("Retry-After")
-                if retry_after:
-                    # Cap server's Retry-After — often wildly inflated
-                    delay = min(float(retry_after), RETRY_MAX_DELAY)
+                if reset:
+                    delay = min(float(reset) + 2, RETRY_MAX_DELAY)
+                elif retry_after:
+                    delay = min(float(retry_after) + 2, RETRY_MAX_DELAY)
                 else:
                     delay = min(
                         RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1),
