@@ -311,6 +311,23 @@ fist_data/fjms_enrichment.db (EXISTING)
 
 ---
 
+## Post-Translation Polish (after batch runs complete)
+
+Consistency fixes to apply across `libraries_translations.db` after all Dicta translations are done:
+
+- [ ] **Piyyut normalization**: Dicta translates `פיוט` as "Poem" — should be "Piyyut" (standard scholarly transliteration used in extracted titles). Affects ~8,077 rows. Simple SQL UPDATE.
+- [ ] **Terminology alignment**: Audit Dicta output vs extracted English for common terms. Ensure consistency:
+  - `ספרות חז"ל` → "Rabbinic Literature" (Dicta) vs varies in extracted
+  - `מקרא [טקסט]` → "Torah (Text)" (Dicta) vs "Bible: Texts" (extracted) — should be "Bible"
+  - `תפילה וברכות` → "Prayer and Blessings" (Dicta) vs "Liturgy and Brakhot" (extracted)
+- [ ] **Transliteration consistency**: Dicta may English-translate terms that should be transliterated (e.g., Torah names, liturgical terms). Review top-100 Dicta translations.
+- [ ] **Mixed-script extraction cleanup**: ~6,876 titles with embedded Hebrew incipits produce messy English (e.g., `Piyyut Qedushta incomplete ; incomplete`). Review and fix.
+- [ ] **Short genre labels**: Many Dicta translations are just genre labels (`Poem.`, `Letters; Documents.`). Consider whether to keep trailing periods.
+
+These are cosmetic — do them in a single batch SQL pass after the main translation is complete.
+
+---
+
 ## Success Criteria
 
 - [ ] 100% of libraries.csv titled records have an English translation (extracted or Dicta)
@@ -319,4 +336,5 @@ fist_data/fjms_enrichment.db (EXISTING)
 - [ ] TranslationService reads from all 3 translation stores
 - [ ] Both web and desktop apps display translated text when toggle is ON
 - [ ] Translation toggle persists across sessions
+- [ ] Post-translation polish pass completed (terminology alignment)
 - [ ] All existing tests pass
