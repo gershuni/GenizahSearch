@@ -15,35 +15,42 @@ translation is more reliable.
 Features:
 - Checkpointing: saves progress to a JSON file every batch_size translations
 - Resume: skips already-translated rows on restart
-- Parallel: ThreadPoolExecutor for concurrent API requests
+- Sequential execution with throttle (safe for Dicta rate limits)
 - Dry-run: count candidates without making API calls
-- Progress: tqdm progress bar with ETA
+- SIGINT: graceful shutdown with checkpoint save
 
 Usage:
   python scripts/translate_pgp_descriptions.py                    # Full run
   python scripts/translate_pgp_descriptions.py --dry-run          # Count candidates
   python scripts/translate_pgp_descriptions.py --limit 50         # Test with 50 items
-  python scripts/translate_pgp_descriptions.py --workers 10       # Faster (more concurrent)
+  python scripts/translate_pgp_descriptions.py --delay 5.0        # Custom throttle
 """
 
 import argparse
+import io
 import json
 import logging
 import os
+import signal
 import sqlite3
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Force UTF-8 stdout/stderr on Windows (needed for nohup/redirect with Hebrew text)
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+if hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 # Ensure project root is on path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.dicta_client import (
-    MAX_WORKERS,
+    GOD_MODE,
     PGP_DOCUMENT_TYPE_HE,
     build_few_shot_prompt,
     load_few_shot_template,
@@ -57,8 +64,19 @@ logger = logging.getLogger(__name__)
 DEFAULT_PGP_DB = str(PROJECT_ROOT / "pgp_data" / "pgp.db")
 DEFAULT_CHECKPOINT = str(PROJECT_ROOT / "translate_pgp_checkpoint.json")
 DEFAULT_FEW_SHOT = str(PROJECT_ROOT / "data" / "few_shot_en2he_scholarly.json")
+REQUEST_DELAY = 0.0 if GOD_MODE else 3.0  # seconds between API calls
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0  # seconds, exponential backoff
+
+# Graceful shutdown
+_shutdown_requested = False
+
+def _signal_handler(signum, frame):
+    global _shutdown_requested
+    _shutdown_requested = True
+    print("\n[SIGINT] Shutdown requested - saving checkpoint after current item...")
+
+signal.signal(signal.SIGINT, _signal_handler)
 
 
 # =============================================================================
@@ -273,65 +291,51 @@ def run_batch(args: argparse.Namespace) -> None:
     batch_buffer: list[tuple[int, str, str | None]] = []
     start_time = time.time()
 
-    # Progress bar
-    pbar = tqdm(total=total_pending, desc="Translating", unit="doc") if tqdm else None
-
-    def process_one(pgpid: int, description: str, document_type: str | None):
-        """Translate one document (runs in worker thread)."""
-        # Translate description via API
-        desc_he = translate_with_retry(description, few_shot_prompt, "en2he")
-
-        # Document type via manual mapping (no API call)
-        dtype_he = PGP_DOCUMENT_TYPE_HE.get(document_type, None) if document_type else None
-
-        return pgpid, desc_he, dtype_he
+    delay = getattr(args, 'delay', REQUEST_DELAY)
 
     try:
-        with ThreadPoolExecutor(max_workers=min(args.workers, MAX_WORKERS)) as pool:
-            futures = {}
-            for pgpid, desc, dtype in pending:
-                f = pool.submit(process_one, pgpid, desc, dtype)
-                futures[f] = pgpid
+        for i, (pgpid, desc, dtype) in enumerate(pending):
+            if _shutdown_requested:
+                logger.info("Shutdown requested - saving checkpoint")
+                break
 
-            for f in as_completed(futures):
-                pgpid = futures[f]
-                try:
-                    result_pgpid, desc_he, dtype_he = f.result()
+            # Translate description via API
+            desc_he = translate_with_retry(desc, few_shot_prompt, "en2he")
 
-                    if desc_he is not None:
-                        batch_buffer.append((result_pgpid, desc_he, dtype_he))
-                        completed_ids.add(result_pgpid)
-                        translated_count += 1
-                    else:
-                        failed_count += 1
-                        logger.warning("Translation failed for pgpid=%d", pgpid)
+            # Document type via manual mapping (no API call)
+            dtype_he = PGP_DOCUMENT_TYPE_HE.get(dtype, None) if dtype else None
 
-                except Exception as e:
-                    failed_count += 1
-                    logger.error("Error processing pgpid=%d: %s", pgpid, e)
+            if desc_he is not None:
+                batch_buffer.append((pgpid, desc_he, dtype_he))
+                completed_ids.add(pgpid)
+                translated_count += 1
+            else:
+                failed_count += 1
+                logger.warning("Translation failed for pgpid=%d", pgpid)
 
-                # Update progress
-                if pbar:
-                    pbar.update(1)
+            # Log progress every 100 items
+            if (i + 1) % 100 == 0:
+                elapsed = time.time() - start_time
+                rate = translated_count / elapsed * 3600 if elapsed > 0 else 0
+                remaining_est = (total_pending - i - 1) / rate * 3600 if rate > 0 else 0
+                logger.info(
+                    "[%d/%d] translated=%d failed=%d [%.0f/hr, ~%.1fh left]",
+                    i + 1, total_pending, translated_count, failed_count,
+                    rate, remaining_est / 3600,
+                )
 
-                # Flush batch at interval
-                if len(batch_buffer) >= args.batch_size:
-                    flush_batch(write_conn, batch_buffer)
-                    save_checkpoint(args.checkpoint_file, completed_ids)
-                    batch_buffer.clear()
+            # Flush batch at interval
+            if len(batch_buffer) >= args.batch_size:
+                flush_batch(write_conn, batch_buffer)
+                save_checkpoint(args.checkpoint_file, completed_ids)
+                batch_buffer.clear()
 
-    except KeyboardInterrupt:
-        print("\n\nInterrupted! Saving checkpoint...")
-        # Flush any remaining buffer
-        if batch_buffer:
-            flush_batch(write_conn, batch_buffer)
-        save_checkpoint(args.checkpoint_file, completed_ids)
-        print(f"Checkpoint saved with {len(completed_ids)} completed IDs.")
-        print("Resume by running the script again.")
-        return
-    finally:
-        if pbar:
-            pbar.close()
+            # Throttle between API calls
+            if delay > 0 and i < total_pending - 1:
+                time.sleep(delay)
+
+    except Exception as e:
+        logger.error("Fatal error in translation loop: %s", e, exc_info=True)
 
     # Flush remaining buffer
     if batch_buffer:
@@ -392,11 +396,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Path to pgp.db sidecar (default: {DEFAULT_PGP_DB})",
     )
     parser.add_argument(
-        "--workers",
-        type=int,
-        default=MAX_WORKERS,
-        metavar="N",
-        help=f"Concurrent API workers (default: {MAX_WORKERS}, max: {MAX_WORKERS})",
+        "--delay",
+        type=float,
+        default=REQUEST_DELAY,
+        help=f"Seconds between API calls (default: {REQUEST_DELAY})",
     )
     parser.add_argument(
         "--batch-size",
@@ -443,11 +446,17 @@ def main(argv: list[str] | None = None) -> None:
     """Main entry point."""
     args = parse_args(argv)
 
-    # Configure logging
-    level = logging.DEBUG if args.verbose else logging.WARNING
+    # Configure logging (console + file)
+    log_file = str(PROJECT_ROOT / "translate_pgp_log.txt")
+    level = logging.DEBUG if args.verbose else logging.INFO
+    handlers = [
+        logging.StreamHandler(sys.stderr),
+        logging.FileHandler(log_file, encoding='utf-8', mode='a'),
+    ]
     logging.basicConfig(
         level=level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=handlers,
     )
 
     run_batch(args)
