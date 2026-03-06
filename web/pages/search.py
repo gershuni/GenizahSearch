@@ -804,6 +804,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ).classes('w-full').props('outlined dense').style('direction: rtl;')
                                 ui.label(tr('Results containing these words will be filtered out')).classes('text-xs').style('color: var(--text-muted);')
 
+                            # Text Position Filter (for join detection)
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Text Position')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                                saved_text_position = app.storage.user.get('search_text_position', 'anywhere')
+                                text_position_select = ui.select(
+                                    {
+                                        'anywhere': tr('Anywhere'),
+                                        'start': tr('Start of text'),
+                                        'end': tr('End of text'),
+                                        'line_start': tr('Line starts'),
+                                        'line_end': tr('Line ends'),
+                                    },
+                                    value=saved_text_position,
+                                ).classes('w-40').props('outlined dense')
+                                ui.tooltip(tr('Constrain matches to text boundaries (for join detection)'))
+
+                                def save_text_position():
+                                    app.storage.user['search_text_position'] = text_position_select.value
+                                text_position_select.on('update:model-value', save_text_position)
 
 
             # Slider row (separate, OUTSIDE main row, below search) - only when slider mode enabled
@@ -2110,7 +2129,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return {'text': text, 'mods': {
                 'prefix': False, 'suffix': False,
                 'wildcard_prefix': False, 'wildcard_suffix': False,
-                'plene': False, 'negation': False
+                'plene': False, 'negation': False,
+                'line_start': False, 'line_end': False,
             }}
 
         def make_component():
@@ -2150,12 +2170,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'wildcard_suffix': '_*',
             'plene': '%',
             'negation': '−',
+            'line_start': '|_',
+            'line_end': '_|',
         }
 
         def _build_mod_indicator_text(mods):
             """Build a short string showing active modifiers for a word."""
             parts = []
-            for key in ['prefix', 'suffix', 'wildcard_prefix', 'wildcard_suffix', 'plene', 'negation']:
+            for key in ['prefix', 'suffix', 'wildcard_prefix', 'wildcard_suffix', 'plene', 'negation',
+                         'line_start', 'line_end']:
                 if mods.get(key):
                     parts.append(MOD_DISPLAY[key])
             return ' '.join(parts)
@@ -2242,11 +2265,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             update_preview()
 
         def on_scope_change(value):
-            """Toggle scope and show/hide distance spinners."""
+            """Toggle scope and show/hide distance spinners and line modifiers."""
             builder_state['scope'] = value
-            show_dists = (value == 'word_range')
+            show_dists = (value in ('word_range', 'lines'))
             for ds in distance_spinners:
                 ds.set_visibility(show_dists)
+            # Show/hide line position modifiers
+            is_lines = (value == 'lines')
+            if 'line_start' in mod_cbs:
+                mod_cbs['line_start'].set_visibility(is_lines)
+            if 'line_end' in mod_cbs:
+                mod_cbs['line_end'].set_visibility(is_lines)
+            # Update distance labels
+            for dn_el in distance_number_els:
+                dn_el.suffix = tr('lines') if is_lines else tr('words') if value == 'word_range' else ''
             update_preview()
 
         def add_word_slot(comp_idx):
@@ -2397,7 +2429,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             # Scope Toggle
             scope_toggle = ui.toggle(
-                {'word_range': tr('Word Range'), 'within_document': tr('Within Document')},
+                {'word_range': tr('Word Range'), 'within_document': tr('Within Document'), 'lines': tr('Lines')},
                 value='word_range',
                 on_change=lambda e: on_scope_change(e.value)
             ).classes('mb-3')
@@ -2500,6 +2532,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 wild_end_cb = ui.checkbox(tr('Wildcard _*')).tooltip(tr('Words starting with...'))
                 plene_cb = ui.checkbox(tr('Plene/Defective %')).tooltip(tr('Plene/defective spelling tooltip'))
                 negation_cb = ui.checkbox(tr('Negation −')).tooltip(tr('Negation tooltip'))
+                line_start_cb = ui.checkbox(tr('Start of line |_')).tooltip(tr('Word must appear at start of line'))
+                line_start_cb.set_visibility(False)  # Only visible in Lines scope
+                line_end_cb = ui.checkbox(tr('End of line _|')).tooltip(tr('Word must appear at end of line'))
+                line_end_cb.set_visibility(False)  # Only visible in Lines scope
 
                 mod_cbs['prefix'] = prefix_cb
                 mod_cbs['suffix'] = suffix_cb
@@ -2507,6 +2543,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 mod_cbs['wildcard_suffix'] = wild_end_cb
                 mod_cbs['plene'] = plene_cb
                 mod_cbs['negation'] = negation_cb
+                mod_cbs['line_start'] = line_start_cb
+                mod_cbs['line_end'] = line_end_cb
 
                 def _make_mod_handler(cb_el, mod_name):
                     def handler():
@@ -2518,6 +2556,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 wild_end_cb.on('update:model-value', _make_mod_handler(wild_end_cb, 'wildcard_suffix'))
                 plene_cb.on('update:model-value', _make_mod_handler(plene_cb, 'plene'))
                 negation_cb.on('update:model-value', _make_mod_handler(negation_cb, 'negation'))
+                line_start_cb.on('update:model-value', _make_mod_handler(line_start_cb, 'line_start'))
+                line_end_cb.on('update:model-value', _make_mod_handler(line_end_cb, 'line_end'))
 
             # === Search Options Row (synced with outer Responsa checkboxes) ===
             with ui.row().classes('w-full gap-3 mt-2 items-center flex-wrap'):
@@ -3047,6 +3087,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             current_preset['value'] = params['preset']
         if params.get('gap') is not None:
             gap_input.value = params['gap']
+        if params.get('text_position'):
+            text_position_select.value = params['text_position']
 
         # Restore filters if present
         filters = params.get('filters')
@@ -3258,6 +3300,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         progress_callback=progress_cb
                     )
                 else:
+                    tp = text_position_select.value
                     return state.searcher.execute_search(
                         clean_query,
                         mode=mode,
@@ -3266,6 +3309,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         exclude_words=not_words,
                         responsa_options=responsa_options,
                         restrict_sys_ids=restrict_sys_ids,
+                        text_position=tp if tp != 'anywhere' else None,
                     )
             except ValueError as e:
                 # Explosion guard or other validation error — surface to user
@@ -3478,6 +3522,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     'mode': mode_select.value,
                     'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
                     'gap': int(gap_input.value or 0),
+                    'text_position': text_position_select.value,
                     'filters': {
                         'domains': search_state.filter_domains,
                         'authors': search_state.filter_authors,
@@ -5221,12 +5266,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             escaped = html.escape(text)
                             if pattern:
                                 try:
-                                    # Apply case-insensitive highlighting
+                                    flags = re.IGNORECASE
+                                    if '\\n' in pattern or pattern.startswith('^') or '^\\'  in pattern:
+                                        flags |= re.MULTILINE
                                     highlighted = re.sub(
                                         f'({pattern})',
                                         r'<span class="highlight-match">\1</span>',
                                         escaped,
-                                        flags=re.IGNORECASE
+                                        flags=flags
                                     )
                                     return highlighted
                                 except re.error:

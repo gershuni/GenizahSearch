@@ -4099,7 +4099,10 @@ class ResultDialog(QDialog):
             return ""
         if pattern_str and '*' not in text:
             try:
-                regex = re.compile(pattern_str, re.IGNORECASE)
+                flags = re.IGNORECASE
+                if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+                    flags |= re.MULTILINE
+                regex = re.compile(pattern_str, flags)
                 text = regex.sub(r'*\g<0>*', text)
             except re.error:
                 pass
@@ -4185,7 +4188,10 @@ class ResultDialog(QDialog):
         if pattern_str:
             try:
                 # Apply Regex to clean full-text to verify highlighting on load
-                regex = re.compile(pattern_str, re.IGNORECASE)
+                flags = re.IGNORECASE
+                if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+                    flags |= re.MULTILINE
+                regex = re.compile(pattern_str, flags)
                 ms_raw = regex.sub(r'*\g<0>*', ms_raw)
             except re.error:
                 pass
@@ -4367,7 +4373,10 @@ class ResultDialog(QDialog):
         
         if pattern_str:
             try:
-                regex = re.compile(pattern_str, re.IGNORECASE)
+                flags = re.IGNORECASE
+                if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+                    flags |= re.MULTILINE
+                regex = re.compile(pattern_str, flags)
                 highlighted_text = regex.sub(r'*\g<0>*', raw_text)
                 raw_text = highlighted_text
             except re.error: pass
@@ -6995,10 +7004,13 @@ class TabularQueryBuilderDialog(QDialog):
         self._rb_word_range = QRadioButton(tr("Word Range"))
         self._rb_word_range.setChecked(True)
         self._rb_within_doc = QRadioButton(tr("Within Document"))
+        self._rb_lines = QRadioButton(tr("Lines"))
         self._scope_group.addButton(self._rb_word_range, 0)
         self._scope_group.addButton(self._rb_within_doc, 1)
+        self._scope_group.addButton(self._rb_lines, 2)
         scope_row.addWidget(self._rb_word_range)
         scope_row.addWidget(self._rb_within_doc)
+        scope_row.addWidget(self._rb_lines)
         scope_row.addStretch()
         self._scope_group.idToggled.connect(self._on_scope_changed)
         main_layout.addLayout(scope_row)
@@ -7055,12 +7067,23 @@ class TabularQueryBuilderDialog(QDialog):
         self.chk_negation.setToolTip(tr("Negation tooltip"))
         mod_row.addWidget(self.chk_negation)
 
+        self.chk_line_start = QCheckBox(tr("Start of line |_"))
+        self.chk_line_start.setToolTip(tr("Word must appear at start of line"))
+        mod_row.addWidget(self.chk_line_start)
+        self.chk_line_start.setVisible(False)  # Only visible in Lines scope
+
+        self.chk_line_end = QCheckBox(tr("End of line _|"))
+        self.chk_line_end.setToolTip(tr("Word must appear at end of line"))
+        mod_row.addWidget(self.chk_line_end)
+        self.chk_line_end.setVisible(False)  # Only visible in Lines scope
+
         mod_row.addStretch()
         main_layout.addLayout(mod_row)
 
         # Connect modifier checkboxes
         for chk in [self.chk_prefix, self.chk_suffix, self.chk_wild_start,
-                     self.chk_wild_end, self.chk_plene, self.chk_negation]:
+                     self.chk_wild_end, self.chk_plene, self.chk_negation,
+                     self.chk_line_start, self.chk_line_end]:
             chk.stateChanged.connect(self._on_modifier_changed)
 
         # --- Search Options Row ---
@@ -7347,12 +7370,23 @@ class TabularQueryBuilderDialog(QDialog):
         self._update_preview()
 
     def _on_scope_changed(self, button_id, checked):
-        """Toggle distance spinner visibility based on scope."""
+        """Toggle distance spinner/modifier visibility based on scope."""
         if not checked:
             return
-        show_distances = (button_id == 0)  # 0 = Word Range
+        is_word_range = (button_id == 0)
+        is_lines = (button_id == 2)
+        # Distance spinners: visible for word_range and lines, hidden for within_document
         for container in self._distance_containers:
-            container.setVisible(show_distances)
+            container.setVisible(is_word_range or is_lines)
+        # Update distance labels: "words" vs "lines"
+        for container in self._distance_containers:
+            labels = container.findChildren(QLabel)
+            for lbl in labels:
+                if lbl.text() in (tr("words"), tr("lines")):
+                    lbl.setText(tr("lines") if is_lines else tr("words"))
+        # Line position modifiers: only visible in Lines scope
+        self.chk_line_start.setVisible(is_lines)
+        self.chk_line_end.setVisible(is_lines)
         self._update_preview()
 
     def _on_word_focus(self, comp_idx, word_idx):
@@ -7367,6 +7401,8 @@ class TabularQueryBuilderDialog(QDialog):
             self.chk_wild_end.setChecked(mods.get('wildcard_suffix', False))
             self.chk_plene.setChecked(mods.get('plene', False))
             self.chk_negation.setChecked(mods.get('negation', False))
+            self.chk_line_start.setChecked(mods.get('line_start', False))
+            self.chk_line_end.setChecked(mods.get('line_end', False))
         finally:
             self._updating_modifiers = False
 
@@ -7374,6 +7410,7 @@ class TabularQueryBuilderDialog(QDialog):
         'prefix': '#_', 'suffix': '_#',
         'wildcard_prefix': '*_', 'wildcard_suffix': '_*',
         'plene': '%', 'negation': '−',
+        'line_start': '|_', 'line_end': '_|',
     }
 
     def _update_mod_indicator(self, ci, wi):
@@ -7400,6 +7437,8 @@ class TabularQueryBuilderDialog(QDialog):
             'wildcard_suffix': self.chk_wild_end.isChecked(),
             'plene': self.chk_plene.isChecked(),
             'negation': self.chk_negation.isChecked(),
+            'line_start': self.chk_line_start.isChecked(),
+            'line_end': self.chk_line_end.isChecked(),
         }
         self._component_data[ci]['words'][wi]['mods'] = mods
         self._update_mod_indicator(ci, wi)
@@ -7436,7 +7475,12 @@ class TabularQueryBuilderDialog(QDialog):
         distances = [s.value() for s in self._distance_spinners]
 
         # Get scope
-        scope = 'word_range' if self._rb_word_range.isChecked() else 'within_document'
+        if self._rb_lines.isChecked():
+            scope = 'lines'
+        elif self._rb_within_doc.isChecked():
+            scope = 'within_document'
+        else:
+            scope = 'word_range'
 
         try:
             syntax, negated = generate_tabular_syntax(components, distances, scope)
@@ -9980,6 +10024,12 @@ class GenizahGUI(QMainWindow):
         self.exclude_input.setToolTip(tr("Results containing these words will be filtered out"))
         self.exclude_input.setFixedWidth(120)
 
+        # Text Position filter (for join detection)
+        self.text_position_combo = QComboBox()
+        self.text_position_combo.addItems([tr("Anywhere"), tr("Start of text"), tr("End of text"), tr("Line starts"), tr("Line ends")])
+        self.text_position_combo.setToolTip(tr("Constrain matches to text boundaries (for join detection)"))
+        self.text_position_combo.setFixedWidth(120)
+
         # Gear button for search settings
         self.btn_search_settings = QPushButton("⚙")
         self.btn_search_settings.setFixedWidth(30)
@@ -10002,6 +10052,8 @@ class GenizahGUI(QMainWindow):
         params_layout.addWidget(self.gap_input)
         params_layout.addWidget(QLabel(tr("Exclude:")))
         params_layout.addWidget(self.exclude_input)
+        params_layout.addWidget(QLabel(tr("Position:")))
+        params_layout.addWidget(self.text_position_combo)
         params_layout.addWidget(self.btn_search_settings)
         params_layout.addWidget(self.btn_lab_mode_toggle)
         params_layout.addWidget(self.chk_lab_deep)
@@ -10169,7 +10221,8 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnWidth(self.COL_PGP, 40)  # PGP badge column
         self.results_table.setColumnWidth(self.COL_DOMAIN, 130)  # Domain column
         self.results_table.setColumnWidth(self.COL_PRINTED, 50)  # Printed badge column
-        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Stretch)
+        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Interactive)
+        self.results_table.setColumnWidth(self.COL_SNIPPET, 600)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PGP, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PRINTED, QHeaderView.ResizeMode.Fixed)
         # Ensure column 0 is not sortable to avoid confusion with check action
@@ -19045,7 +19098,8 @@ class GenizahGUI(QMainWindow):
 
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None))
+            text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()]
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None), text_position=text_position)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(self._on_search_progress)
@@ -19135,11 +19189,13 @@ class GenizahGUI(QMainWindow):
         # 11. Clear list filter state
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
 
-        # 12. Clear gap and exclude inputs
+        # 12. Clear gap, exclude, and position inputs
         if hasattr(self, 'gap_input'):
             self.gap_input.setText("0")
         if hasattr(self, 'exclude_input'):
             self.exclude_input.setText("")
+        if hasattr(self, 'text_position_combo'):
+            self.text_position_combo.setCurrentIndex(0)
 
         # 13. Update status bar
         self.status_label.setText(tr("Ready."))
@@ -19166,7 +19222,7 @@ class GenizahGUI(QMainWindow):
     def render_asterisks_to_html(self, text):
         if not text: return ""
         t = SearchEngine.format_snippet(text, style='html_inline')
-        return f"<div dir='rtl'>{t}</div>"
+        return f"<p dir='rtl' align='center'>{t}</p>"
 
     def check_scroll_load(self, value):
         bar = self.results_table.verticalScrollBar()
@@ -22510,7 +22566,10 @@ class GenizahGUI(QMainWindow):
         if highlight_pattern and source_text:
             try:
                 # Apply highlighting to Source Text if pattern exists
-                regex = re.compile(highlight_pattern, re.IGNORECASE)
+                flags = re.IGNORECASE
+                if '\\n' in highlight_pattern or highlight_pattern.startswith('^') or '^\\' in highlight_pattern:
+                    flags |= re.MULTILINE
+                regex = re.compile(highlight_pattern, flags)
                 # Only apply if not already highlighted (simple check)
                 if '*' not in source_text:
                     source_text = regex.sub(r'*\g<0>*', source_text)
@@ -24137,7 +24196,10 @@ class GenizahGUI(QMainWindow):
         page_text = self._apply_browse_highlights(page_text, pd.get('uid'))
         if self.browse_highlight_pattern:
             try:
-                regex = re.compile(self.browse_highlight_pattern, re.IGNORECASE)
+                flags = re.IGNORECASE
+                if '\\n' in self.browse_highlight_pattern or self.browse_highlight_pattern.startswith('^') or '^\\' in self.browse_highlight_pattern:
+                    flags |= re.MULTILINE
+                regex = re.compile(self.browse_highlight_pattern, flags)
                 page_text = regex.sub(r'*\g<0>*', page_text)
             except Exception:
                 pass
@@ -24832,6 +24894,8 @@ class GenizahGUI(QMainWindow):
                 self.mode_combo.setCurrentIndex(params['mode_index'])
             if 'gap' in params:
                 self.gap_input.setText(str(params['gap']))
+            if 'text_position' in params:
+                self.text_position_combo.setCurrentIndex(params['text_position'])
             if 'variant_preset' in params:
                 self._current_variant_preset = params['variant_preset']
             # Restore pre-search filters
@@ -24922,6 +24986,7 @@ class GenizahGUI(QMainWindow):
             'search_params': {
                 'mode_index': self.mode_combo.currentIndex(),
                 'gap': int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0,
+                'text_position': self.text_position_combo.currentIndex(),
                 'variant_preset': getattr(self, '_current_variant_preset', 70),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
@@ -25003,6 +25068,7 @@ class GenizahGUI(QMainWindow):
                     'query': self.query_input.text() if hasattr(self, 'query_input') else '',
                     'mode_index': self.mode_combo.currentIndex() if hasattr(self, 'mode_combo') else 0,
                     'gap': int(self.gap_input.text()) if hasattr(self, 'gap_input') and self.gap_input.text().isdigit() else 0,
+                    'text_position': self.text_position_combo.currentIndex() if hasattr(self, 'text_position_combo') else 0,
                     'variant_preset': getattr(self, '_current_variant_preset', 70),
                     'results': getattr(self, 'last_results', [])[:5000],
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
@@ -25112,6 +25178,8 @@ class GenizahGUI(QMainWindow):
                 self.mode_combo.setCurrentIndex(reg['mode_index'])
             if reg.get('gap'):
                 self.gap_input.setText(str(reg['gap']))
+            if reg.get('text_position'):
+                self.text_position_combo.setCurrentIndex(reg['text_position'])
             if reg.get('variant_preset') is not None:
                 self._current_variant_preset = reg['variant_preset']
 

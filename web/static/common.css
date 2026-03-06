@@ -184,6 +184,10 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex=
     color: white !important;
 }
 
+[data-theme="dark"] .line-break-sep {
+    color: #aaa !important;
+}
+
 /* Dark Theme Tabs Fixes */
 [data-theme="dark"] .q-tabs,
 [data-theme="dark"] .q-tab-panels {
@@ -692,6 +696,12 @@ body {
     padding: 2px 4px;
     border-radius: 3px;
     font-weight: 600;
+}
+
+.line-break-sep {
+    color: #888;
+    font-weight: bold;
+    padding: 0 2px;
 }
 
 /* Stats Cards */

@@ -3986,6 +3986,168 @@ class Indexer:
     def __init__(self, meta_mgr):
         self.meta_mgr = meta_mgr
 
+    @staticmethod
+    def _extract_position_fields(content, head_words=10):
+        """Extract position-search fields from content text.
+
+        Returns dict with content_head, content_tail, line_starts, line_ends.
+        line_starts/line_ends include both plain tokens (for "any line" search)
+        and L{n}:word positional tokens (for per-line search like L3:שלום).
+        """
+        words = content.split()
+        head = " ".join(words[:head_words]) if words else ""
+        tail = " ".join(words[-head_words:]) if words else ""
+        lines = [ln.strip() for ln in content.split("\n") if ln.strip()]
+        ls_parts = []
+        le_parts = []
+        for i, ln in enumerate(lines, 1):
+            ln_words = ln.split()
+            if ln_words:
+                ls_parts.append(ln_words[0])
+                ls_parts.append(f"L{i}:{ln_words[0]}")
+                le_parts.append(ln_words[-1])
+                le_parts.append(f"L{i}:{ln_words[-1]}")
+        return {
+            'content_head': head,
+            'content_tail': tail,
+            'line_starts': " ".join(ls_parts),
+            'line_ends': " ".join(le_parts),
+        }
+
+    @staticmethod
+    def _validate_position_match(content, match_obj, text_position, line_constraints=None):
+        """Post-filter: validate that a regex match occurs at the expected text position.
+
+        Tantivy uses broad fields (e.g. first 10 words) for speed; this validates
+        the exact position (e.g. match is literally the first/last words).
+
+        line_constraints: {line_num: word} for per-line validation (L3:שלום syntax).
+        """
+        if not text_position:
+            return True
+
+        # Per-line constraints: validate each L{n}:word against specific lines
+        if line_constraints:
+            lines = [ln.strip() for ln in content.split('\n') if ln.strip()]
+            for line_num, word in line_constraints.items():
+                if line_num < 1 or line_num > len(lines):
+                    return False
+                ln_words = lines[line_num - 1].split()
+                if not ln_words:
+                    return False
+                if text_position == 'line_start':
+                    if ln_words[0] != word:
+                        return False
+                elif text_position == 'line_end':
+                    if ln_words[-1] != word:
+                        return False
+            return True
+
+        start, end = match_obj.start(), match_obj.end()
+        if text_position == 'start':
+            return not content[:start].strip()
+        elif text_position == 'end':
+            return not content[end:].strip()
+        elif text_position == 'line_start':
+            before = content[:start]
+            last_nl = before.rfind('\n')
+            line_prefix = before[last_nl + 1:] if last_nl >= 0 else before
+            return not line_prefix.strip()
+        elif text_position == 'line_end':
+            after = content[end:]
+            next_nl = after.find('\n')
+            line_suffix = after[:next_nl] if next_nl >= 0 else after
+            return not line_suffix.strip()
+        return True
+
+    @staticmethod
+    def _validate_line_break_match(content, line_groups, line_gaps, expanded_groups):
+        """Post-filter: validate that a document satisfies line-break constraints.
+
+        Args:
+            content: Full document text
+            line_groups: List[LineGroup] with positional constraints
+            line_gaps: List[Optional[int]] — None=consecutive, int=skip N lines
+            expanded_groups: List[List[set]] — for each group, for each component,
+                            the set of expanded words (lowercase) that match
+
+        Returns:
+            list of (line_index, line_text) tuples for matched lines, or None if no match.
+        """
+        lines = [ln.strip() for ln in content.split('\n') if ln.strip()]
+        if not lines:
+            return None
+
+        # For each group, find all line indices where ALL components match
+        group_candidates = []
+        for gi, group in enumerate(line_groups):
+            exp_words = expanded_groups[gi]  # list of sets, one per component
+            matching_lines = []
+            for li, line in enumerate(lines):
+                line_words = line.split()
+                if not line_words:
+                    continue
+
+                # Check positional constraints
+                all_match = True
+                for ci, word_set in enumerate(exp_words):
+                    if not word_set:
+                        all_match = False
+                        break
+                    if ci == 0 and group.line_start:
+                        # First component must match first word of line
+                        if line_words[0].lower() not in word_set:
+                            all_match = False
+                            break
+                    elif ci == len(exp_words) - 1 and group.line_end:
+                        # Last component must match last word of line
+                        if line_words[-1].lower() not in word_set:
+                            all_match = False
+                            break
+
+                    # Word must appear somewhere on the line (for unconstrained position)
+                    if ci == 0 and group.line_start:
+                        continue  # Already checked above
+                    if ci == len(exp_words) - 1 and group.line_end:
+                        continue  # Already checked above
+
+                    # Check if any expanded word appears on this line
+                    line_lower = [w.lower() for w in line_words]
+                    if not any(w in word_set for w in line_lower):
+                        all_match = False
+                        break
+
+                if all_match:
+                    matching_lines.append(li)
+
+            if not matching_lines:
+                return None  # This group has no matching line → fail
+            group_candidates.append(matching_lines)
+
+        # Find valid assignment: ordered line indices with gap constraints
+        # Use recursive backtracking (groups are typically 2-4, so this is fast)
+        def _find_assignment(gi, prev_line):
+            if gi >= len(group_candidates):
+                return []  # All groups assigned
+            gap = line_gaps[gi - 1] if gi > 0 and gi - 1 < len(line_gaps) else None
+            for li in group_candidates[gi]:
+                if gi == 0:
+                    # First group can be any line
+                    result = _find_assignment(gi + 1, li)
+                    if result is not None:
+                        return [(li, lines[li])] + result
+                else:
+                    # Check ordering and gap constraint
+                    expected_distance = (gap if gap is not None else 0) + 1
+                    actual_distance = li - prev_line
+                    if actual_distance == expected_distance:
+                        result = _find_assignment(gi + 1, li)
+                        if result is not None:
+                            return [(li, lines[li])] + result
+            return None
+
+        return _find_assignment(0, -1)
+
     def create_index(self, progress_callback=None):
         # Validation
         if not os.path.exists(Config.FILE_V8):
@@ -4004,6 +4166,10 @@ class Indexer:
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("unique_id", stored=True)
         builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
+        builder.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
+        builder.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
+        builder.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
+        builder.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
         builder.add_text_field("source", stored=True)
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
@@ -4012,7 +4178,7 @@ class Indexer:
         schema = builder.build()
         
         index = tantivy.Index(schema, path=db_path)
-        writer = index.writer(heap_size=150_000_000)
+        writer = index.writer(heap_size=500_000_000)
         
         total_docs = 0
         browse_map = defaultdict(list)
@@ -4049,11 +4215,15 @@ class Indexer:
                     
                     if is_sep:
                         if cid and ctext:
+                            page_content = "\n".join(ctext)
+                            pos = self._extract_position_fields(page_content)
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                             writer.add_document(tantivy.Document(
-                                unique_id=str(cid), content="\n".join(ctext), source=str(label),
+                                unique_id=str(cid), content=page_content, source=str(label),
                                 full_header=str(chead), shelfmark=str(shelfmark),
-                                scope="page", boundaries=""
+                                scope="page", boundaries="",
+                                content_head=pos['content_head'], content_tail=pos['content_tail'],
+                                line_starts=pos['line_starts'], line_ends=pos['line_ends'],
                             ))
                             parsed = self.meta_mgr.parse_full_id_components(chead)
                             if parsed['sys_id']:
@@ -4078,11 +4248,15 @@ class Indexer:
                         progress_callback(processed_lines, total_lines)
                 
                 if cid and ctext:
+                    page_content = " ".join(ctext)
+                    pos = self._extract_position_fields(page_content)
                     shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                     writer.add_document(tantivy.Document(
-                        unique_id=str(cid), content=" ".join(ctext), source=str(label),
+                        unique_id=str(cid), content=page_content, source=str(label),
                         full_header=str(chead), shelfmark=str(shelfmark),
-                        scope="page", boundaries=""
+                        scope="page", boundaries="",
+                        content_head=pos['content_head'], content_tail=pos['content_tail'],
+                        line_starts=pos['line_starts'], line_ends=pos['line_ends'],
                     ))
                     parsed = self.meta_mgr.parse_full_id_components(chead)
                     if parsed['sys_id']:
@@ -4189,6 +4363,7 @@ class Indexer:
         first_source = pages[0].get('source', '')
         shelfmark = self.meta_mgr.get_shelfmark_from_header(first_header) or ""
 
+        pos = self._extract_position_fields(content)
         writer.add_document(tantivy.Document(
             unique_id=str(unique_id),
             content=str(content),
@@ -4196,7 +4371,9 @@ class Indexer:
             full_header=str(first_header),
             shelfmark=str(shelfmark),
             scope=str(scope),
-            boundaries=json.dumps(boundaries, ensure_ascii=False)
+            boundaries=json.dumps(boundaries, ensure_ascii=False),
+            content_head=pos['content_head'], content_tail=pos['content_tail'],
+            line_starts=pos['line_starts'], line_ends=pos['line_ends'],
         ))
 
     def _add_chunked_continuous_documents(self, writer, pages, scope, unique_id, word_limit, word_pattern):
@@ -4300,6 +4477,172 @@ def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
 # Regex for matching [N] gap tokens like [3], [0], [15]
 _GAP_TOKEN_RE = re.compile(r'^\[(\d+)\]$')
 
+# Regex for matching [|N] line-gap tokens like [|2], [|0]
+_LINE_GAP_TOKEN_RE = re.compile(r'^\[\|(\d+)\]$')
+
+
+def _has_line_break_syntax(query_str: str) -> bool:
+    """Check if a query string contains line-break syntax (| characters).
+
+    Returns True if any token starts/ends with | or is a standalone |,
+    or contains [|N] line-gap notation.
+    """
+    if not query_str:
+        return False
+    tokens = _tokenize_responsa_query(query_str.strip())
+    for token in tokens:
+        if not token:
+            continue
+        if _LINE_GAP_TOKEN_RE.match(token):
+            return True
+        if token == '|':
+            return True
+        # Check for |word or word| (but not inside parentheses)
+        stripped = token
+        # Strip leading Responsa modifiers to find the |
+        while stripped and stripped[0] in ('%', '#', '-'):
+            stripped = stripped[1:]
+        if stripped.startswith('|'):
+            return True
+        # Strip trailing modifiers to find |
+        stripped = token
+        while stripped and stripped[-1] in ('#',):
+            stripped = stripped[:-1]
+        if stripped.endswith('|'):
+            return True
+    return False
+
+
+@dataclass
+class LineGroup:
+    """A constraint on one line of text in a line-break search.
+
+    Each group represents words that must appear on the same line,
+    with optional positional constraints (start/end of line).
+    """
+    components: List['ResponsaComponent']
+    line_start: bool = False   # First word must be at start of line
+    line_end: bool = False     # Last word must be at end of line
+
+
+def _parse_line_break_query(query_str: str):
+    """Parse a Responsa query with line-break syntax into line groups.
+
+    Returns (line_groups, line_gaps) where:
+    - line_groups: List[LineGroup] — each group = one line constraint
+    - line_gaps: List[Optional[int]] — gaps between consecutive groups
+      (None = consecutive, int = skip N lines)
+
+    Returns (None, None) if no line-break syntax detected.
+    """
+    if not query_str or not _has_line_break_syntax(query_str):
+        return None, None
+
+    tokens = _tokenize_responsa_query(query_str.strip())
+    if not tokens:
+        return None, None
+
+    groups = []
+    line_gaps = []
+    current_tokens = []       # raw tokens for current group
+    current_line_start = False
+    current_line_end = False
+    pending_line_gap = None   # gap value from [|N] token
+
+    def _flush_group():
+        """Finalize current group and append to groups list."""
+        nonlocal current_tokens, current_line_start, current_line_end, pending_line_gap
+        if not current_tokens:
+            return
+        # Parse tokens through Responsa pipeline
+        comps = []
+        for t in current_tokens:
+            if _GAP_TOKEN_RE.match(t):
+                continue  # word-gaps within a line group are ignored
+            comps.append(_parse_single_token(t))
+        if comps:
+            if groups:
+                line_gaps.append(pending_line_gap)
+            groups.append(LineGroup(
+                components=comps,
+                line_start=current_line_start,
+                line_end=current_line_end,
+            ))
+        current_tokens = []
+        current_line_start = False
+        current_line_end = False
+        pending_line_gap = None
+
+    for token in tokens:
+        if not token:
+            continue
+
+        # [|N] line gap
+        lg_match = _LINE_GAP_TOKEN_RE.match(token)
+        if lg_match:
+            _flush_group()
+            pending_line_gap = int(lg_match.group(1))
+            continue
+
+        # [N] word gap — pass through (ignored in line mode, but keep for component parsing)
+        if _GAP_TOKEN_RE.match(token):
+            current_tokens.append(token)
+            continue
+
+        # Standalone | — line break without position constraint
+        if token == '|':
+            _flush_group()
+            continue
+
+        # Check for leading | (after stripping Responsa modifiers)
+        raw = token
+        prefix_mods = ''
+        while raw and raw[0] in ('%', '#', '-'):
+            prefix_mods += raw[0]
+            raw = raw[1:]
+
+        has_leading_pipe = raw.startswith('|')
+        if has_leading_pipe:
+            raw = raw[1:]  # strip the |
+
+        # Check for trailing | (after stripping trailing modifiers)
+        suffix_mods = ''
+        temp = raw
+        while temp and temp[-1] in ('#',):
+            suffix_mods = temp[-1] + suffix_mods
+            temp = temp[:-1]
+        has_trailing_pipe = temp.endswith('|')
+        if has_trailing_pipe:
+            temp = temp[:-1]  # strip the |
+            raw = temp + suffix_mods
+
+        # If leading |, this starts a new group
+        if has_leading_pipe:
+            _flush_group()
+            current_line_start = True
+
+        # Reconstruct the clean token (without |) for Responsa parsing
+        clean_token = prefix_mods + raw
+        if clean_token:
+            current_tokens.append(clean_token)
+
+        # If trailing |, mark end and flush (next token starts new group)
+        if has_trailing_pipe:
+            current_line_end = True
+            _flush_group()
+
+    # Flush remaining
+    _flush_group()
+
+    if not groups:
+        return None, None
+
+    # Fill remaining gaps
+    while len(line_gaps) < len(groups) - 1:
+        line_gaps.append(None)
+
+    return groups, line_gaps
+
 
 def extract_per_pair_gaps(query_str: str) -> List[Optional[int]]:
     """Extract per-pair gap values from [N] tokens in a Responsa query.
@@ -4349,9 +4692,10 @@ def generate_tabular_syntax(components, distances, scope='word_range'):
     Args:
         components: List of dicts with 'words' key, where words is a list of
                    {'text': str, 'mods': dict} dicts. Mods keys: prefix, suffix,
-                   wildcard_prefix, wildcard_suffix, plene, negation
+                   wildcard_prefix, wildcard_suffix, plene, negation,
+                   line_start, line_end (for lines scope)
         distances: List of ints (len = len(components) - 1), gap between adjacent pairs
-        scope: 'word_range' or 'within_document'
+        scope: 'word_range', 'within_document', or 'lines'
 
     Returns:
         Tuple of (syntax_str, negated_words) where negated_words is a list of
@@ -4364,11 +4708,19 @@ def generate_tabular_syntax(components, distances, scope='word_range'):
 
     for i, comp in enumerate(components):
         words_with_mods = []
+        has_line_start = False
+        has_line_end = False
         for word_info in comp.get('words', []):
             text = word_info.get('text', '').strip()
             if not text:
                 continue
             mods = word_info.get('mods', {})
+
+            # Track line position modifiers (lines scope)
+            if mods.get('line_start'):
+                has_line_start = True
+            if mods.get('line_end'):
+                has_line_end = True
 
             # Check negation -- embed as -word in syntax AND extract
             if mods.get('negation'):
@@ -4399,13 +4751,32 @@ def generate_tabular_syntax(components, distances, scope='word_range'):
         else:
             part = words_with_mods[0]
 
-        # Add distance notation between components (only for word_range scope)
-        if valid_component_index > 0 and scope == 'word_range':
-            # Get the distance for the gap BEFORE this component
-            dist_idx = valid_component_index - 1
-            dist = distances[dist_idx] if dist_idx < len(distances) else 0
-            if dist > 0:
-                parts.append(f'[{dist}]')
+        # Lines scope: wrap with | for position, add [|N] for gaps
+        if scope == 'lines':
+            if has_line_start:
+                part = '|' + part
+            if has_line_end:
+                part = part + '|'
+            # If neither start nor end, just a bare component (any position on line)
+
+            if valid_component_index > 0:
+                dist_idx = valid_component_index - 1
+                dist = distances[dist_idx] if dist_idx < len(distances) else 0
+                if dist > 0:
+                    parts.append(f'[|{dist}]')
+                else:
+                    # Consecutive lines: insert | separator if previous part
+                    # doesn't already end with | and current doesn't start with |
+                    prev = parts[-1] if parts else ''
+                    if not prev.endswith('|') and not part.startswith('|'):
+                        parts.append('|')
+        elif scope == 'word_range':
+            # Add distance notation between components (only for word_range scope)
+            if valid_component_index > 0:
+                dist_idx = valid_component_index - 1
+                dist = distances[dist_idx] if dist_idx < len(distances) else 0
+                if dist > 0:
+                    parts.append(f'[{dist}]')
 
         parts.append(part)
         valid_component_index += 1
@@ -5145,6 +5516,10 @@ class SearchEngine:
         # First escape HTML to prevent XSS
         escaped = html.escape(text)
 
+        # Style ‖ line-break indicators
+        escaped = escaped.replace('\u2016', '<span class="line-break-sep">\u2016</span>' if style == 'html_class'
+                                  else '<span style="color:#888; font-weight:bold;">\u2016</span>')
+
         # Convert *word* to highlighted span (after escaping, markers are safe)
         if style == 'html_class':
             return re.sub(r'\*(.*?)\*', r'<span class="highlight-match">\1</span>', escaped)
@@ -5465,9 +5840,9 @@ class SearchEngine:
         hl_snippet = snippet_safe[:rel_s] + f"*{snippet_safe[rel_s:rel_e]}*" + snippet_safe[rel_e:]
 
         if not for_file:
-            # For UI Table: Flatten newlines
-            return hl_snippet.replace('\n', ' ')
-        
+            # For UI Table: Replace newlines with ‖ line-break indicator
+            return hl_snippet.replace('\n', ' \u2016 ')
+
         # For File/Export: Keep newlines
         return hl_snippet
 
@@ -5487,7 +5862,7 @@ class SearchEngine:
         hl_snippet = snippet_safe[:rel_s] + f"*{snippet_safe[rel_s:rel_e]}*" + snippet_safe[rel_e:]
 
         if not for_file:
-            return hl_snippet.replace('\n', ' ')
+            return hl_snippet.replace('\n', ' \u2016 ')
         return hl_snippet
 
     def _parse_boundaries(self, doc):
@@ -5637,8 +6012,292 @@ class SearchEngine:
 
         return None, query
 
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None):
+    def _expand_responsa_component(self, comp, responsa_options):
+        """Expand a single ResponsaComponent through the full Responsa expansion pipeline.
+
+        Returns list of expanded words (lowercase strings).
+        """
+        variants_on = responsa_options.get('variants', False)
+        ja_on = responsa_options.get('ja', False)
+        variant_mode = responsa_options.get('variant_mode', 'exact')
+
+        expanded = list(comp.words)
+
+        if comp.plene_defective:
+            plene = []
+            for w in expanded:
+                plene.extend(expand_plene_defective(w))
+            expanded = list(dict.fromkeys(plene))
+
+        if comp.grammatical_prefixes:
+            pfx = []
+            for w in expanded:
+                pfx.extend(expand_grammatical_prefixes(w))
+            expanded = list(dict.fromkeys(pfx))
+
+        if comp.grammatical_suffixes:
+            sfx = []
+            for w in expanded:
+                sfx.extend(expand_grammatical_suffixes(w))
+            expanded = list(dict.fromkeys(sfx))
+
+        if ja_on:
+            ja = []
+            for w in expanded:
+                ja.extend(expand_judeo_arabic(w))
+            expanded = list(dict.fromkeys(ja))
+
+        if variants_on and self.var_mgr:
+            var = []
+            for w in expanded:
+                try:
+                    var.extend(self.var_mgr.get_variants(w, variant_mode, limit=200))
+                except Exception:
+                    var.append(w)
+            expanded = list(dict.fromkeys(var))
+
+        return expanded
+
+    @staticmethod
+    def _build_line_break_regex(line_groups, line_gaps, expanded_groups):
+        """Build a regex pattern for line-break search.
+
+        Each group becomes a line pattern, joined by newline separators with gap support.
+        Returns compiled regex or None.
+        """
+        line_patterns = []
+        for gi, group in enumerate(line_groups):
+            # Build per-component alternatives
+            comp_parts = []
+            for ci, word_set in enumerate(expanded_groups[gi]):
+                sorted_words = sorted(word_set, key=len, reverse=True)
+                escaped = [make_mark_tolerant_pattern(re.escape(w)) for w in sorted_words]
+                if not escaped:
+                    continue
+                comp_parts.append(f"({'|'.join(escaped)})")
+
+            if not comp_parts:
+                continue
+
+            # Build line pattern based on position constraints
+            is_first_start = group.line_start
+            is_last_end = group.line_end
+
+            if len(comp_parts) == 1:
+                word_pat = comp_parts[0]
+            else:
+                # Multiple words on same line: join with flexible spacing
+                word_pat = r'[^\S\n]+'.join(comp_parts)
+
+            if is_first_start and is_last_end:
+                # Entire line must be just these words
+                line_pat = r'^\s*' + word_pat + r'\s*$'
+            elif is_first_start:
+                line_pat = r'^\s*' + word_pat + r'.*$'
+            elif is_last_end:
+                line_pat = r'^.*' + word_pat + r'\s*$'
+            else:
+                # Word anywhere on line
+                line_pat = r'^.*' + word_pat + r'.*$'
+
+            line_patterns.append(line_pat)
+
+        if not line_patterns:
+            return None
+
+        # Join line patterns with newline separators respecting gaps
+        parts = [line_patterns[0]]
+        for i in range(1, len(line_patterns)):
+            gap = line_gaps[i - 1] if i - 1 < len(line_gaps) and line_gaps[i - 1] is not None else 0
+            if gap == 0:
+                parts.append(r'\n')
+            else:
+                # Skip exactly `gap` lines
+                parts.append(r'\n(?:.*\n){' + str(gap) + r'}')
+            parts.append(line_patterns[i])
+
+        pattern_str = ''.join(parts)
+        try:
+            return re.compile(pattern_str, re.IGNORECASE | re.MULTILINE)
+        except re.error as e:
+            LOGGER.warning("Line-break regex failed to compile: %s", e)
+            return None
+
+    def _execute_line_break_search(self, line_groups, line_gaps, query_str,
+                                    responsa_options=None, progress_callback=None,
+                                    exclude_words=None, restrict_sys_ids=None,
+                                    text_position=None):
+        """Execute a line-break search using | syntax.
+
+        Uses regex for both matching and highlighting (fast + correct highlights).
+        """
+        if not self.searcher:
+            return []
+        opts = responsa_options or {}
+
+        # Expand each component in each group
+        expanded_groups = []
+        tantivy_parts = []
+        for group in line_groups:
+            group_expanded = []
+            for comp in group.components:
+                expanded = self._expand_responsa_component(comp, opts)
+                word_set = {w.lower() for w in expanded}
+                group_expanded.append(word_set)
+
+                is_first = (comp == group.components[0])
+                is_last = (comp == group.components[-1])
+
+                if is_first and group.line_start:
+                    field = 'line_starts'
+                elif is_last and group.line_end:
+                    field = 'line_ends'
+                else:
+                    field = 'content'
+
+                for w in comp.words:
+                    tantivy_parts.append(f'{field}:"{w}"')
+
+            expanded_groups.append(group_expanded)
+
+        if not tantivy_parts:
+            return []
+
+        # Build regex for matching + highlighting
+        regex = SearchEngine._build_line_break_regex(line_groups, line_gaps, expanded_groups)
+        if not regex:
+            return []
+
+        t_query_str = " AND ".join(tantivy_parts)
+        pattern_str = regex.pattern
+        LOGGER.info(f"[DEBUG] Line-break search, Tantivy: {t_query_str[:500]}")
+        LOGGER.info(f"[DEBUG] Line-break regex: {pattern_str[:500]}")
+
+        if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
+            sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
+            t_query_str = f'({t_query_str}) AND ({sid_clauses})'
+
+        try:
+            query = self.index.parse_query(t_query_str, ['content'])
+            res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
+        except Exception as e:
+            LOGGER.warning("Line-break search query failed: %s", e)
+            return []
+
+        hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
+        total_hits = len(hits)
+        LOGGER.info(f"[DEBUG] Line-break Tantivy returned {total_hits} hits")
+
+        restrict_uids = None
+        if restrict_sys_ids is not None:
+            browse_map = self._load_browse_map()
+            restrict_uids = set()
+            for sid in restrict_sys_ids:
+                for page in browse_map.get(sid, []):
+                    restrict_uids.add(page['uid'])
+
+        results = []
+        regex_filtered = 0
+        was_interrupted = False
+
+        try:
+            for i, (score, doc_addr) in enumerate(hits):
+                if progress_callback and i % 5 == 0:
+                    progress_callback(i, total_hits)
+                try:
+                    doc = self.searcher.doc(doc_addr)
+
+                    if restrict_uids is not None:
+                        if doc['unique_id'][0] not in restrict_uids:
+                            continue
+
+                    content = self._get_field(doc, 'content', [""])[0]
+
+                    # Regex match — fast filter + provides highlight span
+                    match_obj = regex.search(content)
+                    if not match_obj:
+                        regex_filtered += 1
+                        continue
+
+                    # Text position filter
+                    if text_position == 'start' and match_obj.start() > 0:
+                        if content[:match_obj.start()].strip():
+                            regex_filtered += 1
+                            continue
+                    elif text_position == 'end' and match_obj.end() < len(content):
+                        if content[match_obj.end():].strip():
+                            regex_filtered += 1
+                            continue
+
+                    # Use standard highlight helpers with the match span
+                    span = match_obj.span()
+                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
+                    scope = scope_list[0]
+                    boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+
+                    hl_c = self.highlight(content, regex, False)
+                    hl_f = self.highlight(content, regex, True)
+
+                    if boundaries:
+                        span_map = self._map_span_to_pages(span, boundaries)
+                        primary = span_map.get('primary') or {}
+                        display_header = primary.get('full_header', doc['full_header'][0])
+                        source_label = primary.get('source', doc['source'][0])
+                        meta = self.meta_mgr.get_display_data(display_header, source_label)
+                        page_highlights = []
+                        for ov in span_map.get('overlaps', []):
+                            if 'span' in ov and ov.get('uid'):
+                                page_highlights.append({
+                                    'uid': ov.get('uid'),
+                                    'p_num': ov.get('p_num'),
+                                    'span': ov.get('span'),
+                                    'full_header': ov.get('full_header', ''),
+                                    'source': ov.get('source', '')
+                                })
+                        results.append({
+                            'display': meta,
+                            'snippet': hl_c or "",
+                            'full_text': content,
+                            'uid': primary.get('uid') or doc['unique_id'][0],
+                            'raw_header': display_header,
+                            'raw_file_hl': hl_f or "",
+                            'highlight_pattern': pattern_str,
+                            'page_highlights': page_highlights,
+                            'cross_page': span_map.get('cross_page', False),
+                            'scope': scope
+                        })
+                    else:
+                        if hl_c:
+                            meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+                            results.append({
+                                'display': meta, 'snippet': hl_c, 'full_text': content,
+                                'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
+                                'raw_file_hl': hl_f, 'highlight_pattern': pattern_str,
+                                'scope': scope
+                            })
+
+                except Exception as e:
+                    LOGGER.warning("Line-break search: failed to process hit %s: %s", i, e)
+        except InterruptedError:
+            was_interrupted = True
+
+        LOGGER.info(f"[DEBUG] Line-break search: {len(results)} results, filtered: {regex_filtered}, interrupted: {was_interrupted}")
+        deduped = self._deduplicate(results)
+
+        if exclude_words and deduped:
+            filtered = []
+            for r in deduped:
+                text_content = (r.get('snippet', '') + ' ' + r.get('full_text', '')).lower()
+                should_exclude = any(w.lower() in text_content for w in exclude_words)
+                if not should_exclude:
+                    filtered.append(r)
+            deduped = filtered
+
+        return deduped
+
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None):
         if not self.searcher: return []
+        _line_constraints = {}  # Per-line position constraints (L3:word syntax)
 
         # Strip combining diacritical marks and geresh/gershayim from query
         # Skip for Regex mode -- user controls the pattern directly
@@ -5694,6 +6353,18 @@ class SearchEngine:
 
             # b2. Extract per-pair gap values from [N] tokens
             per_pair_gaps = extract_per_pair_gaps(query_str)
+
+            # b3. Check for line-break syntax (| separators)
+            line_groups, line_gaps = _parse_line_break_query(query_str)
+            if line_groups is not None:
+                return self._execute_line_break_search(
+                    line_groups, line_gaps, query_str,
+                    responsa_options=responsa_options,
+                    progress_callback=progress_callback,
+                    exclude_words=exclude_words,
+                    restrict_sys_ids=restrict_sys_ids,
+                    text_position=text_position,
+                )
 
             # c. Expand each component
             variants_on = responsa_options.get('variants', False)
@@ -5840,13 +6511,40 @@ class SearchEngine:
             if mode == 'Regex': terms = [query_str]
             else: terms = query_str.split()
 
-            # Pre-compute variants at max limit so Tantivy (limit=200) can
-            # slice from cache instead of recomputing when regex (limit=8000) runs
-            if mode != 'Regex':
-                self._get_or_compute_variants(terms, mode)
+            # Per-line position search: parse L{n}:word constraints
+            # e.g. "L1:שלום L3:עליכם" → Tantivy searches positional tokens,
+            # regex matches the plain words, post-filter validates line positions
+            _line_constraints = {}  # {line_num: word} for post-filter
+            if text_position in ('line_start', 'line_end') and mode != 'Regex':
+                _lc_pattern = re.compile(r'^L(\d+):(.+)$')
+                has_line_prefixes = any(_lc_pattern.match(t) for t in terms)
+                if has_line_prefixes:
+                    tantivy_parts = []
+                    regex_terms = []
+                    for t in terms:
+                        m = _lc_pattern.match(t)
+                        if m:
+                            line_num, word = int(m.group(1)), m.group(2)
+                            _line_constraints[line_num] = word
+                            tantivy_parts.append(f'"{t}"')  # L{n}:word token
+                            regex_terms.append(word)         # plain word for regex
+                        else:
+                            tantivy_parts.append(f'"{t}"')
+                            regex_terms.append(t)
+                    t_query_str = " AND ".join(tantivy_parts)
+                    regex = self.build_regex_pattern(regex_terms, mode, gap)
+                    if not regex: return []
+                    # Skip the normal build path below
+                    terms = None
 
-            t_query_str = self.build_tantivy_query(terms, mode)
-            regex = self.build_regex_pattern(terms, mode, gap)
+            if terms is not None:
+                # Pre-compute variants at max limit so Tantivy (limit=200) can
+                # slice from cache instead of recomputing when regex (limit=8000) runs
+                if mode != 'Regex':
+                    self._get_or_compute_variants(terms, mode)
+
+                t_query_str = self.build_tantivy_query(terms, mode)
+                regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
 
         # DEBUG: Log query and regex
@@ -5863,8 +6561,17 @@ class SearchEngine:
             sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
             t_query_str = f'({t_query_str}) AND ({sid_clauses})'
 
+        # Choose search field based on text_position filter
+        position_field_map = {
+            'start': 'content_head',
+            'end': 'content_tail',
+            'line_start': 'line_starts',
+            'line_end': 'line_ends',
+        }
+        search_field = position_field_map.get(text_position, 'content')
+
         try:
-            query = self.index.parse_query(t_query_str, ["content"])
+            query = self.index.parse_query(t_query_str, [search_field])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
         except Exception as e:
             LOGGER.warning("Search query failed to parse/execute for pattern %s: %s", t_query_str, e)
@@ -5906,6 +6613,12 @@ class SearchEngine:
                     # Check for match before any heavy parsing
                     match_obj = regex.search(content)
                     if not match_obj:
+                        regex_filtered_count += 1
+                        continue
+
+                    # Position post-filter: Tantivy uses broad fields (10-word head/tail),
+                    # validate exact position (first word, last word, line boundary)
+                    if text_position and not Indexer._validate_position_match(content, match_obj, text_position, _line_constraints or None):
                         regex_filtered_count += 1
                         continue
 
