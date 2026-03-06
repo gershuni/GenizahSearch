@@ -4,6 +4,40 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.2.3] - 2026-03-06
+
+### Line-Break Search & Search Progress UX
+
+#### Line-Break Search (| syntax)
+- **Consecutive-line search** in Responsa mode: `|word` (line starts with), `word|` (line ends with), `word1 | word2` (cross-line)
+- **Line gap notation** `[|N]` for skipping N lines between groups
+- **Tabular builder** "Lines" scope with start/end-of-line modifier checkboxes
+- **Multiline regex** matching via `_build_line_break_regex()` for accurate filtering and highlighting
+
+#### Snippet Line-Break Indicator
+- **`‖` (U+2016)** replaces invisible newline flattening in all search snippets (desktop + web)
+- Styled gray/bold — visually distinct from query `|` and parallels segment breaks
+- Dark theme support in web CSS
+
+#### Search Progress Bar Fixes (Desktop)
+- **Stuck "Restoring" message** — progress bar format now resets when a new search starts
+- **Elapsed timer** updates every 1 second via independent QTimer (no longer freezes between progress callbacks)
+- **"Processing" phase** — after Tantivy loop completes, progress bar shows `מעבד תוצאות...` with running clock during result rendering
+- **Accurate "Search completed in"** — total time now includes post-processing and row rendering
+
+#### Multiline Regex Re-highlighting
+- ResultDialog and web expanded view now add `re.MULTILINE` flag when the highlight pattern contains `^` or `\n` anchors
+- Fixes broken highlighting when opening line-break search results in detail view
+
+#### Desktop Snippet Column
+- Column is now **resizable** (Interactive mode, 600px default) — was previously locked to Stretch
+
+#### Hebrew Translations
+- Position dropdown: Text Position, Anywhere, Start/End of text, Line starts/ends
+- Processing indicator, constraint tooltip, Position label (10 new keys)
+
+---
+
 ## [6.2.2] - 2026-03-05
 
 ### Bug Fixes: Parallels Search & Small-Screen Layout

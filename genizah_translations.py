@@ -2322,6 +2322,7 @@ TRANSLATIONS = {
     "Line ends": "סוף שורה",
     "Constrain matches to text boundaries (for join detection)": "הגבל התאמות לגבולות טקסט (לזיהוי צירופים)",
     "Position:": "מיקום:",
+    "Processing": "מעבד תוצאות",
     "Grammatical prefixes tooltip": "קידומות דקדוקיות (ו/ה/ב/כ/ל/מ/ש)",
     "Grammatical suffixes tooltip": "סיומות דקדוקיות",
     "Words ending with...": "מילים שמסתיימות ב...",

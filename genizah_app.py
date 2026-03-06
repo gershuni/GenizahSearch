@@ -19057,7 +19057,12 @@ class GenizahGUI(QMainWindow):
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_start_time = time.time()
         self._search_was_cancelled = False
-        self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setVisible(True)
+        self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setFormat("%p%"); self.search_progress.setVisible(True)
+        # Start a 1-second timer to keep elapsed display updating even between progress callbacks
+        if not hasattr(self, '_search_elapsed_timer'):
+            self._search_elapsed_timer = QTimer(self)
+            self._search_elapsed_timer.timeout.connect(self._update_search_elapsed)
+        self._search_elapsed_timer.start(1000)
 
         # Stop any previous metadata loading to prevent race conditions
         if self.meta_loader and self.meta_loader.isRunning():
@@ -19123,6 +19128,23 @@ class GenizahGUI(QMainWindow):
     def reset_ui(self):
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
         self.search_progress.setVisible(False)
+        if hasattr(self, '_search_elapsed_timer'):
+            self._search_elapsed_timer.stop()
+
+    def _update_search_elapsed(self):
+        """Tick every 1s to keep elapsed time updating during search."""
+        if not getattr(self, 'is_searching', False):
+            return
+        elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+        pct = self.search_progress.value()
+        max_val = self.search_progress.maximum()
+        if max_val > 0 and pct >= max_val:
+            self.search_progress.setFormat(f"{elapsed_str}  {tr('Processing')}...")
+            self.status_label.setText(f"{tr('Processing')}... {elapsed_str}")
+        else:
+            self.search_progress.setFormat(f"{elapsed_str}  %p%")
+            self.status_label.setText(f"{tr('Searching')}... {elapsed_str}")
 
     def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
 
@@ -19212,12 +19234,9 @@ class GenizahGUI(QMainWindow):
         self._schedule_session_save()
 
     def _on_search_progress(self, current, total):
-        """Handle regular search progress: update bar and show elapsed timer (GAP-3)."""
+        """Handle regular search progress: update bar and show elapsed timer."""
         self.search_progress.setMaximum(total)
         self.search_progress.setValue(current)
-        elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
-        elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
-        self.status_label.setText(f"{tr('Searching')}... {elapsed_str}")
 
     def render_asterisks_to_html(self, text):
         if not text: return ""
@@ -19425,10 +19444,13 @@ class GenizahGUI(QMainWindow):
             pass  # Silently fail -- notification is non-critical
 
     def on_search_finished(self, results):
-        self.reset_ui()
-        # Compute search elapsed time
-        search_elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
-        elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
+        # Show processing phase — keep progress bar visible with elapsed timer running
+        self.search_progress.setRange(0, 0)  # Indeterminate
+        elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+        self.search_progress.setFormat(f"{elapsed_str}  {tr('Processing')}...")
+        self.status_label.setText(f"{tr('Processing')}... {elapsed_str}")
+        QApplication.processEvents()
 
         self.chk_search_header.blockSignals(True)
         self.chk_search_header.setChecked(False)
@@ -19437,6 +19459,7 @@ class GenizahGUI(QMainWindow):
 
         was_cancelled = getattr(self, '_search_was_cancelled', False)
         if not results:
+            self.reset_ui()
             if was_cancelled:
                 self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})")
             else:
@@ -19483,14 +19506,6 @@ class GenizahGUI(QMainWindow):
 
         for b in self.export_buttons: b.setEnabled(True)
 
-        # Show elapsed time in status bar (persists until next action)
-        # Skip during session restore -- the "Restoring..." message is more relevant
-        partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
-        if not getattr(self, '_restoring_session', False):
-            self.statusBar().showMessage(
-                f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
-            )
-
         # Hide Source column if secondary source file (V0.7) is missing or empty
         # If Config.FILE_V7 is missing/empty, it implies we only have one source (V0.8) in index
         has_multiple_sources = os.path.exists(Config.FILE_V7) and os.path.getsize(Config.FILE_V7) > 0
@@ -19523,6 +19538,16 @@ class GenizahGUI(QMainWindow):
 
         # Toast notification when app is not focused
         self._notify_search_complete(len(results), self.last_search_query)
+
+        # Final: hide progress, compute total elapsed including rendering
+        self.reset_ui()
+        search_elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
+        partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
+        if not getattr(self, '_restoring_session', False):
+            self.statusBar().showMessage(
+                f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
+            )
 
     def _launch_enrichment_workers(self, results, defer=False):
         """Launch domain, PGP badge, and printed badge enrichment workers."""
