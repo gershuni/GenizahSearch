@@ -3737,14 +3737,14 @@ class ResultDialog(QDialog):
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
 
-        # Fields where original is Hebrew (translation direction is he2en)
-        _he_fields = {'rd_phys_desc', 'br_phys_desc'}
-
         def _trans_or_badge(field_key, text, label):
             """Return text with translate badge or cached translation."""
             if not _show_trans or not text or len(text.strip()) < 10:
                 return text
-            is_he_orig = field_key in _he_fields
+            # Skip translation for text already in Hebrew (user is in Hebrew UI)
+            if _is_hebrew_text(text):
+                return text
+            is_he_orig = False  # All translatable fields are English (Hebrew skipped above)
             cached = _ft_cache.get(field_key)
             if cached:
                 parent = self.parent()
@@ -4570,6 +4570,10 @@ class ResultDialog(QDialog):
                 if hasattr(parent, 'btn_b_translations'):
                     parent.btn_b_translations.setChecked(checked)
                     parent.btn_b_translations.setText(_label)
+                # Sync search tab button
+                if hasattr(parent, 'btn_search_translations'):
+                    parent.btn_search_translations.setChecked(checked)
+                    parent.btn_search_translations.setText(_label)
                 parent._trans_toggle_state = {}
         finally:
             self._rd_trans_syncing = False
@@ -4841,6 +4845,10 @@ class ResultDialog(QDialog):
         if thumb_url and thumb_url != getattr(self, 'current_thumb_url', None):
             self.fetch_image(self.current_sys_id, meta)
 
+        # Auto-translate fields on initial load if translations are ON
+        if load_app_config().get('show_translations', False):
+            self._rd_auto_translate_all()
+
     def sync_external_view(self):
         meta = self.meta_mgr.nli_cache.get(self.current_sys_id, {})
         if not meta:
@@ -5089,12 +5097,27 @@ def _get_title_svc():
             return None
     return _title_svc_singleton
 
-def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translations=None):
+def _is_hebrew_text(text):
+    """Check if text is purely/nearly Hebrew with negligible English.
+
+    Returns True only when Latin content is negligible (<20 chars).
+    Mixed text (e.g. scholarly descriptions with Hebrew quotations)
+    returns False so it still gets offered for translation.
+    """
+    if not text:
+        return False
+    hebrew_count = sum(1 for c in text if '\u0590' <= c <= '\u05FF' or '\uFB1D' <= c <= '\uFB4F')
+    latin_count = sum(1 for c in text if 'A' <= c <= 'Z' or 'a' <= c <= 'z')
+    return hebrew_count > 0 and latin_count < 20
+
+
+def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translations=None, compact=False):
     """Resolve the display title using libraries_translations.db if available.
 
-    When translations OFF: show hebrew_title from DB (or raw_title fallback).
-    When translations ON: show hebrew_title | english_title.
-    Falls back to raw title + marc english_title if no DB entry.
+    compact=False (ResultDialog): Always shows both Hebrew and English.
+    compact=True  (search table):
+        show_translations OFF → Hebrew only
+        show_translations ON  → English only (falls back to Hebrew if no English)
     """
     if show_translations is None:
         show_translations = load_app_config().get('show_translations', False)
@@ -5105,8 +5128,12 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
             if tt:
                 he = tt.get('hebrew_title') or ''
                 en = tt.get('english_title') or ''
-                if he.strip():
+                if compact:
                     if show_translations and en.strip():
+                        return en
+                    return he or en or raw_title or ''
+                if he.strip():
+                    if en.strip():
                         return f"{he}  |  {en}"
                     return he
                 elif en.strip():
@@ -5116,7 +5143,11 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
     # Fallback: original behavior
     if (not raw_title or not raw_title.strip()) and eng_title_marc:
         return eng_title_marc
-    if eng_title_marc and eng_title_marc.strip() and show_translations:
+    if compact:
+        if show_translations and eng_title_marc and eng_title_marc.strip():
+            return eng_title_marc
+        return raw_title or ''
+    if eng_title_marc and eng_title_marc.strip():
         return f"{raw_title}  |  {eng_title_marc}"
     return raw_title or ''
 
@@ -7712,6 +7743,9 @@ class SettingsDialog(QDialog):
             if hasattr(self.main_win, 'btn_b_translations'):
                 self.main_win.btn_b_translations.setChecked(checked)
                 self.main_win.btn_b_translations.setText(_label)
+            if hasattr(self.main_win, 'btn_search_translations'):
+                self.main_win.btn_search_translations.setChecked(checked)
+                self.main_win.btn_search_translations.setText(_label)
         self.main_win.chk_show_translations.stateChanged.connect(_on_settings_trans_changed)
         trans_row = QHBoxLayout()
         trans_row.addWidget(self.main_win.chk_show_translations)
@@ -10090,11 +10124,24 @@ class GenizahGUI(QMainWindow):
         # Insert Focus Search button in row1, right before the Search button
         row1.insertWidget(row1.indexOf(self.btn_search), self.btn_pre_search_filters)
 
+        # Translation toggle button (search tab)
+        self.btn_search_translations = QPushButton()
+        self.btn_search_translations.setCheckable(True)
+        _trans_on_s = load_app_config().get('show_translations', False)
+        self.btn_search_translations.setChecked(_trans_on_s)
+        self.btn_search_translations.setText(tr('Translations ON') if _trans_on_s else tr('Translations OFF'))
+        self.btn_search_translations.setStyleSheet(
+            "QPushButton { background-color: #0369a1; color: white; border-radius: 4px; padding: 2px 8px; font-size: 11px; }"
+            "QPushButton:checked { background-color: #059669; }"
+        )
+        self.btn_search_translations.toggled.connect(self._search_toggle_translations)
+
         row2.addWidget(self.tag_search_combo)
         row2.addWidget(self.variant_controls_container)
         row2.addWidget(self.search_params_container)
         row2.addWidget(self.btn_domain_filter)
         row2.addWidget(self.lbl_domain_filter)
+        row2.addWidget(self.btn_search_translations)
 
         row2.addStretch()
         row2.addWidget(btn_help)
@@ -11941,13 +11988,14 @@ class GenizahGUI(QMainWindow):
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
         _toggle = getattr(self, '_trans_toggle_state', {})
-        _he_fields_b = {'br_phys_desc'}
-
         def _trans_or_badge_b(field_key, text, label):
             """Return text with translate badge or cached translation (browse)."""
             if not _show_trans or not text or len(text.strip()) < 10:
                 return text
-            is_he_orig = field_key in _he_fields_b
+            # Skip translation for text already in Hebrew (user is in Hebrew UI)
+            if _is_hebrew_text(text):
+                return text
+            is_he_orig = False  # All translatable fields are English (Hebrew skipped above)
             cached = _ft_cache.get(field_key)
             if cached:
                 showing_orig = _toggle.get(field_key, False)
@@ -12153,6 +12201,39 @@ class GenizahGUI(QMainWindow):
         elif url_str.startswith('http'):
             QDesktopServices.openUrl(url)
 
+    def _search_toggle_translations(self, checked):
+        """Toggle show_translations from search tab toolbar button."""
+        if getattr(self, '_s_trans_syncing', False):
+            return
+        self._s_trans_syncing = True
+        try:
+            save_app_config({'show_translations': checked})
+            _label = tr('Translations ON') if checked else tr('Translations OFF')
+            self.btn_search_translations.setText(_label)
+            # Sync all other translation buttons
+            if hasattr(self, 'chk_show_translations'):
+                self.chk_show_translations.setChecked(checked)
+            if hasattr(self, 'btn_b_translations'):
+                self.btn_b_translations.setChecked(checked)
+                self.btn_b_translations.setText(_label)
+        finally:
+            self._s_trans_syncing = False
+        # Refresh search results to show/hide translated titles
+        self._refresh_search_titles()
+
+    def _refresh_search_titles(self):
+        """Refresh title column in search results to reflect translation state."""
+        if not hasattr(self, 'results_table'):
+            return
+        for row in range(self.results_table.rowCount()):
+            sid_item = self.results_table.item(row, self.COL_SYS_ID)
+            if not sid_item:
+                continue
+            sys_id = sid_item.text()
+            title_item = self.results_table.item(row, self.COL_TITLE)
+            if title_item:
+                title_item.setText(_resolve_display_title(sys_id, title_item.toolTip(), compact=True))
+
     def _browse_toggle_translations(self, checked):
         """Toggle show_translations from browse tab toolbar button."""
         if getattr(self, '_b_trans_syncing', False):
@@ -12165,6 +12246,10 @@ class GenizahGUI(QMainWindow):
             # Sync Settings checkbox
             if hasattr(self, 'chk_show_translations'):
                 self.chk_show_translations.setChecked(checked)
+            # Sync search tab button
+            if hasattr(self, 'btn_search_translations'):
+                self.btn_search_translations.setChecked(checked)
+                self.btn_search_translations.setText(_label)
             self._trans_toggle_state = {}
         finally:
             self._b_trans_syncing = False
@@ -12270,9 +12355,10 @@ class GenizahGUI(QMainWindow):
         if not text:
             return
 
-        # Hebrew fields translate HE->EN, everything else EN->HE
-        suffix = field_key[3:] if field_key.startswith(('rd_', 'br_')) else field_key
-        direction = 'he2en' if suffix == 'phys_desc' else 'en2he'
+        # Skip fields already in Hebrew (no translation needed for Hebrew UI)
+        if _is_hebrew_text(text):
+            return
+        direction = 'en2he'
         thread = TranslateTextThread(field_key, text, direction)
         thread.finished_signal.connect(
             lambda fk, orig, translated: self._on_field_translated(fk, orig, translated, context, rd_dialog)
@@ -20010,8 +20096,10 @@ class GenizahGUI(QMainWindow):
                 res['display']['shelfmark'] = shelf
 
             if sid in self.title_items_by_sid and title:
-                self.title_items_by_sid[sid].setText(title)
-                res['display']['title'] = title
+                display_title = _resolve_display_title(sid, title, compact=True)
+                self.title_items_by_sid[sid].setText(display_title)
+                self.title_items_by_sid[sid].setToolTip(title)
+                res['display']['title'] = display_title
 
         self._apply_results_table_filters()
 
@@ -20050,7 +20138,9 @@ class GenizahGUI(QMainWindow):
 
         if sid in self.title_items_by_sid:
             try:
-                self.title_items_by_sid[sid].setText(title)
+                display_title = _resolve_display_title(sid, title, compact=True)
+                self.title_items_by_sid[sid].setText(display_title)
+                self.title_items_by_sid[sid].setToolTip(title)
             except RuntimeError:
                 pass # Item deleted
 
@@ -21027,6 +21117,7 @@ class GenizahGUI(QMainWindow):
                     elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                        title = _resolve_display_title(sid, title or "", compact=True)
                         if not shelf or shelf == "Unknown":
                              shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
                         # Get library info
@@ -22768,7 +22859,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
                 if library_full:
                     ms_node.setToolTip(self.comp_col_library, library_full)
-                self._set_comp_tree_text(ms_node, self.comp_col_title, t)
+                self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t, compact=True))
                 self._set_comp_tree_text(ms_node, self.comp_col_sysid, ms_item.get('part_id', ''))
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -22818,7 +22909,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
                 if library_full:
                     ms_node.setToolTip(self.comp_col_library, library_full)
-                self._set_comp_tree_text(ms_node, self.comp_col_title, t or "")
+                self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True))
                 self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -22860,7 +22951,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(node, self.comp_col_library, library_code)
                 if library_full:
                     node.setToolTip(self.comp_col_library, library_full)
-                self._set_comp_tree_text(node, self.comp_col_title, title)
+                self._set_comp_tree_text(node, self.comp_col_title, _resolve_display_title(sid, title, compact=True))
                 self._set_comp_tree_text(node, self.comp_col_sysid, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -23073,7 +23164,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
             if library_full:
                 ms_node.setToolTip(self.comp_col_library, library_full)
-            self._set_comp_tree_text(ms_node, self.comp_col_title, t)
+            self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t, compact=True))
             self._set_comp_tree_text(ms_node, self.comp_col_sysid, ms_item.get('part_id', ''))
             self._make_node_checkable(ms_node)
             ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -23121,7 +23212,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
             if library_full:
                 ms_node.setToolTip(self.comp_col_library, library_full)
-            self._set_comp_tree_text(ms_node, self.comp_col_title, t or "")
+            self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True))
             self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
             self._make_node_checkable(ms_node)
             ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -23161,7 +23252,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(node, self.comp_col_library, library_code)
             if library_full:
                 node.setToolTip(self.comp_col_library, library_full)
-            self._set_comp_tree_text(node, self.comp_col_title, title)
+            self._set_comp_tree_text(node, self.comp_col_title, _resolve_display_title(sid, title, compact=True))
             self._set_comp_tree_text(node, self.comp_col_sysid, sid)
             self._make_node_checkable(node)
             node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -23185,7 +23276,7 @@ class GenizahGUI(QMainWindow):
         self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0)))) # Score
         self._set_comp_tree_text(node, self.comp_col_shelfmark, display_shelf)
         self._set_comp_tree_text(node, self.comp_col_library, library_display)
-        self._set_comp_tree_text(node, self.comp_col_title, t or "")
+        self._set_comp_tree_text(node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True))
         self._set_comp_tree_text(node, self.comp_col_sysid, sid)
 
         node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -25383,6 +25474,8 @@ class GenizahGUI(QMainWindow):
             shelf, t = self.meta_mgr.get_meta_for_id(sid)
             display_shelf = shelf if shelf and shelf != "Unknown" else (sid if sid else "Loading...")
             display_title = t or ""
+
+        display_title = _resolve_display_title(sid, display_title, compact=True)
 
         # Get library info
         library_code = self.meta_mgr.get_library_for_id(sid)

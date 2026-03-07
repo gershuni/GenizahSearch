@@ -184,6 +184,9 @@ def create_parallels_page(initial_text: str = None):
             self.restrict_sys_ids: set = None
             self.excluded_manuscript_ids: set = set()   # Per-manuscript exclusions (NEW for web)
             self.auto_excluded_source_id: str = None    # Auto-excluded source manuscript
+            # Translation enrichment (Phase 46-07)
+            self.title_translations: dict = {}  # sys_id -> {hebrew_title, english_title, ...}
+            self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
 
     p_state = ParallelsState()
 
@@ -2498,12 +2501,33 @@ def create_parallels_page(initial_text: str = None):
                         fjms = get_fjms_service(thread_safe=True)
                         return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
 
+                    def collect_parallels_translations(sys_ids):
+                        """Batch-fetch title and PGP translations for parallels results (Phase 46-07)."""
+                        try:
+                            show_trans = app.storage.user.get('show_translations', False)
+                        except Exception:
+                            show_trans = False
+                        if not show_trans:
+                            return {}, {}
+                        try:
+                            from shared.translation_service import TranslationService
+                            svc = TranslationService(thread_safe=True)
+                            title_trans = svc.get_title_translations_batch(sys_ids) if svc.titles_available() else {}
+                            pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids) if svc.pgp_available() else {}
+                            svc.close()
+                            return title_trans, pgp_trans
+                        except Exception as e:
+                            logger.warning("Parallels translation batch lookup failed: %s", e)
+                            return {}, {}
+
                     import asyncio as _asyncio
-                    raw_domains, printed_result = await _asyncio.gather(
+                    raw_domains, printed_result, trans_tuple = await _asyncio.gather(
                         run.io_bound(collect_parallels_domains, all_sys_ids),
                         run.io_bound(collect_parallels_printed, all_sys_ids),
+                        run.io_bound(collect_parallels_translations, all_sys_ids),
                     )
                     p_state.printed_ids = printed_result
+                    p_state.title_translations, p_state.translation_data = trans_tuple
                     p_state.all_result_domains = {}
                     p_state.domain_name_map = {}
                     from shared.fjms_service import qualify_domain_name
@@ -2536,6 +2560,8 @@ def create_parallels_page(initial_text: str = None):
                     p_state.has_domain_data = False
                     p_state.domain_hierarchy = {}
                     p_state.printed_ids = set()
+                    p_state.title_translations = {}
+                    p_state.translation_data = {}
 
                 # Show/hide domain filter button
                 p_domain_filter_btn.set_visibility(p_state.has_domain_data)
@@ -3134,9 +3160,25 @@ def create_parallels_page(initial_text: str = None):
                                 'background: #fff3cd; color: #856404; white-space: nowrap;'
                             )
 
-                    if title:
-                        title_short = (title[:100] + '...') if len(title) > 100 else title
-                        ui.label(title_short).classes('text-xs').style('color: var(--text-secondary); direction: rtl;')
+                    # Resolve translated title (Phase 46-07)
+                    _p_show_trans = False
+                    try:
+                        _p_show_trans = app.storage.user.get('show_translations', False)
+                    except Exception:
+                        pass
+                    _p_title = title
+                    if _p_show_trans and sys_id and p_state.title_translations:
+                        _p_tt = p_state.title_translations.get(sys_id)
+                        if _p_tt:
+                            _lang = get_language()
+                            if _lang == 'he':
+                                _p_title = _p_tt.get('hebrew_title') or _p_tt.get('english_title') or title
+                            else:
+                                _p_title = _p_tt.get('english_title') or _p_tt.get('hebrew_title') or title
+                    if _p_title:
+                        _p_title_short = (_p_title[:100] + '...') if len(_p_title) > 100 else _p_title
+                        _p_dir = 'ltr' if (_p_show_trans and p_state.title_translations.get(sys_id, {}).get('english_title') and get_language() != 'he') else 'rtl'
+                        ui.label(_p_title_short).classes('text-xs').style(f'color: var(--text-secondary); direction: {_p_dir};')
 
                 with ui.row().classes('items-center gap-3'):
                     # Score badges
@@ -3331,13 +3373,42 @@ def create_parallels_page(initial_text: str = None):
             h3(tr('Metadata'), classes='text-xl font-bold mb-4')
 
             with ui.column().classes('w-full gap-3'):
+                # Resolve translated title for metadata dialog (Phase 46-07)
+                _md_title = title
+                _md_show_trans = False
+                try:
+                    _md_show_trans = app.storage.user.get('show_translations', False)
+                except Exception:
+                    pass
+                if _md_show_trans and sys_id and p_state.title_translations:
+                    _md_tt = p_state.title_translations.get(sys_id)
+                    if _md_tt:
+                        _lang = get_language()
+                        he = _md_tt.get('hebrew_title') or ''
+                        en = _md_tt.get('english_title') or ''
+                        if he and en:
+                            _md_title = f"{he}  |  {en}"
+                        elif he:
+                            _md_title = he
+                        elif en:
+                            _md_title = en
+
+                # Show PGP description translation if available
+                _md_desc = ''
+                if _md_show_trans and sys_id and p_state.translation_data:
+                    _md_trans = p_state.translation_data.get(sys_id)
+                    if _md_trans:
+                        _md_desc = _md_trans.get('description_he') or ''
+
                 metadata_items = [
                     (tr('Library'), library_name or tr('Not available')),
                     (tr('Shelfmark'), shelfmark),
-                    (tr('Title'), title or tr('Not available')),
+                    (tr('Title'), _md_title or tr('Not available')),
                     (tr('System ID'), sys_id or tr('Not available')),
                     (tr('Score'), str(int(item.get('score', 0)))),
                 ]
+                if _md_desc:
+                    metadata_items.append((tr('Description'), _md_desc))
 
                 for label, value in metadata_items:
                     with ui.row().classes('w-full items-start gap-4'):

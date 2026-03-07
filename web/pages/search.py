@@ -94,6 +94,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Translation enrichment (Phase 46)
             self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
             self.translation_match_sys_ids: set = set()  # sys_ids found via translated description match
+            self.title_translations: dict = {}  # sys_id -> {original_title, english_title, hebrew_title, source}
 
     search_state = SearchUIState()
 
@@ -3379,34 +3380,37 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
 
         def collect_translations(sys_ids):
-            """Batch-fetch PGP translations by sys_id for search results (Phase 46)."""
+            """Batch-fetch PGP translations and title translations by sys_id (Phase 46)."""
             try:
                 show_trans = app.storage.user.get('show_translations', False)
             except Exception:
                 show_trans = False
             if not show_trans:
-                return {}
+                return {}, {}
             try:
                 from shared.translation_service import TranslationService
                 svc = TranslationService(thread_safe=True)
-                if not svc.pgp_available():
-                    svc.close()
-                    return {}
-                result = svc.get_pgp_translations_by_sys_ids(sys_ids)
+                pgp_trans = {}
+                title_trans = {}
+                if svc.pgp_available():
+                    pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids)
+                if svc.titles_available():
+                    title_trans = svc.get_title_translations_batch(sys_ids)
                 svc.close()
-                return result
+                return pgp_trans, title_trans
             except Exception as e:
                 logger.warning("Translation batch lookup failed: %s", e)
-                return {}
+                return {}, {}
 
         # Run five independent enrichment queries in parallel
-        raw_domains, transcription_ids, catalog_counts, printed_ids, trans_data = await asyncio.gather(
+        raw_domains, transcription_ids, catalog_counts, printed_ids, trans_tuple = await asyncio.gather(
             run.io_bound(collect_all_domains, all_sys_ids),
             run.io_bound(get_sys_ids_with_transcriptions, all_sys_ids),
             run.io_bound(collect_catalog_counts, all_sys_ids),
             run.io_bound(collect_printed_ids, all_sys_ids),
             run.io_bound(collect_translations, all_sys_ids),
         )
+        trans_data, title_trans_data = trans_tuple
 
         # Process domains into deduplicated domain names per sys_id
         # Also build English->Hebrew display name map
@@ -3443,6 +3447,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.catalog_source_counts = catalog_counts
         search_state.printed_ids = printed_ids
         search_state.translation_data = trans_data  # Phase 46: sys_id -> {description_he, ...}
+        search_state.title_translations = title_trans_data  # Phase 46: sys_id -> {hebrew_title, english_title, ...}
 
         # Phase 46: Detect "translated match" sys_ids (results whose translations match query)
         if trans_data and query:
@@ -3888,12 +3893,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         _show_trans = app.storage.user.get('show_translations', False)
                     except Exception:
                         pass
+                    # Resolve translated title (Phase 46-06)
+                    _title_info = search_state.title_translations.get(sys_id) if sys_id and _show_trans else None
+                    if _title_info:
+                        _lang = get_language()
+                        if _lang == 'he':
+                            _resolved_title = _title_info.get('hebrew_title') or _title_info.get('english_title') or title
+                        else:
+                            _resolved_title = _title_info.get('english_title') or _title_info.get('hebrew_title') or title
+                        _resolved_short = (_resolved_title[:60] + '...') if _resolved_title and len(_resolved_title) > 60 else (_resolved_title or '')
+                    else:
+                        _resolved_title = title
+                        _resolved_short = title_short
                     _trans_info = search_state.translation_data.get(sys_id) if sys_id and _show_trans else None
                     if _trans_info and _trans_info.get('description_he'):
                         # Show translated description with click-to-toggle original
                         _desc_he = _trans_info['description_he']
                         _desc_short = (_desc_he[:80] + '...') if len(_desc_he) > 80 else _desc_he
-                        _orig = title if title else ''
+                        _orig = _resolved_short if _resolved_short else ''
                         _ts = {'showing_original': False}
                         with ui.row().classes('items-center gap-1'):
                             _tl = ui.label(_desc_short).classes('text-xs').style(
@@ -3920,9 +3937,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             )
                             _tb.on('click.stop', _toggle_fn)
                             _tb_ref[0] = _tb
-                    elif title_short:
-                        ui.label(title_short).classes('text-xs').style(
-                            'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
+                    elif _resolved_short:
+                        _dir = 'ltr' if (_title_info and get_language() != 'he' and _title_info.get('english_title')) else 'rtl'
+                        ui.label(_resolved_short).classes('text-xs').style(
+                            f'color: var(--text-tertiary); direction: {_dir}; word-wrap: break-word;'
                         )
                     # Catalog Records button
                     if sys_id:
@@ -4586,8 +4604,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.label(display_shelfmark).classes('text-sm font-bold truncate').style(
                                     'color: var(--primary-700); max-width: 400px;'
                                 )
-                                if title:
-                                    ui.label(f'\u2014 {title[:60]}{"..." if title and len(title) > 60 else ""}').classes(
+                                # Resolve translated title for info bar (Phase 46-06)
+                                _adv_title = title
+                                _adv_show_trans = False
+                                try:
+                                    _adv_show_trans = app.storage.user.get('show_translations', False)
+                                except Exception:
+                                    pass
+                                if _adv_show_trans and sys_id and search_state.title_translations:
+                                    _adv_tt = search_state.title_translations.get(sys_id)
+                                    if _adv_tt:
+                                        _lang = get_language()
+                                        if _lang == 'he':
+                                            _adv_title = _adv_tt.get('hebrew_title') or _adv_tt.get('english_title') or title
+                                        else:
+                                            _adv_title = _adv_tt.get('english_title') or _adv_tt.get('hebrew_title') or title
+                                if _adv_title:
+                                    ui.label(f'\u2014 {_adv_title[:60]}{"..." if _adv_title and len(_adv_title) > 60 else ""}').classes(
                                         'text-xs truncate'
                                     ).style('color: var(--text-muted); direction: rtl; max-width: 350px;')
 
@@ -4724,7 +4757,41 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 with ui.column().classes('gap-1'):
                                     ui.label(tr('Document Type')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                                     type_parts = [p for p in [doc_type, lang_primary, pgp_metadata.get('languages_secondary')] if p]
-                                    create_translatable_text(' \u00b7 '.join(type_parts), container_style='color: var(--text-primary);')
+                                    _type_text = ' \u00b7 '.join(type_parts)
+                                    # Phase 46-06: Show pre-computed document_type_he when available
+                                    _adv_type_he = None
+                                    _pgpid_for_type = pgp_metadata.get('pgpid')
+                                    _show_type_trans = False
+                                    try:
+                                        _show_type_trans = app.storage.user.get('show_translations', False)
+                                    except Exception:
+                                        pass
+                                    if _show_type_trans and _pgpid_for_type and search_state.translation_data:
+                                        _type_trans = search_state.translation_data.get(sys_id)
+                                        if _type_trans:
+                                            _adv_type_he = _type_trans.get('document_type_he')
+                                    if _adv_type_he:
+                                        _type_st = {'showing_original': False, 'label': None, 'badge': None}
+                                        def _make_type_toggle(st, orig, trans):
+                                            def handler():
+                                                st['showing_original'] = not st['showing_original']
+                                                if st['showing_original']:
+                                                    st['label'].set_text(orig)
+                                                    st['label'].style('color: var(--text-primary); direction: ltr;')
+                                                    st['badge'].set_text(tr('Original'))
+                                                else:
+                                                    st['label'].set_text(trans)
+                                                    st['label'].style('color: var(--text-primary); direction: rtl;')
+                                                    st['badge'].set_text(tr('Translated'))
+                                            return handler
+                                        _type_handler = _make_type_toggle(_type_st, _type_text, _adv_type_he)
+                                        with ui.row().classes('items-center gap-1'):
+                                            _type_st['label'] = ui.label(_adv_type_he).classes('text-sm').style('color: var(--text-primary); direction: rtl;')
+                                            _type_st['badge'] = ui.button(tr('Translated'), on_click=_type_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0').style(
+                                                'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                            )
+                                    else:
+                                        create_translatable_text(_type_text, container_style='color: var(--text-primary);')
 
                             inferred_display = pgp_metadata.get('inferred_date_display')
                             doc_date_standard = pgp_metadata.get('doc_date_standard')
