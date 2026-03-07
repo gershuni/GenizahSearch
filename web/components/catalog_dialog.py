@@ -44,6 +44,19 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
     lang = get_language()
     is_heb = lang == 'he'
 
+    # Fetch FJMS translations for this alma_id (for English UI)
+    fjms_trans = {}
+    if not is_heb:
+        try:
+            from shared.translation_service import TranslationService
+            tsvc = TranslationService(thread_safe=True)
+            if tsvc.fjms_available():
+                fjms_trans = tsvc.get_fjms_translations_batch([sys_id])
+                fjms_trans = fjms_trans.get(sys_id, {})
+            tsvc.close()
+        except Exception:
+            pass
+
     # Group records by source_name to get team columns, skipping generic sources
     from shared.fjms_service import GENERIC_SOURCE_NAMES
     teams = []  # list of (source_name, source_name_heb, [records])
@@ -98,7 +111,7 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
                         _render_catalog_table(
                             teams, running_titles, sizes, fields,
                             free_descriptions, full_texts, textual_frames, mentions, is_heb,
-                            shelfmark=shelfmark,
+                            shelfmark=shelfmark, fjms_trans=fjms_trans, alma_id=sys_id,
                         )
 
         # Close button
@@ -151,8 +164,10 @@ def _field_row(label: str, values: list, is_heb: bool):
 
 def _render_catalog_table(teams, running_titles, sizes, fields,
                           free_descriptions, full_texts, textual_frames, mentions, is_heb,
-                          shelfmark=''):
+                          shelfmark='', fjms_trans=None, alma_id=''):
     """Render the full FIST 6-section side-by-side table."""
+    if fjms_trans is None:
+        fjms_trans = {}
     from shared.fjms_service import get_team_display_name, get_team_header_name, is_team_source
 
     num_teams = len(teams)
@@ -162,7 +177,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         # Only free descriptions / full texts, no team data
         if free_descriptions or full_texts:
             _section_header(tr('Miscellaneous'), 1)
-            _render_free_descriptions(free_descriptions, is_heb)
+            _render_free_descriptions(free_descriptions, is_heb, fjms_trans=fjms_trans, alma_id=alma_id)
             _render_full_texts(full_texts, is_heb)
         return
 
@@ -254,8 +269,9 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         domain_vals.append('; '.join(categories) if categories else None)
     _field_row(tr('Domain'), domain_vals, is_heb)
 
-    # Running Title
+    # Running Title (with translation when UI is English)
     rt_vals = []
+    _rt_en = fjms_trans.get('RunningTitle') if not is_heb else None
     for team in teams:
         titles = []
         for rec in team["records"]:
@@ -265,7 +281,12 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
                     rt_text = rt.get("running_title", "")
                     if rt_text and str(rt_text).strip():
                         titles.append(str(rt_text).strip())
-        rt_vals.append('; '.join(titles) if titles else None)
+        if _rt_en and titles:
+            # Use pre-computed English translation for first team
+            rt_vals.append(_rt_en)
+            _rt_en = None  # Only use for the first team with data
+        else:
+            rt_vals.append('; '.join(titles) if titles else None)
     _field_row(tr('Running Title'), rt_vals, is_heb)
 
     # Detailed Content (from catalog_textual_frames — richer per-verse references)
@@ -368,7 +389,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
     # === Section 6: Miscellaneous ===
     _section_header(tr('Miscellaneous'), num_teams + 1)
 
-    _render_free_descriptions(free_descriptions, is_heb)
+    _render_free_descriptions(free_descriptions, is_heb, fjms_trans=fjms_trans, alma_id=alma_id)
     _render_full_texts(full_texts, is_heb)
 
 
@@ -446,7 +467,7 @@ def _render_full_texts(full_texts, is_heb):
                 )
 
 
-def _render_free_descriptions(free_descriptions, is_heb):
+def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_id=''):
     """Render free description texts with source attribution labels."""
     from shared.fjms_service import get_team_display_name
 
@@ -456,22 +477,45 @@ def _render_free_descriptions(free_descriptions, is_heb):
             ui.label('\u2014').classes('text-sm').style('color: var(--text-muted);')
         return
 
+    # Pre-fetch all free description translations for this alma_id in one batch
+    _fd_lookup = {}  # signature_id -> english text
+    if not is_heb and alma_id:
+        try:
+            from shared.translation_service import TranslationService
+            _tsvc_fd = TranslationService(thread_safe=True)
+            if _tsvc_fd.fjms_available():
+                sig_ids = [desc.get("signature_id") for desc in free_descriptions if desc.get("signature_id")]
+                for sid in sig_ids:
+                    en = _tsvc_fd.get_fjms_free_desc_en(alma_id, sid)
+                    if en:
+                        _fd_lookup[sid] = en
+            _tsvc_fd.close()
+        except Exception:
+            pass
+
     for desc in free_descriptions:
         text = desc.get("text", "")
         if text and str(text).strip():
+            display_text = str(text).strip()
+            display_dir = dir_style
+            sig_id = desc.get("signature_id")
+            if sig_id and sig_id in _fd_lookup:
+                display_text = _fd_lookup[sig_id]
+                display_dir = ''  # English is LTR
+
             with ui.row().classes('w-full py-2 px-3').style(
-                f'border-bottom: 1px solid var(--border-light, #e5e7eb); {dir_style}'
+                f'border-bottom: 1px solid var(--border-light, #e5e7eb); {display_dir}'
             ):
-                with ui.column().classes('gap-0').style(f'flex: 1; {dir_style}'):
+                with ui.column().classes('gap-0').style(f'flex: 1; {display_dir}'):
                     # Source attribution label — always use English key for lookup
                     eng_source = desc.get("source_name")
                     source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
                     if source:
                         ui.label(source).classes('text-xs font-semibold').style(
-                            f'color: var(--primary-700); {dir_style}'
+                            f'color: var(--primary-700); {display_dir}'
                         )
-                    ui.label(str(text).strip()).classes('text-sm whitespace-pre-wrap break-words').style(
-                        f'line-height: 1.6; {dir_style}'
+                    ui.label(display_text).classes('text-sm whitespace-pre-wrap break-words').style(
+                        f'line-height: 1.6; {display_dir}'
                     )
 
 

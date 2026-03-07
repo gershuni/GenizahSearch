@@ -231,6 +231,11 @@ GENERIC_SOURCE_NAMES = frozenset({
     'Inventory', 'Nuscha', 'Institution', 'Instatution', 'Collection', 'Other',
 })
 
+# Known typos in FIST.db source names — correct for display
+_SOURCE_NAME_FIXES = {
+    'Instatution': 'Institution',
+}
+
 # Domains that appear as children of multiple parent categories.
 # These need qualification with parent name to be distinguishable in filters.
 # Data: SELECT Domain FROM domains WHERE ParentDomain IS NOT NULL AND ParentDomain != Domain
@@ -265,6 +270,8 @@ def get_team_display_name(source_name: str, is_heb: bool = False) -> str:
     """
     if not source_name:
         return source_name or ''
+    # Fix known typos in FIST.db source names
+    source_name = _SOURCE_NAME_FIXES.get(source_name, source_name)
     data = _lookup_team(source_name)
     if not data:
         return source_name
