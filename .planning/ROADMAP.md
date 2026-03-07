@@ -276,7 +276,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 43. Session Persistence & History | 3/4 | Complete    | 2026-03-02 |
 | 44. Quick UX Wins | 2/2 | Complete | 2026-03-02 |
 | 45. Filtered Search Context | 5/5 | Complete   | 2026-03-02 |
-| 46. Dicta Translation | 4/5 | In progress | - |
+| 46. Dicta Translation | 4/5 | In progress (all batch translations DONE — 478K total, 46-05 UI remaining) | - |
 | 47. Transcription Import | 0/TBD | Not started | - |
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
 | 49. Index Distribution & Upgrade | 0/TBD | Not started | - |

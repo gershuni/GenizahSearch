@@ -1,60 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: unknown
-stopped_at: Completed 46-04-PLAN.md (Web search integration, translation toggle, Dicta translate buttons)
-last_updated: "2026-03-04T13:36:00.000Z"
-last_activity: 2026-03-04 - Completed 46-04 (Web search integration, translation toggle, Dicta translate buttons)
+milestone: v6.5.0
+milestone_name: Search UX & Filtered Search
+status: in_progress
+stopped_at: Batch translations verified on server. DBs downloaded. 46-05 UI work remaining.
+last_updated: "2026-03-06T14:30:00.000Z"
+last_activity: 2026-03-06 - Verified batch translations (3/4 DONE, FJMS free desc 40%). Downloaded DBs locally.
 progress:
-  total_phases: 8
+  total_phases: 5
   completed_phases: 4
   total_plans: 25
   completed_plans: 24
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: unknown
-stopped_at: Completed 46-01-PLAN.md (Dicta API client, few-shot templates, TranslationService)
-last_updated: "2026-03-04T06:54:46.373Z"
-last_activity: 2026-03-04 - Completed 46-01 (Dicta API client, few-shot templates, TranslationService)
-progress:
-  total_phases: 8
-  completed_phases: 4
-  total_plans: 25
-  completed_plans: 22
-  percent: 98
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: unknown
-stopped_at: Completed 45-05-PLAN.md (Browse-to-search navigation & Hebrew translations)
-last_updated: "2026-03-04T05:03:37.567Z"
-last_activity: 2026-03-03 - Completed 45-05 (Browse-to-search navigation & Hebrew translations)
-progress:
-  [██████████] 98%
-  completed_phases: 4
-  total_plans: 20
-  completed_plans: 20
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: unknown
-last_updated: "2026-03-02T12:00:00.000Z"
-progress:
-  total_phases: 46
-  completed_phases: 44
-  total_plans: 150
-  completed_plans: 150
+  percent: 96
 ---
 
 # Project State
@@ -69,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 46 of 47 (Dicta Translation) -- Plan 4 of 5 complete, 46-03 batch re-executing
-Status: Phase 46 In Progress (batch translation 1,210/3,835 rows)
-Last activity: 2026-03-05 - 46-03 batch translation: few-shot rebuild, dedup, throttle, 429 handling. 1,210 rows done.
+Phase: 46 of 46 (Dicta Translation) -- Plan 4 of 5 complete, 46-05 in progress
+Status: Phase 46 In Progress — batch translations nearly complete, UI integration remaining
+Last activity: 2026-03-06 - Verified server: libraries(DONE), PGP(DONE), FJMS catalog(DONE), FJMS free desc(40%, ~21h left). Downloaded DBs locally.
 
-Progress: [#####░░░░░] 5/5 phases (Phase 42 complete, Phase 43 complete, Phase 44 complete, Phase 45 complete, Phase 46 in progress)
+Progress: [█████████░] 5/5 phases (42-45 complete, 46 in progress — 4/5 plans done)
 
 ## Performance Metrics
 
@@ -152,7 +109,7 @@ Recent decisions affecting current work:
 - 45-05: Browse-to-search buttons on web and desktop catalog browse. Web: incoming_filters via app.storage.user + /search?from_browse=1 or /parallels. Desktop: pre_search_filters + restrict_sys_ids + tab switch. 20 Hebrew translations for Phase 45 strings.
 - 46-01: Dicta API client (shared/dicta_client.py) with translate_text, build_few_shot_prompt, batch_translate, PGP_DOCUMENT_TYPE_HE. TranslationService (shared/translation_service.py) with sidecar queries. Scholarly few-shots validated on 20 samples vs defaults -- scholarly adopted for domain consistency. Schema helpers for pgp_translations/fjms_translations.
 - 46-02: PGP batch translation script (scripts/translate_pgp_descriptions.py) with checkpointing, resume, parallel API calls, retry with backoff. 34,954 candidates. Document types via manual PGP_DOCUMENT_TYPE_HE mapping. Atomic checkpoint writes (tempfile+os.replace). 8 new integration tests.
-- 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations. **RE-EXECUTED 2026-03-05**: Rebuilt few-shot with 16 real genizah_titles pairs (JA transliteration), added dedup (265→20 unique for titles), sequential+3s throttle, 429 retry in dicta_client. EN→HE filtered to 9 real English candidates. translate_fjms_free_desc.py still needs same fixes (parallel→sequential, dedup, throttle).
+- 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations. Rebuilt few-shot with 16 real genizah_titles pairs (JA transliteration), dedup (265→20 unique for titles), sequential+3s throttle, 429 retry in dicta_client. **ALL BATCH TRANSLATIONS COMPLETE (2026-03-07)**: Libraries 184,514 | PGP 34,954 | FJMS catalog 3,830 | FJMS free desc 254,835 | Total: ~478K translations, 0 failures.
 - 46-04: Web translation integration: global toggle (show_translations user pref), translated match badge (light blue), clickable Translated/Original toggle badges, sys_id-based translation lookup via document_fragments JOIN (batched 400), 5th parallel enrichment query in asyncio.gather. MyMemory replaced with Dicta API + lazy few-shot singleton. Browse page shelfmark URL param + sys_id detection. 12 new translation UI strings. 10 new tests (35 total).
 
 ### Pending Todos
@@ -182,7 +139,13 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-05T17:00:00Z
-Stopped at: 46-05 title wiring committed, needs UAT. Batch translations running on server.
+Last session: 2026-03-06T14:30:00Z
+Stopped at: Downloaded DBs from server. Updating planning docs.
 Resume file: .planning/phases/46-dicta-translation/HANDOFF.md
-Notes: Title display wired to libraries_translations.db (7fb59c4c). Stale cache fix for Oxford parts. Joins sync startup-only. All 4 batch translation scripts deployed to server and running in tmux session `translations` (FJMS catalog done, libraries titles in progress at ~18K/hr, PGP descriptions + FJMS free desc queued). When scripts finish: download updated DBs back. Remaining: UAT title display, search results translations, web parity.
+Notes: ALL BATCH TRANSLATIONS COMPLETE (2026-03-07):
+  - Libraries titles: DONE (184,514, 0 pending)
+  - PGP descriptions: DONE (34,954 EN->HE)
+  - FJMS catalog fields: DONE (3,830 rows, 6 categories)
+  - FJMS free descriptions: DONE (254,835/254,835, 0 failures)
+  - Total: ~478K translations across 3 DBs. All downloaded locally.
+  Remaining 46-05 work: UAT title display, search results translations, web parity.

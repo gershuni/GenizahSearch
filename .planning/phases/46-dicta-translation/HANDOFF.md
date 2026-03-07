@@ -1,33 +1,27 @@
 # Phase 46 Handoff — Batch Translation & Desktop Toggle
 
-**Last updated:** 2026-03-05 (session 4)
+**Last updated:** 2026-03-06 (session 5)
 
 ## Status
 - **46-01 through 46-04**: COMPLETE and committed
 - **46-05 Task 1**: Committed. Desktop translation toggle, badges, settings.
-- **46-05 Task 2**: Partially done — auto-translate-all + phys_desc committed (`6f5fdc38`)
+- **46-05 Task 2**: Committed (`6f5fdc38`) — auto-translate-all + phys_desc
 - **46-05 title wiring**: Committed (`7fb59c4c`) — libraries_translations.db title lookup + stale cache fix. **NOT FULLY TESTED — needs UAT**
 
 ---
 
-## What Changed This Session (session 4)
+## What Changed This Session (session 5, 2026-03-06)
 
-### Title Translation Wiring (`7fb59c4c`)
-- `TranslationService` gains `_titles_conn` for `libraries_translations.db` with `get_title_translation()` and `get_title_translations_batch()` methods
-- `_resolve_display_title()` helper: looks up clean `hebrew_title`/`english_title` from DB, replaces raw bilingual strings from libraries.csv
-- Translations OFF: shows `hebrew_title` only (clean Hebrew)
-- Translations ON: shows `hebrew_title | english_title`
-- Wired into 4 desktop title paths: `apply_metadata`, `on_enriched_data_loaded`, `_rd_refresh_title`, `on_browse_enriched_loaded`
-- Singleton `_title_svc_singleton` avoids repeated DB connections
+### Batch Translation — Server Status Update
+- Verified all batch jobs on server (`ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com`, tmux `translations`)
+- Libraries titles, PGP descriptions, and FJMS catalog all COMPLETE
+- FJMS free descriptions running (~40% done, ~21h remaining)
+- Downloaded current DBs to local machine for testing
 
-### Stale Translation Cache Fix (`7fb59c4c`)
-- `_field_translation_cache` (global dict in gui_threads.py) was never cleared on manuscript navigation
-- Caused Oxford Part titles/contents to show PREVIOUS part's cached translation when navigating between parts
-- ResultDialog: clear entire cache + `_trans_toggle_state` on navigate (in `load_result_by_index` reset block)
-- Browse tab: clear `br_*` prefixed keys on new `on_browse_enriched_loaded`
-
-### Joins Sync (`7fb59c4c`)
-- Changed from 5-minute polling loop to startup-only sync in `_sync_loop()`
+### Prior Session (session 4) Changes
+- Title Translation Wiring (`7fb59c4c`): `_resolve_display_title()`, `_get_title_svc()`, 4 desktop title paths
+- Stale Translation Cache Fix (`7fb59c4c`): clear `_field_translation_cache` on navigate
+- Joins Sync (`7fb59c4c`): startup-only (was 5-min polling)
 
 ## What Still Needs Testing / Doing
 
@@ -46,29 +40,17 @@ Translations should also work on:
 3. **Web search results** (web/pages/search.py) — translated titles and metadata
 4. **Web composition results** (web/pages/parallels.py or similar)
 
-### Batch Translation Progress
+### Batch Translation Progress (updated 2026-03-07)
 | Phase | Status | Details |
 |-------|--------|---------|
 | A: Extract bilingual English | **DONE** | 112,361 titles, zero API |
-| B: FJMS catalog fields | **DONE** | 3,835 complete |
-| C: Hebrew-only titles | **RUNNING ON SERVER** | 7,859 done, ~27K remaining (~1.5h) |
-| D: PGP descriptions | **QUEUED ON SERVER** | 100 done, ~35K remaining (runs after C) |
+| B: FJMS catalog fields | **DONE** | 3,830 rows (6 categories) |
+| C: Hebrew-only titles | **DONE** | 184,514 total (all pending_dicta resolved) |
+| D: PGP descriptions | **DONE** | 34,954 descriptions EN->HE |
 | E: Service + UI integration | In progress | Title wiring done, search results needed |
-| F: FJMS free desc | **QUEUED ON SERVER** | ~255K (runs after D, ~14h est) |
+| F: FJMS free desc | **DONE** | 254,835/254,835 (100%, 0 failures) |
 
-All 4 scripts running sequentially on server in tmux session `translations`.
-Server: `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com`, then `tmux attach -t translations`.
-When done, download updated DBs back to dev machine (see bottom of this file).
-
-### Downloading Results
-After all scripts complete, from PowerShell:
-```powershell
-$SERVER = "ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com"
-$REMOTE = "/home/ubuntu/GenizahSearch"
-scp ${SERVER}:${REMOTE}/pgp_data/pgp.db pgp_data/pgp.db
-scp ${SERVER}:${REMOTE}/fist_data/fjms_enrichment.db fist_data/fjms_enrichment.db
-scp ${SERVER}:${REMOTE}/libraries_translations.db libraries_translations.db
-```
+All batch translation jobs complete. All DBs downloaded locally (2026-03-07).
 
 ### Post-Translation Polish
 - Piyyut->Poem normalization, terminology alignment (see Translation Master Plan)
@@ -76,7 +58,7 @@ scp ${SERVER}:${REMOTE}/libraries_translations.db libraries_translations.db
 - Browse tab auto-translate-all (parity with ResultDialog)
 
 ## Key Code Locations
-- `_resolve_display_title()`: genizah_app.py — NEW, resolves title from libraries_translations.db
+- `_resolve_display_title()`: genizah_app.py — resolves title from libraries_translations.db
 - `_get_title_svc()`: genizah_app.py — singleton TranslationService for title lookups
 - `_rd_auto_translate_all()`: genizah_app.py — fires all pending translations on toggle ON
 - `_rd_refresh_title()`: genizah_app.py — rebuilds title on toggle (now uses _resolve_display_title)
@@ -89,6 +71,7 @@ scp ${SERVER}:${REMOTE}/libraries_translations.db libraries_translations.db
 - `dicta_client.py`: GOD_MODE, MAX_WORKERS, _split_by_words, _sanitize_text
 
 ## Test Data
-- 8 test translations in pgp.db `pgp_translations` for pgpids 444-453
-- libraries_translations.db: 184K+ records (112K extracted, 38K dicta, 34K pending)
+- 34,954 translations in pgp.db `pgp_translations` (full corpus)
+- libraries_translations.db: 184,514 records (112K extracted + 72K dicta, 0 pending)
+- fjms_enrichment.db `fjms_translations`: 258,665 (3,830 catalog + 254,835 free desc) — COMPLETE
 - sys_id 990053401060205171: bilingual title with extracted English "Mishnah: Avot 2:9 - 16"
