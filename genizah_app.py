@@ -3734,18 +3734,43 @@ class ResultDialog(QDialog):
         if _show_trans:
             from gui_threads import _field_translation_cache
             _ft_cache = _field_translation_cache
+            # Pre-populate cache with Oxford pre-computed translations for part fields
+            if part_meta:
+                try:
+                    _ox_svc = _get_title_svc()
+                    if _ox_svc and _ox_svc.oxford_available():
+                        _ox_texts = [part_meta.get(f, '').strip() for f in ('title', 'contents') if part_meta.get(f, '').strip()]
+                        if _ox_texts:
+                            _ox_batch = _ox_svc.get_oxford_translations_batch(_ox_texts)
+                            for _ox_eng, _ox_heb in _ox_batch.items():
+                                if _ox_eng == part_meta.get('title', '').strip():
+                                    _ft_cache.setdefault('rd_part_title', _ox_heb)
+                                if _ox_eng == part_meta.get('contents', '').strip():
+                                    _ft_cache.setdefault('rd_part_contents', _ox_heb)
+                except Exception:
+                    pass
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
+
+        _ui_lang = CURRENT_LANG  # 'he' or 'en'
 
         def _trans_or_badge(field_key, text, label):
             """Return text with translate badge or cached translation."""
             if not _show_trans or not text or len(text.strip()) < 10:
                 return text
-            # Skip translation for text already in Hebrew (user is in Hebrew UI)
-            if _is_hebrew_text(text):
+            is_he_orig = _is_hebrew_text(text)
+            # Skip if text is already in the UI language (nothing to translate)
+            if is_he_orig and _ui_lang == 'he':
                 return text
-            is_he_orig = False  # All translatable fields are English (Hebrew skipped above)
+            if not is_he_orig and _ui_lang == 'en':
+                return text
             cached = _ft_cache.get(field_key)
+            if cached == '__translating__':
+                _loading_style = 'color: #6b7280; font-size: 11px; font-style: italic;'
+                return (
+                    f"{_html_mod.escape(text)} "
+                    f"<span style='{_loading_style}'>⏳ {tr('Translating...')}</span>"
+                )
             if cached:
                 parent = self.parent()
                 _toggle = getattr(parent, '_trans_toggle_state', {}) if parent else {}
@@ -3785,10 +3810,16 @@ class ResultDialog(QDialog):
 
         notes = marc.get('notes', [])
         if notes:
-            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for _ni, n in enumerate(notes):
-                kti_html += f"<li>{_trans_or_badge(f'rd_note_{_ni}', n, tr('Notes'))}</li>"
-            kti_html += "</ul></p>"
+            notes_combined = '\n'.join(notes)
+            notes_result = _trans_or_badge('rd_notes', notes_combined, tr('Notes'))
+            # If badge was applied to combined text, render as single block with line breaks
+            if notes_result != notes_combined:
+                kti_html += f"<p><b>{tr('Notes')}:</b></p>{notes_result.replace(chr(10), '<br/>')}"
+            else:
+                kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
+                for n in notes:
+                    kti_html += f"<li>{_html_mod.escape(n)}</li>"
+                kti_html += "</ul></p>"
 
         people = marc.get('people', [])
         if people:
@@ -4617,9 +4648,11 @@ class ResultDialog(QDialog):
         phys_text = f"{phys or ''} {dims or ''}".strip()
         if phys_text and len(phys_text) >= 10:
             field_keys.append('rd_phys_desc')
-        for i, n in enumerate(marc.get('notes', [])):
-            if n and len(n.strip()) >= 10:
-                field_keys.append(f'rd_note_{i}')
+        notes = marc.get('notes', [])
+        if notes:
+            combined = '\n'.join(notes)
+            if len(combined.strip()) >= 10:
+                field_keys.append('rd_notes')
         if part_meta.get('title') and len(part_meta['title'].strip()) >= 10:
             field_keys.append('rd_part_title')
         if part_meta.get('contents') and len(part_meta['contents'].strip()) >= 10:
@@ -5114,10 +5147,12 @@ def _is_hebrew_text(text):
 def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translations=None, compact=False):
     """Resolve the display title using libraries_translations.db if available.
 
-    compact=False (ResultDialog): Always shows both Hebrew and English.
+    compact=False (ResultDialog):
+        show_translations OFF → both Hebrew and English ("he  |  en")
+        show_translations ON  → language-aware: English UI → English, Hebrew UI → Hebrew
     compact=True  (search table):
         show_translations OFF → Hebrew only
-        show_translations ON  → English only (falls back to Hebrew if no English)
+        show_translations ON  → language-aware: English UI → English, Hebrew UI → Hebrew
     """
     if show_translations is None:
         show_translations = load_app_config().get('show_translations', False)
@@ -5128,10 +5163,19 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
             if tt:
                 he = tt.get('hebrew_title') or ''
                 en = tt.get('english_title') or ''
+                if show_translations:
+                    # Language-aware: show title in UI language
+                    if CURRENT_LANG == 'en':
+                        if en.strip():
+                            return en
+                        return he or raw_title or ''
+                    else:  # Hebrew UI
+                        if he.strip():
+                            return he
+                        return en or raw_title or ''
                 if compact:
-                    if show_translations and en.strip():
-                        return en
                     return he or en or raw_title or ''
+                # Non-compact, translations OFF: show both
                 if he.strip():
                     if en.strip():
                         return f"{he}  |  {en}"
@@ -5147,6 +5191,8 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
         if show_translations and eng_title_marc and eng_title_marc.strip():
             return eng_title_marc
         return raw_title or ''
+    if show_translations and CURRENT_LANG == 'en' and eng_title_marc and eng_title_marc.strip():
+        return eng_title_marc
     if eng_title_marc and eng_title_marc.strip():
         return f"{raw_title}  |  {eng_title_marc}"
     return raw_title or ''
@@ -11985,18 +12031,43 @@ class GenizahGUI(QMainWindow):
         if _show_trans:
             from gui_threads import _field_translation_cache
             _ft_cache = _field_translation_cache
+            # Pre-populate cache with Oxford pre-computed translations for part fields
+            if part_meta:
+                try:
+                    _ox_svc = _get_title_svc()
+                    if _ox_svc and _ox_svc.oxford_available():
+                        _ox_texts = [part_meta.get(f, '').strip() for f in ('title', 'contents') if part_meta.get(f, '').strip()]
+                        if _ox_texts:
+                            _ox_batch = _ox_svc.get_oxford_translations_batch(_ox_texts)
+                            for _ox_eng, _ox_heb in _ox_batch.items():
+                                if _ox_eng == part_meta.get('title', '').strip():
+                                    _ft_cache.setdefault('br_part_title', _ox_heb)
+                                if _ox_eng == part_meta.get('contents', '').strip():
+                                    _ft_cache.setdefault('br_part_contents', _ox_heb)
+                except Exception:
+                    pass
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
         _toggle = getattr(self, '_trans_toggle_state', {})
+        _ui_lang_b = CURRENT_LANG  # 'he' or 'en'
+
         def _trans_or_badge_b(field_key, text, label):
             """Return text with translate badge or cached translation (browse)."""
             if not _show_trans or not text or len(text.strip()) < 10:
                 return text
-            # Skip translation for text already in Hebrew (user is in Hebrew UI)
-            if _is_hebrew_text(text):
+            is_he_orig = _is_hebrew_text(text)
+            # Skip if text is already in the UI language (nothing to translate)
+            if is_he_orig and _ui_lang_b == 'he':
                 return text
-            is_he_orig = False  # All translatable fields are English (Hebrew skipped above)
+            if not is_he_orig and _ui_lang_b == 'en':
+                return text
             cached = _ft_cache.get(field_key)
+            if cached == '__translating__':
+                _loading_style = 'color: #6b7280; font-size: 11px; font-style: italic;'
+                return (
+                    f"{_html_mod.escape(text)} "
+                    f"<span style='{_loading_style}'>⏳ {tr('Translating...')}</span>"
+                )
             if cached:
                 showing_orig = _toggle.get(field_key, False)
                 show_text = text if showing_orig else cached
@@ -12035,10 +12106,15 @@ class GenizahGUI(QMainWindow):
 
         notes = marc.get('notes', [])
         if notes:
-            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for _ni, n in enumerate(notes):
-                kti_html += f"<li>{_trans_or_badge_b(f'br_note_{_ni}', n, tr('Notes'))}</li>"
-            kti_html += "</ul></p>"
+            notes_combined = '\n'.join(notes)
+            notes_result = _trans_or_badge_b('br_notes', notes_combined, tr('Notes'))
+            if notes_result != notes_combined:
+                kti_html += f"<p><b>{tr('Notes')}:</b></p>{notes_result.replace(chr(10), '<br/>')}"
+            else:
+                kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
+                for n in notes:
+                    kti_html += f"<li>{_html_mod.escape(n)}</li>"
+                kti_html += "</ul></p>"
 
         people = marc.get('people', [])
         if people:
@@ -12355,10 +12431,19 @@ class GenizahGUI(QMainWindow):
         if not text:
             return
 
-        # Skip fields already in Hebrew (no translation needed for Hebrew UI)
-        if _is_hebrew_text(text):
-            return
-        direction = 'en2he'
+        # Show inline loading indicator by setting sentinel in cache + refreshing UI
+        _field_translation_cache[field_key] = '__translating__'
+        if context == 'rd' and rd_dialog:
+            try:
+                rd_dialog._rd_refresh_extended_info()
+            except RuntimeError:
+                pass
+        else:
+            self._refresh_browse_extended_info()
+
+        # Determine translation direction: translate toward UI language
+        is_he = _is_hebrew_text(text)
+        direction = 'he2en' if is_he else 'en2he'
         thread = TranslateTextThread(field_key, text, direction)
         thread.finished_signal.connect(
             lambda fk, orig, translated: self._on_field_translated(fk, orig, translated, context, rd_dialog)
@@ -12390,6 +12475,9 @@ class GenizahGUI(QMainWindow):
             phys = meta.get('physical_desc', '') or marc.get('physical_desc', '') or marc.get('physical_description', '')
             dims = marc.get('dimensions', '')
             return f"{phys or ''} {dims or ''}".strip() or None
+        elif suffix == 'notes':
+            notes = marc.get('notes', [])
+            return '\n'.join(notes) if notes else None
         elif suffix.startswith('note_'):
             idx = int(suffix[5:]) if suffix[5:].isdigit() else -1
             notes = marc.get('notes', [])
@@ -12405,7 +12493,20 @@ class GenizahGUI(QMainWindow):
 
     def _on_field_translated(self, field_key, original, translated, context, rd_dialog=None):
         """Handle completed field translation — refresh the relevant panel."""
+        self.statusBar().clearMessage()
+        from gui_threads import _field_translation_cache
         if not translated:
+            # Remove sentinel so badge reverts to "Translate"
+            _field_translation_cache.pop(field_key, None)
+            self.statusBar().showMessage(tr("Translation failed"), 3000)
+            # Refresh to remove "Translating..." indicator
+            if context == 'rd' and rd_dialog:
+                try:
+                    rd_dialog._rd_refresh_extended_info()
+                except RuntimeError:
+                    pass
+            else:
+                self._refresh_browse_extended_info()
             return
         if context == 'rd' and rd_dialog:
             # Rebuild ResultDialog extended info
@@ -19410,7 +19511,10 @@ class GenizahGUI(QMainWindow):
                 item_title = QTableWidgetItem(tr("Loading..."))
             else:
                 item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                item_title = QTableWidgetItem(title if title else "")
+                display_title = _resolve_display_title(sid, title, compact=True) if sid else (title or "")
+                item_title = QTableWidgetItem(display_title)
+                if title and title != display_title:
+                    item_title.setToolTip(title)
 
             self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
 
