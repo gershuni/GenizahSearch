@@ -111,13 +111,16 @@ def extract_title_parts(title: str) -> tuple[str | None, str | None]:
         english = ' ; '.join(mixed_english)
 
     if hebrew_parts:
-        # Use the most specific Hebrew part (usually the last one, or the longest)
-        # Filter out generic category labels (short, ending with period)
-        specific = [p for p in hebrew_parts if len(p) > 15 or not p.endswith('.')]
-        if specific:
-            hebrew = specific[-1]  # Last specific part is typically the detailed one
+        if english:
+            # Bilingual: pick the most specific Hebrew part as counterpart to English
+            specific = [p for p in hebrew_parts if len(p) > 15 or not p.endswith('.')]
+            if specific:
+                hebrew = specific[-1]
+            else:
+                hebrew = hebrew_parts[-1]
         else:
-            hebrew = hebrew_parts[-1]
+            # Pure Hebrew: keep full original title (semicolons are within-language)
+            hebrew = title
 
     return english, hebrew
 

@@ -3356,6 +3356,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
             results_count.text = f"{len(results)} {tr('Results')} ({tr('partial')})"
 
+            # Fast title-only translation fetch for partial results (~1ms SQLite)
+            _partial_sids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+            if _partial_sids:
+                try:
+                    def _fetch_partial_titles():
+                        from shared.translation_service import TranslationService
+                        svc = TranslationService(thread_safe=True)
+                        tt = svc.get_title_translations_batch(_partial_sids) if svc.titles_available() else {}
+                        svc.close()
+                        return tt
+                    search_state.title_translations = await run.io_bound(_fetch_partial_titles)
+                except Exception:
+                    pass
+
             # Render what we have (no enrichment badges -- acceptable for partial results)
             render_results(results, page=0)
             return
@@ -5624,6 +5638,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if tag_results and hasattr(state, 'meta_mgr') and state.meta_mgr and hasattr(state.meta_mgr, 'csv_bank'):
                 tag_results = [r for r in tag_results if r.get('sys_id') in state.meta_mgr.csv_bank]
 
+            # Batch-fetch PGP translations for tag results (Hebrew descriptions/types)
+            _tag_trans = {}
+            if tag_results and get_language() == 'he':
+                try:
+                    _tag_show = app.storage.user.get('show_translations', False)
+                    if _tag_show:
+                        _tag_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
+                        if _tag_sids:
+                            def _fetch_tag_trans():
+                                from shared.translation_service import TranslationService
+                                svc = TranslationService(thread_safe=True)
+                                result = svc.get_pgp_translations_by_sys_ids(_tag_sids) if svc.pgp_available() else {}
+                                svc.close()
+                                return result
+                            _tag_trans = await run.io_bound(_fetch_tag_trans)
+                except Exception:
+                    pass
+
             results_container.clear()
             with results_container:
                 if not tag_results:
@@ -5662,14 +5694,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                             'font-bold break-all'
                                         ).style('color: var(--primary-700);')
 
-                                    # Document type
-                                    if result.get('document_type'):
-                                        ui.label(result['document_type']).classes('text-xs').style(
+                                    # Document type (with translation if available)
+                                    _tag_r_trans = _tag_trans.get(result.get('sys_id'), {}) if _tag_trans else {}
+                                    _tag_doc_type = _tag_r_trans.get('document_type_he') or result.get('document_type')
+                                    if _tag_doc_type:
+                                        ui.label(_tag_doc_type).classes('text-xs').style(
                                             'color: var(--text-tertiary);'
                                         )
 
-                                    # Description snippet (truncated, with translate)
-                                    desc = result.get('description', '') or ''
+                                    # Description snippet (with translation if available)
+                                    desc = _tag_r_trans.get('description_he') or result.get('description', '') or ''
                                     if desc:
                                         truncated = (desc[:150] + '...') if len(desc) > 150 else desc
                                         ui.label(truncated).classes('text-sm').style('color: var(--text-secondary); line-height: 1.4; font-size: 0.75rem;')

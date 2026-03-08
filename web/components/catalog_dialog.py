@@ -499,9 +499,11 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
             display_text = str(text).strip()
             display_dir = dir_style
             sig_id = desc.get("signature_id")
+            _is_translated = False
             if sig_id and sig_id in _fd_lookup:
                 display_text = _fd_lookup[sig_id]
                 display_dir = ''  # English is LTR
+                _is_translated = True
 
             with ui.row().classes('w-full py-2 px-3').style(
                 f'border-bottom: 1px solid var(--border-light, #e5e7eb); {display_dir}'
@@ -510,13 +512,39 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
                     # Source attribution label — always use English key for lookup
                     eng_source = desc.get("source_name")
                     source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
-                    if source:
-                        ui.label(source).classes('text-xs font-semibold').style(
-                            f'color: var(--primary-700); {display_dir}'
-                        )
-                    ui.label(display_text).classes('text-sm whitespace-pre-wrap break-words').style(
+                    with ui.row().classes('items-center gap-2'):
+                        if source:
+                            ui.label(source).classes('text-xs font-semibold').style(
+                                f'color: var(--primary-700); {display_dir}'
+                            )
+                    _fd_lbl = ui.label(display_text).classes('text-sm whitespace-pre-wrap break-words').style(
                         f'line-height: 1.6; {display_dir}'
                     )
+                    if _is_translated:
+                        _orig_text = str(text).strip()
+                        _trans_text = display_text
+                        _fd_st = {'showing_original': False}
+                        _fd_badge_ref = [None]
+                        def _make_fd_toggle(lbl, badge_ref, orig, trans, orig_dir, trans_dir, flag):
+                            def handler():
+                                flag['showing_original'] = not flag['showing_original']
+                                if flag['showing_original']:
+                                    lbl.text = orig
+                                    lbl.style(f'line-height: 1.6; {orig_dir}')
+                                    badge_ref[0].text = tr('Original')
+                                else:
+                                    lbl.text = trans
+                                    lbl.style(f'line-height: 1.6; {trans_dir}')
+                                    badge_ref[0].text = tr('Translated')
+                            return handler
+                        _fd_badge = ui.badge(tr('Translated'), color='light-blue').props('dense outline').classes(
+                            'text-xs cursor-pointer'
+                        )
+                        _fd_badge_ref[0] = _fd_badge
+                        _fd_badge.on('click', _make_fd_toggle(
+                            _fd_lbl, _fd_badge_ref, _orig_text, _trans_text,
+                            dir_style, '', _fd_st
+                        ))
 
 
 def _fmt_num(val) -> str:

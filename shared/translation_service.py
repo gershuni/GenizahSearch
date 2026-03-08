@@ -144,6 +144,7 @@ class TranslationService:
         self._pgp_has_translations = False
         self._fjms_has_translations = False
         self._titles_has_translations = False
+        self._oxford_has_translations = False
 
         # Resolve PGP database path
         if pgp_db_path is None:
@@ -185,6 +186,9 @@ class TranslationService:
                 self._titles_conn.row_factory = sqlite3.Row
                 self._titles_has_translations = self._table_exists(
                     self._titles_conn, "title_translations"
+                )
+                self._oxford_has_translations = self._table_exists(
+                    self._titles_conn, "oxford_translations"
                 )
             except Exception as e:
                 logger.warning("Failed to connect to titles sidecar: %s", e)
@@ -595,6 +599,61 @@ class TranslationService:
         except Exception as e:
             logger.warning("Error reading title translation for %s: %s", sys_id, e)
             return None
+
+    # -------------------------------------------------------------------------
+    # Oxford Translation Methods (from libraries_translations.db)
+    # -------------------------------------------------------------------------
+
+    def oxford_available(self) -> bool:
+        """True if libraries_translations.db has oxford_translations table."""
+        return self._oxford_has_translations
+
+    def get_oxford_translation(self, english_text: str) -> Optional[str]:
+        """Get Hebrew translation for an Oxford metadata English text.
+
+        Returns Hebrew string or None if not found.
+        """
+        if not self._oxford_has_translations or not self._titles_conn or not english_text:
+            return None
+        try:
+            row = self._titles_conn.execute(
+                "SELECT hebrew_text FROM oxford_translations WHERE english_text = ?",
+                (english_text.strip(),),
+            ).fetchone()
+            return row[0] if row else None
+        except Exception:
+            return None
+
+    def get_oxford_translations_batch(
+        self, english_texts: List[str]
+    ) -> Dict[str, str]:
+        """Batch lookup Oxford translations.
+
+        Args:
+            english_texts: List of English text strings.
+
+        Returns:
+            Dict of {english_text: hebrew_text} for found entries.
+        """
+        if not self._oxford_has_translations or not self._titles_conn or not english_texts:
+            return {}
+        try:
+            result = {}
+            batch_size = 200
+            for i in range(0, len(english_texts), batch_size):
+                batch = [t.strip() for t in english_texts[i:i + batch_size] if t]
+                placeholders = ",".join("?" * len(batch))
+                rows = self._titles_conn.execute(
+                    f"SELECT english_text, hebrew_text FROM oxford_translations "
+                    f"WHERE english_text IN ({placeholders})",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    result[row[0]] = row[1]
+            return result
+        except Exception as e:
+            logger.warning("Error in Oxford translations batch: %s", e)
+            return {}
 
     # -------------------------------------------------------------------------
     # No-Overwrite Safety Check

@@ -729,6 +729,7 @@ class BrowseState:
         self.enrichment_loading: bool = False
         # Title translation (populated in load_page)
         self.title_translation: Optional[Dict[str, str]] = None
+        self.oxford_translations: Dict[str, str] = {}  # english_text -> hebrew_text
 
 
 # Module-level crossref cache: keyed by sys_id, persists across page navigations
@@ -918,6 +919,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.all_sources = None
         state.fjms_data = None
         state.crossref_data = None
+        state.title_translation = None
+        state.oxford_translations = {}
 
         state.is_loading = True
         state.error = None
@@ -991,8 +994,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 return
             state.error = f"{tr('Error')}: {str(e)}"
 
+        # Title + Oxford translations: fast SQLite queries (~1ms), safe for Phase A
+        if state.current_page and state.current_page.sys_id:
+            _title_sys_id = state.current_page.sys_id
+            _ox_meta = state.current_page.oxford_part_metadata if hasattr(state.current_page, 'oxford_part_metadata') else None
+            def _fetch_title_and_oxford():
+                title_result = None
+                oxford_result = {}
+                try:
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    if svc.titles_available():
+                        title_result = svc.get_title_translations_batch([_title_sys_id]).get(_title_sys_id)
+                    if svc.oxford_available() and _ox_meta:
+                        texts = [_ox_meta.get(f, '').strip() for f in ('title', 'contents', 'provenance') if _ox_meta.get(f, '').strip()]
+                        if texts:
+                            oxford_result = svc.get_oxford_translations_batch(texts)
+                    svc.close()
+                except Exception:
+                    pass
+                return title_result, oxford_result
+            try:
+                state.title_translation, state.oxford_translations = await run.io_bound(_fetch_title_and_oxford)
+            except Exception:
+                pass
+
         state.is_loading = False
-        update_content()  # Phase A complete: show image + header immediately
+        update_content()  # Phase A complete: show image + header + title translation
 
         # === Phase B: Background enrichment ===
         if state.current_page and state.current_page.sys_id and not state.error:
@@ -1060,28 +1088,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 logger.error(f"Failed to fetch crossref data: {e}")
                 return {}
 
-        async def fetch_title_translation():
-            _page_sys_id = page.sys_id
-            def _title_sync():
-                try:
-                    from shared.translation_service import TranslationService
-                    svc = TranslationService(thread_safe=True)
-                    if svc.titles_available():
-                        batch = svc.get_title_translations_batch([_page_sys_id])
-                        svc.close()
-                        return batch.get(_page_sys_id)
-                    svc.close()
-                except Exception:
-                    pass
-                return None
-            try:
-                return await run.io_bound(_title_sync)
-            except Exception:
-                return None
-
         try:
-            (all_sources, pgp_doc), fjms_data, crossref_data, title_trans = await asyncio.gather(
-                fetch_pgp(), fetch_fjms(), fetch_crossref(), fetch_title_translation()
+            (all_sources, pgp_doc), fjms_data, crossref_data = await asyncio.gather(
+                fetch_pgp(), fetch_fjms(), fetch_crossref()
             )
         except Exception as e:
             logger.error(f"Enrichment fetch failed: {e}")
@@ -1092,8 +1101,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Stale check
         if generation != _load_generation['value']:
             return
-
-        state.title_translation = title_trans
 
         # Process PGP sources
         if all_sources:
@@ -2064,19 +2071,46 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             words = _overlay_title.split()
                             if len(words) > 5:
                                 short_title = ' '.join(words[:5]) + '...'
+                            else:
+                                short_title = _overlay_title
+                            _ol_has_toggle = state.title_translation and _overlay_title != page.title
+                            if _ol_has_toggle:
+                                _ol_st = {'showing_original': False}
+                                with ui.row().classes('items-center gap-0'):
+                                    _ol_lbl = ui.label(short_title).classes(
+                                        _ol_dir
+                                    ).style(
+                                        'color: #ffffff !important; opacity: 0.95;'
+                                    )
+                                    if len(words) > 5:
+                                        _ol_lbl.tooltip(_overlay_title)
+                                    def _make_ol_toggle(lbl, orig_title, trans_title, orig_short, trans_short, flag):
+                                        def handler():
+                                            flag['showing_original'] = not flag['showing_original']
+                                            if flag['showing_original']:
+                                                _os = orig_short
+                                                lbl.text = _os
+                                                lbl.classes('rtl-text hebrew-text')
+                                                lbl.tooltip(orig_title)
+                                            else:
+                                                _ts = trans_short
+                                                lbl.text = _ts
+                                                lbl.classes(_ol_dir)
+                                                lbl.tooltip(trans_title)
+                                        return handler
+                                    _orig_words = page.title.split() if page.title else []
+                                    _orig_short = (' '.join(_orig_words[:5]) + '...') if len(_orig_words) > 5 else (page.title or '')
+                                    ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                        'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.5; color: white !important;'
+                                    ).tooltip(tr('Show original title')).on(
+                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title, _overlay_title, _orig_short, short_title, _ol_st)
+                                    )
+                            else:
                                 ui.label(short_title).classes(
                                     _ol_dir
                                 ).style(
-                                    'color: #ffffff !important; '
-                                    'opacity: 0.95;'
-                                ).tooltip(_overlay_title)
-                            else:
-                                ui.label(_overlay_title).classes(
-                                    _ol_dir
-                                ).style(
-                                    'color: #ffffff !important; '
-                                    'opacity: 0.95;'
-                                )
+                                    'color: #ffffff !important; opacity: 0.95;'
+                                ).tooltip(_overlay_title if len(words) > 5 else '')
 
                         # Ktiv link
                         ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
@@ -2263,23 +2297,37 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                         # Oxford Metadata (Part Title, Contents, Provenance)
                         if page.oxford_part_metadata:
-                            # Part Title
-                            if page.oxford_part_metadata.get('title'):
+                            _ox_trans = state.oxford_translations or {}
+                            _ox_is_heb = get_language() == 'he'
+                            for _ox_field, _ox_label in [('title', tr('Part Title')), ('contents', tr('Contents')), ('provenance', tr('Provenance'))]:
+                                _ox_eng = page.oxford_part_metadata.get(_ox_field, '').strip()
+                                if not _ox_eng:
+                                    continue
+                                _ox_heb = _ox_trans.get(_ox_eng)
+                                _ox_display = _ox_heb if (_ox_is_heb and _ox_heb) else _ox_eng
+                                _ox_dir = 'direction: rtl; text-align: right;' if (_ox_is_heb and _ox_heb) else ''
                                 with ui.column().classes('gap-1 col-span-2'):
-                                    ui.label(tr('Part Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(page.oxford_part_metadata['title']).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
-
-                            # Contents
-                            if page.oxford_part_metadata.get('contents'):
-                                with ui.column().classes('gap-1 col-span-2'):
-                                    ui.label(tr('Contents')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(page.oxford_part_metadata['contents']).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
-
-                            # Provenance
-                            if page.oxford_part_metadata.get('provenance'):
-                                with ui.column().classes('gap-1 col-span-2'):
-                                    ui.label(tr('Provenance')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(page.oxford_part_metadata['provenance']).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
+                                    ui.label(_ox_label).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    _ox_lbl = ui.label(_ox_display).classes('text-sm whitespace-pre-wrap').style(f'color: var(--text-primary); {_ox_dir}')
+                                    if _ox_heb and _ox_heb != _ox_eng:
+                                        _ox_st = {'showing_original': False if _ox_is_heb else True}
+                                        _ox_badge_ref = [None]
+                                        def _make_ox_toggle(lbl, badge_ref, eng, heb, flag):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                if flag['showing_original']:
+                                                    lbl.text = eng
+                                                    lbl.style('color: var(--text-primary);')
+                                                    badge_ref[0].text = 'Original'
+                                                else:
+                                                    lbl.text = heb
+                                                    lbl.style('color: var(--text-primary); direction: rtl; text-align: right;')
+                                                    badge_ref[0].text = tr('Translated')
+                                            return handler
+                                        _init_badge = tr('Translated') if _ox_is_heb else 'Original'
+                                        _ox_badge = ui.badge(_init_badge, color='light-blue').props('dense outline').classes('text-xs cursor-pointer')
+                                        _ox_badge_ref[0] = _ox_badge
+                                        _ox_badge.on('click', _make_ox_toggle(_ox_lbl, _ox_badge_ref, _ox_eng, _ox_heb, _ox_st))
 
                     # External Links
                     ui.separator().classes('my-3')
