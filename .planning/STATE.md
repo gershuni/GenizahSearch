@@ -124,6 +124,10 @@ Recent decisions affecting current work:
 - Copyist name browse axis (CopyName, 1.6K rows)
 - OrgCreation/OrgAuthor cross-refs for commentary identification display
 
+### Roadmap Evolution
+
+- Phase 50 added: Pre-built index distribution with in-app download
+
 ### Blockers/Concerns
 
 - FIST.db access required for v7.0.0 Phase 47 (FJMS transcription import) -- confirm file available

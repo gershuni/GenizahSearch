@@ -285,6 +285,16 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 **Total plans completed:** ~130 (Phase 42 fully complete)
 **Total milestones shipped:** 9
 
+### Phase 50: Pre-built index distribution with in-app download
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 49
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 50 to break down)
+
 ---
 *Roadmap created: 2026-02-09*
 *Last updated: 2026-03-04 after Phase 46 planning complete (5 plans)*
