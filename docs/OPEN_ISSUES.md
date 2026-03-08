@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-03 (v6.2.x — pre-search domain filter parity fix)
+> **Last Updated:** 2026-03-08 (Phase 46 — Round 2 batch translations launched)
 > **Status:** Active working document
 
 ---

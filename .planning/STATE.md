@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v6.5.0
 milestone_name: Search UX & Filtered Search
 status: in_progress
-stopped_at: Batch translations verified on server. DBs downloaded. 46-05 UI work remaining.
-last_updated: "2026-03-06T14:30:00.000Z"
-last_activity: 2026-03-06 - Verified batch translations (3/4 DONE, FJMS free desc 40%). Downloaded DBs locally.
+stopped_at: Round 2 batch (RunningTitle+FullText EN->HE) running on server. 46-05 desktop UI work remaining.
+last_updated: "2026-03-08T20:10:00.000Z"
+last_activity: 2026-03-08 - Launched Round 2 batch translations on server (107K running titles + 46K full texts, EN->HE). Script: translate_fjms_catalog_text.py.
 progress:
   total_phases: 5
   completed_phases: 4
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 
 Milestone: v6.5.0 Search UX & Filtered Search
 Phase: 46 of 46 (Dicta Translation) -- Plan 4 of 5 complete, 46-05 in progress
-Status: Phase 46 In Progress — batch translations nearly complete, UI integration remaining
-Last activity: 2026-03-06 - Verified server: libraries(DONE), PGP(DONE), FJMS catalog(DONE), FJMS free desc(40%, ~21h left). Downloaded DBs locally.
+Status: Phase 46 In Progress — Round 2 batch (RunningTitle+FullText) running on server, 46-05 desktop UI remaining
+Last activity: 2026-03-08 - Launched Round 2 batch translations on server (107K running titles + 46K full texts, EN->HE). Script: translate_fjms_catalog_text.py.
 
 Progress: [█████████░] 5/5 phases (42-45 complete, 46 in progress — 4/5 plans done)
 
@@ -111,6 +111,7 @@ Recent decisions affecting current work:
 - 46-02: PGP batch translation script (scripts/translate_pgp_descriptions.py) with checkpointing, resume, parallel API calls, retry with backoff. 34,954 candidates. Document types via manual PGP_DOCUMENT_TYPE_HE mapping. Atomic checkpoint writes (tempfile+os.replace). 8 new integration tests.
 - 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations. Rebuilt few-shot with 16 real genizah_titles pairs (JA transliteration), dedup (265→20 unique for titles), sequential+3s throttle, 429 retry in dicta_client. **ALL BATCH TRANSLATIONS COMPLETE (2026-03-07)**: Libraries 184,514 | PGP 34,954 | FJMS catalog 3,830 | FJMS free desc 254,835 | Total: ~478K translations, 0 failures.
 - 46-04: Web translation integration: global toggle (show_translations user pref), translated match badge (light blue), clickable Translated/Original toggle badges, sys_id-based translation lookup via document_fragments JOIN (batched 400), 5th parallel enrichment query in asyncio.gather. MyMemory replaced with Dicta API + lazy few-shot singleton. Browse page shelfmark URL param + sys_id detection. 12 new translation UI strings. 10 new tests (35 total).
+- 46 (Round 2 batch): Created translate_fjms_catalog_text.py for EN->HE translation of FJMS catalog running titles (107K English) and full texts/scholarly descriptions (46K English). Uses Dicta LM 2.0 with en2he_scholarly few-shot. Running on server 2026-03-08 (~11h total). New field_names: 'RunningTitle', 'FullText' in fjms_translations.
 
 ### Pending Todos
 
@@ -143,13 +144,12 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-06T14:30:00Z
-Stopped at: Downloaded DBs from server. Updating planning docs.
+Last session: 2026-03-08T20:10:00Z
+Stopped at: Round 2 batch running on server. 46-05 desktop UI work remaining.
 Resume file: .planning/phases/46-dicta-translation/HANDOFF.md
-Notes: ALL BATCH TRANSLATIONS COMPLETE (2026-03-07):
-  - Libraries titles: DONE (184,514, 0 pending)
-  - PGP descriptions: DONE (34,954 EN->HE)
-  - FJMS catalog fields: DONE (3,830 rows, 6 categories)
-  - FJMS free descriptions: DONE (254,835/254,835, 0 failures)
-  - Total: ~478K translations across 3 DBs. All downloaded locally.
-  Remaining 46-05 work: UAT title display, search results translations, web parity.
+Notes: Round 1 COMPLETE (478K). Round 2 RUNNING (2026-03-08):
+  - FJMS running titles: 107,273 EN->HE (server screen: fjms-translate)
+  - FJMS full texts: 46,218 EN->HE
+  - Script: scripts/translate_fjms_catalog_text.py --mode both --workers 5
+  - Check: ssh server, query fjms_translations WHERE field_name IN ('RunningTitle','FullText')
+  Remaining: wire translations into FjmsCatalogDialog display, then 46-05 desktop UI.
