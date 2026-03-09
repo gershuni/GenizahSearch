@@ -37,6 +37,11 @@ def get_client() -> Client:
     """Get or create the Supabase client singleton."""
     global _client
     if _client is None:
+        if not SUPABASE_URL:
+            raise ValueError(
+                "SUPABASE_URL not set! "
+                "Set it in environment variables or .env file."
+            )
         if not SUPABASE_ANON_KEY:
             raise ValueError(
                 "SUPABASE_ANON_KEY not set! "

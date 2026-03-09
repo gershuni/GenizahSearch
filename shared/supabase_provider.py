@@ -46,9 +46,9 @@ def reset_client():
 
 def get_url() -> str:
     """Get Supabase URL from environment."""
-    return os.environ.get("SUPABASE_URL", "")
+    return SUPABASE_URL
 
 
 def get_anon_key() -> str:
     """Get Supabase anonymous key from environment."""
-    return os.environ.get("SUPABASE_ANON_KEY", "")
+    return SUPABASE_ANON_KEY
