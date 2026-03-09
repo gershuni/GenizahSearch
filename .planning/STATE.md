@@ -144,12 +144,11 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-08T20:10:00Z
-Stopped at: Round 2 batch running on server. 46-05 desktop UI work remaining.
-Resume file: .planning/phases/46-dicta-translation/HANDOFF.md
-Notes: Round 1 COMPLETE (478K). Round 2 RUNNING (2026-03-08):
-  - FJMS running titles: 107,273 EN->HE (server screen: fjms-translate)
-  - FJMS full texts: 46,218 EN->HE
-  - Script: scripts/translate_fjms_catalog_text.py --mode both --workers 5
-  - Check: ssh server, query fjms_translations WHERE field_name IN ('RunningTitle','FullText')
-  Remaining: wire translations into FjmsCatalogDialog display, then 46-05 desktop UI.
+Last session: 2026-03-09T21:05:00Z
+Stopped at: Catalog dialog 3 refinements done (source names, clickable toggles, bidirectional). Round 3 batch running on server (~46K new texts). Uncommitted — needs test + commit.
+Resume file: .planning/phases/46-dicta-translation/.continue-here.md
+Notes: Round 2 COMPLETE (107K RT + 46K FT). Round 3 RUNNING (2026-03-09):
+  - Upgraded language detection: majority-based Latin count (min_latin=3 for RT, 10 for FT/FD)
+  - RunningTitle: ~3,648 new | FullText: ~31,252 new | FreeDesc: 0 new
+  - Server screen: fjms-translate-r3 (GOD_MODE=bagatz)
+  - After batch: download DB, test, commit, proceed to 46-05.
