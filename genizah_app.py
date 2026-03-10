@@ -11880,8 +11880,8 @@ class GenizahGUI(QMainWindow):
                 _desc_dir = 'ltr' if _desc_toggled else 'rtl'
                 _desc_badge = tr('Original') if _desc_toggled else tr('Translated')
                 pgp_html += (
-                    f"<p><b>{tr('Description')}:</b> "
-                    f"<span dir='{_desc_dir}'>{html_mod.escape(_show_desc)}</span> "
+                    f"<p dir='{_desc_dir}'><b>{tr('Description')}:</b> "
+                    f"{html_mod.escape(_show_desc)} "
                     f"<a href='toggle-trans:desc:{_esc_orig_desc}' "
                     f"style='{_badge_style}'>{_desc_badge}</a></p>"
                 )

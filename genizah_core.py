@@ -3495,10 +3495,13 @@ class MetadataManager:
 
                 # Metadata
                 if 'metadata' in data:
+                    import re as _re_meta
                     for item in data['metadata']:
                         label = str(item.get('label', '')).lower()
                         val = str(item.get('value', ''))
                         if label in ['abstract', 'condition', 'provenance', 'physical description']:
+                            # Strip HTML tags from IIIF manifest values (e.g. <p style='...'> wrappers)
+                            val = _re_meta.sub(r'<[^>]+>', '', val).strip()
                             result['metadata'][label.title()] = val
 
                 # Canvases (Images with Labels)
