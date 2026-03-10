@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-08 (Phase 46 — Round 2 batch translations launched)
+> **Last Updated:** 2026-03-10 (Phase 46 review: confirmed translation wiring blockers)
 > **Status:** Active working document
 
 ---
@@ -46,8 +46,8 @@ Move to "Completed Issues" section at bottom with date
 
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
-| P1 Critical Bugs | 0 | 1 | 1 |
-| P2 Medium Bugs | 0 | 6 | 6 |
+| P1 Critical Bugs | 0 | 4 | 4 |
+| P2 Medium Bugs | 0 | 7 | 7 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 5 | 0 | 5 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **6** | **38** | **44** |
+| **Total** | **6** | **42** | **48** |
 
 ---
 
@@ -67,10 +67,14 @@ Move to "Completed Issues" section at bottom with date
 |-------|------|--------|-------|
 | **Desktop Path Traversal** | `filter_text_dialog.py:16-23,58` | ✅ Fixed (2026-02-03) | Already fixed - uses `_sanitize_cache_filename()` whitelist approach |
 
+| **Desktop FJMS catalog HTML injection** | `genizah_app.py:6712-6716,6879-6883,6921-6932` | ✅ Fixed (2026-03-10) | Added `html.escape()` to all three catalog toggle sections (RunningTitle, FreeDesc, FullText) |
+| **Parallels metadata dialog NameError** | `web/pages/parallels.py:3387` | ✅ Fixed (2026-03-10) | Changed `_md_show_trans` → `_par_show_trans` |
+| **Search advanced header NameError** | `web/pages/search.py:4656` | ✅ Fixed (2026-03-10) | Replaced `_adv_tt` with safe `_adv_tt_resolved` lookup |
 ### P2 - Medium
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Browse title toggle keeps RTL classes** | web/pages/browse.py:2093,2098,2253,2257 | ✅ Fixed (2026-03-10) | Changed `.classes()` to use `remove=/add=` for proper class swapping |
 | **Debug prints in code** | `genizah_app.py`, `parallels.py` | ✅ Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
 | **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
 | **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ⏭️ Won't Fix | Excel export sufficient for needs |

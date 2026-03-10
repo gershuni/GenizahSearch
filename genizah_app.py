@@ -6484,6 +6484,7 @@ class FjmsCatalogDialog(QDialog):
         mentions = detail.get("mentions", {})
 
         is_heb = CURRENT_LANG == 'he'
+        import html as _html_esc
 
         # Translation service — initialized once for all sections
         _show_trans = load_app_config().get('show_translations', False)
@@ -6709,14 +6710,14 @@ class FjmsCatalogDialog(QDialog):
                                 toggle_key = f'rt_{rec_id}'
                                 toggled = self._cat_toggle_state.get(toggle_key, False)
                                 if _should_swap:
-                                    show_text = orig if toggled else trans
+                                    show_text = _html_esc.escape(orig if toggled else trans)
                                     badge_label = tr('Translated') if toggled else tr('Original')
                                     titles.append(
                                         f'{show_text} '
                                         f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
                                     )
                                 else:
-                                    titles.append(orig)
+                                    titles.append(_html_esc.escape(orig))
                 rt_vals.append('; '.join(titles) if titles else '')
             html_parts.append(self._field_row(tr('Running Title'), rt_vals, is_heb))
 
@@ -6876,14 +6877,14 @@ class FjmsCatalogDialog(QDialog):
 
                     if _should_swap:
                         trans = str(trans_text).strip()
-                        show_text = orig if toggled else trans
+                        show_text = _html_esc.escape(orig if toggled else trans)
                         badge_label = tr('Translated') if toggled else tr('Original')
                         display = (
                             f'{show_text} '
                             f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
                         )
                     else:
-                        display = orig
+                        display = _html_esc.escape(orig)
 
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
@@ -6918,13 +6919,13 @@ class FjmsCatalogDialog(QDialog):
                         toggled = self._cat_toggle_state.get(toggle_key, False)
 
                         if _should_swap:
-                            show_text = orig if toggled else trans
+                            show_text = _html_esc.escape(orig if toggled else trans)
                             badge_label = tr('Translated') if toggled else tr('Original')
                             badge = (
                                 f' <a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
                             )
                         else:
-                            show_text = orig
+                            show_text = _html_esc.escape(orig)
                             badge = ''
                         html_parts.append(
                             f'<tr><td colspan="{col_span}" '

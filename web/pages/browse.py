@@ -2084,18 +2084,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     )
                                     if len(words) > 5:
                                         _ol_lbl.tooltip(_overlay_title)
-                                    def _make_ol_toggle(lbl, orig_title, trans_title, orig_short, trans_short, flag):
+                                    def _make_ol_toggle(lbl, orig_title, trans_title, orig_short, trans_short, flag, trans_dir):
                                         def handler():
                                             flag['showing_original'] = not flag['showing_original']
                                             if flag['showing_original']:
-                                                _os = orig_short
-                                                lbl.text = _os
-                                                lbl.classes('rtl-text hebrew-text')
+                                                lbl.text = orig_short
+                                                lbl.classes(remove=trans_dir, add='rtl-text hebrew-text')
                                                 lbl.tooltip(orig_title)
                                             else:
-                                                _ts = trans_short
-                                                lbl.text = _ts
-                                                lbl.classes(_ol_dir)
+                                                lbl.text = trans_short
+                                                lbl.classes(remove='rtl-text hebrew-text', add=trans_dir)
                                                 lbl.tooltip(trans_title)
                                         return handler
                                     _orig_words = page.title.split() if page.title else []
@@ -2103,7 +2101,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
                                         'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.5; color: white !important;'
                                     ).tooltip(tr('Show original title')).on(
-                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title, _overlay_title, _orig_short, short_title, _ol_st)
+                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title, _overlay_title, _orig_short, short_title, _ol_st, _ol_dir)
                                     )
                             else:
                                 ui.label(short_title).classes(
@@ -2246,20 +2244,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     _mt_st = {'showing_original': False}
                                     with ui.row().classes('items-center gap-0'):
                                         _mt_lbl = ui.label(_meta_title).classes(f'text-sm {_meta_dir}').style('color: var(--text-primary);')
-                                        def _make_mt_toggle(lbl, orig, resolved, flag):
+                                        def _make_mt_toggle(lbl, orig, resolved, flag, resolved_dir):
                                             def handler():
                                                 flag['showing_original'] = not flag['showing_original']
                                                 if flag['showing_original']:
                                                     lbl.text = orig
-                                                    lbl.classes('text-sm rtl-text hebrew-text')
+                                                    lbl.classes(remove=resolved_dir, add='rtl-text hebrew-text')
                                                 else:
                                                     lbl.text = resolved
-                                                    lbl.classes(f'text-sm {_meta_dir}')
+                                                    lbl.classes(remove='rtl-text hebrew-text', add=resolved_dir)
                                             return handler
                                         ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
                                             'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
                                         ).tooltip(tr('Show original title')).on(
-                                            'click.stop', _make_mt_toggle(_mt_lbl, page.title, _meta_title, _mt_st)
+                                            'click.stop', _make_mt_toggle(_mt_lbl, page.title, _meta_title, _mt_st, _meta_dir)
                                         )
                                 else:
                                     ui.label(_meta_title).classes(f'text-sm {_meta_dir}').style('color: var(--text-primary);')

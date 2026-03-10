@@ -4653,7 +4653,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 if _adv_title:
                                     _adv_t_short = f'\u2014 {_adv_title[:60]}{"..." if _adv_title and len(_adv_title) > 60 else ""}'
                                     _adv_orig = f'\u2014 {title[:60]}{"..." if title and len(title) > 60 else ""}' if title else ''
-                                    _adv_dir = 'ltr' if (get_language() != 'he' and _adv_tt and _adv_tt.get('english_title')) else 'rtl' if sys_id and search_state.title_translations.get(sys_id) else 'rtl'
+                                    _adv_tt_resolved = search_state.title_translations.get(sys_id) if sys_id else None
+                                    _adv_dir = 'ltr' if (get_language() != 'he' and _adv_tt_resolved and _adv_tt_resolved.get('english_title')) else 'rtl'
                                     if _adv_orig and _adv_orig != _adv_t_short:
                                         _ib_st = {'showing_original': False}
                                         with ui.row().classes('items-center gap-0 min-w-0'):
