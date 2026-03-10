@@ -159,6 +159,28 @@ pytest tests/
 | Web app pages/components | `docs/CODE_INDEX.md` |
 | Environment variables | `CLAUDE.md`, `docs/guides/DEVELOPER_GUIDE.md` |
 | Major features | `CHANGELOG.md`, `README.md` |
+| **App version** | Run `python scripts/bump_version.py X.Y.Z` (see below) |
+
+### Version Bumping (REQUIRED for releases)
+
+Run the automated script — it updates all version files at once:
+```bash
+python scripts/bump_version.py 6.3.0          # apply changes
+python scripts/bump_version.py 6.3.0 --dry-run # preview only
+```
+
+**Files updated automatically:**
+| File | What changes |
+|------|-------------|
+| `version.py` | `APP_VERSION` (source of truth, imported by both apps) |
+| `version_info.txt` | Windows EXE metadata (`filevers`, `prodvers`, `FileVersion`, `ProductVersion`) |
+| `CompileScriptGenizah.iss` | Inno Setup `#define MyAppVersion` + `OutputBaseFilename` |
+| `README.md` | Header line |
+
+**Manual steps after running the script:**
+1. `CHANGELOG.md` — add `## [X.Y.Z]` section with release notes
+2. `CLAUDE.md` "Recently Changed" — add entry for the new version
+3. `README.md` "What's New" section — update feature description
 
 ### Before Finishing a Session
 
