@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v6.5.0
 milestone_name: Search UX & Filtered Search
 status: in_progress
-stopped_at: Round 2 batch (RunningTitle+FullText EN->HE) running on server. 46-05 desktop UI work remaining.
-last_updated: "2026-03-08T20:10:00.000Z"
-last_activity: 2026-03-08 - Launched Round 2 batch translations on server (107K running titles + 46K full texts, EN->HE). Script: translate_fjms_catalog_text.py.
+stopped_at: Extraction fix done + search-in-translation removed from main search. Uncommitted. EN→HE title batch + Round 3 download remain.
+last_updated: "2026-03-10T15:00:00.000Z"
+last_activity: 2026-03-10 - Fixed extraction semicolon split (87K records), removed translated-match from main search (belongs in browse filter only), rebuilt libraries_translations.db.
 progress:
   total_phases: 5
   completed_phases: 4
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 
 Milestone: v6.5.0 Search UX & Filtered Search
 Phase: 46 of 46 (Dicta Translation) -- Plan 4 of 5 complete, 46-05 in progress
-Status: Phase 46 In Progress — Round 2 batch (RunningTitle+FullText) running on server, 46-05 desktop UI remaining
-Last activity: 2026-03-08 - Launched Round 2 batch translations on server (107K running titles + 46K full texts, EN->HE). Script: translate_fjms_catalog_text.py.
+Status: Phase 46 In Progress — 46-05 desktop wiring near complete, extraction fixed, search-in-translation corrected
+Last activity: 2026-03-10 - Fixed extraction semicolon split (87K records), removed translated-match from main search, rebuilt libraries_translations.db.
 
 Progress: [█████████░] 5/5 phases (42-45 complete, 46 in progress — 4/5 plans done)
 
@@ -112,6 +112,8 @@ Recent decisions affecting current work:
 - 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations. Rebuilt few-shot with 16 real genizah_titles pairs (JA transliteration), dedup (265→20 unique for titles), sequential+3s throttle, 429 retry in dicta_client. **ALL BATCH TRANSLATIONS COMPLETE (2026-03-07)**: Libraries 184,514 | PGP 34,954 | FJMS catalog 3,830 | FJMS free desc 254,835 | Total: ~478K translations, 0 failures.
 - 46-04: Web translation integration: global toggle (show_translations user pref), translated match badge (light blue), clickable Translated/Original toggle badges, sys_id-based translation lookup via document_fragments JOIN (batched 400), 5th parallel enrichment query in asyncio.gather. MyMemory replaced with Dicta API + lazy few-shot singleton. Browse page shelfmark URL param + sys_id detection. 12 new translation UI strings. 10 new tests (35 total).
 - 46 (Round 2 batch): Created translate_fjms_catalog_text.py for EN->HE translation of FJMS catalog running titles (107K English) and full texts/scholarly descriptions (46K English). Uses Dicta LM 2.0 with en2he_scholarly few-shot. Running on server 2026-03-08 (~11h total). New field_names: 'RunningTitle', 'FullText' in fjms_translations.
+- 46-05 (extraction fix): Semicolon split changed from `\s*;\s*` to ` ; ` (MARC separator). Longest pure-Hebrew part preferred over mixed. 87K records fixed, 58K Hebrew values improved, zero data loss. libraries_translations.db rebuilt.
+- 46-05 (search-in-translation): Removed translated-match badges from main search (both web and desktop). Translation search belongs only in browse catalog text filter (FTS5), not in main search results. TranslationService methods retained for future browse integration.
 
 ### Pending Todos
 
@@ -141,14 +143,16 @@ Recent decisions affecting current work:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 15 | Move catalog/bib buttons to page nav pane in Browse; fix FJMS button in advanced mode | 2026-02-22 | da8cd4ab | [15-move-catalog-bib-buttons-to-page-nav-pan](./quick/15-move-catalog-bib-buttons-to-page-nav-pan/) |
+| 16 | Fix installer: show directory selection on upgrades, update filename to v6.2.0 | 2026-03-10 | ebb7e2f0 | [16-fix-desktop-installer-add-directory-sele](./quick/16-fix-desktop-installer-add-directory-sele/) |
 
 ## Session Continuity
 
-Last session: 2026-03-09T21:05:00Z
-Stopped at: Catalog dialog 3 refinements done (source names, clickable toggles, bidirectional). Round 3 batch running on server (~46K new texts). Uncommitted — needs test + commit.
+Last session: 2026-03-10T15:00:00Z
+Stopped at: Extraction fix + search-in-translation removal done. All uncommitted. User paused for urgent issue.
 Resume file: .planning/phases/46-dicta-translation/.continue-here.md
-Notes: Round 2 COMPLETE (107K RT + 46K FT). Round 3 RUNNING (2026-03-09):
-  - Upgraded language detection: majority-based Latin count (min_latin=3 for RT, 10 for FT/FD)
-  - RunningTitle: ~3,648 new | FullText: ~31,252 new | FreeDesc: 0 new
-  - Server screen: fjms-translate-r3 (GOD_MODE=bagatz)
-  - After batch: download DB, test, commit, proceed to 46-05.
+Notes:
+  - Extraction fix: semicolon split ` ; ` (87K records fixed), longest pure-Hebrew (58K improved), DB rebuilt
+  - Search-in-translation: removed from gui_threads.py, genizah_app.py, web/pages/search.py (belongs in browse filter only)
+  - Bug fixes still uncommitted: IIIF HTML strip + RTL bidi
+  - Round 3 FJMS batch: should be complete, need to download fjms_enrichment.db
+  - Next: commit, upload DB to server, run EN→HE title batch, download Round 3, wire subtitle display
