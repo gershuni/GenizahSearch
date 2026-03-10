@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 Milestone: v6.5.0 Search UX & Filtered Search
 Phase: 46 of 46 (Dicta Translation) -- Plan 4 of 5 complete, 46-05 in progress
 Status: Phase 46 In Progress — 46-05 desktop wiring near complete, extraction fixed, search-in-translation corrected
-Last activity: 2026-03-10 - Fixed extraction semicolon split (87K records), removed translated-match from main search, rebuilt libraries_translations.db.
+Last activity: 2026-03-10 - Completed quick task 16: Fix desktop installer: add directory selection page and handle stale install paths
 
 Progress: [█████████░] 5/5 phases (42-45 complete, 46 in progress — 4/5 plans done)
 
