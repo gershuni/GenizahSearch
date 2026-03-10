@@ -383,6 +383,36 @@ class TranslationService:
             logger.warning("Error in FJMS batch translation lookup: %s", e)
             return {}
 
+    def get_fjms_translations_by_signature_ids(
+        self, field_name: str, signature_ids: List[int]
+    ) -> Dict[int, str]:
+        """Batch lookup of FJMS translations keyed by signature_id.
+
+        Useful for RunningTitle (signature_id = UnitCatalogRecId) and
+        FullText (signature_id = rowid) where multiple entries per alma_id
+        need to be distinguished.
+
+        Args:
+            field_name: Field name filter (e.g., 'RunningTitle', 'FullText').
+            signature_ids: List of signature_id integers.
+
+        Returns:
+            Dict of {signature_id: translated_text} for found entries.
+        """
+        if not self._fjms_has_translations or not self._fjms_conn or not signature_ids:
+            return {}
+        try:
+            placeholders = ",".join("?" * len(signature_ids))
+            rows = self._fjms_conn.execute(
+                f"SELECT signature_id, translated_text FROM fjms_translations "
+                f"WHERE field_name = ? AND signature_id IN ({placeholders})",
+                [field_name] + signature_ids,
+            ).fetchall()
+            return {row[0]: row[1] for row in rows if row[1]}
+        except Exception as e:
+            logger.warning("Error in FJMS signature_id batch lookup: %s", e)
+            return {}
+
     # -------------------------------------------------------------------------
     # Translation Search Methods (SQLite metadata search, NOT Tantivy)
     # -------------------------------------------------------------------------

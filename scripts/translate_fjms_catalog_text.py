@@ -71,9 +71,22 @@ RECONNECT_INTERVAL = 10000
 # =============================================================================
 
 
-def is_english_text(text: str) -> bool:
-    """Return True if text has no Hebrew characters (treat as English)."""
-    return not any("\u0590" <= c <= "\u05FF" for c in text)
+def has_english(text: str, min_latin: int = 10) -> bool:
+    """Return True if text contains significant English content worth translating.
+
+    Scholarly catalog descriptions often mix English framing with Hebrew/Arabic
+    titles, incipits, and names in Hebrew script. Texts with >=min_latin Latin
+    letters contain English scholarly content that should be translated.
+    Pure Hebrew texts (below threshold) are left as-is.
+
+    Args:
+        text: The text to check.
+        min_latin: Minimum Latin letter count. Use 10 for long-form descriptions
+            (FreeDesc, FullText) where a few Latin chars may be shelfmark codes.
+            Use 3 for short RunningTitles where even "Num." or "Lev." is English.
+    """
+    latin = sum(1 for c in text if ("A" <= c <= "Z") or ("a" <= c <= "z"))
+    return latin >= min_latin
 
 
 def format_eta(seconds: float) -> str:
@@ -170,7 +183,7 @@ def get_runningtitle_candidates(
     return [
         (str(r[0]), r[1], r[2])
         for r in rows
-        if is_english_text(r[2])
+        if has_english(r[2], min_latin=3)  # short titles: even "Num." is English
     ]
 
 
@@ -206,7 +219,7 @@ def get_fulltext_candidates(
     return [
         (str(r[0]), r[1], r[2])
         for r in rows
-        if is_english_text(r[2])
+        if has_english(r[2])  # long descriptions: 10+ Latin letters
     ]
 
 

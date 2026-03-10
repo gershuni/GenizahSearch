@@ -6409,6 +6409,9 @@ class FjmsCatalogDialog(QDialog):
         self.setWindowTitle(f'{tr("Catalog Records")} \u2014 {shelfmark}' if shelfmark else tr('Catalog Records'))
         self.setMinimumSize(800, 500)
         self.resize(900, 650)
+        self._detail = detail
+        self._shelfmark = shelfmark or ''
+        self._cat_toggle_state = {}  # field_key -> bool (True = showing original)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -6424,7 +6427,8 @@ class FjmsCatalogDialog(QDialog):
         # Qt's QTextBrowser inherits RTL from the application, so we use plain
         # LTR HTML (no text-align or column reversal) and let Qt handle alignment.
         self.text_browser = QTextBrowser()
-        self.text_browser.setOpenExternalLinks(True)
+        self.text_browser.setOpenExternalLinks(False)
+        self.text_browser.anchorClicked.connect(self._on_anchor_clicked)
         self.text_browser.setHtml(self._build_html(detail, shelfmark=shelfmark or ''))
         layout.addWidget(self.text_browser)
 
@@ -6436,9 +6440,22 @@ class FjmsCatalogDialog(QDialog):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
+    def _on_anchor_clicked(self, url):
+        """Handle anchor clicks: toggle translation or open external links."""
+        url_str = url.toString()
+        if url_str.startswith('cat-toggle:'):
+            field_key = url_str[len('cat-toggle:'):]
+            self._cat_toggle_state[field_key] = not self._cat_toggle_state.get(field_key, False)
+            scroll_pos = self.text_browser.verticalScrollBar().value()
+            self.text_browser.setHtml(self._build_html(self._detail, shelfmark=self._shelfmark))
+            self.text_browser.verticalScrollBar().setValue(scroll_pos)
+        elif url_str.startswith('http'):
+            from PyQt6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(url)
+
     def _build_html(self, detail: dict, shelfmark: str = '') -> str:
         """Build HTML table mirroring FIST Cataloging Data Details view."""
-        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, get_team_header_name, is_team_source, GENERIC_SOURCE_NAMES
+        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, get_team_header_name, is_team_source, GENERIC_SOURCE_NAMES, get_catalog_source_he
 
         records = detail.get("records", [])
         running_titles = detail.get("running_titles", {})
@@ -6450,6 +6467,29 @@ class FjmsCatalogDialog(QDialog):
         mentions = detail.get("mentions", {})
 
         is_heb = CURRENT_LANG == 'he'
+
+        # Translation service — initialized once for all sections
+        _show_trans = load_app_config().get('show_translations', False)
+        _trans_svc = None
+        if _show_trans:
+            try:
+                from shared.translation_service import TranslationService
+                _trans_svc = TranslationService()
+                if not _trans_svc.fjms_available():
+                    _trans_svc.close()
+                    _trans_svc = None
+            except Exception:
+                _trans_svc = None
+
+        # Language detection: text has significant English content
+        def _has_english(t, min_latin=10):
+            return sum(1 for c in t if ('A' <= c <= 'Z') or ('a' <= c <= 'z')) >= min_latin
+
+        # Clickable translation toggle badge style (used in RunningTitle, FreeDesc, FullText)
+        _badge_style = (
+            'color: #0369a1; font-size: 10px; text-decoration: none; '
+            'background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
+        )
 
         # Dark mode detection — define color palette for HTML
         palette = QApplication.palette()
@@ -6564,7 +6604,16 @@ class FjmsCatalogDialog(QDialog):
                 elif is_team_source(sn):
                     source_vals.append(get_team_display_name(sn, is_heb=is_heb))
                 else:
-                    sn_display = team.get("source_name_heb", sn) if is_heb else sn
+                    if is_heb:
+                        # Priority: catalog mapping > DB Hebrew > English fallback
+                        sn_mapped = get_catalog_source_he(sn)
+                        if sn_mapped != sn:
+                            sn_display = sn_mapped
+                        else:
+                            db_heb = team.get("source_name_heb")
+                            sn_display = db_heb if (db_heb and db_heb != sn) else sn
+                    else:
+                        sn_display = sn
                     source_vals.append(sn_display or sn)
             html_parts.append(self._field_row(tr('Source'), source_vals, is_heb))
 
@@ -6611,7 +6660,21 @@ class FjmsCatalogDialog(QDialog):
                 domain_vals.append('; '.join(categories) if categories else '')
             html_parts.append(self._field_row(tr('Domain'), domain_vals, is_heb))
 
-            # Running Title
+            # Running Title (with clickable translation toggle)
+            # Collect all UnitCatalogRecIds to batch-fetch translations
+            _rt_trans_map = {}
+            if _trans_svc:
+                _all_rt_rec_ids = []
+                for team in teams:
+                    for rec in team["records"]:
+                        rec_id = rec.get("unit_catalog_rec_id")
+                        if rec_id and rec_id in running_titles:
+                            _all_rt_rec_ids.append(rec_id)
+                if _all_rt_rec_ids:
+                    _rt_trans_map = _trans_svc.get_fjms_translations_by_signature_ids(
+                        'RunningTitle', list(set(_all_rt_rec_ids))
+                    )
+
             rt_vals = []
             for team in teams:
                 titles = []
@@ -6621,7 +6684,22 @@ class FjmsCatalogDialog(QDialog):
                         for rt in running_titles[rec_id]:
                             rt_text = rt.get("running_title", "")
                             if rt_text and str(rt_text).strip():
-                                titles.append(str(rt_text).strip())
+                                orig = str(rt_text).strip()
+                                trans = str(_rt_trans_map.get(rec_id, '')).strip() if _rt_trans_map else ''
+                                _orig_has_eng = _has_english(orig, min_latin=3)
+                                # HE UI + English text → show HE translation; EN UI + Hebrew text → show EN translation
+                                _should_swap = trans and trans != orig and ((_orig_has_eng and is_heb) or (not _orig_has_eng and not is_heb))
+                                toggle_key = f'rt_{rec_id}'
+                                toggled = self._cat_toggle_state.get(toggle_key, False)
+                                if _should_swap:
+                                    show_text = orig if toggled else trans
+                                    badge_label = tr('Translated') if toggled else tr('Original')
+                                    titles.append(
+                                        f'{show_text} '
+                                        f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                    )
+                                else:
+                                    titles.append(orig)
                 rt_vals.append('; '.join(titles) if titles else '')
             html_parts.append(self._field_row(tr('Running Title'), rt_vals, is_heb))
 
@@ -6740,66 +6818,108 @@ class FjmsCatalogDialog(QDialog):
             html_parts.append(self._section_row(tr('Miscellaneous'), total_cols if num_teams > 0 else 2))
 
             col_span = total_cols if num_teams > 0 else 2
-            # Check for FJMS translations if show_translations is enabled
-            _fjms_trans_map = {}
-            _show_trans = load_app_config().get('show_translations', False)
-            if _show_trans:
-                try:
-                    from shared.translation_service import TranslationService
-                    _trans_svc = TranslationService()
-                    if _trans_svc.fjms_available():
-                        # Collect alma_ids from free_descriptions
-                        _desc_alma_ids = list({d.get('alma_id', '') for d in free_descriptions if d.get('alma_id')})
-                        if _desc_alma_ids:
-                            _fjms_trans_map = _trans_svc.get_fjms_translations_batch(_desc_alma_ids)
-                    _trans_svc.close()
-                except Exception:
-                    pass
+            # Fetch FJMS translations for free descriptions (by signature_id)
+            _fd_trans_map = {}
+            if _trans_svc:
+                _fd_sig_ids = [d.get('signature_id') for d in free_descriptions if d.get('signature_id')]
+                if _fd_sig_ids:
+                    _fd_trans_map = _trans_svc.get_fjms_translations_by_signature_ids(
+                        'FreeDesc', _fd_sig_ids
+                    )
 
-            for desc in free_descriptions:
+            for fd_idx, desc in enumerate(free_descriptions):
                 text = desc.get("text", "")
                 if text and str(text).strip():
                     eng_source = desc.get("source_name")
-                    source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
+                    if eng_source:
+                        if is_team_source(eng_source):
+                            source = get_team_display_name(eng_source, is_heb=is_heb)
+                        elif is_heb:
+                            mapped = get_catalog_source_he(eng_source)
+                            if mapped != eng_source:
+                                source = mapped
+                            else:
+                                db_heb = desc.get("source_name_heb")
+                                source = db_heb if (db_heb and db_heb != eng_source) else eng_source
+                        else:
+                            source = eng_source
+                    else:
+                        source = None
                     source_html = f'<div style="font-weight:bold; font-size:11px; color:{c["section_text"]}; margin-bottom:2px;">{source}</div>' if source else ''
 
-                    # Show FJMS translation if available
-                    trans_html = ''
-                    if _show_trans:
-                        alma_id = desc.get('alma_id', '')
-                        if alma_id and alma_id in _fjms_trans_map:
-                            trans_text = _fjms_trans_map[alma_id].get('FreeDesc')
-                            if trans_text:
-                                trans_html = (
-                                    f'<div style="color:{c["muted"]}; font-size:12px; margin-top:4px;" '
-                                    f'title="{tr("Machine translated via Dicta")}">'
-                                    f'{trans_text} '
-                                    f'<span style="font-size:10px;">({tr("Translated")})</span>'
-                                    f'</div>'
-                                )
+                    sig_id = desc.get('signature_id')
+                    trans_text = _fd_trans_map.get(sig_id) if sig_id else None
+                    orig = str(text).strip()
+                    _orig_has_eng = _has_english(orig)
+                    # Skip swap if translation is identical to original (failed translations)
+                    _trans_differs = trans_text and str(trans_text).strip() != orig
+                    _should_swap = _trans_differs and ((_orig_has_eng and is_heb) or (not _orig_has_eng and not is_heb))
+                    toggle_key = f'fd_{sig_id or fd_idx}'
+                    toggled = self._cat_toggle_state.get(toggle_key, False)
+
+                    if _should_swap:
+                        trans = str(trans_text).strip()
+                        show_text = orig if toggled else trans
+                        badge_label = tr('Translated') if toggled else tr('Original')
+                        display = (
+                            f'{show_text} '
+                            f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                        )
+                    else:
+                        display = orig
 
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
                         f'style="padding:8px; border-bottom:1px solid {c["border"]};"'
-                        f'>{source_html}{str(text).strip()}{trans_html}</td></tr>'
+                        f'>{source_html}{display}</td></tr>'
                     )
 
             # Full texts (scholarly descriptions) with distinct styling
             if full_texts:
+                # Batch-fetch FullText translations by rowid
+                _ft_trans_map = {}
+                if _trans_svc:
+                    _ft_rowids = [ft.get("rowid") for ft in full_texts if ft.get("rowid")]
+                    if _ft_rowids:
+                        _ft_trans_map = _trans_svc.get_fjms_translations_by_signature_ids(
+                            'FullText', _ft_rowids
+                        )
+
                 html_parts.append(
                     f'<tr><td colspan="{col_span}" style="padding:6px 8px; font-weight:bold; '
                     f'color:{c["section_text"]}; font-size:12px;">{tr("Scholarly Description")}</td></tr>'
                 )
-                for ft in full_texts:
+                for ft_idx, ft in enumerate(full_texts):
                     text = ft.get("text", "")
                     if text and str(text).strip():
+                        ft_rowid = ft.get("rowid")
+                        orig = str(text).strip()
+                        trans = str(_ft_trans_map.get(ft_rowid, '')).strip() if ft_rowid and _ft_trans_map else ''
+                        _orig_has_eng = _has_english(orig)
+                        _should_swap = trans and trans != orig and ((_orig_has_eng and is_heb) or (not _orig_has_eng and not is_heb))
+                        toggle_key = f'ft_{ft_rowid or ft_idx}'
+                        toggled = self._cat_toggle_state.get(toggle_key, False)
+
+                        if _should_swap:
+                            show_text = orig if toggled else trans
+                            badge_label = tr('Translated') if toggled else tr('Original')
+                            badge = (
+                                f' <a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                            )
+                        else:
+                            show_text = orig
+                            badge = ''
                         html_parts.append(
                             f'<tr><td colspan="{col_span}" '
                             f'style="padding:8px; border-bottom:1px solid {c["border"]}; background:{c["full_text_bg"]};"'
-                            f'>{str(text).strip()}</td></tr>'
+                            f'>{show_text}{badge}</td></tr>'
                         )
 
         html_parts.append('</table>')
+
+        if _trans_svc:
+            _trans_svc.close()
+
         return '\n'.join(html_parts)
 
     def _section_row(self, title: str, colspan: int) -> str:
