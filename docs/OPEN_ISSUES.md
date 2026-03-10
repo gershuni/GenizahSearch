@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-10 (Phase 46 review: confirmed translation wiring blockers)
+> **Last Updated:** 2026-03-11 (fixed stdio import side-effect in translation scripts)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 4 | 4 |
-| P2 Medium Bugs | 0 | 7 | 7 |
+| P2 Medium Bugs | 0 | 8 | 8 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 5 | 0 | 5 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **6** | **42** | **48** |
+| **Total** | **6** | **43** | **49** |
 
 ---
 
@@ -74,6 +74,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Translation batch script rewires stdio on import and breaks pytest capture** | scripts/translate_pgp_descriptions.py, scripts/translate_libraries_titles.py | ✅ Fixed (2026-03-11) | Moved UTF-8 stdio setup from import-time into `_configure_utf8_stdio()` called only from `if __name__ == "__main__":`. Uses `reconfigure()` when available. Fixed in both translation scripts. |
 | **Browse title toggle keeps RTL classes** | web/pages/browse.py:2093,2098,2253,2257 | ✅ Fixed (2026-03-10) | Changed `.classes()` to use `remove=/add=` for proper class swapping |
 | **Debug prints in code** | `genizah_app.py`, `parallels.py` | ✅ Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
 | **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
