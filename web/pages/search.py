@@ -4661,16 +4661,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                             _ib_lbl = ui.label(_adv_t_short).classes('text-xs truncate').style(
                                                 f'color: var(--text-muted); direction: {_adv_dir}; max-width: 350px;'
                                             )
-                                            def _make_ib_toggle(lbl, orig, resolved, flag):
+                                            def _make_ib_toggle(lbl, orig, resolved, flag, resolved_dir):
                                                 def handler():
                                                     flag['showing_original'] = not flag['showing_original']
+                                                    _dir = 'rtl' if flag['showing_original'] else resolved_dir
                                                     lbl.text = orig if flag['showing_original'] else resolved
-                                                    lbl.style(f'color: var(--text-muted); direction: rtl; max-width: 350px;')
+                                                    lbl.style(f'color: var(--text-muted); direction: {_dir}; max-width: 350px;')
                                                 return handler
                                             ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
                                                 'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
                                             ).tooltip(tr('Show original title')).on(
-                                                'click.stop', _make_ib_toggle(_ib_lbl, _adv_orig, _adv_t_short, _ib_st)
+                                                'click.stop', _make_ib_toggle(_ib_lbl, _adv_orig, _adv_t_short, _ib_st, _adv_dir)
                                             )
                                     else:
                                         ui.label(_adv_t_short).classes(
