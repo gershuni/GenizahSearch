@@ -11871,7 +11871,7 @@ class GenizahGUI(QMainWindow):
 
         doc_type = pgp_doc.get('document_type')
         if doc_type:
-            if show_trans and trans_data and trans_data.get('document_type_he'):
+            if show_trans and CURRENT_LANG == 'he' and trans_data and trans_data.get('document_type_he'):
                 _esc_orig_type = html_mod.escape(doc_type)
                 _doctype_toggled = _toggle.get('doctype', False)
                 _show_text = doc_type if _doctype_toggled else trans_data['document_type_he']
@@ -11895,7 +11895,7 @@ class GenizahGUI(QMainWindow):
 
         description = pgp_doc.get('description')
         if description:
-            if show_trans and trans_data and trans_data.get('description_he'):
+            if show_trans and CURRENT_LANG == 'he' and trans_data and trans_data.get('description_he'):
                 _esc_orig_desc = html_mod.escape(description)
                 _desc_toggled = _toggle.get('desc', False)
                 _show_desc = description if _desc_toggled else trans_data['description_he']
