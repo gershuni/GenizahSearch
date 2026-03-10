@@ -4,6 +4,17 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.2.4] - 2026-03-10
+
+### Data Quality Fix: Shelfmark-SysID Mismatches
+- **Fixed 1,144 records** in libraries.csv where a single NLI system number was incorrectly mapped to multiple different shelfmarks from the same series
+- Primarily affects RNL (1,012), CUL (91), JTS (18), Oxford (10), BL (6)
+- Added 36 new records for orphaned shelfmarks with their own correct sys_ids
+- Added `scripts/fix_shelfmark_sysid_mismatch.py` for reproducible correction using NLI crossref as authoritative source
+- Reported by Gregor Schwarb
+
+---
+
 ## [6.2.3] - 2026-03-06
 
 ### Line-Break Search & Search Progress UX
