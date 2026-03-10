@@ -19652,15 +19652,8 @@ class GenizahGUI(QMainWindow):
             self.title_items_by_sid[sid] = item_title
             self.result_row_by_sys_id[sid] = row_idx
 
-            # Snippet (with translated match badge if applicable)
+            # Snippet
             html_snippet = self.render_asterisks_to_html(res.get('snippet', ''))
-            if res.get('translated_match'):
-                badge_text = tr("Translated match")
-                html_snippet = (
-                    f"<span style='background-color: #dbeafe; color: #1e40af; "
-                    f"font-size: 10px; padding: 1px 4px; border-radius: 3px; "
-                    f"margin-right: 4px;'>{badge_text}</span> " + html_snippet
-                )
             lbl = QLabel(html_snippet)
             lbl.setProperty("filter_text", res.get('snippet', ''))
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

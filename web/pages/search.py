@@ -92,7 +92,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.word_search_excluded_results: list = []  # Results hidden by word search exclusion
             # Translation enrichment (Phase 46)
             self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
-            self.translation_match_sys_ids: set = set()  # sys_ids found via translated description match
             self.title_translations: dict = {}  # sys_id -> {original_title, english_title, hebrew_title, source}
 
     search_state = SearchUIState()
@@ -1816,7 +1815,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.catalog_source_counts = {}
         search_state.printed_ids = set()
         search_state.translation_data = {}
-        search_state.translation_match_sys_ids = set()
         search_state.domain_excluded_results = []
         search_state.word_search_excluded_results = []
         # Clear domain exclusions
@@ -3465,26 +3463,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.translation_data = trans_data  # Phase 46: sys_id -> {description_he, ...}
         search_state.title_translations = title_trans_data  # Phase 46: sys_id -> {hebrew_title, english_title, ...}
 
-        # Phase 46: Detect "translated match" sys_ids (results whose translations match query)
-        if trans_data and query:
-            def find_translation_matches(q, sids):
-                try:
-                    from shared.translation_service import TranslationService
-                    svc = TranslationService(thread_safe=True)
-                    if svc.pgp_available():
-                        result = svc.get_translated_match_sys_ids(q, sids)
-                        svc.close()
-                        return result
-                    svc.close()
-                except Exception as e:
-                    logger.warning("Translation match detection failed: %s", e)
-                return set()
-            search_state.translation_match_sys_ids = await run.io_bound(
-                find_translation_matches, query, all_sys_ids
-            )
-        else:
-            search_state.translation_match_sys_ids = set()
-
         # Show/hide printed filter button if there are printed items among results
         _set_btn_visible(printed_filter_btn, len(printed_ids) > 0)
 
@@ -3897,11 +3875,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             ui.label(_plabel).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
                                 f'background: {_bg}; color: {_fg};'
                             )
-                        # Translated match badge (Phase 46)
-                        if sys_id and sys_id in search_state.translation_match_sys_ids:
-                            ui.label(tr('Translated match')).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
-                                'background: #dbeafe; color: #1d4ed8;'  # Light blue bg, blue text
-                            ).tooltip(tr('Machine translated via Dicta'))
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
                     # Title and optional translated description (Phase 46)
                     _show_trans = False
