@@ -5163,6 +5163,7 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
             if tt:
                 he = tt.get('hebrew_title') or ''
                 en = tt.get('english_title') or ''
+                en_he = tt.get('english_title_he') or ''  # EN→HE translated subtitle
                 if show_translations:
                     # Language-aware: show title in UI language
                     if CURRENT_LANG == 'en':
@@ -5171,12 +5172,27 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
                         return he or raw_title or ''
                     else:  # Hebrew UI
                         if he.strip():
+                            # If Hebrew is short and EN→HE subtitle exists, append it
+                            if en_he.strip() and len(he) < 15:
+                                return f"{he}  |  {en_he}"
                             return he
+                        if en_he.strip():
+                            return en_he
                         return en or raw_title or ''
                 if compact:
-                    return he or en or raw_title or ''
+                    # Compact: prefer Hebrew, with EN→HE subtitle for short Hebrew
+                    if he.strip():
+                        if en_he.strip() and len(he) < 15:
+                            return f"{he} — {en_he}"
+                        return he
+                    return en_he or en or raw_title or ''
                 # Non-compact, translations OFF: show both
                 if he.strip():
+                    if en_he.strip() and len(he) < 15:
+                        # Hebrew is short, show EN→HE as subtitle alongside English
+                        if en.strip():
+                            return f"{he} — {en_he}  |  {en}"
+                        return f"{he} — {en_he}"
                     if en.strip():
                         return f"{he}  |  {en}"
                     return he

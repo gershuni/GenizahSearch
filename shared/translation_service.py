@@ -187,6 +187,12 @@ class TranslationService:
                 self._titles_has_translations = self._table_exists(
                     self._titles_conn, "title_translations"
                 )
+                self._titles_has_en_he = False
+                if self._titles_has_translations:
+                    cols = {r[1] for r in self._titles_conn.execute(
+                        "PRAGMA table_info(title_translations)"
+                    ).fetchall()}
+                    self._titles_has_en_he = "english_title_he" in cols
                 self._oxford_has_translations = self._table_exists(
                     self._titles_conn, "oxford_translations"
                 )
@@ -580,6 +586,7 @@ class TranslationService:
         if not self._titles_has_translations or not self._titles_conn or not sys_ids:
             return {}
         try:
+            en_he_col = ", english_title_he" if self._titles_has_en_he else ""
             result = {}
             batch_size = 400
             for i in range(0, len(sys_ids), batch_size):
@@ -587,17 +594,20 @@ class TranslationService:
                 placeholders = ",".join("?" * len(batch))
                 rows = self._titles_conn.execute(
                     f"SELECT system_number, original_title, english_title, "
-                    f"hebrew_title, source "
+                    f"hebrew_title, source{en_he_col} "
                     f"FROM title_translations WHERE system_number IN ({placeholders})",
                     batch,
                 ).fetchall()
                 for row in rows:
-                    result[row[0]] = {
+                    entry = {
                         "original_title": row[1],
                         "english_title": row[2],
                         "hebrew_title": row[3],
                         "source": row[4],
                     }
+                    if self._titles_has_en_he and len(row) > 5:
+                        entry["english_title_he"] = row[5]
+                    result[row[0]] = entry
             return result
         except Exception as e:
             logger.warning("Error in title translations batch lookup: %s", e)
@@ -607,25 +617,36 @@ class TranslationService:
         """Get title translation for a single system_number.
 
         Returns:
-            Dict with original_title, english_title, hebrew_title, source
+            Dict with original_title, english_title, hebrew_title, source,
+            english_title_he (EN→HE translation of English title, if available)
             or None if not found.
         """
         if not self._titles_has_translations or not self._titles_conn:
             return None
         try:
-            row = self._titles_conn.execute(
-                "SELECT original_title, english_title, hebrew_title, source "
-                "FROM title_translations WHERE system_number = ?",
-                (sys_id,),
-            ).fetchone()
+            if self._titles_has_en_he:
+                row = self._titles_conn.execute(
+                    "SELECT original_title, english_title, hebrew_title, source, english_title_he "
+                    "FROM title_translations WHERE system_number = ?",
+                    (sys_id,),
+                ).fetchone()
+            else:
+                row = self._titles_conn.execute(
+                    "SELECT original_title, english_title, hebrew_title, source "
+                    "FROM title_translations WHERE system_number = ?",
+                    (sys_id,),
+                ).fetchone()
             if not row:
                 return None
-            return {
+            result = {
                 "original_title": row[0],
                 "english_title": row[1],
                 "hebrew_title": row[2],
                 "source": row[3],
             }
+            if self._titles_has_en_he and len(row) > 4:
+                result["english_title_he"] = row[4]
+            return result
         except Exception as e:
             logger.warning("Error reading title translation for %s: %s", sys_id, e)
             return None

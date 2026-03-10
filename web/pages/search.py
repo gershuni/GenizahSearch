@@ -3886,10 +3886,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _title_info = search_state.title_translations.get(sys_id) if sys_id else None
                     if _title_info:
                         _lang = get_language()
+                        _he = _title_info.get('hebrew_title') or ''
+                        _en = _title_info.get('english_title') or ''
+                        _en_he = _title_info.get('english_title_he') or ''
                         if _lang == 'he':
-                            _resolved_title = _title_info.get('hebrew_title') or _title_info.get('english_title') or title
+                            if _he.strip():
+                                # If Hebrew is short and EN→HE subtitle exists, append it
+                                if _en_he.strip() and len(_he) < 15:
+                                    _resolved_title = f"{_he} — {_en_he}"
+                                else:
+                                    _resolved_title = _he
+                            else:
+                                _resolved_title = _en_he or _en or title
                         else:
-                            _resolved_title = _title_info.get('english_title') or _title_info.get('hebrew_title') or title
+                            _resolved_title = _en or _he or title
                         _resolved_short = (_resolved_title[:60] + '...') if _resolved_title and len(_resolved_title) > 60 else (_resolved_title or '')
                     else:
                         _resolved_title = title
