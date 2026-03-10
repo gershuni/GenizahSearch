@@ -676,7 +676,16 @@ TRANSLATIONS = {
     <li><b>רספונסה (R):</b> תחביר חיפוש בסגנון פרויקט השו"ת של בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. השתמשו בבונה השאילתות לבניה ויזואלית.</li>
     </ul>
     <hr>
-    <b>מרחק (Gap):</b> מרחק מרבי בין מילים (לא רלוונטי לכותרת/מספר מדף).</div>""",
+    <b>מרחק (Gap):</b> מרחק מרבי בין מילים (לא רלוונטי לכותרת/מספר מדף).
+    <hr>
+    <h3>חיפוש לפי מיקום בשורה/טקסט</h3>
+    <p>השתמשו ב<b>תפריט המיקום</b> ליד שורת החיפוש כדי להגביל את מיקום ההתאמות: תחילת טקסט, סוף טקסט, תחילת שורה או סוף שורה. שימושי במיוחד ל<b>זיהוי צירופים</b> בין קטעים &mdash; אם ידוע כיצד כתב יד מסתיים, חפשו את המילים האלה ב&ldquo;סוף טקסט&rdquo; כדי למצוא המשכים אפשריים.</p>
+    <p>ב<b>מצב רספונסה</b>, ניתן להחיל אילוצי מיקום לכל מילה בנפרד באמצעות <code>|_</code> (תחילת שורה) ו-<code>_|</code> (סוף שורה). בשילוב עם תחביר שבירת שורה (<code>|</code>), ניתן לבנות שאילתות מיקום רב-שורתיות &mdash; למשל, למצוא מילים מסוימות בסוף שורה אחת ומילים אחרות בתחילת שורה 4 שורות מאוחר יותר. <b>בונה השאילתות הטבלאי</b> מספק ממשק ויזואלי לבניית שאילתות אלה.</p>
+    <p><i>הערה: דורש בניית אינדקס מחדש. בנו מחדש מההגדרות כדי להשתמש בתכונה זו.</i></p>
+    <hr>
+    <h3>סינון מתקדם</h3>
+    <p>השתמשו בפאנל <b>סינון מתקדם</b> כדי לצמצם תוצאות חיפוש לפי מאפייני כתב יד: תחום, מחבר, יצירה, טווח תאריכים וסוג חומר. מסננים פעילים מופיעים כצ'יפים ניתנים להסרה מעל התוצאות.</p>
+    </div>""",
 
     # --- HTML Help Content (Composition) ---
     "COMP_HELP_HTML": """<div dir='rtl'><h3>חיפוש מקבילות</h3>
@@ -698,8 +707,8 @@ TRANSLATIONS = {
     # --- HTML Help Content (Settings) ---
     "SETTINGS_HELP_HTML": """<div dir='rtl'><h3>הגדרות ואינדקס</h3>
     <ul>
-    <li><b>בנה אינדקס:</b> נדרש להרצה הראשונה או לאחר עדכון הקורפוס.</li>
-    <li><b>הגדרות AI:</b> הזנת מפתח וספק לסיוע בביטויים רגולריים.</li>
+    <li><b>בנה אינדקס:</b> נדרש להרצה הראשונה או לאחר עדכון הקורפוס. נדרש גם לחיפוש לפי גבולות שורה.</li>
+    <li><b>הצג תרגומים:</b> הפעלת תרגומים עברית/אנגלית לנתוני קטלוג, כותרות ותיאורים (באמצעות תרגום דיקטה).</li>
     <li><b>אודות:</b> מידע על הגרסה והקרדיטים.</li>
     </ul></div>""",
     "Browse Help": "עיון בכתב יד - עזרה",
@@ -1464,6 +1473,7 @@ TRANSLATIONS = {
     "Indexed Pages": "עמודים באינדקס",
     "Cached Metadata": "מטא-דאטא במטמון",
     "Rebuild Needed": "נדרשת בנייה מחדש",
+    "Line/position search requires a rebuilt index. Please rebuild the index from Settings to use this feature.": "חיפוש לפי מיקום בשורה/טקסט דורש בניית אינדקס מחדש. אנא בנו מחדש את האינדקס מההגדרות כדי להשתמש בתכונה זו.",
     "Configure advanced search parameters": "הגדר פרמטרים מתקדמים לחיפוש",
     "Learn how to use the Genizah site": "למד כיצד להשתמש באתר הגניזה",
 
@@ -2375,6 +2385,16 @@ TRANSLATIONS = {
         "חדש: שמירת מצב, תפריט היסטוריית חיפושים, שיפורי חיפוש מקבילות, התראות שולחן עבודה, שמות ספריות בעברית",
     "Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names":
         "שמירת מצב, תפריט היסטוריית חיפושים, שיפורי חיפוש מקבילות, התראות שולחן עבודה, שמות ספריות בעברית",
+    "Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English)":
+        "חיפוש ממוקד לפי מאפייני כתב יד (תחום, מחבר, יצירה, תאריך, חומר), תרגומי קטלוג ומטא-נתונים (עברית/אנגלית)",
+    "New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection":
+        "חדש: חיפוש ממוקד לפי מאפייני כתב יד, תרגומי קטלוג ומטא-נתונים, חיפוש לפי גבולות שורה לזיהוי צירופים",
+    "Focused Search: filter manuscripts by domain, author, work, date, and material before searching":
+        "חיפוש ממוקד: סינון כתבי יד לפי תחום, מחבר, יצירה, תאריך וחומר לפני החיפוש",
+    "Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation":
+        "תרגומי קטלוג ומטא-נתונים: תרגומים עברית/אנגלית לכותרות, תיאורים ונתוני קטלוג באמצעות תרגום דיקטה",
+    "Line-Boundary Search: find words at start/end of lines or text for join detection. Requires index rebuild.":
+        "חיפוש לפי גבולות שורה: מציאת מילים בתחילת/סוף שורות או טקסט לזיהוי צירופים. דורש בניית אינדקס מחדש.",
     "Got it!": "הבנתי!",
     "Learn More": "למידע נוסף",
 

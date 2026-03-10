@@ -1,4 +1,4 @@
-# Genizah Search Pro 6.2.0
+# Genizah Search Pro 6.5.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,20 +8,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 6.2.0?
+## What's New in Version 6.5.0?
 
-### v6.2.0: Power-User UX — Search Workflow, Session & Notifications
+### v6.5.0: Search UX & Filtered Search
 
-Major UX overhaul driven by power-user feedback.
+Focused search, multilingual catalog data, and cumulative UX improvements.
 
-* **Composition Search UX:** Elapsed timer, chunk count, cancel with partial results, printed badge & filter, min-chunks filter, collapsible excluded section
-* **Session Persistence:** Search state saved and restored across restarts (desktop + web), with configurable restore mode
-* **Search History:** Dropdown arrow in search bar with last 20 searches, keyboard navigation, mode indicator and result count
-* **Desktop Notifications:** Taskbar flash on search completion, sleep prevention during long searches
-* **Copy Context Menu:** Right-click to copy cell text from desktop search results
-* **Hebrew Library Names:** Full Hebrew names for all library codes when UI language is Hebrew
+* **Focused Search:** Filter manuscripts by domain, author, work, date range, and material type before searching — across all search modes (both apps)
+* **Dicta Translation:** ~580K machine translations for catalog data, titles, and scholarly descriptions (Hebrew↔English) via Dicta Translation API
+* **Translation Toggle:** Show/hide translated text in search results, browse views, and catalog dialogs with clickable Translated/Original badges
+* **Browse-to-Search:** Domain and author labels on Browse page link directly to a focused search
+* **Citation Reminder:** One-time popup reminding users to cite MiDRASH when publishing
 
-### Previous Features (v5.0–v6.1)
+### Previous Features (v5.0–v6.2)
+
+* **Power-User UX (v6.2):** Composition search UX (timer, ETA, cancel with partial results), session persistence, search history, desktop notifications, Hebrew library names, copy context menu
+* **Line-Break Search (v6.2.3):** Consecutive-line search in Responsa mode with `|` syntax and line gap notation
 
 * **Catalog Browse (v6.1):** Browse by domain, author, and work with free-text filtering, cross-links, and FIST v5.0 enrichment
 * **Local Data Architecture (v6.0):** PGP data in local SQLite sidecar, offline browsing, paginated search, desktop crash fixes, performance optimizations
@@ -123,7 +125,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 6.2.0 | אתר הגניזה של דיקטה
+# Genizah Search Pro 6.5.0 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 

@@ -346,7 +346,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English)')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()
@@ -499,7 +499,60 @@ def create_layout():
     # Check if footer was dismissed and hide it
     ui.run_javascript('if(localStorage.getItem("citation_footer_dismissed") === "true") { document.querySelector(".citation-footer").style.display = "none"; }')
 
+    # One-time citation reminder dialog (per machine, via localStorage)
+    _show_citation_reminder(get_language())
+
     return content_col
+
+
+def _show_citation_reminder(lang: str):
+    """Show a one-time citation reminder dialog if not previously dismissed."""
+    dialog = ui.dialog().props('persistent')
+    with dialog, ui.card().classes('max-w-lg'):
+        if lang == 'he':
+            ui.label('בקשה חשובה: ציטוט מדרש').classes('text-lg font-bold').style('direction: rtl;')
+            with ui.column().classes('gap-2').style('direction: rtl; text-align: right;'):
+                ui.label(
+                    'אתר זה מבוסס על תמלולים אוטומטיים שנוצרו על ידי צוות פרויקט מדרש. '
+                    'על פי חוק זכויות יוצרים, יש לצטט את המקור בעת פרסום חומר מאתר זה.'
+                ).classes('text-sm')
+                ui.label(
+                    'מעבר לדרישה החוקית \u2014 ככל שיהיו יותר ציטוטים, כך יוכל צוות מדרש '
+                    'להשתמש בהם כדי לקבל מענקים נוספים, לשפר את התמלולים ולהרחיב את העבודה '
+                    'לכתבי יד עבריים נוספים. הציטוט המלא מופיע בתחתית המסך.'
+                ).classes('text-sm')
+                ui.label('תודה על שיתוף הפעולה!').classes('text-sm font-medium')
+        else:
+            ui.label('Important: Please cite MiDRASH').classes('text-lg font-bold')
+            with ui.column().classes('gap-2'):
+                ui.label(
+                    'This website is built on automatic transcriptions produced by the MiDRASH Project. '
+                    'Copyright law requires citing the source when publishing material from this site.'
+                ).classes('text-sm')
+                ui.label(
+                    'Beyond the legal requirement \u2014 the more citations the project receives, the more '
+                    'the MiDRASH team can use them to secure grants and funding to improve the Genizah '
+                    'transcriptions and expand their work to other Hebrew manuscripts. '
+                    'The full citation appears at the bottom of the screen.'
+                ).classes('text-sm')
+                ui.label('Thank you for your cooperation!').classes('text-sm font-medium')
+        with ui.row().classes('w-full justify-end mt-2'):
+            ui.button(
+                tr('Got it'),
+                on_click=lambda: (
+                    ui.run_javascript('localStorage.setItem("citation_reminder_seen", "true")'),
+                    dialog.close(),
+                ),
+            ).props('color=primary')
+    # Only open if not previously seen — pure JS check avoids slot context issues
+    _trigger = ui.button('', on_click=dialog.open).props('flat dense').style('display:none;')
+    _trigger_id = f'citation-trigger-{_trigger.id}'
+    _trigger.props(f'id="{_trigger_id}"')
+    ui.run_javascript(f'''
+        if (localStorage.getItem("citation_reminder_seen") !== "true") {{
+            document.getElementById("{_trigger_id}")?.click();
+        }}
+    ''')
 
 
 # ============================================================================

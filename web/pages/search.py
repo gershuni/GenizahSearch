@@ -762,6 +762,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.label('*מילה / מילה*').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('wildcard'))
                         ui.label('(א/ב)').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('OR'))
                         ui.label('-מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Exclude'))
+                        ui.label('|מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Line starts'))
+                        ui.label('מילה|').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Line ends'))
 
                     # Tabular Search button (pushed to right side)
                     ui.space()

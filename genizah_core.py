@@ -6577,6 +6577,10 @@ class SearchEngine:
             query = self.index.parse_query(t_query_str, [search_field])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
         except Exception as e:
+            if text_position and search_field != 'content':
+                raise RuntimeError(
+                    tr("Line/position search requires a rebuilt index. Please rebuild the index from Settings to use this feature.")
+                ) from e
             LOGGER.warning("Search query failed to parse/execute for pattern %s: %s", t_query_str, e)
             return []
 

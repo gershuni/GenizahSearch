@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v6.5.0
 milestone_name: Search UX & Filtered Search
 status: in_progress
-stopped_at: Extraction fix done + search-in-translation removed from main search. Uncommitted. EN→HE title batch + Round 3 download remain.
-last_updated: "2026-03-10T15:00:00.000Z"
-last_activity: 2026-03-10 - Fixed extraction semicolon split (87K records), removed translated-match from main search (belongs in browse filter only), rebuilt libraries_translations.db.
+stopped_at: Phase 46 complete (all 5 plans done). Citation popup quick task next, then milestone wrap-up.
+last_updated: "2026-03-10T18:00:00.000Z"
+last_activity: 2026-03-10 - Completed 46-05 (desktop translation wiring, extraction fix, batch Round 2-3). Citation popup quick task before v6.5.0 release.
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 25
-  completed_plans: 24
-  percent: 96
+  completed_plans: 25
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 46 in progress (4/5 plans done)
+**Current focus:** v6.5.0 Search UX & Filtered Search — all phases complete, citation popup quick task before release
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 46 of 46 (Dicta Translation) -- Plan 4 of 5 complete, 46-05 in progress
-Status: Phase 46 In Progress — 46-05 desktop wiring near complete, extraction fixed, search-in-translation corrected
-Last activity: 2026-03-10 - Completed quick task 16: Fix desktop installer: add directory selection page and handle stale install paths
+Phase: 46 of 46 (Dicta Translation) -- COMPLETE (all 5 plans done)
+Status: All phases complete. Quick task (citation popup) before milestone release.
+Last activity: 2026-03-10 - Completed 46-05, wrapping up v6.5.0
 
-Progress: [█████████░] 5/5 phases (42-45 complete, 46 in progress — 4/5 plans done)
+Progress: [██████████] 5/5 phases (42-46 all complete, 25/25 plans)
 
 ## Performance Metrics
 
@@ -144,16 +144,15 @@ Recent decisions affecting current work:
 |---|-------------|------|--------|-----------|
 | 15 | Move catalog/bib buttons to page nav pane in Browse; fix FJMS button in advanced mode | 2026-02-22 | da8cd4ab | [15-move-catalog-bib-buttons-to-page-nav-pan](./quick/15-move-catalog-bib-buttons-to-page-nav-pan/) |
 | 16 | Fix installer: show directory selection on upgrades, update filename to v6.2.0 | 2026-03-10 | ebb7e2f0 | [16-fix-desktop-installer-add-directory-sele](./quick/16-fix-desktop-installer-add-directory-sele/) |
-| 17 | Create bump_version.py script, fix version_info.txt (6.1.1->6.2.0), document in CLAUDE.md | 2026-03-10 | pending | [17-create-bump-version-py-script-and-fix-ve](./quick/17-create-bump-version-py-script-and-fix-ve/) |
+| 17 | Create bump_version.py script, fix version_info.txt (6.1.1->6.2.0), document in CLAUDE.md | 2026-03-10 | 45e6d801 | [17-create-bump-version-py-script-and-fix-ve](./quick/17-create-bump-version-py-script-and-fix-ve/) |
 
 ## Session Continuity
 
-Last session: 2026-03-10T15:00:00Z
-Stopped at: Extraction fix + search-in-translation removal done. All uncommitted. User paused for urgent issue.
-Resume file: .planning/phases/46-dicta-translation/.continue-here.md
+Last session: 2026-03-10T18:00:00Z
+Stopped at: Phase 46 complete. Citation popup quick task in progress.
+Resume file: none
 Notes:
-  - Extraction fix: semicolon split ` ; ` (87K records fixed), longest pure-Hebrew (58K improved), DB rebuilt
-  - Search-in-translation: removed from gui_threads.py, genizah_app.py, web/pages/search.py (belongs in browse filter only)
-  - Bug fixes still uncommitted: IIIF HTML strip + RTL bidi
-  - Round 3 FJMS batch: should be complete, need to download fjms_enrichment.db
-  - Next: commit, upload DB to server, run EN→HE title batch, download Round 3, wire subtitle display
+  - All 5 phases (42-46) complete, 25/25 plans done
+  - Quick task: one-time citation reminder popup (todo #10) — in progress
+  - After quick task: download updated DBs from server, verify, then v6.5.0 milestone wrap-up
+  - DB download pending: libraries_translations.db (EN→HE titles), fjms_enrichment.db (Round 3 RunningTitle+FullText)

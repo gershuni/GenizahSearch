@@ -325,7 +325,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names"))
+        self.lbl_msg.setText(tr("New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection"))
         self.show()
 
     def on_learn_more(self):
@@ -345,6 +345,8 @@ class WhatsNewDialog(QDialog):
         self.setModal(True)
         self.setFixedSize(500, 380)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        if CURRENT_LANG == 'he':
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -357,10 +359,9 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
-            f"<li><b>{tr('Composition Search UX: elapsed timer, cancel with partial results, printed badge and filter')}</b></li>"
-            f"<li><b>{tr('Session Persistence: search state saved and restored across restarts, search history dropdown in search bar')}</b></li>"
-            f"<li><b>{tr('Desktop Notifications: taskbar flash on search completion, sleep prevention, copy context menu')}</b></li>"
-            f"<li><b>{tr('Hebrew Library Names: full Hebrew names for all library codes')}</b></li>"
+            f"<li><b>{tr('Focused Search: filter manuscripts by domain, author, work, date, and material before searching')}</b></li>"
+            f"<li><b>{tr('Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation')}</b></li>"
+            f"<li><b>{tr('Line-Boundary Search: find words at start/end of lines or text for join detection. Requires index rebuild.')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)
@@ -8288,6 +8289,10 @@ class GenizahGUI(QMainWindow):
             if cfg.get('whats_new_seen') != APP_VERSION:
                 self.whats_new_bar.show_whats_new(APP_VERSION)
 
+            # One-time citation reminder (shown once per installation)
+            if not cfg.get('citation_reminder_seen', False):
+                QTimer.singleShot(500, self._show_citation_reminder)
+
             # Restore session state (deferred slightly so all widgets are settled)
             QTimer.singleShot(200, self._restore_session)
 
@@ -10351,7 +10356,7 @@ class GenizahGUI(QMainWindow):
         responsa_sub_layout.addWidget(self.chk_bidirectional)
 
         # Syntax legend label
-        syntax_legend = QLabel("  #מילה " + tr("prefix") + "  |  מילה# " + tr("suffix") + "  |  %מילה " + tr("plene") + "  |  *מילה " + tr("wildcard") + "  |  (א/ב) " + tr("OR") + "  |  -מילה " + tr("Exclude"))
+        syntax_legend = QLabel("  #מילה " + tr("prefix") + "  ·  מילה# " + tr("suffix") + "  ·  %מילה " + tr("plene") + "  ·  *מילה " + tr("wildcard") + "  ·  (א/ב) " + tr("OR") + "  ·  -מילה " + tr("Exclude") + "  ·  |מילה " + tr("Line starts") + "  ·  מילה| " + tr("Line ends"))
         syntax_legend.setStyleSheet("font-size: 10px; color: #7f8c8d;")
         responsa_sub_layout.addWidget(syntax_legend)
 
@@ -18232,6 +18237,38 @@ class GenizahGUI(QMainWindow):
         QApplication.clipboard().setText(citation)
         QMessageBox.information(self, tr("Copied"), tr("Citation copied to clipboard!"))
 
+    def _show_citation_reminder(self):
+        """Show a one-time citation reminder dialog on first launch."""
+        if CURRENT_LANG == 'he':
+            title = 'בקשה חשובה: ציטוט מדרש'
+            text = (
+                'אפליקציה זו מבוססת על תמלולים אוטומטיים שנוצרו על ידי צוות פרויקט מדרש. '
+                'על פי חוק זכויות יוצרים, יש לצטט את המקור בעת פרסום חומר מאפליקציה זו.\n\n'
+                'מעבר לדרישה החוקית \u2014 ככל שיהיו יותר ציטוטים, כך יוכל צוות מדרש '
+                'להשתמש בהם כדי לקבל מענקים נוספים, לשפר את התמלולים ולהרחיב את העבודה '
+                'לכתבי יד עבריים נוספים. הציטוט המלא מופיע בתחתית המסך.\n\n'
+                'תודה על שיתוף הפעולה!'
+            )
+        else:
+            title = 'Important: Please cite MiDRASH'
+            text = (
+                'This application is built on automatic transcriptions produced by the MiDRASH Project. '
+                'Copyright law requires citing the source when publishing material from this application.\n\n'
+                'Beyond the legal requirement \u2014 the more citations the project receives, the more '
+                'the MiDRASH team can use them to secure grants and funding to improve the Genizah '
+                'transcriptions and expand their work to other Hebrew manuscripts. '
+                'The full citation appears at the bottom of the screen.\n\n'
+                'Thank you for your cooperation!'
+            )
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(text)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.button(QMessageBox.StandardButton.Ok).setText(tr('Got it'))
+        msg.exec()
+        save_app_config({'citation_reminder_seen': True})
+
     # --- HELP TEXTS ---
     def open_help_center(self, anchor=None):
         """Open the bundled Help.html with optional anchor scrolling and fallback content."""
@@ -18248,7 +18285,7 @@ class GenizahGUI(QMainWindow):
 
     def get_search_help_text(self):
         if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark)."""
+        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
 
     def get_comp_help_text(self):
         if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
@@ -18260,7 +18297,7 @@ class GenizahGUI(QMainWindow):
 
     def get_settings_help_text(self):
         if CURRENT_LANG == 'he': return tr("SETTINGS_HELP_HTML")
-        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates.</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
+        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates. Also required for line-boundary search.</li><li><b>Show Translations:</b> Toggle Hebrew/English translations for catalog data, titles, and descriptions (powered by Dicta Translation).</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
 
     def _build_help_fallback_html(self):
         sections = [

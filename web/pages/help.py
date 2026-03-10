@@ -45,6 +45,8 @@ def _create_english_content():
                 ('intro', 'Introduction: How it Works'),
                 ('search', 'Search'),
                 ('responsa', 'Responsa-Style Search'),
+                ('filters', 'Focused Search (Advanced Filters)'),
+                ('translations', 'Catalog & Metadata Translations'),
                 ('parallels', 'Parallels Search'),
                 ('pgp', 'Princeton Geniza Project (PGP) Data'),
                 ('reading-desk', 'Reading Desk'),
@@ -177,6 +179,46 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
         ui.markdown('*Note:* When a query expands beyond 500 terms, the system automatically downgrades options (variants, Judeo-Arabic, plene, etc.) to maintain speed, and displays a notification accordingly.').style('color: var(--text-secondary);')
+
+    # === Advanced Filters ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-filters"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('filter_list').classes('text-2xl text-primary')
+            h2('Focused Search (Advanced Filters)', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+Use the **Advanced Filters** panel (available on both Search and Parallels pages) to narrow results by manuscript properties before searching. This focuses your search on specific subsets of the corpus.
+
+**Available Filters:**
+- **Domain:** Filter by scholarly classification (e.g., Bible, Talmud, Poetry)
+- **Author:** Filter by attributed author
+- **Work:** Filter by specific work title
+- **Date Range:** Filter by manuscript dating
+- **Material:** Filter by material type (manuscript vs. printed)
+
+**How it works:**
+- Open the collapsible **Advanced Filters** panel above the search results
+- Select one or more filters — the manuscript count updates in real time
+- Active filters appear as removable **chips** above the results
+- Filters apply to all search modes (Exact, Variants, Responsa, etc.)
+- On the Browse page, domain and author labels link directly to a filtered search
+        ''').style('color: var(--text-secondary);')
+
+    # === Translations ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-translations"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('translate').classes('text-2xl text-primary')
+            h2('Catalog & Metadata Translations', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+Catalog data, titles, and scholarly descriptions are available in both Hebrew and English, powered by machine translation via [Dicta Translation](https://translate.dicta.org.il/).
+
+**Toggle:** Use the **Show Translations** toggle in the sidebar to enable translated descriptions in search results, browse views, and catalog dialogs.
+
+When enabled, translated text appears with a clickable **Translated/Original** badge — click to toggle between the translated and original text.
+        ''').style('color: var(--text-secondary);')
 
     # === Parallels Search ===
     with ui.card().classes('w-full p-6'):
@@ -412,6 +454,8 @@ def _create_hebrew_content():
                 ('intro', 'הקדמה: איך זה עובד?'),
                 ('search', 'חיפוש'),
                 ('responsa', 'חיפוש בסגנון פרויקט השו"ת'),
+                ('filters', 'חיפוש ממוקד (סינון מתקדם)'),
+                ('translations', 'תרגומי קטלוג ומטא-נתונים'),
                 ('parallels', 'חיפוש מקבילות'),
                 ('pgp', 'מידע מפרויקט הגניזה של פרינסטון (PGP)'),
                 ('reading-desk', 'שולחן קריאה (Reading Desk)'),
@@ -544,6 +588,46 @@ def _create_hebrew_content():
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         ui.markdown('*הערה:* כאשר שאילתא מתרחבת מעבר ל-500 מונחים, המערכת מורידה אוטומטית אפשרויות (וריאנטים, ערבית-יהודית, כתיב וכו\') כדי לשמור על מהירות, ומציגה התראה בהתאם.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Advanced Filters ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-filters"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('filter_list').classes('text-2xl text-primary')
+            h2('חיפוש ממוקד (סינון מתקדם)', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
+
+        ui.markdown('''
+השתמשו בפאנל **סינון מתקדם** (זמין בדפי חיפוש ומקבילות) כדי לצמצם תוצאות לפי מאפייני כתב יד לפני החיפוש. כך תוכלו למקד את החיפוש בתת-קבוצה ספציפית של הקורפוס.
+
+**מסננים זמינים:**
+- **תחום:** סינון לפי סיווג מדעי (כגון תנ"ך, תלמוד, שירה)
+- **מחבר:** סינון לפי מחבר מיוחס
+- **יצירה:** סינון לפי שם יצירה
+- **טווח תאריכים:** סינון לפי תיארוך כתב היד
+- **חומר:** סינון לפי סוג חומר (כתב יד מול דפוס)
+
+**אופן השימוש:**
+- פתחו את פאנל **סינון מתקדם** המתקפל מעל תוצאות החיפוש
+- בחרו מסנן אחד או יותר — מספר כתבי היד מתעדכן בזמן אמת
+- מסננים פעילים מופיעים כ**צ'יפים** ניתנים להסרה מעל התוצאות
+- המסננים חלים על כל מצבי החיפוש (מדויק, וריאנטים, רספונסה וכו')
+- בדף העיון, תוויות תחום ומחבר מקשרות ישירות לחיפוש מסונן
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Translations ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-translations"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('translate').classes('text-2xl text-primary')
+            h2('תרגומי קטלוג ומטא-נתונים', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
+
+        ui.markdown('''
+נתוני קטלוג, כותרות ותיאורים מדעיים זמינים גם בעברית וגם באנגלית, באמצעות [תרגום דיקטה](https://translate.dicta.org.il/).
+
+**הפעלה:** השתמשו במתג **הצג תרגומים** בסרגל הצד כדי להציג תיאורים מתורגמים בתוצאות חיפוש, תצוגות עיון ודיאלוגי קטלוג.
+
+כאשר מופעל, טקסט מתורגם מופיע עם תג **מתורגם/מקור** לחיץ — לחצו כדי לעבור בין הטקסט המתורגם למקורי.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Parallels Search ===
     with ui.card().classes('w-full p-6'):
