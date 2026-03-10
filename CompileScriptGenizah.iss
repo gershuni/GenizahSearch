@@ -30,10 +30,11 @@ ArchitecturesAllowed=x64compatible
 ; the 64-bit view of the registry.
 ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
+DisableDirPage=no
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 OutputDir=C:\GenizahSearch\dist
-OutputBaseFilename=GenizahSearchPro_V6.1.1_Setup
+OutputBaseFilename=GenizahSearchPro_V6.2.0_Setup
 SetupIconFile=C:\GenizahSearch\icon.ico
 SolidCompression=yes
 WizardStyle=modern dynamic
