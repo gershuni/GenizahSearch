@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-11 (Translation QA: QC module, disclaimers, report buttons, 12,827 data fixes)
+> **Last Updated:** 2026-03-11 (Added P2 FJMS export data loss + P2 translation toggle direction bugs)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 4 | 4 |
-| P2 Medium Bugs | 0 | 8 | 8 |
+| P2 Medium Bugs | 2 | 8 | 10 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 7 | 0 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **8** | **43** | **51** |
+| **Total** | **10** | **43** | **53** |
 
 ---
 
@@ -75,6 +75,8 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Translation batch script rewires stdio on import and breaks pytest capture** | scripts/translate_pgp_descriptions.py, scripts/translate_libraries_titles.py | ג… Fixed (2026-03-11) | Moved UTF-8 stdio setup from import-time into `_configure_utf8_stdio()` called only from `if __name__ == "__main__":`. Uses `reconfigure()` when available. Fixed in both translation scripts. |
+| **FJMS export drops ~38K catalog records (MAX(Version) filter)** | scripts/export_fist_enrichment.py | ✅ Fixed (2026-03-11) | MAX(Version) join on dbo_Signature drops child records when latest version lacks data but earlier versions have it. Affects 6 functions (catalog, running_titles, sizes, fields, textual_frames, mentions). 37,962 catalog recs lost (9.2%), 33,410 AlmaIds affected. 3 other functions (free_desc, full_texts, bibliography) already fixed. Fix: remove MAX(Version) from 6 functions. UnitCatalogRecId never on multiple versions — verified 0 for all 6 child tables (UnitCatalogRec, CatalogMultiRunningTitle, CatalogMultiSize, CatalogMultiField, CatalogMultiMention). See `docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md`. |
+| **FJMS catalog translation toggle shows wrong language by default (desktop + web RT)** | genizah_app.py:6784-7000, web/components/catalog_dialog.py:274-286, shared/translation_service.py:392-420 | ✅ Fixed (2026-03-11) | Translation directions are mixed: RunningTitle/FullText are en2he, FreeDesc is he2en. Service layer drops direction column. Desktop: 3 confirmed wrong-default toggle sections (RunningTitle en2he, FreeDesc he2en, FullText en2he). Web: RunningTitle replacement confirmed broken (replaces EN with HE in EN UI); FreeDesc works by coincidence; FullText has no translation logic. Fix: (1) return direction from translation_service, (2) make desktop renderer + web RT replacement direction-aware. See `docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md`. |
 | **Browse title toggle keeps RTL classes** | web/pages/browse.py:2093,2098,2253,2257 | ג… Fixed (2026-03-10) | Changed `.classes()` to use `remove=/add=` for proper class swapping |
 | **Debug prints in code** | `genizah_app.py`, `parallels.py` | ג… Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
 | **List Rename** | `web/pages/lists.py:414-423` | ג… Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
@@ -93,6 +95,7 @@ Move to "Completed Issues" section at bottom with date
 | **Filter panel overlap with progress bar** | `web/pages/search.py`, `parallels.py` | ג… Fixed (2026-03-03) | Chip bar, progress bar, results overlapped when filter panel open. Auto-collapse panel on search start + scroll to progress + spacing/z-index fix |
 | **Pre-search domain filter: bilingual, "Other" ambiguous, missing 3rd level** | `search.py`, `parallels.py`, `genizah_app.py`, `fjms_service.py` | ג… Fixed (2026-03-03) | Dropdown showed bilingual labels (should be current lang only), "Other" had no parent disambiguation, sub-sub-domains missing. Chips also lost qualified names. Fixed all 3 issues + recursive checkbox propagation + qualified-name SQL filtering |
 | **CSRF protection missing** | API endpoints | ג Deferred | Low risk - NiceGUI uses WebSocket |
+| **Session persistence only saves search tab state** | genizah_app.py | ❌ Open | Session save/restore remembers search state but does not restore position and info in other tabs (Browse, Lists, etc.). User request: persist full tab state across sessions. |
 
 ---
 
@@ -205,6 +208,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-11 | Added P2: FJMS export MAX(Version) drops ~38K catalog records (9.2%); P2: Desktop translation toggle shows wrong language by default. Full report in docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md | Claude |
 | 2026-03-11 | MARC field translations: added translate badges for Date, Subjects, People; Hebrew date gematria converter avoids Dicta errors; marked for testing | Claude |
 | 2026-03-11 | Added open untested-area item for translation QA / hallucination audit after reviewing the Phase 46 translation rollout | Codex |
 | 2026-03-01 | v6.1.1 ג€” async desktop catalog browse (QThread), 100x faster domain queries (35s->0.8s via IN+UNION subquery + dedup CTE), 3-level domain hierarchy, canonical FJMS ordering, thread-safe FjmsService, browse cache v2 | Claude |
