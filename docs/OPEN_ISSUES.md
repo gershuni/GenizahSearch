@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-11 (MARC field translations: Date/Subjects/People badges + Hebrew date converter)
+> **Last Updated:** 2026-03-11 (Translation QA: QC module, disclaimers, report buttons, 12,827 data fixes)
 > **Status:** Active working document
 
 ---
@@ -129,7 +129,7 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 | **Browser Compatibility** | ❌ Not Tested | Chrome, Firefox, Safari, Edge, Mobile |
 | **Performance** | ❌ Not Tested | 1000+ results, 100+ list items, stress tests |
 | **In-App Update (Desktop)** | ❌ Test on Next Release | Build test version with 5.0.0, verify full update flow works (download → install → auto-restart) |
-| **Translation QA / hallucination audit** | ❌ Not Tested | ~580K Dicta translations are now user-visible, but there is no systematic sampling, validator pipeline, or reviewer workflow to detect hallucinations, mistranslations, or terminology drift across PGP, FJMS, and title datasets. |
+| **Translation QA / hallucination audit** | ✅ Fixed (2026-03-11) | QC module (`shared/translation_qc.py`), audit script, report component, disclaimers added. 12,827 rows fixed: Piyyut (10,256), Bible (979), Mahzor (317), Selihot (347), Kinot (218), stuttering nulled (257), FJMS hallucinations deleted (445), PGP collapsed nulled (8). DBs uploaded to server. |
 | **MARC field translations (Date/Subjects/People)** | ❌ Needs Testing | Added translate badges for Date, Subjects, People in ResultDialog and Browse extended info. Hebrew dates use direct gematria converter (`_translate_hebrew_date`) to avoid Dicta errors (e.g. "מאה ט״ו" → "15th century"). Subjects/People use Dicta on-demand. Test: open records with Hebrew dates, subjects, people in EN UI with translations ON. Verify badges appear, translations are correct, toggle works. Test record: sys_id 990001430180205171. |
 
 ---

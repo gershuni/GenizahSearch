@@ -2691,6 +2691,21 @@ TRANSLATIONS = {
     "Script": "כתב",
     "Decoration": "עיטור",
     "Translating...": "מתרגם...",
+
+    # Phase 46 - Translation QA & User Safety
+    "Machine-generated translation": "תרגום ממוחשב",
+    "Translations are machine-generated scholarly aids and may contain errors. Always verify against the original text.": "התרגומים הם כלי עזר ממוחשבים ועלולים להכיל שגיאות. יש לאמת תמיד מול הטקסט המקורי.",
+    "Report translation issue": "דווח על בעיה בתרגום",
+    "Report an issue with this translation": "דווח על בעיה בתרגום זה",
+    "Translation issue reported. Thank you!": "הבעיה בתרגום דווחה. תודה!",
+    "Please describe the issue": "אנא תאר/י את הבעיה",
+    "The translation is incorrect or misleading": "התרגום שגוי או מטעה",
+    "The translation contains hallucinated content": "התרגום מכיל תוכן שאינו במקור",
+    "The translation is a copy of the source text": "התרגום הוא העתק של טקסט המקור",
+    "Other issue": "בעיה אחרת",
+    "Issue type": "סוג הבעיה",
+    "Submit report": "שלח דיווח",
+    "Translation reports help us improve quality": "דיווחי תרגום מסייעים לנו לשפר את האיכות",
 }
 
 # Hebrew library display names (keyed by library_code)

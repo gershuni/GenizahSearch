@@ -2326,6 +2326,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         _ox_badge = ui.badge(_init_badge, color='light-blue').props('dense outline').classes('text-xs cursor-pointer')
                                         _ox_badge_ref[0] = _ox_badge
                                         _ox_badge.on('click', _make_ox_toggle(_ox_lbl, _ox_badge_ref, _ox_eng, _ox_heb, _ox_st))
+                                        from web.components.translation_report import create_report_button
+                                        create_report_button(
+                                            dataset='oxford', record_id=str(page.sys_id),
+                                            field_name=_ox_field, direction='en2he',
+                                            source_text=_ox_eng, translated_text=_ox_heb,
+                                        )
 
                     # External Links
                     ui.separator().classes('my-3')
@@ -2466,6 +2472,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         )
                                         _br_btn.on('click.stop', _make_browse_toggle(_br_lbl, _br_badge_ref, description, _trans_desc_he, _br_st))
                                         _br_badge_ref[0] = _br_btn
+                                        from web.components.translation_report import create_report_button
+                                        create_report_button(
+                                            dataset='pgp', record_id=str(_pgpid_browse),
+                                            field_name='description', direction='en2he',
+                                            source_text=description, translated_text=_trans_desc_he,
+                                        )
                                 else:
                                     ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
 

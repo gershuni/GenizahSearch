@@ -3940,6 +3940,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             )
                             _tb.on('click.stop', _toggle_fn)
                             _tb_ref[0] = _tb
+                            from web.components.translation_report import create_report_button
+                            create_report_button(
+                                dataset='pgp', record_id=str(search_state.translation_data.get(sys_id, {}).get('pgpid', sys_id)),
+                                field_name='description', direction='en2he',
+                                source_text=_orig, translated_text=_desc_short,
+                            )
                     elif _resolved_short:
                         _dir = 'ltr' if (_title_info and get_language() != 'he' and _title_info.get('english_title')) else 'rtl'
                         # Show title with toggle to original bilingual title
@@ -4910,6 +4916,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         )
                                         _adv_st['badge'] = ui.button(tr('Translated'), on_click=_adv_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
                                             'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                        )
+                                        from web.components.translation_report import create_report_button
+                                        create_report_button(
+                                            dataset='pgp', record_id=str(_adv_pgpid),
+                                            field_name='description', direction='en2he',
+                                            source_text=description, translated_text=_adv_trans_he,
                                         )
                                 else:
                                     ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')

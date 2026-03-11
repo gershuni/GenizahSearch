@@ -454,6 +454,12 @@ def create_layout():
                     ui.label(trans_label).classes('text-xs font-medium')
                     if show_translations:
                         ui.icon('check_circle').classes('text-xs').style('color: var(--primary-600);')
+                if show_translations:
+                    ui.label(
+                        tr('Translations are machine-generated scholarly aids and may contain errors. Always verify against the original text.')
+                    ).classes('text-xs px-2').style(
+                        'color: var(--text-tertiary); font-style: italic; line-height: 1.3; opacity: 0.8;'
+                    )
 
                 # Theme Switcher
                 with ui.row().classes('theme-switcher w-full'):

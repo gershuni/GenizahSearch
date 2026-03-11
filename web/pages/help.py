@@ -220,6 +220,10 @@ Catalog data, titles, and scholarly descriptions are available in both Hebrew an
 When enabled, translated text appears with a clickable **Translated/Original** badge — click to toggle between the translated and original text.
         ''').style('color: var(--text-secondary);')
 
+        ui.markdown('''
+> **Important:** Translations are machine-generated scholarly aids and may contain errors, including incorrect terminology, hallucinated content, or inconsistent transliterations. Always verify against the original text for research purposes. If you encounter a problematic translation, click the **Report** button next to the translated text to help us improve quality.
+        ''').style('color: var(--text-secondary); background: var(--surface-1, #f8f9fa); border-left: 3px solid var(--warning, #f59e0b); padding: 8px 12px; border-radius: 4px; margin-top: 4px;')
+
     # === Parallels Search ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-parallels"')
@@ -628,6 +632,10 @@ def _create_hebrew_content():
 
 כאשר מופעל, טקסט מתורגם מופיע עם תג **מתורגם/מקור** לחיץ — לחצו כדי לעבור בין הטקסט המתורגם למקורי.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+        ui.markdown('''
+> **חשוב:** התרגומים הם כלי עזר ממוחשבים ועלולים להכיל שגיאות, לרבות מונחים שגויים, תוכן שאינו מופיע במקור, או תעתיקים לא עקביים. יש לאמת תמיד מול הטקסט המקורי לצורכי מחקר. אם נתקלתם בתרגום בעייתי, לחצו על כפתור **דיווח** ליד הטקסט המתורגם כדי לסייע לנו לשפר את האיכות.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right; background: var(--surface-1, #f8f9fa); border-right: 3px solid var(--warning, #f59e0b); padding: 8px 12px; border-radius: 4px; margin-top: 4px;')
 
     # === Parallels Search ===
     with ui.card().classes('w-full p-6'):
