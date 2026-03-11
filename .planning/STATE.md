@@ -148,11 +148,14 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-10T18:00:00Z
-Stopped at: Phase 46 complete. Citation popup quick task in progress.
-Resume file: none
+Last session: 2026-03-11T19:30:00Z
+Stopped at: Server backfill RUNNING (screen `fjms-backfill`, ~9h from 19:27 UTC). Citation popup already done.
+Resume file: .planning/phases/46-dicta-translation/.continue-here.md
 Notes:
   - All 5 phases (42-46) complete, 25/25 plans done
-  - Quick task: one-time citation reminder popup (todo #10) — in progress
-  - After quick task: download updated DBs from server, verify, then v6.5.0 milestone wrap-up
-  - DB download pending: libraries_translations.db (EN→HE titles), fjms_enrichment.db (Round 3 RunningTitle+FullText)
+  - Citation popup quick task: DONE
+  - Bug 1+2 fixed and committed (565446ae), pushed to remote
+  - Server DB was corrupted — replaced with clean rebuilt DB (730K catalog, 447K translations)
+  - Backfill running: 108,768 items (catalog fields done, FullText/FreeDesc/RT/TF in queue)
+  - After backfill: download DB, verify, merge branch to master-main, deploy, v6.5.0 wrap-up
+  - Full handoff: .planning/phases/46-dicta-translation/SERVER_BACKFILL_HANDOFF.md
