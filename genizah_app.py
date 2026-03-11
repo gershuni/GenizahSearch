@@ -3755,9 +3755,9 @@ class ResultDialog(QDialog):
 
         _ui_lang = CURRENT_LANG  # 'he' or 'en'
 
-        def _trans_or_badge(field_key, text, label):
+        def _trans_or_badge(field_key, text, label, min_len=10):
             """Return text with translate badge or cached translation."""
-            if not _show_trans or not text or len(text.strip()) < 10:
+            if not _show_trans or not text or len(text.strip()) < min_len:
                 return text
             is_he_orig = _is_hebrew_text(text)
             # Skip if text is already in the UI language (nothing to translate)
@@ -3794,7 +3794,12 @@ class ResultDialog(QDialog):
         kti_html = ""
         date_val = marc.get('date')
         if date_val:
-            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+            # Pre-populate cache with direct Hebrew date conversion (avoids Dicta errors)
+            if _show_trans and 'rd_date' not in _ft_cache and _is_hebrew_text(date_val):
+                _direct = _translate_hebrew_date(date_val)
+                if _direct:
+                    _ft_cache['rd_date'] = _direct
+            kti_html += f"<p><b>{tr('Date')}:</b> {_trans_or_badge('rd_date', date_val, tr('Date'), min_len=3)}</p>"
 
         dims = marc.get('dimensions'); phys = meta.get('physical_desc')
         if dims or phys:
@@ -3807,7 +3812,8 @@ class ResultDialog(QDialog):
 
         subjects = marc.get('subjects', [])
         if subjects:
-            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+            subjects_text = '; '.join(subjects)
+            kti_html += f"<p><b>{tr('Subjects')}:</b> {_trans_or_badge('rd_subjects', subjects_text, tr('Subjects'))}</p>"
 
         notes = marc.get('notes', [])
         if notes:
@@ -3824,7 +3830,8 @@ class ResultDialog(QDialog):
 
         people = marc.get('people', [])
         if people:
-            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+            people_text = '; '.join(people)
+            kti_html += f"<p><b>{tr('People')}:</b> {_trans_or_badge('rd_people', people_text, tr('People'))}</p>"
 
         external_html = ""
         if part_meta:
@@ -4641,7 +4648,19 @@ class ResultDialog(QDialog):
         part_meta = rd_meta.get('_part_meta') or {}
 
         # Collect all translatable field keys
+        _ui_lang = CURRENT_LANG
         field_keys = []
+        # Date — short Hebrew dates like "מאה ט״ו": try direct conversion first, Dicta fallback
+        date_val = marc.get('date', '')
+        if date_val and len(date_val.strip()) >= 3:
+            is_he = _is_hebrew_text(date_val)
+            if (is_he and _ui_lang != 'he') or (not is_he and _ui_lang != 'en'):
+                if 'rd_date' not in _field_translation_cache and is_he:
+                    _direct = _translate_hebrew_date(date_val)
+                    if _direct:
+                        _field_translation_cache['rd_date'] = _direct
+                if 'rd_date' not in _field_translation_cache:
+                    field_keys.append('rd_date')
         if marc.get('english_title') and len(marc['english_title'].strip()) >= 10:
             field_keys.append('rd_eng_title')
         phys = rd_meta.get('physical_desc', '')
@@ -4649,11 +4668,21 @@ class ResultDialog(QDialog):
         phys_text = f"{phys or ''} {dims or ''}".strip()
         if phys_text and len(phys_text) >= 10:
             field_keys.append('rd_phys_desc')
+        subjects = marc.get('subjects', [])
+        if subjects:
+            subjects_text = '; '.join(subjects)
+            if len(subjects_text.strip()) >= 10:
+                field_keys.append('rd_subjects')
         notes = marc.get('notes', [])
         if notes:
             combined = '\n'.join(notes)
             if len(combined.strip()) >= 10:
                 field_keys.append('rd_notes')
+        people = marc.get('people', [])
+        if people:
+            people_text = '; '.join(people)
+            if len(people_text.strip()) >= 10:
+                field_keys.append('rd_people')
         if part_meta.get('title') and len(part_meta['title'].strip()) >= 10:
             field_keys.append('rd_part_title')
         if part_meta.get('contents') and len(part_meta['contents'].strip()) >= 10:
@@ -5143,6 +5172,60 @@ def _is_hebrew_text(text):
     hebrew_count = sum(1 for c in text if '\u0590' <= c <= '\u05FF' or '\uFB1D' <= c <= '\uFB4F')
     latin_count = sum(1 for c in text if 'A' <= c <= 'Z' or 'a' <= c <= 'z')
     return hebrew_count > 0 and latin_count < 20
+
+
+def _translate_hebrew_date(text):
+    """Translate Hebrew-numeral dates like 'מאה ט״ו' → '15th century'.
+
+    Returns translated string or None if the pattern is not recognized.
+    Handles: מאה X, מאות X-Y, מאה X-Y, and common suffixes.
+    """
+    import re
+    _GEMATRIA = {
+        'א': 1, 'ב': 2, 'ג': 3, 'ד': 4, 'ה': 5, 'ו': 6, 'ז': 7, 'ח': 8, 'ט': 9,
+        'י': 10, 'כ': 20, 'ך': 20, 'ל': 30, 'מ': 40, 'ם': 40, 'נ': 50, 'ן': 50,
+        'ס': 60, 'ע': 70, 'פ': 80, 'ף': 80, 'צ': 90, 'ץ': 90,
+        'ק': 100, 'ר': 200, 'ש': 300, 'ת': 400,
+    }
+
+    def _parse_heb_numeral(s):
+        """Parse a Hebrew numeral string to int. E.g. ט״ו→15, י״ד→14, י→10."""
+        s = s.strip().replace('״', '').replace('"', '').replace("'", '').replace('׳', '')
+        total = 0
+        for c in s:
+            total += _GEMATRIA.get(c, 0)
+        return total if total > 0 else None
+
+    def _ordinal(n):
+        if 11 <= n % 100 <= 13:
+            return f"{n}th"
+        return f"{n}{['th','st','nd','rd'][n % 10] if n % 10 < 4 else 'th'}"
+
+    t = text.strip()
+    # Normalize quotes
+    t = t.replace('״', '"').replace('׳', "'")
+
+    # Pattern: מאה/מאות X-Y (range of centuries)
+    m = re.match(r'^מא(?:ה|ות)\s+(.+?)\s*[-–]\s*(.+?)(\s*\(.*\))?$', t)
+    if m:
+        a, b = _parse_heb_numeral(m.group(1)), _parse_heb_numeral(m.group(2))
+        if a and b:
+            suffix = ''
+            if m.group(3):
+                suffix = ' ' + m.group(3).strip()
+            return f"{_ordinal(a)}-{_ordinal(b)} century{suffix}"
+
+    # Pattern: מאה X (single century), possibly with suffix
+    m = re.match(r'^מאה\s+(.+?)(\s*\(.*\))?$', t)
+    if m:
+        n = _parse_heb_numeral(m.group(1))
+        if n:
+            suffix = ''
+            if m.group(2):
+                suffix = ' ' + m.group(2).strip()
+            return f"{_ordinal(n)} century{suffix}"
+
+    return None
 
 
 def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translations=None, compact=False):
@@ -6499,10 +6582,6 @@ class FjmsCatalogDialog(QDialog):
             except Exception:
                 _trans_svc = None
 
-        # Language detection: text has significant English content
-        def _has_english(t, min_latin=10):
-            return sum(1 for c in t if ('A' <= c <= 'Z') or ('a' <= c <= 'z')) >= min_latin
-
         # Clickable translation toggle badge style (used in RunningTitle, FreeDesc, FullText)
         _badge_style = (
             'color: #0369a1; font-size: 10px; text-decoration: none; '
@@ -6704,9 +6783,8 @@ class FjmsCatalogDialog(QDialog):
                             if rt_text and str(rt_text).strip():
                                 orig = str(rt_text).strip()
                                 trans = str(_rt_trans_map.get(rec_id, '')).strip() if _rt_trans_map else ''
-                                _orig_has_eng = _has_english(orig, min_latin=3)
-                                # HE UI + English text → show HE translation; EN UI + Hebrew text → show EN translation
-                                _should_swap = trans and trans != orig and ((_orig_has_eng and is_heb) or (not _orig_has_eng and not is_heb))
+                                # Show translation if it exists and differs from original
+                                _should_swap = bool(trans and trans != orig)
                                 toggle_key = f'rt_{rec_id}'
                                 toggled = self._cat_toggle_state.get(toggle_key, False)
                                 if _should_swap:
@@ -6868,10 +6946,9 @@ class FjmsCatalogDialog(QDialog):
                     sig_id = desc.get('signature_id')
                     trans_text = _fd_trans_map.get(sig_id) if sig_id else None
                     orig = str(text).strip()
-                    _orig_has_eng = _has_english(orig)
-                    # Skip swap if translation is identical to original (failed translations)
+                    # Show translation if it exists and differs from original
                     _trans_differs = trans_text and str(trans_text).strip() != orig
-                    _should_swap = _trans_differs and ((_orig_has_eng and is_heb) or (not _orig_has_eng and not is_heb))
+                    _should_swap = bool(_trans_differs)
                     toggle_key = f'fd_{sig_id or fd_idx}'
                     toggled = self._cat_toggle_state.get(toggle_key, False)
 
@@ -6913,8 +6990,8 @@ class FjmsCatalogDialog(QDialog):
                         ft_rowid = ft.get("rowid")
                         orig = str(text).strip()
                         trans = str(_ft_trans_map.get(ft_rowid, '')).strip() if ft_rowid and _ft_trans_map else ''
-                        _orig_has_eng = _has_english(orig)
-                        _should_swap = trans and trans != orig and ((_orig_has_eng and is_heb) or (not _orig_has_eng and not is_heb))
+                        # Show translation if it exists and differs from original
+                        _should_swap = bool(trans and trans != orig)
                         toggle_key = f'ft_{ft_rowid or ft_idx}'
                         toggled = self._cat_toggle_state.get(toggle_key, False)
 
@@ -12193,9 +12270,9 @@ class GenizahGUI(QMainWindow):
         _toggle = getattr(self, '_trans_toggle_state', {})
         _ui_lang_b = CURRENT_LANG  # 'he' or 'en'
 
-        def _trans_or_badge_b(field_key, text, label):
+        def _trans_or_badge_b(field_key, text, label, min_len=10):
             """Return text with translate badge or cached translation (browse)."""
-            if not _show_trans or not text or len(text.strip()) < 10:
+            if not _show_trans or not text or len(text.strip()) < min_len:
                 return text
             is_he_orig = _is_hebrew_text(text)
             # Skip if text is already in the UI language (nothing to translate)
@@ -12230,7 +12307,12 @@ class GenizahGUI(QMainWindow):
         kti_html = ""
         date_val = marc.get('date')
         if date_val:
-            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+            # Pre-populate cache with direct Hebrew date conversion (avoids Dicta errors)
+            if _show_trans and 'br_date' not in _ft_cache and _is_hebrew_text(date_val):
+                _direct = _translate_hebrew_date(date_val)
+                if _direct:
+                    _ft_cache['br_date'] = _direct
+            kti_html += f"<p><b>{tr('Date')}:</b> {_trans_or_badge_b('br_date', date_val, tr('Date'), min_len=3)}</p>"
 
         dims = marc.get('dimensions')
         phys = marc.get('physical_desc') or marc.get('physical_description')
@@ -12244,7 +12326,8 @@ class GenizahGUI(QMainWindow):
 
         subjects = marc.get('subjects', [])
         if subjects:
-            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+            subjects_text = '; '.join(subjects)
+            kti_html += f"<p><b>{tr('Subjects')}:</b> {_trans_or_badge_b('br_subjects', subjects_text, tr('Subjects'))}</p>"
 
         notes = marc.get('notes', [])
         if notes:
@@ -12260,7 +12343,8 @@ class GenizahGUI(QMainWindow):
 
         people = marc.get('people', [])
         if people:
-            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+            people_text = '; '.join(people)
+            kti_html += f"<p><b>{tr('People')}:</b> {_trans_or_badge_b('br_people', people_text, tr('People'))}</p>"
 
         external_html = ""
         if part_meta:
@@ -12611,8 +12695,16 @@ class GenizahGUI(QMainWindow):
 
         # Determine field from key (strip prefix rd_/br_)
         suffix = field_key[3:] if field_key.startswith(('rd_', 'br_')) else field_key
-        if suffix == 'eng_title':
+        if suffix == 'date':
+            return marc.get('date', '')
+        elif suffix == 'eng_title':
             return marc.get('english_title', '')
+        elif suffix == 'subjects':
+            subjects = marc.get('subjects', [])
+            return '; '.join(subjects) if subjects else None
+        elif suffix == 'people':
+            people = marc.get('people', [])
+            return '; '.join(people) if people else None
         elif suffix == 'phys_desc':
             phys = meta.get('physical_desc', '') or marc.get('physical_desc', '') or marc.get('physical_description', '')
             dims = marc.get('dimensions', '')

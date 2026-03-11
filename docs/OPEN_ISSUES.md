@@ -1,6 +1,6 @@
-# GenizahSearch - Open Issues Tracker
+﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-11 (fixed stdio import side-effect in translation scripts)
+> **Last Updated:** 2026-03-11 (MARC field translations: Date/Subjects/People badges + Hebrew date converter)
 > **Status:** Active working document
 
 ---
@@ -21,12 +21,12 @@
 ```markdown
 # When completing an issue:
 | Issue | Status | Notes |
-| Old text | ❌ Open | Description |
-↓
-| Old text | ✅ Fixed (2026-02-03) | Description |
+| Old text | ג Open | Description |
+ג†“
+| Old text | ג… Fixed (2026-02-03) | Description |
 
 # When adding new issue:
-| **NEW: Issue description** | ❌ Open | Details |
+| **NEW: Issue description** | ג Open | Details |
 
 # When removing (only after verified in production):
 Move to "Completed Issues" section at bottom with date
@@ -52,10 +52,10 @@ Move to "Completed Issues" section at bottom with date
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 0 | 6 | 6 |
-| Untested Areas | 5 | 0 | 5 |
+| Untested Areas | 7 | 0 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **6** | **43** | **49** |
+| **Total** | **8** | **43** | **51** |
 
 ---
 
@@ -65,34 +65,34 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Desktop Path Traversal** | `filter_text_dialog.py:16-23,58` | ✅ Fixed (2026-02-03) | Already fixed - uses `_sanitize_cache_filename()` whitelist approach |
+| **Desktop Path Traversal** | `filter_text_dialog.py:16-23,58` | ג… Fixed (2026-02-03) | Already fixed - uses `_sanitize_cache_filename()` whitelist approach |
 
-| **Desktop FJMS catalog HTML injection** | `genizah_app.py:6712-6716,6879-6883,6921-6932` | ✅ Fixed (2026-03-10) | Added `html.escape()` to all three catalog toggle sections (RunningTitle, FreeDesc, FullText) |
-| **Parallels metadata dialog NameError** | `web/pages/parallels.py:3387` | ✅ Fixed (2026-03-10) | Changed `_md_show_trans` → `_par_show_trans` |
-| **Search advanced header NameError** | `web/pages/search.py:4656` | ✅ Fixed (2026-03-10) | Replaced `_adv_tt` with safe `_adv_tt_resolved` lookup |
+| **Desktop FJMS catalog HTML injection** | `genizah_app.py:6712-6716,6879-6883,6921-6932` | ג… Fixed (2026-03-10) | Added `html.escape()` to all three catalog toggle sections (RunningTitle, FreeDesc, FullText) |
+| **Parallels metadata dialog NameError** | `web/pages/parallels.py:3387` | ג… Fixed (2026-03-10) | Changed `_md_show_trans` ג†’ `_par_show_trans` |
+| **Search advanced header NameError** | `web/pages/search.py:4656` | ג… Fixed (2026-03-10) | Replaced `_adv_tt` with safe `_adv_tt_resolved` lookup |
 ### P2 - Medium
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Translation batch script rewires stdio on import and breaks pytest capture** | scripts/translate_pgp_descriptions.py, scripts/translate_libraries_titles.py | ✅ Fixed (2026-03-11) | Moved UTF-8 stdio setup from import-time into `_configure_utf8_stdio()` called only from `if __name__ == "__main__":`. Uses `reconfigure()` when available. Fixed in both translation scripts. |
-| **Browse title toggle keeps RTL classes** | web/pages/browse.py:2093,2098,2253,2257 | ✅ Fixed (2026-03-10) | Changed `.classes()` to use `remove=/add=` for proper class swapping |
-| **Debug prints in code** | `genizah_app.py`, `parallels.py` | ✅ Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
-| **List Rename** | `web/pages/lists.py:414-423` | ✅ Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
-| **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ⏭️ Won't Fix | Excel export sufficient for needs |
-| **Bare `except:` statements** | Multiple files | ✅ Fixed (2026-02-03) | Changed all 16 instances to `except Exception:` |
-| **Shelfmark normalization inconsistency** | 5 implementations | ✅ Fixed (2026-02-04) | Unified to single `normalize_shelfmark()` in `genizah_core.py` |
-| **Star button visual feedback** | `browse.py`, `search.py` | ✅ Fixed (2026-02-03) | Shows `star` when in list, `star_border` when not |
+| **Translation batch script rewires stdio on import and breaks pytest capture** | scripts/translate_pgp_descriptions.py, scripts/translate_libraries_titles.py | ג… Fixed (2026-03-11) | Moved UTF-8 stdio setup from import-time into `_configure_utf8_stdio()` called only from `if __name__ == "__main__":`. Uses `reconfigure()` when available. Fixed in both translation scripts. |
+| **Browse title toggle keeps RTL classes** | web/pages/browse.py:2093,2098,2253,2257 | ג… Fixed (2026-03-10) | Changed `.classes()` to use `remove=/add=` for proper class swapping |
+| **Debug prints in code** | `genizah_app.py`, `parallels.py` | ג… Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
+| **List Rename** | `web/pages/lists.py:414-423` | ג… Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
+| **Missing CSV/Word exports for Lists** | `lists.py:612-631` | ג­ן¸ Won't Fix | Excel export sufficient for needs |
+| **Bare `except:` statements** | Multiple files | ג… Fixed (2026-02-03) | Changed all 16 instances to `except Exception:` |
+| **Shelfmark normalization inconsistency** | 5 implementations | ג… Fixed (2026-02-04) | Unified to single `normalize_shelfmark()` in `genizah_core.py` |
+| **Star button visual feedback** | `browse.py`, `search.py` | ג… Fixed (2026-02-03) | Shows `star` when in list, `star_border` when not |
 
 ### P3 - Low Priority
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Auto-save not working** | `text_editor.py:374` | ✅ Fixed (2026-02-03) | Auto-save implemented at lines 443-454 using NiceGUI timer |
-| **Race conditions in UI timers** | `parallels.py`, `search.py` | ✅ Fixed (2026-02-04) | Added timer tracking and deactivation to prevent duplicates |
-| **Cache thread-safety** | `joins_panel.py:17-19` | ✅ Fixed (2026-02-04) | Added threading.Lock for cache access |
-| **Filter panel overlap with progress bar** | `web/pages/search.py`, `parallels.py` | ✅ Fixed (2026-03-03) | Chip bar, progress bar, results overlapped when filter panel open. Auto-collapse panel on search start + scroll to progress + spacing/z-index fix |
-| **Pre-search domain filter: bilingual, "Other" ambiguous, missing 3rd level** | `search.py`, `parallels.py`, `genizah_app.py`, `fjms_service.py` | ✅ Fixed (2026-03-03) | Dropdown showed bilingual labels (should be current lang only), "Other" had no parent disambiguation, sub-sub-domains missing. Chips also lost qualified names. Fixed all 3 issues + recursive checkbox propagation + qualified-name SQL filtering |
-| **CSRF protection missing** | API endpoints | ❌ Deferred | Low risk - NiceGUI uses WebSocket |
+| **Auto-save not working** | `text_editor.py:374` | ג… Fixed (2026-02-03) | Auto-save implemented at lines 443-454 using NiceGUI timer |
+| **Race conditions in UI timers** | `parallels.py`, `search.py` | ג… Fixed (2026-02-04) | Added timer tracking and deactivation to prevent duplicates |
+| **Cache thread-safety** | `joins_panel.py:17-19` | ג… Fixed (2026-02-04) | Added threading.Lock for cache access |
+| **Filter panel overlap with progress bar** | `web/pages/search.py`, `parallels.py` | ג… Fixed (2026-03-03) | Chip bar, progress bar, results overlapped when filter panel open. Auto-collapse panel on search start + scroll to progress + spacing/z-index fix |
+| **Pre-search domain filter: bilingual, "Other" ambiguous, missing 3rd level** | `search.py`, `parallels.py`, `genizah_app.py`, `fjms_service.py` | ג… Fixed (2026-03-03) | Dropdown showed bilingual labels (should be current lang only), "Other" had no parent disambiguation, sub-sub-domains missing. Chips also lost qualified names. Fixed all 3 issues + recursive checkbox propagation + qualified-name SQL filtering |
+| **CSRF protection missing** | API endpoints | ג Deferred | Low risk - NiceGUI uses WebSocket |
 
 ---
 
@@ -102,19 +102,19 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Lists Unification Plan references removed backend** | `LISTS_UNIFICATION_PLAN.md` | ✅ Fixed (2026-02-03) | Added deprecation note |
-| **Joins Feed Plan references removed backend** | `JOINS_FEED_PLAN.md` | ✅ Fixed (2026-02-03) | Added deprecation note |
-| **Plans Index stale status** | `PLANS_INDEX.md` | ✅ Fixed (2026-02-03) | Updated with current status |
-| **Duplicate bug tracking** | `PRE_LAUNCH_CHECKLIST.md` + `FIX_PLAN.md` | ⏭️ Deferred | OPEN_ISSUES.md is now canonical |
+| **Lists Unification Plan references removed backend** | `LISTS_UNIFICATION_PLAN.md` | ג… Fixed (2026-02-03) | Added deprecation note |
+| **Joins Feed Plan references removed backend** | `JOINS_FEED_PLAN.md` | ג… Fixed (2026-02-03) | Added deprecation note |
+| **Plans Index stale status** | `PLANS_INDEX.md` | ג… Fixed (2026-02-03) | Updated with current status |
+| **Duplicate bug tracking** | `PRE_LAUNCH_CHECKLIST.md` + `FIX_PLAN.md` | ג­ן¸ Deferred | OPEN_ISSUES.md is now canonical |
 
 ### Version Number Mismatches
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **README says 5.3** | `README.md` | ✅ Fixed (2026-02-03) | Updated to 5.4 |
-| **Desktop download reference** | `README.md` | ✅ Fixed (2026-02-03) | Updated to V5.4.1 |
-| **Pre-launch checklist version** | `PRE_LAUNCH_CHECKLIST.md` | ✅ Fixed (2026-02-03) | Updated to 5.4 |
-| **Code Quality Audit version** | `CODE_QUALITY_AUDIT_2026-01-30.md` | ⏭️ N/A | Already in archive |
+| **README says 5.3** | `README.md` | ג… Fixed (2026-02-03) | Updated to 5.4 |
+| **Desktop download reference** | `README.md` | ג… Fixed (2026-02-03) | Updated to V5.4.1 |
+| **Pre-launch checklist version** | `PRE_LAUNCH_CHECKLIST.md` | ג… Fixed (2026-02-03) | Updated to 5.4 |
+| **Code Quality Audit version** | `CODE_QUALITY_AUDIT_2026-01-30.md` | ג­ן¸ N/A | Already in archive |
 
 ---
 
@@ -129,6 +129,8 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 | **Browser Compatibility** | ❌ Not Tested | Chrome, Firefox, Safari, Edge, Mobile |
 | **Performance** | ❌ Not Tested | 1000+ results, 100+ list items, stress tests |
 | **In-App Update (Desktop)** | ❌ Test on Next Release | Build test version with 5.0.0, verify full update flow works (download → install → auto-restart) |
+| **Translation QA / hallucination audit** | ❌ Not Tested | ~580K Dicta translations are now user-visible, but there is no systematic sampling, validator pipeline, or reviewer workflow to detect hallucinations, mistranslations, or terminology drift across PGP, FJMS, and title datasets. |
+| **MARC field translations (Date/Subjects/People)** | ❌ Needs Testing | Added translate badges for Date, Subjects, People in ResultDialog and Browse extended info. Hebrew dates use direct gematria converter (`_translate_hebrew_date`) to avoid Dicta errors (e.g. "מאה ט״ו" → "15th century"). Subjects/People use Dicta on-demand. Test: open records with Hebrew dates, subjects, people in EN UI with translations ON. Verify badges appear, translations are correct, toggle works. Test record: sys_id 990001430180205171. |
 
 ---
 
@@ -136,10 +138,10 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Plan | File | Status | Notes |
 |------|------|--------|-------|
-| **Mobile Responsive Design** | `MOBILE_RESPONSIVE_PLAN.md` | ✅ Implemented | Responsive design completed |
-| **Lists/Projects Unification** | `LISTS_UNIFICATION_PLAN.md` | ✅ Implemented | Lists and projects unified |
-| **Joins in Discovery Feed** | `JOINS_FEED_PLAN.md` | ✅ Implemented | Joins appear in discovery feed |
-| **Desktop Cloud Sync** | Multiple docs | ✅ Implemented | Desktop syncs with Supabase |
+| **Mobile Responsive Design** | `MOBILE_RESPONSIVE_PLAN.md` | ג… Implemented | Responsive design completed |
+| **Lists/Projects Unification** | `LISTS_UNIFICATION_PLAN.md` | ג… Implemented | Lists and projects unified |
+| **Joins in Discovery Feed** | `JOINS_FEED_PLAN.md` | ג… Implemented | Joins appear in discovery feed |
+| **Desktop Cloud Sync** | Multiple docs | ג… Implemented | Desktop syncs with Supabase |
 
 > Note: All plans implemented as of 2026-02-04
 
@@ -151,17 +153,17 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Issue | Files | Status | Notes |
 |-------|-------|--------|-------|
-| **Excel export duplication** | `genizah_app.py` + `export_service.py` | ✅ Fixed (2026-02-04) | Unified via `shared_export_utils.py` |
-| **Word export duplication** | `genizah_app.py` + `export_service.py` | ✅ Fixed (2026-02-04) | Unified via `shared_export_utils.py` |
-| **Text sanitization inconsistency** | Desktop vs Web | ✅ Fixed (2026-02-04) | Single `sanitize_text_for_excel()` in `shared_export_utils.py` |
+| **Excel export duplication** | `genizah_app.py` + `export_service.py` | ג… Fixed (2026-02-04) | Unified via `shared_export_utils.py` |
+| **Word export duplication** | `genizah_app.py` + `export_service.py` | ג… Fixed (2026-02-04) | Unified via `shared_export_utils.py` |
+| **Text sanitization inconsistency** | Desktop vs Web | ג… Fixed (2026-02-04) | Single `sanitize_text_for_excel()` in `shared_export_utils.py` |
 
 ### Hardcoded Values
 
 | Value | File | Status | Should Be |
 |-------|------|--------|-----------|
-| `_CACHE_TTL = 30` | `joins_panel.py:19` | ✅ Fixed (2026-02-04) | Now uses `JOINS_CACHE_TTL` env var |
-| `CACHE_TTL = 300` | `api.py:46` | ✅ Fixed (2026-02-04) | Now uses `NLI_CACHE_TTL` / `IMAGE_CACHE_TTL` env vars |
-| Timeouts & retries | `auth_state.py:17-20` | ❌ Deferred | Low priority - defaults are reasonable |
+| `_CACHE_TTL = 30` | `joins_panel.py:19` | ג… Fixed (2026-02-04) | Now uses `JOINS_CACHE_TTL` env var |
+| `CACHE_TTL = 300` | `api.py:46` | ג… Fixed (2026-02-04) | Now uses `NLI_CACHE_TTL` / `IMAGE_CACHE_TTL` env vars |
+| Timeouts & retries | `auth_state.py:17-20` | ג Deferred | Low priority - defaults are reasonable |
 
 ---
 
@@ -169,10 +171,10 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 | Topic | Status | Notes |
 |-------|--------|-------|
-| **Supabase RLS policies detail** | ✅ Fixed (2026-02-03) | Added detailed policy SQL examples to `SUPABASE_GUIDE.md` |
-| **OAuth callback handling** | ✅ Fixed (2026-02-03) | Documented implicit flow and token extraction in `SUPABASE_GUIDE.md` |
-| **Cloudflare rate limiting config** | ✅ Fixed (2026-02-03) | Added configuration guide to `DEPLOYMENT_TECHNICAL.md` |
-| **Desktop Supabase client** | ✅ Fixed (2026-02-03) | Added `supabase_corrections_client.py` to `CODE_INDEX.md` |
+| **Supabase RLS policies detail** | ג… Fixed (2026-02-03) | Added detailed policy SQL examples to `SUPABASE_GUIDE.md` |
+| **OAuth callback handling** | ג… Fixed (2026-02-03) | Documented implicit flow and token extraction in `SUPABASE_GUIDE.md` |
+| **Cloudflare rate limiting config** | ג… Fixed (2026-02-03) | Added configuration guide to `DEPLOYMENT_TECHNICAL.md` |
+| **Desktop Supabase client** | ג… Fixed (2026-02-03) | Added `supabase_corrections_client.py` to `CODE_INDEX.md` |
 
 ---
 
@@ -182,10 +184,10 @@ All completed items have been moved to `docs/archive/`:
 
 | File | Reason | Status |
 |------|--------|--------|
-| `SUPABASE_MIGRATION_PLAN.md` | Marked COMPLETED | ✅ Archived (2026-02-03) |
-| `LIBRARY_LOCATION_PLAN.md` | Marked ✅ Implemented | ✅ Archived (2026-02-03) |
-| `LIBRARY_LOCATION_TEST_CHECKLIST.md` | Testing complete | ✅ Archived (2026-02-03) |
-| `BOUNDARY_SEARCH_SPEC.md` | COMPLETED (Web + Desktop) | ✅ Archived (2026-02-03) |
+| `SUPABASE_MIGRATION_PLAN.md` | Marked COMPLETED | ג… Archived (2026-02-03) |
+| `LIBRARY_LOCATION_PLAN.md` | Marked ג… Implemented | ג… Archived (2026-02-03) |
+| `LIBRARY_LOCATION_TEST_CHECKLIST.md` | Testing complete | ג… Archived (2026-02-03) |
+| `BOUNDARY_SEARCH_SPEC.md` | COMPLETED (Web + Desktop) | ג… Archived (2026-02-03) |
 
 ---
 
@@ -203,27 +205,29 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
-| 2026-03-01 | v6.1.1 — async desktop catalog browse (QThread), 100x faster domain queries (35s->0.8s via IN+UNION subquery + dedup CTE), 3-level domain hierarchy, canonical FJMS ordering, thread-safe FjmsService, browse cache v2 | Claude |
-| 2026-02-22 | Closed v6.0.0 milestone — local data architecture (pgp.db sidecar, FJMS catalog descriptions, offline browsing), bug fixes (desktop crashes, pagination), performance optimization (parallel NLI, crossref, variant cache), IsNotGenizah badge removed | Claude |
-| 2026-02-16 | Closed v5.9.0 milestone — multi-source image & metadata integration (NLI crossref, Cambridge/Manchester/JTS IIIF, bibliography, catalog refs), version bump to 5.9.0 | Claude |
-| 2026-02-15 | Closed v5.8.0 milestone — FJMS integration (domains, scientific joins, catalog enrichment), version bump to 5.8.0 | Claude |
-| 2026-02-11 | Closed v5.7.2 milestone — version bump to 5.7.2, AI code removed, search normalization, full green test suite, structural sections | Claude |
-| 2026-02-09 | Closed v5.6.0 milestone — version bump to 5.6.0, updated CHANGELOG.md and STATE.md | Claude |
-| 2026-02-09 | Created `pgp_tag_translations.py` — 251 PGP tags with curated Hebrew translations in 16 categories | Claude |
+| 2026-03-11 | MARC field translations: added translate badges for Date, Subjects, People; Hebrew date gematria converter avoids Dicta errors; marked for testing | Claude |
+| 2026-03-11 | Added open untested-area item for translation QA / hallucination audit after reviewing the Phase 46 translation rollout | Codex |
+| 2026-03-01 | v6.1.1 ג€” async desktop catalog browse (QThread), 100x faster domain queries (35s->0.8s via IN+UNION subquery + dedup CTE), 3-level domain hierarchy, canonical FJMS ordering, thread-safe FjmsService, browse cache v2 | Claude |
+| 2026-02-22 | Closed v6.0.0 milestone ג€” local data architecture (pgp.db sidecar, FJMS catalog descriptions, offline browsing), bug fixes (desktop crashes, pagination), performance optimization (parallel NLI, crossref, variant cache), IsNotGenizah badge removed | Claude |
+| 2026-02-16 | Closed v5.9.0 milestone ג€” multi-source image & metadata integration (NLI crossref, Cambridge/Manchester/JTS IIIF, bibliography, catalog refs), version bump to 5.9.0 | Claude |
+| 2026-02-15 | Closed v5.8.0 milestone ג€” FJMS integration (domains, scientific joins, catalog enrichment), version bump to 5.8.0 | Claude |
+| 2026-02-11 | Closed v5.7.2 milestone ג€” version bump to 5.7.2, AI code removed, search normalization, full green test suite, structural sections | Claude |
+| 2026-02-09 | Closed v5.6.0 milestone ג€” version bump to 5.6.0, updated CHANGELOG.md and STATE.md | Claude |
+| 2026-02-09 | Created `pgp_tag_translations.py` ג€” 251 PGP tags with curated Hebrew translations in 16 categories | Claude |
 | 2026-02-09 | Added categorized tag dropdowns with category headers in both web and desktop apps | Claude |
-| 2026-02-09 | Language-aware tag display: Hebrew UI shows "עברית (English)", English UI shows English only | Claude |
-| 2026-02-09 | Fixed desktop PGP Tags mode layout — hides row1, shows tag combo in row2 after Mode | Claude |
-| 2026-02-09 | Fixed web [object Object] in tag dropdown — switched to NiceGUI native dict format | Claude |
+| 2026-02-09 | Language-aware tag display: Hebrew UI shows "׳¢׳‘׳¨׳™׳× (English)", English UI shows English only | Claude |
+| 2026-02-09 | Fixed desktop PGP Tags mode layout ג€” hides row1, shows tag combo in row2 after Mode | Claude |
+| 2026-02-09 | Fixed web [object Object] in tag dropdown ג€” switched to NiceGUI native dict format | Claude |
 | 2026-02-09 | Corrected ~12 tag category misassignments (e.g., Ibn Yiju moved from India Book to People) | Claude |
 | 2026-02-09 | PGP Tags search mode added to Mode dropdown in both apps | Claude |
 | 2026-02-09 | PGP column sorting, simplified PGP controls, user-friendly labels | Claude |
-| 2026-02-09 | Reverted Phase 13 (Transcription Search) — index build too slow for desktop | Claude |
+| 2026-02-09 | Reverted Phase 13 (Transcription Search) ג€” index build too slow for desktop | Claude |
 | 2026-02-04 | Improved connection indicator UX - yellow pulsing dot for loading, no alarming text messages | Claude |
 | 2026-02-04 | Fixed sidebar opening on mobile - now closes by default on screens < 768px | Claude |
 | 2026-02-04 | Improved connection stability - added continuous heartbeat monitoring and reconnect_timeout | Claude |
 | 2026-02-04 | Added Hebrew translations for "Reconnecting...", "Connecting..." | Claude |
 | 2026-02-04 | Implemented in-app software updates - downloads and runs installer silently via Inno Setup | Claude |
-| 2026-02-04 | Added translation button for comments and community messages (Hebrew ↔ English using MyMemory API) | Claude |
+| 2026-02-04 | Added translation button for comments and community messages (Hebrew ג†” English using MyMemory API) | Claude |
 | 2026-02-04 | Marked pending plans as implemented: Mobile, Lists Unification, Joins Feed, Desktop Sync | Claude |
 | 2026-02-04 | Created `shared_export_utils.py` - unified text sanitization, filename helpers for Desktop & Web | Claude |
 | 2026-02-04 | Unified shelfmark normalization - single `normalize_shelfmark()` in genizah_core.py | Claude |
@@ -254,3 +258,4 @@ All completed items have been moved to `docs/archive/`:
 - `FIX_PLAN.md` - Bug fix tracking
 - `CODE_QUALITY_AUDIT_2026-01-30.md` - Full code audit
 - `PLANS_INDEX.md` - Implementation plans overview
+
