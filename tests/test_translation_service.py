@@ -326,6 +326,153 @@ class TestTranslationServiceFjms:
         assert result is None
 
 
+class TestFjmsTranslationTupleReturn:
+    """Tests for tuple (text, direction) return from batch/signature_id methods."""
+
+    @pytest.fixture
+    def fjms_svc(self, tmp_path):
+        from shared.translation_service import (
+            TranslationService,
+            ensure_fjms_translations_table,
+        )
+
+        fjms_db = tmp_path / "fjms_dir.db"
+        conn = sqlite3.connect(str(fjms_db))
+        ensure_fjms_translations_table(conn)
+
+        # en2he RunningTitle
+        conn.execute(
+            "INSERT INTO fjms_translations (alma_id, field_name, signature_id, "
+            "original_text, translated_text, direction, translated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("A1", "RunningTitle", 100, "Numbers 3:14", "\u05d1\u05de\u05d3\u05d1\u05e8 \u05d2:\u05d9\u05d3", "en2he", "2026-03-11"),
+        )
+        # he2en FreeDesc
+        conn.execute(
+            "INSERT INTO fjms_translations (alma_id, field_name, signature_id, "
+            "original_text, translated_text, direction, translated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("A1", "FreeDesc", 200, "\u05e7\u05d8\u05e2 \u05ea\u05d5\u05e8\u05d4", "Torah fragment", "he2en", "2026-03-11"),
+        )
+        # en2he FullText
+        conn.execute(
+            "INSERT INTO fjms_translations (alma_id, field_name, signature_id, "
+            "original_text, translated_text, direction, translated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("A1", "FullText", 300, "Scholarly text", "\u05d8\u05e7\u05e1\u05d8 \u05de\u05d3\u05e2\u05d9", "en2he", "2026-03-11"),
+        )
+        conn.commit()
+        conn.close()
+
+        svc = TranslationService(fjms_db_path=str(fjms_db))
+        yield svc
+        svc.close()
+
+    def test_signature_ids_returns_tuple(self, fjms_svc):
+        """get_fjms_translations_by_signature_ids returns (text, direction) tuples."""
+        result = fjms_svc.get_fjms_translations_by_signature_ids("RunningTitle", [100])
+        assert 100 in result
+        text, direction = result[100]
+        assert text == "\u05d1\u05de\u05d3\u05d1\u05e8 \u05d2:\u05d9\u05d3"
+        assert direction == "en2he"
+
+    def test_signature_ids_freedesc_he2en(self, fjms_svc):
+        """FreeDesc returns he2en direction."""
+        result = fjms_svc.get_fjms_translations_by_signature_ids("FreeDesc", [200])
+        text, direction = result[200]
+        assert text == "Torah fragment"
+        assert direction == "he2en"
+
+    def test_signature_ids_missing(self, fjms_svc):
+        """Missing signature_id not in result."""
+        result = fjms_svc.get_fjms_translations_by_signature_ids("RunningTitle", [999])
+        assert 999 not in result
+
+    def test_batch_returns_tuple(self, fjms_svc):
+        """get_fjms_translations_batch returns (text, direction) tuples per field."""
+        result = fjms_svc.get_fjms_translations_batch(["A1"])
+        assert "A1" in result
+        entry = result["A1"]
+        rt_text, rt_dir = entry["RunningTitle"]
+        assert rt_dir == "en2he"
+        fd_text, fd_dir = entry["FreeDesc"]
+        assert fd_dir == "he2en"
+
+    def test_batch_missing_alma(self, fjms_svc):
+        """Missing alma_id not in batch result."""
+        result = fjms_svc.get_fjms_translations_batch(["UNKNOWN"])
+        assert "UNKNOWN" not in result
+
+
+class TestDirectionSelectionLogic:
+    """Tests for the direction-aware display default logic used by desktop toggles.
+
+    The rule: show the user's UI language by default.
+    - en2he (trans=Hebrew): EN UI → show orig (English), HE UI → show trans (Hebrew)
+    - he2en (trans=English): EN UI → show trans (English), HE UI → show orig (Hebrew)
+    """
+
+    @staticmethod
+    def _compute_display(direction, is_heb, toggled, orig, trans):
+        """Replicate the direction-aware toggle logic from genizah_app.py."""
+        _show_trans_default = (is_heb if direction == 'en2he' else not is_heb)
+        if _show_trans_default:
+            show_text = orig if toggled else trans
+            badge = 'Translated' if toggled else 'Original'
+        else:
+            show_text = trans if toggled else orig
+            badge = 'Original' if toggled else 'Translated'
+        return show_text, badge
+
+    def test_en2he_english_ui_default(self):
+        """en2he in English UI: default shows orig (English), badge='Translated'."""
+        text, badge = self._compute_display('en2he', False, False, 'English', 'Hebrew')
+        assert text == 'English'
+        assert badge == 'Translated'
+
+    def test_en2he_english_ui_toggled(self):
+        """en2he in English UI toggled: shows trans (Hebrew), badge='Original'."""
+        text, badge = self._compute_display('en2he', False, True, 'English', 'Hebrew')
+        assert text == 'Hebrew'
+        assert badge == 'Original'
+
+    def test_en2he_hebrew_ui_default(self):
+        """en2he in Hebrew UI: default shows trans (Hebrew), badge='Original'."""
+        text, badge = self._compute_display('en2he', True, False, 'English', 'Hebrew')
+        assert text == 'Hebrew'
+        assert badge == 'Original'
+
+    def test_en2he_hebrew_ui_toggled(self):
+        """en2he in Hebrew UI toggled: shows orig (English), badge='Translated'."""
+        text, badge = self._compute_display('en2he', True, True, 'English', 'Hebrew')
+        assert text == 'English'
+        assert badge == 'Translated'
+
+    def test_he2en_english_ui_default(self):
+        """he2en in English UI: default shows trans (English), badge='Original'."""
+        text, badge = self._compute_display('he2en', False, False, 'Hebrew', 'English')
+        assert text == 'English'
+        assert badge == 'Original'
+
+    def test_he2en_english_ui_toggled(self):
+        """he2en in English UI toggled: shows orig (Hebrew), badge='Translated'."""
+        text, badge = self._compute_display('he2en', False, True, 'Hebrew', 'English')
+        assert text == 'Hebrew'
+        assert badge == 'Translated'
+
+    def test_he2en_hebrew_ui_default(self):
+        """he2en in Hebrew UI: default shows orig (Hebrew), badge='Translated'."""
+        text, badge = self._compute_display('he2en', True, False, 'Hebrew', 'English')
+        assert text == 'Hebrew'
+        assert badge == 'Translated'
+
+    def test_he2en_hebrew_ui_toggled(self):
+        """he2en in Hebrew UI toggled: shows trans (English), badge='Original'."""
+        text, badge = self._compute_display('he2en', True, True, 'Hebrew', 'English')
+        assert text == 'English'
+        assert badge == 'Original'
+
+
 class TestNoOverwriteCheck:
     """Tests for the no-overwrite safety check."""
 

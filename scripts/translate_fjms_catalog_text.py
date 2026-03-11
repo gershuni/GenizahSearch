@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Batch translate FJMS catalog running titles and full texts (scholarly
-descriptions) from English to Hebrew using the Dicta LM 2.0 Translation API.
+Batch translate FJMS catalog running titles, full texts, and textual frames
+using the Dicta LM 2.0 Translation API.
 
-Only translates entries that contain NO Hebrew characters (pure English text).
-Hebrew and mixed-language entries are left as-is.
-
-Running titles: ~107K English entries (~8 hours at 5 workers)
-Full texts:     ~46K English entries  (~3 hours at 5 workers)
+Running titles:   ~107K English entries EN→HE (~8 hours at 5 workers)
+Full texts:       ~46K English entries  EN→HE (~3 hours at 5 workers)
+Textual frames:   ~127K Hebrew entries  HE→EN (~10 hours at 5 workers)
 
 Designed for very long-running batch operations with robust error handling:
 - Exponential backoff on API errors (1s, 2s, 4s, max 30s, 3 retries)
@@ -23,6 +21,8 @@ Usage:
   python scripts/translate_fjms_catalog_text.py --mode runningtitle --workers 10
   python scripts/translate_fjms_catalog_text.py --mode fulltext --dry-run
   python scripts/translate_fjms_catalog_text.py --mode fulltext --workers 10
+  python scripts/translate_fjms_catalog_text.py --mode textualframe --dry-run
+  python scripts/translate_fjms_catalog_text.py --mode textualframe --workers 5
 """
 
 import argparse
@@ -58,6 +58,8 @@ DEFAULT_FJMS_DB = str(PROJECT_ROOT / "fist_data" / "fjms_enrichment.db")
 DEFAULT_RT_CHECKPOINT = str(PROJECT_ROOT / "translate_fjms_runningtitle_checkpoint.json")
 DEFAULT_FT_CHECKPOINT = str(PROJECT_ROOT / "translate_fjms_fulltext_checkpoint.json")
 DEFAULT_FEW_SHOT_EN2HE = str(PROJECT_ROOT / "data" / "few_shot_en2he_scholarly.json")
+DEFAULT_FEW_SHOT_HE2EN = str(PROJECT_ROOT / "data" / "few_shot_he2en_scholarly.json")
+DEFAULT_TF_CHECKPOINT = str(PROJECT_ROOT / "translate_fjms_textualframe_checkpoint.json")
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 1.0
@@ -87,6 +89,16 @@ def has_english(text: str, min_latin: int = 10) -> bool:
     """
     latin = sum(1 for c in text if ("A" <= c <= "Z") or ("a" <= c <= "z"))
     return latin >= min_latin
+
+
+def has_hebrew(text: str, min_hebrew: int = 3) -> bool:
+    """Return True if text contains significant Hebrew content worth translating.
+
+    Used for HE→EN translation: identifies Hebrew-language textual frames that
+    need English translations. Ignores texts that are already in English.
+    """
+    hebrew = sum(1 for c in text if "\u0590" <= c <= "\u05FF" or "\uFB1D" <= c <= "\uFB4F")
+    return hebrew >= min_hebrew
 
 
 def format_eta(seconds: float) -> str:
@@ -235,6 +247,48 @@ def get_already_translated_ft(conn: sqlite3.Connection) -> set:
 
 
 # =============================================================================
+# Textual Frame Candidates (HE→EN)
+# =============================================================================
+
+
+def get_textualframe_candidates(
+    conn: sqlite3.Connection, min_length: int
+) -> list[tuple[str, str, str]]:
+    """Get Hebrew-only textual frame candidates for HE→EN translation.
+
+    Selects rows where TextualFrameHeb contains Hebrew and either:
+    - TextualFrameEng is missing, or
+    - TextualFrameEng is identical to TextualFrameHeb (no real English)
+
+    Returns:
+        List of (rowid as str, AlmaId, TextualFrameHeb) tuples.
+    """
+    rows = conn.execute(
+        "SELECT rowid, AlmaId, TextualFrameHeb FROM catalog_textual_frames "
+        "WHERE TextualFrameHeb IS NOT NULL AND length(TextualFrameHeb) >= ? "
+        "AND (TextualFrameEng IS NULL OR TextualFrameEng = '' "
+        "     OR TextualFrameEng = TextualFrameHeb)",
+        (min_length,),
+    ).fetchall()
+    return [
+        (str(r[0]), r[1], r[2])
+        for r in rows
+        if has_hebrew(r[2])
+    ]
+
+
+def get_already_translated_tf(conn: sqlite3.Connection) -> set:
+    try:
+        rows = conn.execute(
+            "SELECT COALESCE(signature_id, '') FROM fjms_translations "
+            "WHERE field_name = 'TextualFrame'"
+        ).fetchall()
+        return {str(r[0]) for r in rows}
+    except sqlite3.OperationalError:
+        return set()
+
+
+# =============================================================================
 # Write Translation
 # =============================================================================
 
@@ -272,6 +326,7 @@ def run_batch_translate(
     already_translated: set,
     checkpoint_path: str,
     id_func,
+    direction: str = "en2he",
 ) -> None:
     """Generic batch translation loop.
 
@@ -283,6 +338,7 @@ def run_batch_translate(
         already_translated: Set of already-translated ID keys.
         checkpoint_path: Path to checkpoint file.
         id_func: Function(id_key, alma_id) -> checkpoint key string.
+        direction: Translation direction ("en2he" or "he2en").
     """
     try:
         from tqdm import tqdm
@@ -332,10 +388,14 @@ def run_batch_translate(
         print("Nothing to translate. All candidates already completed.")
         return
 
-    # Load few-shot template (EN→HE)
-    print("Loading EN->HE few-shot template...")
-    template = load_few_shot_template(DEFAULT_FEW_SHOT_EN2HE)
-    few_shot_prompt = build_few_shot_prompt(template, direction="en2he")
+    # Load few-shot template
+    if direction == "he2en":
+        print("Loading HE->EN few-shot template...")
+        template = load_few_shot_template(DEFAULT_FEW_SHOT_HE2EN)
+    else:
+        print("Loading EN->HE few-shot template...")
+        template = load_few_shot_template(DEFAULT_FEW_SHOT_EN2HE)
+    few_shot_prompt = build_few_shot_prompt(template, direction=direction)
 
     # Ensure target table exists
     conn = sqlite3.connect(args.fjms_db)
@@ -363,7 +423,7 @@ def run_batch_translate(
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {}
             for id_key, alma_id, text in pending:
-                f = pool.submit(translate_with_retry, text, few_shot_prompt, "en2he")
+                f = pool.submit(translate_with_retry, text, few_shot_prompt, direction)
                 futures[f] = (id_key, alma_id, text)
 
             for f in as_completed(futures):
@@ -380,7 +440,7 @@ def run_batch_translate(
                     if result is not None:
                         write_translation(
                             conn, alma_id, field_name, id_key,
-                            original_text, result, "en2he",
+                            original_text, result, direction,
                         )
                         completed_ids.add(id_func(id_key, alma_id))
                         translated_count += 1
@@ -512,6 +572,31 @@ def run_fulltext(args: argparse.Namespace) -> None:
     )
 
 
+def run_textualframe(args: argparse.Namespace) -> None:
+    checkpoint_path = args.checkpoint_file or DEFAULT_TF_CHECKPOINT
+
+    print(f"Loading Hebrew textual frame candidates from {args.fjms_db}")
+    print(f"  (min_length={args.min_length})...")
+
+    conn = sqlite3.connect(args.fjms_db)
+    candidates = get_textualframe_candidates(conn, args.min_length)
+    already = get_already_translated_tf(conn)
+    conn.close()
+
+    print(f"Found {len(candidates):,} Hebrew textual frame candidates.")
+
+    run_batch_translate(
+        args,
+        mode_name="Textual Frame",
+        field_name="TextualFrame",
+        candidates=candidates,
+        already_translated=already,
+        checkpoint_path=checkpoint_path,
+        id_func=lambda id_key, alma_id: id_key,
+        direction="he2en",
+    )
+
+
 # =============================================================================
 # CLI
 # =============================================================================
@@ -519,14 +604,15 @@ def run_fulltext(args: argparse.Namespace) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Batch translate FJMS running titles and full texts (EN→HE) via Dicta API.",
+        description="Batch translate FJMS catalog text fields via Dicta API.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   python scripts/translate_fjms_catalog_text.py --mode runningtitle --dry-run
-  python scripts/translate_fjms_catalog_text.py --mode runningtitle --limit 100
   python scripts/translate_fjms_catalog_text.py --mode runningtitle --workers 10
   python scripts/translate_fjms_catalog_text.py --mode fulltext --dry-run
   python scripts/translate_fjms_catalog_text.py --mode fulltext --workers 10
+  python scripts/translate_fjms_catalog_text.py --mode textualframe --dry-run
+  python scripts/translate_fjms_catalog_text.py --mode textualframe --workers 5
   python scripts/translate_fjms_catalog_text.py --mode both --workers 10
 """,
     )
@@ -572,7 +658,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         default="runningtitle",
-        choices=["runningtitle", "fulltext", "both"],
+        choices=["runningtitle", "fulltext", "textualframe", "both"],
         help="Translation mode (default: runningtitle)",
     )
     parser.add_argument(
@@ -599,6 +685,8 @@ def main(argv: list[str] | None = None) -> None:
         run_fulltext(args)
     elif args.mode == "fulltext":
         run_fulltext(args)
+    elif args.mode == "textualframe":
+        run_textualframe(args)
     else:
         run_runningtitle(args)
 

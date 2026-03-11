@@ -44,18 +44,17 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
     lang = get_language()
     is_heb = lang == 'he'
 
-    # Fetch FJMS translations for this alma_id (for English UI)
+    # Fetch FJMS translations (needed for both UI languages — direction determines usage)
     fjms_trans = {}
-    if not is_heb:
-        try:
-            from shared.translation_service import TranslationService
-            tsvc = TranslationService(thread_safe=True)
-            if tsvc.fjms_available():
-                fjms_trans = tsvc.get_fjms_translations_batch([sys_id])
-                fjms_trans = fjms_trans.get(sys_id, {})
-            tsvc.close()
-        except Exception:
-            pass
+    try:
+        from shared.translation_service import TranslationService
+        tsvc = TranslationService(thread_safe=True)
+        if tsvc.fjms_available():
+            fjms_trans = tsvc.get_fjms_translations_batch([sys_id])
+            fjms_trans = fjms_trans.get(sys_id, {})
+        tsvc.close()
+    except Exception:
+        pass
 
     # Group records by source_name to get team columns, skipping generic sources
     from shared.fjms_service import GENERIC_SOURCE_NAMES
@@ -269,9 +268,20 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         domain_vals.append('; '.join(categories) if categories else None)
     _field_row(tr('Domain'), domain_vals, is_heb)
 
-    # Running Title (with translation when UI is English)
+    # Running Title (with translation support)
+    # fjms_trans values are now (translated_text, direction) tuples
     rt_vals = []
-    _rt_en = fjms_trans.get('RunningTitle') if not is_heb else None
+    _rt_trans_entry = fjms_trans.get('RunningTitle')
+    _rt_trans_text = None
+    if _rt_trans_entry:
+        _rt_text_val, _rt_dir = (_rt_trans_entry if isinstance(_rt_trans_entry, tuple)
+                                  else (_rt_trans_entry, None))
+        # For en2he: translated_text is Hebrew — show in Hebrew UI, skip in English UI
+        # For he2en: translated_text is English — show in English UI, skip in Hebrew UI
+        if _rt_dir == 'en2he' and is_heb:
+            _rt_trans_text = _rt_text_val
+        elif _rt_dir != 'en2he' and not is_heb:
+            _rt_trans_text = _rt_text_val
     for team in teams:
         titles = []
         for rec in team["records"]:
@@ -281,10 +291,9 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
                     rt_text = rt.get("running_title", "")
                     if rt_text and str(rt_text).strip():
                         titles.append(str(rt_text).strip())
-        if _rt_en and titles:
-            # Use pre-computed English translation for first team
-            rt_vals.append(_rt_en)
-            _rt_en = None  # Only use for the first team with data
+        if _rt_trans_text and titles:
+            rt_vals.append(_rt_trans_text)
+            _rt_trans_text = None  # Only use for the first team with data
         else:
             rt_vals.append('; '.join(titles) if titles else None)
     _field_row(tr('Running Title'), rt_vals, is_heb)

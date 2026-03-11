@@ -366,14 +366,14 @@ class TranslationService:
             alma_ids: List of FJMS AlmaId identifiers.
 
         Returns:
-            Dict of {alma_id: {field_name: translated_text}} for found entries.
+            Dict of {alma_id: {field_name: (translated_text, direction)}} for found entries.
         """
         if not self._fjms_has_translations or not self._fjms_conn or not alma_ids:
             return {}
         try:
             placeholders = ",".join("?" * len(alma_ids))
             rows = self._fjms_conn.execute(
-                f"SELECT alma_id, field_name, translated_text "
+                f"SELECT alma_id, field_name, translated_text, direction "
                 f"FROM fjms_translations WHERE alma_id IN ({placeholders})",
                 alma_ids,
             ).fetchall()
@@ -383,7 +383,7 @@ class TranslationService:
                 aid = row[0]
                 if aid not in result:
                     result[aid] = {}
-                result[aid][row[1]] = row[2]
+                result[aid][row[1]] = (row[2], row[3])
             return result
         except Exception as e:
             logger.warning("Error in FJMS batch translation lookup: %s", e)
@@ -391,7 +391,7 @@ class TranslationService:
 
     def get_fjms_translations_by_signature_ids(
         self, field_name: str, signature_ids: List[int]
-    ) -> Dict[int, str]:
+    ) -> Dict[int, tuple]:
         """Batch lookup of FJMS translations keyed by signature_id.
 
         Useful for RunningTitle (signature_id = UnitCatalogRecId) and
@@ -403,18 +403,18 @@ class TranslationService:
             signature_ids: List of signature_id integers.
 
         Returns:
-            Dict of {signature_id: translated_text} for found entries.
+            Dict of {signature_id: (translated_text, direction)} for found entries.
         """
         if not self._fjms_has_translations or not self._fjms_conn or not signature_ids:
             return {}
         try:
             placeholders = ",".join("?" * len(signature_ids))
             rows = self._fjms_conn.execute(
-                f"SELECT signature_id, translated_text FROM fjms_translations "
+                f"SELECT signature_id, translated_text, direction FROM fjms_translations "
                 f"WHERE field_name = ? AND signature_id IN ({placeholders})",
                 [field_name] + signature_ids,
             ).fetchall()
-            return {row[0]: row[1] for row in rows if row[1]}
+            return {row[0]: (row[1], row[2]) for row in rows if row[1]}
         except Exception as e:
             logger.warning("Error in FJMS signature_id batch lookup: %s", e)
             return {}
