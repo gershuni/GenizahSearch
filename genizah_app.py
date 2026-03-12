@@ -6660,6 +6660,9 @@ class FjmsCatalogDialog(QDialog):
             team_ths = []
             for team in teams:
                 header_name = get_team_header_name(team["source_name"], is_heb=is_heb)
+                # For non-team sources (e.g. FJMS site users), use Hebrew name when available
+                if is_heb and header_name == team["source_name"] and team.get("source_name_heb"):
+                    header_name = team["source_name_heb"]
                 team_ths.append(
                     f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; '
                     f'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{header_name}">'

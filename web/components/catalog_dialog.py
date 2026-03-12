@@ -189,6 +189,9 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         # Team name columns
         for team in teams:
             header_name = get_team_header_name(team["source_name"], is_heb=is_heb)
+            # For non-team sources (e.g. FJMS site users), use Hebrew name when available
+            if is_heb and header_name == team["source_name"] and team.get("source_name_heb"):
+                header_name = team["source_name_heb"]
             with ui.column().classes('gap-0').style(f'flex: 1; min-width: 130px; {dir_style}'):
                 ui.label(header_name).classes('text-sm font-bold').style('color: var(--primary-700);')
 
