@@ -202,13 +202,39 @@ These 32,428 records from libraries.csv have no entry in title_translations at a
 
 ## 5. Known Issues & Future Work
 
-### Not Yet Translated (by priority)
+### Round 3 Gap-Closing Batch (2026-03-12)
 
-1. **FJMS RunningTitle HE→EN** (~155K Hebrew titles) — no script exists for this direction
-2. **FJMS FullText HE→EN** (~24K Hebrew full texts) — no script exists for this direction
-3. **Library title gaps** (32K records) — need investigation of why excluded
-4. **PGP nulled descriptions** (157 rows) — retranslatable with `--retranslate-nulls`
-5. **FJMS FreeDesc language detection** — future batch runs should skip English sources
+**Completed locally:**
+- RunningTitle EN→HE: 8,098 rows inserted (295 unique English terms, manual+Dicta mapping)
+
+**Server batches prepared** (CSVs in `scripts/translation_gaps/`, script: `scripts/translate_gaps_server.py`):
+
+| Batch | File | Rows | Direction | Est. Time |
+|-------|------|------|-----------|-----------|
+| freedesc_en | freedesc_en2he.csv | 23,389 | EN→HE | ~2h |
+| freedesc_he | freedesc_he2en.csv | 3,048 | HE→EN | ~20min |
+| fulltext_en | fulltext_en2he.csv | 4,971 | EN→HE | ~30min |
+| fulltext_he | fulltext_he2en.csv | 14,680 | HE→EN | ~1.5h |
+| rt | rt_he2en.csv | 159,910 | HE→EN | ~12h |
+| **Total** | | **205,998** | | **~16h** |
+
+**After server batches:** download results CSVs, run `scripts/merge_translation_results.py` to insert into DB, then QC pass.
+
+### Gaps Investigated and Closed (2026-03-12)
+
+| Gap | Original Estimate | Actual | Status |
+|-----|-------------------|--------|--------|
+| Library title gaps (32K) | 32,428 | 0 | Not a gap — all blank titles, correctly skipped |
+| Library EN→HE backfill (102K) | ~102,045 | N/A | Not needed — hebrew_title already serves users |
+| TextualFrame (179K) | ~179K | 0 | Not a gap — source table already has both Heb+Eng |
+| PGP 885 stubs | 885 | 0 | Not a gap — 1-2 word placeholders |
+| PGP 3,686 missing types | 3,686 | 0 | Not a gap — source has no document_type |
+| RT EN→HE (295 unique) | 9,112 | 8,098 | Done locally (1,014 already existed) |
+
+### Still Pending
+
+1. **PGP nulled descriptions** (157 rows) — retranslatable with `--retranslate-nulls`, Arabic diacritics may cause issues
+2. **Wiring gaps**: RunningTitle/FullText translations not yet displayed in FjmsCatalogDialog; TextualFrame translations not yet wired to browse UI
 
 ### Translation Scripts Missing Language Detection
 
@@ -217,20 +243,19 @@ These 32,428 records from libraries.csv have no entry in title_translations at a
 | translate_fjms_free_desc.py | No `has_hebrew()` check — translates English sources too | Add language filter |
 | translate_pgp_descriptions.py | No language check — assumes all English | OK (PGP is English-only) |
 
-### Wiring Gaps
-
-- RunningTitle/FullText translations not yet displayed in FjmsCatalogDialog
-- TextualFrame translations not yet wired to browse UI
-
 ---
 
 ## 6. Database Sizes
 
 | Database | Size | Translations |
 |----------|------|-------------|
-| fjms_enrichment.db | 1.1 GB | 490,377 |
+| fjms_enrichment.db | 1.1 GB | 498,475 (+8,098 RT EN→HE) |
 | pgp.db | 165 MB | 34,954 |
 | libraries_translations.db | 84 MB | 184,514 |
-| **Total** | **~1.35 GB** | **~710K** |
+| **Total** | **~1.35 GB** | **~718K** |
 
-Backup: `fist_data/fjms_enrichment_pre_qc_cleanup.db` (1.1 GB, pre-cleanup state with 556,282 translations)
+After Round 3 server batches complete: estimated ~924K total translations.
+
+Backups:
+- `fist_data/fjms_enrichment_pre_qc_cleanup.db` (556,282 translations pre-cleanup)
+- `fist_data/fjms_enrichment_pre_round3.db` (490,377 translations pre-Round 3)

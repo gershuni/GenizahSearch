@@ -300,6 +300,21 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
 
     # Detailed Content (from catalog_textual_frames — richer per-verse references)
     if textual_frames:
+        # Batch-fetch TextualFrame translations (he2en) for EN UI
+        _tf_trans_map = {}  # {original_heb_text: english_translation}
+        if not is_heb and alma_id:
+            try:
+                from shared.translation_service import TranslationService
+                _tsvc_tf = TranslationService(thread_safe=True)
+                if _tsvc_tf.fjms_available():
+                    _tf_lookup = _tsvc_tf.get_fjms_translations_by_text(
+                        'TextualFrame', [alma_id]
+                    )
+                    _tf_trans_map = {k: v[0] for k, v in _tf_lookup.get(alma_id, {}).items()}
+                _tsvc_tf.close()
+            except Exception:
+                pass
+
         dc_vals = []
         for team in teams:
             frames = []
@@ -307,20 +322,54 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
                 rec_id = rec.get("unit_catalog_rec_id")
                 if rec_id and rec_id in textual_frames:
                     for tf in textual_frames[rec_id]:
-                        text = tf.get("heb") if is_heb and tf.get("heb") else tf.get("eng")
+                        heb_text = tf.get("heb")
+                        eng_text = tf.get("eng")
+                        if is_heb:
+                            text = heb_text if heb_text else eng_text
+                        else:
+                            # In EN UI: prefer translation of Hebrew text if available
+                            heb_key = str(heb_text).strip() if heb_text else None
+                            tf_trans = _tf_trans_map.get(heb_key) if heb_key else None
+                            text = tf_trans if tf_trans else (eng_text if eng_text else heb_text)
                         if text and str(text).strip():
                             frames.append(str(text).strip())
             dc_vals.append('; '.join(frames) if frames else None)
         _field_row(tr('Detailed Content'), dc_vals, is_heb)
 
-    # GenizahTitle (org/eng)
+    # GenizahTitle (with translation support)
+    # Batch-fetch Title translations (he2en) for EN UI
+    _title_trans_map = {}  # {original_text: english_translation}
+    if not is_heb and alma_id:
+        try:
+            from shared.translation_service import TranslationService
+            _tsvc_gt = TranslationService(thread_safe=True)
+            if _tsvc_gt.fjms_available():
+                _gt_lookup = _tsvc_gt.get_fjms_translations_by_text(
+                    'Title', [alma_id]
+                )
+                _title_trans_map = {k: v[0] for k, v in _gt_lookup.get(alma_id, {}).items()}
+            _tsvc_gt.close()
+        except Exception:
+            pass
+
     gt_vals = []
     for team in teams:
         titles = []
         for rec in team["records"]:
             gt_org = rec.get("genizah_title_org")
             gt_eng = rec.get("genizah_title_eng")
-            gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+            if is_heb:
+                gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+            else:
+                # EN UI: prefer English title, then translation, then Hebrew original
+                if gt_eng and str(gt_eng).strip():
+                    gt = gt_eng
+                elif gt_org and str(gt_org).strip():
+                    orig = str(gt_org).strip()
+                    gt_trans = _title_trans_map.get(orig) if _title_trans_map else None
+                    gt = gt_trans if gt_trans else gt_org
+                else:
+                    gt = None
             if gt and str(gt).strip():
                 titles.append(str(gt).strip())
         gt_vals.append('; '.join(titles) if titles else None)
@@ -520,6 +569,8 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
                 with ui.column().classes('gap-0').style(f'flex: 1; {display_dir}'):
                     # Source attribution label — always use English key for lookup
                     eng_source = desc.get("source_name")
+                    if eng_source in ('Instatution', 'Institution'):
+                        eng_source = None
                     source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
                     with ui.row().classes('items-center gap-2'):
                         if source:

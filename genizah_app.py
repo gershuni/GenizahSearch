@@ -6511,6 +6511,7 @@ class FjmsCatalogDialog(QDialog):
         self.resize(900, 650)
         self._detail = detail
         self._shelfmark = shelfmark or ''
+        self.sys_id = sys_id or ''
         self._cat_toggle_state = {}  # field_key -> bool (True = showing original)
 
         layout = QVBoxLayout(self)
@@ -6799,15 +6800,16 @@ class FjmsCatalogDialog(QDialog):
                                     # he2en: trans=English, orig=Hebrew → EN UI default=trans, HE UI default=orig
                                     _show_trans_default = (is_heb if _trans_dir == 'en2he' else not is_heb)
                                     if _show_trans_default:
+                                        # Original lang ≠ UI lang → show translation with badge
                                         show_text = _html_esc.escape(orig if toggled else trans)
                                         badge_label = tr('Translated') if toggled else tr('Original')
+                                        titles.append(
+                                            f'{show_text} '
+                                            f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                        )
                                     else:
-                                        show_text = _html_esc.escape(trans if toggled else orig)
-                                        badge_label = tr('Original') if toggled else tr('Translated')
-                                    titles.append(
-                                        f'{show_text} '
-                                        f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
-                                    )
+                                        # Original lang matches UI lang → no badge needed
+                                        titles.append(_html_esc.escape(orig))
                                 else:
                                     titles.append(_html_esc.escape(orig))
                 rt_vals.append('; '.join(titles) if titles else '')
@@ -6815,29 +6817,86 @@ class FjmsCatalogDialog(QDialog):
 
             # Detailed Content (from catalog_textual_frames)
             if textual_frames:
+                # Batch-fetch TextualFrame translations (he2en) by text content
+                _tf_trans_map = {}  # {original_heb_text: (english, direction)}
+                if _trans_svc and not is_heb:
+                    _tf_text_lookup = _trans_svc.get_fjms_translations_by_text(
+                        'TextualFrame', [self.sys_id]
+                    )
+                    _tf_trans_map = _tf_text_lookup.get(self.sys_id, {})
+
                 dc_vals = []
                 for team in teams:
                     frames = []
                     for rec in team["records"]:
                         rec_id = rec.get("unit_catalog_rec_id")
                         if rec_id and rec_id in textual_frames:
-                            for tf in textual_frames[rec_id]:
-                                text = tf.get("heb") if is_heb and tf.get("heb") else tf.get("eng")
-                                if text and str(text).strip():
-                                    frames.append(str(text).strip())
+                            for tf_idx, tf in enumerate(textual_frames[rec_id]):
+                                heb_text = tf.get("heb")
+                                eng_text = tf.get("eng")
+                                if is_heb:
+                                    text = heb_text if heb_text else eng_text
+                                else:
+                                    text = eng_text if eng_text else heb_text
+                                if not text or not str(text).strip():
+                                    continue
+                                orig = str(text).strip()
+                                # In EN UI, try to find he2en translation for Hebrew text
+                                _tf_entry = _tf_trans_map.get(str(heb_text).strip()) if heb_text and _tf_trans_map else None
+                                if _tf_entry and not is_heb:
+                                    trans_text, _tf_dir = _tf_entry
+                                    if trans_text and trans_text != orig:
+                                        toggle_key = f'tf_{rec_id}_{tf_idx}'
+                                        toggled = self._cat_toggle_state.get(toggle_key, False)
+                                        show_text = _html_esc.escape(orig if toggled else trans_text)
+                                        badge_label = tr('Translated') if toggled else tr('Original')
+                                        frames.append(
+                                            f'{show_text} '
+                                            f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                        )
+                                        continue
+                                frames.append(_html_esc.escape(orig))
                     dc_vals.append('; '.join(frames) if frames else '')
                 html_parts.append(self._field_row(tr('Detailed Content'), dc_vals, is_heb))
 
-            # GenizahTitle
+            # GenizahTitle (with translation support)
+            # Batch-fetch Title translations (he2en) by alma_id
+            _title_trans_map = {}  # {original_text: (english, direction)}
+            if _trans_svc and not is_heb:
+                _title_text_lookup = _trans_svc.get_fjms_translations_by_text(
+                    'Title', [self.sys_id]
+                )
+                _title_trans_map = _title_text_lookup.get(self.sys_id, {})
+
             gt_vals = []
             for team in teams:
                 titles = []
                 for rec in team["records"]:
                     gt_org = rec.get("genizah_title_org")
                     gt_eng = rec.get("genizah_title_eng")
-                    gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+                    if is_heb:
+                        gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+                    else:
+                        gt = gt_eng if gt_eng and str(gt_eng).strip() else gt_org
                     if gt and str(gt).strip():
-                        titles.append(str(gt).strip())
+                        orig = str(gt).strip()
+                        # In EN UI with Hebrew title (no gt_eng), try he2en translation
+                        _gt_entry = None
+                        if not is_heb and gt_org and not (gt_eng and str(gt_eng).strip()):
+                            _gt_entry = _title_trans_map.get(str(gt_org).strip()) if _title_trans_map else None
+                        if _gt_entry:
+                            trans_text, _gt_dir = _gt_entry
+                            if trans_text and trans_text != orig:
+                                toggle_key = f'gt_{rec.get("unit_catalog_rec_id", id(rec))}'
+                                toggled = self._cat_toggle_state.get(toggle_key, False)
+                                show_text = _html_esc.escape(orig if toggled else trans_text)
+                                badge_label = tr('Translated') if toggled else tr('Original')
+                                titles.append(
+                                    f'{show_text} '
+                                    f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                )
+                                continue
+                        titles.append(_html_esc.escape(orig))
                 gt_vals.append('; '.join(titles) if titles else '')
             html_parts.append(self._field_row(tr('Title'), gt_vals, is_heb))
 
@@ -6941,7 +7000,7 @@ class FjmsCatalogDialog(QDialog):
                 text = desc.get("text", "")
                 if text and str(text).strip():
                     eng_source = desc.get("source_name")
-                    if eng_source:
+                    if eng_source and eng_source not in ('Instatution', 'Institution'):
                         if is_team_source(eng_source):
                             source = get_team_display_name(eng_source, is_heb=is_heb)
                         elif is_heb:
@@ -6976,15 +7035,16 @@ class FjmsCatalogDialog(QDialog):
                         trans = str(trans_text).strip()
                         _show_trans_default = (is_heb if _fd_dir == 'en2he' else not is_heb)
                         if _show_trans_default:
+                            # Original lang ≠ UI lang → show translation with badge
                             show_text = _html_esc.escape(orig if toggled else trans)
                             badge_label = tr('Translated') if toggled else tr('Original')
+                            display = (
+                                f'{show_text} '
+                                f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                            )
                         else:
-                            show_text = _html_esc.escape(trans if toggled else orig)
-                            badge_label = tr('Original') if toggled else tr('Translated')
-                        display = (
-                            f'{show_text} '
-                            f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
-                        )
+                            # Original lang matches UI lang → no badge needed
+                            display = _html_esc.escape(orig)
                     else:
                         display = _html_esc.escape(orig)
 
@@ -7029,14 +7089,16 @@ class FjmsCatalogDialog(QDialog):
                         if _should_swap:
                             _show_trans_default = (is_heb if _ft_dir == 'en2he' else not is_heb)
                             if _show_trans_default:
+                                # Original lang ≠ UI lang → show translation with badge
                                 show_text = _html_esc.escape(orig if toggled else trans)
                                 badge_label = tr('Translated') if toggled else tr('Original')
+                                badge = (
+                                    f' <a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                )
                             else:
-                                show_text = _html_esc.escape(trans if toggled else orig)
-                                badge_label = tr('Original') if toggled else tr('Translated')
-                            badge = (
-                                f' <a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
-                            )
+                                # Original lang matches UI lang → no badge needed
+                                show_text = _html_esc.escape(orig)
+                                badge = ''
                         else:
                             show_text = _html_esc.escape(orig)
                             badge = ''

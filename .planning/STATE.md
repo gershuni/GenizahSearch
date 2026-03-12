@@ -148,14 +148,13 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-11T19:30:00Z
-Stopped at: Server backfill RUNNING (screen `fjms-backfill`, ~9h from 19:27 UTC). Citation popup already done.
+Last session: 2026-03-12T08:00:00Z
+Stopped at: Round 3 gap-closing batch RUNNING on server (screen `translate-r3`, ~19h from 05:50 UTC)
 Resume file: .planning/phases/46-dicta-translation/.continue-here.md
 Notes:
   - All 5 phases (42-46) complete, 25/25 plans done
-  - Citation popup quick task: DONE
-  - Bug 1+2 fixed and committed (565446ae), pushed to remote
-  - Server DB was corrupted — replaced with clean rebuilt DB (730K catalog, 447K translations)
-  - Backfill running: 108,768 items (catalog fields done, FullText/FreeDesc/RT/TF in queue)
-  - After backfill: download DB, verify, merge branch to master-main, deploy, v6.5.0 wrap-up
-  - Full handoff: .planning/phases/46-dicta-translation/SERVER_BACKFILL_HANDOFF.md
+  - Round 2 backfill DONE (108,768 translations, QC cleanup done, 65,905 bad rows deleted)
+  - Round 3 gap-closing IN PROGRESS: 8,098 RT EN->HE done locally, 206K rows running on server
+  - After Round 3: download results -> merge -> QC -> stats -> upload DB -> deploy -> v6.5.0
+  - Full handoff: .planning/phases/46-dicta-translation/ROUND3_GAP_CLOSING.md
+  - QA plan: docs/plans/TRANSLATION_QA_IMPROVEMENT_PLAN.md
