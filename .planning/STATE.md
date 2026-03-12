@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v6.5.0
 milestone_name: Search UX & Filtered Search
 status: in_progress
-stopped_at: Phase 46 complete (all 5 plans done). Citation popup quick task next, then milestone wrap-up.
+stopped_at: Phase 46 complete (all 5 plans done). Citation popup shipped. Working on personal handlist source mapping.
 last_updated: "2026-03-10T18:00:00.000Z"
-last_activity: 2026-03-10 - Completed 46-05 (desktop translation wiring, extraction fix, batch Round 2-3). Citation popup quick task before v6.5.0 release.
+last_activity: 2026-03-12 - Citation popup done. Personal handlist source mapping for 43K NULL SourceName records.
 progress:
   total_phases: 5
   completed_phases: 5
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — all phases complete, citation popup quick task before release
+**Current focus:** v6.5.0 Search UX & Filtered Search — all phases complete, personal handlist source mapping + Round 3 merge pending
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
 Phase: 46 of 46 (Dicta Translation) -- COMPLETE (all 5 plans done)
-Status: All phases complete. Quick task (citation popup) before milestone release.
+Status: All phases complete. Citation popup done. Personal handlist mapping + Round 3 merge before release.
 Last activity: 2026-03-10 - Completed 46-05, wrapping up v6.5.0
 
 Progress: [██████████] 5/5 phases (42-46 all complete, 25/25 plans)
@@ -148,13 +148,13 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-12T08:00:00Z
-Stopped at: Round 3 gap-closing batch RUNNING on server (screen `translate-r3`, ~19h from 05:50 UTC)
+Last session: 2026-03-12T17:30:00Z
+Stopped at: Handlist source fix DONE (43K records). Site user attribution pending. Round 3 batch still running on server.
 Resume file: .planning/phases/46-dicta-translation/.continue-here.md
 Notes:
   - All 5 phases (42-46) complete, 25/25 plans done
-  - Round 2 backfill DONE (108,768 translations, QC cleanup done, 65,905 bad rows deleted)
-  - Round 3 gap-closing IN PROGRESS: 8,098 RT EN->HE done locally, 206K rows running on server
+  - Handlist source fix: 43,233 NULL SourceName records fixed (5 named handlists + preliminary)
+  - Site user attribution pending: ~5,800 SourceId=850 records need SubId→user name mapping
+  - Round 3 gap-closing IN PROGRESS: 206K rows running on server (ETA ~01:00 UTC 2026-03-13)
   - After Round 3: download results -> merge -> QC -> stats -> upload DB -> deploy -> v6.5.0
-  - Full handoff: .planning/phases/46-dicta-translation/ROUND3_GAP_CLOSING.md
-  - QA plan: docs/plans/TRANSLATION_QA_IMPROVEMENT_PLAN.md
+  - Full handoff: .planning/phases/46-dicta-translation/.continue-here.md
