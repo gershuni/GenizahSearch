@@ -96,6 +96,9 @@
         <li><a href="#intro">Introduction: How it Works</a></li>
         <li><a href="#search">Search Tab</a></li>
         <li><a href="#responsa">Responsa-Style Search</a></li>
+        <li><a href="#position">Line & Text Position Search</a></li>
+        <li><a href="#filters">Focused Search (Advanced Filters)</a></li>
+        <li><a href="#translations">Catalog & Metadata Translations</a></li>
         <li><a href="#composition">Composition Search</a></li>
         <li><a href="#browse">Browse Manuscript</a></li>
         <li><a href="#catalog-browse">Browse by Identification</a></li>
@@ -194,6 +197,36 @@
     </ol>
 
     <p><i>Note:</i> When a query expands beyond 500 terms, the system automatically downgrades options (variants, Judeo-Arabic, plene, etc.) to maintain speed, and displays a notification accordingly.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="position">Line &amp; Text Position Search</h2>
+    <p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is particularly useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p>
+
+    <p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p>
+
+    <p><i>Note: This feature requires a rebuilt index. Please rebuild the index from Settings to use it.</i></p>
+    </div>
+
+    <div class="section">
+    <h2 id="filters">Focused Search (Advanced Filters)</h2>
+    <p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties before searching. This focuses your search on specific subsets of the corpus.</p>
+
+    <h3>Available Filters</h3>
+    <ul>
+        <li><b>Domain:</b> Filter by scholarly classification (e.g., Bible, Talmud, Poetry)</li>
+        <li><b>Author:</b> Filter by attributed author</li>
+        <li><b>Work:</b> Filter by specific work title</li>
+        <li><b>Date Range:</b> Filter by manuscript dating</li>
+        <li><b>Material:</b> Filter by material type (manuscript vs. printed)</li>
+    </ul>
+    <p>Active filters appear as removable <b>chips</b> above the results. Filters apply to all search modes.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="translations">Catalog &amp; Metadata Translations</h2>
+    <p>Catalog data, titles, and scholarly descriptions are available in both Hebrew and English, powered by machine translation via <a href="https://translate.dicta.org.il/" target="_blank">Dicta Translation</a>.</p>
+    <p>Use the <b>Show Translations</b> toggle in Settings to enable translated descriptions in search results, browse views, and catalog dialogs. When enabled, translated text appears with a clickable <b>Translated/Original</b> badge &mdash; click to toggle between the translated and original text.</p>
     </div>
 
     <div class="section">
@@ -412,6 +445,9 @@
         <li><a href="#intro">הקדמה: איך זה עובד?</a></li>
         <li><a href="#search">לשונית חיפוש</a></li>
         <li><a href="#responsa">חיפוש בסגנון פרויקט השו"ת</a></li>
+        <li><a href="#position">חיפוש לפי מיקום בשורה/טקסט</a></li>
+        <li><a href="#filters">חיפוש ממוקד (סינון מתקדם)</a></li>
+        <li><a href="#translations">תרגומי קטלוג ומטא-נתונים</a></li>
         <li><a href="#composition">חיפוש חיבורים</a></li>
         <li><a href="#browse">עיון בכתב יד</a></li>
         <li><a href="#catalog-browse">עיון לפי זיהוי</a></li>
@@ -510,6 +546,33 @@
     </ol>
 
     <p><i>הערה:</i> כאשר שאילתא מתרחבת מעבר ל-500 מונחים, המערכת מורידה אוטומטית אפשרויות (וריאנטים, ערבית-יהודית, כתיב וכו') כדי לשמור על מהירות, ומציגה התראה בהתאם.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="position">חיפוש לפי מיקום בשורה/טקסט</h2>
+    <p>השתמשו ב<b>תפריט המיקום</b> ליד שורת החיפוש כדי להגביל את מיקום ההתאמות: תחילת טקסט, סוף טקסט, תחילת שורה או סוף שורה. שימושי במיוחד ל<b>זיהוי צירופים</b> בין קטעים &mdash; אם ידוע כיצד כתב יד מסתיים, חפשו את המילים האלה ב&ldquo;סוף טקסט&rdquo; כדי למצוא המשכים אפשריים.</p>
+    <p>ב<b>מצב רספונסה</b>, ניתן להחיל אילוצי מיקום לכל מילה בנפרד באמצעות <code>|_</code> (תחילת שורה) ו-<code>_|</code> (סוף שורה). בשילוב עם תחביר שבירת שורה (<code>|</code>), ניתן לבנות שאילתות מיקום רב-שורתיות &mdash; למשל, למצוא מילים מסוימות בסוף שורה אחת ומילים אחרות בתחילת שורה 4 שורות מאוחר יותר. <b>בונה השאילתות הטבלאי</b> מספק ממשק ויזואלי לבניית שאילתות אלה.</p>
+    <p><i>הערה: תכונה זו דורשת בניית אינדקס מחדש. בנו מחדש מההגדרות כדי להשתמש בה.</i></p>
+    </div>
+
+    <div class="section">
+    <h2 id="filters">חיפוש ממוקד (סינון מתקדם)</h2>
+    <p>השתמשו בפאנל <b>סינון מתקדם</b> כדי לצמצם תוצאות חיפוש לפי מאפייני כתב יד לפני החיפוש.</p>
+    <h3>מסננים זמינים</h3>
+    <ul>
+        <li><b>תחום:</b> סינון לפי סיווג מדעי (כגון תנ"ך, תלמוד, שירה)</li>
+        <li><b>מחבר:</b> סינון לפי מחבר מיוחס</li>
+        <li><b>יצירה:</b> סינון לפי שם יצירה</li>
+        <li><b>טווח תאריכים:</b> סינון לפי תיארוך כתב היד</li>
+        <li><b>חומר:</b> סינון לפי סוג חומר (כתב יד מול דפוס)</li>
+    </ul>
+    <p>מסננים פעילים מופיעים כ<b>צ'יפים</b> ניתנים להסרה מעל התוצאות. המסננים חלים על כל מצבי החיפוש.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="translations">תרגומי קטלוג ומטא-נתונים</h2>
+    <p>נתוני קטלוג, כותרות ותיאורים מדעיים זמינים גם בעברית וגם באנגלית, באמצעות <a href="https://translate.dicta.org.il/" target="_blank">תרגום דיקטה</a>.</p>
+    <p>הפעילו את מתג <b>הצג תרגומים</b> בהגדרות כדי להציג תיאורים מתורגמים בתוצאות חיפוש, תצוגות עיון ודיאלוגי קטלוג. כאשר מופעל, טקסט מתורגם מופיע עם תג <b>מתורגם/מקור</b> לחיץ &mdash; לחצו כדי לעבור בין הטקסט המתורגם למקורי.</p>
     </div>
 
     <div class="section">

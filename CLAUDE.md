@@ -159,6 +159,28 @@ pytest tests/
 | Web app pages/components | `docs/CODE_INDEX.md` |
 | Environment variables | `CLAUDE.md`, `docs/guides/DEVELOPER_GUIDE.md` |
 | Major features | `CHANGELOG.md`, `README.md` |
+| **App version** | Run `python scripts/bump_version.py X.Y.Z` (see below) |
+
+### Version Bumping (REQUIRED for releases)
+
+Run the automated script — it updates all version files at once:
+```bash
+python scripts/bump_version.py 6.3.0          # apply changes
+python scripts/bump_version.py 6.3.0 --dry-run # preview only
+```
+
+**Files updated automatically:**
+| File | What changes |
+|------|-------------|
+| `version.py` | `APP_VERSION` (source of truth, imported by both apps) |
+| `version_info.txt` | Windows EXE metadata (`filevers`, `prodvers`, `FileVersion`, `ProductVersion`) |
+| `CompileScriptGenizah.iss` | Inno Setup `#define MyAppVersion` + `OutputBaseFilename` |
+| `README.md` | Header line |
+
+**Manual steps after running the script:**
+1. `CHANGELOG.md` — add `## [X.Y.Z]` section with release notes
+2. `CLAUDE.md` "Recently Changed" — add entry for the new version
+3. `README.md` "What's New" section — update feature description
 
 ### Before Finishing a Session
 
@@ -185,6 +207,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- March 2026: v6.5.0 Search UX & Filtered Search -- focused search by manuscript properties (domain/author/work/date/material), ~580K Dicta translations (Hebrew↔English) for catalog data, translation toggle, browse-to-search navigation, citation reminder popup (both apps)
 - March 2026: v6.2.0 Power-User UX -- composition search UX (timer, ETA, cancel with partial results, printed badge/filter), session persistence, search history dropdowns, desktop notifications, sleep prevention, copy menu, Hebrew library names (both apps)
 - March 2026: v6.1.0/v6.1.1 Catalog Browse & Navigation -- faceted catalog browsing by domain/author/work, free-text filter, FIST v5.0.0 enrichment, 100x faster domain queries, async desktop catalog
 - February 2026: v6.0.0 Local Data Architecture -- PGP data migrated to pgp.db sidecar (147MB), FJMS catalog descriptions expanded, offline browsing, desktop crash fixes, paginated search, performance optimizations (both apps)

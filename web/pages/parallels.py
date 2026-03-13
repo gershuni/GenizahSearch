@@ -2501,19 +2501,22 @@ def create_parallels_page(initial_text: str = None):
                         fjms = get_fjms_service(thread_safe=True)
                         return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
 
-                    def collect_parallels_translations(sys_ids):
+                    # Read show_translations in main thread before entering thread pool
+                    _par_show_trans = False
+                    try:
+                        _par_show_trans = app.storage.user.get('show_translations', False)
+                    except Exception:
+                        pass
+
+                    def collect_parallels_translations(sys_ids, show_trans=False):
                         """Batch-fetch title and PGP translations for parallels results (Phase 46-07)."""
-                        try:
-                            show_trans = app.storage.user.get('show_translations', False)
-                        except Exception:
-                            show_trans = False
-                        if not show_trans:
-                            return {}, {}
                         try:
                             from shared.translation_service import TranslationService
                             svc = TranslationService(thread_safe=True)
+                            # Title translations always fetched (language-aware)
                             title_trans = svc.get_title_translations_batch(sys_ids) if svc.titles_available() else {}
-                            pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids) if svc.pgp_available() else {}
+                            # PGP translations only when toggle is ON
+                            pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids) if show_trans and svc.pgp_available() else {}
                             svc.close()
                             return title_trans, pgp_trans
                         except Exception as e:
@@ -2524,7 +2527,7 @@ def create_parallels_page(initial_text: str = None):
                     raw_domains, printed_result, trans_tuple = await _asyncio.gather(
                         run.io_bound(collect_parallels_domains, all_sys_ids),
                         run.io_bound(collect_parallels_printed, all_sys_ids),
-                        run.io_bound(collect_parallels_translations, all_sys_ids),
+                        run.io_bound(collect_parallels_translations, all_sys_ids, _par_show_trans),
                     )
                     p_state.printed_ids = printed_result
                     p_state.title_translations, p_state.translation_data = trans_tuple
@@ -3160,14 +3163,9 @@ def create_parallels_page(initial_text: str = None):
                                 'background: #fff3cd; color: #856404; white-space: nowrap;'
                             )
 
-                    # Resolve translated title (Phase 46-07)
-                    _p_show_trans = False
-                    try:
-                        _p_show_trans = app.storage.user.get('show_translations', False)
-                    except Exception:
-                        pass
+                    # Resolve translated title — always language-aware (not gated behind toggle)
                     _p_title = title
-                    if _p_show_trans and sys_id and p_state.title_translations:
+                    if sys_id and p_state.title_translations:
                         _p_tt = p_state.title_translations.get(sys_id)
                         if _p_tt:
                             _lang = get_language()
@@ -3177,7 +3175,7 @@ def create_parallels_page(initial_text: str = None):
                                 _p_title = _p_tt.get('english_title') or _p_tt.get('hebrew_title') or title
                     if _p_title:
                         _p_title_short = (_p_title[:100] + '...') if len(_p_title) > 100 else _p_title
-                        _p_dir = 'ltr' if (_p_show_trans and p_state.title_translations.get(sys_id, {}).get('english_title') and get_language() != 'he') else 'rtl'
+                        _p_dir = 'ltr' if (p_state.title_translations.get(sys_id, {}).get('english_title') and get_language() != 'he') else 'rtl'
                         ui.label(_p_title_short).classes('text-xs').style(f'color: var(--text-secondary); direction: {_p_dir};')
 
                 with ui.row().classes('items-center gap-3'):
@@ -3373,29 +3371,20 @@ def create_parallels_page(initial_text: str = None):
             h3(tr('Metadata'), classes='text-xl font-bold mb-4')
 
             with ui.column().classes('w-full gap-3'):
-                # Resolve translated title for metadata dialog (Phase 46-07)
+                # Resolve translated title for metadata dialog — always language-aware
                 _md_title = title
-                _md_show_trans = False
-                try:
-                    _md_show_trans = app.storage.user.get('show_translations', False)
-                except Exception:
-                    pass
-                if _md_show_trans and sys_id and p_state.title_translations:
+                if sys_id and p_state.title_translations:
                     _md_tt = p_state.title_translations.get(sys_id)
                     if _md_tt:
                         _lang = get_language()
-                        he = _md_tt.get('hebrew_title') or ''
-                        en = _md_tt.get('english_title') or ''
-                        if he and en:
-                            _md_title = f"{he}  |  {en}"
-                        elif he:
-                            _md_title = he
-                        elif en:
-                            _md_title = en
+                        if _lang == 'he':
+                            _md_title = _md_tt.get('hebrew_title') or _md_tt.get('english_title') or title
+                        else:
+                            _md_title = _md_tt.get('english_title') or _md_tt.get('hebrew_title') or title
 
-                # Show PGP description translation if available
+                # Show PGP description translation if available (only when UI is Hebrew)
                 _md_desc = ''
-                if _md_show_trans and sys_id and p_state.translation_data:
+                if _par_show_trans and get_language() == 'he' and sys_id and p_state.translation_data:
                     _md_trans = p_state.translation_data.get(sys_id)
                     if _md_trans:
                         _md_desc = _md_trans.get('description_he') or ''
@@ -3403,12 +3392,33 @@ def create_parallels_page(initial_text: str = None):
                 metadata_items = [
                     (tr('Library'), library_name or tr('Not available')),
                     (tr('Shelfmark'), shelfmark),
-                    (tr('Title'), _md_title or tr('Not available')),
                     (tr('System ID'), sys_id or tr('Not available')),
                     (tr('Score'), str(int(item.get('score', 0)))),
                 ]
                 if _md_desc:
                     metadata_items.append((tr('Description'), _md_desc))
+
+                # Title row with toggle to original
+                with ui.row().classes('w-full items-start gap-4'):
+                    ui.label(tr('Title') + ':').classes('font-bold w-32').style('color: var(--text-secondary);')
+                    _md_display = _md_title or tr('Not available')
+                    _md_orig = title or ''
+                    _md_dir = 'ltr' if get_language() != 'he' else 'rtl'
+                    if _md_orig and _md_orig != _md_display:
+                        _md_st = {'showing_original': False}
+                        with ui.row().classes('flex-grow items-center gap-0'):
+                            _md_lbl = ui.label(_md_display).classes('flex-grow').style(f'color: var(--text-primary); direction: {_md_dir};')
+                            def _make_md_toggle(lbl, orig, resolved, flag):
+                                def handler():
+                                    flag['showing_original'] = not flag['showing_original']
+                                    lbl.text = orig if flag['showing_original'] else resolved
+                                    lbl.style(f'color: var(--text-primary); direction: rtl;' if flag['showing_original'] else f'color: var(--text-primary); direction: {_md_dir};')
+                                return handler
+                            ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
+                            ).tooltip(tr('Show original title')).on('click.stop', _make_md_toggle(_md_lbl, _md_orig, _md_display, _md_st))
+                    else:
+                        ui.label(_md_display).classes('flex-grow').style(f'color: var(--text-primary); direction: {_md_dir};')
 
                 for label, value in metadata_items:
                     with ui.row().classes('w-full items-start gap-4'):
@@ -3500,8 +3510,16 @@ def create_parallels_page(initial_text: str = None):
                         )
                         ui.label(display_shelfmark).classes('text-lg font-bold').style('color: var(--primary-700);')
                     if title:
-                        title_short = (title[:80] + '...') if len(title) > 80 else title
-                        ui.label(title_short).classes('text-sm').style('color: var(--text-secondary); direction: rtl;')
+                        # Resolve title by language
+                        _exp_title = title
+                        if sys_id and p_state.title_translations:
+                            _exp_tt = p_state.title_translations.get(sys_id)
+                            if _exp_tt:
+                                _exp_lang = get_language()
+                                _exp_title = (_exp_tt.get('english_title') or _exp_tt.get('hebrew_title') or title) if _exp_lang != 'he' else (_exp_tt.get('hebrew_title') or _exp_tt.get('english_title') or title)
+                        _exp_short = (_exp_title[:80] + '...') if len(_exp_title) > 80 else _exp_title
+                        _exp_dir = 'ltr' if get_language() != 'he' else 'rtl'
+                        ui.label(_exp_short).classes('text-sm').style(f'color: var(--text-secondary); direction: {_exp_dir};')
 
                 # Score badge
                 score_color = 'green' if score > 70 else 'amber' if score > 40 else 'gray'

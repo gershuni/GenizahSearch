@@ -172,16 +172,19 @@ class PgpService:
             # If page_num specified, try to find matching page_info
             # page_num 1 = recto, page_num 2 = verso
             pgpid = None
+            matched_page_info = None
             if page_num and len(frags) > 1:
                 target_page = 'recto' if page_num == 1 else 'verso'
                 for f in frags:
                     if f['page_info'] == target_page:
                         pgpid = f['document_id']
+                        matched_page_info = f['page_info']
                         break
 
             # Fallback to first result if no page match or page_num not specified
             if not pgpid:
                 pgpid = frags[0]['document_id']
+                matched_page_info = frags[0]['page_info']
 
             if not pgpid:
                 return None
@@ -191,7 +194,10 @@ class PgpService:
                 "SELECT * FROM documents WHERE pgpid = ?", (pgpid,)
             )
             row = cursor.fetchone()
-            return _row_to_dict(row, json_columns=('tags',)) if row else None
+            doc = _row_to_dict(row, json_columns=('tags',)) if row else None
+            if doc and matched_page_info:
+                doc['_fragment_page_info'] = matched_page_info
+            return doc
 
         except Exception as e:
             logger.error(f"Error getting document for fragment {sys_id}: {e}")
@@ -647,7 +653,7 @@ def parse_transcription_sections(transcription: str) -> dict:
     return sections
 
 
-def get_section_for_page(transcription: str, page_num: int, sections: list = None) -> Optional[str]:
+def get_section_for_page(transcription: str, page_num: int, sections: list = None, fragment_page_info: str = None) -> Optional[str]:
     """
     Get the appropriate transcription section for a page number.
 
@@ -661,11 +667,29 @@ def get_section_for_page(transcription: str, page_num: int, sections: list = Non
         sections: Optional structured sections from document_sources.sections JSONB.
                   List of dicts with canvas_url, canvas_num, label, text.
                   When provided, uses canvas_num matching instead of regex parsing.
+        fragment_page_info: Optional page_info from document_fragments ('recto' or 'verso').
+                  When set and the transcription has no recto/verso markers, used to
+                  suppress display on the wrong page (e.g. verso-only doc on recto page).
 
     Returns:
         Section text for the page, None if no content exists for this page,
         or full transcription if no recto/verso markers found at all.
     """
+    # Path 0: fragment_page_info override — if the fragment is linked to a
+    # specific page (recto/verso) and the transcription has no recto/verso
+    # markers, use fragment_page_info to decide which page gets the text.
+    if fragment_page_info:
+        target_page = 'recto' if page_num == 1 else 'verso'
+        # Check if the transcription actually has recto+verso markers
+        parsed_check = parse_transcription_sections(transcription)
+        has_both_markers = bool(parsed_check.get('recto')) and bool(parsed_check.get('verso'))
+        if not has_both_markers:
+            # No markers — the entire text belongs to fragment_page_info side only
+            if fragment_page_info == target_page:
+                return transcription
+            else:
+                return None
+
     # Path 1: Structured sections (reliable canvas-based lookup)
     if sections:
         for section in sections:

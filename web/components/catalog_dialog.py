@@ -44,6 +44,18 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
     lang = get_language()
     is_heb = lang == 'he'
 
+    # Fetch FJMS translations (needed for both UI languages — direction determines usage)
+    fjms_trans = {}
+    try:
+        from shared.translation_service import TranslationService
+        tsvc = TranslationService(thread_safe=True)
+        if tsvc.fjms_available():
+            fjms_trans = tsvc.get_fjms_translations_batch([sys_id])
+            fjms_trans = fjms_trans.get(sys_id, {})
+        tsvc.close()
+    except Exception:
+        pass
+
     # Group records by source_name to get team columns, skipping generic sources
     from shared.fjms_service import GENERIC_SOURCE_NAMES
     teams = []  # list of (source_name, source_name_heb, [records])
@@ -98,7 +110,7 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
                         _render_catalog_table(
                             teams, running_titles, sizes, fields,
                             free_descriptions, full_texts, textual_frames, mentions, is_heb,
-                            shelfmark=shelfmark,
+                            shelfmark=shelfmark, fjms_trans=fjms_trans, alma_id=sys_id,
                         )
 
         # Close button
@@ -151,8 +163,10 @@ def _field_row(label: str, values: list, is_heb: bool):
 
 def _render_catalog_table(teams, running_titles, sizes, fields,
                           free_descriptions, full_texts, textual_frames, mentions, is_heb,
-                          shelfmark=''):
+                          shelfmark='', fjms_trans=None, alma_id=''):
     """Render the full FIST 6-section side-by-side table."""
+    if fjms_trans is None:
+        fjms_trans = {}
     from shared.fjms_service import get_team_display_name, get_team_header_name, is_team_source
 
     num_teams = len(teams)
@@ -162,7 +176,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         # Only free descriptions / full texts, no team data
         if free_descriptions or full_texts:
             _section_header(tr('Miscellaneous'), 1)
-            _render_free_descriptions(free_descriptions, is_heb)
+            _render_free_descriptions(free_descriptions, is_heb, fjms_trans=fjms_trans, alma_id=alma_id)
             _render_full_texts(full_texts, is_heb)
         return
 
@@ -175,6 +189,9 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         # Team name columns
         for team in teams:
             header_name = get_team_header_name(team["source_name"], is_heb=is_heb)
+            # For non-team sources (e.g. FJMS site users), use Hebrew name when available
+            if is_heb and header_name == team["source_name"] and team.get("source_name_heb"):
+                header_name = team["source_name_heb"]
             with ui.column().classes('gap-0').style(f'flex: 1; min-width: 130px; {dir_style}'):
                 ui.label(header_name).classes('text-sm font-bold').style('color: var(--primary-700);')
 
@@ -254,22 +271,140 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         domain_vals.append('; '.join(categories) if categories else None)
     _field_row(tr('Domain'), domain_vals, is_heb)
 
-    # Running Title
-    rt_vals = []
+    # Running Title (with per-record translation support)
+    # Fetch translations keyed by UnitCatalogRecId (not by alma_id like fjms_trans)
+    _rt_trans_map = {}
+    try:
+        from shared.translation_service import TranslationService
+        _tsvc_rt = TranslationService(thread_safe=True)
+        if _tsvc_rt.fjms_available():
+            _all_rt_rec_ids = []
+            for team in teams:
+                for rec in team["records"]:
+                    rec_id = rec.get("unit_catalog_rec_id")
+                    if rec_id and rec_id in running_titles:
+                        _all_rt_rec_ids.append(rec_id)
+            if _all_rt_rec_ids:
+                _rt_trans_map = _tsvc_rt.get_fjms_translations_by_signature_ids(
+                    'RunningTitle', list(set(_all_rt_rec_ids))
+                )
+        _tsvc_rt.close()
+    except Exception:
+        pass
+
+    # Check if any team has running title data
+    _any_rt = False
     for team in teams:
-        titles = []
         for rec in team["records"]:
             rec_id = rec.get("unit_catalog_rec_id")
             if rec_id and rec_id in running_titles:
                 for rt in running_titles[rec_id]:
-                    rt_text = rt.get("running_title", "")
-                    if rt_text and str(rt_text).strip():
-                        titles.append(str(rt_text).strip())
-        rt_vals.append('; '.join(titles) if titles else None)
-    _field_row(tr('Running Title'), rt_vals, is_heb)
+                    if rt.get("running_title") and str(rt["running_title"]).strip():
+                        _any_rt = True
+                        break
+            if _any_rt:
+                break
+        if _any_rt:
+            break
+
+    if _any_rt:
+        # Inline layout (not _field_row) to support interactive toggle badges
+        with ui.row().classes('w-full items-start py-1 px-3').style(
+            'border-bottom: 1px solid var(--border-light, #e5e7eb); min-height: 2em;'
+        ):
+            # Label column (matches _field_row style)
+            ui.label(tr('Running Title')).classes('text-xs font-semibold shrink-0').style(
+                f'width: 120px; color: var(--text-secondary); {dir_style}'
+            )
+            # Per-team value columns
+            for team in teams:
+                titles_orig = []
+                for rec in team["records"]:
+                    rec_id = rec.get("unit_catalog_rec_id")
+                    if rec_id and rec_id in running_titles:
+                        for rt in running_titles[rec_id]:
+                            rt_text = rt.get("running_title", "")
+                            if rt_text and str(rt_text).strip():
+                                titles_orig.append((str(rt_text).strip(), rec_id))
+
+                if not titles_orig:
+                    # Empty cell
+                    ui.label('\u2014').classes('text-sm').style(
+                        f'flex: 1; min-width: 130px; color: var(--text-muted, #9ca3af); {dir_style}'
+                    )
+                else:
+                    with ui.column().classes('gap-1').style(f'flex: 1; min-width: 130px; {dir_style}'):
+                        for orig_text, rec_id in titles_orig:
+                            _trans_entry = _rt_trans_map.get(rec_id)
+                            _is_translated = False
+                            display_text = orig_text
+                            display_dir = dir_style
+
+                            if _trans_entry and isinstance(_trans_entry, tuple):
+                                _trans_text_val = str(_trans_entry[0]).strip()
+                                _trans_dir = _trans_entry[1]
+                                # Direction-aware: en2he shows Hebrew in HE UI, he2en shows English in EN UI
+                                _should_show = (
+                                    (_trans_dir == 'en2he' and is_heb) or
+                                    (_trans_dir == 'he2en' and not is_heb)
+                                )
+                                if _should_show and _trans_text_val and _trans_text_val != orig_text:
+                                    display_text = _trans_text_val
+                                    _is_translated = True
+                                    if _trans_dir == 'en2he':
+                                        display_dir = 'direction: rtl; text-align: right;'
+                                    else:
+                                        display_dir = ''
+
+                            _rt_lbl = ui.label(display_text).classes('text-sm break-words').style(
+                                f'line-height: 1.6; {display_dir}'
+                            )
+
+                            if _is_translated:
+                                _rt_st = {'showing_original': False}
+                                _rt_badge_ref = [None]
+                                _orig_dir_style = dir_style
+                                _trans_dir_style = display_dir
+
+                                def _make_rt_toggle(lbl, badge_ref, orig, trans, orig_dir, trans_dir, flag):
+                                    def handler():
+                                        flag['showing_original'] = not flag['showing_original']
+                                        if flag['showing_original']:
+                                            lbl.text = orig
+                                            lbl.style(f'line-height: 1.6; {orig_dir}')
+                                            badge_ref[0].text = tr('Original')
+                                        else:
+                                            lbl.text = trans
+                                            lbl.style(f'line-height: 1.6; {trans_dir}')
+                                            badge_ref[0].text = tr('Translated')
+                                    return handler
+
+                                _rt_badge = ui.badge(tr('Translated'), color='light-blue').props(
+                                    'dense outline'
+                                ).classes('text-xs cursor-pointer')
+                                _rt_badge_ref[0] = _rt_badge
+                                _rt_badge.on('click', _make_rt_toggle(
+                                    _rt_lbl, _rt_badge_ref, orig_text, display_text,
+                                    _orig_dir_style, _trans_dir_style, _rt_st
+                                ))
 
     # Detailed Content (from catalog_textual_frames — richer per-verse references)
     if textual_frames:
+        # Batch-fetch TextualFrame translations (he2en) for EN UI
+        _tf_trans_map = {}  # {original_heb_text: english_translation}
+        if not is_heb and alma_id:
+            try:
+                from shared.translation_service import TranslationService
+                _tsvc_tf = TranslationService(thread_safe=True)
+                if _tsvc_tf.fjms_available():
+                    _tf_lookup = _tsvc_tf.get_fjms_translations_by_text(
+                        'TextualFrame', [alma_id]
+                    )
+                    _tf_trans_map = {k: v[0] for k, v in _tf_lookup.get(alma_id, {}).items()}
+                _tsvc_tf.close()
+            except Exception:
+                pass
+
         dc_vals = []
         for team in teams:
             frames = []
@@ -277,20 +412,54 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
                 rec_id = rec.get("unit_catalog_rec_id")
                 if rec_id and rec_id in textual_frames:
                     for tf in textual_frames[rec_id]:
-                        text = tf.get("heb") if is_heb and tf.get("heb") else tf.get("eng")
+                        heb_text = tf.get("heb")
+                        eng_text = tf.get("eng")
+                        if is_heb:
+                            text = heb_text if heb_text else eng_text
+                        else:
+                            # In EN UI: prefer translation of Hebrew text if available
+                            heb_key = str(heb_text).strip() if heb_text else None
+                            tf_trans = _tf_trans_map.get(heb_key) if heb_key else None
+                            text = tf_trans if tf_trans else (eng_text if eng_text else heb_text)
                         if text and str(text).strip():
                             frames.append(str(text).strip())
             dc_vals.append('; '.join(frames) if frames else None)
         _field_row(tr('Detailed Content'), dc_vals, is_heb)
 
-    # GenizahTitle (org/eng)
+    # GenizahTitle (with translation support)
+    # Batch-fetch Title translations (he2en) for EN UI
+    _title_trans_map = {}  # {original_text: english_translation}
+    if not is_heb and alma_id:
+        try:
+            from shared.translation_service import TranslationService
+            _tsvc_gt = TranslationService(thread_safe=True)
+            if _tsvc_gt.fjms_available():
+                _gt_lookup = _tsvc_gt.get_fjms_translations_by_text(
+                    'Title', [alma_id]
+                )
+                _title_trans_map = {k: v[0] for k, v in _gt_lookup.get(alma_id, {}).items()}
+            _tsvc_gt.close()
+        except Exception:
+            pass
+
     gt_vals = []
     for team in teams:
         titles = []
         for rec in team["records"]:
             gt_org = rec.get("genizah_title_org")
             gt_eng = rec.get("genizah_title_eng")
-            gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+            if is_heb:
+                gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+            else:
+                # EN UI: prefer English title, then translation, then Hebrew original
+                if gt_eng and str(gt_eng).strip():
+                    gt = gt_eng
+                elif gt_org and str(gt_org).strip():
+                    orig = str(gt_org).strip()
+                    gt_trans = _title_trans_map.get(orig) if _title_trans_map else None
+                    gt = gt_trans if gt_trans else gt_org
+                else:
+                    gt = None
             if gt and str(gt).strip():
                 titles.append(str(gt).strip())
         gt_vals.append('; '.join(titles) if titles else None)
@@ -368,7 +537,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
     # === Section 6: Miscellaneous ===
     _section_header(tr('Miscellaneous'), num_teams + 1)
 
-    _render_free_descriptions(free_descriptions, is_heb)
+    _render_free_descriptions(free_descriptions, is_heb, fjms_trans=fjms_trans, alma_id=alma_id)
     _render_full_texts(full_texts, is_heb)
 
 
@@ -446,7 +615,7 @@ def _render_full_texts(full_texts, is_heb):
                 )
 
 
-def _render_free_descriptions(free_descriptions, is_heb):
+def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_id=''):
     """Render free description texts with source attribution labels."""
     from shared.fjms_service import get_team_display_name
 
@@ -456,23 +625,76 @@ def _render_free_descriptions(free_descriptions, is_heb):
             ui.label('\u2014').classes('text-sm').style('color: var(--text-muted);')
         return
 
+    # Pre-fetch all free description translations for this alma_id in one batch
+    _fd_lookup = {}  # signature_id -> english text
+    if not is_heb and alma_id:
+        try:
+            from shared.translation_service import TranslationService
+            _tsvc_fd = TranslationService(thread_safe=True)
+            if _tsvc_fd.fjms_available():
+                sig_ids = [desc.get("signature_id") for desc in free_descriptions if desc.get("signature_id")]
+                for sid in sig_ids:
+                    en = _tsvc_fd.get_fjms_free_desc_en(alma_id, sid)
+                    if en:
+                        _fd_lookup[sid] = en
+            _tsvc_fd.close()
+        except Exception:
+            pass
+
     for desc in free_descriptions:
         text = desc.get("text", "")
         if text and str(text).strip():
+            display_text = str(text).strip()
+            display_dir = dir_style
+            sig_id = desc.get("signature_id")
+            _is_translated = False
+            if sig_id and sig_id in _fd_lookup:
+                display_text = _fd_lookup[sig_id]
+                display_dir = ''  # English is LTR
+                _is_translated = True
+
             with ui.row().classes('w-full py-2 px-3').style(
-                f'border-bottom: 1px solid var(--border-light, #e5e7eb); {dir_style}'
+                f'border-bottom: 1px solid var(--border-light, #e5e7eb); {display_dir}'
             ):
-                with ui.column().classes('gap-0').style(f'flex: 1; {dir_style}'):
+                with ui.column().classes('gap-0').style(f'flex: 1; {display_dir}'):
                     # Source attribution label — always use English key for lookup
                     eng_source = desc.get("source_name")
+                    if eng_source in ('Instatution', 'Institution'):
+                        eng_source = None
                     source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
-                    if source:
-                        ui.label(source).classes('text-xs font-semibold').style(
-                            f'color: var(--primary-700); {dir_style}'
-                        )
-                    ui.label(str(text).strip()).classes('text-sm whitespace-pre-wrap break-words').style(
-                        f'line-height: 1.6; {dir_style}'
+                    with ui.row().classes('items-center gap-2'):
+                        if source:
+                            ui.label(source).classes('text-xs font-semibold').style(
+                                f'color: var(--primary-700); {display_dir}'
+                            )
+                    _fd_lbl = ui.label(display_text).classes('text-sm whitespace-pre-wrap break-words').style(
+                        f'line-height: 1.6; {display_dir}'
                     )
+                    if _is_translated:
+                        _orig_text = str(text).strip()
+                        _trans_text = display_text
+                        _fd_st = {'showing_original': False}
+                        _fd_badge_ref = [None]
+                        def _make_fd_toggle(lbl, badge_ref, orig, trans, orig_dir, trans_dir, flag):
+                            def handler():
+                                flag['showing_original'] = not flag['showing_original']
+                                if flag['showing_original']:
+                                    lbl.text = orig
+                                    lbl.style(f'line-height: 1.6; {orig_dir}')
+                                    badge_ref[0].text = tr('Original')
+                                else:
+                                    lbl.text = trans
+                                    lbl.style(f'line-height: 1.6; {trans_dir}')
+                                    badge_ref[0].text = tr('Translated')
+                            return handler
+                        _fd_badge = ui.badge(tr('Translated'), color='light-blue').props('dense outline').classes(
+                            'text-xs cursor-pointer'
+                        )
+                        _fd_badge_ref[0] = _fd_badge
+                        _fd_badge.on('click', _make_fd_toggle(
+                            _fd_lbl, _fd_badge_ref, _orig_text, _trans_text,
+                            dir_style, '', _fd_st
+                        ))
 
 
 def _fmt_num(val) -> str:

@@ -144,6 +144,7 @@ class TranslationService:
         self._pgp_has_translations = False
         self._fjms_has_translations = False
         self._titles_has_translations = False
+        self._oxford_has_translations = False
 
         # Resolve PGP database path
         if pgp_db_path is None:
@@ -185,6 +186,15 @@ class TranslationService:
                 self._titles_conn.row_factory = sqlite3.Row
                 self._titles_has_translations = self._table_exists(
                     self._titles_conn, "title_translations"
+                )
+                self._titles_has_en_he = False
+                if self._titles_has_translations:
+                    cols = {r[1] for r in self._titles_conn.execute(
+                        "PRAGMA table_info(title_translations)"
+                    ).fetchall()}
+                    self._titles_has_en_he = "english_title_he" in cols
+                self._oxford_has_translations = self._table_exists(
+                    self._titles_conn, "oxford_translations"
                 )
             except Exception as e:
                 logger.warning("Failed to connect to titles sidecar: %s", e)
@@ -356,14 +366,14 @@ class TranslationService:
             alma_ids: List of FJMS AlmaId identifiers.
 
         Returns:
-            Dict of {alma_id: {field_name: translated_text}} for found entries.
+            Dict of {alma_id: {field_name: (translated_text, direction)}} for found entries.
         """
         if not self._fjms_has_translations or not self._fjms_conn or not alma_ids:
             return {}
         try:
             placeholders = ",".join("?" * len(alma_ids))
             rows = self._fjms_conn.execute(
-                f"SELECT alma_id, field_name, translated_text "
+                f"SELECT alma_id, field_name, translated_text, direction "
                 f"FROM fjms_translations WHERE alma_id IN ({placeholders})",
                 alma_ids,
             ).fetchall()
@@ -373,10 +383,78 @@ class TranslationService:
                 aid = row[0]
                 if aid not in result:
                     result[aid] = {}
-                result[aid][row[1]] = row[2]
+                result[aid][row[1]] = (row[2], row[3])
             return result
         except Exception as e:
             logger.warning("Error in FJMS batch translation lookup: %s", e)
+            return {}
+
+    def get_fjms_translations_by_signature_ids(
+        self, field_name: str, signature_ids: List[int]
+    ) -> Dict[int, tuple]:
+        """Batch lookup of FJMS translations keyed by signature_id.
+
+        Useful for RunningTitle (signature_id = UnitCatalogRecId) and
+        FullText (signature_id = rowid) where multiple entries per alma_id
+        need to be distinguished.
+
+        Args:
+            field_name: Field name filter (e.g., 'RunningTitle', 'FullText').
+            signature_ids: List of signature_id integers.
+
+        Returns:
+            Dict of {signature_id: (translated_text, direction)} for found entries.
+        """
+        if not self._fjms_has_translations or not self._fjms_conn or not signature_ids:
+            return {}
+        try:
+            placeholders = ",".join("?" * len(signature_ids))
+            rows = self._fjms_conn.execute(
+                f"SELECT signature_id, translated_text, direction FROM fjms_translations "
+                f"WHERE field_name = ? AND signature_id IN ({placeholders})",
+                [field_name] + signature_ids,
+            ).fetchall()
+            return {row[0]: (row[1], row[2]) for row in rows if row[1]}
+        except Exception as e:
+            logger.warning("Error in FJMS signature_id batch lookup: %s", e)
+            return {}
+
+    def get_fjms_translations_by_text(
+        self, field_name: str, alma_ids: List[str]
+    ) -> Dict[str, Dict[str, tuple]]:
+        """Batch lookup of FJMS translations keyed by alma_id and original_text.
+
+        Used for fields like TextualFrame where signature_id does not match
+        the catalog's UnitCatalogRecId and text-content matching is needed.
+
+        Args:
+            field_name: Field name filter (e.g., 'TextualFrame', 'Title').
+            alma_ids: List of AlmaId strings.
+
+        Returns:
+            Dict of {alma_id: {original_text: (translated_text, direction)}}.
+        """
+        if not self._fjms_has_translations or not self._fjms_conn or not alma_ids:
+            return {}
+        try:
+            placeholders = ",".join("?" * len(alma_ids))
+            rows = self._fjms_conn.execute(
+                f"SELECT alma_id, original_text, translated_text, direction "
+                f"FROM fjms_translations "
+                f"WHERE field_name = ? AND alma_id IN ({placeholders})",
+                [field_name] + list(alma_ids),
+            ).fetchall()
+            result: Dict[str, Dict[str, tuple]] = {}
+            for row in rows:
+                aid, orig, trans, direction = row
+                if not trans:
+                    continue
+                if aid not in result:
+                    result[aid] = {}
+                result[aid][orig.strip()] = (trans.strip(), direction)
+            return result
+        except Exception as e:
+            logger.warning("Error in FJMS text-based batch lookup: %s", e)
             return {}
 
     # -------------------------------------------------------------------------
@@ -546,6 +624,7 @@ class TranslationService:
         if not self._titles_has_translations or not self._titles_conn or not sys_ids:
             return {}
         try:
+            en_he_col = ", english_title_he" if self._titles_has_en_he else ""
             result = {}
             batch_size = 400
             for i in range(0, len(sys_ids), batch_size):
@@ -553,17 +632,20 @@ class TranslationService:
                 placeholders = ",".join("?" * len(batch))
                 rows = self._titles_conn.execute(
                     f"SELECT system_number, original_title, english_title, "
-                    f"hebrew_title, source "
+                    f"hebrew_title, source{en_he_col} "
                     f"FROM title_translations WHERE system_number IN ({placeholders})",
                     batch,
                 ).fetchall()
                 for row in rows:
-                    result[row[0]] = {
+                    entry = {
                         "original_title": row[1],
                         "english_title": row[2],
                         "hebrew_title": row[3],
                         "source": row[4],
                     }
+                    if self._titles_has_en_he and len(row) > 5:
+                        entry["english_title_he"] = row[5]
+                    result[row[0]] = entry
             return result
         except Exception as e:
             logger.warning("Error in title translations batch lookup: %s", e)
@@ -573,28 +655,94 @@ class TranslationService:
         """Get title translation for a single system_number.
 
         Returns:
-            Dict with original_title, english_title, hebrew_title, source
+            Dict with original_title, english_title, hebrew_title, source,
+            english_title_he (EN→HE translation of English title, if available)
             or None if not found.
         """
         if not self._titles_has_translations or not self._titles_conn:
             return None
         try:
-            row = self._titles_conn.execute(
-                "SELECT original_title, english_title, hebrew_title, source "
-                "FROM title_translations WHERE system_number = ?",
-                (sys_id,),
-            ).fetchone()
+            if self._titles_has_en_he:
+                row = self._titles_conn.execute(
+                    "SELECT original_title, english_title, hebrew_title, source, english_title_he "
+                    "FROM title_translations WHERE system_number = ?",
+                    (sys_id,),
+                ).fetchone()
+            else:
+                row = self._titles_conn.execute(
+                    "SELECT original_title, english_title, hebrew_title, source "
+                    "FROM title_translations WHERE system_number = ?",
+                    (sys_id,),
+                ).fetchone()
             if not row:
                 return None
-            return {
+            result = {
                 "original_title": row[0],
                 "english_title": row[1],
                 "hebrew_title": row[2],
                 "source": row[3],
             }
+            if self._titles_has_en_he and len(row) > 4:
+                result["english_title_he"] = row[4]
+            return result
         except Exception as e:
             logger.warning("Error reading title translation for %s: %s", sys_id, e)
             return None
+
+    # -------------------------------------------------------------------------
+    # Oxford Translation Methods (from libraries_translations.db)
+    # -------------------------------------------------------------------------
+
+    def oxford_available(self) -> bool:
+        """True if libraries_translations.db has oxford_translations table."""
+        return self._oxford_has_translations
+
+    def get_oxford_translation(self, english_text: str) -> Optional[str]:
+        """Get Hebrew translation for an Oxford metadata English text.
+
+        Returns Hebrew string or None if not found.
+        """
+        if not self._oxford_has_translations or not self._titles_conn or not english_text:
+            return None
+        try:
+            row = self._titles_conn.execute(
+                "SELECT hebrew_text FROM oxford_translations WHERE english_text = ?",
+                (english_text.strip(),),
+            ).fetchone()
+            return row[0] if row else None
+        except Exception:
+            return None
+
+    def get_oxford_translations_batch(
+        self, english_texts: List[str]
+    ) -> Dict[str, str]:
+        """Batch lookup Oxford translations.
+
+        Args:
+            english_texts: List of English text strings.
+
+        Returns:
+            Dict of {english_text: hebrew_text} for found entries.
+        """
+        if not self._oxford_has_translations or not self._titles_conn or not english_texts:
+            return {}
+        try:
+            result = {}
+            batch_size = 200
+            for i in range(0, len(english_texts), batch_size):
+                batch = [t.strip() for t in english_texts[i:i + batch_size] if t]
+                placeholders = ",".join("?" * len(batch))
+                rows = self._titles_conn.execute(
+                    f"SELECT english_text, hebrew_text FROM oxford_translations "
+                    f"WHERE english_text IN ({placeholders})",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    result[row[0]] = row[1]
+            return result
+        except Exception as e:
+            logger.warning("Error in Oxford translations batch: %s", e)
+            return {}
 
     # -------------------------------------------------------------------------
     # No-Overwrite Safety Check

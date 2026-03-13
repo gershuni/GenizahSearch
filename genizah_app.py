@@ -325,7 +325,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Session persistence, search history dropdown, composition UX improvements, desktop notifications, Hebrew library names"))
+        self.lbl_msg.setText(tr("New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection"))
         self.show()
 
     def on_learn_more(self):
@@ -345,6 +345,8 @@ class WhatsNewDialog(QDialog):
         self.setModal(True)
         self.setFixedSize(500, 380)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        if CURRENT_LANG == 'he':
+            self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -357,10 +359,9 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
-            f"<li><b>{tr('Composition Search UX: elapsed timer, cancel with partial results, printed badge and filter')}</b></li>"
-            f"<li><b>{tr('Session Persistence: search state saved and restored across restarts, search history dropdown in search bar')}</b></li>"
-            f"<li><b>{tr('Desktop Notifications: taskbar flash on search completion, sleep prevention, copy context menu')}</b></li>"
-            f"<li><b>{tr('Hebrew Library Names: full Hebrew names for all library codes')}</b></li>"
+            f"<li><b>{tr('Focused Search: filter manuscripts by domain, author, work, date, and material before searching')}</b></li>"
+            f"<li><b>{tr('Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation')}</b></li>"
+            f"<li><b>{tr('Line-Boundary Search: find words at start/end of lines or text for join detection. Requires index rebuild.')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)
@@ -3734,18 +3735,43 @@ class ResultDialog(QDialog):
         if _show_trans:
             from gui_threads import _field_translation_cache
             _ft_cache = _field_translation_cache
+            # Pre-populate cache with Oxford pre-computed translations for part fields
+            if part_meta:
+                try:
+                    _ox_svc = _get_title_svc()
+                    if _ox_svc and _ox_svc.oxford_available():
+                        _ox_texts = [part_meta.get(f, '').strip() for f in ('title', 'contents') if part_meta.get(f, '').strip()]
+                        if _ox_texts:
+                            _ox_batch = _ox_svc.get_oxford_translations_batch(_ox_texts)
+                            for _ox_eng, _ox_heb in _ox_batch.items():
+                                if _ox_eng == part_meta.get('title', '').strip():
+                                    _ft_cache.setdefault('rd_part_title', _ox_heb)
+                                if _ox_eng == part_meta.get('contents', '').strip():
+                                    _ft_cache.setdefault('rd_part_contents', _ox_heb)
+                except Exception:
+                    pass
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
 
-        def _trans_or_badge(field_key, text, label):
+        _ui_lang = CURRENT_LANG  # 'he' or 'en'
+
+        def _trans_or_badge(field_key, text, label, min_len=10):
             """Return text with translate badge or cached translation."""
-            if not _show_trans or not text or len(text.strip()) < 10:
+            if not _show_trans or not text or len(text.strip()) < min_len:
                 return text
-            # Skip translation for text already in Hebrew (user is in Hebrew UI)
-            if _is_hebrew_text(text):
+            is_he_orig = _is_hebrew_text(text)
+            # Skip if text is already in the UI language (nothing to translate)
+            if is_he_orig and _ui_lang == 'he':
                 return text
-            is_he_orig = False  # All translatable fields are English (Hebrew skipped above)
+            if not is_he_orig and _ui_lang == 'en':
+                return text
             cached = _ft_cache.get(field_key)
+            if cached == '__translating__':
+                _loading_style = 'color: #6b7280; font-size: 11px; font-style: italic;'
+                return (
+                    f"{_html_mod.escape(text)} "
+                    f"<span style='{_loading_style}'>⏳ {tr('Translating...')}</span>"
+                )
             if cached:
                 parent = self.parent()
                 _toggle = getattr(parent, '_trans_toggle_state', {}) if parent else {}
@@ -3768,7 +3794,12 @@ class ResultDialog(QDialog):
         kti_html = ""
         date_val = marc.get('date')
         if date_val:
-            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+            # Pre-populate cache with direct Hebrew date conversion (avoids Dicta errors)
+            if _show_trans and 'rd_date' not in _ft_cache and _is_hebrew_text(date_val):
+                _direct = _translate_hebrew_date(date_val)
+                if _direct:
+                    _ft_cache['rd_date'] = _direct
+            kti_html += f"<p><b>{tr('Date')}:</b> {_trans_or_badge('rd_date', date_val, tr('Date'), min_len=3)}</p>"
 
         dims = marc.get('dimensions'); phys = meta.get('physical_desc')
         if dims or phys:
@@ -3781,18 +3812,26 @@ class ResultDialog(QDialog):
 
         subjects = marc.get('subjects', [])
         if subjects:
-            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+            subjects_text = '; '.join(subjects)
+            kti_html += f"<p><b>{tr('Subjects')}:</b> {_trans_or_badge('rd_subjects', subjects_text, tr('Subjects'))}</p>"
 
         notes = marc.get('notes', [])
         if notes:
-            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for _ni, n in enumerate(notes):
-                kti_html += f"<li>{_trans_or_badge(f'rd_note_{_ni}', n, tr('Notes'))}</li>"
-            kti_html += "</ul></p>"
+            notes_combined = '\n'.join(notes)
+            notes_result = _trans_or_badge('rd_notes', notes_combined, tr('Notes'))
+            # If badge was applied to combined text, render as single block with line breaks
+            if notes_result != notes_combined:
+                kti_html += f"<p><b>{tr('Notes')}:</b></p>{notes_result.replace(chr(10), '<br/>')}"
+            else:
+                kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
+                for n in notes:
+                    kti_html += f"<li>{_html_mod.escape(n)}</li>"
+                kti_html += "</ul></p>"
 
         people = marc.get('people', [])
         if people:
-            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+            people_text = '; '.join(people)
+            kti_html += f"<p><b>{tr('People')}:</b> {_trans_or_badge('rd_people', people_text, tr('People'))}</p>"
 
         external_html = ""
         if part_meta:
@@ -4609,7 +4648,19 @@ class ResultDialog(QDialog):
         part_meta = rd_meta.get('_part_meta') or {}
 
         # Collect all translatable field keys
+        _ui_lang = CURRENT_LANG
         field_keys = []
+        # Date — short Hebrew dates like "מאה ט״ו": try direct conversion first, Dicta fallback
+        date_val = marc.get('date', '')
+        if date_val and len(date_val.strip()) >= 3:
+            is_he = _is_hebrew_text(date_val)
+            if (is_he and _ui_lang != 'he') or (not is_he and _ui_lang != 'en'):
+                if 'rd_date' not in _field_translation_cache and is_he:
+                    _direct = _translate_hebrew_date(date_val)
+                    if _direct:
+                        _field_translation_cache['rd_date'] = _direct
+                if 'rd_date' not in _field_translation_cache:
+                    field_keys.append('rd_date')
         if marc.get('english_title') and len(marc['english_title'].strip()) >= 10:
             field_keys.append('rd_eng_title')
         phys = rd_meta.get('physical_desc', '')
@@ -4617,9 +4668,21 @@ class ResultDialog(QDialog):
         phys_text = f"{phys or ''} {dims or ''}".strip()
         if phys_text and len(phys_text) >= 10:
             field_keys.append('rd_phys_desc')
-        for i, n in enumerate(marc.get('notes', [])):
-            if n and len(n.strip()) >= 10:
-                field_keys.append(f'rd_note_{i}')
+        subjects = marc.get('subjects', [])
+        if subjects:
+            subjects_text = '; '.join(subjects)
+            if len(subjects_text.strip()) >= 10:
+                field_keys.append('rd_subjects')
+        notes = marc.get('notes', [])
+        if notes:
+            combined = '\n'.join(notes)
+            if len(combined.strip()) >= 10:
+                field_keys.append('rd_notes')
+        people = marc.get('people', [])
+        if people:
+            people_text = '; '.join(people)
+            if len(people_text.strip()) >= 10:
+                field_keys.append('rd_people')
         if part_meta.get('title') and len(part_meta['title'].strip()) >= 10:
             field_keys.append('rd_part_title')
         if part_meta.get('contents') and len(part_meta['contents'].strip()) >= 10:
@@ -5111,13 +5174,69 @@ def _is_hebrew_text(text):
     return hebrew_count > 0 and latin_count < 20
 
 
+def _translate_hebrew_date(text):
+    """Translate Hebrew-numeral dates like 'מאה ט״ו' → '15th century'.
+
+    Returns translated string or None if the pattern is not recognized.
+    Handles: מאה X, מאות X-Y, מאה X-Y, and common suffixes.
+    """
+    import re
+    _GEMATRIA = {
+        'א': 1, 'ב': 2, 'ג': 3, 'ד': 4, 'ה': 5, 'ו': 6, 'ז': 7, 'ח': 8, 'ט': 9,
+        'י': 10, 'כ': 20, 'ך': 20, 'ל': 30, 'מ': 40, 'ם': 40, 'נ': 50, 'ן': 50,
+        'ס': 60, 'ע': 70, 'פ': 80, 'ף': 80, 'צ': 90, 'ץ': 90,
+        'ק': 100, 'ר': 200, 'ש': 300, 'ת': 400,
+    }
+
+    def _parse_heb_numeral(s):
+        """Parse a Hebrew numeral string to int. E.g. ט״ו→15, י״ד→14, י→10."""
+        s = s.strip().replace('״', '').replace('"', '').replace("'", '').replace('׳', '')
+        total = 0
+        for c in s:
+            total += _GEMATRIA.get(c, 0)
+        return total if total > 0 else None
+
+    def _ordinal(n):
+        if 11 <= n % 100 <= 13:
+            return f"{n}th"
+        return f"{n}{['th','st','nd','rd'][n % 10] if n % 10 < 4 else 'th'}"
+
+    t = text.strip()
+    # Normalize quotes
+    t = t.replace('״', '"').replace('׳', "'")
+
+    # Pattern: מאה/מאות X-Y (range of centuries)
+    m = re.match(r'^מא(?:ה|ות)\s+(.+?)\s*[-–]\s*(.+?)(\s*\(.*\))?$', t)
+    if m:
+        a, b = _parse_heb_numeral(m.group(1)), _parse_heb_numeral(m.group(2))
+        if a and b:
+            suffix = ''
+            if m.group(3):
+                suffix = ' ' + m.group(3).strip()
+            return f"{_ordinal(a)}-{_ordinal(b)} century{suffix}"
+
+    # Pattern: מאה X (single century), possibly with suffix
+    m = re.match(r'^מאה\s+(.+?)(\s*\(.*\))?$', t)
+    if m:
+        n = _parse_heb_numeral(m.group(1))
+        if n:
+            suffix = ''
+            if m.group(2):
+                suffix = ' ' + m.group(2).strip()
+            return f"{_ordinal(n)} century{suffix}"
+
+    return None
+
+
 def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translations=None, compact=False):
     """Resolve the display title using libraries_translations.db if available.
 
-    compact=False (ResultDialog): Always shows both Hebrew and English.
+    compact=False (ResultDialog):
+        show_translations OFF → both Hebrew and English ("he  |  en")
+        show_translations ON  → language-aware: English UI → English, Hebrew UI → Hebrew
     compact=True  (search table):
         show_translations OFF → Hebrew only
-        show_translations ON  → English only (falls back to Hebrew if no English)
+        show_translations ON  → language-aware: English UI → English, Hebrew UI → Hebrew
     """
     if show_translations is None:
         show_translations = load_app_config().get('show_translations', False)
@@ -5128,11 +5247,36 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
             if tt:
                 he = tt.get('hebrew_title') or ''
                 en = tt.get('english_title') or ''
+                en_he = tt.get('english_title_he') or ''  # EN→HE translated subtitle
+                if show_translations:
+                    # Language-aware: show title in UI language
+                    if CURRENT_LANG == 'en':
+                        if en.strip():
+                            return en
+                        return he or raw_title or ''
+                    else:  # Hebrew UI
+                        if he.strip():
+                            # If Hebrew is short and EN→HE subtitle exists, append it
+                            if en_he.strip() and len(he) < 15:
+                                return f"{he}  |  {en_he}"
+                            return he
+                        if en_he.strip():
+                            return en_he
+                        return en or raw_title or ''
                 if compact:
-                    if show_translations and en.strip():
-                        return en
-                    return he or en or raw_title or ''
+                    # Compact: prefer Hebrew, with EN→HE subtitle for short Hebrew
+                    if he.strip():
+                        if en_he.strip() and len(he) < 15:
+                            return f"{he} — {en_he}"
+                        return he
+                    return en_he or en or raw_title or ''
+                # Non-compact, translations OFF: show both
                 if he.strip():
+                    if en_he.strip() and len(he) < 15:
+                        # Hebrew is short, show EN→HE as subtitle alongside English
+                        if en.strip():
+                            return f"{he} — {en_he}  |  {en}"
+                        return f"{he} — {en_he}"
                     if en.strip():
                         return f"{he}  |  {en}"
                     return he
@@ -5147,6 +5291,8 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
         if show_translations and eng_title_marc and eng_title_marc.strip():
             return eng_title_marc
         return raw_title or ''
+    if show_translations and CURRENT_LANG == 'en' and eng_title_marc and eng_title_marc.strip():
+        return eng_title_marc
     if eng_title_marc and eng_title_marc.strip():
         return f"{raw_title}  |  {eng_title_marc}"
     return raw_title or ''
@@ -6363,6 +6509,10 @@ class FjmsCatalogDialog(QDialog):
         self.setWindowTitle(f'{tr("Catalog Records")} \u2014 {shelfmark}' if shelfmark else tr('Catalog Records'))
         self.setMinimumSize(800, 500)
         self.resize(900, 650)
+        self._detail = detail
+        self._shelfmark = shelfmark or ''
+        self.sys_id = sys_id or ''
+        self._cat_toggle_state = {}  # field_key -> bool (True = showing original)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -6378,7 +6528,8 @@ class FjmsCatalogDialog(QDialog):
         # Qt's QTextBrowser inherits RTL from the application, so we use plain
         # LTR HTML (no text-align or column reversal) and let Qt handle alignment.
         self.text_browser = QTextBrowser()
-        self.text_browser.setOpenExternalLinks(True)
+        self.text_browser.setOpenExternalLinks(False)
+        self.text_browser.anchorClicked.connect(self._on_anchor_clicked)
         self.text_browser.setHtml(self._build_html(detail, shelfmark=shelfmark or ''))
         layout.addWidget(self.text_browser)
 
@@ -6390,9 +6541,22 @@ class FjmsCatalogDialog(QDialog):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
+    def _on_anchor_clicked(self, url):
+        """Handle anchor clicks: toggle translation or open external links."""
+        url_str = url.toString()
+        if url_str.startswith('cat-toggle:'):
+            field_key = url_str[len('cat-toggle:'):]
+            self._cat_toggle_state[field_key] = not self._cat_toggle_state.get(field_key, False)
+            scroll_pos = self.text_browser.verticalScrollBar().value()
+            self.text_browser.setHtml(self._build_html(self._detail, shelfmark=self._shelfmark))
+            self.text_browser.verticalScrollBar().setValue(scroll_pos)
+        elif url_str.startswith('http'):
+            from PyQt6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(url)
+
     def _build_html(self, detail: dict, shelfmark: str = '') -> str:
         """Build HTML table mirroring FIST Cataloging Data Details view."""
-        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, get_team_header_name, is_team_source, GENERIC_SOURCE_NAMES
+        from shared.fjms_service import parse_textual_frame, split_textual_frames, get_team_display_name, get_team_header_name, is_team_source, GENERIC_SOURCE_NAMES, get_catalog_source_he
 
         records = detail.get("records", [])
         running_titles = detail.get("running_titles", {})
@@ -6404,6 +6568,26 @@ class FjmsCatalogDialog(QDialog):
         mentions = detail.get("mentions", {})
 
         is_heb = CURRENT_LANG == 'he'
+        import html as _html_esc
+
+        # Translation service — initialized once for all sections
+        _show_trans = load_app_config().get('show_translations', False)
+        _trans_svc = None
+        if _show_trans:
+            try:
+                from shared.translation_service import TranslationService
+                _trans_svc = TranslationService()
+                if not _trans_svc.fjms_available():
+                    _trans_svc.close()
+                    _trans_svc = None
+            except Exception:
+                _trans_svc = None
+
+        # Clickable translation toggle badge style (used in RunningTitle, FreeDesc, FullText)
+        _badge_style = (
+            'color: #0369a1; font-size: 10px; text-decoration: none; '
+            'background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
+        )
 
         # Dark mode detection — define color palette for HTML
         palette = QApplication.palette()
@@ -6476,6 +6660,9 @@ class FjmsCatalogDialog(QDialog):
             team_ths = []
             for team in teams:
                 header_name = get_team_header_name(team["source_name"], is_heb=is_heb)
+                # For non-team sources (e.g. FJMS site users), use Hebrew name when available
+                if is_heb and header_name == team["source_name"] and team.get("source_name_heb"):
+                    header_name = team["source_name_heb"]
                 team_ths.append(
                     f'<th style="padding:8px; border-bottom:2px solid {c["header_border"]}; '
                     f'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{header_name}">'
@@ -6518,7 +6705,16 @@ class FjmsCatalogDialog(QDialog):
                 elif is_team_source(sn):
                     source_vals.append(get_team_display_name(sn, is_heb=is_heb))
                 else:
-                    sn_display = team.get("source_name_heb", sn) if is_heb else sn
+                    if is_heb:
+                        # Priority: catalog mapping > DB Hebrew > English fallback
+                        sn_mapped = get_catalog_source_he(sn)
+                        if sn_mapped != sn:
+                            sn_display = sn_mapped
+                        else:
+                            db_heb = team.get("source_name_heb")
+                            sn_display = db_heb if (db_heb and db_heb != sn) else sn
+                    else:
+                        sn_display = sn
                     source_vals.append(sn_display or sn)
             html_parts.append(self._field_row(tr('Source'), source_vals, is_heb))
 
@@ -6565,7 +6761,21 @@ class FjmsCatalogDialog(QDialog):
                 domain_vals.append('; '.join(categories) if categories else '')
             html_parts.append(self._field_row(tr('Domain'), domain_vals, is_heb))
 
-            # Running Title
+            # Running Title (with clickable translation toggle)
+            # Collect all UnitCatalogRecIds to batch-fetch translations
+            _rt_trans_map = {}
+            if _trans_svc:
+                _all_rt_rec_ids = []
+                for team in teams:
+                    for rec in team["records"]:
+                        rec_id = rec.get("unit_catalog_rec_id")
+                        if rec_id and rec_id in running_titles:
+                            _all_rt_rec_ids.append(rec_id)
+                if _all_rt_rec_ids:
+                    _rt_trans_map = _trans_svc.get_fjms_translations_by_signature_ids(
+                        'RunningTitle', list(set(_all_rt_rec_ids))
+                    )
+
             rt_vals = []
             for team in teams:
                 titles = []
@@ -6575,35 +6785,121 @@ class FjmsCatalogDialog(QDialog):
                         for rt in running_titles[rec_id]:
                             rt_text = rt.get("running_title", "")
                             if rt_text and str(rt_text).strip():
-                                titles.append(str(rt_text).strip())
+                                orig = str(rt_text).strip()
+                                _trans_entry = _rt_trans_map.get(rec_id) if _rt_trans_map else None
+                                trans = ''
+                                _trans_dir = None
+                                if _trans_entry and isinstance(_trans_entry, tuple):
+                                    trans = str(_trans_entry[0]).strip()
+                                    _trans_dir = _trans_entry[1]
+                                elif _trans_entry:
+                                    trans = str(_trans_entry).strip()
+                                _should_swap = bool(trans and trans != orig)
+                                toggle_key = f'rt_{rec_id}'
+                                toggled = self._cat_toggle_state.get(toggle_key, False)
+                                if _should_swap:
+                                    # Direction-aware default: show user's UI language by default
+                                    # en2he: trans=Hebrew, orig=English → EN UI default=orig, HE UI default=trans
+                                    # he2en: trans=English, orig=Hebrew → EN UI default=trans, HE UI default=orig
+                                    _show_trans_default = (is_heb if _trans_dir == 'en2he' else not is_heb)
+                                    if _show_trans_default:
+                                        # Original lang ≠ UI lang → show translation with badge
+                                        show_text = _html_esc.escape(orig if toggled else trans)
+                                        badge_label = tr('Translated') if toggled else tr('Original')
+                                        titles.append(
+                                            f'{show_text} '
+                                            f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                        )
+                                    else:
+                                        # Original lang matches UI lang → no badge needed
+                                        titles.append(_html_esc.escape(orig))
+                                else:
+                                    titles.append(_html_esc.escape(orig))
                 rt_vals.append('; '.join(titles) if titles else '')
             html_parts.append(self._field_row(tr('Running Title'), rt_vals, is_heb))
 
             # Detailed Content (from catalog_textual_frames)
             if textual_frames:
+                # Batch-fetch TextualFrame translations (he2en) by text content
+                _tf_trans_map = {}  # {original_heb_text: (english, direction)}
+                if _trans_svc and not is_heb:
+                    _tf_text_lookup = _trans_svc.get_fjms_translations_by_text(
+                        'TextualFrame', [self.sys_id]
+                    )
+                    _tf_trans_map = _tf_text_lookup.get(self.sys_id, {})
+
                 dc_vals = []
                 for team in teams:
                     frames = []
                     for rec in team["records"]:
                         rec_id = rec.get("unit_catalog_rec_id")
                         if rec_id and rec_id in textual_frames:
-                            for tf in textual_frames[rec_id]:
-                                text = tf.get("heb") if is_heb and tf.get("heb") else tf.get("eng")
-                                if text and str(text).strip():
-                                    frames.append(str(text).strip())
+                            for tf_idx, tf in enumerate(textual_frames[rec_id]):
+                                heb_text = tf.get("heb")
+                                eng_text = tf.get("eng")
+                                if is_heb:
+                                    text = heb_text if heb_text else eng_text
+                                else:
+                                    text = eng_text if eng_text else heb_text
+                                if not text or not str(text).strip():
+                                    continue
+                                orig = str(text).strip()
+                                # In EN UI, try to find he2en translation for Hebrew text
+                                _tf_entry = _tf_trans_map.get(str(heb_text).strip()) if heb_text and _tf_trans_map else None
+                                if _tf_entry and not is_heb:
+                                    trans_text, _tf_dir = _tf_entry
+                                    if trans_text and trans_text != orig:
+                                        toggle_key = f'tf_{rec_id}_{tf_idx}'
+                                        toggled = self._cat_toggle_state.get(toggle_key, False)
+                                        show_text = _html_esc.escape(orig if toggled else trans_text)
+                                        badge_label = tr('Translated') if toggled else tr('Original')
+                                        frames.append(
+                                            f'{show_text} '
+                                            f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                        )
+                                        continue
+                                frames.append(_html_esc.escape(orig))
                     dc_vals.append('; '.join(frames) if frames else '')
                 html_parts.append(self._field_row(tr('Detailed Content'), dc_vals, is_heb))
 
-            # GenizahTitle
+            # GenizahTitle (with translation support)
+            # Batch-fetch Title translations (he2en) by alma_id
+            _title_trans_map = {}  # {original_text: (english, direction)}
+            if _trans_svc and not is_heb:
+                _title_text_lookup = _trans_svc.get_fjms_translations_by_text(
+                    'Title', [self.sys_id]
+                )
+                _title_trans_map = _title_text_lookup.get(self.sys_id, {})
+
             gt_vals = []
             for team in teams:
                 titles = []
                 for rec in team["records"]:
                     gt_org = rec.get("genizah_title_org")
                     gt_eng = rec.get("genizah_title_eng")
-                    gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+                    if is_heb:
+                        gt = gt_org if gt_org and str(gt_org).strip() else gt_eng
+                    else:
+                        gt = gt_eng if gt_eng and str(gt_eng).strip() else gt_org
                     if gt and str(gt).strip():
-                        titles.append(str(gt).strip())
+                        orig = str(gt).strip()
+                        # In EN UI with Hebrew title (no gt_eng), try he2en translation
+                        _gt_entry = None
+                        if not is_heb and gt_org and not (gt_eng and str(gt_eng).strip()):
+                            _gt_entry = _title_trans_map.get(str(gt_org).strip()) if _title_trans_map else None
+                        if _gt_entry:
+                            trans_text, _gt_dir = _gt_entry
+                            if trans_text and trans_text != orig:
+                                toggle_key = f'gt_{rec.get("unit_catalog_rec_id", id(rec))}'
+                                toggled = self._cat_toggle_state.get(toggle_key, False)
+                                show_text = _html_esc.escape(orig if toggled else trans_text)
+                                badge_label = tr('Translated') if toggled else tr('Original')
+                                titles.append(
+                                    f'{show_text} '
+                                    f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                )
+                                continue
+                        titles.append(_html_esc.escape(orig))
                 gt_vals.append('; '.join(titles) if titles else '')
             html_parts.append(self._field_row(tr('Title'), gt_vals, is_heb))
 
@@ -6694,66 +6990,132 @@ class FjmsCatalogDialog(QDialog):
             html_parts.append(self._section_row(tr('Miscellaneous'), total_cols if num_teams > 0 else 2))
 
             col_span = total_cols if num_teams > 0 else 2
-            # Check for FJMS translations if show_translations is enabled
-            _fjms_trans_map = {}
-            _show_trans = load_app_config().get('show_translations', False)
-            if _show_trans:
-                try:
-                    from shared.translation_service import TranslationService
-                    _trans_svc = TranslationService()
-                    if _trans_svc.fjms_available():
-                        # Collect alma_ids from free_descriptions
-                        _desc_alma_ids = list({d.get('alma_id', '') for d in free_descriptions if d.get('alma_id')})
-                        if _desc_alma_ids:
-                            _fjms_trans_map = _trans_svc.get_fjms_translations_batch(_desc_alma_ids)
-                    _trans_svc.close()
-                except Exception:
-                    pass
+            # Fetch FJMS translations for free descriptions (by signature_id)
+            _fd_trans_map = {}
+            if _trans_svc:
+                _fd_sig_ids = [d.get('signature_id') for d in free_descriptions if d.get('signature_id')]
+                if _fd_sig_ids:
+                    _fd_trans_map = _trans_svc.get_fjms_translations_by_signature_ids(
+                        'FreeDesc', _fd_sig_ids
+                    )
 
-            for desc in free_descriptions:
+            for fd_idx, desc in enumerate(free_descriptions):
                 text = desc.get("text", "")
                 if text and str(text).strip():
                     eng_source = desc.get("source_name")
-                    source = get_team_display_name(eng_source, is_heb=is_heb) if eng_source else None
+                    if eng_source and eng_source not in ('Instatution', 'Institution'):
+                        if is_team_source(eng_source):
+                            source = get_team_display_name(eng_source, is_heb=is_heb)
+                        elif is_heb:
+                            mapped = get_catalog_source_he(eng_source)
+                            if mapped != eng_source:
+                                source = mapped
+                            else:
+                                db_heb = desc.get("source_name_heb")
+                                source = db_heb if (db_heb and db_heb != eng_source) else eng_source
+                        else:
+                            source = eng_source
+                    else:
+                        source = None
                     source_html = f'<div style="font-weight:bold; font-size:11px; color:{c["section_text"]}; margin-bottom:2px;">{source}</div>' if source else ''
 
-                    # Show FJMS translation if available
-                    trans_html = ''
-                    if _show_trans:
-                        alma_id = desc.get('alma_id', '')
-                        if alma_id and alma_id in _fjms_trans_map:
-                            trans_text = _fjms_trans_map[alma_id].get('FreeDesc')
-                            if trans_text:
-                                trans_html = (
-                                    f'<div style="color:{c["muted"]}; font-size:12px; margin-top:4px;" '
-                                    f'title="{tr("Machine translated via Dicta")}">'
-                                    f'{trans_text} '
-                                    f'<span style="font-size:10px;">({tr("Translated")})</span>'
-                                    f'</div>'
-                                )
+                    sig_id = desc.get('signature_id')
+                    _fd_entry = _fd_trans_map.get(sig_id) if sig_id else None
+                    trans_text = None
+                    _fd_dir = None
+                    if _fd_entry and isinstance(_fd_entry, tuple):
+                        trans_text = _fd_entry[0]
+                        _fd_dir = _fd_entry[1]
+                    elif _fd_entry:
+                        trans_text = _fd_entry
+                    orig = str(text).strip()
+                    _trans_differs = trans_text and str(trans_text).strip() != orig
+                    _should_swap = bool(_trans_differs)
+                    toggle_key = f'fd_{sig_id or fd_idx}'
+                    toggled = self._cat_toggle_state.get(toggle_key, False)
+
+                    if _should_swap:
+                        trans = str(trans_text).strip()
+                        _show_trans_default = (is_heb if _fd_dir == 'en2he' else not is_heb)
+                        if _show_trans_default:
+                            # Original lang ≠ UI lang → show translation with badge
+                            show_text = _html_esc.escape(orig if toggled else trans)
+                            badge_label = tr('Translated') if toggled else tr('Original')
+                            display = (
+                                f'{show_text} '
+                                f'<a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                            )
+                        else:
+                            # Original lang matches UI lang → no badge needed
+                            display = _html_esc.escape(orig)
+                    else:
+                        display = _html_esc.escape(orig)
 
                     html_parts.append(
                         f'<tr><td colspan="{col_span}" '
                         f'style="padding:8px; border-bottom:1px solid {c["border"]};"'
-                        f'>{source_html}{str(text).strip()}{trans_html}</td></tr>'
+                        f'>{source_html}{display}</td></tr>'
                     )
 
             # Full texts (scholarly descriptions) with distinct styling
             if full_texts:
+                # Batch-fetch FullText translations by rowid
+                _ft_trans_map = {}
+                if _trans_svc:
+                    _ft_rowids = [ft.get("rowid") for ft in full_texts if ft.get("rowid")]
+                    if _ft_rowids:
+                        _ft_trans_map = _trans_svc.get_fjms_translations_by_signature_ids(
+                            'FullText', _ft_rowids
+                        )
+
                 html_parts.append(
                     f'<tr><td colspan="{col_span}" style="padding:6px 8px; font-weight:bold; '
                     f'color:{c["section_text"]}; font-size:12px;">{tr("Scholarly Description")}</td></tr>'
                 )
-                for ft in full_texts:
+                for ft_idx, ft in enumerate(full_texts):
                     text = ft.get("text", "")
                     if text and str(text).strip():
+                        ft_rowid = ft.get("rowid")
+                        orig = str(text).strip()
+                        _ft_entry = _ft_trans_map.get(ft_rowid) if ft_rowid and _ft_trans_map else None
+                        trans = ''
+                        _ft_dir = None
+                        if _ft_entry and isinstance(_ft_entry, tuple):
+                            trans = str(_ft_entry[0]).strip()
+                            _ft_dir = _ft_entry[1]
+                        elif _ft_entry:
+                            trans = str(_ft_entry).strip()
+                        _should_swap = bool(trans and trans != orig)
+                        toggle_key = f'ft_{ft_rowid or ft_idx}'
+                        toggled = self._cat_toggle_state.get(toggle_key, False)
+
+                        if _should_swap:
+                            _show_trans_default = (is_heb if _ft_dir == 'en2he' else not is_heb)
+                            if _show_trans_default:
+                                # Original lang ≠ UI lang → show translation with badge
+                                show_text = _html_esc.escape(orig if toggled else trans)
+                                badge_label = tr('Translated') if toggled else tr('Original')
+                                badge = (
+                                    f' <a href="cat-toggle:{toggle_key}" style="{_badge_style}">{badge_label}</a>'
+                                )
+                            else:
+                                # Original lang matches UI lang → no badge needed
+                                show_text = _html_esc.escape(orig)
+                                badge = ''
+                        else:
+                            show_text = _html_esc.escape(orig)
+                            badge = ''
                         html_parts.append(
                             f'<tr><td colspan="{col_span}" '
                             f'style="padding:8px; border-bottom:1px solid {c["border"]}; background:{c["full_text_bg"]};"'
-                            f'>{str(text).strip()}</td></tr>'
+                            f'>{show_text}{badge}</td></tr>'
                         )
 
         html_parts.append('</table>')
+
+        if _trans_svc:
+            _trans_svc.close()
+
         return '\n'.join(html_parts)
 
     def _section_row(self, title: str, colspan: int) -> str:
@@ -8105,6 +8467,10 @@ class GenizahGUI(QMainWindow):
             cfg = load_app_config()
             if cfg.get('whats_new_seen') != APP_VERSION:
                 self.whats_new_bar.show_whats_new(APP_VERSION)
+
+            # One-time citation reminder (shown once per installation)
+            if not cfg.get('citation_reminder_seen', False):
+                QTimer.singleShot(500, self._show_citation_reminder)
 
             # Restore session state (deferred slightly so all widgets are settled)
             QTimer.singleShot(200, self._restore_session)
@@ -10169,7 +10535,7 @@ class GenizahGUI(QMainWindow):
         responsa_sub_layout.addWidget(self.chk_bidirectional)
 
         # Syntax legend label
-        syntax_legend = QLabel("  #מילה " + tr("prefix") + "  |  מילה# " + tr("suffix") + "  |  %מילה " + tr("plene") + "  |  *מילה " + tr("wildcard") + "  |  (א/ב) " + tr("OR") + "  |  -מילה " + tr("Exclude"))
+        syntax_legend = QLabel("  #מילה " + tr("prefix") + "  ·  מילה# " + tr("suffix") + "  ·  %מילה " + tr("plene") + "  ·  *מילה " + tr("wildcard") + "  ·  (א/ב) " + tr("OR") + "  ·  -מילה " + tr("Exclude") + "  ·  |מילה " + tr("Line starts") + "  ·  מילה| " + tr("Line ends"))
         syntax_legend.setStyleSheet("font-size: 10px; color: #7f8c8d;")
         responsa_sub_layout.addWidget(syntax_legend)
 
@@ -11683,7 +12049,7 @@ class GenizahGUI(QMainWindow):
 
         doc_type = pgp_doc.get('document_type')
         if doc_type:
-            if show_trans and trans_data and trans_data.get('document_type_he'):
+            if show_trans and CURRENT_LANG == 'he' and trans_data and trans_data.get('document_type_he'):
                 _esc_orig_type = html_mod.escape(doc_type)
                 _doctype_toggled = _toggle.get('doctype', False)
                 _show_text = doc_type if _doctype_toggled else trans_data['document_type_he']
@@ -11707,15 +12073,15 @@ class GenizahGUI(QMainWindow):
 
         description = pgp_doc.get('description')
         if description:
-            if show_trans and trans_data and trans_data.get('description_he'):
+            if show_trans and CURRENT_LANG == 'he' and trans_data and trans_data.get('description_he'):
                 _esc_orig_desc = html_mod.escape(description)
                 _desc_toggled = _toggle.get('desc', False)
                 _show_desc = description if _desc_toggled else trans_data['description_he']
                 _desc_dir = 'ltr' if _desc_toggled else 'rtl'
                 _desc_badge = tr('Original') if _desc_toggled else tr('Translated')
                 pgp_html += (
-                    f"<p><b>{tr('Description')}:</b> "
-                    f"<span dir='{_desc_dir}'>{html_mod.escape(_show_desc)}</span> "
+                    f"<p dir='{_desc_dir}'><b>{tr('Description')}:</b> "
+                    f"{html_mod.escape(_show_desc)} "
                     f"<a href='toggle-trans:desc:{_esc_orig_desc}' "
                     f"style='{_badge_style}'>{_desc_badge}</a></p>"
                 )
@@ -11985,18 +12351,43 @@ class GenizahGUI(QMainWindow):
         if _show_trans:
             from gui_threads import _field_translation_cache
             _ft_cache = _field_translation_cache
+            # Pre-populate cache with Oxford pre-computed translations for part fields
+            if part_meta:
+                try:
+                    _ox_svc = _get_title_svc()
+                    if _ox_svc and _ox_svc.oxford_available():
+                        _ox_texts = [part_meta.get(f, '').strip() for f in ('title', 'contents') if part_meta.get(f, '').strip()]
+                        if _ox_texts:
+                            _ox_batch = _ox_svc.get_oxford_translations_batch(_ox_texts)
+                            for _ox_eng, _ox_heb in _ox_batch.items():
+                                if _ox_eng == part_meta.get('title', '').strip():
+                                    _ft_cache.setdefault('br_part_title', _ox_heb)
+                                if _ox_eng == part_meta.get('contents', '').strip():
+                                    _ft_cache.setdefault('br_part_contents', _ox_heb)
+                except Exception:
+                    pass
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
         _toggle = getattr(self, '_trans_toggle_state', {})
-        def _trans_or_badge_b(field_key, text, label):
+        _ui_lang_b = CURRENT_LANG  # 'he' or 'en'
+
+        def _trans_or_badge_b(field_key, text, label, min_len=10):
             """Return text with translate badge or cached translation (browse)."""
-            if not _show_trans or not text or len(text.strip()) < 10:
+            if not _show_trans or not text or len(text.strip()) < min_len:
                 return text
-            # Skip translation for text already in Hebrew (user is in Hebrew UI)
-            if _is_hebrew_text(text):
+            is_he_orig = _is_hebrew_text(text)
+            # Skip if text is already in the UI language (nothing to translate)
+            if is_he_orig and _ui_lang_b == 'he':
                 return text
-            is_he_orig = False  # All translatable fields are English (Hebrew skipped above)
+            if not is_he_orig and _ui_lang_b == 'en':
+                return text
             cached = _ft_cache.get(field_key)
+            if cached == '__translating__':
+                _loading_style = 'color: #6b7280; font-size: 11px; font-style: italic;'
+                return (
+                    f"{_html_mod.escape(text)} "
+                    f"<span style='{_loading_style}'>⏳ {tr('Translating...')}</span>"
+                )
             if cached:
                 showing_orig = _toggle.get(field_key, False)
                 show_text = text if showing_orig else cached
@@ -12017,7 +12408,12 @@ class GenizahGUI(QMainWindow):
         kti_html = ""
         date_val = marc.get('date')
         if date_val:
-            kti_html += f"<p><b>{tr('Date')}:</b> {date_val}</p>"
+            # Pre-populate cache with direct Hebrew date conversion (avoids Dicta errors)
+            if _show_trans and 'br_date' not in _ft_cache and _is_hebrew_text(date_val):
+                _direct = _translate_hebrew_date(date_val)
+                if _direct:
+                    _ft_cache['br_date'] = _direct
+            kti_html += f"<p><b>{tr('Date')}:</b> {_trans_or_badge_b('br_date', date_val, tr('Date'), min_len=3)}</p>"
 
         dims = marc.get('dimensions')
         phys = marc.get('physical_desc') or marc.get('physical_description')
@@ -12031,18 +12427,25 @@ class GenizahGUI(QMainWindow):
 
         subjects = marc.get('subjects', [])
         if subjects:
-            kti_html += f"<p><b>{tr('Subjects')}:</b> {'; '.join(subjects)}</p>"
+            subjects_text = '; '.join(subjects)
+            kti_html += f"<p><b>{tr('Subjects')}:</b> {_trans_or_badge_b('br_subjects', subjects_text, tr('Subjects'))}</p>"
 
         notes = marc.get('notes', [])
         if notes:
-            kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
-            for _ni, n in enumerate(notes):
-                kti_html += f"<li>{_trans_or_badge_b(f'br_note_{_ni}', n, tr('Notes'))}</li>"
-            kti_html += "</ul></p>"
+            notes_combined = '\n'.join(notes)
+            notes_result = _trans_or_badge_b('br_notes', notes_combined, tr('Notes'))
+            if notes_result != notes_combined:
+                kti_html += f"<p><b>{tr('Notes')}:</b></p>{notes_result.replace(chr(10), '<br/>')}"
+            else:
+                kti_html += f"<p><b>{tr('Notes')}:</b><ul>"
+                for n in notes:
+                    kti_html += f"<li>{_html_mod.escape(n)}</li>"
+                kti_html += "</ul></p>"
 
         people = marc.get('people', [])
         if people:
-            kti_html += f"<p><b>{tr('People')}:</b> {'; '.join(people)}</p>"
+            people_text = '; '.join(people)
+            kti_html += f"<p><b>{tr('People')}:</b> {_trans_or_badge_b('br_people', people_text, tr('People'))}</p>"
 
         external_html = ""
         if part_meta:
@@ -12355,10 +12758,19 @@ class GenizahGUI(QMainWindow):
         if not text:
             return
 
-        # Skip fields already in Hebrew (no translation needed for Hebrew UI)
-        if _is_hebrew_text(text):
-            return
-        direction = 'en2he'
+        # Show inline loading indicator by setting sentinel in cache + refreshing UI
+        _field_translation_cache[field_key] = '__translating__'
+        if context == 'rd' and rd_dialog:
+            try:
+                rd_dialog._rd_refresh_extended_info()
+            except RuntimeError:
+                pass
+        else:
+            self._refresh_browse_extended_info()
+
+        # Determine translation direction: translate toward UI language
+        is_he = _is_hebrew_text(text)
+        direction = 'he2en' if is_he else 'en2he'
         thread = TranslateTextThread(field_key, text, direction)
         thread.finished_signal.connect(
             lambda fk, orig, translated: self._on_field_translated(fk, orig, translated, context, rd_dialog)
@@ -12384,12 +12796,23 @@ class GenizahGUI(QMainWindow):
 
         # Determine field from key (strip prefix rd_/br_)
         suffix = field_key[3:] if field_key.startswith(('rd_', 'br_')) else field_key
-        if suffix == 'eng_title':
+        if suffix == 'date':
+            return marc.get('date', '')
+        elif suffix == 'eng_title':
             return marc.get('english_title', '')
+        elif suffix == 'subjects':
+            subjects = marc.get('subjects', [])
+            return '; '.join(subjects) if subjects else None
+        elif suffix == 'people':
+            people = marc.get('people', [])
+            return '; '.join(people) if people else None
         elif suffix == 'phys_desc':
             phys = meta.get('physical_desc', '') or marc.get('physical_desc', '') or marc.get('physical_description', '')
             dims = marc.get('dimensions', '')
             return f"{phys or ''} {dims or ''}".strip() or None
+        elif suffix == 'notes':
+            notes = marc.get('notes', [])
+            return '\n'.join(notes) if notes else None
         elif suffix.startswith('note_'):
             idx = int(suffix[5:]) if suffix[5:].isdigit() else -1
             notes = marc.get('notes', [])
@@ -12405,7 +12828,20 @@ class GenizahGUI(QMainWindow):
 
     def _on_field_translated(self, field_key, original, translated, context, rd_dialog=None):
         """Handle completed field translation — refresh the relevant panel."""
+        self.statusBar().clearMessage()
+        from gui_threads import _field_translation_cache
         if not translated:
+            # Remove sentinel so badge reverts to "Translate"
+            _field_translation_cache.pop(field_key, None)
+            self.statusBar().showMessage(tr("Translation failed"), 3000)
+            # Refresh to remove "Translating..." indicator
+            if context == 'rd' and rd_dialog:
+                try:
+                    rd_dialog._rd_refresh_extended_info()
+                except RuntimeError:
+                    pass
+            else:
+                self._refresh_browse_extended_info()
             return
         if context == 'rd' and rd_dialog:
             # Rebuild ResultDialog extended info
@@ -12500,8 +12936,10 @@ class GenizahGUI(QMainWindow):
 
     def _browse_refresh_pgp_for_page(self):
         """Re-fetch PGP sources for current page (called on page change within same manuscript)."""
-        if not hasattr(self, '_browse_pgp_sources') or not self._browse_pgp_sources:
-            return  # No PGP data was loaded for this manuscript
+        if not hasattr(self, '_browse_pgp_doc'):
+            return  # PGP worker never ran for this manuscript
+        if not self._browse_pgp_doc:
+            return  # No PGP document linked to this fragment
         if not self.current_browse_sid:
             return
         # Disconnect old worker signals first
@@ -17995,6 +18433,38 @@ class GenizahGUI(QMainWindow):
         QApplication.clipboard().setText(citation)
         QMessageBox.information(self, tr("Copied"), tr("Citation copied to clipboard!"))
 
+    def _show_citation_reminder(self):
+        """Show a one-time citation reminder dialog on first launch."""
+        if CURRENT_LANG == 'he':
+            title = 'בקשה חשובה: ציטוט מדרש'
+            text = (
+                'אפליקציה זו מבוססת על תמלולים אוטומטיים שנוצרו על ידי צוות פרויקט מדרש. '
+                'על פי חוק זכויות יוצרים, יש לצטט את המקור בעת פרסום חומר מאפליקציה זו.\n\n'
+                'מעבר לדרישה החוקית \u2014 ככל שיהיו יותר ציטוטים, כך יוכל צוות מדרש '
+                'להשתמש בהם כדי לקבל מענקים נוספים, לשפר את התמלולים ולהרחיב את העבודה '
+                'לכתבי יד עבריים נוספים. הציטוט המלא מופיע בתחתית המסך.\n\n'
+                'תודה על שיתוף הפעולה!'
+            )
+        else:
+            title = 'Important: Please cite MiDRASH'
+            text = (
+                'This application is built on automatic transcriptions produced by the MiDRASH Project. '
+                'Copyright law requires citing the source when publishing material from this application.\n\n'
+                'Beyond the legal requirement \u2014 the more citations the project receives, the more '
+                'the MiDRASH team can use them to secure grants and funding to improve the Genizah '
+                'transcriptions and expand their work to other Hebrew manuscripts. '
+                'The full citation appears at the bottom of the screen.\n\n'
+                'Thank you for your cooperation!'
+            )
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(text)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.button(QMessageBox.StandardButton.Ok).setText(tr('Got it'))
+        msg.exec()
+        save_app_config({'citation_reminder_seen': True})
+
     # --- HELP TEXTS ---
     def open_help_center(self, anchor=None):
         """Open the bundled Help.html with optional anchor scrolling and fallback content."""
@@ -18011,7 +18481,7 @@ class GenizahGUI(QMainWindow):
 
     def get_search_help_text(self):
         if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark)."""
+        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
 
     def get_comp_help_text(self):
         if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
@@ -18023,7 +18493,7 @@ class GenizahGUI(QMainWindow):
 
     def get_settings_help_text(self):
         if CURRENT_LANG == 'he': return tr("SETTINGS_HELP_HTML")
-        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates.</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
+        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates. Also required for line-boundary search.</li><li><b>Show Translations:</b> Toggle Hebrew/English translations for catalog data, titles, and descriptions (powered by Dicta Translation).</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
 
     def _build_help_fallback_html(self):
         sections = [
@@ -19410,7 +19880,10 @@ class GenizahGUI(QMainWindow):
                 item_title = QTableWidgetItem(tr("Loading..."))
             else:
                 item_shelf = ShelfmarkTableWidgetItem(shelf if shelf else tr("Unknown"))
-                item_title = QTableWidgetItem(title if title else "")
+                display_title = _resolve_display_title(sid, title, compact=True) if sid else (title or "")
+                item_title = QTableWidgetItem(display_title)
+                if title and title != display_title:
+                    item_title.setToolTip(title)
 
             self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
 
@@ -19428,15 +19901,8 @@ class GenizahGUI(QMainWindow):
             self.title_items_by_sid[sid] = item_title
             self.result_row_by_sys_id[sid] = row_idx
 
-            # Snippet (with translated match badge if applicable)
+            # Snippet
             html_snippet = self.render_asterisks_to_html(res.get('snippet', ''))
-            if res.get('translated_match'):
-                badge_text = tr("Translated match")
-                html_snippet = (
-                    f"<span style='background-color: #dbeafe; color: #1e40af; "
-                    f"font-size: 10px; padding: 1px 4px; border-radius: 3px; "
-                    f"margin-right: 4px;'>{badge_text}</span> " + html_snippet
-                )
             lbl = QLabel(html_snippet)
             lbl.setProperty("filter_text", res.get('snippet', ''))
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -24456,8 +24922,8 @@ class GenizahGUI(QMainWindow):
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
             side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
 
-            # Check if folio needs dynamic images (missing from viewer but within Oxford folio_range)
-            viewer_images = getattr(self.browse_viewer, 'images_ext', [])
+            # Use active_list (includes both images_ext and images_nli depending on source)
+            viewer_images = getattr(self.browse_viewer, 'active_list', []) or getattr(self.browse_viewer, 'images_ext', [])
             folio_in_viewer = any(img.get('folio_num') == folio_num for img in viewer_images) if folio_num and viewer_images else False
 
             if not folio_in_viewer and folio_num is not None and meta:
@@ -25708,8 +26174,8 @@ class GenizahGUI(QMainWindow):
         folio_num = _get_folio_number_from_shelfmark(shelfmark)
         side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
 
-        # Check if folio needs dynamic images (missing from viewer but within Oxford folio_range)
-        viewer_images = getattr(self.browse_viewer, 'images_ext', [])
+        # Use active_list (includes both images_ext and images_nli depending on source)
+        viewer_images = getattr(self.browse_viewer, 'active_list', []) or getattr(self.browse_viewer, 'images_ext', [])
         folio_in_viewer = any(img.get('folio_num') == folio_num for img in viewer_images) if folio_num and viewer_images else False
 
         if not folio_in_viewer and folio_num is not None and meta:

@@ -34,7 +34,6 @@ from web.translations import tr, is_rtl, get_language
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
-from web.components.translate_button import create_translatable_text
 from web.document_service import get_document_for_fragment, get_section_for_page, get_sources_for_document, get_all_sources_for_fragment
 from web.components.joins_panel import fetch_connected_fragments
 
@@ -728,6 +727,9 @@ class BrowseState:
         # Enrichment loading state (two-phase async loading)
         self.enrichment_loaded: bool = False
         self.enrichment_loading: bool = False
+        # Title translation (populated in load_page)
+        self.title_translation: Optional[Dict[str, str]] = None
+        self.oxford_translations: Dict[str, str] = {}  # english_text -> hebrew_text
 
 
 # Module-level crossref cache: keyed by sys_id, persists across page navigations
@@ -917,6 +919,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.all_sources = None
         state.fjms_data = None
         state.crossref_data = None
+        state.title_translation = None
+        state.oxford_translations = {}
 
         state.is_loading = True
         state.error = None
@@ -990,8 +994,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 return
             state.error = f"{tr('Error')}: {str(e)}"
 
+        # Title + Oxford translations: fast SQLite queries (~1ms), safe for Phase A
+        if state.current_page and state.current_page.sys_id:
+            _title_sys_id = state.current_page.sys_id
+            _ox_meta = state.current_page.oxford_part_metadata if hasattr(state.current_page, 'oxford_part_metadata') else None
+            def _fetch_title_and_oxford():
+                title_result = None
+                oxford_result = {}
+                try:
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    if svc.titles_available():
+                        title_result = svc.get_title_translations_batch([_title_sys_id]).get(_title_sys_id)
+                    if svc.oxford_available() and _ox_meta:
+                        texts = [_ox_meta.get(f, '').strip() for f in ('title', 'contents', 'provenance') if _ox_meta.get(f, '').strip()]
+                        if texts:
+                            oxford_result = svc.get_oxford_translations_batch(texts)
+                    svc.close()
+                except Exception:
+                    pass
+                return title_result, oxford_result
+            try:
+                state.title_translation, state.oxford_translations = await run.io_bound(_fetch_title_and_oxford)
+            except Exception:
+                pass
+
         state.is_loading = False
-        update_content()  # Phase A complete: show image + header immediately
+        update_content()  # Phase A complete: show image + header + title translation
 
         # === Phase B: Background enrichment ===
         if state.current_page and state.current_page.sys_id and not state.error:
@@ -1109,7 +1138,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             pgpid = pgp_doc.get('pgpid')
             doc_relation = pgp_doc.get('doc_relation', '')
             is_edition = 'Edition' in doc_relation or not doc_relation
-            page_content = get_section_for_page(pgp_doc['transcription'], page.p_num) if pgp_doc.get('transcription') else None
+            page_content = get_section_for_page(pgp_doc['transcription'], page.p_num, fragment_page_info=pgp_doc.get('_fragment_page_info')) if pgp_doc.get('transcription') else None
 
             if is_edition and page_content:
                 state.pgp_transcription = {
@@ -2029,24 +2058,57 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);'
                             )
 
-                        # Title (truncated with tooltip)
-                        if page.title:
-                            words = page.title.split()
+                        # Title (truncated with tooltip, language-aware)
+                        _overlay_title = page.title
+                        if state.title_translation:
+                            _ol_lang = get_language()
+                            if _ol_lang == 'he':
+                                _overlay_title = state.title_translation.get('hebrew_title') or state.title_translation.get('english_title') or page.title
+                            else:
+                                _overlay_title = state.title_translation.get('english_title') or state.title_translation.get('hebrew_title') or page.title
+                        if _overlay_title:
+                            _ol_dir = 'rtl-text hebrew-text' if not (state.title_translation and get_language() != 'he' and state.title_translation.get('english_title')) else ''
+                            words = _overlay_title.split()
                             if len(words) > 5:
                                 short_title = ' '.join(words[:5]) + '...'
-                                ui.label(short_title).classes(
-                                    'rtl-text hebrew-text'
-                                ).style(
-                                    'color: #ffffff !important; '
-                                    'opacity: 0.95;'
-                                ).tooltip(page.title)
                             else:
-                                ui.label(page.title).classes(
-                                    'rtl-text hebrew-text'
+                                short_title = _overlay_title
+                            _ol_has_toggle = state.title_translation and _overlay_title != page.title
+                            if _ol_has_toggle:
+                                _ol_st = {'showing_original': False}
+                                with ui.row().classes('items-center gap-0'):
+                                    _ol_lbl = ui.label(short_title).classes(
+                                        _ol_dir
+                                    ).style(
+                                        'color: #ffffff !important; opacity: 0.95;'
+                                    )
+                                    if len(words) > 5:
+                                        _ol_lbl.tooltip(_overlay_title)
+                                    def _make_ol_toggle(lbl, orig_title, trans_title, orig_short, trans_short, flag, trans_dir):
+                                        def handler():
+                                            flag['showing_original'] = not flag['showing_original']
+                                            if flag['showing_original']:
+                                                lbl.text = orig_short
+                                                lbl.classes(remove=trans_dir, add='rtl-text hebrew-text')
+                                                lbl.tooltip(orig_title)
+                                            else:
+                                                lbl.text = trans_short
+                                                lbl.classes(remove='rtl-text hebrew-text', add=trans_dir)
+                                                lbl.tooltip(trans_title)
+                                        return handler
+                                    _orig_words = page.title.split() if page.title else []
+                                    _orig_short = (' '.join(_orig_words[:5]) + '...') if len(_orig_words) > 5 else (page.title or '')
+                                    ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                        'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.5; color: white !important;'
+                                    ).tooltip(tr('Show original title')).on(
+                                        'click.stop', _make_ol_toggle(_ol_lbl, page.title, _overlay_title, _orig_short, short_title, _ol_st, _ol_dir)
+                                    )
+                            else:
+                                ui.label(short_title).classes(
+                                    _ol_dir
                                 ).style(
-                                    'color: #ffffff !important; '
-                                    'opacity: 0.95;'
-                                )
+                                    'color: #ffffff !important; opacity: 0.95;'
+                                ).tooltip(_overlay_title if len(words) > 5 else '')
 
                         # Ktiv link
                         ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
@@ -2164,11 +2226,41 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.label(tr('System ID')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                             ui.label(page.sys_id).classes('text-sm font-mono').style('color: var(--text-primary);')
 
-                        # Title
+                        # Title (language-aware with swap toggle)
                         if page.title:
                             with ui.column().classes('gap-1 col-span-2'):
                                 ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                ui.label(page.title).classes('text-sm rtl-text hebrew-text').style('color: var(--text-primary);')
+                                _meta_title = page.title
+                                _meta_dir = 'rtl-text hebrew-text'
+                                if state.title_translation:
+                                    _mt_lang = get_language()
+                                    if _mt_lang == 'he':
+                                        _meta_title = state.title_translation.get('hebrew_title') or state.title_translation.get('english_title') or page.title
+                                    else:
+                                        _meta_title = state.title_translation.get('english_title') or state.title_translation.get('hebrew_title') or page.title
+                                        if state.title_translation.get('english_title'):
+                                            _meta_dir = ''
+                                if state.title_translation and _meta_title != page.title:
+                                    _mt_st = {'showing_original': False}
+                                    with ui.row().classes('items-center gap-0'):
+                                        _mt_lbl = ui.label(_meta_title).classes(f'text-sm {_meta_dir}').style('color: var(--text-primary);')
+                                        def _make_mt_toggle(lbl, orig, resolved, flag, resolved_dir):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                if flag['showing_original']:
+                                                    lbl.text = orig
+                                                    lbl.classes(remove=resolved_dir, add='rtl-text hebrew-text')
+                                                else:
+                                                    lbl.text = resolved
+                                                    lbl.classes(remove='rtl-text hebrew-text', add=resolved_dir)
+                                            return handler
+                                        ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                            'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
+                                        ).tooltip(tr('Show original title')).on(
+                                            'click.stop', _make_mt_toggle(_mt_lbl, page.title, _meta_title, _mt_st, _meta_dir)
+                                        )
+                                else:
+                                    ui.label(_meta_title).classes(f'text-sm {_meta_dir}').style('color: var(--text-primary);')
 
                         # Total Pages
                         with ui.column().classes('gap-1'):
@@ -2203,32 +2295,43 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                         # Oxford Metadata (Part Title, Contents, Provenance)
                         if page.oxford_part_metadata:
-                            # Part Title
-                            if page.oxford_part_metadata.get('title'):
+                            _ox_trans = state.oxford_translations or {}
+                            _ox_is_heb = get_language() == 'he'
+                            for _ox_field, _ox_label in [('title', tr('Part Title')), ('contents', tr('Contents')), ('provenance', tr('Provenance'))]:
+                                _ox_eng = page.oxford_part_metadata.get(_ox_field, '').strip()
+                                if not _ox_eng:
+                                    continue
+                                _ox_heb = _ox_trans.get(_ox_eng)
+                                _ox_display = _ox_heb if (_ox_is_heb and _ox_heb) else _ox_eng
+                                _ox_dir = 'direction: rtl; text-align: right;' if (_ox_is_heb and _ox_heb) else ''
                                 with ui.column().classes('gap-1 col-span-2'):
-                                    ui.label(tr('Part Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    create_translatable_text(
-                                        page.oxford_part_metadata['title'],
-                                        container_style='color: var(--text-primary);'
-                                    )
-
-                            # Contents
-                            if page.oxford_part_metadata.get('contents'):
-                                with ui.column().classes('gap-1 col-span-2'):
-                                    ui.label(tr('Contents')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    create_translatable_text(
-                                        page.oxford_part_metadata['contents'],
-                                        container_style='color: var(--text-primary);'
-                                    )
-
-                            # Provenance
-                            if page.oxford_part_metadata.get('provenance'):
-                                with ui.column().classes('gap-1 col-span-2'):
-                                    ui.label(tr('Provenance')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    create_translatable_text(
-                                        page.oxford_part_metadata['provenance'],
-                                        container_style='color: var(--text-primary);'
-                                    )
+                                    ui.label(_ox_label).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    _ox_lbl = ui.label(_ox_display).classes('text-sm whitespace-pre-wrap').style(f'color: var(--text-primary); {_ox_dir}')
+                                    if _ox_heb and _ox_heb != _ox_eng:
+                                        _ox_st = {'showing_original': False if _ox_is_heb else True}
+                                        _ox_badge_ref = [None]
+                                        def _make_ox_toggle(lbl, badge_ref, eng, heb, flag):
+                                            def handler():
+                                                flag['showing_original'] = not flag['showing_original']
+                                                if flag['showing_original']:
+                                                    lbl.text = eng
+                                                    lbl.style('color: var(--text-primary);')
+                                                    badge_ref[0].text = 'Original'
+                                                else:
+                                                    lbl.text = heb
+                                                    lbl.style('color: var(--text-primary); direction: rtl; text-align: right;')
+                                                    badge_ref[0].text = tr('Translated')
+                                            return handler
+                                        _init_badge = tr('Translated') if _ox_is_heb else 'Original'
+                                        _ox_badge = ui.badge(_init_badge, color='light-blue').props('dense outline').classes('text-xs cursor-pointer')
+                                        _ox_badge_ref[0] = _ox_badge
+                                        _ox_badge.on('click', _make_ox_toggle(_ox_lbl, _ox_badge_ref, _ox_eng, _ox_heb, _ox_st))
+                                        from web.components.translation_report import create_report_button
+                                        create_report_button(
+                                            dataset='oxford', record_id=str(page.sys_id),
+                                            field_name=_ox_field, direction='en2he',
+                                            source_text=_ox_eng, translated_text=_ox_heb,
+                                        )
 
                     # External Links
                     ui.separator().classes('my-3')
@@ -2288,7 +2391,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 if lang_secondary:
                                     type_parts.append(lang_secondary)
                                 type_text = ' \u00b7 '.join(type_parts)
-                                create_translatable_text(type_text, container_style='color: var(--text-primary);')
+                                # Show document_type_he when UI is Hebrew and translation toggle is on
+                                _browse_type_he = None
+                                _browse_type_lang = get_language()
+                                _browse_pgpid = state.pgp_metadata.get('pgpid')
+                                _browse_show_trans = False
+                                try:
+                                    _browse_show_trans = app.storage.user.get('show_translations', False)
+                                except Exception:
+                                    pass
+                                if _browse_show_trans and _browse_type_lang == 'he' and _browse_pgpid:
+                                    try:
+                                        from shared.translation_service import TranslationService
+                                        _tsvc_type = TranslationService(thread_safe=True)
+                                        _browse_type_he = _tsvc_type.get_pgp_document_type_he(_browse_pgpid)
+                                        _tsvc_type.close()
+                                    except Exception:
+                                        pass
+                                if _browse_type_he:
+                                    ui.label(_browse_type_he).classes('text-sm').style('color: var(--text-primary); direction: rtl;')
+                                else:
+                                    ui.label(type_text).classes('text-sm').style('color: var(--text-primary);')
 
                         # Tags (clickable badges)
                         tags = state.pgp_metadata.get('tags', [])
@@ -2314,7 +2437,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     pass
                                 _pgpid_browse = state.pgp_metadata.get('pgpid')
                                 _trans_desc_he = None
-                                if _show_trans_browse and _pgpid_browse:
+                                _browse_lang = get_language()
+                                if _show_trans_browse and _browse_lang == 'he' and _pgpid_browse:
                                     try:
                                         from shared.translation_service import TranslationService
                                         _tsvc = TranslationService(thread_safe=True)
@@ -2348,8 +2472,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         )
                                         _br_btn.on('click.stop', _make_browse_toggle(_br_lbl, _br_badge_ref, description, _trans_desc_he, _br_st))
                                         _br_badge_ref[0] = _br_btn
+                                        from web.components.translation_report import create_report_button
+                                        create_report_button(
+                                            dataset='pgp', record_id=str(_pgpid_browse),
+                                            field_name='description', direction='en2he',
+                                            source_text=description, translated_text=_trans_desc_he,
+                                        )
                                 else:
-                                    create_translatable_text(description, container_style='color: var(--text-primary); white-space: pre-wrap;')
+                                    ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
 
                         # Dates
                         inferred_display = state.pgp_metadata.get('inferred_date_display')
@@ -2368,9 +2498,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # Secondary: original date (only if different from primary)
                                 if doc_date_original and doc_date_original != primary_date:
                                     ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
-                                # Rationale (with translate button)
+                                # Rationale
                                 if date_rationale:
-                                    create_translatable_text(date_rationale, container_style='color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
+                                    ui.label(date_rationale).classes('text-sm').style('color: var(--text-tertiary); font-style: italic; font-size: 0.75rem;')
 
                     # === FJMS Catalog Metadata (pre-fetched in load_page) ===
                     from shared.fjms_service import merge_catalog_records, parse_textual_frame

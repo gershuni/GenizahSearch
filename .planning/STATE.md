@@ -1,17 +1,33 @@
 ---
 gsd_state_version: 1.0
+milestone: v5.6
+milestone_name: milestone
+status: in_progress
+stopped_at: Completed 46-06-PLAN.md
+last_updated: "2026-03-13T06:41:34.571Z"
+last_activity: 2026-03-10 - Completed 46-05, wrapping up v6.5.0
+progress:
+  total_phases: 9
+  completed_phases: 5
+  total_plans: 26
+  completed_plans: 26
+  percent: 100
+---
+
+---
+gsd_state_version: 1.0
 milestone: v6.5.0
 milestone_name: Search UX & Filtered Search
 status: in_progress
-stopped_at: Batch translations verified on server. DBs downloaded. 46-05 UI work remaining.
-last_updated: "2026-03-06T14:30:00.000Z"
-last_activity: 2026-03-06 - Verified batch translations (3/4 DONE, FJMS free desc 40%). Downloaded DBs locally.
+stopped_at: Phase 46 complete (all 5 plans done). Citation popup shipped. Working on personal handlist source mapping.
+last_updated: "2026-03-10T18:00:00.000Z"
+last_activity: 2026-03-12 - Citation popup done. Personal handlist source mapping for 43K NULL SourceName records.
 progress:
-  total_phases: 5
-  completed_phases: 4
+  [██████████] 100%
+  completed_phases: 5
   total_plans: 25
-  completed_plans: 24
-  percent: 96
+  completed_plans: 25
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +37,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v6.5.0 Search UX & Filtered Search — Phase 46 in progress (4/5 plans done)
+**Current focus:** v6.5.0 Search UX & Filtered Search — all phases complete, personal handlist source mapping + Round 3 merge pending
 
 ## Current Position
 
 Milestone: v6.5.0 Search UX & Filtered Search
-Phase: 46 of 46 (Dicta Translation) -- Plan 4 of 5 complete, 46-05 in progress
-Status: Phase 46 In Progress — batch translations nearly complete, UI integration remaining
-Last activity: 2026-03-06 - Verified server: libraries(DONE), PGP(DONE), FJMS catalog(DONE), FJMS free desc(40%, ~21h left). Downloaded DBs locally.
+Phase: 46 of 46 (Dicta Translation) -- COMPLETE (all 5 plans done)
+Status: All phases complete. Citation popup done. Personal handlist mapping + Round 3 merge before release.
+Last activity: 2026-03-10 - Completed 46-05, wrapping up v6.5.0
 
-Progress: [█████████░] 5/5 phases (42-45 complete, 46 in progress — 4/5 plans done)
+Progress: [██████████] 5/5 phases (42-46 all complete, 25/25 plans)
 
 ## Performance Metrics
 
@@ -76,6 +92,7 @@ Progress: [█████████░] 5/5 phases (42-45 complete, 46 in pro
 - Trend: Stable
 
 *Updated after each plan completion*
+| Phase 46 P06 | 2min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -111,6 +128,10 @@ Recent decisions affecting current work:
 - 46-02: PGP batch translation script (scripts/translate_pgp_descriptions.py) with checkpointing, resume, parallel API calls, retry with backoff. 34,954 candidates. Document types via manual PGP_DOCUMENT_TYPE_HE mapping. Atomic checkpoint writes (tempfile+os.replace). 8 new integration tests.
 - 46-03: FJMS catalog gap-fill script (6 categories, ~5,546 items) and free description script (~255K items, ~18h). Bibliography scaffold deferred. RunningTitle column (not BibDesc). SIGINT handler, SQLite reconnect every 10K items. Gap-fill only -- never overwrites existing human translations. Rebuilt few-shot with 16 real genizah_titles pairs (JA transliteration), dedup (265→20 unique for titles), sequential+3s throttle, 429 retry in dicta_client. **ALL BATCH TRANSLATIONS COMPLETE (2026-03-07)**: Libraries 184,514 | PGP 34,954 | FJMS catalog 3,830 | FJMS free desc 254,835 | Total: ~478K translations, 0 failures.
 - 46-04: Web translation integration: global toggle (show_translations user pref), translated match badge (light blue), clickable Translated/Original toggle badges, sys_id-based translation lookup via document_fragments JOIN (batched 400), 5th parallel enrichment query in asyncio.gather. MyMemory replaced with Dicta API + lazy few-shot singleton. Browse page shelfmark URL param + sys_id detection. 12 new translation UI strings. 10 new tests (35 total).
+- 46 (Round 2 batch): Created translate_fjms_catalog_text.py for EN->HE translation of FJMS catalog running titles (107K English) and full texts/scholarly descriptions (46K English). Uses Dicta LM 2.0 with en2he_scholarly few-shot. Running on server 2026-03-08 (~11h total). New field_names: 'RunningTitle', 'FullText' in fjms_translations.
+- 46-05 (extraction fix): Semicolon split changed from `\s*;\s*` to ` ; ` (MARC separator). Longest pure-Hebrew part preferred over mixed. 87K records fixed, 58K Hebrew values improved, zero data loss. libraries_translations.db rebuilt.
+- 46-05 (search-in-translation): Removed translated-match badges from main search (both web and desktop). Translation search belongs only in browse catalog text filter (FTS5), not in main search results. TranslationService methods retained for future browse integration.
+- [Phase 46]: 46-06: Per-record RunningTitle translation via get_fjms_translations_by_signature_ids with inline NiceGUI toggle badges
 
 ### Pending Todos
 
@@ -124,6 +145,10 @@ Recent decisions affecting current work:
 - Copyist name browse axis (CopyName, 1.6K rows)
 - OrgCreation/OrgAuthor cross-refs for commentary identification display
 
+### Roadmap Evolution
+
+- Phase 50 added: Pre-built index distribution with in-app download
+
 ### Blockers/Concerns
 
 - FIST.db access required for v7.0.0 Phase 47 (FJMS transcription import) -- confirm file available
@@ -136,16 +161,18 @@ Recent decisions affecting current work:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 15 | Move catalog/bib buttons to page nav pane in Browse; fix FJMS button in advanced mode | 2026-02-22 | da8cd4ab | [15-move-catalog-bib-buttons-to-page-nav-pan](./quick/15-move-catalog-bib-buttons-to-page-nav-pan/) |
+| 16 | Fix installer: show directory selection on upgrades, update filename to v6.2.0 | 2026-03-10 | ebb7e2f0 | [16-fix-desktop-installer-add-directory-sele](./quick/16-fix-desktop-installer-add-directory-sele/) |
+| 17 | Create bump_version.py script, fix version_info.txt (6.1.1->6.2.0), document in CLAUDE.md | 2026-03-10 | 45e6d801 | [17-create-bump-version-py-script-and-fix-ve](./quick/17-create-bump-version-py-script-and-fix-ve/) |
 
 ## Session Continuity
 
-Last session: 2026-03-06T14:30:00Z
-Stopped at: Downloaded DBs from server. Updating planning docs.
-Resume file: .planning/phases/46-dicta-translation/HANDOFF.md
-Notes: ALL BATCH TRANSLATIONS COMPLETE (2026-03-07):
-  - Libraries titles: DONE (184,514, 0 pending)
-  - PGP descriptions: DONE (34,954 EN->HE)
-  - FJMS catalog fields: DONE (3,830 rows, 6 categories)
-  - FJMS free descriptions: DONE (254,835/254,835, 0 failures)
-  - Total: ~478K translations across 3 DBs. All downloaded locally.
-  Remaining 46-05 work: UAT title display, search results translations, web parity.
+Last session: 2026-03-13T06:35:39.344Z
+Stopped at: Completed 46-06-PLAN.md
+Resume file: None
+Notes:
+  - All 5 phases (42-46) complete, 25/25 plans done
+  - Handlist source fix: 43,233 NULL SourceName records fixed (5 named handlists + preliminary)
+  - Site user attribution pending: ~5,800 SourceId=850 records need SubId→user name mapping
+  - Round 3 gap-closing IN PROGRESS: 206K rows running on server (ETA ~01:00 UTC 2026-03-13)
+  - After Round 3: download results -> merge -> QC -> stats -> upload DB -> deploy -> v6.5.0
+  - Full handoff: .planning/phases/46-dicta-translation/.continue-here.md

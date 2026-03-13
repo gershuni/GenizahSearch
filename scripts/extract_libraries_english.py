@@ -74,10 +74,12 @@ def extract_title_parts(title: str) -> tuple[str | None, str | None]:
 
     # Split on ' ; ' (space-semicolon-space) which separates MARC fields
     # Note: ';' without spaces is used within Hebrew subject lists
-    parts = re.split(r'\s*;\s*', title)
+    # (e.g., "גלוסאר למשנה;פירושי תלמוד בבלי;תפסיר אלפאט' אלמשנה")
+    parts = re.split(r' ; ', title)
 
     english_parts = []
-    hebrew_parts = []
+    pure_hebrew_parts = []  # Parts with only Hebrew characters
+    mixed_hebrew_parts = []  # Mixed parts kept as Hebrew fallback
     mixed_english = []
 
     for part in parts:
@@ -92,15 +94,15 @@ def extract_title_parts(title: str) -> tuple[str | None, str | None]:
                 continue
             english_parts.append(part)
         elif cls == 'hebrew':
-            hebrew_parts.append(part)
+            pure_hebrew_parts.append(part)
         elif cls == 'mixed':
             extracted = extract_english_from_mixed(part)
             if extracted:
                 mixed_english.append(extracted)
-            # Also keep the Hebrew portions
+            # Also keep the Hebrew portions as fallback
             heb_only = re.sub(r'[^\u0590-\u05FF\s,.:;()\[\]]+', '', part).strip()
             if heb_only and len(heb_only) > 2:
-                hebrew_parts.append(part)  # Keep full mixed as Hebrew fallback
+                mixed_hebrew_parts.append(part)
 
     english = None
     hebrew = None
@@ -110,14 +112,17 @@ def extract_title_parts(title: str) -> tuple[str | None, str | None]:
     elif mixed_english:
         english = ' ; '.join(mixed_english)
 
-    if hebrew_parts:
-        # Use the most specific Hebrew part (usually the last one, or the longest)
-        # Filter out generic category labels (short, ending with period)
-        specific = [p for p in hebrew_parts if len(p) > 15 or not p.endswith('.')]
-        if specific:
-            hebrew = specific[-1]  # Last specific part is typically the detailed one
+    all_hebrew = pure_hebrew_parts + mixed_hebrew_parts
+    if all_hebrew:
+        if english:
+            # Bilingual: pick the LONGEST pure-Hebrew part as counterpart to English.
+            # Only fall back to mixed parts if no pure Hebrew exists.
+            # (prevents picking "Piyyut (Pesah): ..." over "פיוט" when mixed is longer)
+            candidates = pure_hebrew_parts if pure_hebrew_parts else mixed_hebrew_parts
+            hebrew = max(candidates, key=len)
         else:
-            hebrew = hebrew_parts[-1]
+            # Pure Hebrew: keep full original title (semicolons are within-language)
+            hebrew = title
 
     return english, hebrew
 

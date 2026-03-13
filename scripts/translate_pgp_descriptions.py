@@ -39,11 +39,20 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Force UTF-8 stdout/stderr on Windows (needed for nohup/redirect with Hebrew text)
-if hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-if hasattr(sys.stderr, 'buffer'):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+def _configure_utf8_stdio():
+    """Force UTF-8 stdout/stderr on Windows (needed for nohup/redirect with Hebrew text).
+
+    Must only be called from CLI entry point, not at import time,
+    to avoid poisoning pytest's capture machinery.
+    """
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    elif hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    elif hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 # Ensure project root is on path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -173,25 +182,39 @@ def translate_with_retry(
 
 
 def get_candidates(
-    db_path: str, min_length: int
+    db_path: str, min_length: int, retranslate_nulls: bool = False,
 ) -> list[tuple[int, str, str | None]]:
     """Read candidate rows from pgp.db documents table.
 
     Args:
         db_path: Path to pgp.db.
         min_length: Minimum description length to include.
+        retranslate_nulls: If True, return only rows that exist in
+            pgp_translations but have NULL description_he (cleaned-out
+            hallucinated translations that need re-translation).
 
     Returns:
         List of (pgpid, description, document_type) tuples.
     """
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT pgpid, description, document_type FROM documents "
-            "WHERE description IS NOT NULL AND description != '' "
-            "AND length(description) >= ?",
-            (min_length,),
-        ).fetchall()
+        if retranslate_nulls:
+            rows = conn.execute(
+                "SELECT d.pgpid, d.description, d.document_type "
+                "FROM documents d "
+                "JOIN pgp_translations t ON d.pgpid = t.pgpid "
+                "WHERE d.description IS NOT NULL AND d.description != '' "
+                "AND length(d.description) >= ? "
+                "AND (t.description_he IS NULL OR t.description_he = '')",
+                (min_length,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT pgpid, description, document_type FROM documents "
+                "WHERE description IS NOT NULL AND description != '' "
+                "AND length(description) >= ?",
+                (min_length,),
+            ).fetchall()
         return [(r[0], r[1], r[2]) for r in rows]
     finally:
         conn.close()
@@ -237,7 +260,8 @@ def run_batch(args: argparse.Namespace) -> None:
 
     # Load candidates
     print(f"Loading candidates from {args.pgp_db} (min_length={args.min_length})...")
-    candidates = get_candidates(args.pgp_db, args.min_length)
+    retranslate = getattr(args, 'retranslate_nulls', False)
+    candidates = get_candidates(args.pgp_db, args.min_length, retranslate_nulls=retranslate)
     total_candidates = len(candidates)
     print(f"Found {total_candidates} candidate descriptions.")
 
@@ -262,8 +286,12 @@ def run_batch(args: argparse.Namespace) -> None:
     if completed_ids:
         print(f"Checkpoint loaded: {len(completed_ids)} already completed.")
 
-    # Filter out already-completed
-    pending = [(pgpid, desc, dtype) for pgpid, desc, dtype in candidates if pgpid not in completed_ids]
+    # Filter out already-completed (skip filter for --retranslate-nulls since
+    # those pgpids are in the checkpoint but need re-translation)
+    if retranslate:
+        pending = candidates  # SQL already filtered to NULL description_he
+    else:
+        pending = [(pgpid, desc, dtype) for pgpid, desc, dtype in candidates if pgpid not in completed_ids]
     if args.limit:
         pending = pending[: args.limit]
 
@@ -435,6 +463,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Path to few-shot template JSON (default: {DEFAULT_FEW_SHOT})",
     )
     parser.add_argument(
+        "--retranslate-nulls",
+        action="store_true",
+        help="Re-translate only rows with NULL description_he (cleaned hallucinations)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logging",
@@ -463,4 +496,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    _configure_utf8_stdio()
     main()

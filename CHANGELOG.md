@@ -4,6 +4,51 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.5.0] - 2026-03-10
+
+### Milestone: Search UX & Filtered Search
+
+Focused search by manuscript properties, catalog & metadata translations, and cumulative improvements from 6.2.1–6.2.4.
+
+#### Focused Search — Pre-Search Filtering (Phase 45)
+- **Focused search panel**: Filter manuscripts by domain, author, work, date range, and material type before searching — narrows the corpus to a specific subset (both apps)
+- **Removable chip bar**: Active filters shown as color-coded removable chips above results (purple=domain, blue=author, teal=work, orange=date, red=material)
+- **Real-time manuscript count**: Filter panel updates matching manuscript count as filters are selected
+- **All search modes**: Filters apply across Exact, Variants, Responsa, and Parallels search modes
+- **Per-result word search exclusion**: Individually exclude manuscripts from word search results
+- **Parallels filter parity**: Full filter panel on Parallels page with auto-exclude source manuscript, per-manuscript exclude buttons, and import exclusions from word search
+- **Browse-to-search navigation**: Domain and author labels on Browse page link directly to a focused search (both apps)
+- **Filter-aware search history**: Filters saved and restored with search history entries
+- **Session persistence**: Filter state preserved across restarts
+
+#### Dicta Translation — Multilingual Catalog Data (Phase 46)
+- **~580K machine translations**: All catalog data, titles, and scholarly descriptions translated Hebrew↔English via Dicta Translation API with scholarly few-shot templates
+  - Libraries: 184,514 title translations (bilingual extraction + Dicta HE→EN)
+  - PGP: 34,954 document description translations (EN→HE)
+  - FJMS catalog fields: 3,830 translations across 6 categories (titles, authors, persons, genizah_titles)
+  - FJMS free descriptions: 254,835 scholarly description translations (HE→EN)
+  - FJMS running titles: ~111K translations (EN→HE)
+  - FJMS full texts: ~71K scholarly description translations (EN→HE)
+- **Translation toggle**: Show Translations sidebar toggle enables translated text in search results, browse views, and catalog dialogs (both apps)
+- **Translated/Original badge**: Clickable badge on each translated text to toggle between translated and original
+- **Subtitle display**: When Hebrew title is short (<15 chars), English subtitle shown alongside (desktop)
+- **Extraction fix**: MARC semicolon split improved — 87K records fixed, 58K Hebrew values improved
+- **Dicta-powered translate buttons**: Individual translate buttons now use Dicta API instead of MyMemory
+
+#### Citation Reminder
+- **One-time citation popup**: Reminds users to cite MiDRASH when publishing material from the site (web + desktop, bilingual)
+
+#### Cumulative Fixes (6.2.1–6.2.4)
+- Line-break search (`|` syntax) with line gap notation, tabular builder support, and snippet indicators
+- Search progress bar fixes (desktop): stuck "Restoring", elapsed timer, processing phase
+- Pre-search domain filter parity: language-conditional display, "Other" disambiguation, sub-sub-domains
+- Parallels search critical fix: stale branch + min-chunks filter bug
+- Small-screen layout fix: browse button visibility, result card browse buttons
+- Data quality: 1,144 shelfmark-SysID mismatches fixed in libraries.csv
+- 30+ new Hebrew translation keys
+
+---
+
 ## [6.2.4] - 2026-03-10
 
 ### Data Quality Fix: Shelfmark-SysID Mismatches

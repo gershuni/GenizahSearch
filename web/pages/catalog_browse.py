@@ -349,13 +349,15 @@ def create_catalog_browse_page(
                         if _tsvc_cat.fjms_available():
                             _fjms_trans = _tsvc_cat.get_fjms_translations_batch([alma_id])
                             _trans_fields = _fjms_trans.get(alma_id, {})
-                            # Fill empty title from translations
-                            if not title and _trans_fields.get('Title'):
-                                title = _trans_fields['Title']
+                            # Fill empty title from translations (values are (text, direction) tuples)
+                            _title_entry = _trans_fields.get('Title')
+                            _titleheb_entry = _trans_fields.get('TitleHeb')
+                            if not title and _title_entry:
+                                title = _title_entry[0] if isinstance(_title_entry, tuple) else _title_entry
                                 identification = f"{author} - {title}" if author and title else (author or title)
                                 _is_translated_title = True
-                            elif not title and _trans_fields.get('TitleHeb'):
-                                title = _trans_fields['TitleHeb']
+                            elif not title and _titleheb_entry:
+                                title = _titleheb_entry[0] if isinstance(_titleheb_entry, tuple) else _titleheb_entry
                                 identification = f"{author} - {title}" if author and title else (author or title)
                                 _is_translated_title = True
                         _tsvc_cat.close()

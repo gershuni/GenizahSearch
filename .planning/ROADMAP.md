@@ -130,7 +130,7 @@ cross-links between browse and catalog browse pages. 72 tests.
 - [x] **Phase 43: Session Persistence & Search History** - Restore state + exclusions on reopen (critical: user lost 5K exclusions), search history with saved results
 - [x] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results (complete)
 - [x] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels (completed 2026-03-02)
-- [ ] **Phase 46: Dicta Translation** - Translate all data (PGP metadata, identifications, catalog, bibliography) via Dicta API for multilingual display and search completeness, careful handling of already-bilingual fields
+- [x] **Phase 46: Dicta Translation** - Translate all data (PGP metadata, identifications, catalog, bibliography) via Dicta API for multilingual display and search completeness, careful handling of already-bilingual fields (completed 2026-03-13)
 
 ### v7.0.0 Transcription Search (Planned)
 
@@ -224,13 +224,14 @@ Plans:
   3. Already-bilingual fields are preserved and not double-translated
   4. Translated data improves search coverage (searching in either language finds results regardless of original language)
   5. Translation pipeline is repeatable for future data updates
-**Plans**: 5 plans
+**Plans**: 6 plans
 Plans:
 - [x] 46-01-PLAN.md — Dicta API client, few-shot templates, TranslationService, schema definitions, tests (TRANS-01, TRANS-02, TRANS-04)
 - [x] 46-02-PLAN.md — PGP batch translation script: 35K descriptions EN->HE + document_type mapping (TRANS-01, TRANS-04)
 - [x] 46-03-PLAN.md — FJMS batch translation scripts: catalog gap-fill + 303K free descriptions HE->EN + bibliography scaffold (TRANS-02, TRANS-03, TRANS-04)
 - [x] 46-04-PLAN.md — Web search integration, translation toggle, translated match badges, replace MyMemory with Dicta (TRANS-05, TRANS-01, TRANS-02)
 - [ ] 46-05-PLAN.md — Desktop translation toggle, translated text display, Hebrew UI strings (TRANS-05, TRANS-01, TRANS-02)
+- [ ] 46-06-PLAN.md — UAT gap closure: fix web RunningTitle translation lookup to use per-record method (TRANS-02)
 
 ### Phase 47: Transcription Import
 **Goal**: FJMS transcription text (~30K transcriptions) is imported from FIST.db into fjms_enrichment.db and accessible through the shared service layer for both apps
@@ -276,7 +277,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 43. Session Persistence & History | 3/4 | Complete    | 2026-03-02 |
 | 44. Quick UX Wins | 2/2 | Complete | 2026-03-02 |
 | 45. Filtered Search Context | 5/5 | Complete   | 2026-03-02 |
-| 46. Dicta Translation | 4/5 | In progress (all batch translations DONE — 478K total, 46-05 UI remaining) | - |
+| 46. Dicta Translation | 6/6 | Complete    | 2026-03-13 |
 | 47. Transcription Import | 0/TBD | Not started | - |
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
 | 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
@@ -285,6 +286,16 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 **Total plans completed:** ~130 (Phase 42 fully complete)
 **Total milestones shipped:** 9
 
+### Phase 50: Pre-built index distribution with in-app download
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 49
+**Plans:** 6/6 plans complete
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 50 to break down)
+
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-04 after Phase 46 planning complete (5 plans)*
+*Last updated: 2026-03-13 after Phase 46 gap closure plan (46-06)*

@@ -231,6 +231,79 @@ GENERIC_SOURCE_NAMES = frozenset({
     'Inventory', 'Nuscha', 'Institution', 'Instatution', 'Collection', 'Other',
 })
 
+# Known typos in FIST.db source names — correct for display
+_SOURCE_NAME_FIXES = {
+    'Instatution': 'Institution',
+}
+
+# Hebrew display names for catalog/handlist source names.
+# These are scholar handlists that have no Hebrew in FIST.db (SourceNameHeb == SourceName).
+# Format: "English Name" -> "Hebrew transliterated display name"
+_CATALOG_SOURCE_HE = {
+    "AIU Biblical Fragments Catalog": "קטלוג קטעי מקרא של כי\"ח",
+    "Adler Catalog": "קטלוג אדלר",
+    "Baker/Polliack Catalog": "קטלוג בייקר/פוליאק",
+    "Basel Catalog": "קטלוג באזל",
+    "Brody Catalog": "קטלוג ברודי",
+    "CUL Genizah Research Unit Catalog": "קטלוג יחידת מחקר הגניזה קיימברידג'",
+    "CUL Genizah Research Unit (10/2015) Catalog": "קטלוג יחידת מחקר הגניזה קיימברידג' (10/2015)",
+    "CUL Genizah Research Unit (2018) Catalog": "קטלוג יחידת מחקר הגניזה קיימברידג' (2018)",
+    "Columbia Catalog": "קטלוג קולומביה",
+    "Cowley (typewritten handlist) Catalog": "קטלוג קאולי (רשימה מודפסת)",
+    "Danzig Catalog": "קטלוג דנציג",
+    "Davis I Catalog": "קטלוג דייויס א",
+    "Davis II Catalog": "קטלוג דייויס ב",
+    "Davis/Outhwaite III Catalog": "קטלוג דייויס/אאותווייט ג",
+    "Davis/Outhwaite IV Catalog": "קטלוג דייויס/אאותווייט ד",
+    "Geneva Catalog": "קטלוג ג'נבה",
+    "Goitein/Gaster Catalog": "קטלוג גויטין/גסטר",
+    "Gottstein Catalog": "קטלוג גוטשטיין",
+    "Halper Catalog": "קטלוג האלפר",
+    "Hopkins Catalog": "קטלוג הופקינס",
+    "Isaacs Catalog": "קטלוג אייזקס",
+    "JTS Catalog": "קטלוג בית המדרש לרבנים",
+    "Khan (Karaite Bible) Catalog": "קטלוג חאן (מקרא קראי)",
+    "Khan (Legal) Catalog": "קטלוג חאן (משפטי)",
+    "Klein Catalog": "קטלוג קליין",
+    "Lieberman Catalog": "קטלוג ליברמן",
+    "Lutzki Catalog": "קטלוג לוצקי",
+    "Maman Catalog": "קטלוג ממן",
+    "Manchester Catalog": "קטלוג מנצ'סטר",
+    "Morag Catalog": "קטלוג מורג",
+    "Mosseri Catalog": "קטלוג מוסרי",
+    "NLI Aleph Catalog": "קטלוג אלף הספרייה הלאומית",
+    "Neubauer - Cowley Catalog": "קטלוג נויבאואר - קאולי",
+    "Otsar Nehmad Catalog": "קטלוג אוצר נחמד",
+    "Penn Catalog": "קטלוג פן",
+    "Reif (Bibl.) Catalog": "קטלוג רייף (ביבליוגרפי)",
+    "Reif (Cat. Heb. Manus.) Catalog": "קטלוג רייף (כתבי יד עבריים)",
+    "Sasoon Catalog": "קטלוג ששון",
+    "Schoyen Catalog": "קטלוג שוין",
+    "Schwab Catalog": "קטלוג שוואב",
+    "Schwarz Catalog": "קטלוג שוורץ",
+    "Shivtiel/Niessen Catalog": "קטלוג שבטיאל/ניסן",
+    "Strasbourg Catalog": "קטלוג שטרסבורג",
+    "Sussmann (Talmud) Catalog": "קטלוג זוסמן (תלמוד)",
+    "Sussmann (Talmud) \u2013 Supplement Catalog": "קטלוג זוסמן (תלמוד) \u2013 השלמה",
+    "Vienna Catalog": "קטלוג וינה",
+    "Widder Catalog": "קטלוג וידר",
+    "Worman Catalog": "קטלוג וורמן",
+    "Worrel Catalog": "קטלוג וורל",
+    "Yahalom Catalog": "קטלוג יהלום",
+    "Yeivin catalog Catalog": "קטלוג ייבין",
+    "Zulay/Widder Catalog": "קטלוג זולאי/וידר",
+}
+
+
+def get_catalog_source_he(source_name: str) -> str:
+    """Get Hebrew display name for a catalog source name.
+
+    Returns Hebrew name if available, otherwise returns the original name.
+    """
+    if not source_name:
+        return source_name or ''
+    return _CATALOG_SOURCE_HE.get(source_name, source_name)
+
 # Domains that appear as children of multiple parent categories.
 # These need qualification with parent name to be distinguishable in filters.
 # Data: SELECT Domain FROM domains WHERE ParentDomain IS NOT NULL AND ParentDomain != Domain
@@ -265,6 +338,8 @@ def get_team_display_name(source_name: str, is_heb: bool = False) -> str:
     """
     if not source_name:
         return source_name or ''
+    # Fix known typos in FIST.db source names
+    source_name = _SOURCE_NAME_FIXES.get(source_name, source_name)
     data = _lookup_team(source_name)
     if not data:
         return source_name
@@ -2409,7 +2484,7 @@ class FjmsService:
         full_texts = []
         try:
             cursor = self._conn.execute(
-                "SELECT SignatureId, FullText "
+                "SELECT rowid, SignatureId, FullText "
                 "FROM catalog_full_texts WHERE AlmaId = ?",
                 (sys_id,),
             )
@@ -2419,6 +2494,7 @@ class FjmsService:
                     full_texts.append({
                         "text": row["FullText"],
                         "signature_id": row["SignatureId"],
+                        "rowid": row["rowid"],
                     })
         except Exception as e:
             logger.debug(f"FjmsService.get_catalog_detail full_texts error for {sys_id}: {e}")

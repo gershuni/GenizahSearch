@@ -274,11 +274,6 @@ def export_catalog(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN (
-            SELECT SetSignatureId, MAX(Version) as MaxVersion
-            FROM dbo_Signature GROUP BY SetSignatureId
-        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
-            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
         LEFT JOIN CODE_Catalog catname
@@ -379,11 +374,6 @@ def export_catalog_running_titles(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN (
-            SELECT SetSignatureId, MAX(Version) as MaxVersion
-            FROM dbo_Signature GROUP BY SetSignatureId
-        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
-            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiRunningTitle rt ON cat.UnitCatalogRecId = rt.UnitCatalogRecId
     """)
@@ -444,11 +434,6 @@ def export_catalog_sizes(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN (
-            SELECT SetSignatureId, MAX(Version) as MaxVersion
-            FROM dbo_Signature GROUP BY SetSignatureId
-        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
-            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiSize sz ON cat.UnitCatalogRecId = sz.UnitCatalogRecId
     """)
@@ -506,11 +491,6 @@ def export_catalog_fields(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN (
-            SELECT SetSignatureId, MAX(Version) as MaxVersion
-            FROM dbo_Signature GROUP BY SetSignatureId
-        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
-            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiField fld ON cat.UnitCatalogRecId = fld.UnitCatalogRecId
         JOIN CODE_FullCode fc ON fld.ValueCode = fc.ComputedCode
@@ -703,11 +683,6 @@ def export_catalog_textual_frames(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN (
-            SELECT SetSignatureId, MAX(Version) as MaxVersion
-            FROM dbo_Signature GROUP BY SetSignatureId
-        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
-            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiTextualFrame_Simple tf
             ON cat.UnitCatalogRecId = tf.UnitCatalogRecId
@@ -772,11 +747,6 @@ def export_catalog_mentions(source, target):
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
         JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN (
-            SELECT SetSignatureId, MAX(Version) as MaxVersion
-            FROM dbo_Signature GROUP BY SetSignatureId
-        ) lsv ON sig.SetSignatureId = lsv.SetSignatureId
-            AND sig.Version = lsv.MaxVersion
         JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
         JOIN dbo_CatalogMultiMention m ON cat.UnitCatalogRecId = m.UnitCatalogRecId
         LEFT JOIN CODE_FullCode fc ON m.MentionTypeCode = fc.ComputedCode
