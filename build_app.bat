@@ -26,6 +26,7 @@ pyinstaller --noconfirm --noconsole --onedir --clean ^
  --add-data "pgp_tag_translations.py;." ^
  --add-data "shared_export_utils.py;." ^
  --add-data "shared;shared" ^
+ --add-data "libraries_translations.db;." ^
  --add-data "fist_data\fjms_enrichment.db;fist_data" ^
  --add-data "nli_data\nli_crossref.db;nli_data" ^
  --add-data "pgp_data\pgp.db;pgp_data" ^
