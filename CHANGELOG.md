@@ -4,11 +4,11 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [6.5.0] - 2026-03-10
+## [6.5.0] - 2026-03-13
 
 ### Milestone: Search UX & Filtered Search
 
-Focused search by manuscript properties, catalog & metadata translations, and cumulative improvements from 6.2.1–6.2.4.
+Focused search by manuscript properties, ~924K catalog & metadata translations, line-boundary search for join detection, and cumulative improvements from 6.2.1–6.2.4.
 
 #### Focused Search — Pre-Search Filtering (Phase 45)
 - **Focused search panel**: Filter manuscripts by domain, author, work, date range, and material type before searching — narrows the corpus to a specific subset (both apps)
@@ -22,24 +22,39 @@ Focused search by manuscript properties, catalog & metadata translations, and cu
 - **Session persistence**: Filter state preserved across restarts
 
 #### Dicta Translation — Multilingual Catalog Data (Phase 46)
-- **~580K machine translations**: All catalog data, titles, and scholarly descriptions translated Hebrew↔English via Dicta Translation API with scholarly few-shot templates
+- **~924K machine translations**: All catalog data, titles, and scholarly descriptions translated Hebrew↔English via Dicta Translation API with scholarly few-shot templates across 3 rounds
   - Libraries: 184,514 title translations (bilingual extraction + Dicta HE→EN)
   - PGP: 34,954 document description translations (EN→HE)
   - FJMS catalog fields: 3,830 translations across 6 categories (titles, authors, persons, genizah_titles)
   - FJMS free descriptions: 254,835 scholarly description translations (HE→EN)
-  - FJMS running titles: ~111K translations (EN→HE)
+  - FJMS running titles: ~134K translations (EN→HE)
   - FJMS full texts: ~71K scholarly description translations (EN→HE)
+  - FJMS textual frames: ~84K translations (HE→EN)
+  - Round 3 gap-closing: 206K additional translations for previously untranslated fields
 - **Translation toggle**: Show Translations sidebar toggle enables translated text in search results, browse views, and catalog dialogs (both apps)
 - **Translated/Original badge**: Clickable badge on each translated text to toggle between translated and original
 - **Subtitle display**: When Hebrew title is short (<15 chars), English subtitle shown alongside (desktop)
+- **Per-record RunningTitle translation**: Web catalog dialog uses per-record lookup matching desktop behavior
+- **Translation QA**: Heuristic quality checks (length ratio, script mismatch, number drift, truncation), stratified audit sampling, user-facing "Report translation issue" dialog
+- **Data quality fixes**: 12,827 translation rows fixed (stuttering, hallucinations, collapsed text), 34 gibberish rows deleted
 - **Extraction fix**: MARC semicolon split improved — 87K records fixed, 58K Hebrew values improved
 - **Dicta-powered translate buttons**: Individual translate buttons now use Dicta API instead of MyMemory
+
+#### Source Attribution (Phase 46)
+- **FJMS site user attribution**: 6,655 catalog records attributed to 168 named users via FJMS API bridge
+- **Source name cleanup**: "Site User" → "FJMS Site User", Hebrew source labels, Fleischer Piyut Project (1,716 rows)
+- **Handlist source fix**: 43,233 NULL SourceName records fixed with proper handlist/team labels
 
 #### Citation Reminder
 - **One-time citation popup**: Reminds users to cite MiDRASH when publishing material from the site (web + desktop, bilingual)
 
+#### Line-Boundary Search (6.2.3)
+- **Text position dropdown**: Search for words at Start of text, End of text, Line starts, or Line ends — useful for join detection between fragments
+- **Per-word line constraints**: In Responsa mode, `|word` (start of line) and `word|` (end of line) with tabular builder checkboxes
+- **Line-break syntax**: `word1 | word2` for cross-line search, `[|N]` for line gap notation
+- **Snippet indicator**: `‖` (U+2016) shows line breaks in search snippets (both apps)
+
 #### Cumulative Fixes (6.2.1–6.2.4)
-- Line-break search (`|` syntax) with line gap notation, tabular builder support, and snippet indicators
 - Search progress bar fixes (desktop): stuck "Restoring", elapsed timer, processing phase
 - Pre-search domain filter parity: language-conditional display, "Other" disambiguation, sub-sub-domains
 - Parallels search critical fix: stale branch + min-chunks filter bug

@@ -12,11 +12,12 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ### v6.5.0: Search UX & Filtered Search
 
-Focused search, multilingual catalog data, and cumulative UX improvements.
+Focused search, ~924K multilingual catalog translations, line-boundary search, and cumulative UX improvements.
 
 * **Focused Search:** Filter manuscripts by domain, author, work, date range, and material type before searching — across all search modes (both apps)
-* **Dicta Translation:** ~580K machine translations for catalog data, titles, and scholarly descriptions (Hebrew↔English) via Dicta Translation API
+* **Dicta Translation:** ~924K machine translations for catalog data, titles, and scholarly descriptions (Hebrew↔English) via Dicta Translation API, with translation QA and user reporting
 * **Translation Toggle:** Show/hide translated text in search results, browse views, and catalog dialogs with clickable Translated/Original badges
+* **Line-Boundary Search:** Find words at start/end of lines or text — useful for detecting joins between fragments. Position dropdown + per-word constraints in Responsa mode
 * **Browse-to-Search:** Domain and author labels on Browse page link directly to a focused search
 * **Citation Reminder:** One-time popup reminding users to cite MiDRASH when publishing
 
