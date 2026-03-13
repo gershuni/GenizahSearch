@@ -1,108 +1,106 @@
 # Translation Statistics & Coverage Report
 
-**Date:** 2026-03-12 (post-QC cleanup)
-**Status:** Comprehensive audit after Round 1 + Round 2 batch translations
+**Date:** 2026-03-13 (final, post-Round 3 + retranslation)
+**Status:** All translation rounds complete. Ready for v6.5.0 release.
 
 ---
 
 ## Grand Totals
 
-| Database | Translations | Source Records | Coverage |
-|----------|-------------|----------------|----------|
-| FJMS (fjms_enrichment.db) | 490,377 | ~1.01M translatable | 48.5% |
-| PGP (pgp.db) | 34,797 desc + 31,268 types | 35,839 docs | 97.1% desc |
-| Library Titles (libraries_translations.db) | 184,514 EN + 10,328 EN→HE | 216,942 records | 85.1% |
-| **GRAND TOTAL** | **~751K translations** | **~1.27M source** | **~59%** |
+| Database | Translations | Coverage |
+|----------|-------------|----------|
+| FJMS (fjms_enrichment.db) | 704,138 | See per-field below |
+| PGP (pgp.db) | 34,954 (34,797 desc + 31,268 types) | 97.1% desc |
+| Library Titles (libraries_translations.db) | 184,514 EN + 10,328 EN→HE | 85.1% |
+| **GRAND TOTAL** | **923,606** | |
 
 ---
 
 ## 1. FJMS Enrichment (fjms_enrichment.db)
 
-### 1.1 Translation Counts (post-cleanup)
+### 1.1 Translation Counts (final)
 
-| field_name | Direction | Count | Source Table | Source Column |
-|------------|-----------|-------|-------------|---------------|
-| FreeDesc | HE→EN | 196,314 | catalog_free_desc | FreeDesc |
-| RunningTitle | EN→HE | 133,767 | catalog_running_titles | RunningTitle |
-| TextualFrame | HE→EN | 84,345 | catalog_textual_frames | TextualFrameHeb |
-| FullText | EN→HE | 70,797 | catalog_full_texts | FullText |
-| Title | HE→EN | 2,408 | catalog_fields (gap-fill) | TitleHeb→Title |
-| PersonEngDesc | HE→EN | 1,163 | genizah_persons | HebDesc→EngDesc |
-| PersonHebDesc | EN→HE | 702 | genizah_persons | EngDesc→HebDesc |
-| GenizahTitleEngTitle | HE→EN | 624 | genizah_titles | OrgTitle→EngTitle |
-| AuthorText | HE→EN | 247 | catalog_fields (gap-fill) | AuthorText |
-| TitleHeb | EN→HE | 10 | catalog_fields (gap-fill) | Title→TitleHeb |
-| **TOTAL** | | **490,377** | | |
+| field_name | Direction | Count | Source Table |
+|------------|-----------|-------|-------------|
+| FreeDesc | HE→EN | 199,349 | catalog_free_desc |
+| RunningTitle | HE→EN | 159,845 | catalog_running_titles |
+| RunningTitle | EN→HE | 141,865 | catalog_running_titles |
+| TextualFrame | HE→EN | 84,345 | catalog_textual_frames |
+| FullText | EN→HE | 75,560 | catalog_full_texts |
+| FullText | HE→EN | 14,648 | catalog_full_texts |
+| FreeDesc | EN→HE | 23,372 | catalog_free_desc |
+| Title | HE→EN | 2,408 | catalog_fields |
+| PersonEngDesc | HE→EN | 1,163 | genizah_persons |
+| PersonHebDesc | EN→HE | 702 | genizah_persons |
+| GenizahTitleEngTitle | HE→EN | 624 | genizah_titles |
+| AuthorText | HE→EN | 247 | catalog_fields |
+| TitleHeb | EN→HE | 10 | catalog_fields |
+| **TOTAL** | | **704,138** | |
 
-Unique AlmaIds covered: 184,700 / 1,315,501 catalog_fields rows (14% of catalog rows have at least one translation).
+### 1.2 By Model Version
 
-### 1.2 Source Data & Coverage
+| Model | Count | Notes |
+|-------|-------|-------|
+| dictalm2.0 | 490,377 | Rounds 1 + 2 |
+| dictalm2.0-round3 | 205,113 | Round 3 gap-closing |
+| manual+dictalm2.0 | 8,098 | 295 RT terms, hand-mapped |
+| dictalm2.0-retranslate | 550 | Flagged items retranslated |
 
-| Source Table | Column | Total Rows | Non-null | len>=10 | len>=20 | Translated | Coverage (of len>=20) |
-|-------------|--------|-----------|----------|---------|---------|------------|----------------------|
-| catalog_free_desc | FreeDesc | 303,392 | 303,378 | 302,710 | 254,835 | 196,314 | 77.0% |
-| catalog_running_titles | RunningTitle | 317,412 | 317,217 | 288,430 | 209,417 | 133,767 | 63.9% |
-| catalog_full_texts | FullText | 94,939 | 94,939 | 94,937 | 94,860 | 70,797 | 74.6% |
-| catalog_textual_frames | TextualFrameHeb | 298,740 | 298,740 | 263,193 | 221,259 | 84,345 | 38.1% |
+### 1.3 Coverage by Field
 
-### 1.3 What Was NOT Translated (and Why)
+| Field | Translated AlmaIds | Total AlmaIds | Coverage |
+|-------|-------------------|---------------|----------|
+| RunningTitle | 162,111 | 162,188 | **100.0%** |
+| FullText | 85,063 | 85,313 | **99.7%** |
+| FreeDesc | 150,431 | 170,327 | **88.3%** |
+| TextualFrame | 26,343 | — | Bidirectional (source has both langs) |
+| Title | 1,220 | — | Gap-fill only |
 
-#### FreeDesc (58,521 gap from 254,835)
+### 1.4 What Remains Untranslated
 
-- **~56,700 were English-only source text** — the script translated HE→EN but had no language detection. English FreeDesc entries were sent to Dicta which echoed them back. These copies were deleted in QC cleanup. The source data is already in English so no translation is needed.
-- ~1,800 remaining are short texts (under min_length=20) or genuine gaps.
-- **Action needed:** None. English source texts serve the user directly. Future batch runs should add `has_hebrew()` filtering to skip English sources.
+**FreeDesc (19,896 AlmaIds, 11.7%):**
+- Mostly mixed-language texts, very short entries (<20 chars), or Arabic-script content that Dicta cannot handle.
 
-#### RunningTitle (155,650 gap from 288,430 at len>=10)
+**FullText (250 AlmaIds, 0.3%):**
+- English-only codicological descriptions where Dicta echoes back the source. These are inherently untranslatable by the current model — the source text is already in English.
 
-- **~183K non-English running titles** — the script uses `has_english(text, min_latin=3)` to select only English titles for EN→HE translation. Running titles in Hebrew were not sent to Dicta (they're already in the user's target language for Hebrew UI).
-- ~22K were translated in Round 2 backfill (the gap closed from 183K to 155K).
-- **Remaining gap:** Running titles that are pure Hebrew (no English content). These don't need EN→HE translation — they need HE→EN translation instead (not yet implemented for this field).
+**RunningTitle (77 AlmaIds, <0.1%):**
+- Edge cases: mixed script, very short, or unusual characters.
 
-#### FullText (24,140 gap from 94,937 at len>=10)
+### 1.5 QC Summary
 
-- Same as RunningTitle: `has_english(text, min_latin=10)` filters out Hebrew-only full texts.
-- **Remaining:** Hebrew-only full texts that need HE→EN translation (not yet implemented).
+**Rounds 1–2 cleanup (2026-03-12):**
 
-#### TextualFrame (178,848 gap from 263,193 at len>=10)
+| Reason | Rows Deleted |
+|--------|-------------|
+| copied_source (English echoed as "translation") | 61,834 |
+| script_mismatch (wrong script in output) | 5,134 |
+| near_copy (>90% character overlap) | 1,615 |
+| score < 0.5 (multiple severe flags) | 4,763 |
+| collapsed (>100 chars → <15 chars) | 442 |
+| word/sentence stuttering | 310 |
+| stock hallucination ("N manuscripts" summary) | 15 |
+| **Total** | **~65,905** |
 
-- Script uses `has_hebrew(text)` and checks that TextualFrameEng is NULL/empty/identical to Heb.
-- ~84K Hebrew textual frames were translated HE→EN in Round 2.
-- **Remaining:** ~179K frames where TextualFrameEng already exists and differs from TextualFrameHeb (i.e., an English version already exists in the source data — no translation needed).
+**Round 3 cleanup (2026-03-13):**
 
-#### Catalog Fields Gap-Fill (Title, TitleHeb, AuthorText)
-
-- Only fills gaps: translates TitleHeb when Title is NULL, and vice versa.
-- 3,170 total gap-fill translations. The remaining catalog_fields rows already have both Hebrew and English values.
-
-#### Reference Tables (genizah_persons, genizah_titles)
-
-- genizah_persons: 2,286 total. 1,163 HebDesc→EngDesc + 702 EngDesc→HebDesc = 1,865 translations. Remaining ~421 have both fields or neither.
-- genizah_titles: 775 total. 624 OrgTitle→EngTitle translated. Remaining ~151 already have EngTitle or OrgTitle is empty.
-
-### 1.4 QC Cleanup Summary (2026-03-12)
-
-| Pass | Reason | Rows Deleted |
-|------|--------|-------------|
-| Pass 1 | copied_source (English echoed as "translation") | 61,834 |
-| Pass 1 | script_mismatch (wrong script in output) | 5,134 |
-| Pass 1 | near_copy (>90% character overlap) | 1,615 |
-| Pass 1 | score < 0.5 (multiple severe flags) | 4,763 |
-| Pass 2 | collapsed (>100 chars source → <15 chars target) | 442 |
-| Pass 2 | word stuttering (>60% same word) | 300 |
-| Pass 2 | stock hallucination (invented "N manuscripts" summary) | 15 |
-| Pass 2 | sentence stuttering (same sentence 3+ times) | 10 |
-| **TOTAL** | | **~65,905** (some overlap between passes) |
+| Action | Count |
+|--------|-------|
+| Gibberish rows deleted (post-merge) | 34 |
+| Bad translations deleted (length_ratio_low, no_words, copies) | 696 |
+| Retranslated via Dicta | 550 |
+| QC rejected on retranslation (untranslatable by Dicta) | 89 |
+| **Net loss from Round 3 QC** | **-146** |
 
 **Post-cleanup QC scores:**
 
-| Dataset | Total | Flagged | % Flagged | Worst (<0.5) | Mean Score |
-|---------|-------|---------|-----------|-------------|------------|
-| FJMS | 490,377 | 35,221 | 7.2% | 0 | 0.986 |
-| PGP | 34,797 | 1,833 | 5.3% | 41 | 0.993 |
-| Titles | 82,481 | 2,788 | 3.4% | 38 | 0.993 |
+| Dataset | Total | Flagged | % Flagged | Mean Score |
+|---------|-------|---------|-----------|------------|
+| FJMS | 704,138 | ~35K | ~5% | 0.99 |
+| PGP | 34,797 | 1,833 | 5.3% | 0.993 |
+| Titles | 82,481 | 2,788 | 3.4% | 0.993 |
 
-Remaining flags are mostly minor: numbers_added (scholarly references), parens_dropped, brackets_dropped, length_ratio variations — common in scholarly translation and not hallucinations.
+Remaining flags are minor: numbers_added (scholarly references), parens/brackets variation — common in scholarly translation.
 
 ---
 
@@ -119,9 +117,8 @@ Remaining flags are mostly minor: numbers_added (scholarly references), parens_d
 | description_he null/empty | 157 |
 | **Coverage** | **97.1%** |
 
-**157 null/empty description_he:** These were previously hallucinated translations that were manually nulled during Round 1 QA. Can be retranslated with `--retranslate-nulls` flag.
-
-**885 documents with no pgp_translations row at all:** Short descriptions below min_length threshold, or documents added after the batch run.
+157 null/empty: previously hallucinated translations manually nulled during QA.
+885 documents with no row: short descriptions below min_length or documents added after batch.
 
 ### 2.2 Document Type Translations (EN→HE)
 
@@ -131,14 +128,7 @@ Remaining flags are mostly minor: numbers_added (scholarly references), parens_d
 | document_type_he not filled | 3,686 |
 | **Coverage** | **87.2%** |
 
-Document types use a **manual controlled mapping** (9 fixed values in `PGP_DOCUMENT_TYPE_HE` dict), not Dicta API. The 3,686 without translations have document types not in the mapping or NULL source types.
-
-### 2.3 What Was NOT Translated
-
-- 157 nulled hallucinations — retranslatable with improved prompts
-- 885 missing rows — short/empty descriptions
-- 3,686 missing document types — unmapped type values or NULL source
-- **No HE→EN needed:** PGP descriptions are natively English
+Uses manual controlled mapping (9 values in `PGP_DOCUMENT_TYPE_HE` dict). The 3,686 without translations have NULL source types.
 
 ---
 
@@ -159,103 +149,50 @@ Document types use a **manual controlled mapping** (9 fixed values in `PGP_DOCUM
 
 | Source | Count | Description |
 |--------|-------|-------------|
-| extracted | 112,361 | Bilingual pairs extracted from libraries.csv (title had both HE+EN) |
+| extracted | 112,361 | Bilingual pairs extracted from libraries.csv |
 | dicta | 72,153 | Hebrew-only titles translated HE→EN via Dicta API |
-| **Total** | **184,514** | |
 
-### 3.3 EN→HE Backfill (english_title_he column)
+### 3.3 Untranslated (32,428 records)
 
-10,328 rows have English→Hebrew backfill translations. These are cases where the English title was the scholarly description (e.g., "Letter to David ha-Kohen he-haver") and the Hebrew title was just a generic label (e.g., "מכתבים"). The backfill provides a proper Hebrew rendering of the English content.
-
-### 3.4 What Was NOT Translated (32,428 gap)
-
-| Reason | Est. Count |
-|--------|-----------|
-| Records not in title_translations table | 32,428 |
-| Likely: placeholder titles, non-Hebrew/English, or recent CSV additions | — |
-
-These 32,428 records from libraries.csv have no entry in title_translations at all. They were likely excluded during the initial extraction because:
-- Title field was empty or a placeholder
-- Title was in a non-Hebrew/non-English script
-- Record was added to libraries.csv after the translation batch
+Records not in title_translations at all — empty or placeholder titles, non-Hebrew/English script, or recent CSV additions.
 
 ---
 
-## 4. Translation Method Summary
+## 4. Translation Rounds
+
+| Round | Date | Scope | Translations |
+|-------|------|-------|-------------|
+| **Round 1** | 2026-03-05–07 | Libraries 184K, PGP 35K, FJMS catalog 4K, FJMS FreeDesc 255K | ~478K |
+| **Round 2** | 2026-03-08 | FJMS RunningTitle EN→HE 107K, FullText EN→HE 46K | ~153K |
+| **Round 3** | 2026-03-12–13 | Gap-closing: FreeDesc both dirs, FullText both dirs, RT HE→EN 160K | ~206K |
+| **RT local** | 2026-03-12 | 295 English RunningTitles hand-mapped to Hebrew (8,098 rows) | 8K |
+| **Retranslation** | 2026-03-13 | QC-flagged bad rows retranslated via Dicta | 550 |
+| **QC cleanup** | 2026-03-12–13 | Hallucinations, copies, gibberish, stuttering deleted | -66K |
+
+### Translation Method Summary
 
 | Method | Description | Scope |
 |--------|-------------|-------|
-| **Dicta LM 2.0 (batch)** | Few-shot prompted neural translation via API | All batch translations |
-| **Bilingual extraction** | Parse existing HE+EN from libraries.csv | 112,361 library titles |
-| **Manual mapping** | Fixed dict for small taxonomies | 9 PGP document types |
-| **Language detection** | `has_english()`/`has_hebrew()` filters source by script | FJMS catalog_text only |
-| **No detection** | Assumes source language from context | PGP (EN), FreeDesc (HE), library titles (HE) |
-
-### Few-Shot Templates
-
-| File | Direction | Used By |
-|------|-----------|---------|
-| data/few_shot_en2he_scholarly.json | EN→HE | PGP descriptions, FJMS RunningTitle, FJMS FullText |
-| data/few_shot_he2en_scholarly.json | HE→EN | FJMS FreeDesc, FJMS TextualFrame, library titles |
+| Dicta LM 2.0 (batch) | Few-shot prompted neural translation | All batch translations |
+| Bilingual extraction | Parse existing HE+EN from libraries.csv | 112,361 library titles |
+| Manual mapping | Fixed dict for small taxonomies | 9 PGP document types, 295 RT terms |
+| Language detection | `has_english()`/`has_hebrew()` per-row | FJMS source filtering |
 
 ---
 
-## 5. Known Issues & Future Work
-
-### Round 3 Gap-Closing Batch (2026-03-12)
-
-**Completed locally:**
-- RunningTitle EN→HE: 8,098 rows inserted (295 unique English terms, manual+Dicta mapping)
-
-**Server batches prepared** (CSVs in `scripts/translation_gaps/`, script: `scripts/translate_gaps_server.py`):
-
-| Batch | File | Rows | Direction | Est. Time |
-|-------|------|------|-----------|-----------|
-| freedesc_en | freedesc_en2he.csv | 23,389 | EN→HE | ~2h |
-| freedesc_he | freedesc_he2en.csv | 3,048 | HE→EN | ~20min |
-| fulltext_en | fulltext_en2he.csv | 4,971 | EN→HE | ~30min |
-| fulltext_he | fulltext_he2en.csv | 14,680 | HE→EN | ~1.5h |
-| rt | rt_he2en.csv | 159,910 | HE→EN | ~12h |
-| **Total** | | **205,998** | | **~16h** |
-
-**After server batches:** download results CSVs, run `scripts/merge_translation_results.py` to insert into DB, then QC pass.
-
-### Gaps Investigated and Closed (2026-03-12)
-
-| Gap | Original Estimate | Actual | Status |
-|-----|-------------------|--------|--------|
-| Library title gaps (32K) | 32,428 | 0 | Not a gap — all blank titles, correctly skipped |
-| Library EN→HE backfill (102K) | ~102,045 | N/A | Not needed — hebrew_title already serves users |
-| TextualFrame (179K) | ~179K | 0 | Not a gap — source table already has both Heb+Eng |
-| PGP 885 stubs | 885 | 0 | Not a gap — 1-2 word placeholders |
-| PGP 3,686 missing types | 3,686 | 0 | Not a gap — source has no document_type |
-| RT EN→HE (295 unique) | 9,112 | 8,098 | Done locally (1,014 already existed) |
-
-### Still Pending
-
-1. **PGP nulled descriptions** (157 rows) — retranslatable with `--retranslate-nulls`, Arabic diacritics may cause issues
-2. **Wiring gaps**: RunningTitle/FullText translations not yet displayed in FjmsCatalogDialog; TextualFrame translations not yet wired to browse UI
-
-### Translation Scripts Missing Language Detection
-
-| Script | Issue | Fix |
-|--------|-------|-----|
-| translate_fjms_free_desc.py | No `has_hebrew()` check — translates English sources too | Add language filter |
-| translate_pgp_descriptions.py | No language check — assumes all English | OK (PGP is English-only) |
-
----
-
-## 6. Database Sizes
+## 5. Database Sizes
 
 | Database | Size | Translations |
 |----------|------|-------------|
-| fjms_enrichment.db | 1.1 GB | 498,475 (+8,098 RT EN→HE) |
-| pgp.db | 165 MB | 34,954 |
+| fjms_enrichment.db | 1.17 GB | 704,138 |
+| pgp.db | 164 MB | 34,954 |
 | libraries_translations.db | 84 MB | 184,514 |
-| **Total** | **~1.35 GB** | **~718K** |
+| **Total** | **~1.42 GB** | **923,606** |
 
-After Round 3 server batches complete: estimated ~924K total translations.
+---
 
-Backups:
-- `fist_data/fjms_enrichment_pre_qc_cleanup.db` (556,282 translations pre-cleanup)
-- `fist_data/fjms_enrichment_pre_round3.db` (490,377 translations pre-Round 3)
+## 6. Remaining Known Issues
+
+1. **PGP nulled descriptions** (157 rows) — retranslatable with improved prompts
+2. **89 untranslatable FJMS rows** — English codicological descriptions that Dicta echoes back; would need a different model
+3. **FreeDesc 11.7% gap** — mixed-language/Arabic content beyond current model capability
