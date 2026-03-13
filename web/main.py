@@ -489,7 +489,7 @@ def create_layout():
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
 
     # Global Footer with Citation Note (dismissible)
-    full_citation = 'Stoekl Ben Ezra et al. (2025). MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments. https://doi.org/10.5281/zenodo.17734473'
+    full_citation = 'Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473'
     footer = ui.footer().classes('citation-footer')
     with footer:
         with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap'):
