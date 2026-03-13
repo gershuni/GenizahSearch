@@ -130,7 +130,7 @@ cross-links between browse and catalog browse pages. 72 tests.
 - [x] **Phase 43: Session Persistence & Search History** - Restore state + exclusions on reopen (critical: user lost 5K exclusions), search history with saved results
 - [x] **Phase 44: Quick UX Wins** - Desktop notification on search completion, prevent sleep during search, Hebrew library names, copy from compact results (complete)
 - [x] **Phase 45: Filtered Search Context** - Shared filter set (domain/author/work/date/CreationType), bidirectional: search page pre-filter (Path A) + catalog browse "search within" (Path B), works with all search modes including parallels (completed 2026-03-02)
-- [ ] **Phase 46: Dicta Translation** - Translate all data (PGP metadata, identifications, catalog, bibliography) via Dicta API for multilingual display and search completeness, careful handling of already-bilingual fields
+- [x] **Phase 46: Dicta Translation** - Translate all data (PGP metadata, identifications, catalog, bibliography) via Dicta API for multilingual display and search completeness, careful handling of already-bilingual fields (completed 2026-03-13)
 
 ### v7.0.0 Transcription Search (Planned)
 
@@ -277,7 +277,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 | 43. Session Persistence & History | 3/4 | Complete    | 2026-03-02 |
 | 44. Quick UX Wins | 2/2 | Complete | 2026-03-02 |
 | 45. Filtered Search Context | 5/5 | Complete   | 2026-03-02 |
-| 46. Dicta Translation | 4/6 | In progress (gap closure: web RunningTitle fix) | - |
+| 46. Dicta Translation | 6/6 | Complete   | 2026-03-13 |
 | 47. Transcription Import | 0/TBD | Not started | - |
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
 | 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
@@ -291,7 +291,7 @@ v7.0.0: Phases 47 -> 48 -> 49 (import -> index -> distribute)
 **Goal:** [To be planned]
 **Requirements**: TBD
 **Depends on:** Phase 49
-**Plans:** 0 plans
+**Plans:** 6/6 plans complete
 
 Plans:
 - [ ] TBD (run /gsd:plan-phase 50 to break down)

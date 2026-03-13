@@ -1,5 +1,21 @@
 ---
 gsd_state_version: 1.0
+milestone: v5.6
+milestone_name: milestone
+status: in_progress
+stopped_at: Completed 46-06-PLAN.md
+last_updated: "2026-03-13T06:35:39.347Z"
+last_activity: 2026-03-10 - Completed 46-05, wrapping up v6.5.0
+progress:
+  total_phases: 9
+  completed_phases: 5
+  total_plans: 26
+  completed_plans: 26
+  percent: 100
+---
+
+---
+gsd_state_version: 1.0
 milestone: v6.5.0
 milestone_name: Search UX & Filtered Search
 status: in_progress
@@ -7,7 +23,7 @@ stopped_at: Phase 46 complete (all 5 plans done). Citation popup shipped. Workin
 last_updated: "2026-03-10T18:00:00.000Z"
 last_activity: 2026-03-12 - Citation popup done. Personal handlist source mapping for 43K NULL SourceName records.
 progress:
-  total_phases: 5
+  [██████████] 100%
   completed_phases: 5
   total_plans: 25
   completed_plans: 25
@@ -76,6 +92,7 @@ Progress: [██████████] 5/5 phases (42-46 all complete, 25/25
 - Trend: Stable
 
 *Updated after each plan completion*
+| Phase 46 P06 | 2min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -114,6 +131,7 @@ Recent decisions affecting current work:
 - 46 (Round 2 batch): Created translate_fjms_catalog_text.py for EN->HE translation of FJMS catalog running titles (107K English) and full texts/scholarly descriptions (46K English). Uses Dicta LM 2.0 with en2he_scholarly few-shot. Running on server 2026-03-08 (~11h total). New field_names: 'RunningTitle', 'FullText' in fjms_translations.
 - 46-05 (extraction fix): Semicolon split changed from `\s*;\s*` to ` ; ` (MARC separator). Longest pure-Hebrew part preferred over mixed. 87K records fixed, 58K Hebrew values improved, zero data loss. libraries_translations.db rebuilt.
 - 46-05 (search-in-translation): Removed translated-match badges from main search (both web and desktop). Translation search belongs only in browse catalog text filter (FTS5), not in main search results. TranslationService methods retained for future browse integration.
+- [Phase 46]: 46-06: Per-record RunningTitle translation via get_fjms_translations_by_signature_ids with inline NiceGUI toggle badges
 
 ### Pending Todos
 
@@ -148,9 +166,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-12T17:30:00Z
-Stopped at: Handlist source fix DONE (43K records). Site user attribution pending. Round 3 batch still running on server.
-Resume file: .planning/phases/46-dicta-translation/.continue-here.md
+Last session: 2026-03-13T06:35:39.344Z
+Stopped at: Completed 46-06-PLAN.md
+Resume file: None
 Notes:
   - All 5 phases (42-46) complete, 25/25 plans done
   - Handlist source fix: 43,233 NULL SourceName records fixed (5 named handlists + preliminary)
