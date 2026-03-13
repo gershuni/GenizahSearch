@@ -2729,7 +2729,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 if frag_rel_type:
                                     rel_label = {
                                         'physical_join': tr('Physical join'),
+                                        'physical': tr('Physical join'),
                                         'same_composition': tr('Same composition'),
+                                        'content': tr('Same composition'),
+                                        'uncertain': tr('Unknown'),
                                     }.get(frag_rel_type, frag_rel_type)
                                     ui.label(rel_label).classes('text-xs text-gray-500')
                                 scholar = info.get('scholar_name', '')

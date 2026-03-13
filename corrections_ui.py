@@ -1391,7 +1391,10 @@ class DiscoveriesDialog(QDialog):
 
             rel_labels = {
                 'physical_join': tr('Physical join'),
-                'same_composition': tr('Same composition')
+                'physical': tr('Physical join'),
+                'same_composition': tr('Same composition'),
+                'content': tr('Same composition'),
+                'uncertain': tr('Unknown'),
             }
 
             frag_a_label = QLabel(frag_a)
@@ -3324,10 +3327,10 @@ class JoinsDialog(QDialog):
         joins_layout = QVBoxLayout(joins_group)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
             tr("Fragment A"), tr("Fragment B"), tr("Relationship"),
-            tr("Source"), tr("Created By"), tr("Date")
+            tr("Source"), tr("Created By"), tr("Date"), tr("Notes")
         ])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -3634,13 +3637,19 @@ class JoinsDialog(QDialog):
                         if not existing_rel_text or existing_rel_text == unknown_label:
                             rel_display = {
                                 'physical_join': tr('Physical join'),
-                                'same_composition': tr('Same composition')
+                                'physical': tr('Physical join'),
+                                'same_composition': tr('Same composition'),
+                                'content': tr('Same composition'),
+                                'uncertain': tr('Unknown'),
                             }.get(fjms_rel, fjms_rel)
                             existing_rel.setText(rel_display)
                         elif fjms_rel not in existing_rel_text:
                             fjms_rel_display = {
                                 'physical_join': tr('Physical join'),
-                                'same_composition': tr('Same composition')
+                                'physical': tr('Physical join'),
+                                'same_composition': tr('Same composition'),
+                                'content': tr('Same composition'),
+                                'uncertain': tr('Unknown'),
                             }.get(fjms_rel, fjms_rel)
                             if fjms_rel_display not in existing_rel_text:
                                 existing_rel.setText(f"{existing_rel_text}, {fjms_rel_display}")
@@ -3663,7 +3672,10 @@ class JoinsDialog(QDialog):
             rel_type = join.get('relationship_type')
             rel_display = {
                 'physical_join': tr('Physical join'),
-                'same_composition': tr('Same composition')
+                'physical': tr('Physical join'),
+                'same_composition': tr('Same composition'),
+                'content': tr('Same composition'),
+                'uncertain': tr('Unknown'),
             }.get(rel_type, rel_type or tr('Unknown'))
             self.table.setItem(row, 2, QTableWidgetItem(rel_display))
 
@@ -3674,6 +3686,7 @@ class JoinsDialog(QDialog):
 
             self.table.setItem(row, 4, QTableWidgetItem(join.get('created_by_username', '')))
             self.table.setItem(row, 5, QTableWidgetItem(''))
+            self.table.setItem(row, 6, QTableWidgetItem(join.get('notes', '')))
 
             # Store None as join ID (prevents deletion)
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, None)
@@ -4004,7 +4017,10 @@ class JoinsDialog(QDialog):
             rel_type = join.get('relationship_type')
             rel_display = {
                 'physical_join': tr('Physical join'),
-                'same_composition': tr('Same composition')
+                'physical': tr('Physical join'),
+                'same_composition': tr('Same composition'),
+                'content': tr('Same composition'),
+                'uncertain': tr('Unknown'),
             }.get(rel_type, rel_type or tr('Unknown'))
             self.table.setItem(row, 2, QTableWidgetItem(rel_display))
 
@@ -4017,6 +4033,7 @@ class JoinsDialog(QDialog):
 
             date_str = safe_date_str(join.get('created_at'))
             self.table.setItem(row, 5, QTableWidgetItem(date_str))
+            self.table.setItem(row, 6, QTableWidgetItem(join.get('notes', '')))
 
             # Store None as join ID (prevents deletion)
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, None)
@@ -4028,7 +4045,7 @@ class JoinsDialog(QDialog):
                 palette = self.palette()
                 is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
                 highlight_color = QColor('#1b4332') if is_dark else QColor('#e8f5e9')
-                for col in range(6):
+                for col in range(self.table.columnCount()):
                     item = self.table.item(row, col)
                     if item:
                         item.setBackground(highlight_color)
@@ -4192,7 +4209,10 @@ class JoinsDialog(QDialog):
             rel_type = join.get('relationship_type')
             rel_display = {
                 'physical_join': tr('Physical join'),
-                'same_composition': tr('Same composition')
+                'physical': tr('Physical join'),
+                'same_composition': tr('Same composition'),
+                'content': tr('Same composition'),
+                'uncertain': tr('Unknown'),
             }.get(rel_type, rel_type or tr('Unknown'))
             self.table.setItem(row, 2, QTableWidgetItem(rel_display))
 
@@ -4201,6 +4221,7 @@ class JoinsDialog(QDialog):
 
             date_str = safe_date_str(join.get('created_at'))
             self.table.setItem(row, 5, QTableWidgetItem(date_str))
+            self.table.setItem(row, 6, QTableWidgetItem(join.get('notes', '')))
 
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, join.get('id'))
 
@@ -4212,7 +4233,7 @@ class JoinsDialog(QDialog):
                 palette = self.palette()
                 is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
                 highlight_color = QColor('#1b4332') if is_dark else QColor('#e8f5e9')
-                for col in range(6):
+                for col in range(self.table.columnCount()):
                     item = self.table.item(row, col)
                     if item:
                         item.setBackground(highlight_color)
@@ -4307,7 +4328,10 @@ class JoinsDialog(QDialog):
 
             rel_display = {
                 'physical_join': tr('Physical join'),
-                'same_composition': tr('Same composition')
+                'physical': tr('Physical join'),
+                'same_composition': tr('Same composition'),
+                'content': tr('Same composition'),
+                'uncertain': tr('Unknown'),
             }.get(join.relationship_type, join.relationship_type or tr('Unknown'))
             self.table.setItem(row, 2, QTableWidgetItem(rel_display))
 
@@ -4316,6 +4340,7 @@ class JoinsDialog(QDialog):
 
             date_str = safe_date_str(join.created_at)
             self.table.setItem(row, 5, QTableWidgetItem(date_str))
+            self.table.setItem(row, 6, QTableWidgetItem(join.notes or ""))
 
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, join.id)
 
@@ -4327,7 +4352,7 @@ class JoinsDialog(QDialog):
                 palette = self.palette()
                 is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
                 highlight_color = QColor('#1b4332') if is_dark else QColor('#e8f5e9')
-                for col in range(6):
+                for col in range(self.table.columnCount()):
                     item = self.table.item(row, col)
                     if item:
                         item.setBackground(highlight_color)
@@ -4907,7 +4932,10 @@ class JoinsFeedDialog(QDialog):
                 # Relationship type
                 rel_labels = {
                     'physical_join': tr('Physical join'),
-                    'same_composition': tr('Same composition')
+                    'physical': tr('Physical join'),
+                    'same_composition': tr('Same composition'),
+                    'content': tr('Same composition'),
+                    'uncertain': tr('Unknown'),
                 }
                 rel_display = rel_labels.get(join.relationship_type, join.relationship_type or "")
                 table.setItem(row, 2, QTableWidgetItem(rel_display))

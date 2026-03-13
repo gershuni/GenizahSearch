@@ -103,7 +103,9 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                 'fragment_b': frag_b,
                 'relationship_type': j.get('join_type'),
                 'sources': ['user'],
-                'notes': j.get('notes', '')
+                'notes': j.get('notes', ''),
+                'created_by_username': j.get('created_by_username', ''),
+                'created_at': j.get('created_at', ''),
             })
 
         # --- Merge PGP document joins ---
@@ -457,12 +459,13 @@ def create_joins_dialog(
                         sources = join.get('sources', [join.get('source', 'user')])
                         join_id = join.get('id')
 
-                        scholar_name = join.get('scholar_name', '')
+                        scholar_name = join.get('scholar_name', '') or join.get('created_by_username', '')
+                        notes = join.get('notes', '')
 
                         # Map each fragment to its relationship info, aggregating sources
                         for frag_key in [frag_a, frag_b]:
                             if frag_key not in relationship_map:
-                                relationship_map[frag_key] = {'type': rel_type, 'sources': list(sources), 'scholar_name': scholar_name}
+                                relationship_map[frag_key] = {'type': rel_type, 'sources': list(sources), 'scholar_name': scholar_name, 'notes': notes}
                             else:
                                 existing = relationship_map[frag_key]
                                 existing_sources = existing.get('sources', [existing.get('source', 'user')])
@@ -472,6 +475,8 @@ def create_joins_dialog(
                                 existing['sources'] = existing_sources
                                 if scholar_name and not existing.get('scholar_name'):
                                     existing['scholar_name'] = scholar_name
+                                if notes and not existing.get('notes'):
+                                    existing['notes'] = notes
 
                         # Track DIRECT joins to current shelfmark only
                         if frag_a.upper() == shelfmark.upper():
@@ -558,7 +563,10 @@ def create_joins_dialog(
                                     if rel_type:
                                         rel_label = {
                                             'physical_join': tr('Physical join'),
-                                            'same_composition': tr('Same composition')
+                                            'physical': tr('Physical join'),
+                                            'same_composition': tr('Same composition'),
+                                            'content': tr('Same composition'),
+                                            'uncertain': tr('Unknown'),
                                         }.get(rel_type, rel_type)
                                         ui.label(rel_label).classes('text-xs text-gray-500')
 
@@ -572,6 +580,10 @@ def create_joins_dialog(
                                     scholar = rel_info.get('scholar_name', '')
                                     if scholar:
                                         ui.label(f"({scholar})").classes('text-xs text-gray-400 italic')
+
+                                    notes = rel_info.get('notes', '')
+                                    if notes:
+                                        ui.label(notes).classes('text-xs text-gray-400')
 
                                     # Show "direct" badge for directly joined fragments
                                     if direct_join_id:

@@ -268,12 +268,14 @@ def create_discoveries_page():
                     discoveries = client.table('discoveries').select('id', count='exact').execute()
                     corrections = client.table('corrections').select('id', count='exact').eq('status', 'approved').execute()
                     profiles = client.table('profiles').select('id', count='exact').execute()
+                    joins = client.table('fragment_joins').select('id', count='exact').execute()
                     return {
                         'words_corrected': 0,
                         'documents_edited': corrections.count or 0,
                         'total_discoveries': discoveries.count or 0,
                         'open_questions': 0,
                         'active_contributors': profiles.count or 0,
+                        'user_joins': joins.count or 0,
                     }
                 except Exception as e:
                     logger.error("Error loading stats: %s", e)
@@ -781,7 +783,10 @@ def create_feed_item(item: dict, on_refresh=None):
 
                             join_rel_labels = {
                                 'physical_join': tr('Physical join'),
-                                'same_composition': tr('Same composition')
+                                'physical': tr('Physical join'),
+                                'same_composition': tr('Same composition'),
+                                'content': tr('Same composition'),
+                                'uncertain': tr('Unknown'),
                             }
 
                             # Show all fragments in the cluster

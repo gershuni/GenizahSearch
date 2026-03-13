@@ -882,7 +882,12 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
                        status: str = None) -> List[Dict]:
     """Get fragment joins with optional filters."""
     try:
-        client = get_client()
+        # Use authenticated client when available — RLS only shows
+        # proposed joins to their creator (status='confirmed' OR auth.uid()=user_id)
+        try:
+            client = get_user_client()
+        except Exception:
+            client = get_client()
         query = client.table('fragment_joins').select('*')
 
         if user_id:
@@ -893,7 +898,21 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
             query = query.eq('status', status)
 
         response = query.order('created_at', desc=True).execute()
-        return response.data or []
+        rows = response.data or []
+
+        # Batch-resolve user_ids to display names via profiles table
+        uid_set = {r.get('user_id') for r in rows if r.get('user_id')}
+        profiles_map = {}
+        if uid_set:
+            try:
+                profiles_resp = client.table('profiles').select('id, full_name, username').in_('id', list(uid_set)).execute()
+                for p in (profiles_resp.data or []):
+                    profiles_map[p['id']] = p.get('full_name') or p.get('username') or ''
+            except Exception:
+                pass
+        for row in rows:
+            row['created_by_username'] = profiles_map.get(row.get('user_id'), '')
+        return rows
     except Exception as e:
         logger.error(f"Error getting joins: {e}")
         return []
@@ -906,13 +925,20 @@ def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfm
     """Create a new fragment join."""
     try:
         client = get_user_client()
+        # Map UI join type values to DB CHECK constraint values
+        # DB allows: 'physical', 'content', 'uncertain'
+        join_type_map = {
+            'physical_join': 'physical',
+            'same_composition': 'content',
+        }
+        db_join_type = join_type_map.get(join_type, join_type) or 'uncertain'
         data = {
             'user_id': user_id,
             'fragment_a_sys_id': fragment_a_sys_id,
             'fragment_a_shelfmark': fragment_a_shelfmark,
             'fragment_b_sys_id': fragment_b_sys_id,
             'fragment_b_shelfmark': fragment_b_shelfmark,
-            'join_type': join_type,
+            'join_type': db_join_type,
             'confidence': confidence,
             'notes': notes,
             'evidence': evidence
@@ -1194,6 +1220,18 @@ def get_feed_items(item_type: str = None, period: str = None,
                     'created_at', desc=True
                 ).limit(limit).execute()
                 for j in (joins.data or []):
+                    # Normalize column names for consumers (author resolved in second pass below)
+                    normalized_join = {
+                        'id': j.get('id'),
+                        'fragment_a': j.get('fragment_a_shelfmark', ''),
+                        'fragment_b': j.get('fragment_b_shelfmark', ''),
+                        'document_id_a': j.get('fragment_a_sys_id'),
+                        'document_id_b': j.get('fragment_b_sys_id'),
+                        'relationship_type': j.get('join_type'),
+                        'notes': j.get('notes', ''),
+                        'created_by_username': '',  # Resolved in second-pass profile lookup
+                        'created_at': j.get('created_at'),
+                    }
                     items.append({
                         'id': f"join_{j.get('id')}",
                         'item_type': 'join',
@@ -1203,7 +1241,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                         'shelfmark': j.get('fragment_a_shelfmark'),
                         'created_at': j.get('created_at'),
                         'cluster_fragments': [j.get('fragment_a_shelfmark'), j.get('fragment_b_shelfmark')],
-                        'cluster_joins': [j],
+                        'cluster_joins': [normalized_join],
                         'author': {'id': j.get('user_id')}
                     })
             except Exception as e:
@@ -1228,7 +1266,7 @@ def get_feed_items(item_type: str = None, period: str = None,
                 profiles_response = client.table('profiles').select('id, full_name, username, affiliation').in_('id', list(user_ids)).execute()
                 profiles_map = {p['id']: p for p in (profiles_response.data or [])}
 
-                # Merge profile data into author dicts
+                # Merge profile data into author dicts and cluster_joins
                 for item in items:
                     author = item.get('author', {})
                     author_id = author.get('id')
@@ -1237,6 +1275,11 @@ def get_feed_items(item_type: str = None, period: str = None,
                         author['full_name'] = profile.get('full_name')
                         author['username'] = profile.get('username')
                         author['affiliation'] = profile.get('affiliation')
+                        # Propagate into cluster_joins for join feed items
+                        display_name = profile.get('full_name') or profile.get('username') or ''
+                        for cj in item.get('cluster_joins', []):
+                            if isinstance(cj, dict) and not cj.get('created_by_username'):
+                                cj['created_by_username'] = display_name
         except Exception as e:
             logger.error(f"Error fetching profiles for feed: {e}")
 

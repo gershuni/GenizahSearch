@@ -18221,7 +18221,10 @@ class GenizahGUI(QMainWindow):
 
         rel_labels = {
             'physical_join': tr('Physical join'),
-            'same_composition': tr('Same composition')
+            'physical': tr('Physical join'),
+            'same_composition': tr('Same composition'),
+            'content': tr('Same composition'),
+            'uncertain': tr('Unknown'),
         }
 
         for join in joins_data:

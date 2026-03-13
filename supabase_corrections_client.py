@@ -186,6 +186,7 @@ class FragmentJoin:
     source_url: Optional[str] = None
     created_by_username: Optional[str] = None
     created_at: Optional[str] = None
+    _user_id: Optional[str] = None  # Internal: for profile resolution
 
 
 @dataclass
@@ -253,6 +254,18 @@ class FeedItem:
     relationship_type: Optional[str] = None
     join_source: Optional[str] = None
 
+
+# ============================================================================
+# Map UI join type keys to DB CHECK constraint values
+# DB allows: 'physical', 'content', 'uncertain'
+_JOIN_TYPE_TO_DB = {
+    'physical_join': 'physical',
+    'same_composition': 'content',
+}
+
+def _map_join_type(ui_value: str) -> str:
+    """Map UI join type value to DB CHECK constraint value."""
+    return _JOIN_TYPE_TO_DB.get(ui_value, ui_value) or 'uncertain'
 
 # ============================================================================
 # SUPABASE CORRECTIONS CLIENT
@@ -1279,13 +1292,15 @@ class SupabaseCorrectionsClient:
             return None, "Must be logged in to create joins"
 
         try:
+            db_join_type = _map_join_type(relationship_type)
+
             data = {
                 'user_id': self.current_user._uuid,
                 'fragment_a_sys_id': document_id_a or '',
                 'fragment_a_shelfmark': fragment_a,
                 'fragment_b_sys_id': document_id_b or '',
                 'fragment_b_shelfmark': fragment_b,
-                'join_type': relationship_type or 'uncertain',
+                'join_type': db_join_type,
                 'notes': notes or '',
                 'status': 'proposed'
             }
@@ -1293,7 +1308,11 @@ class SupabaseCorrectionsClient:
             response = client.table('fragment_joins').insert(data).execute()
 
             if response.data:
-                return self._parse_join(response.data[0]), "Join created"
+                join = self._parse_join(response.data[0])
+                # INSERT doesn't return profiles join — fill from current user
+                if not join.created_by_username and self.current_user:
+                    join.created_by_username = self.current_user.full_name or self.current_user.username
+                return join, "Join created"
             return None, "Failed to create join"
 
         except Exception as e:
@@ -1340,6 +1359,8 @@ class SupabaseCorrectionsClient:
                 ) for f in fragment_list
             ]
 
+            self._resolve_join_authors(joins)
+
             return ConnectedFragments(
                 shelfmark=shelfmark,
                 shelfmark_normalized=normalize_shelfmark(shelfmark),
@@ -1384,6 +1405,8 @@ class SupabaseCorrectionsClient:
             fragments.discard('')
             fragment_list = sorted(list(fragments))
 
+            self._resolve_join_authors(joins)
+
             return ConnectedFragments(
                 shelfmark=fragment_list[0] if fragment_list else '',
                 shelfmark_normalized='',
@@ -1419,11 +1442,12 @@ class SupabaseCorrectionsClient:
                     f'fragment_b_shelfmark.ilike.%{query}%'
                 )
             if relationship_type:
-                q = q.eq('join_type', relationship_type)
+                q = q.eq('join_type', _map_join_type(relationship_type))
 
             response = q.order('created_at', desc=True).range(offset, offset + limit - 1).execute()
 
             joins = [self._parse_join(j) for j in response.data or []]
+            self._resolve_join_authors(joins)
             total = response.count or len(joins)
             return joins, total
 
@@ -1452,11 +1476,12 @@ class SupabaseCorrectionsClient:
                     f'fragment_b_shelfmark.ilike.%{query}%'
                 )
             if relationship_type:
-                q = q.eq('join_type', relationship_type)
+                q = q.eq('join_type', _map_join_type(relationship_type))
 
             response = q.order('created_at', desc=True).range(offset, offset + limit - 1).execute()
 
             joins = [self._parse_join(j) for j in response.data or []]
+            self._resolve_join_authors(joins)
             total = response.count or len(joins)
             return joins, total
 
@@ -1466,7 +1491,6 @@ class SupabaseCorrectionsClient:
 
     def _parse_join(self, data: Dict) -> FragmentJoin:
         """Parse join data into FragmentJoin object."""
-        profiles = data.get('profiles', {}) or {}
         return FragmentJoin(
             id=data['id'],
             fragment_a=data.get('fragment_a_shelfmark', ''),
@@ -1476,9 +1500,41 @@ class SupabaseCorrectionsClient:
             relationship_type=data.get('join_type'),
             notes=data.get('notes'),
             source='user',
-            created_by_username=profiles.get('username'),
-            created_at=data.get('created_at')
+            created_by_username='',  # Resolved by _resolve_join_authors
+            created_at=data.get('created_at'),
+            _user_id=data.get('user_id'),
         )
+
+    def _resolve_join_authors(self, joins: List[FragmentJoin]) -> List[FragmentJoin]:
+        """Batch-resolve user_ids to full names via profiles table."""
+        client = self._get_client()
+        if not client or not joins:
+            return joins
+
+        user_ids = set()
+        for j in joins:
+            uid = getattr(j, '_user_id', None)
+            if uid:
+                user_ids.add(uid)
+
+        if not user_ids:
+            return joins
+
+        try:
+            response = client.table('profiles').select('id, full_name, username').in_('id', list(user_ids)).execute()
+            profiles_map = {}
+            for p in (response.data or []):
+                profiles_map[p['id']] = p.get('full_name') or p.get('username') or ''
+        except Exception as e:
+            logger.warning(f"Failed to fetch profiles for joins: {e}")
+            return joins
+
+        for j in joins:
+            uid = getattr(j, '_user_id', None)
+            if uid and uid in profiles_map:
+                j.created_by_username = profiles_map[uid]
+
+        return joins
 
     # ==================== Feed ====================
 
@@ -1778,7 +1834,9 @@ class SupabaseCorrectionsClient:
         try:
             response = client.table('fragment_joins').select('*').eq('id', join_id).single().execute()
             if response.data:
-                return self._parse_join(response.data)
+                join = self._parse_join(response.data)
+                self._resolve_join_authors([join])
+                return join
             return None
         except Exception:
             return None
@@ -1809,7 +1867,7 @@ class SupabaseCorrectionsClient:
         try:
             update_data = {}
             if relationship_type is not None:
-                update_data['join_type'] = relationship_type
+                update_data['join_type'] = _map_join_type(relationship_type)
             if notes is not None:
                 update_data['notes'] = notes
 

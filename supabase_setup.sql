@@ -335,8 +335,8 @@ CREATE POLICY "Users can update own discoveries" ON discoveries FOR UPDATE USING
 -- ============================================
 -- FRAGMENT JOINS POLICIES
 -- ============================================
-CREATE POLICY "Anyone can view confirmed joins" ON fragment_joins FOR SELECT
-    USING (status = 'confirmed' OR auth.uid() = user_id);
+CREATE POLICY "Anyone can view joins" ON fragment_joins FOR SELECT
+    USING (true);
 CREATE POLICY "Users can create joins" ON fragment_joins FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own joins" ON fragment_joins FOR UPDATE USING (auth.uid() = user_id);
 
