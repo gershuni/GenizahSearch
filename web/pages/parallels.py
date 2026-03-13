@@ -155,7 +155,7 @@ def create_parallels_page(initial_text: str = None):
             self.results = []
             self.filtered_results = []
             self.finished_animation_shown = False
-            self.update_timer = None  # Track timer to prevent duplicates
+            self.update_timer = None  # asyncio.Task for progress update loop
             # Search timing state
             self.search_start_time: float = 0.0
             self.chunks_processed: int = 0
@@ -430,7 +430,13 @@ def create_parallels_page(initial_text: str = None):
                     # Also update on blur to catch paste events
                     text_input.on('blur', update_word_count)
                     # Update after a short delay to ensure textarea has initial value from storage
-                    ui.timer(0.3, update_word_count, once=True)
+                    async def _deferred_word_count():
+                        await asyncio.sleep(0.3)
+                        try:
+                            update_word_count()
+                        except (RuntimeError, Exception):
+                            pass
+                    asyncio.ensure_future(_deferred_word_count())
 
                     # === Lab Mode and Boundary Search Settings (below text input) ===
                     ui.separator().classes('my-3')
@@ -1934,9 +1940,9 @@ def create_parallels_page(initial_text: str = None):
             # Check if client still exists
             _ = progress_bar.client
         except (RuntimeError, Exception):
-            # Client deleted, deactivate the timer
+            # Client deleted, cancel the update loop
             if p_state.update_timer:
-                p_state.update_timer.deactivate()
+                p_state.update_timer.cancel()
             return
 
         try:
@@ -1990,11 +1996,18 @@ def create_parallels_page(initial_text: str = None):
         except (RuntimeError, Exception):
             pass  # Client may be deleted
 
-    # Use faster timer for more responsive progress updates
-    # Cancel any existing timer first to prevent duplicates
+    # Use asyncio loop for progress updates instead of ui.timer to avoid
+    # "parent slot of the element has been deleted" RuntimeError on navigation
     if p_state.update_timer:
-        p_state.update_timer.deactivate()
-    p_state.update_timer = ui.timer(0.05, update_ui)
+        p_state.update_timer.cancel()
+    async def _update_loop():
+        while True:
+            try:
+                update_ui()
+            except (RuntimeError, Exception):
+                break
+            await asyncio.sleep(0.05)
+    p_state.update_timer = asyncio.ensure_future(_update_loop())
 
     def cancel_search():
         p_state.is_cancelled = True
@@ -3660,7 +3673,13 @@ def create_parallels_page(initial_text: str = None):
             pass  # Client deleted
 
     # Schedule async restore on page load
-    ui.timer(0.1, restore_filter_sources, once=True)
+    async def _deferred_restore():
+        await asyncio.sleep(0.1)
+        try:
+            await restore_filter_sources()
+        except (RuntimeError, Exception):
+            pass
+    asyncio.ensure_future(_deferred_restore())
 
     # --- Deferred filter option loading (runs after UI renders) ---
 
@@ -3677,4 +3696,10 @@ def create_parallels_page(initial_text: str = None):
         p_work_select.update()
         _update_p_chip_bar()
 
-    ui.timer(0.1, _deferred_p_filter_init, once=True)
+    async def _deferred_p_filter_init_wrapper():
+        await asyncio.sleep(0.1)
+        try:
+            await _deferred_p_filter_init()
+        except (RuntimeError, Exception):
+            pass
+    asyncio.ensure_future(_deferred_p_filter_init_wrapper())

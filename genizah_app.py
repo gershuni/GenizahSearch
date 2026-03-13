@@ -26022,15 +26022,20 @@ class GenizahGUI(QMainWindow):
                 nonlocal target_index
                 target_index = len(flat_list) - 1
 
+        def traverse_tree(node):
+            """Recursively traverse all tree nodes, collecting data from leaf/manuscript nodes."""
+            node_data = node.data(0, Qt.ItemDataRole.UserRole)
+            if node_data:
+                # Node has result data — let collect_node_data handle it
+                collect_node_data(node)
+            else:
+                # Category/reason node without result data — descend into children
+                for i in range(node.childCount()):
+                    traverse_tree(node.child(i))
+
         root = self.comp_tree.invisibleRootItem()
         for i in range(root.childCount()):
-            category = root.child(i)
-            if category.data(0, Qt.ItemDataRole.UserRole):
-                 collect_node_data(category)
-            
-            for j in range(category.childCount()):
-                sub = category.child(j)
-                collect_node_data(sub)
+            traverse_tree(root.child(i))
 
         if not flat_list: return
         
