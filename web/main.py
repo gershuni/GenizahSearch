@@ -346,7 +346,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English)')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English), line-boundary search for join detection')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()

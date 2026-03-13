@@ -2387,6 +2387,8 @@ TRANSLATIONS = {
         "שמירת מצב, תפריט היסטוריית חיפושים, שיפורי חיפוש מקבילות, התראות שולחן עבודה, שמות ספריות בעברית",
     "Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English)":
         "חיפוש ממוקד לפי מאפייני כתב יד (תחום, מחבר, יצירה, תאריך, חומר), תרגומי קטלוג ומטא-נתונים (עברית/אנגלית)",
+    "Focused search by manuscript properties (domain, author, work, date, material), catalog & metadata translations (Hebrew/English), line-boundary search for join detection":
+        "חיפוש ממוקד לפי מאפייני כתב יד (תחום, מחבר, יצירה, תאריך, חומר), תרגומי קטלוג ומטא-נתונים (עברית/אנגלית), חיפוש לפי גבולות שורה לזיהוי צירופים",
     "New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection":
         "חדש: חיפוש ממוקד לפי מאפייני כתב יד, תרגומי קטלוג ומטא-נתונים, חיפוש לפי גבולות שורה לזיהוי צירופים",
     "Focused Search: filter manuscripts by domain, author, work, date, and material before searching":

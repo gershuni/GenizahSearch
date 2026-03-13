@@ -180,6 +180,19 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
 
         ui.markdown('*Note:* When a query expands beyond 500 terms, the system automatically downgrades options (variants, Judeo-Arabic, plene, etc.) to maintain speed, and displays a notification accordingly.').style('color: var(--text-secondary);')
 
+        h3('Line & Text Position Search', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
+        ui.markdown('''
+Use the **position dropdown** (in Advanced Options) to constrain where matches appear within a manuscript: **Start of text**, **End of text**, **Line starts**, or **Line ends**.
+
+This is especially useful for **detecting joins** between fragments — if you know how a manuscript ends, search for those words at "End of text" to find potential continuations.
+
+In **Responsa mode**, position constraints can also be applied **per word** using the checkboxes in the Tabular Query Builder:
+- **|word** — word must appear at the start of a line
+- **word|** — word must appear at the end of a line
+
+Combined with line-break syntax (`|` between words), you can build multi-line positional queries — for example, find specific words at the end of one line and other words at the beginning of a line several lines later.
+        ''').style('color: var(--text-secondary);')
+
     # === Advanced Filters ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-filters"')
