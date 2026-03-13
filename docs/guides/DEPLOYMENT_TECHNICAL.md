@@ -1,6 +1,6 @@
 # GenizahSearch Technical Deployment Guide
 
-> Last updated: 2026-02-18
+> Last updated: 2026-03-13
 > For: Developers, System Administrators, AI Assistants
 
 ---
@@ -100,7 +100,13 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 │   ├── document_service.py    # PGP data access
 │   ├── corrections_service.py # Corrections data access
 │   ├── fjms_service.py        # FJMS domain/join/catalog queries
-│   └── nli_crossref_service.py # NLI crossref/image/metadata queries
+│   ├── nli_crossref_service.py # NLI crossref/image/metadata queries
+│   ├── translation_service.py # Dicta translation lookups (libraries, PGP, FJMS)
+│   ├── translation_qc.py     # Translation quality checks
+│   ├── dicta_client.py        # Dicta Translation API client
+│   ├── session_persistence.py # Session state save/restore
+│   ├── supabase_provider.py   # Supabase client factory
+│   └── reading_desk_model.py  # Virtual Reading Desk data model
 ├── Genizah_Index/         # Search indexes
 │   ├── tantivy_db/        # Main search index (3.3GB)
 │   ├── lab_index/         # Parallels index (3.0GB)
@@ -108,16 +114,17 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 │   ├── metadata_cache.pkl # Metadata cache
 │   └── lab/               # Lab configuration
 ├── fist_data/             # FJMS sidecar (NOT in git)
-│   └── fjms_enrichment.db # SQLite sidecar v2.0.0 (246MB)
+│   └── fjms_enrichment.db # SQLite sidecar v5.0.0 (~941MB)
 ├── nli_data/              # NLI crossref sidecar (NOT in git)
 │   └── nli_crossref.db   # SQLite sidecar v1.2.0 (248MB)
 ├── pgp_data/              # PGP data + sidecar (NOT in git)
-│   ├── pgp.db             # SQLite sidecar v1.0.0 (147MB)
+│   ├── pgp.db             # SQLite sidecar (~165MB, includes translations)
 │   ├── documents.csv      # 35K PGP document records (export source)
 │   ├── fragments.csv      # 36K fragment links (export source)
 │   ├── footnotes.csv      # 23K footnotes (export source)
 │   └── transcriptions_linked.csv # Linked transcription sources
 ├── libraries.csv          # Master manuscript metadata (~217K records)
+├── libraries_translations.db # Dicta translations sidecar (76MB, NOT in git)
 ├── genizah_core.py        # Core search logic
 ├── venv/                  # Python virtual environment
 ├── Transcriptions.txt     # Source transcription data (1.4GB)
@@ -142,6 +149,9 @@ GENIZAH_PORT=8081
 NICEGUI_RELOAD=false
 NICEGUI_SHOW=false
 ENVIRONMENT=production
+
+# Optional - PostHog analytics
+POSTHOG_API_KEY=phc_xxxxx
 ```
 
 ### Systemd Service (`/etc/systemd/system/genizah-web.service`)
@@ -549,13 +559,14 @@ Web-based UI for server management:
 
 ### SQLite Sidecar Databases (v5.8.0+)
 
-All three sidecar databases are **NOT in git** (listed in `.gitignore`). They must be uploaded manually to the server and regenerated when source data changes.
+All sidecar databases are **NOT in git** (listed in `.gitignore`). They must be uploaded manually to the server and regenerated when source data changes.
 
 | Database | Directory | Size | Version | Contents |
 |----------|-----------|------|---------|----------|
-| `fjms_enrichment.db` | `fist_data/` | 246 MB | v2.0.0 | FJMS domains (390K), joins (48K), catalog (500K), bibliography (542K), catalog_refs (64K) |
+| `fjms_enrichment.db` | `fist_data/` | ~941 MB | v5.0.0 | FJMS domains (390K), joins (48K), catalog (685K, 37 cols), bibliography (542K), catalog_refs (64K), genizah_persons (2,286), genizah_titles (775), code_values (3,440), translations |
 | `nli_crossref.db` | `nli_data/` | 248 MB | v1.2.0 | NLI crossref images (815K), Cambridge manifests (141K), Manchester LUNA (28K), JTS DPUL (453) |
-| `pgp.db` | `pgp_data/` | 147 MB | v1.0.0 | PGP documents (35K), sources (9K), footnotes (23K), fragments (36K) |
+| `pgp.db` | `pgp_data/` | ~165 MB | - | PGP documents (35K), sources (9K), footnotes (23K), fragments (36K), pgp_translations (35K) |
+| `libraries_translations.db` | project root | 76 MB | - | Dicta translations for library titles (~185K records, Hebrew↔English) |
 
 #### Initial Upload to Server
 
@@ -564,6 +575,7 @@ All three sidecar databases are **NOT in git** (listed in `.gitignore`). They mu
 scp fist_data/fjms_enrichment.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/fist_data/
 scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/nli_data/
 scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/
+scp libraries_translations.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/
 
 # On server, create directories if needed:
 ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com
@@ -605,8 +617,9 @@ sudo systemctl restart genizah-web
 | `nli_crossref.db` | New NLI crossreference CSV or Cambridge JSON | Rare (when NLI provides) |
 | Manchester/JTS tables | New manuscripts added to LUNA or DPUL | Rare (can re-run import scripts) |
 | `pgp.db` | New PGP data exported from Princeton Geniza Project | Rare (when PGP releases new data) |
+| `libraries_translations.db` | New Dicta translations batch or corrections | Rare (after translation runs) |
 
-**Note:** Both databases are read-only at runtime. The web app opens them in `?mode=ro` URI mode. No write operations occur during normal operation.
+**Note:** All sidecar databases are read-only at runtime. The web app opens them in `?mode=ro` URI mode. No write operations occur during normal operation.
 
 ### PGP Data Maintenance
 
@@ -768,6 +781,7 @@ Key environment variables in `/home/ubuntu/GenizahSearch/.env`:
 |----------|-------------|---------|
 | `SUPABASE_URL` | Supabase project URL | Required |
 | `SUPABASE_ANON_KEY` | Supabase anonymous key | Required |
+| `POSTHOG_API_KEY` | PostHog analytics key | Optional |
 | `NICEGUI_RECONNECT_TIMEOUT` | WebSocket reconnect timeout (seconds) | 30 |
 | `NICEGUI_RELOAD` | Hot reload (dev only) | false |
 | `NICEGUI_SHOW` | Open browser on start | false |

@@ -1,6 +1,6 @@
 # GenizahSearch Website Admin Guide
 
-> Last updated: 2026-01-31
+> Last updated: 2026-03-13
 > For: Site administrators and non-technical users
 
 ---
@@ -17,7 +17,7 @@
 
 ---
 
-## Architecture Overview (Updated 2026-01-31)
+## Architecture Overview (Updated 2026-03-13)
 
 ```
 User's Browser
@@ -32,6 +32,12 @@ Nginx (Web Server on port 80/443)
                           │
                           ├── Search/Browse ──► Tantivy Index (local)
                           │
+                          ├── Reference Data ─► SQLite Sidecars (local, read-only)
+                          │                     ├── fjms_enrichment.db (FJMS catalog)
+                          │                     ├── nli_crossref.db (NLI images/metadata)
+                          │                     ├── pgp.db (PGP documents/transcriptions)
+                          │                     └── libraries_translations.db (Dicta translations)
+                          │
                           └── User Data ──────► Supabase (cloud)
                                                     │
                                                     ├── PostgreSQL Database
@@ -39,7 +45,7 @@ Nginx (Web Server on port 80/443)
                                                     └── Row Level Security
 ```
 
-**Important Change:** The FastAPI backend has been removed. All user data (lists, corrections, comments, discoveries) is now stored directly in **Supabase** cloud database.
+All user data (lists, corrections, comments, discoveries) is stored in **Supabase** cloud database. Reference data is served from local SQLite sidecar databases.
 
 ### Key Components
 
@@ -50,6 +56,7 @@ Nginx (Web Server on port 80/443)
 | **Frontend (NiceGUI)** | The visual interface users see |
 | **Supabase** | Cloud database for user data, auth, lists |
 | **Tantivy Index** | Powers the manuscript search (local) |
+| **SQLite Sidecars** | FJMS catalog, NLI images, PGP data, Dicta translations (local, read-only) |
 
 ---
 
@@ -223,6 +230,10 @@ User data (lists, corrections) is stored in Supabase cloud. If data isn't syncin
 | `/home/ubuntu/GenizahSearch/Genizah_Index/` | Search indexes |
 | `/home/ubuntu/GenizahSearch/Transcriptions.txt` | Source manuscript data |
 | `/home/ubuntu/GenizahSearch/deploy.sh` | Update script |
+| `/home/ubuntu/GenizahSearch/fist_data/fjms_enrichment.db` | FJMS catalog sidecar |
+| `/home/ubuntu/GenizahSearch/nli_data/nli_crossref.db` | NLI image/metadata sidecar |
+| `/home/ubuntu/GenizahSearch/pgp_data/pgp.db` | PGP documents sidecar |
+| `/home/ubuntu/GenizahSearch/libraries_translations.db` | Dicta Hebrew/English translations |
 
 ---
 
@@ -233,6 +244,7 @@ The `.env` file should contain:
 ```
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
+POSTHOG_API_KEY=phc_xxxxx          # Optional - enables PostHog analytics
 ```
 
 **Note:** Never share these keys publicly.

@@ -209,6 +209,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-13 | Updated all 4 docs/guides/ files: WEBSITE_ADMIN_GUIDE (added sidecars, translations, PostHog), DEPLOYMENT_TECHNICAL (fixed DB versions/sizes, expanded shared/ listing, added libraries_translations.db), DEVELOPER_GUIDE (full project structure with pages/components/shared), SUPABASE_GUIDE (fixed author_id column in query). Web citation bar updated to full author list. | Claude |
 | 2026-03-11 | Added P2: FJMS export MAX(Version) drops ~38K catalog records (9.2%); P2: Desktop translation toggle shows wrong language by default. Full report in docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md | Claude |
 | 2026-03-11 | MARC field translations: added translate badges for Date, Subjects, People; Hebrew date gematria converter avoids Dicta errors; marked for testing | Claude |
 | 2026-03-11 | Added open untested-area item for translation QA / hallucination audit after reviewing the Phase 46 translation rollout | Codex |

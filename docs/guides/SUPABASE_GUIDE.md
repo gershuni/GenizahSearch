@@ -1,6 +1,7 @@
 # GenizahSearch Supabase Guide
 
 > Guide for working with Supabase in the GenizahSearch project
+> Last updated: 2026-03-13
 
 ---
 
@@ -620,7 +621,7 @@ SELECT
     p.reputation,
     COUNT(c.id) as corrections_count
 FROM profiles p
-LEFT JOIN corrections c ON c.user_id = p.id AND c.status = 'approved'
+LEFT JOIN corrections c ON c.author_id = p.id AND c.status = 'approved'
 GROUP BY p.id
 ORDER BY p.reputation DESC
 LIMIT 10;
