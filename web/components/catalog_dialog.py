@@ -271,35 +271,122 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
         domain_vals.append('; '.join(categories) if categories else None)
     _field_row(tr('Domain'), domain_vals, is_heb)
 
-    # Running Title (with translation support)
-    # fjms_trans values are now (translated_text, direction) tuples
-    rt_vals = []
-    _rt_trans_entry = fjms_trans.get('RunningTitle')
-    _rt_trans_text = None
-    if _rt_trans_entry:
-        _rt_text_val, _rt_dir = (_rt_trans_entry if isinstance(_rt_trans_entry, tuple)
-                                  else (_rt_trans_entry, None))
-        # For en2he: translated_text is Hebrew — show in Hebrew UI, skip in English UI
-        # For he2en: translated_text is English — show in English UI, skip in Hebrew UI
-        if _rt_dir == 'en2he' and is_heb:
-            _rt_trans_text = _rt_text_val
-        elif _rt_dir != 'en2he' and not is_heb:
-            _rt_trans_text = _rt_text_val
+    # Running Title (with per-record translation support)
+    # Fetch translations keyed by UnitCatalogRecId (not by alma_id like fjms_trans)
+    _rt_trans_map = {}
+    try:
+        from shared.translation_service import TranslationService
+        _tsvc_rt = TranslationService(thread_safe=True)
+        if _tsvc_rt.fjms_available():
+            _all_rt_rec_ids = []
+            for team in teams:
+                for rec in team["records"]:
+                    rec_id = rec.get("unit_catalog_rec_id")
+                    if rec_id and rec_id in running_titles:
+                        _all_rt_rec_ids.append(rec_id)
+            if _all_rt_rec_ids:
+                _rt_trans_map = _tsvc_rt.get_fjms_translations_by_signature_ids(
+                    'RunningTitle', list(set(_all_rt_rec_ids))
+                )
+        _tsvc_rt.close()
+    except Exception:
+        pass
+
+    # Check if any team has running title data
+    _any_rt = False
     for team in teams:
-        titles = []
         for rec in team["records"]:
             rec_id = rec.get("unit_catalog_rec_id")
             if rec_id and rec_id in running_titles:
                 for rt in running_titles[rec_id]:
-                    rt_text = rt.get("running_title", "")
-                    if rt_text and str(rt_text).strip():
-                        titles.append(str(rt_text).strip())
-        if _rt_trans_text and titles:
-            rt_vals.append(_rt_trans_text)
-            _rt_trans_text = None  # Only use for the first team with data
-        else:
-            rt_vals.append('; '.join(titles) if titles else None)
-    _field_row(tr('Running Title'), rt_vals, is_heb)
+                    if rt.get("running_title") and str(rt["running_title"]).strip():
+                        _any_rt = True
+                        break
+            if _any_rt:
+                break
+        if _any_rt:
+            break
+
+    if _any_rt:
+        # Inline layout (not _field_row) to support interactive toggle badges
+        with ui.row().classes('w-full items-start py-1 px-3').style(
+            'border-bottom: 1px solid var(--border-light, #e5e7eb); min-height: 2em;'
+        ):
+            # Label column (matches _field_row style)
+            ui.label(tr('Running Title')).classes('text-xs font-semibold shrink-0').style(
+                f'width: 120px; color: var(--text-secondary); {dir_style}'
+            )
+            # Per-team value columns
+            for team in teams:
+                titles_orig = []
+                for rec in team["records"]:
+                    rec_id = rec.get("unit_catalog_rec_id")
+                    if rec_id and rec_id in running_titles:
+                        for rt in running_titles[rec_id]:
+                            rt_text = rt.get("running_title", "")
+                            if rt_text and str(rt_text).strip():
+                                titles_orig.append((str(rt_text).strip(), rec_id))
+
+                if not titles_orig:
+                    # Empty cell
+                    ui.label('\u2014').classes('text-sm').style(
+                        f'flex: 1; min-width: 130px; color: var(--text-muted, #9ca3af); {dir_style}'
+                    )
+                else:
+                    with ui.column().classes('gap-1').style(f'flex: 1; min-width: 130px; {dir_style}'):
+                        for orig_text, rec_id in titles_orig:
+                            _trans_entry = _rt_trans_map.get(rec_id)
+                            _is_translated = False
+                            display_text = orig_text
+                            display_dir = dir_style
+
+                            if _trans_entry and isinstance(_trans_entry, tuple):
+                                _trans_text_val = str(_trans_entry[0]).strip()
+                                _trans_dir = _trans_entry[1]
+                                # Direction-aware: en2he shows Hebrew in HE UI, he2en shows English in EN UI
+                                _should_show = (
+                                    (_trans_dir == 'en2he' and is_heb) or
+                                    (_trans_dir == 'he2en' and not is_heb)
+                                )
+                                if _should_show and _trans_text_val and _trans_text_val != orig_text:
+                                    display_text = _trans_text_val
+                                    _is_translated = True
+                                    if _trans_dir == 'en2he':
+                                        display_dir = 'direction: rtl; text-align: right;'
+                                    else:
+                                        display_dir = ''
+
+                            _rt_lbl = ui.label(display_text).classes('text-sm break-words').style(
+                                f'line-height: 1.6; {display_dir}'
+                            )
+
+                            if _is_translated:
+                                _rt_st = {'showing_original': False}
+                                _rt_badge_ref = [None]
+                                _orig_dir_style = dir_style
+                                _trans_dir_style = display_dir
+
+                                def _make_rt_toggle(lbl, badge_ref, orig, trans, orig_dir, trans_dir, flag):
+                                    def handler():
+                                        flag['showing_original'] = not flag['showing_original']
+                                        if flag['showing_original']:
+                                            lbl.text = orig
+                                            lbl.style(f'line-height: 1.6; {orig_dir}')
+                                            badge_ref[0].text = tr('Original')
+                                        else:
+                                            lbl.text = trans
+                                            lbl.style(f'line-height: 1.6; {trans_dir}')
+                                            badge_ref[0].text = tr('Translated')
+                                    return handler
+
+                                _rt_badge = ui.badge(tr('Translated'), color='light-blue').props(
+                                    'dense outline'
+                                ).classes('text-xs cursor-pointer')
+                                _rt_badge_ref[0] = _rt_badge
+                                _rt_badge.on('click', _make_rt_toggle(
+                                    _rt_lbl, _rt_badge_ref, orig_text, display_text,
+                                    _orig_dir_style, _trans_dir_style, _rt_st
+                                ))
 
     # Detailed Content (from catalog_textual_frames — richer per-verse references)
     if textual_frames:
