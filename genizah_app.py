@@ -10280,21 +10280,6 @@ class GenizahGUI(QMainWindow):
         # Row 2: Search Parameters & Lab Mode
         row2 = QHBoxLayout()
 
-        # Feature discovery glow on mode combo (one-time hint)
-        self._mode_glow_active = False
-        cfg = load_app_config()
-        if not cfg.get('hint_responsa_seen'):
-            self._mode_glow_active = True
-            self._mode_glow_on = True
-            self.mode_combo.setToolTip(tr("Try the Responsa-project style search mode!"))
-            self._mode_glow_timer = QTimer(self)
-            self._mode_glow_timer.timeout.connect(self._pulse_mode_glow)
-            self._mode_glow_timer.start(800)
-            self._pulse_mode_glow()
-            # Highlight the Responsa item inside the dropdown
-            from PyQt6.QtGui import QColor
-            self.mode_combo.model().item(self.MODE_RESPONSA).setBackground(QColor("#d1fae5"))
-            self.mode_combo.setItemText(self.MODE_RESPONSA, "\u2728 " + tr("Responsa (R)"))
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
@@ -10545,17 +10530,6 @@ class GenizahGUI(QMainWindow):
         self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
         self.btn_query_builder.clicked.connect(self._open_query_builder)
         responsa_sub_layout.addWidget(self.btn_query_builder)
-
-        # Feature discovery glow on tabular button (one-time hint)
-        self._tabular_glow_active = False
-        if not cfg.get('hint_tabular_seen'):
-            self._tabular_glow_active = True
-            self._tabular_glow_on = True
-            self.btn_query_builder.setToolTip(tr("Try the Tabular Search!"))
-            self._tabular_glow_timer = QTimer(self)
-            self._tabular_glow_timer.timeout.connect(self._pulse_tabular_glow)
-            self._tabular_glow_timer.start(800)
-            self._pulse_tabular_glow()
 
         responsa_sub_layout.addStretch()
 
@@ -18651,52 +18625,12 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'responsa_sub_row'):
             self.responsa_sub_row.setVisible(is_responsa)
 
-        # Dismiss mode combo glow when user selects Responsa
-        if is_responsa and self._mode_glow_active:
-            self._stop_mode_glow()
-            save_app_config({'hint_responsa_seen': True})
 
         # PGP Tags mode: hide row1, show tag combo, hide search params
         if hasattr(self, 'tag_search_combo'):
             self.search_row1_container.setVisible(not is_pgp_tags)
             self.tag_search_combo.setVisible(is_pgp_tags)
             self.search_params_container.setVisible(not is_pgp_tags)
-
-    def _pulse_mode_glow(self):
-        """Toggle glow border on mode combo for feature discovery."""
-        if self._mode_glow_on:
-            self.mode_combo.setStyleSheet("QComboBox { border: 2px solid #10b981; border-radius: 4px; }")
-        else:
-            self.mode_combo.setStyleSheet("")
-        self._mode_glow_on = not self._mode_glow_on
-
-    def _stop_mode_glow(self):
-        """Remove mode combo glow and item highlight."""
-        self._mode_glow_active = False
-        if hasattr(self, '_mode_glow_timer'):
-            self._mode_glow_timer.stop()
-        self.mode_combo.setStyleSheet("")
-        self.mode_combo.setToolTip(tr("Responsa-Project style grammatical expansion for Hebrew search"))
-        # Clear the green background and sparkle from the Responsa item
-        from PyQt6.QtGui import QBrush
-        self.mode_combo.model().item(self.MODE_RESPONSA).setBackground(QBrush())
-        self.mode_combo.setItemText(self.MODE_RESPONSA, tr("Responsa (R)"))
-
-    def _pulse_tabular_glow(self):
-        """Toggle glow border on tabular button for feature discovery."""
-        if self._tabular_glow_on:
-            self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px; border: 2px solid #10b981; border-radius: 4px;")
-        else:
-            self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-        self._tabular_glow_on = not self._tabular_glow_on
-
-    def _stop_tabular_glow(self):
-        """Remove tabular button glow."""
-        self._tabular_glow_active = False
-        if hasattr(self, '_tabular_glow_timer'):
-            self._tabular_glow_timer.stop()
-        self.btn_query_builder.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-        self.btn_query_builder.setToolTip(tr("Open the tabular query builder"))
 
     def _on_comp_mode_changed(self, index):
         """Show/hide variant slider for composition based on selected mode."""
@@ -19519,10 +19453,6 @@ class GenizahGUI(QMainWindow):
 
     def _open_query_builder(self):
         """Open the tabular query builder dialog."""
-        # Dismiss tabular button glow on first use
-        if self._tabular_glow_active:
-            self._stop_tabular_glow()
-            save_app_config({'hint_tabular_seen': True})
         dlg = TabularQueryBuilderDialog(self)
         # Sync search options into dialog from outer checkboxes
         dlg.chk_opt_variants.setChecked(self.chk_responsa_variants.isChecked())
