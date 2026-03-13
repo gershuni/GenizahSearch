@@ -1138,7 +1138,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             pgpid = pgp_doc.get('pgpid')
             doc_relation = pgp_doc.get('doc_relation', '')
             is_edition = 'Edition' in doc_relation or not doc_relation
-            page_content = get_section_for_page(pgp_doc['transcription'], page.p_num) if pgp_doc.get('transcription') else None
+            page_content = get_section_for_page(pgp_doc['transcription'], page.p_num, fragment_page_info=pgp_doc.get('_fragment_page_info')) if pgp_doc.get('transcription') else None
 
             if is_edition and page_content:
                 state.pgp_transcription = {

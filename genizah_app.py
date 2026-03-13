@@ -12936,8 +12936,10 @@ class GenizahGUI(QMainWindow):
 
     def _browse_refresh_pgp_for_page(self):
         """Re-fetch PGP sources for current page (called on page change within same manuscript)."""
-        if not hasattr(self, '_browse_pgp_sources') or not self._browse_pgp_sources:
-            return  # No PGP data was loaded for this manuscript
+        if not hasattr(self, '_browse_pgp_doc'):
+            return  # PGP worker never ran for this manuscript
+        if not self._browse_pgp_doc:
+            return  # No PGP document linked to this fragment
         if not self.current_browse_sid:
             return
         # Disconnect old worker signals first
@@ -24920,8 +24922,8 @@ class GenizahGUI(QMainWindow):
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
             side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
 
-            # Check if folio needs dynamic images (missing from viewer but within Oxford folio_range)
-            viewer_images = getattr(self.browse_viewer, 'images_ext', [])
+            # Use active_list (includes both images_ext and images_nli depending on source)
+            viewer_images = getattr(self.browse_viewer, 'active_list', []) or getattr(self.browse_viewer, 'images_ext', [])
             folio_in_viewer = any(img.get('folio_num') == folio_num for img in viewer_images) if folio_num and viewer_images else False
 
             if not folio_in_viewer and folio_num is not None and meta:
@@ -26172,8 +26174,8 @@ class GenizahGUI(QMainWindow):
         folio_num = _get_folio_number_from_shelfmark(shelfmark)
         side_offset = 1 if (self.current_browse_internal_idx or 0) % 2 == 1 else 0
 
-        # Check if folio needs dynamic images (missing from viewer but within Oxford folio_range)
-        viewer_images = getattr(self.browse_viewer, 'images_ext', [])
+        # Use active_list (includes both images_ext and images_nli depending on source)
+        viewer_images = getattr(self.browse_viewer, 'active_list', []) or getattr(self.browse_viewer, 'images_ext', [])
         folio_in_viewer = any(img.get('folio_num') == folio_num for img in viewer_images) if folio_num and viewer_images else False
 
         if not folio_in_viewer and folio_num is not None and meta:
