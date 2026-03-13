@@ -2,8 +2,8 @@
 
 **Purpose:** Expand and update help content in both web (`web/pages/help.py`) and desktop (`Help.html` + `genizah_app.py:HelpDialog`) apps to cover all features from phases 1-17.
 
-**Created:** 2026-02-10
-**Status:** Planning
+**Created:** 2026-02-10 (updated 2026-03-13)
+**Status:** Completed (help pages updated through v6.5.0)
 
 ---
 

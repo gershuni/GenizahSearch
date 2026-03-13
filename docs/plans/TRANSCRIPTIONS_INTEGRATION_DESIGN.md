@@ -1,8 +1,8 @@
 # Transcription Integration Design
 
-> **Status:** Design Phase
-> **Date:** February 2026
-> **Priority:** HIGH - Core feature enhancement
+> **Status:** Deferred (Phase 13 — index build too slow for desktop)
+> **Date:** February 2026 (updated 2026-03-13)
+> **Priority:** HIGH - Core feature enhancement (deferred)
 
 ---
 

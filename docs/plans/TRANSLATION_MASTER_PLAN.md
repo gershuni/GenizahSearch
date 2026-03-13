@@ -3,8 +3,8 @@
 > Complete plan for translating all user-facing text fields across all data sources.
 > Goal: Full bilingual (Hebrew/English) access to all metadata in both apps.
 
-**Created:** 2026-03-05
-**Status:** In Progress (Phase 46 of v6.5.0)
+**Created:** 2026-03-05 (updated 2026-03-13)
+**Status:** Completed — ~580K translations shipped in v6.5.0
 
 ---
 

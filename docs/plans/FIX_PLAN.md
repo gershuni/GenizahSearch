@@ -1,6 +1,6 @@
 # Pre-Launch Fix Plan
-**Generated:** 2026-01-29
-**Status:** Ready for execution when user returns
+**Generated:** 2026-01-29 (updated 2026-03-13)
+**Status:** Historical — most fixes shipped in v5.4-v6.5.0. See [OPEN_ISSUES.md](../OPEN_ISSUES.md) for current tracking.
 
 ---
 

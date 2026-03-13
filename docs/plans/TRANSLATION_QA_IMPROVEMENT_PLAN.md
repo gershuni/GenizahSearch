@@ -1,7 +1,7 @@
 ﻿# Translation QA and Improvement Plan
 
-**Date:** 2026-03-11  
-**Status:** Proposed  
+**Date:** 2026-03-11 (updated 2026-03-13)
+**Status:** Completed
 **Scope:** Phase 46 translation quality control for PGP, FJMS, library titles, and Oxford metadata
 
 ---

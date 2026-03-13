@@ -1,8 +1,8 @@
 # Simplified Joins System
 ## Pairwise Fragment Joins with Connected Components
 
-**Date:** January 2026
-**Version:** 2.0 (Simplified)
+**Date:** January 2026 (updated 2026-03-13)
+**Version:** 2.0 (Simplified) — Active/Implemented
 **Branch:** `claude/searchable-corrections-sync`
 **Supersedes:** JOINS_TECHNICAL_SPEC.md (v1.0 - never implemented)
 

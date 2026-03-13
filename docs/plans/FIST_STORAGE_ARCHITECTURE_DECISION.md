@@ -1,7 +1,7 @@
 # FIST Data Storage Architecture Decision
 
-> **Status:** Awaiting expert review
-> **Date:** 2026-02-12
+> **Status:** Completed — SQLite sidecar approach selected and shipped
+> **Date:** 2026-02-12 (updated 2026-03-13)
 > **Context:** Deciding how GenizahSearch should store and access FIST enrichment data
 > **Stakeholders:** GenizahSearch developer, NLI data team
 

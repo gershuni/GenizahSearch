@@ -1,5 +1,7 @@
 # Codebase Index
 
+> Last updated: 2026-03-13
+
 Auto-generated index of classes and methods.
 
 ## genizah_app.py

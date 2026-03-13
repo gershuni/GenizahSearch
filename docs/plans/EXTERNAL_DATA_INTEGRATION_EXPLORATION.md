@@ -1,7 +1,7 @@
 # External Data Integration Exploration
 
-> **Status:** Exploration Phase
-> **Date:** February 2026
+> **Status:** Completed (PGP, FJMS, NLI all integrated in v5.8.0-v6.0.0)
+> **Date:** February 2026 (updated 2026-03-13)
 > **Purpose:** Document available external data sources for GenizahSearch enrichment
 
 ---

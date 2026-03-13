@@ -1,8 +1,8 @@
 # Technical Specification: Joins System
 ## A System for Managing Relationships Between Cairo Genizah Manuscripts
 
-**Date:** January 2026
-**Version:** 1.0
+**Date:** January 2026 (updated 2026-03-13)
+**Version:** 1.0 — Superseded by JOINS_SIMPLIFIED_SPEC.md v2.0
 **Purpose:** This document captures the experience of implementing a Joins system, including goals, methods, problems encountered, and recommendations for future implementation.
 
 ---

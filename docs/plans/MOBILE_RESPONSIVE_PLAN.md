@@ -1,5 +1,8 @@
 # Mobile Responsive Design Plan - GenizahSearch
 
+> **Status:** Planned (not yet started)
+> **Date:** 2025 (updated 2026-03-13)
+>
 > **UX/UI Expert Review**: This document has been enhanced with 2025 best practices from leading UX/UI guidelines including Apple HIG, Google Material Design, and WCAG accessibility standards.
 
 ---

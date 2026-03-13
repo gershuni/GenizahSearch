@@ -1,7 +1,7 @@
 # FIST Database Integration Design
 
-> **Status:** Design Phase
-> **Date:** February 2026
+> **Status:** Completed (shipped v5.8.0-v6.1.0, Feb 2026)
+> **Date:** February 2026 (updated 2026-03-13)
 > **Source:** FIST.db (Friedberg Image and Study Tool database from NLI)
 
 ---
