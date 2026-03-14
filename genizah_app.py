@@ -25864,11 +25864,9 @@ class GenizahGUI(QMainWindow):
                     self._catalog_undated_cb.blockSignals(True)
                     self._catalog_undated_cb.setChecked(self._catalog_include_undated)
                     self._catalog_undated_cb.blockSignals(False)
-                # Restore sidebar visible state: author/work inputs
-                if cat.get('author') and hasattr(self, 'catalog_author_input'):
-                    self.catalog_author_input.setText(cat['author'])
-                if cat.get('work') and hasattr(self, 'catalog_work_input'):
-                    self.catalog_work_input.setText(cat['work'])
+                # Note: catalog_author_input / catalog_work_input are search filter
+                # boxes, not display fields. The selected author/work is shown via
+                # the chip bar. Don't populate these with query keys (often person_ids).
                 # Restore text filter chips
                 if any([self._catalog_text_all, self._catalog_text_any, self._catalog_text_not]):
                     if hasattr(self, '_catalog_render_text_chips'):
