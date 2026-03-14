@@ -290,6 +290,20 @@ def create_layout():
                 from web.auth_state import create_auth_buttons
                 create_auth_buttons()
 
+            # Language Toggle
+            def toggle_lang():
+                current = get_language()
+                new_lang = 'en' if current == 'he' else 'he'
+                try:
+                    app.storage.user['ui_language'] = new_lang
+                except Exception:
+                    pass
+                set_language(new_lang)
+                ui.navigate.reload()
+
+            lang_label = "EN" if get_language() == 'he' else "\u05E2\u05D1"
+            ui.button(lang_label, on_click=toggle_lang).props('flat round text-color=white').tooltip(tr('Switch language')).classes('lang-btn-header')
+
             # Help Button (hidden on mobile via CSS)
             ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
         return section
@@ -409,24 +423,6 @@ def create_layout():
 
             # Footer Section
             with ui.column().classes('sidebar-footer gap-4'):
-                # Language Toggle
-                def toggle_lang():
-                    current = get_language()
-                    new_lang = 'en' if current == 'he' else 'he'
-                    try:
-                        app.storage.user['ui_language'] = new_lang
-                    except Exception:
-                        pass
-                    set_language(new_lang)
-                    ui.navigate.reload()
-
-                lang_btn_text = "English" if get_language() == 'he' else "עברית"
-                with ui.row().classes('w-full items-center justify-center gap-2 cursor-pointer opacity-80 hover:opacity-100').props(
-                    'role=button tabindex=0'
-                ).on('click', toggle_lang).on('keydown.enter', toggle_lang).on('keydown.space', toggle_lang):
-                    ui.icon('translate').classes('text-lg')
-                    ui.label(lang_btn_text).classes('text-sm font-medium')
-
                 # Translation Toggle (show/hide machine translations)
                 show_translations = False
                 try:
