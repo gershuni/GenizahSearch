@@ -10,7 +10,8 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ## What's New in Version 6.5.1?
 
-### v6.5.1: Bug Fixes
+### v6.5.1: Bug Fixes & Session Restore
+* **Session restore improvements:** Browse tabs (Shelfmark + Identification) and composition search summary now fully persist across restarts; active tab is restored (desktop)
 * **Composition search navigation:** Fixed missing next/prev in ResultDialog for filtered and appendix results (desktop)
 * **Web parallels stability:** Fixed parent_slot crash when navigating away from composition search page
 

@@ -6,6 +6,12 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [6.5.1] - 2026-03-14
 
+### Improvements
+
+- **Desktop session persistence — browse tabs**: Browse by Shelfmark now restores the last viewed manuscript on restart. Browse by Identification restores domain, author, work, date, and text filters
+- **Desktop session persistence — composition search**: Composition search now restores the results summary bar showing elapsed time and match counts
+- **Desktop session persistence — active tab**: The last active tab is restored on restart (previously always returned to Search tab)
+
 ### Bug Fixes
 
 - **Desktop composition search — ResultDialog navigation**: Fixed missing next/prev navigation when opening filtered (high-frequency) results. The tree traversal now recursively descends through all levels including filtered reason sub-groups and lazy-loaded appendix groups

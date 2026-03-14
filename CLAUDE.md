@@ -207,7 +207,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
-- March 2026: v6.5.1 Bug fixes -- desktop composition ResultDialog nav for filtered/appendix results, web parallels parent_slot timer crash
+- March 2026: v6.5.1 Bug fixes + session restore -- desktop composition ResultDialog nav for filtered/appendix results, web parallels parent_slot timer crash, session persistence for browse tabs/composition summary/active tab
 - March 2026: v6.5.0 Search UX & Filtered Search -- focused search by manuscript properties (domain/author/work/date/material), ~580K Dicta translations (Hebrew↔English) for catalog data, translation toggle, browse-to-search navigation, citation reminder popup (both apps)
 - March 2026: v6.2.0 Power-User UX -- composition search UX (timer, ETA, cancel with partial results, printed badge/filter), session persistence, search history dropdowns, desktop notifications, sleep prevention, copy menu, Hebrew library names (both apps)
 - March 2026: v6.1.0/v6.1.1 Catalog Browse & Navigation -- faceted catalog browsing by domain/author/work, free-text filter, FIST v5.0.0 enrichment, 100x faster domain queries, async desktop catalog
