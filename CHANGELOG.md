@@ -8,8 +8,8 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ### Improvements
 
-- **Desktop session persistence — browse tabs**: Browse by Shelfmark now restores the last viewed manuscript on restart. Browse by Identification restores domain, author, work, date, and text filters
-- **Desktop session persistence — composition search**: Composition search now restores the results summary bar showing elapsed time and match counts
+- **Desktop session persistence — browse tabs**: Browse by Shelfmark restores the last viewed manuscript (text + images) on restart. Browse by Identification restores domain tree selection, date range, text filter chips, and undated checkbox
+- **Desktop session persistence — composition search**: Composition search restores results (flat view), summary bar, sort mode, and appendix threshold
 - **Desktop session persistence — active tab**: The last active tab is restored on restart (previously always returned to Search tab)
 
 ### Bug Fixes
