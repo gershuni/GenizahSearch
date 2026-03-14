@@ -26065,7 +26065,7 @@ class GenizahGUI(QMainWindow):
                 # Check for lazy-loaded (virtual) children stored in UserRole+200
                 lazy_items = node.data(0, Qt.ItemDataRole.UserRole + 200)
                 if lazy_items:
-                    for lazy_item in lazy_items:
+                    for lazy_item in self._sort_comp_items(lazy_items):
                         collect_from_data(lazy_item)
                 else:
                     # Category/reason node — descend into children
