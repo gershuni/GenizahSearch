@@ -25615,7 +25615,27 @@ class GenizahGUI(QMainWindow):
                 # Pre-search filters (Phase 45-03) -- shared across search/composition
                 'pre_search_filters': getattr(self, 'pre_search_filters', {}),
                 'word_excluded_sys_ids': sorted(getattr(self, 'word_excluded_sys_ids', set())),
+                'active_tab': self.tabs.currentIndex() if hasattr(self, 'tabs') else 0,
+                'browse_shelfmark': {
+                    'sys_id': self.browse_sys_input.text().strip() if hasattr(self, 'browse_sys_input') else '',
+                    'shelfmark': self.browse_shelf_input.text().strip() if hasattr(self, 'browse_shelf_input') else '',
+                    'fl_id': self.browse_fl_input.text().strip() if hasattr(self, 'browse_fl_input') else '',
+                    'last_field': getattr(self, 'last_browse_field', 'shelf'),
+                },
+                'browse_catalog': {
+                    'domain': getattr(self, '_catalog_current_domain', None),
+                    'author': getattr(self, '_catalog_current_author', None),
+                    'work': getattr(self, '_catalog_current_work', None),
+                    'date_from': getattr(self, '_catalog_date_from', None),
+                    'date_to': getattr(self, '_catalog_date_to', None),
+                    'include_undated': getattr(self, '_catalog_include_undated', False),
+                    'text_all': getattr(self, '_catalog_text_all', []),
+                    'text_any': getattr(self, '_catalog_text_any', []),
+                    'text_not': getattr(self, '_catalog_text_not', []),
+                },
             }
+            # Add composition summary text
+            state_dict['composition_search']['summary_text'] = getattr(self, 'comp_summary_text', '')
             save_session_state(state_dict)
         except Exception as e:
             logger.error("Failed to save session state: %s", e)
@@ -25647,7 +25667,11 @@ class GenizahGUI(QMainWindow):
             # Check if there's anything meaningful to restore
             reg = state.get('regular_search', {})
             comp = state.get('composition_search', {})
-            has_data = reg.get('results') or comp.get('results') or comp.get('source_text')
+            browse = state.get('browse_shelfmark', {})
+            cat = state.get('browse_catalog', {})
+            has_data = (reg.get('results') or comp.get('results') or comp.get('source_text')
+                        or browse.get('sys_id') or browse.get('shelfmark')
+                        or cat.get('domain') or cat.get('author') or cat.get('work'))
             if not has_data:
                 return
 
@@ -25759,6 +25783,53 @@ class GenizahGUI(QMainWindow):
                 self.search_progress.setValue(n_total)
                 QApplication.processEvents()
 
+            # Restore composition summary text (elapsed time, match counts)
+            if comp.get('summary_text'):
+                self.comp_summary_text = comp['summary_text']
+                self.comp_progress.setVisible(True)
+                self.comp_progress.setRange(0, 1)
+                self.comp_progress.setValue(1)
+                self.comp_progress.setFormat(self.comp_summary_text)
+
+            # Restore Browse by Shelfmark
+            browse = state.get('browse_shelfmark', {})
+            if browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id'):
+                if browse.get('sys_id'):
+                    self.browse_sys_input.setText(browse['sys_id'])
+                if browse.get('shelfmark'):
+                    self.browse_shelf_input.setText(browse['shelfmark'])
+                if browse.get('fl_id'):
+                    self.browse_fl_input.setText(browse['fl_id'])
+                self.last_browse_field = browse.get('last_field', 'shelf')
+                # Defer browse_load to after UI is settled
+                QTimer.singleShot(300, self.browse_load)
+
+            # Restore catalog browse filters (Browse by Identification)
+            cat = state.get('browse_catalog', {})
+            if any([cat.get('domain'), cat.get('author'), cat.get('work'),
+                    cat.get('date_from'), cat.get('date_to'),
+                    cat.get('text_all'), cat.get('text_any'), cat.get('text_not')]):
+                self._catalog_current_domain = cat.get('domain')
+                self._catalog_current_author = cat.get('author')
+                self._catalog_current_work = cat.get('work')
+                self._catalog_date_from = cat.get('date_from')
+                self._catalog_date_to = cat.get('date_to')
+                self._catalog_include_undated = cat.get('include_undated', False)
+                self._catalog_text_all = cat.get('text_all', [])
+                self._catalog_text_any = cat.get('text_any', [])
+                self._catalog_text_not = cat.get('text_not', [])
+                # Populate date input fields
+                if cat.get('date_from') and hasattr(self, '_catalog_date_from_input'):
+                    self._catalog_date_from_input.setText(str(cat['date_from']))
+                if cat.get('date_to') and hasattr(self, '_catalog_date_to_input'):
+                    self._catalog_date_to_input.setText(str(cat['date_to']))
+                # Update undated checkbox
+                if hasattr(self, '_catalog_undated_cb'):
+                    self._catalog_undated_cb.setChecked(self._catalog_include_undated)
+                # Defer catalog refresh to after UI is settled
+                QTimer.singleShot(400, self._catalog_refresh)
+                QTimer.singleShot(450, self._catalog_update_chips)
+
             # Restore pre-search filters (Phase 45-03)
             self.pre_search_filters = state.get('pre_search_filters', {})
             self.word_excluded_sys_ids = set(state.get('word_excluded_sys_ids', []))
@@ -25770,6 +25841,11 @@ class GenizahGUI(QMainWindow):
                 worker.start()
             else:
                 self._update_filter_chip_bar()
+
+            # Restore active tab
+            active_tab_idx = state.get('active_tab')
+            if active_tab_idx is not None and 0 <= active_tab_idx < self.tabs.count():
+                self.tabs.setCurrentIndex(active_tab_idx)
 
             # Hide restore progress bar and show "Session restored" in statusbar
             self.search_progress.setVisible(False)
