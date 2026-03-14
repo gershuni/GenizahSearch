@@ -49,7 +49,6 @@ See PROJECT.md Key Decisions table for full history.
 
 ### Pending Todos
 
-- JA diacritic dots normalization in search
 - Migrate desktop corrections fetch to shared corrections_service
 - CUT-01: Remove read-only PGP tables from Supabase (legacy desktop users depend on them)
 - Date range filter using CopyToDate (21K rows) — show "from-to" date display
