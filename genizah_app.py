@@ -25769,21 +25769,18 @@ class GenizahGUI(QMainWindow):
             self.comp_sort_mode = comp.get('sort_mode', 'score')
             self.comp_sort_reverse = comp.get('sort_reverse', True)
 
-            # Restore flat mode and appendix threshold before grouping decision
-            if 'flat_mode' in comp and hasattr(self, 'chk_comp_flat'):
-                self.chk_comp_flat.blockSignals(True)
-                self.chk_comp_flat.setChecked(comp['flat_mode'])
-                self.chk_comp_flat.blockSignals(False)
+            # Restore appendix threshold (flat mode is forced during restore)
             if 'appendix_threshold' in comp and hasattr(self, 'spin_filter'):
                 self.spin_filter.blockSignals(True)
                 self.spin_filter.setValue(comp['appendix_threshold'])
                 self.spin_filter.blockSignals(False)
 
-            # Restore composition results — display flat first, then regroup
+            # Restore composition results — flat display (grouping is lost on save)
             if comp.get('results') or comp.get('filtered_results'):
-                self.comp_raw_items = comp['results']
+                self.comp_raw_items = comp.get('results', [])
                 self.comp_raw_filtered = comp.get('filtered_results', [])
-                # Display flat immediately (guaranteed to work)
+                # Display flat — grouping state is not persisted, user can
+                # toggle the flat checkbox or re-run to get grouped view
                 self.comp_has_grouped_results = False
                 self.comp_grouped_main = self.comp_raw_items
                 self.comp_grouped_appendix = {}
@@ -25791,16 +25788,17 @@ class GenizahGUI(QMainWindow):
                 self.comp_grouped_filtered_main = self.comp_raw_filtered
                 self.comp_grouped_filtered_appendix = {}
                 self.comp_grouped_filtered_summary = {}
+                # Force flat mode checkbox during restore so display matches state
+                if hasattr(self, 'chk_comp_flat'):
+                    self.chk_comp_flat.blockSignals(True)
+                    self.chk_comp_flat.setChecked(True)
+                    self.chk_comp_flat.blockSignals(False)
                 self.display_comp_results(
                     self.comp_raw_items, {}, {},
                     self.comp_raw_filtered, {}, {}
                 )
                 self.search_progress.setValue(n_total)
                 QApplication.processEvents()
-                # Schedule deferred grouping if not flat mode
-                if not self.chk_comp_flat.isChecked() and hasattr(self, 'searcher') and self.searcher:
-                    QTimer.singleShot(1000, lambda: self.start_grouping(
-                        self.comp_raw_items, self.comp_raw_filtered))
 
             # Restore composition summary text (elapsed time, match counts)
             if comp.get('summary_text'):
