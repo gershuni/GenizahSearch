@@ -25671,7 +25671,7 @@ class GenizahGUI(QMainWindow):
             comp = state.get('composition_search', {})
             browse = state.get('browse_shelfmark', {})
             cat = state.get('browse_catalog', {})
-            has_data = (reg.get('results') or comp.get('results') or comp.get('source_text')
+            has_data = (reg.get('results') or comp.get('results') or comp.get('filtered_results') or comp.get('source_text')
                         or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
                         or cat.get('domain') or cat.get('author') or cat.get('work')
                         or cat.get('date_from') or cat.get('date_to')
@@ -25780,7 +25780,7 @@ class GenizahGUI(QMainWindow):
                 self.spin_filter.blockSignals(False)
 
             # Restore composition results — display flat first, then regroup
-            if comp.get('results'):
+            if comp.get('results') or comp.get('filtered_results'):
                 self.comp_raw_items = comp['results']
                 self.comp_raw_filtered = comp.get('filtered_results', [])
                 # Display flat immediately (guaranteed to work)
