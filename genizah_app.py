@@ -25670,8 +25670,11 @@ class GenizahGUI(QMainWindow):
             browse = state.get('browse_shelfmark', {})
             cat = state.get('browse_catalog', {})
             has_data = (reg.get('results') or comp.get('results') or comp.get('source_text')
-                        or browse.get('sys_id') or browse.get('shelfmark')
-                        or cat.get('domain') or cat.get('author') or cat.get('work'))
+                        or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
+                        or cat.get('domain') or cat.get('author') or cat.get('work')
+                        or cat.get('date_from') or cat.get('date_to')
+                        or cat.get('text_all') or cat.get('text_any') or cat.get('text_not')
+                        or cat.get('include_undated'))
             if not has_data:
                 return
 
@@ -25768,18 +25771,34 @@ class GenizahGUI(QMainWindow):
             if comp.get('results'):
                 self.comp_raw_items = comp['results']
                 self.comp_raw_filtered = comp.get('filtered_results', [])
-                # Display in flat mode (grouping state was not persisted)
-                self.comp_has_grouped_results = False
-                self.comp_grouped_main = self.comp_raw_items
-                self.comp_grouped_appendix = {}
-                self.comp_grouped_summary = {}
-                self.comp_grouped_filtered_main = self.comp_raw_filtered
-                self.comp_grouped_filtered_appendix = {}
-                self.comp_grouped_filtered_summary = {}
-                self.display_comp_results(
-                    self.comp_raw_items, {}, {},
-                    self.comp_raw_filtered, {}, {}
-                )
+                # Re-run grouping thread to restore grouped view
+                if not self.chk_comp_flat.isChecked() and hasattr(self, 'searcher') and self.searcher:
+                    self.comp_progress.setVisible(True)
+                    self.comp_progress.setRange(0, 0)
+                    self.comp_progress.setFormat(tr("Grouping compositions..."))
+                    self.group_thread = GroupingThread(
+                        self.searcher, self.comp_raw_items,
+                        self.spin_filter.value(),
+                        filtered_items=self.comp_raw_filtered
+                    )
+                    self.group_thread.progress_signal.connect(self.on_comp_progress)
+                    self.group_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
+                    self.group_thread.finished_signal.connect(self.on_comp_finished)
+                    self.group_thread.error_signal.connect(self.on_grouping_error)
+                    self.group_thread.start()
+                else:
+                    # Flat mode or no searcher — display ungrouped
+                    self.comp_has_grouped_results = False
+                    self.comp_grouped_main = self.comp_raw_items
+                    self.comp_grouped_appendix = {}
+                    self.comp_grouped_summary = {}
+                    self.comp_grouped_filtered_main = self.comp_raw_filtered
+                    self.comp_grouped_filtered_appendix = {}
+                    self.comp_grouped_filtered_summary = {}
+                    self.display_comp_results(
+                        self.comp_raw_items, {}, {},
+                        self.comp_raw_filtered, {}, {}
+                    )
                 self.search_progress.setValue(n_total)
                 QApplication.processEvents()
 
@@ -25807,7 +25826,7 @@ class GenizahGUI(QMainWindow):
             # Restore catalog browse filters (Browse by Identification)
             cat = state.get('browse_catalog', {})
             if any([cat.get('domain'), cat.get('author'), cat.get('work'),
-                    cat.get('date_from'), cat.get('date_to'),
+                    cat.get('date_from'), cat.get('date_to'), cat.get('include_undated'),
                     cat.get('text_all'), cat.get('text_any'), cat.get('text_not')]):
                 self._catalog_current_domain = cat.get('domain')
                 self._catalog_current_author = cat.get('author')
@@ -25818,15 +25837,22 @@ class GenizahGUI(QMainWindow):
                 self._catalog_text_all = cat.get('text_all', [])
                 self._catalog_text_any = cat.get('text_any', [])
                 self._catalog_text_not = cat.get('text_not', [])
-                # Populate date input fields
-                if cat.get('date_from') and hasattr(self, '_catalog_date_from_input'):
-                    self._catalog_date_from_input.setText(str(cat['date_from']))
-                if cat.get('date_to') and hasattr(self, '_catalog_date_to_input'):
-                    self._catalog_date_to_input.setText(str(cat['date_to']))
-                # Update undated checkbox
+                # Block signals on date/undated widgets to prevent duplicate refreshes
+                if hasattr(self, '_catalog_date_from_input'):
+                    self._catalog_date_from_input.blockSignals(True)
+                    if cat.get('date_from'):
+                        self._catalog_date_from_input.setText(str(cat['date_from']))
+                    self._catalog_date_from_input.blockSignals(False)
+                if hasattr(self, '_catalog_date_to_input'):
+                    self._catalog_date_to_input.blockSignals(True)
+                    if cat.get('date_to'):
+                        self._catalog_date_to_input.setText(str(cat['date_to']))
+                    self._catalog_date_to_input.blockSignals(False)
                 if hasattr(self, '_catalog_undated_cb'):
+                    self._catalog_undated_cb.blockSignals(True)
                     self._catalog_undated_cb.setChecked(self._catalog_include_undated)
-                # Defer catalog refresh to after UI is settled
+                    self._catalog_undated_cb.blockSignals(False)
+                # Single deferred refresh after UI is settled
                 QTimer.singleShot(400, self._catalog_refresh)
                 QTimer.singleShot(450, self._catalog_update_chips)
 
