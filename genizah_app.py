@@ -26022,16 +26022,55 @@ class GenizahGUI(QMainWindow):
                 nonlocal target_index
                 target_index = len(flat_list) - 1
 
+        def collect_from_data(item_data):
+            """Extract leaf-level results from a manuscript/part data dict (for lazy nodes)."""
+            pages = item_data.get('pages', [])
+            if pages:
+                for p in pages:
+                    raw_h = p.get('raw_header', '')
+                    sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
+                    flat_list.append({
+                        'uid': p.get('uid', sid),
+                        'raw_header': raw_h,
+                        'text': p.get('text', ''),
+                        'full_text': None,
+                        'source_ctx': p.get('source_ctx', ''),
+                        'highlight_pattern': p.get('highlight_pattern'),
+                        'display': {'id': sid, 'shelfmark': shelf, 'title': title,
+                                    'img': p_num, 'source': p.get('src_lbl', 'Genizah Lab')}
+                    })
+            else:
+                # Single-page manuscript without pages array
+                raw_h = item_data.get('raw_header', '')
+                sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
+                flat_list.append({
+                    'uid': item_data.get('uid', sid),
+                    'raw_header': raw_h,
+                    'text': item_data.get('text', ''),
+                    'full_text': None,
+                    'source_ctx': item_data.get('source_ctx', ''),
+                    'highlight_pattern': item_data.get('highlight_pattern'),
+                    'display': {'id': sid, 'shelfmark': shelf, 'title': title,
+                                'img': p_num, 'source': item_data.get('src_lbl', 'Genizah Lab')}
+                })
+
         def traverse_tree(node):
-            """Recursively traverse all tree nodes, collecting data from leaf/manuscript nodes."""
+            """Recursively traverse all tree nodes, collecting data from leaf/manuscript nodes.
+            Also handles lazy-loaded appendix groups (UserRole+200) whose children aren't instantiated."""
             node_data = node.data(0, Qt.ItemDataRole.UserRole)
             if node_data:
                 # Node has result data — let collect_node_data handle it
                 collect_node_data(node)
             else:
-                # Category/reason node without result data — descend into children
-                for i in range(node.childCount()):
-                    traverse_tree(node.child(i))
+                # Check for lazy-loaded (virtual) children stored in UserRole+200
+                lazy_items = node.data(0, Qt.ItemDataRole.UserRole + 200)
+                if lazy_items:
+                    for lazy_item in lazy_items:
+                        collect_from_data(lazy_item)
+                else:
+                    # Category/reason node — descend into children
+                    for i in range(node.childCount()):
+                        traverse_tree(node.child(i))
 
         root = self.comp_tree.invisibleRootItem()
         for i in range(root.childCount()):

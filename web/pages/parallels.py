@@ -1936,14 +1936,12 @@ def create_parallels_page(initial_text: str = None):
         await load_selected_refs(refs, None)
 
     def update_ui():
+        """Update progress UI. Returns False if the client is gone and the loop should stop."""
         try:
             # Check if client still exists
             _ = progress_bar.client
         except (RuntimeError, Exception):
-            # Client deleted, cancel the update loop
-            if p_state.update_timer:
-                p_state.update_timer.cancel()
-            return
+            return False
 
         try:
             if p_state.is_running:
@@ -1994,7 +1992,8 @@ def create_parallels_page(initial_text: str = None):
                     p_state.finished_animation_shown = True
                     # Don't auto-hide progress bar -- summary stays visible until next search
         except (RuntimeError, Exception):
-            pass  # Client may be deleted
+            return False  # Client deleted — stop the loop
+        return True
 
     # Use asyncio loop for progress updates instead of ui.timer to avoid
     # "parent slot of the element has been deleted" RuntimeError on navigation
@@ -2002,9 +2001,7 @@ def create_parallels_page(initial_text: str = None):
         p_state.update_timer.cancel()
     async def _update_loop():
         while True:
-            try:
-                update_ui()
-            except (RuntimeError, Exception):
+            if not update_ui():
                 break
             await asyncio.sleep(0.05)
     p_state.update_timer = asyncio.ensure_future(_update_loop())
