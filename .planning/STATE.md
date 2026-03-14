@@ -5,7 +5,7 @@ milestone_name: Transcription Search
 status: not_started
 stopped_at: null
 last_updated: "2026-03-14T21:00:00.000Z"
-last_activity: 2026-03-14 - Completed v6.5.0 milestone archival
+last_activity: 2026-03-14 - Completed quick task 20: Move language change button to top bar in web app
 progress:
   total_phases: 4
   completed_phases: 0
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 Milestone: v7.0.0 Transcription Search
 Phase: None started
 Status: Between milestones — v6.5.0 shipped, v7.0.0 not yet planned
-Last activity: 2026-03-14 - Completed v6.5.0 milestone archival
+Last activity: 2026-03-14 - Completed quick task 20: Move language change button to top bar in web app
 
 ## Performance Metrics
 
