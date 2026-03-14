@@ -8,18 +8,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v6.5.0 Search UX & Filtered Search
-
-**Goal:** Improve the daily search experience based on power user feedback, add CreationType visibility, implement bidirectional filtered search, and translate all data via Dicta API for multilingual access.
-
-**Target features:**
-- Search UX & composition polish: duration display, ETA, partial results on cancel, chunk count, min-chunks filter, CreationType badge
-- Session persistence: restore state + exclusions on reopen, search history
-- Quick UX wins: desktop notification, prevent sleep, Hebrew library names, copy from compact results
-- Filtered search context: bidirectional (search pre-filter + browse "search within"), domain/author/work/date/CreationType filters across all search modes
-- Dicta translation: translate all data via API for multilingual display and search completeness
-
-## Next Milestone: v7.0.0 Transcription Search
+## Current Milestone: v7.0.0 Transcription Search
 
 **Goal:** Import FJMS transcriptions and build unified searchable index over all human transcription text alongside OCR.
 
@@ -28,31 +17,33 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Unified Tantivy index (PGP + FJMS + user corrections) with source badges and ranking
 - Pre-built index distribution and desktop upgrade path
 
-## Current State (after v6.0.0 shipped)
+## Current State (after v6.5.0 shipped)
 
-**Shipped:** v6.0.0 Local Data Architecture (2026-02-22, git tag v6.0.0)
-- PGP data migrated to local pgp.db sidecar (147MB, 104K rows) -- zero Supabase dependency for read-only data
-- PgpService with sub-millisecond local queries replacing 50-200ms Supabase API calls
-- FJMS catalog descriptions expanded (4 new tables, ~1.7M rows) with dedicated 5-section scholarly dialog
-- Desktop offline PGP browsing verified, sidecar update mechanism for future data updates
-- All desktop Qt lifecycle crashes fixed, 200-result cap replaced with PAGE_SIZE=50 pagination
-- Performance optimizations: parallel NLI fetch, browse crossref parallelization, FL ID O(1) index, variant cache unification
-- PostHog analytics integrated (env-var gated, privacy-first: maskAllInputs + identified_only)
-- IsNotGenizah badge removed from UI (data preserved in sidecar)
+**Shipped:** v6.5.0 Search UX & Filtered Search (2026-03-14, git tag v6.5.0)
+- Search UX overhaul: elapsed timer, ETA, partial results on cancel, chunk count, min-chunks filter, 3-state printed filter, CreationType badge (both apps)
+- Session persistence: full state + exclusion restore on reopen, search/composition history dropdowns (both apps)
+- Quick UX wins: desktop notifications, sleep prevention, Hebrew library names (81 codes), copy context menu
+- Bidirectional filtered search: pre-search filtering by domain/author/work/date/material across all modes including parallels, browse-to-search navigation
+- Dicta translation: ~580K translations across all scholarly data with translation toggle and per-record display
+- Translation QA: 10-heuristic QC module, 12,827 data fixes applied
 
 **Architecture:**
-- Web: NiceGUI -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI) + Supabase (community features only)
+- Web: NiceGUI -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI + libraries_translations.db) + Supabase (community features only)
 - Desktop: PyQt6 -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI) + Supabase (community features only)
-- Shared: genizah_core.py (~8,300 lines -- search engine, metadata, variants, Responsa)
+- Shared: genizah_core.py (~8,300 lines -- search engine, metadata, variants, Responsa, filtered search)
 - Shared: shared/document_service.py (PGP data from pgp.db SQLite)
 - Shared: shared/corrections_service.py (corrections data access)
 - Shared: shared/fjms_service.py (FJMS domain, join, catalog, bibliography queries from fjms_enrichment.db)
 - Shared: shared/nli_crossref_service.py (NLI crossref, images, metadata, library URLs from nli_crossref.db)
+- Shared: shared/translation_service.py (Dicta translations from pgp.db, fjms_enrichment.db, libraries_translations.db)
+- Shared: shared/dicta_client.py (Dicta Translate API client with few-shot scholarly prompts)
+- Shared: shared/translation_qc.py (translation QC heuristics)
 
 **Data:**
-- pgp.db: 35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments (v1.0.0)
+- pgp.db: 35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments, 34,954 translations (v1.0.0)
 - manuscripts (libraries.csv): ~217,000 records
-- fjms_enrichment.db: 390K domains, 48K joins, 500K catalog, 542K bibliography, 64K catalog_refs, ~1.7M new catalog detail rows (v3.0.0)
+- libraries_translations.db: 184,514 title translations (76MB)
+- fjms_enrichment.db: 390K domains, 48K joins, 685K catalog (37 cols), 542K bib, 64K catalog_refs, ~260K translations (v5.0.0)
 - nli_crossref.db: 815K NLI images, 141K Cambridge manifests, 28K Manchester LUNA, 453 JTS DPUL (v1.2.0)
 
 ## Requirements
@@ -126,16 +117,13 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - PostHog analytics integrated alongside Google Analytics -- v6.0.0
 - Desktop crash fixes (sip.isdeleted guards on all Qt lifecycle sites) -- v6.0.0
 - Performance: parallel NLI fetch, browse crossref parallelization, variant cache unification -- v6.0.0
+- Search UX: elapsed timer, ETA, partial results on cancel, chunk count, min-chunks filter, CreationType badge (both apps) -- v6.5.0
+- Session persistence: full state + exclusion restore on reopen, search/composition history dropdowns (both apps) -- v6.5.0
+- Quick UX wins: desktop notifications, sleep prevention, Hebrew library names (81 codes), copy context menu -- v6.5.0
+- Bidirectional filtered search: pre-search filtering by domain/author/work/date/material across all modes (both apps) -- v6.5.0
+- Dicta translation: ~580K translations for multilingual access with translation toggle (both apps) -- v6.5.0
 
 ### Active
-
-- Search UX & composition polish: duration display, ETA, partial results on cancel, chunk count, min-chunks filter, CreationType badge (both apps)
-- Session persistence: restore state + exclusions on reopen, search history (both apps)
-- Quick UX wins: desktop notification, prevent sleep, Hebrew library names, copy from compact results
-- Filtered search context: bidirectional pre-search filtering (domain/author/work/date/CreationType) across all search modes (both apps)
-- Dicta translation: translate all scholarly data via Dicta API for multilingual access (both apps)
-
-### Planned (v7.0.0)
 
 - FJMS transcription import: ~30K transcriptions from FIST.db into fjms_enrichment.db
 - Transcription search: unified Tantivy index over PGP + FJMS + user transcription text, prioritizing human transcriptions (both apps)
@@ -154,7 +142,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - FJMS full texts as version selector sources -- deferred (catalog descriptions only)
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
 - FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
-- Search tabs / multi-search workspace (יג) -- deferred, too architectural for v6.5.0
+- Search tabs / multi-search workspace (יג) -- deferred, too architectural
 
 ## Context
 
@@ -194,10 +182,11 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Separate nli_crossref.db sidecar | Different provenance and update cycles from FJMS | Good |
 | FGP ≠ FL (crossref FGPImageNumberId not usable for IIIF) | Friedberg photo numbers are different numbering system | Lesson Learned |
 | Phase 13 deferred | Transcription index build too slow for desktop | Revisit in v7.0.0 |
-| v6.5.0 UX-first ordering | Power user feedback: search UX pain > catalog features | In progress |
-| Bidirectional filtered search | Pre-filter from search + "search within" from browse — same mechanism | Planned (Phase 45) |
-| Dicta Translation for all data | Multilingual access + search completeness, careful with bilingual fields | Planned (Phase 46) |
+| v6.5.0 UX-first ordering | Power user feedback: search UX pain > catalog features | Good — addressed 15/17 user requests |
+| Bidirectional filtered search | Pre-filter from search + "search within" from browse — same restrict_sys_ids mechanism | Good |
+| Dicta Translation for all data | Multilingual access + search completeness, scholarly few-shot prompts | Good — 580K translations, 0 failures |
+| Translation QA with heuristic checks | Catch hallucinations, script mismatches, length anomalies before display | Good — found and fixed 12,827 issues |
 | Transcription deferred to v7.0.0 | v6.5.0 focuses on UX + filtering; transcription is separate milestone | Good |
 
 ---
-*Last updated: 2026-03-01 after v6.5.0 milestone scoped*
+*Last updated: 2026-03-14 after v6.5.0 milestone shipped*

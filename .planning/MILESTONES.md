@@ -1,4 +1,28 @@
 # Project Milestones: GenizahSearch
+## v6.5.0 Search UX & Filtered Search (Shipped: 2026-03-14)
+
+**Delivered:** Overhauled the daily search experience based on power user feedback — composition progress display with ETA, partial results on cancel, session persistence (restoring state including 5K+ exclusions), bidirectional filtered search by scholarly categories, and ~580K Dicta translations for multilingual access across all scholarly data.
+
+**Phases completed:** 42-46 (26 plans total, including 6 UAT gap closure plans)
+
+**Key accomplishments:**
+- Search UX overhaul: elapsed timer, ETA, partial results on cancel, chunk count, min-chunks filter, 3-state printed filter, CreationType badge (both apps)
+- Session persistence: full state + exclusion restore on reopen, search/composition history dropdowns (both apps)
+- Quick UX wins: desktop notifications on search completion, sleep prevention during search, Hebrew library names (81 codes), copy context menu
+- Bidirectional filtered search: pre-search filtering by domain/author/work/date/material across all modes including parallels, browse-to-search navigation
+- Dicta translation: ~580K translations (libraries 185K, PGP 35K, FJMS catalog 4K, FJMS descriptions 255K, FJMS running titles 107K) with translation toggle
+- Translation QA: 10-heuristic QC module, audit sampling, user-facing report dialog, 12,827 data fixes applied
+
+**Stats:**
+- 244 commits, 223 files changed, +44,331 / -3,414 lines
+- 5 phases (42-46), 26 plans
+- 15 days (Feb 28 -> Mar 14, 2026)
+- Origin: Power user feedback letter (2026-02-27, 17 requests)
+
+**Git tag:** v6.5.0
+
+---
+
 
 ## v1 External Data Integration (Shipped: 2026-02-07)
 
@@ -194,6 +218,28 @@
 - 14/14 requirements satisfied (audit passed)
 
 **Git tag:** v6.0.0
+
+---
+
+
+## v6.1.0 Catalog Browse & Navigation (Shipped: 2026-02-27)
+
+**Delivered:** Added faceted catalog browsing by domain hierarchy, author, and work title in both web and desktop apps, with FIST v5.0.0 enrichment data (genizah_persons, genizah_titles, code_values) and cross-links between browse and catalog browse pages.
+
+**Phases completed:** 41 (4 plans total)
+
+**Key accomplishments:**
+- Faceted browsing by FJMS domain hierarchy, author (801 from v5.0.0), and work title (663)
+- FIST v5.0.0 enrichment: genizah_persons (2,286), genizah_titles (775), code_values (3,440)
+- FTS5+domain text filter for catalog browse
+- Cross-links between browse page and catalog browse page
+- 72 tests
+
+**Stats:**
+- 1 phase (41), 4 plans
+- 1 day (Feb 27, 2026)
+
+**Git tag:** v6.1.0
 
 ---
 
