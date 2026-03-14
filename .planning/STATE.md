@@ -73,6 +73,7 @@ See PROJECT.md Key Decisions table for full history.
 | 17 | Create bump_version.py script, fix version_info.txt (6.1.1->6.2.0), document in CLAUDE.md | 2026-03-10 | 45e6d801 | [17-create-bump-version-py-script-and-fix-ve](./quick/17-create-bump-version-py-script-and-fix-ve/) |
 | 18 | Fix composition search ResultDialog parent_slot error and missing next/prev for filtered results | 2026-03-13 | a0a8c9d2 | [18-fix-composition-search-resultdialog-pare](./quick/18-fix-composition-search-resultdialog-pare/) |
 | 19 | Fix desktop session restore for browse tabs, composition summary, and active tab | 2026-03-14 | f64690d8 | [19-fix-desktop-session-restore-parallel-sea](./quick/19-fix-desktop-session-restore-parallel-sea/) |
+| 20 | Move language toggle from sidebar to header bar | 2026-03-14 | 55ee8d6d | [20-move-language-change-button-to-top-bar-i](./quick/20-move-language-change-button-to-top-bar-i/) |
 
 ## Session Continuity
 
