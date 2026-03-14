@@ -1,4 +1,4 @@
-# Genizah Search Pro 6.5.0
+# Genizah Search Pro 6.5.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,11 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 6.5.0?
+## What's New in Version 6.5.1?
+
+### v6.5.1: Bug Fixes
+* **Composition search navigation:** Fixed missing next/prev in ResultDialog for filtered and appendix results (desktop)
+* **Web parallels stability:** Fixed parent_slot crash when navigating away from composition search page
 
 ### v6.5.0: Search UX & Filtered Search
 
@@ -126,7 +130,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 6.5.0 | אתר הגניזה של דיקטה
+# Genizah Search Pro 6.5.1 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 

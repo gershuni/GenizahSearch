@@ -4,6 +4,16 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.5.1] - 2026-03-14
+
+### Bug Fixes
+
+- **Desktop composition search — ResultDialog navigation**: Fixed missing next/prev navigation when opening filtered (high-frequency) results. The tree traversal now recursively descends through all levels including filtered reason sub-groups and lazy-loaded appendix groups
+- **Desktop composition search — lazy appendix ordering**: Lazy appendix groups are now sorted before being added to the ResultDialog navigation list, matching the order shown when groups are expanded in the tree
+- **Web parallels page — parent_slot crash**: Fixed "The parent slot of the element has been deleted" RuntimeError by replacing all `ui.timer()` calls with `asyncio` patterns that don't attach to NiceGUI parent slots. The repeating progress timer and one-shot init timers no longer crash when users navigate away from the page
+
+---
+
 ## [6.5.0] - 2026-03-13
 
 ### Milestone: Search UX & Filtered Search
