@@ -21,7 +21,7 @@ milestone_name: Search UX & Filtered Search
 status: in_progress
 stopped_at: Phase 46 complete (all 5 plans done). Citation popup shipped. Working on personal handlist source mapping.
 last_updated: "2026-03-10T18:00:00.000Z"
-last_activity: 2026-03-13 - Completed quick task 18: Fix composition search ResultDialog parent_slot error and missing next/prev for filtered results
+last_activity: 2026-03-14 - Completed quick task 19: Fix desktop session restore for browse tabs, composition summary, and active tab
 progress:
   [██████████] 100%
   completed_phases: 5
@@ -164,11 +164,12 @@ Recent decisions affecting current work:
 | 16 | Fix installer: show directory selection on upgrades, update filename to v6.2.0 | 2026-03-10 | ebb7e2f0 | [16-fix-desktop-installer-add-directory-sele](./quick/16-fix-desktop-installer-add-directory-sele/) |
 | 17 | Create bump_version.py script, fix version_info.txt (6.1.1->6.2.0), document in CLAUDE.md | 2026-03-10 | 45e6d801 | [17-create-bump-version-py-script-and-fix-ve](./quick/17-create-bump-version-py-script-and-fix-ve/) |
 | 18 | Fix composition search ResultDialog parent_slot error and missing next/prev for filtered results | 2026-03-13 | a0a8c9d2 | [18-fix-composition-search-resultdialog-pare](./quick/18-fix-composition-search-resultdialog-pare/) |
+| 19 | Fix desktop session restore for browse tabs, composition summary, and active tab | 2026-03-14 | f64690d8 | [19-fix-desktop-session-restore-parallel-sea](./quick/19-fix-desktop-session-restore-parallel-sea/) |
 
 ## Session Continuity
 
-Last session: 2026-03-13T06:35:39.344Z
-Stopped at: Completed 46-06-PLAN.md
+Last session: 2026-03-14T17:23:00.000Z
+Stopped at: Completed quick task 19 (session restore for browse tabs/composition summary/active tab)
 Resume file: None
 Notes:
   - All 5 phases (42-46) complete, 25/25 plans done
