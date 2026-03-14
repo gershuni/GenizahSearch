@@ -25610,6 +25610,8 @@ class GenizahGUI(QMainWindow):
                     'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
                     'sort_mode': getattr(self, 'comp_sort_mode', 'score'),
                     'sort_reverse': getattr(self, 'comp_sort_reverse', True),
+                    'flat_mode': self.chk_comp_flat.isChecked() if hasattr(self, 'chk_comp_flat') else False,
+                    'appendix_threshold': self.spin_filter.value() if hasattr(self, 'spin_filter') else 5,
                 },
                 'was_interrupted': getattr(self, 'is_comp_running', False),
                 # Pre-search filters (Phase 45-03) -- shared across search/composition
@@ -25767,7 +25769,17 @@ class GenizahGUI(QMainWindow):
             self.comp_sort_mode = comp.get('sort_mode', 'score')
             self.comp_sort_reverse = comp.get('sort_reverse', True)
 
-            # Restore composition results (flat display, no grouping thread needed)
+            # Restore flat mode and appendix threshold before grouping decision
+            if 'flat_mode' in comp and hasattr(self, 'chk_comp_flat'):
+                self.chk_comp_flat.blockSignals(True)
+                self.chk_comp_flat.setChecked(comp['flat_mode'])
+                self.chk_comp_flat.blockSignals(False)
+            if 'appendix_threshold' in comp and hasattr(self, 'spin_filter'):
+                self.spin_filter.blockSignals(True)
+                self.spin_filter.setValue(comp['appendix_threshold'])
+                self.spin_filter.blockSignals(False)
+
+            # Restore composition results
             if comp.get('results'):
                 self.comp_raw_items = comp['results']
                 self.comp_raw_filtered = comp.get('filtered_results', [])
@@ -25852,8 +25864,9 @@ class GenizahGUI(QMainWindow):
                     self._catalog_undated_cb.blockSignals(True)
                     self._catalog_undated_cb.setChecked(self._catalog_include_undated)
                     self._catalog_undated_cb.blockSignals(False)
-                # Single deferred refresh after UI is settled
-                QTimer.singleShot(400, self._catalog_refresh)
+                # Single deferred async refresh after UI is settled
+                QTimer.singleShot(400, lambda: self._catalog_start_async_refresh(
+                    refresh_authors=True, refresh_works=True))
                 QTimer.singleShot(450, self._catalog_update_chips)
 
             # Restore pre-search filters (Phase 45-03)
