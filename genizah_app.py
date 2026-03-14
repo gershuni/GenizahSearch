@@ -25864,9 +25864,23 @@ class GenizahGUI(QMainWindow):
                     self._catalog_undated_cb.blockSignals(True)
                     self._catalog_undated_cb.setChecked(self._catalog_include_undated)
                     self._catalog_undated_cb.blockSignals(False)
-                # Single deferred async refresh after UI is settled
-                QTimer.singleShot(400, lambda: self._catalog_start_async_refresh(
-                    refresh_authors=True, refresh_works=True))
+                # Restore sidebar visible state: author/work inputs
+                if cat.get('author') and hasattr(self, 'catalog_author_input'):
+                    self.catalog_author_input.setText(cat['author'])
+                if cat.get('work') and hasattr(self, 'catalog_work_input'):
+                    self.catalog_work_input.setText(cat['work'])
+                # Restore text filter chips
+                if any([self._catalog_text_all, self._catalog_text_any, self._catalog_text_not]):
+                    if hasattr(self, '_catalog_render_text_chips'):
+                        self._catalog_render_text_chips()
+                # Restore domain tree selection (deferred — tree may still be loading)
+                if cat.get('domain'):
+                    self._pending_catalog_domain = cat['domain']
+                    QTimer.singleShot(300, self._apply_pending_catalog_nav)
+                else:
+                    # No domain — just run async refresh
+                    QTimer.singleShot(400, lambda: self._catalog_start_async_refresh(
+                        refresh_authors=True, refresh_works=True))
                 QTimer.singleShot(450, self._catalog_update_chips)
 
             # Restore pre-search filters (Phase 45-03)
