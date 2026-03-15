@@ -2708,6 +2708,16 @@ TRANSLATIONS = {
     "Issue type": "סוג הבעיה",
     "Submit report": "שלח דיווח",
     "Translation reports help us improve quality": "דיווחי תרגום מסייעים לנו לשפר את האיכות",
+
+    # --- Quick-21: Short button labels for icon+text compact ---
+    "Parallels": "מקבילות",
+    "Trans ON": "תרגום פעיל",
+    "Trans OFF": "תרגום כבוי",
+    "Hide Info": "הסתר מידע",
+    "External": "חיצוני",
+    "Bib FJMS": "ביבל׳ פרידברג",
+    "Bib Ktiv": "ביבל׳ כתיב",
+    "Toggle translations": "הפעל/כבה תרגומים",
 }
 
 # Hebrew library display names (keyed by library_code)
@@ -2793,11 +2803,4 @@ LIBRARY_CODES_HE = {
     'Goldsmith': 'מוזיאון גולדסמית',
     'SOS': 'החברה האורתודוקסית הנפרדת',
     'MotB': 'מוזיאון התנ״ך',
-
-    # --- Quick-21: Short button labels for icon+text compact ---
-    "Parallels": "מקבילות",
-    "Trans ON": "תרגום פעיל",
-    "Trans OFF": "תרגום כבוי",
-    "Hide Info": "הסתר מידע",
-    "External": "חיצוני",
 }
