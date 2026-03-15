@@ -1,203 +1,181 @@
 # Project Research Summary
 
-**Project:** PGP Sidecar Migration + FJMS Full Texts
-**Domain:** Database migration (cloud-to-local), SQLite sidecar architecture, scholarly text integration
-**Researched:** 2026-02-16
+**Project:** v7.0.0 Fragment Puzzle
+**Domain:** Visual fragment assembly tool for Cairo Genizah manuscript research
+**Researched:** 2026-03-15
 **Confidence:** HIGH
 
 ## Executive Summary
 
-This milestone migrates all PGP reference data (104K rows across 4 tables: documents, document_sources, document_fragments, document_footnotes) from Supabase PostgreSQL to a local SQLite sidecar, following the proven pattern established by fjms_enrichment.db and nli_crossref.db. Concurrently, it integrates 65K FJMS catalog descriptions (scholarly identification texts, not line-by-line transcriptions) as additional sources in the version selector. Together these changes eliminate cloud dependency for browsing, reduce query latency from 50-200ms to <1ms, enable offline desktop usage, and unify all reference data in local sidecars while preserving Supabase for community features (auth, corrections, lists, comments).
+The Fragment Puzzle is a canvas-based visual join assembly tool that lets researchers drag, rotate, flip, and overlay manuscript fragment images to test and document physical joins. This is fundamentally a dual-canvas problem: a JavaScript canvas (Fabric.js) embedded in NiceGUI for the web app, and a QGraphicsScene for the PyQt6 desktop app. The two canvas implementations share nothing at the rendering level -- the shared contract is a `PuzzleDocument` data model in `shared/puzzle_service.py` that serializes fragment positions, transforms, and join metadata. This "shared model, independent rendering" architecture is the only viable approach; attempts to abstract over both canvas APIs will fail.
 
-The architecture is straightforward: create shared/pgp_service.py following the FjmsService/NliCrossrefService pattern, rewrite shared/document_service.py to swap Supabase calls for PgpService calls (preserving the API surface so all callers remain unchanged), and extend fjms_enrichment.db with a full_texts table. No new dependencies are required — Python's built-in sqlite3 module handles everything. The critical technical challenge is JSONB-to-TEXT conversion for the documents.tags and document_sources.sections columns, which requires careful JSON serialization and a query translation from PostgreSQL's GIN-indexed @> operator to SQLite's json_each() table function.
+The recommended build order is desktop-first. QGraphicsScene already provides multi-item drag, rotation, selection, and z-ordering out of the box, and the existing `ZoomableScrollArea` (genizah_app.py:1391) is a working starting point. The web canvas requires embedding Fabric.js via NiceGUI's JS bridge (`ui.run_javascript()`), which is more architecturally novel but follows proven patterns from the existing advViewer. The single biggest differentiator over the FJMS Jigsaw tool is automatic background removal -- isolating parchment from solid-color library scanning backgrounds using HSV color segmentation with Pillow and NumPy. This requires no new heavy dependencies (OpenCV is explicitly rejected in favor of Pillow+NumPy for simplicity and smaller installer size).
 
-The main risks are: (1) silently corrupting JSON data during migration, (2) accidentally breaking user-data features by removing Supabase imports needed by desktop corrections/lists, (3) poor thread-safety causing crashes under concurrent web load, and (4) duplicate sources appearing when both PGP and FJMS have overlapping content. All four are mitigatable with proven patterns from existing codebase migrations and strict adherence to the established sidecar service architecture.
+Key risks are: (1) IIIF images are large and showing 3-8 fragments simultaneously requires a multi-resolution loading strategy (800px for interaction, 2000px for export only); (2) background removal quality at manuscript edges needs empirical tuning with real Genizah images from multiple libraries; (3) IIIF servers almost certainly lack physical scale metadata, so DPI calibration must rely on per-library defaults with manual override; (4) CORS blocks pixel access to cross-origin images on the web canvas, requiring all image processing to go through the existing NiceGUI server proxy. All four risks have clear mitigation strategies documented in the research.
 
 ## Key Findings
 
 ### Recommended Stack
 
-No new dependencies required. The migration uses Python 3.11's built-in sqlite3 module (SQLite 3.45.1) with JSON1 extension support verified available. The existing sidecar services (fjms_enrichment.db at 246 MB, nli_crossref.db at 248 MB) prove the pattern scales. The pgp.db sidecar will be ~110 MB (35,839 documents + 36,155 fragments + 9,364 sources + 22,757 footnotes). Supabase remains for community features only (auth, corrections, lists, comments).
+No new pip dependencies are required for core functionality. Pillow and NumPy are already indirect dependencies. The web canvas uses Fabric.js 6.x loaded from CDN (no npm build step). The desktop canvas uses PyQt6's built-in QGraphicsScene. Background removal uses Pillow + NumPy for HSV color segmentation. Persistence uses a new `joins.db` SQLite sidecar (local-first) with optional Supabase publish for community features.
 
 **Core technologies:**
-- **sqlite3 (stdlib)**: Read-only sidecar database — proven by 2 existing services, thread-safe mode for web, graceful degradation
-- **Supabase (retained)**: Community features only — auth, corrections, lists, comments (user-generated data requiring shared state)
-- **JSON1 extension**: Built-in json_each() for tag queries — replaces PostgreSQL GIN index with table-valued function
-- **Python json module**: Parse sections JSONB on retrieval — same pattern as Supabase client already returns dicts/lists
+- **Fabric.js 6.x (CDN):** Web canvas for multi-image drag/rotate/flip/scale -- standard library for browser-based object manipulation, mature, well-documented
+- **QGraphicsScene (PyQt6, bundled):** Desktop canvas -- already partially implemented via ZoomableScrollArea, native multi-item transforms
+- **Pillow + NumPy:** Background removal via HSV color thresholding, composite image export -- no new dependencies, sufficient for solid-color library backgrounds
+- **SQLite sidecar (joins.db):** Local persistence for join documents -- follows established pgp.db/fjms_enrichment.db pattern
+- **IIIF info.json:** DPI calibration via pixel dimensions + per-library fallback table -- physicalScale service unlikely to be available
 
-**Critical decision from STACK.md:** New pgp_data/pgp.db sidecar (not extending existing sidecars) because each has distinct domain boundary (FJMS=scholarly metadata, NLI=image crossrefs, PGP=document data), independent update cycles, and independent versioning. The 110 MB size is manageable for distribution.
+**What NOT to add:** OpenCV (50MB+ for no benefit over Pillow+NumPy for solid backgrounds), rembg/deep learning (175MB model, clips manuscript edges), npm build pipeline, WebSocket image streaming, 3D rendering.
 
 ### Expected Features
 
-From FEATURES.md analysis, 9 table-stakes features and 4 differentiators identified:
-
 **Must have (table stakes):**
-- **TS-1: PGP Data in SQLite Sidecar** — All 4 Supabase tables exported to pgp.db, 104K rows, foundation for everything
-- **TS-2: document_service.py Rewritten for SQLite** — Same 12-function API, different backend (Supabase to PgpService), preserves shim contract
-- **TS-3: Version Selector Continues Working** — PGP editions/translations display unchanged if API surface preserved
-- **TS-4: Search Result PGP Indicators** — Batch lookup of sys_ids with transcriptions (currently Supabase IN, becomes SQLite IN with 500 batch)
-- **TS-5: Tag-Based Search** — documents.tags JSONB to TEXT, query with json_each() or normalized junction table
-- **TS-6: PGP Footnotes Display** — 22,757 bibliography footnotes (simple table migration)
-- **TS-7: Multi-Fragment Navigation** — Joined manuscripts (get_fragments_for_document with ORDER BY)
-- **TS-8: Graceful Degradation** — is_available() pattern when sidecar missing
-- **TS-9: Remove Supabase Tables** — After verification, drop 4 PGP tables from Supabase (keep user-data tables)
+- Canvas with drag, rotate, flip, zoom for 2+ fragment images
+- Load fragments by shelfmark/sys_id using existing image pipeline
+- Pre-populate from FJMS/PGP join groups (48K known joins)
+- Opacity/transparency control for edge-matching verification
+- Save/load arrangements with full state persistence
+- Undo/redo (QUndoStack on desktop, state history on web)
 
-**Should have (competitive):**
-- **D-1: FJMS Full Texts in Version Selector** — 65K catalog descriptions from dbo_UnitFullText as scholarly sources (NOT line-by-line transcriptions — clarification: these are English/Hebrew identification texts like "Contains Genesis 39:20-41:8 with vowel points")
-- **D-2: FJMS Source Badges** — Purple badge in version selector for FJMS content (consistent visual language)
-- **D-3: Offline Browsing** — Desktop app browses all PGP+FJMS data without internet (only images/community need network)
-- **D-4: Faster Queries** — SQLite <1ms vs Supabase 50-200ms latency (free benefit of migration)
+**Should have (differentiators over FJMS Jigsaw):**
+- Automatic background removal (HSV segmentation for solid library backgrounds) -- the single biggest differentiator
+- DPI-calibrated auto-sizing from IIIF metadata with manual fallback
+- Recto/verso dual canvas with independent editing
+- Composite image export (PNG) for publication/sharing
+- Join document metadata (fragment IDs, type, notes, confidence)
+- Personal workspace with multiple saved arrangements
+- Per-fragment independent scaling
 
 **Defer (v2+):**
-- D-5: FJMS Bibliography Transcription Indicators (nice-to-have)
-- AF-7: FJMS Full-Text Search (separate milestone)
-
-**Anti-features (explicitly not building):**
-- AF-1: Line-by-Line FJMS Transcription Import (dbo_UnitTranscription has 56K external file references, copyright concerns)
-- AF-2: Real-Time Supabase-SQLite Sync (static exports sufficient for infrequent updates)
-- AF-6: Bidirectional Editing in Sidecar (sidecars are read-only, corrections go through Supabase)
+- Community publish/review workflow (use existing corrections infrastructure as interim)
+- Snap-to-edge alignment guides
+- AI/ML-based join detection (explicitly out of scope per PROJECT.md)
+- Image enhancement (contrast, levels) -- researchers have Photoshop/GIMP
+- Real-time multi-user collaboration
 
 ### Architecture Approach
 
-From ARCHITECTURE.md: Migration is internal to shared/document_service.py — web/pages and desktop/genizah_app.py callers remain untouched. The shim pattern (web/document_service.py re-exports from shared/) ensures zero web import changes. Desktop already uses lazy imports inside methods.
+The architecture is "shared data model, independent canvas rendering." All data logic lives in `shared/puzzle_service.py` and `shared/background_removal.py`. Canvas implementations are entirely separate: Fabric.js (web) communicates with Python via `ui.run_javascript()` bridge; QGraphicsScene (desktop) operates natively. State of truth during active editing lives in the canvas (JS or Qt); Python requests state snapshots only on save/export. Images are proxied through existing infrastructure (web: `/api/nli_image` proxy; desktop: `ImageLoaderThread` with disk cache). Background removal runs server-side for both platforms.
 
 **Major components:**
-1. **PgpService (NEW)** — SQLite accessor for pgp.db, 8 methods mirroring current Supabase queries (get_document, get_fragments_for_sys_id, get_sources_for_document, get_sys_ids_with_documents, etc.), handles JSON parsing for tags/sections
-2. **document_service.py (MODIFIED)** — Swap Supabase client calls for PgpService calls, pure functions (parse_transcription_sections, get_section_for_page, parse_html_sections) stay unchanged
-3. **fjms_service.py (EXTENDED)** — Add get_full_texts() method for FJMS catalog descriptions from new full_texts table
-4. **export_pgp_sidecar.py (NEW)** — Paginated export from Supabase to pgp.db with JSON serialization validation
-5. **export_fist_enrichment.py (EXTENDED)** — Add export_fulltext() for dbo_UnitFullText to fjms_enrichment.db
-
-**Data flow change (from ARCHITECTURE.md):**
-- BEFORE: get_sys_ids_with_transcriptions to Supabase HTTP IN query to 50-200ms
-- AFTER: get_sys_ids_with_transcriptions to pgp_service to SQLite IN with 500 batch to <1ms
-
-**Schema design (from STACK.md Decision 4):**
-- documents: pgpid PK, tags as TEXT JSON, transcription as TEXT (~50 MB)
-- document_fragments: sys_id indexed, document_id FK (~3 MB)
-- document_sources: pgpid FK, sections as TEXT JSON, content as TEXT (~40 MB)
-- document_footnotes: pgpid FK (~15 MB)
-- meta: version tracking (matches existing sidecar pattern)
-- Total: ~110 MB pgp.db
-
-**JSONB handling (STACK.md Decision 2):** Store as TEXT JSON strings, parse with json.loads() in service layer (same as Supabase client returns), query tags with json_each() or LIKE for single checks. The sections column parsing already exists in get_section_for_page() — just changes source from Supabase JSON to SQLite TEXT JSON.
+1. **shared/puzzle_service.py** -- PuzzleDocument/PuzzleFragment data model, IIIF info fetch, DPI calibration, composite export, serialization
+2. **shared/background_removal.py** -- HSV color segmentation, alpha mask generation, edge feathering (Pillow + NumPy)
+3. **web/components/puzzle_canvas.py + .js** -- Fabric.js canvas as NiceGUI custom component, toolbar, JS-Python bridge
+4. **Desktop PuzzleWidget** -- QGraphicsScene with PuzzleFragmentItem subclass, rotation/resize handles, keyboard shortcuts
+5. **joins.db** -- Local SQLite sidecar for join documents (drafts); Supabase for published joins
+6. **web/pages/puzzle.py** -- Puzzle workspace page with fragment selection, canvas, metadata panel
 
 ### Critical Pitfalls
 
-From PITFALLS.md, 5 critical issues identified with mitigations:
-
-1. **JSONB-to-TEXT Data Loss (tags, sections)** — PostgreSQL JSONB binary format NOT compatible with SQLite. Must serialize with json.dumps(), validate with json_valid() on every row post-import. Tags query requires json_each() table function (not GIN @> operator). Sections column is 10KB+ JSON per row, consider normalizing into separate table if file size > 300MB. PREVENTION: Validation pass after export, test round-trip on every JSONB column.
-
-2. **Removing Supabase While User-Data Depends On It** — Two Supabase clients exist: shared/supabase_provider.py (document data, being migrated) and web/supabase_client.py + supabase_corrections_client.py (user data, MUST STAY). Desktop corrections (1,800+ lines), lists, joins, discoveries all use Supabase. PREVENTION: Dependency map before removing ANY imports, test both apps end-to-end for corrections/lists after migration.
-
-3. **Thread Safety for NiceGUI Web** — Web app is async, SQLite calls are blocking. Requires check_same_thread=False in PgpService constructor and await run.io_bound() at all call sites (15+ in web/pages). Without this: ProgrammingError under concurrent load. PREVENTION: Copy fjms_service.py constructor pattern exactly, load test with 3+ concurrent tabs.
-
-4. **PostgreSQL GIN Index to SQLite json_each()** — Tag search uses filter('tags', 'cs', [tag]) which is GIN @> operator. SQLite equivalent: SELECT FROM documents, json_each(tags) WHERE value = ? (table-valued function, no index). Consider normalized document_tags junction table if > 100ms. PREVENTION: Benchmark json_each() on 35K rows before deciding.
-
-5. **Deduplication Between PGP/FJMS Sources** — Same manuscript may have PGP edition + FJMS catalog description. Dedup by (sys_id, normalized_scholar_name, relation_type), NOT content similarity. Build scholar name normalization map (e.g., "S.D. Goitein" = "Goitein"). Prefer PGP for transcriptions, show FJMS as alternative. PREVENTION: Test with 10 known-overlapping sys_ids, verify version selector shows distinct sources correctly.
-
-Additional moderate pitfalls (PITFALLS.md Pitfall 6-10): full table scan for tags, sections storage size, SQLite 999 variable limit for batch IN queries, generated pgp_url column, data staleness strategy. All have documented mitigations.
+1. **NiceGUI has no canvas framework** -- `ui.interactive_image` cannot handle multi-image manipulation. Must embed Fabric.js via JS bridge. If you find yourself writing Python mouse-move handlers for canvas objects, stop immediately.
+2. **IIIF images are enormous** -- 3-8 fragments at 2000px each = 120-240MB in browser memory. Load at 800px for interaction, full-res only for server-side composite export.
+3. **Background removal fails at manuscript edges** -- HSV thresholding produces jagged edges on parchment. Must add alpha feathering (5-10px gradient), make removal optional and off by default, provide manual threshold slider.
+4. **CORS blocks pixel access on web canvas** -- Must proxy all IIIF images through NiceGUI server and serve processed images as data URLs or via HTTP endpoint. Never load cross-origin images directly onto Fabric.js canvas.
+5. **Two canvas implementations will diverge** -- Do not attempt a shared canvas abstraction. Share only the PuzzleDocument data model. Test cross-platform roundtrip (desktop save -> web load) early and continuously.
+6. **IIIF servers lack physical scale metadata** -- Build per-library default DPI table from day one. Always provide manual scale override. Display "assumed scale" indicator.
 
 ## Implications for Roadmap
 
-Based on research, suggested 4-phase structure with clear dependencies:
+Based on research, suggested phase structure:
 
-### Phase 1: PGP Sidecar Foundation
-**Rationale:** All features depend on the sidecar existing. Export script must be bulletproof — JSON validation, pagination, batch inserts. This establishes the data layer.
-**Delivers:** pgp_data/pgp.db with 104K rows, export_pgp_sidecar.py script, meta table with version tracking
-**Addresses:** TS-1 (PGP Sidecar), avoids Pitfall 1 (JSONB loss) via validation pass
-**Key decision:** Tags storage (json_each vs junction table) must be made here — affects schema and service queries
-**Research flag:** LOW — follows proven export_fist_enrichment.py pattern (8 existing export functions)
+### Phase 1: Data Model + Shared Services
+**Rationale:** Everything depends on the PuzzleDocument data model and the shared service layer. Defining this first prevents schema migration pain later and ensures both platforms build against the same contract.
+**Delivers:** `shared/puzzle_service.py` with PuzzleDocument/PuzzleFragment dataclasses, joins.db schema, IIIF info.json fetch, DPI calibration with per-library fallback table, serialization/deserialization.
+**Addresses:** Join document metadata (FEATURES), schema breadth (Pitfall 9), DPI fallback chain (Pitfall 5)
+**Avoids:** Pitfall 9 (narrow schema) by designing with FJMS join fields as reference from the start
 
-### Phase 2: PGP Service Layer
-**Rationale:** Service isolates SQLite access, enables parallel development of FJMS integration. Thread-safety and batch patterns must be correct here — testing is critical.
-**Delivers:** shared/pgp_service.py with 8 methods, thread_safe flag, singleton pattern, is_available() degradation
-**Addresses:** TS-2 (document_service rewrite), TS-8 (graceful degradation), avoids Pitfall 3 (thread safety) and Pitfall 4 (GIN index)
-**Uses:** sqlite3 (stdlib), json module for sections parsing
-**Implements:** Read-only sidecar service pattern (proven by FjmsService 961 lines, NliCrossrefService 845 lines)
-**Research flag:** MEDIUM — Query translation from Supabase to SQLite needs careful implementation (PITFALLS.md has translation guide)
+### Phase 2: Desktop Canvas (QGraphicsScene)
+**Rationale:** Desktop is the natural prototype -- QGraphicsScene provides drag/rotate/flip/zoom/selection natively. Existing ZoomableScrollArea is the starting point. Building desktop first validates the data model before tackling the harder web canvas.
+**Delivers:** PuzzleWidget with PuzzleFragmentItem, drag/rotate/flip/zoom, fragment loading by shelfmark/sys_id, pre-populate from FJMS join groups, opacity control, undo/redo (QUndoStack), save/load via joins.db.
+**Addresses:** All table-stakes features (FEATURES Phase 1), desktop proof-of-concept
+**Avoids:** Pitfall 3 (memory) via multi-resolution loading; Pitfall 13 (no undo) by using QUndoStack from day one
 
-### Phase 3: FJMS Full Texts Integration (parallel with Phase 2)
-**Rationale:** Independent of PGP migration — extends existing fjms_enrichment.db. Can proceed in parallel with Phase 2 to speed delivery.
-**Delivers:** full_texts table in fjms_enrichment.db (65K rows, ~15-25 MB), export_fulltext() in export_fist_enrichment.py, get_full_texts() in fjms_service.py
-**Addresses:** D-1 (FJMS catalog descriptions), D-2 (purple badges in version selector)
-**Key clarification:** These are catalog identification texts (English/Hebrew descriptions of manuscript content), NOT line-by-line transcriptions
-**Research flag:** LOW — extends existing service, standard pattern
+### Phase 3: Background Removal
+**Rationale:** The biggest differentiator. Independent of canvas platform -- runs as a shared Python module. Needs empirical testing with real Genizah images from NLI, Cambridge, Manchester, Oxford before being wired into either canvas.
+**Delivers:** `shared/background_removal.py` with HSV segmentation, alpha feathering, per-library color profiles, manual threshold adjustment. Test suite against sample images from multiple libraries.
+**Addresses:** Automatic background removal (FEATURES top differentiator)
+**Avoids:** Pitfall 4 (edge quality) by prototyping against real images early; Pitfall 17 (OpenCV bloat) by using Pillow+NumPy; Pitfall 11 (CPU blocking) by running in worker thread/process
 
-### Phase 4: Verification and Cutover
-**Rationale:** All table-stakes features must work before removing Supabase tables. Parallel reads validate correctness. Dependency map prevents breaking user-data features.
-**Delivers:** TS-3 through TS-7 verified (version selector, search indicators, tags, footnotes, navigation), TS-9 (Supabase table removal), documentation of offline capabilities
-**Addresses:** Avoids Pitfall 2 (user-data dependency) via explicit mapping, Pitfall 10 (staleness) via version display
-**Testing:** Both apps end-to-end (search, browse, corrections, lists), load test web concurrency, verify 10 overlapping PGP/FJMS sources
-**Research flag:** MEDIUM — Requires analysis of which Supabase tables can be safely removed (PITFALLS.md Pitfall 3 has dependency mapping guidance)
+### Phase 4: Web Canvas (Fabric.js + NiceGUI)
+**Rationale:** Architecturally the hardest part -- JS canvas embedded in NiceGUI via custom component. Depends on validated data model (Phase 1) and proven interaction patterns from desktop (Phase 2). Background removal (Phase 3) feeds processed images to the canvas.
+**Delivers:** `web/components/puzzle_canvas.py` + `.js`, `web/pages/puzzle.py`, Fabric.js canvas with all table-stakes features, image proxy for CORS, JS-authoritative state with Python persistence.
+**Addresses:** Web parity with desktop canvas
+**Avoids:** Pitfall 1 (no NiceGUI canvas) by using Fabric.js; Pitfall 6 (CORS) by proxying through server; Pitfall 7 (WebSocket overhead) by keeping state in JS
+
+### Phase 5: Recto/Verso + Composite Export
+**Rationale:** Completes the scholarly workflow. Depends on working canvas (either platform) and background removal. Recto/verso requires NLI S1/S2 mapping and independent verso editing.
+**Delivers:** Recto/verso toggle with auto-generated (but independently editable) verso layout, composite PNG export via Pillow, metadata embedding.
+**Addresses:** Recto/verso dual canvas, composite export, join metadata (FEATURES Phase 3)
+**Avoids:** Pitfall 8 (mirror symmetry) by making verso independently editable; Pitfall 14 (metadata loss) by exporting PuzzleDocument JSON alongside image
+
+### Phase 6: Integration + Polish
+**Rationale:** Wire puzzle into existing app navigation (browse "Open in Puzzle", search "Add to Puzzle"), session persistence, state auto-save, and UX polish (fragment list panel, z-order controls, RTL layout, grid/ruler overlay).
+**Delivers:** Entry points from browse/search, session persistence following v6.5.0 pattern, fragment layer panel, Hebrew RTL support in labels/notes.
+**Addresses:** Personal workspace, snap-to-edge guides, grid/ruler (FEATURES Phase 4 items)
+**Avoids:** Pitfall 10 (navigation destroys state) by auto-saving; Pitfall 15 (RTL) by applying existing patterns; Pitfall 16 (z-order) by adding layer panel
 
 ### Phase Ordering Rationale
 
-- Phase 1 first: Sidecar is foundation, export script with validation prevents data corruption (PITFALLS.md Pitfall 1)
-- Phase 2 follows: Service isolates SQLite complexity, enables testing before UI integration
-- Phase 3 parallel: FJMS is independent data source, no PGP migration dependency (can run concurrently with Phase 2)
-- Phase 4 last: Verification phase prevents premature cutover, protects user-data features (PITFALLS.md Pitfall 2)
-
-**Critical path:** Phase 1 to Phase 2 to Phase 4 (PGP migration)
-**Parallel track:** Phase 3 (FJMS full texts, can start anytime after Phase 1 data pipeline established)
-
-**Dependencies identified:**
-- Tags storage decision (Phase 1) affects service queries (Phase 2)
-- Thread-safe constructor (Phase 2) required before web integration (Phase 4)
-- Supabase dependency map (Phase 4) required before table removal
-- FJMS export (Phase 1) required for Phase 3 UI integration
+- Data model first because both canvases and persistence depend on it. Changing the schema after canvas implementation is painful (Pitfall 9).
+- Desktop before web because QGraphicsScene is easier and validates the interaction model. The web canvas (Fabric.js in NiceGUI) is architecturally novel and benefits from a working reference implementation.
+- Background removal as a standalone phase because it needs empirical tuning with real images and is independent of canvas choice. Testing it in isolation reduces risk.
+- Web canvas after desktop and background removal because it depends on both (validated data model + processed images).
+- Recto/verso and export after both canvases work because they are workflow completions, not infrastructure.
+- Integration last because it wires an already-working feature into the existing app.
 
 ### Research Flags
 
-**Phases needing deeper research during planning:**
-- **Phase 2:** Query translation from Supabase PostgREST to SQLite — PITFALLS.md has full translation guide (Pitfall 4 for GIN index, table at end for all patterns). Needs careful implementation of json_each() for tags.
-- **Phase 4:** Dependency mapping to identify which Supabase imports can be safely removed — PITFALLS.md Pitfall 3 lists all current Supabase clients and their purposes.
+Phases likely needing deeper research during planning:
+- **Phase 3 (Background Removal):** Needs empirical testing with actual Genizah images from 4+ libraries. HSV thresholds, edge feathering parameters, and failure modes are unknown until tested with real data. Probe IIIF info.json endpoints for NLI, Cambridge, Manchester, JTS during this phase.
+- **Phase 4 (Web Canvas):** Fabric.js + NiceGUI custom component pattern is architecturally novel for this codebase. May need `/gsd:research-phase` to prototype the JS-Python bridge before full planning.
+- **Phase 5 (Recto/Verso):** NLI S1/S2 folio mapping needs verification. How to reliably pair recto and verso FL IDs across different libraries is a data question.
 
-**Phases with standard patterns (skip research-phase):**
-- **Phase 1:** Export script follows export_fist_enrichment.py pattern (8 existing export functions, proven pagination)
-- **Phase 3:** Service extension follows existing fjms_service.py pattern
-
-**Validation checkpoints during execution:**
-- Phase 1: JSON round-trip test, row count verification, json_valid() on all JSONB columns
-- Phase 2: Thread-safety load test (3+ concurrent web tabs), batch query correctness (500-item chunks)
-- Phase 4: Both apps end-to-end, corrections/lists still work, version selector shows PGP+FJMS correctly
+Phases with standard patterns (skip research-phase):
+- **Phase 1 (Data Model):** Standard dataclass + SQLite sidecar pattern, well-established in codebase.
+- **Phase 2 (Desktop Canvas):** QGraphicsScene is Qt's designed solution; ZoomableScrollArea is the proven starting point.
+- **Phase 6 (Integration):** Follows existing browse/search entry point and session persistence patterns exactly.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | No new dependencies, sqlite3 built-in verified, JSON1 available, proven by 2 existing sidecars (246 MB, 248 MB) |
-| Features | HIGH | All 9 table-stakes mapped to existing Supabase queries (1:1 SQL translation documented), 4 differentiators are natural consequences |
-| Architecture | HIGH | PgpService pattern proven by FjmsService/NliCrossrefService (961 lines, 845 lines), shim pattern preserves all 11 consumer files |
-| Pitfalls | HIGH | Based on direct codebase analysis (all 4 Supabase tables, 15+ call sites, 2 existing sidecars), 15 pitfalls catalogued with proven mitigations |
+| Stack | HIGH | No new dependencies needed. Fabric.js and QGraphicsScene are standard solutions for their respective platforms. Pillow+NumPy sufficient for background removal. |
+| Features | MEDIUM | FJMS Jigsaw is the only real prior art; no open-source fragment assembly tools found. Feature set derived from domain analysis rather than competitive landscape. |
+| Architecture | HIGH | Follows proven codebase patterns (shared service + app-specific UI). Canvas separation is the only viable approach. |
+| Pitfalls | HIGH | Critical pitfalls (NiceGUI canvas limitations, CORS, image memory) are verified against official docs and codebase analysis. Edge-case pitfalls (background removal quality, IIIF metadata availability) need runtime validation. |
 
-**Overall confidence:** HIGH
+**Overall confidence:** HIGH -- the stack and architecture recommendations are well-grounded. The main uncertainty is background removal quality on real manuscript images, which is addressable through empirical prototyping in Phase 3.
 
 ### Gaps to Address
 
-- **Tags query performance**: Benchmark json_each() on 35K rows before deciding between it and normalized junction table. Decision affects Phase 1 schema and Phase 2 service queries. Mitigation: Start with json_each() (simpler), add junction table in Phase 4 if profiling shows > 100ms.
-
-- **Sections storage size**: Profile pgp.db file size with sections as JSON TEXT vs normalized table. 9,364 sources * avg 2KB = ~19 MB of content, sections could add 10-50 MB depending on sparsity. Mitigation: Build with JSON first (STACK.md Decision 3 rationale: sections always read as complete array), normalize in Phase 4 only if > 300 MB total.
-
-- **FJMS/PGP overlap extent**: Unknown how many sys_ids have both PGP sources AND FJMS catalog descriptions. Affects deduplication complexity. Mitigation: Query both datasets during Phase 1 to get overlap count, design dedup strategy in Phase 4 based on actual numbers (PITFALLS.md Pitfall 5 has dedup approach).
-
-- **Supabase pagination for export**: 35,839 documents exceed single-page fetch. Must use .range() pagination (1000 rows/page pattern from import_pgp_sections.py:282). Mitigation: STACK.md Decision 6 documents exact pagination pattern.
-
-- **Desktop app file distribution**: pgp.db must be bundled with desktop installer. Update build_app.bat to include pgp_data/ alongside fist_data/ and nli_data/. Mitigation: Add to Phase 4 verification checklist (STACK.md Decision 6 notes distribution requirement).
+- **IIIF Physical Dimensions availability:** No one has actually probed NLI/Cambridge/Manchester info.json endpoints for physicalScale data. Must do this in Phase 1 or early Phase 3. If no library provides it, the entire DPI calibration feature reduces to a per-library lookup table + manual override.
+- **Background removal quality:** HSV thresholding on solid backgrounds is well-documented, but manuscript-specific edge behavior (translucent parchment, frayed fibers, shadow zones) needs testing with 10+ real images per library. Phase 3 should start with a test suite before writing production code.
+- **Pillow+NumPy vs OpenCV for morphological operations:** STACK.md recommends Pillow+NumPy; ARCHITECTURE.md references OpenCV. The recommendation is to start with Pillow+NumPy and add `opencv-python-headless` only if morphological cleanup proves insufficient. This decision should be made during Phase 3 prototyping.
+- **Fabric.js version:** v6.x is recommended over v7.x (more battle-tested), but v7 may be necessary if v6 CDN availability decreases. Pin to specific minor version in CDN URL.
+- **NLI recto/verso FL ID pairing:** The S1/S2 convention is assumed but not verified across all NLI collections. Must validate during Phase 5 planning.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- **Codebase analysis**: shared/document_service.py (742 lines, 14 functions, 7 Supabase-calling), shared/fjms_service.py (961 lines, proven pattern), shared/nli_crossref_service.py (845 lines, thread-safe singleton), migrations/*.sql (9 files, full Supabase schema), web/components/version_selector.py (440 lines)
-- **Data verification**: Supabase table counts (35,839 documents, 36,155 fragments, 9,364 sources, 22,757 footnotes), FIST.db dbo_UnitFullText (65,332 rows, 85,313 AlmaIds, ~56K > 100 chars, avg 240 chars)
-- **Python/SQLite verification**: Python 3.11.9, SQLite 3.45.1, JSON1 functions (json_array, json_type, json_each) confirmed working
-- **SQLite documentation**: [sqlite.org/json1.html](https://sqlite.org/json1.html) (JSON1 functions), [sqlite.org/jsonb.html](https://sqlite.org/jsonb.html) (JSONB incompatibility with PostgreSQL), [sqlite.org/threadsafe.html](https://www.sqlite.org/threadsafe.html) (check_same_thread)
+- [Fabric.js official documentation](https://fabricjs.com/) -- canvas API, serialization, object manipulation
+- [Qt QGraphicsScene documentation](https://doc.qt.io/qt-6/qgraphicsscene.html) -- scene management, item transforms, z-ordering
+- [IIIF Image API 2.1/3.0 specification](https://iiif.io/api/image/3.0/) -- info.json structure, image request syntax
+- [NiceGUI documentation](https://nicegui.io/documentation/) -- run_javascript, ui.html, custom components
+- Existing codebase: ZoomableScrollArea (genizah_app.py:1391), image proxy (web/api.py), service layer pattern (shared/)
+- [Pillow Image module documentation](https://pillow.readthedocs.io/en/stable/reference/Image.html) -- rotate, composite, alpha operations
 
 ### Secondary (MEDIUM confidence)
-- **Princeton Geniza Project**: [geniza.princeton.edu](https://geniza.princeton.edu/en/) — PGP handles multiple editions per document with scholar attribution, validates dedup approach
-- **Friedberg Research Platform**: Multiple transcription sources per manuscript (validates multi-source display pattern)
-- **Supabase offline discussion**: Real-time CDC complexity (PowerSync, RxDB) — confirms static export strategy appropriate for infrequent updates
+- [IIIF Physical Dimensions Service](https://iiif.io/api/annex/services/) -- physicalScale specification (spec is clear; adoption is low)
+- [NiceGUI GitHub discussions #1339, #2513, #3427](https://github.com/zauberzeug/nicegui/discussions/) -- canvas/drag limitations confirmed
+- [Friedberg Genizah Project Research Platform](https://pr.genizah.org/) -- FJMS Jigsaw feature set (primary competitor)
+- [IIIF-discuss mailing list](https://groups.google.com/g/iiif-discuss/) -- physical dimensions adoption discussion
+
+### Tertiary (LOW confidence)
+- IIIF info.json actual content from NLI/Cambridge/Manchester -- needs runtime probing, not yet verified
+- Background removal edge quality on Genizah manuscript images -- needs empirical testing
+- Fabric.js v6 vs v7 stability comparison -- based on community consensus, not direct testing
 
 ---
-*Research completed: 2026-02-16*
+*Research completed: 2026-03-15*
 *Ready for roadmap: yes*

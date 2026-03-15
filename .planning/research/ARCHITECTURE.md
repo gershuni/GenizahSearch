@@ -1,486 +1,428 @@
-# Architecture Patterns
+# Architecture Patterns: Fragment Puzzle / Jigsaw Join Tool
 
-**Domain:** PGP sidecar migration + FJMS full text integration
-**Researched:** 2026-02-16
-**Confidence:** HIGH (evidence-based from full codebase analysis)
-
-## Current Architecture (Before)
-
-```
-Web App (NiceGUI)
-  |
-  +-- web/pages/search.py        --> from web.document_service import ...  (shim)
-  +-- web/pages/browse.py        --> from shared.document_service import ...
-  +-- web/services.py            --> from shared.nli_crossref_service import ...
-  +-- web/components/joins_panel  --> from web.fjms_service import ...  (shim)
-  |
-  +-- Supabase (PostgreSQL)  <---- PGP data (documents, sources, footnotes, fragments)
-  |     via shared/supabase_provider.py -> get_client()
-  |
-  +-- Tantivy Index (local)  <---- Full-text search
-  +-- fist_data/fjms_enrichment.db  <---- FJMS enrichment (SQLite sidecar)
-  +-- nli_data/nli_crossref.db      <---- NLI crossref (SQLite sidecar)
-
-Desktop App (PyQt6)
-  |
-  +-- genizah_app.py             --> from shared.document_service import ...  (lazy)
-  +-- genizah_app.py             --> from shared.fjms_service import ...
-  |
-  +-- Supabase (PostgreSQL)  <---- Same PGP data + community features
-  +-- Tantivy Index (local)
-  +-- fist_data/fjms_enrichment.db
-  +-- nli_data/nli_crossref.db
-```
-
-### Current document_service.py API Surface
-
-All functions use `from shared.supabase_provider import get_client`:
-
-| Function | Callers | Tables Hit |
-|----------|---------|------------|
-| `get_document_for_fragment(sys_id, page_num)` | web search, web browse, desktop (3 sites) | document_fragments, documents |
-| `get_fragments_for_document(pgpid)` | web browse, desktop (3 sites) | document_fragments |
-| `get_transcription_for_document(pgpid)` | (unused in current code) | documents |
-| `get_document_metadata(pgpid)` | (unused in current code) | documents |
-| `get_sources_for_document(pgpid)` | web browse | document_sources |
-| `get_all_sources_for_fragment(sys_id)` | web search, web browse | document_fragments, document_sources |
-| `get_editions_for_document(pgpid)` | (unused in current code) | document_sources |
-| `get_translations_for_document(pgpid)` | (unused in current code) | document_sources |
-| `get_sys_ids_with_transcriptions(sys_ids)` | web search, desktop gui_threads | document_fragments |
-| `get_fragments_by_tag(tag)` | web search | documents, document_fragments |
-| `get_all_distinct_tags()` | web search | documents |
-| `parse_transcription_sections(text)` | web browse | (pure function, no DB) |
-| `get_section_for_page(text, page, sections)` | web search, web browse | (pure function, no DB) |
-| `parse_html_sections(html)` | (import/test only) | (pure function, no DB) |
-
-**Critical observation:** 4 functions are unused, 3 are pure (no DB). The actual DB-calling surface is 7 functions that need migration.
-
-### Callers in Each App
-
-**Web app (imports via shim or direct):**
-- `web/pages/search.py:19` -- import via `web.document_service` shim (6 functions)
-- `web/pages/browse.py` -- import via `shared.document_service` directly (5 sites)
-
-**Desktop app (lazy imports inside methods):**
-- `genizah_app.py:3037` -- `get_document_for_fragment, get_fragments_for_document`
-- `genizah_app.py:7379` -- `get_fragments_for_document`
-- `genizah_app.py:10146` -- `get_document_for_fragment`
-- `genizah_app.py:10162` -- `get_fragments_for_document`
-
-**gui_threads.py:531** -- `get_sys_ids_with_transcriptions` (batch check)
-
-## Target Architecture (After)
-
-```
-Web App (NiceGUI)
-  |
-  +-- web/pages/search.py        --> from web.document_service import ...  (shim, UNCHANGED)
-  +-- web/pages/browse.py        --> from shared.document_service import ...  (UNCHANGED)
-  |
-  +-- Supabase (PostgreSQL)  <---- Community ONLY (auth, corrections, lists, comments)
-  |     via web/supabase_client.py (community)
-  |
-  +-- Tantivy Index (local)
-  +-- pgp_data/pgp.db               <---- NEW: PGP sidecar (SQLite)
-  +-- fist_data/fjms_enrichment.db   <---- UPDATED: + full_texts table
-  +-- nli_data/nli_crossref.db
-
-Desktop App (PyQt6)
-  |
-  +-- genizah_app.py             --> from shared.document_service import ...  (UNCHANGED)
-  |
-  +-- Supabase                   <---- Community ONLY
-  +-- Tantivy Index (local)
-  +-- pgp_data/pgp.db
-  +-- fist_data/fjms_enrichment.db
-  +-- nli_data/nli_crossref.db
-```
-
-### Key Change: document_service.py Internal Switch
-
-```
-BEFORE:                                   AFTER:
-shared/document_service.py                shared/document_service.py
-  |                                         |
-  +-- from shared.supabase_provider         +-- from shared.pgp_service import get_pgp_service
-  |     import get_client                   |
-  +-- client.table('documents')...          +-- pgp_svc.get_document(pgpid)
-                                            +-- pgp_svc.get_fragments_for_sys_id(sys_id)
-```
-
-**The shim pattern (web/document_service.py) and ALL callers remain untouched.** The migration is entirely inside `shared/document_service.py`, swapping Supabase calls for PgpService calls.
+**Domain:** Visual fragment assembly tool for manuscript research platform
+**Researched:** 2026-03-15
+**Confidence:** HIGH (based on existing codebase analysis, verified framework capabilities)
 
 ## Recommended Architecture
 
-### New Component: PgpService (shared/pgp_service.py)
+The fragment puzzle tool adds a **canvas-based visual assembly layer** on top of the existing dual-app architecture. The key architectural decision: canvas implementations are entirely separate (JavaScript for web, QGraphicsScene for desktop) while sharing a common data model and image processing pipeline via `shared/puzzle_service.py`.
 
-Follows the exact pattern established by FjmsService and NliCrossrefService:
-
-```python
-class PgpService:
-    """Service for accessing PGP reference data from the SQLite sidecar."""
-
-    def __init__(self, db_path: str = None, thread_safe: bool = False):
-        # Same pattern as FjmsService/NliCrossrefService:
-        # - Auto-detect from project root
-        # - Read-only URI mode
-        # - thread_safe for NiceGUI web
-        # - sqlite3.Row row factory
-        pass
-
-    def is_available(self) -> bool: ...
-    def get_version(self) -> Optional[str]: ...
-
-    # Core queries (replacing Supabase calls):
-    def get_document(self, pgpid: int) -> Optional[dict]: ...
-    def get_fragments_for_sys_id(self, sys_id: str) -> list[dict]: ...
-    def get_fragments_for_document(self, pgpid: int) -> list[dict]: ...
-    def get_sources_for_document(self, pgpid: int) -> list[dict]: ...
-    def get_sys_ids_with_documents(self, sys_ids: list[str]) -> set[str]: ...
-    def get_documents_by_tag(self, tag: str) -> list[dict]: ...
-    def get_all_distinct_tags(self) -> list[str]: ...
-    def get_footnotes_for_document(self, pgpid: int) -> list[dict]: ...
-
-    def close(self): ...
-
-# Singleton
-_default_service = None
-def get_pgp_service(thread_safe: bool = False) -> PgpService: ...
+```
+                        shared/puzzle_service.py
+                        shared/background_removal.py
+                        (data model, image processing,
+                         IIIF metadata, serialization)
+                              |
+              +---------------+---------------+
+              |                               |
+    Web (NiceGUI)                    Desktop (PyQt6)
+    Fabric.js canvas                 QGraphicsScene
+    (custom JS component)           (PuzzleFragmentItem subclass)
+    web/components/                  genizah_app.py or
+      puzzle_canvas.py                puzzle_widget.py
+      puzzle_canvas.js
+              |                               |
+              +---------------+---------------+
+                              |
+              +---------------+---------------+
+              |                               |
+    joins.db (local SQLite)        Supabase (published joins)
+    (drafts, offline work)         + Storage (composite images)
 ```
 
 ### Component Boundaries
 
 | Component | Responsibility | Communicates With |
 |-----------|---------------|-------------------|
-| `shared/pgp_service.py` (NEW) | PGP data access from pgp.db | document_service.py |
-| `shared/document_service.py` (MODIFIED) | PGP business logic, section parsing | pgp_service.py (was: supabase_provider) |
-| `shared/fjms_service.py` (MODIFIED) | FJMS enrichment + NEW full texts | document_service.py (for source merging) |
-| `shared/supabase_provider.py` (REMOVED) | Was: Supabase client factory | Nothing after migration |
-| `web/supabase_client.py` (KEPT) | Community features (auth, lists, corrections) | Web app community pages |
-| `supabase_corrections_client.py` (KEPT) | Desktop community features | Desktop app corrections |
-| `scripts/export_pgp_sidecar.py` (NEW) | Export Supabase -> pgp.db | Run once during migration |
-| `scripts/export_fist_texts.py` (NEW) | Export FIST TextualFrame -> fjms_enrichment.db | Run once to add texts |
+| `shared/puzzle_service.py` | Data model (PuzzleDocument, PuzzleFragment), DPI calibration, IIIF info fetch, composite image export, serialization | NliCrossrefService, FjmsService, joins.db, web+desktop canvases |
+| `shared/background_removal.py` | OpenCV-based color segmentation and alpha mask generation | puzzle_service (called during fragment add) |
+| `web/components/puzzle_canvas.py` + `.js` | NiceGUI custom component wrapping Fabric.js; drag/rotate/flip/scale, selection, toolbar | puzzle_service (data), web/api.py (image proxy) |
+| Desktop `PuzzleWidget` (QWidget) | QGraphicsScene with movable PuzzleFragmentItem objects, toolbar, keyboard shortcuts | puzzle_service (data), ImageLoaderThread (image fetch) |
+| `web/supabase_client.py` extensions | CRUD for published join_documents + Storage upload | Supabase cloud |
+| `joins.db` (new SQLite sidecar) | Local persistence for join documents (drafts + published cache) | puzzle_service.py only |
 
 ### Data Flow
 
-**Before (search result enrichment):**
-```
-User searches -> Tantivy -> result sys_ids
-  -> get_sys_ids_with_transcriptions(sys_ids)
-     -> Supabase HTTP: document_fragments.select().in_(sys_ids)
-     -> Returns set of sys_ids with PGP links
-```
-
-**After:**
-```
-User searches -> Tantivy -> result sys_ids
-  -> get_sys_ids_with_transcriptions(sys_ids)
-     -> pgp_service.get_sys_ids_with_documents(sys_ids)
-        -> SQLite: SELECT DISTINCT sys_id FROM document_fragments WHERE sys_id IN (...)
-     -> Returns set of sys_ids with PGP links
-```
-
-**Before (browse page source display):**
-```
-User opens manuscript -> get_all_sources_for_fragment(sys_id)
-  -> Supabase HTTP: document_fragments.select().eq(sys_id)
-  -> For each pgpid: Supabase HTTP: document_sources.select().eq(pgpid)
-  -> Returns list of source dicts
-```
-
-**After:**
-```
-User opens manuscript -> get_all_sources_for_fragment(sys_id)
-  -> pgp_service.get_fragments_for_sys_id(sys_id)
-     -> SQLite: SELECT * FROM document_fragments WHERE sys_id = ?
-  -> pgp_service.get_sources_for_document(pgpid)
-     -> SQLite: SELECT * FROM document_sources WHERE pgpid = ?
-  -> OPTIONAL: fjms_service.get_full_texts(sys_id)
-     -> SQLite: SELECT * FROM full_texts WHERE AlmaId = ?
-  -> Merge PGP + FJMS sources, deduplicate
-  -> Returns combined list of source dicts
-```
-
-## pgp.db Schema Design
-
-### Table: documents
-
-```sql
-CREATE TABLE documents (
-    pgpid INTEGER PRIMARY KEY,
-    shelfmark_combined TEXT,
-    document_type TEXT,
-    tags TEXT,                       -- JSON array string: '["communal","marriage"]'
-    doc_date_original TEXT,
-    doc_date_standard TEXT,
-    doc_date_calendar TEXT,
-    inferred_date_display TEXT,
-    inferred_date_standard TEXT,
-    inferred_date_rationale TEXT,
-    inferred_date_notes TEXT,
-    description TEXT,
-    transcription TEXT,
-    transcription_source TEXT,
-    doc_relation TEXT,
-    languages_primary TEXT,
-    languages_secondary TEXT,
-    language_note TEXT,
-    scholarship_records TEXT,
-    shelfmarks_historic TEXT,
-    has_transcription INTEGER,       -- 0/1 (SQLite boolean)
-    has_translation INTEGER,         -- 0/1
-    input_by TEXT
-);
--- pgp_url is computed: no need to store, generate in service layer
-```
-
-**Rationale for tags as TEXT:** Supabase uses JSONB but SQLite has no native JSONB. Store as JSON string, parse with `json.loads()` in the service layer. The json1 extension is available but for read-only tag queries, Python-side parsing is simpler and more portable.
-
-### Table: document_fragments
-
-```sql
-CREATE TABLE document_fragments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id INTEGER NOT NULL REFERENCES documents(pgpid),
-    sys_id TEXT NOT NULL,
-    shelfmark TEXT,
-    sequence_order INTEGER DEFAULT 1,
-    page_info TEXT,                   -- 'recto' or 'verso'
-    collection TEXT,
-    library TEXT,
-    library_abbrev TEXT,
-    fragment_url TEXT,
-    iiif_url TEXT,
-    UNIQUE(document_id, sys_id)
-);
-
-CREATE INDEX idx_fragments_sys_id ON document_fragments(sys_id);
-CREATE INDEX idx_fragments_document_id ON document_fragments(document_id);
-```
-
-### Table: document_sources
-
-```sql
-CREATE TABLE document_sources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    pgpid INTEGER NOT NULL REFERENCES documents(pgpid),
-    source_scholar TEXT NOT NULL,
-    doc_relation TEXT NOT NULL,
-    language TEXT,
-    content TEXT NOT NULL,
-    content_length INTEGER,
-    source_url TEXT,
-    notes TEXT,
-    sections TEXT,                    -- JSON string (was JSONB in Supabase)
-    source_language TEXT,
-    source_direction TEXT,
-    sequence_order INTEGER DEFAULT 1
-);
-
-CREATE INDEX idx_sources_pgpid ON document_sources(pgpid);
-CREATE INDEX idx_sources_relation ON document_sources(pgpid, doc_relation);
-```
-
-### Table: document_footnotes
-
-```sql
-CREATE TABLE document_footnotes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    pgpid INTEGER NOT NULL REFERENCES documents(pgpid),
-    source TEXT NOT NULL,
-    source_slug TEXT,
-    doc_relation TEXT NOT NULL,
-    location TEXT,
-    url TEXT,
-    notes TEXT,
-    content TEXT,
-    content_length INTEGER
-);
-
-CREATE INDEX idx_footnotes_pgpid ON document_footnotes(pgpid);
-CREATE INDEX idx_footnotes_relation ON document_footnotes(pgpid, doc_relation);
-```
-
-### Table: meta
-
-```sql
-CREATE TABLE meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
--- Stores: version, created, source
-```
-
-### Indexes
-
-The indexes above directly mirror the Supabase indexes. Key queries to optimize:
-
-1. `SELECT * FROM document_fragments WHERE sys_id = ?` -- most common (every browse/search)
-2. `SELECT DISTINCT sys_id FROM document_fragments WHERE sys_id IN (...)` -- batch check
-3. `SELECT * FROM documents WHERE pgpid = ?` -- document lookup
-4. `SELECT * FROM document_sources WHERE pgpid = ?` -- source listing
-5. Tag search via `json_each()` or LIKE pattern
-
-For tag search, two options:
-- **Option A:** `json_each()` with json1 extension (cleaner but requires extension)
-- **Option B:** Tags as separate normalized table
-- **Recommendation:** Option A with json1. SQLite's json1 is built-in since Python 3.9+ and `json_each()` with a simple JOIN is fast enough for 35K documents. But if performance is an issue, a normalized tags table can be added later.
-
-### Estimated Sizes
-
-| Table | Rows | Est. Size |
-|-------|------|-----------|
-| documents | 35,839 | ~50 MB (transcription TEXT is bulk) |
-| document_fragments | 36,155 | ~3 MB |
-| document_sources | 9,364 | ~40 MB (content TEXT is bulk) |
-| document_footnotes | 22,757 | ~15 MB |
-| meta | 3 | <1 KB |
-| **Total** | **104,118** | **~110 MB** |
-
-This is small enough to ship as a single file with the desktop app.
-
-## FJMS Full Texts Integration
-
-### New Table in fjms_enrichment.db: full_texts
-
-```sql
-CREATE TABLE full_texts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    AlmaId TEXT NOT NULL,
-    content TEXT NOT NULL,
-    content_length INTEGER,
-    source_name TEXT,            -- Scholar/source attribution from FIST
-    source_name_heb TEXT,
-    language TEXT,               -- Detected language
-    UNIQUE(AlmaId, content_length)   -- Dedup by content length per AlmaId
-);
-
-CREATE INDEX idx_full_texts_alma ON full_texts(AlmaId);
-```
-
-### Source Merging Strategy
-
-FJMS full texts appear alongside PGP sources in the version selector. The merge order:
+**Adding a fragment to the canvas:**
 
 ```
-1. PGP Digital Editions (primary scholarly transcriptions)
-2. PGP Digital Translations
-3. FJMS Full Texts (marked with "FJMS" badge, distinct from PGP)
-4. MiDRASH auto-transcriptions (existing V0.8/V0.7)
-5. User corrections (pending, shown to submitter only)
+1. User selects manuscript (sys_id) from browse/search
+2. puzzle_service.resolve_fragment_images(sys_id)
+   -> NliCrossrefService.get_folio_images(sys_id) -> IIIF URLs + FL IDs
+   -> fetch IIIF info.json for each -> {width, height}
+3. Image loaded:
+   - Web: browser loads via /api/nli_image proxy (existing)
+   - Desktop: ImageLoaderThread with disk cache (existing)
+4. Background removal (Python, server-side for both):
+   -> background_removal.remove_background(image_bytes) -> RGBA PNG with alpha mask
+   - Web: served via new /api/puzzle/process_image/{fl_id} endpoint
+   - Desktop: called directly from puzzle_service, result -> QPixmap
+5. Canvas creates interactive object:
+   - Web: fabric.Image from data URL (supports alpha transparency)
+   - Desktop: QGraphicsPixmapItem from QPixmap (supports alpha via ARGB32)
 ```
 
-### Deduplication
+**Saving a join document:**
 
-Many FJMS texts may overlap with PGP transcriptions. Dedup approach:
+```
+1. Canvas serializes fragment positions + transforms to JSON
+   Each fragment: {sys_id, fl_id, x, y, rotation, scale, flip_h, flip_v}
+2. Web: ui.run_javascript('JSON.stringify(canvas.toJSON())') -> Python
+   Desktop: iterate scene.items(), extract transforms
+3. puzzle_service.save_join_document(fragments_json, metadata)
+   -> Always save to joins.db (local, immediate)
+   -> If publishing: also upload to Supabase join_documents + Storage
+4. Composite image rendered via Pillow (puzzle_service.export_composite())
+   -> Stored locally and/or uploaded to Supabase Storage
+```
+
+**Recto/Verso toggle:**
+
+```
+1. User arranges recto -> positions saved as recto_layout
+2. Toggle to verso -> auto-generate mirror layout:
+   - Mirror all X positions around canvas center
+   - Swap each fragment to its verso FL ID (NLI: S1=recto, S2=verso)
+   - Load verso images (same sys_id, page+1 or S2 variant)
+3. Verso layout independently editable
+4. Join document stores both recto_layout and verso_layout
+```
+
+## Component Details
+
+### 1. Web Canvas: Fabric.js via NiceGUI Custom Component
+
+**Why Fabric.js:** Standard library for interactive canvas object manipulation. Built-in drag, rotate, scale, flip per object. Active maintenance, large community. The existing `advViewer` (search.py) is CSS transform-based -- it only handles a single image with zoom/pan/rotate. The puzzle needs true multi-object canvas manipulation.
+
+**Integration with NiceGUI:** The project already uses `ui.run_javascript()` extensively (~20 call sites in search.py for advViewer). For the puzzle, create a proper custom component:
+
+```
+web/components/puzzle_canvas.py    -- Python NiceGUI Element subclass
+web/components/puzzle_canvas.js    -- Fabric.js canvas logic (Vue component)
+```
+
+Python manages state and communicates via NiceGUI's `run_javascript()` / `emit()` bridge. JS handles all rendering and interaction. State of truth for visual positions lives in the JS canvas; Python requests it on save.
+
+**Key Fabric.js features needed:**
+- `fabric.Image` objects with per-object transforms
+- `canvas.toJSON()` / `canvas.loadFromJSON()` for serialization
+- `canvas.toDataURL()` for quick preview export
+- Object controls (rotation handle, corner scale handles)
+- Transparency (RGBA images with alpha from background removal)
+- Z-order management (bring to front/send to back)
+
+**Loading Fabric.js:** ~300KB minified from CDN via `ui.add_head_html('<script src="...">')`, same as other external JS.
+
+**Example bridge pattern:**
+```python
+# Add fragment to canvas (Python -> JS)
+await ui.run_javascript(f'''
+    fabric.Image.fromURL("{processed_image_data_url}", function(img) {{
+        img.set({{ left: 100, top: 100, angle: 0, fragmentId: "{fl_id}" }});
+        canvas.add(img);
+        canvas.setActiveObject(img);
+        canvas.renderAll();
+    }});
+''')
+
+# Get state for saving (Python <- JS)
+state_json = await ui.run_javascript('JSON.stringify(canvas.toJSON())')
+```
+
+### 2. Desktop Canvas: QGraphicsScene with Custom Items
+
+**Why QGraphicsScene:** Already in the codebase. `ZoomableScrollArea` (genizah_app.py:1391) demonstrates: QGraphicsView + QGraphicsScene + QGraphicsPixmapItem with pan/zoom, rotation, context menus. QGraphicsScene natively supports multiple items with independent transforms, z-ordering, and selection.
+
+**Implementation:**
 
 ```python
-def merge_sources(pgp_sources: list, fjms_texts: list) -> list:
-    """Merge PGP and FJMS sources, deduplicating overlaps."""
-    # Track PGP content fingerprints
-    pgp_fingerprints = set()
-    for src in pgp_sources:
-        if src.get('content'):
-            # Normalize: strip whitespace, collapse spaces
-            fp = normalize_for_dedup(src['content'])
-            pgp_fingerprints.add(fp)
-
-    merged = list(pgp_sources)  # PGP first
-    for text in fjms_texts:
-        fp = normalize_for_dedup(text['content'])
-        if fp not in pgp_fingerprints:
-            merged.append({
-                'source_scholar': text.get('source_name', 'FJMS'),
-                'doc_relation': 'FJMS Edition',
-                'content': text['content'],
-                'content_length': text.get('content_length'),
-                'language': text.get('language'),
-                'source': 'fjms',  # Marker for UI badge
-            })
-    return merged
+class PuzzleFragmentItem(QGraphicsPixmapItem):
+    """A single manuscript fragment on the puzzle canvas."""
+    def __init__(self, pixmap: QPixmap, fragment_id: str, parent=None):
+        super().__init__(pixmap, parent)
+        self.fragment_id = fragment_id
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+        self.setTransformOriginPoint(pixmap.width()/2, pixmap.height()/2)
+        # Right-click context menu (existing pattern from ZoomableScrollArea)
+        self.setAcceptHoverEvents(True)
 ```
 
-**Fingerprint approach:** Normalize whitespace + strip diacritics + lowercase. If the first 200 chars match, consider it a duplicate. This handles minor formatting differences between PGP and FJMS versions of the same text.
+**Reuse from ZoomableScrollArea:**
+- Pan/zoom (Ctrl+wheel zoom at line 1527, drag mode at line 1400)
+- Rotation (`setRotation()` at line 1520)
+- Fit-to-viewport (`fitInView()` at line 1570)
+- Context menu pattern (line 1427)
+
+**Key extension:** Multiple movable items instead of a single pixmap. Add selection handles, rotation handle, and flip via QTransform with negative scale.
+
+### 3. Shared Service: puzzle_service.py
+
+Following `shared/document_service.py`, `shared/fjms_service.py` pattern:
+
+```python
+@dataclass
+class PuzzleFragment:
+    sys_id: str
+    fl_id: str              # NLI FL ID for this side
+    shelfmark: str
+    side: str               # 'recto' or 'verso'
+    paired_fl_id: str       # the other side's FL ID
+    image_url: str          # IIIF URL
+    width_px: int           # from info.json
+    height_px: int
+    dpi: float              # estimated or from IIIF physical dimensions
+    x: float = 0.0          # canvas position (per-layout)
+    y: float = 0.0
+    rotation: float = 0.0
+    scale: float = 1.0
+    flip_h: bool = False
+    flip_v: bool = False
+
+@dataclass
+class PuzzleDocument:
+    id: str                  # UUID
+    user_id: str
+    title: str
+    fragments: List[PuzzleFragment]
+    recto_layout: dict
+    verso_layout: dict
+    join_type: str           # physical, content, uncertain
+    notes: str
+    status: str              # draft, proposed, confirmed
+    created_at: str
+    updated_at: str
+    composite_recto_path: str
+    composite_verso_path: str
+```
+
+### 4. Background Removal: shared/background_removal.py
+
+**Approach: HSV color-based segmentation.** Manuscript photos from NLI, Cambridge, etc. have solid-color library backgrounds (dark blue, black, grey, green felt). Well-constrained problem for traditional CV.
+
+**Why not ML (rembg/U-2-Net):** ~180MB model dependency. Overkill for solid-color backgrounds. Slower (seconds vs. milliseconds).
+
+**Why not GrabCut:** Requires user-provided initial rectangle. Semi-interactive.
+
+**Pipeline:**
+```python
+def remove_background(image_bytes: bytes, bg_color_hint: str = 'auto') -> bytes:
+    """Returns RGBA PNG bytes with transparent background."""
+    # 1. Decode to BGR numpy array
+    # 2. Convert to HSV
+    # 3. Sample 20x20 blocks at 4 corners -> median HSV = background color
+    # 4. cv2.inRange() with tolerance (+/-15 H, +/-40 S, +/-40 V) -> mask
+    # 5. Morphological cleanup (MORPH_CLOSE then MORPH_OPEN)
+    # 6. Keep largest contour only
+    # 7. GaussianBlur on mask edges for smooth alpha transition
+    # 8. Composite RGBA = BGR + alpha mask
+    # 9. Encode PNG, return bytes
+```
+
+**Performance:** ~100-300ms per 2000x3000px image. Parallelize with ThreadPoolExecutor for multi-fragment loading.
+
+**Dependency:** `opencv-python-headless` (~40MB). Headless variant avoids GUI conflicts with PyQt6.
+
+**Fallback:** If OpenCV unavailable or removal fails, show original image with opaque background. Users can still arrange fragments.
+
+### 5. DPI Calibration
+
+IIIF info.json provides `width` and `height` in pixels (required). Physical dimensions via optional `service` property with `physicalScale`/`physicalUnits` -- most Genizah servers do NOT provide this.
+
+**Approach:**
+1. Fetch info.json: `{iiif_base}/info.json` -> get native width/height
+2. Check for physical dimensions service (bonus)
+3. Fallback DPI by library: NLI ~400 PPI, Cambridge ~300-400 PPI, default 400 PPI
+4. Allow user override per fragment
+5. **Relative sizing is sufficient for Phase 1:** fragments from same library have consistent DPI, so pixel-ratio sizing is correct for visual alignment
+
+### 6. Storage Architecture
+
+**Local-first with optional cloud publish.** This follows the project's "offline-capable" principle.
+
+**joins.db (new local SQLite sidecar):**
+```sql
+CREATE TABLE join_documents (
+    id TEXT PRIMARY KEY,              -- UUID
+    user_id TEXT,
+    title TEXT,
+    fragments TEXT NOT NULL,          -- JSON array of fragment descriptors
+    recto_layout TEXT,                -- JSON {fl_id: {x, y, rotation, scale, flip_h, flip_v}}
+    verso_layout TEXT,
+    join_type TEXT DEFAULT 'uncertain',
+    notes TEXT,
+    status TEXT DEFAULT 'draft',
+    composite_recto BLOB,             -- compressed PNG
+    composite_verso BLOB,
+    supabase_id TEXT,                 -- NULL until published
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+```
+
+**Supabase (for published joins only):**
+```sql
+CREATE TABLE join_documents (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users NOT NULL,
+    title TEXT,
+    fragments JSONB NOT NULL,
+    recto_layout JSONB,
+    verso_layout JSONB,
+    join_type TEXT CHECK (join_type IN ('physical', 'content', 'uncertain')),
+    notes TEXT,
+    status TEXT DEFAULT 'proposed' CHECK (status IN ('proposed', 'confirmed')),
+    composite_recto_url TEXT,
+    composite_verso_url TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE join_documents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Anyone reads published" ON join_documents
+    FOR SELECT USING (true);
+CREATE POLICY "Users insert own" ON join_documents
+    FOR INSERT WITH CHECK (user_id = auth.uid());
+CREATE POLICY "Users update own" ON join_documents
+    FOR UPDATE USING (user_id = auth.uid());
+```
+
+**Supabase Storage bucket:** `puzzle-composites` with path `{user_id}/{doc_id}/recto.png`.
+
+**Rationale for local-first:**
+- Saves are instant (no network round-trip)
+- Works offline (desktop users)
+- Drafts never leave the user's machine
+- Publishing is an explicit action (upload to Supabase)
+- Same pattern as `session_persistence.py` for local + Supabase for community
+
+**Relationship to existing fragment_joins table:**
+- `fragment_joins`: pairwise A-B join claims (text metadata only, existing)
+- `join_documents`: visual puzzle assemblies (images + positions, new)
+- Coexist: puzzle tool creates visual evidence for textual join claims
+- Optional link: join_document.notes can reference fragment_join IDs
 
 ## Patterns to Follow
 
-### Pattern 1: Sidecar Service (Established)
+### Pattern 1: Shared Service + App-Specific UI (Existing)
+**What:** All data logic in `shared/`, all rendering in app-specific code.
+**Applied here:** `shared/puzzle_service.py` + `shared/background_removal.py` handle data. Web (Fabric.js) and desktop (QGraphicsScene) are independent UIs consuming the same data model.
 
-**What:** SQLite read-only service with singleton, thread-safety toggle, auto-detect
-**When:** Any new reference data source
-**Example:** FjmsService, NliCrossrefService -- PgpService follows identically
+### Pattern 2: NiceGUI JavaScript Bridge (Existing)
+**What:** Python manages state, JavaScript handles rendering via `ui.run_javascript()`.
+**Applied here:** Canvas JS receives image data URLs from Python, emits state snapshots back on save. Same pattern as advViewer but formalized as a Vue component.
 
-```python
-class PgpService:
-    def __init__(self, db_path=None, thread_safe=False):
-        # Auto-detect: project_root / pgp_data / pgp.db
-        # Read-only URI: file:{path}?mode=ro
-        # check_same_thread=not thread_safe
-        # row_factory = sqlite3.Row
-```
+### Pattern 3: SQLite Sidecar for Local Data (Existing)
+**What:** Structured data in SQLite, accessed via service module, auto-detect from project root.
+**Applied here:** joins.db stores join documents locally. Same pattern as pgp.db, fjms_enrichment.db, nli_crossref.db.
 
-### Pattern 2: Shim Re-export (Established)
+### Pattern 4: Image Loading Through Existing Pipeline (Existing)
+**What:** Reuse IIIF image loading (web: `/api/nli_image` proxy; desktop: `ImageLoaderThread` with disk cache).
+**Applied here:** Fragment images load through the same proxy/thread as browse and search. Background removal is a post-processing step, not a parallel pipeline.
 
-**What:** web/document_service.py re-exports from shared/document_service.py
-**When:** Maintaining backward compatibility during migration
-**Why:** Zero changes to web/pages/search.py import line
+### Pattern 5: Graceful Degradation (Existing)
+**What:** Feature works with reduced functionality when dependencies unavailable.
+**Applied here:** No OpenCV -> show original images. No IIIF info.json -> use default DPI. No Supabase -> save locally only.
 
-### Pattern 3: Lazy Import in Desktop (Established)
-
-**What:** Desktop app uses `from shared.X import Y` inside methods, not at module level
-**When:** Desktop features that may not always need the service
-**Example:** `genizah_app.py:3037` -- import inside try block
-
-### Pattern 4: Graceful Degradation (Established)
-
-**What:** Service returns empty/None when .db file missing
-**When:** Always -- user may not have the sidecar file yet
+### Pattern 6: Async Image Loading (Existing)
+**What:** Images loaded in background thread to avoid UI blocking.
+**Applied here (desktop):** Reuse ImageLoaderThread. Each fragment triggers async load + background removal callback.
+**Applied here (web):** Background removal via `run.io_bound()`. Processed image sent to browser as data URL.
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Breaking the Shim Contract
+### Anti-Pattern 1: Shared Canvas Abstraction
+**What:** Unified canvas API abstracting over Fabric.js and QGraphicsScene.
+**Why bad:** Fundamentally different paradigms (DOM/JS events vs. Qt paint system). Leaky abstraction, limits both implementations.
+**Instead:** Share data model only. Independent native canvas implementations.
 
-**What:** Changing function signatures in shared/document_service.py
-**Why bad:** web/pages/search.py imports 6 functions by name. If signatures change, both apps break.
-**Instead:** Keep all existing function signatures identical. Change only the internal implementation (Supabase -> SQLite).
+### Anti-Pattern 2: Client-Side Background Removal for Web
+**What:** Running OpenCV.js (~8MB) in the browser.
+**Why bad:** Huge download. Slow without hardware acceleration. Inconsistent across browsers.
+**Instead:** Background removal runs in NiceGUI Python process (same server, no network hop). Processed PNG served via image proxy.
 
-### Anti-Pattern 2: Mixed Supabase+SQLite in Transition
+### Anti-Pattern 3: Storing Full IIIF Images in SQLite
+**What:** Storing original 2000px fragment images as BLOBs in joins.db.
+**Why bad:** 500KB-2MB per image. 5-fragment join = 5-10MB per save. DB bloats.
+**Instead:** Store only IIIF URLs + fragment metadata. Re-fetch from IIIF on load. Store ONLY the final composite as BLOB (single rendered output, compressed).
 
-**What:** Having document_service.py call Supabase for some functions and SQLite for others
-**Why bad:** Two connection types, two failure modes, two test approaches
-**Instead:** Clean cutover. All functions switch to PgpService in one phase.
+### Anti-Pattern 4: Bidirectional Real-Time State Sync
+**What:** Mirroring every canvas state change to Python in real-time.
+**Why bad:** High-frequency drag events create excessive WebSocket traffic. State goes out of sync.
+**Instead:** Canvas is single source of truth for visual state. Python requests state only at save/export.
 
-### Anti-Pattern 3: Storing Computed pgp_url in SQLite
+### Anti-Pattern 5: Server-Side Canvas Rendering
+**What:** Rendering the interactive canvas on the server and streaming to browser.
+**Why bad:** Latency on every interaction. Defeats visual puzzle purpose.
+**Instead:** All canvas interaction is client-side. Server handles processing and persistence only.
 
-**What:** Storing `https://geniza.princeton.edu/documents/{pgpid}/` as a column
-**Why bad:** Supabase had it as GENERATED ALWAYS, but it wastes space and is trivially computed
-**Instead:** Generate in PgpService: `def get_pgp_url(pgpid): return f"https://geniza.princeton.edu/documents/{pgpid}/"`
+## Integration Points with Existing Code
 
-### Anti-Pattern 4: Premature Normalization of Tags
+### Files to Modify
 
-**What:** Creating a normalized tags table before proving json_each is too slow
-**Why bad:** Extra complexity, extra export logic, extra join in queries -- for 35K rows, unnecessary
-**Instead:** Start with JSON text + json_each(). Add normalized table only if profiling shows a bottleneck.
+| File | Change | Reason |
+|------|--------|--------|
+| `web/supabase_client.py` | Add CRUD for published join_documents + Storage upload | Cloud persistence |
+| `web/api.py` | Add `/api/puzzle/process_image/{fl_id}` endpoint | Serve background-removed RGBA images |
+| `web/pages/browse.py` | Add "Open in Puzzle" button on manuscript view | Entry point from browse |
+| `web/pages/search.py` | Add "Add to Puzzle" action in result menu | Entry point from search |
+| `web/main.py` | Register `/puzzle` route | New page |
+| `genizah_app.py` | Add puzzle tab/dialog launcher, toolbar action | Desktop entry point |
+| `shared/nli_crossref_service.py` | Add `get_recto_verso_pairs(sys_id)` method | Map recto FL IDs to verso using S1/S2 |
+| `supabase_corrections_client.py` | Add join_document publish/fetch (desktop) | Desktop Supabase access |
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `shared/puzzle_service.py` | Data model, IIIF info, serialization, composite export |
+| `shared/background_removal.py` | OpenCV HSV-based background removal |
+| `web/components/puzzle_canvas.py` | NiceGUI Python component wrapper |
+| `web/components/puzzle_canvas.js` | Fabric.js canvas (Vue component) |
+| `web/pages/puzzle.py` | Puzzle workspace page |
+| `tests/test_background_removal.py` | Background removal unit tests |
+| `tests/test_puzzle_service.py` | Data model + serialization tests |
+
+### Existing Infrastructure Reused Without Modification
+
+| Component | How Reused |
+|-----------|------------|
+| `NliCrossrefService.get_folio_images()` | Get FL IDs and folio labels for manuscript |
+| `NliCrossrefService.get_image_sources()` | Determine available image providers |
+| `FjmsService.get_joins_for_fragment()` | Pre-populate with known FJMS join groups |
+| `ImageLoaderThread` (desktop, line 2114) | Load fragment images with cache + fallback |
+| `/api/nli_image/{fl_id}` proxy (web) | CORS-safe image fetch |
+| `/api/cambridge_image/{sys_id}` proxy (web) | Cambridge IIIF images |
+| `ZoomableScrollArea` (desktop, line 1391) | Reference for QGraphicsScene pan/zoom |
+| Supabase auth + RLS patterns | User ownership, visibility |
+| `session_persistence.py` pattern | Local session save/restore |
+| `reading_desk_model.py` pattern | Multi-fragment data model reference |
 
 ## Scalability Considerations
 
-| Concern | Current (35K docs) | At 100K docs | At 500K docs |
-|---------|---------------------|--------------|-------------|
-| pgp.db file size | ~110 MB | ~300 MB | ~1.5 GB |
-| Batch sys_id check | <50ms (SQLite IN clause, 500 batch) | <100ms | Consider FTS or separate index |
-| Tag search | <100ms (json_each on 35K rows) | May need normalized tags table | Definitely need normalized table |
-| Desktop app startup | <1s (connection only) | Same | Same (lazy queries) |
-| Web concurrent reads | Thread-safe mode, read-only | Same | Same (read-only, no WAL needed) |
-
-**Note:** Since the database is read-only (opened with `?mode=ro`), WAL mode is not needed. Multiple readers can proceed without contention.
+| Concern | 2-3 fragments (typical) | 10+ fragments (large join) | Notes |
+|---------|------------------------|---------------------------|-------|
+| Canvas performance | Trivial | Both Fabric.js and QGraphicsScene handle dozens easily | Not a concern |
+| Image memory (browser) | ~20MB (3 RGBA 2000px PNGs) | ~70MB | Within browser limits |
+| Image memory (desktop) | ~20MB | ~70MB | Desktop has more headroom |
+| Background removal | ~300ms x 3 = ~1s | ~300ms x 10 = ~3s (parallelize) | Show progress indicator |
+| IIIF info.json | 3 HTTP GETs | 10 parallel GETs | Cache in memory |
+| joins.db size | ~100KB per doc | Same | Composite BLOBs are main size factor |
+| Supabase Storage | 2 composites ~1-2MB each | 2 composites ~3-5MB | Within free tier |
 
 ## Sources
 
-- `shared/document_service.py` -- 742 lines, 14 functions (7 DB-calling, 4 unused, 3 pure)
-- `shared/fjms_service.py` -- 961 lines, FjmsService pattern
-- `shared/nli_crossref_service.py` -- 845 lines, NliCrossrefService pattern
-- `shared/supabase_provider.py` -- 45 lines, will be removed
-- `scripts/import_pgp_full.py` -- Full Supabase schema and import logic
-- `migrations/*.sql` -- 9 migration files defining Supabase schema
-- `docs/plans/FIST_INTEGRATION_DESIGN.md` -- FIST data architecture
-- `.planning/PROJECT.md` -- v6.0.0 scope definition
+- Existing codebase: `genizah_app.py` ZoomableScrollArea (line 1391), ImageLoaderThread (line 2114)
+- Existing codebase: `web/api.py` image proxy endpoints
+- Existing codebase: `shared/nli_crossref_service.py` (image metadata, FL IDs, folio parsing)
+- Existing codebase: `web/supabase_client.py` fragment_joins CRUD pattern
+- Existing codebase: `shared/reading_desk_model.py` multi-fragment data model
+- [Fabric.js documentation](https://fabricjs.com/)
+- [Qt QGraphicsScene documentation](https://doc.qt.io/qt-6/qgraphicsscene.html)
+- [NiceGUI run_javascript](https://nicegui.io/documentation/run_javascript)
+- [IIIF Image API 2.1 info.json specification](https://iiif.io/api/image/2.1/)
+- [OpenCV background removal techniques](https://opencv.org/blog/remove-backgrounds-from-images-using-opencv/)

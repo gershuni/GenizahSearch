@@ -1,153 +1,144 @@
-# Domain Pitfalls: PGP Sidecar Migration + FJMS Full Texts
+# Domain Pitfalls: Fragment Puzzle / Visual Join Assembly
 
-**Domain:** PostgreSQL-to-SQLite migration for reference data, FJMS transcription integration
-**Researched:** 2026-02-16
-**Confidence:** HIGH (based on direct codebase analysis of all 4 Supabase tables, 2 existing SQLite sidecars, and 15+ consumer call sites)
-
-This document supersedes the v5.6.0 pitfalls (shared service extraction). Those pitfalls were addressed -- `shared/document_service.py` was extracted with a `web/document_service.py` shim (Phase 8), and `shared/supabase_provider.py` handles the client singleton. This document covers pitfalls specific to the NEXT milestone: migrating PGP data from Supabase to a SQLite sidecar, and adding 65K FJMS transcriptions as a scholarly source.
-
----
+**Domain:** Visual fragment assembly tool for Cairo Genizah manuscript research platform
+**Researched:** 2026-03-15
+**Platform:** Dual-app (NiceGUI web + PyQt6 desktop)
 
 ## Critical Pitfalls
 
-Mistakes that cause data loss, broken production deployments, or require rewrites.
+Mistakes that cause rewrites or major issues.
 
 ---
 
-### Pitfall 1: JSONB-to-SQLite Data Loss on `tags` and `sections` Columns
+### Pitfall 1: NiceGUI Has No Canvas/Image Manipulation Framework
 
-**What goes wrong:** The `documents.tags` column stores JSONB arrays (e.g., `["communal", "marriage", "trade"]`) and `document_sources.sections` stores JSONB arrays of objects (e.g., `[{"canvas_url": "...", "canvas_num": 1, "label": null, "text": "..."}]`). Migrating these to SQLite requires storing them as TEXT (JSON strings). If the export/import pipeline doesn't serialize properly, data is silently corrupted or lost.
+**What goes wrong:** Developers assume NiceGUI's `ui.interactive_image` can handle multi-image drag/rotate/flip assembly. It cannot. `ui.interactive_image` only supports SVG overlays on a single image -- it has no concept of multiple movable image items, rotation transforms, or layered composition. Building a puzzle canvas purely in NiceGUI's Python API leads to a dead end requiring a complete rewrite.
 
-**Why it happens:**
-1. PostgreSQL JSONB is a binary format with O(1) lookup; SQLite stores JSON as TEXT with O(N) parsing. The formats are NOT binary-compatible despite SQLite 3.45+ calling its binary format "JSONB" too.
-2. Supabase PostgREST returns JSONB as Python dicts/lists, but inserting into SQLite requires explicit `json.dumps()`. Forgetting this produces `"{'key': 'value'}"` (Python repr, not JSON) which breaks `json_extract()`.
-3. NULL vs empty: PostgreSQL distinguishes `NULL` JSONB from empty array `[]`. If the migration normalizes both to `NULL`, queries like `get_all_distinct_tags()` break because they rely on `NOT NULL` filtering.
+**Why it happens:** The component name "interactive_image" suggests interactivity. In reality it is an SVG-overlay viewer, not a canvas compositor. NiceGUI's GitHub discussions (#1339, #3427, #2513) show users repeatedly requesting drag/canvas features that do not exist natively.
 
-**Consequences:**
-- `get_fragments_by_tag()` stops working entirely -- it uses `filter('tags', 'cs', json.dumps([tag]))` which translates to PostgreSQL's `@>` operator. The SQLite equivalent (`json_each` + `WHERE value = ?`) requires completely different SQL.
-- `get_section_for_page()` gets `None` for sections because `json.loads()` fails on malformed strings.
-- Tag search in both apps produces zero results with no error (silent failure).
+**Consequences:** Weeks spent building a Python-side canvas abstraction that hits WebSocket round-trip latency on every mouse move. Unresponsive UX. Eventually must rewrite with a JavaScript canvas library anyway.
 
 **Prevention:**
-1. Serialize all JSONB columns with `json.dumps()` during export, verify round-trip with `json.loads()` on every row.
-2. Write a validation pass after SQLite import: `SELECT COUNT(*) FROM documents WHERE json_valid(tags) = 0` to catch any malformed JSON.
-3. For `tags`, store as JSON TEXT and query with `json_each()`:
-   ```sql
-   -- PostgreSQL: filter('tags', 'cs', '["communal"]')
-   -- SQLite equivalent:
-   SELECT d.* FROM documents d, json_each(d.tags) AS t WHERE t.value = ?
-   ```
-4. For `sections`, store as JSON TEXT and parse in Python after retrieval (as the current code already does -- `get_section_for_page` iterates the list in Python, not SQL).
-5. Preserve the distinction between `NULL` and `[]` in tags -- the `get_all_distinct_tags()` function filters with `.not_.is_('tags', 'null')`.
+- For the web app: embed a JavaScript canvas library (Fabric.js or Konva.js) inside NiceGUI via `ui.html()` + `ui.run_javascript()`. All drag/rotate/flip logic runs client-side in JS. Python handles data persistence and image URL provision only.
+- Communicate between Python and JS via `ui.run_javascript()` (Python-to-JS) and event handlers or exposed endpoints (JS-to-Python).
+- Accept that the web puzzle canvas will be ~90% JavaScript, ~10% NiceGUI scaffolding.
 
-**Detection:** Automated test: export all documents, import into SQLite, verify `json_valid()` on every JSON column, assert row counts match. Run `get_all_distinct_tags()` against both backends and compare output.
+**Detection:** If you find yourself writing Python code for mouse-move handlers that update image positions via WebSocket, stop. That path does not work for real-time manipulation.
 
-**Which phase should address it:** The sidecar build script phase (likely Phase 1 or 2). The build script must include a JSON validation pass as part of its verification report, mirroring the pattern in `import_nli_crossref.py`.
+**Confidence:** HIGH (verified via NiceGUI official docs and GitHub discussions)
 
 ---
 
-### Pitfall 2: PostgreSQL GIN Index Features Have No SQLite Equivalent
+### Pitfall 2: Divergent Canvas Architectures Between Web and Desktop
 
-**What goes wrong:** Three query patterns in `document_service.py` rely on PostgreSQL-specific features that have no direct SQLite equivalent:
+**What goes wrong:** The web canvas (JavaScript Fabric.js/Konva.js) and the desktop canvas (PyQt6 QGraphicsScene) have fundamentally different APIs, coordinate systems, and capabilities. Developers try to create a shared "canvas abstraction layer" and end up with a leaky abstraction that satisfies neither platform. Or worse, they build the desktop version first (QGraphicsScene is easier), then discover the web port requires a complete reimplementation.
 
-| Query | PostgreSQL Feature | Current Code |
-|-------|-------------------|--------------|
-| Tag search | GIN index with `@>` operator | `filter('tags', 'cs', json.dumps([tag]))` |
-| Edition filter | `LIKE` on text column | `.like('doc_relation', '%Edition%')` |
-| Null JSON check | `IS NOT NULL` on JSONB | `.not_.is_('tags', 'null')` |
+**Why it happens:** The project's historical pattern is shared service layers (document_service.py, fjms_service.py, etc.) that work identically across both apps. But canvas manipulation is inherently platform-specific -- you cannot abstract over QGraphicsScene vs HTML5 Canvas in any meaningful way.
 
-**Why it happens:** The migration naturally translates Supabase PostgREST calls to SQLite queries, but developers assume 1:1 mapping. The GIN-indexed `@>` containment operator has no SQLite equivalent -- `json_each()` is a table-valued function that requires a subquery or join, and it cannot use an index.
-
-**Consequences:**
-- Tag-based search (`get_fragments_by_tag`) either crashes with SQL error or returns wrong results.
-- If the developer uses `LIKE '%tag%'` on the JSON TEXT column as a shortcut, it matches partial tag names (searching "war" matches "software").
-- Performance: scanning all 35K documents with `json_each()` on every tag search may be acceptable for reference data, but if the 65K FJMS records also have tags, the scan becomes slow.
+**Consequences:** Either (a) a brittle abstraction layer that breaks on edge cases, or (b) two completely separate implementations that drift apart in behavior.
 
 **Prevention:**
-1. For tag search: either use `json_each()` join (correct but slower) or pre-compute a separate `document_tags` junction table:
-   ```sql
-   CREATE TABLE document_tags (pgpid INTEGER, tag TEXT);
-   CREATE INDEX idx_doc_tags ON document_tags(tag);
-   -- Populated during sidecar build from documents.tags JSON
-   ```
-   This gives indexed tag lookup matching the GIN index performance.
-2. For `LIKE` on `doc_relation`: this works identically in SQLite, no change needed.
-3. For null JSON check: SQLite's `IS NOT NULL` works on TEXT columns, but also need `AND tags != 'null'` to handle the string literal "null" that might appear.
-4. Benchmark the `json_each()` approach on 35K rows before deciding if a junction table is needed.
+- Accept two separate canvas implementations from the start. Share only the data model, not the rendering.
+- Define a shared `PuzzleDocument` data model (fragment positions, rotations, scales, join metadata) in a shared module (e.g., `shared/puzzle_service.py`).
+- Each platform renders from this model independently. The model is the contract, not the canvas.
+- Build desktop first (QGraphicsScene is proven; existing `ZoomableScrollArea` code at line 1391 of genizah_app.py provides a starting point), then port the data model to the web JS canvas.
+- Test roundtrip: Desktop saves PuzzleDocument -> Web loads it -> renders identically (and vice versa).
+- Critical detail: set rotation center consistently -- Fabric.js defaults to top-left origin, Qt defaults to (0,0). Both must use center-origin:
+  - Fabric.js: `img.set({ originX: 'center', originY: 'center' })`
+  - Qt: `item.setTransformOriginPoint(width/2, height/2)`
 
-**Detection:** Run the full test suite against the SQLite backend. The `get_fragments_by_tag('Legal')` call must return the same set of sys_ids as the Supabase version.
+**Detection:** If you are writing an `AbstractCanvas` class with `add_fragment()`, `rotate()`, `move()` methods that dispatch to platform-specific implementations, you are on the wrong path.
 
-**Which phase should address it:** Schema design phase. The decision between `json_each()` and a junction table must be made before building the sidecar.
+**Confidence:** HIGH (architectural analysis of existing codebase + NiceGUI limitations)
 
 ---
 
-### Pitfall 3: Removing Supabase Read Paths While User-Data Writes Still Depend on It
+### Pitfall 3: IIIF Images Are Enormous and Kill Performance
 
-**What goes wrong:** The migration moves READ-ONLY reference data (documents, document_fragments, document_sources, document_footnotes) from Supabase to SQLite. But Supabase still hosts user-generated data (corrections, comments, discoveries, fragment_joins, lists). If the developer removes the Supabase dependency entirely or accidentally breaks the Supabase client singleton during refactoring, all user features break.
+**What goes wrong:** The existing codebase fetches IIIF images at `/full/2000,/0/default.jpg` (2000px wide). For a puzzle canvas with 3-8 fragments visible simultaneously, that is 3-8 images at 2000px+ each, all needing real-time transform operations. Memory explodes, rendering stutters, GPU compositing chokes.
 
-**Why it happens:** There are currently TWO Supabase client singletons:
-1. `shared/supabase_provider.py` -- used by `shared/document_service.py` (PGP data reads)
-2. `web/supabase_client.py` -- used for auth, lists, corrections, comments, discoveries
+**Why it happens:** Current image viewer shows one image at a time. The puzzle canvas shows many simultaneously. Linear memory scaling is the obvious consequence but easy to overlook during single-image prototyping.
 
-When `shared/document_service.py` is refactored to use SQLite instead of Supabase, the developer may:
-- Remove `shared/supabase_provider.py` thinking it's no longer needed (but `supabase_corrections_client.py` for desktop also imports from Supabase)
-- Change `shared/document_service.py` to stop importing from `shared/supabase_provider.py`, then remove the provider, not realizing other desktop code uses it
-- Test only the web app and miss that the desktop `supabase_corrections_client.py` (1,800+ lines) still needs the Supabase client for corrections, discoveries, and joins
-
-**Consequences:**
-- Desktop app: corrections, comments, discoveries, and join proposals all break with ImportError or connection failure.
-- Web app: auth still works (uses `web/supabase_client.py`), but if someone refactors to share the provider, it could break auth flow.
-- Partial deployment: web app works fine, desktop app silently fails on all user features.
+**Consequences:** Desktop: QGraphicsScene with 8x 2000px QPixmaps = ~120MB of uncompressed pixel data per puzzle. Web: browser tab memory bloat, compositing lag on rotate/scale. 5-10 fragments at 2000x3000px RGBA = ~24MB each = 120-240MB in browser memory.
 
 **Prevention:**
-1. Map every Supabase dependency BEFORE removing any:
-   - `shared/document_service.py` -> `shared/supabase_provider.py` (being migrated away)
-   - `supabase_corrections_client.py` -> direct Supabase client (KEEP)
-   - `web/supabase_client.py` -> direct Supabase client (KEEP)
-   - `lists_sync.py` -> Supabase client (KEEP)
-2. Do NOT remove `shared/supabase_provider.py` -- other code may depend on it. Instead, remove only the `document_service.py` import of it.
-3. Mark the refactoring as "remove Supabase from document reads" not "remove Supabase dependency."
-4. Run both apps end-to-end after migration: verify search, PGP display, AND corrections/lists.
+- Use a multi-resolution strategy: load reduced-res images (`/full/800,/0/default.jpg` or `/full/1000,/0/default.jpg`) for the interactive canvas, then load high-res (`/full/2000,/0/default.jpg`) only when exporting the final composite.
+- On desktop (QGraphicsScene): use `QGraphicsPixmapItem` with LOD (Level of Detail) -- override `paint()` to swap between low-res and high-res based on zoom level.
+- On web: use the JS canvas library's built-in image caching and implement progressive loading.
+- Limit canvas to a maximum number of fragments (8-10 is typical for Genizah joins; enforce this).
+- For the final composite export, fetch full-resolution images one at a time on the server side (Python Pillow), composite in memory, save, then release. Never send full-res to the browser.
 
-**Detection:** `grep -r "supabase_provider\|get_client" shared/ web/ supabase_corrections_client.py` before and after migration. The count should decrease only for document_service.py references.
+**Detection:** If canvas becomes sluggish with 3+ fragments, or memory usage exceeds 500MB per puzzle, the resolution strategy is wrong.
 
-**Which phase should address it:** Must be documented in the cutover phase. A dependency map should be produced before any Supabase read paths are removed.
+**Confidence:** HIGH (existing IIIF URL patterns verified in codebase at genizah_app.py:1708,1858,1930 and web/api.py:145,208,285)
 
 ---
 
-### Pitfall 4: Forgetting `check_same_thread=False` or Blocking the Async Event Loop
+### Pitfall 4: Background Removal Fails on Parchment/Paper Edges
 
-**What goes wrong:** The NiceGUI web app runs async with uvicorn. SQLite calls are synchronous and will block the event loop if called directly. The existing sidecar services (`fjms_service.py`, `nli_crossref_service.py`) use `check_same_thread=False` for the web app's thread pool, but the new PGP sidecar service might not follow this pattern.
+**What goes wrong:** HSV color segmentation works well for removing solid blue/green library backgrounds BUT fails at the fragment edges where the parchment color bleeds into the background color (shadow zones, translucent edges, frayed fibers). The result is either: (a) jagged edges with background color artifacts, or (b) over-aggressive removal that eats into the manuscript text near edges.
 
-**Why it happens:**
-1. Developer copies the `document_service.py` function signatures but implements them with direct SQLite calls inside `async` handlers, blocking the event loop.
-2. Developer forgets the `thread_safe: bool = False` constructor parameter that both existing services implement.
-3. The web app calls PGP functions via `await run.io_bound(...)` (see `web/pages/search.py:2005` and 15+ other sites). If the new service is NOT thread-safe, concurrent requests crash with `ProgrammingError: SQLite objects created in a thread can only be used in that same thread`.
+**Why it happens:** Manuscript fragments have irregular, fuzzy edges. Library backgrounds (NLI blue, Cambridge green/white, grid paper at other institutions) create gradients at the fragment boundary. Simple HSV thresholding produces binary masks with no edge feathering. The parchment itself varies in color from cream to dark brown, sometimes approaching the background hue in degraded areas.
 
-**Consequences:**
-- Without `check_same_thread=False`: crash under concurrent load, intermittent `ProgrammingError` that only appears in production with multiple users.
-- Without `run.io_bound()`: UI freezes during SQLite queries, WebSocket timeouts, poor user experience.
-- Both are hard to catch in single-user development testing.
+**Consequences:** Researchers lose trust in the tool if background removal visibly damages the manuscript content. They will not use a tool that clips text at fragment edges. Scholarly credibility destroyed.
 
 **Prevention:**
-1. Follow the exact pattern from `fjms_service.py:43-79`:
-   ```python
-   def __init__(self, db_path=None, thread_safe=False):
-       uri = f"file:{db_path}?mode=ro"
-       self._conn = sqlite3.connect(
-           uri, uri=True,
-           check_same_thread=not thread_safe,
-           timeout=10.0,
-       )
-       self._conn.row_factory = sqlite3.Row
-   ```
-2. Web app initialization MUST pass `thread_safe=True` (matches existing pattern in both sidecar services).
-3. All web page calls to the service MUST use `await run.io_bound(service.method, args)` to offload to the thread pool.
-4. Desktop app should leave `thread_safe=False` (single-threaded) and use QThread for background operations (matches existing `gui_threads.py` pattern).
+- Make background removal OPTIONAL and OFF by default -- show original image first.
+- Use HSV segmentation as a first pass (more robust to lighting than RGB), then apply morphological operations (erode slightly to pull mask inward, then dilate back with Gaussian blur for soft edges).
+- Add alpha feathering at mask boundaries (5-10px gradient from opaque to transparent) instead of hard cutoff.
+- Provide a manual adjustment slider for threshold sensitivity per fragment (real-time preview).
+- Provide a "show original" / "undo removal" toggle so researchers can verify nothing was lost.
+- Consider GrabCut (OpenCV) as a refinement step after initial HSV segmentation -- it handles edge gradients much better than pure thresholding.
+- Consider edge preservation: detect the manuscript boundary first (largest contour via findContours), then only remove outside it. This prevents interior parchment from being affected.
+- Do NOT use deep learning models (rembg, U-Net) for this task -- they are trained on natural photos, not manuscripts, and will hallucinate edges on parchment.
 
-**Detection:** Load test with 3+ concurrent browser tabs hitting search results with PGP data. If it crashes, thread safety is wrong.
+**Detection:** Test with NLI blue backgrounds (the most common source) AND Cambridge images (different background colors) AND light-colored parchment on cream/white backgrounds. If edges look pixelated or text near edges is clipped, the approach needs refinement.
 
-**Which phase should address it:** Service implementation phase. The service constructor MUST be reviewed against the existing pattern before any web integration.
+**Confidence:** MEDIUM (HSV segmentation well-documented for solid backgrounds; manuscript-specific edge behavior needs empirical testing with actual Genizah images)
+
+---
+
+### Pitfall 5: IIIF Sources Lack Physical Scale Metadata
+
+**What goes wrong:** The DPI calibration feature assumes IIIF `info.json` includes a `physicalScale` service so fragments can be auto-sized to real-world proportions. In practice, most IIIF servers (including NLI, Cambridge CUDL) do NOT include the physical dimensions service. The `info.json` contains pixel dimensions only, with no scale information. Without this, DPI calibration silently falls back to pixel-based sizing, making fragments from different libraries display at wildly different relative scales.
+
+**Why it happens:** The IIIF Physical Dimensions service (`http://iiif.io/api/annex/services/physdim`) is optional. It requires `physicalScale` (float ratio) and `physicalUnits` (mm/cm/in). Example: physicalScale=0.0025, physicalUnits="in" with a 4000px image means 400 DPI. Adoption is extremely low. Most digitization workflows store DPI in TIFF EXIF headers but strip it when serving via IIIF.
+
+**Consequences:** A CUL fragment scanned at 400 DPI appears twice the size of a JTS fragment scanned at 200 DPI, even though they might be physically similar. The puzzle becomes useless for scale-sensitive assembly.
+
+**Prevention:**
+- Probe actual IIIF `info.json` endpoints for NLI, Cambridge, Manchester, JTS to determine what metadata is actually available. Do this in the research/prototyping phase, not during implementation.
+- Build a fallback DPI lookup table per library/source: many institutions scan at consistent DPI within their collections (NLI typically 400 DPI, Cambridge CUDL typically 400 DPI).
+- Normalize all fragments to a common pixels-per-cm before display.
+- If no DPI data is available from any source, default all fragments to the same assumed DPI (e.g., 400) and let the user manually resize.
+- Always provide manual scale adjustment (drag corner to resize), because auto-sizing will never be perfect.
+- Display a visual indicator ("assumed scale" vs "calibrated scale") so researchers know when they are working with estimates.
+
+**Detection:** If two fragments from the same physical manuscript but different digitization sources display at dramatically different sizes, the DPI fallback is not working.
+
+**Confidence:** MEDIUM (IIIF physicalScale spec verified at iiif.io/api/annex/services; NLI/Cambridge actual support needs runtime probing)
+
+---
+
+### Pitfall 6: CORS Blocking IIIF Images on Web Canvas
+
+**What goes wrong:** Fabric.js/Konva.js cannot manipulate pixels of images loaded from cross-origin URLs. The HTML5 canvas becomes "tainted" and `toDataURL()` / `toJSON()` throws security errors. Background removal requires pixel access which is blocked by CORS. Even if images display in an `<img>` tag, canvas pixel access requires explicit CORS headers.
+
+**Why it happens:** IIIF servers (NLI, Cambridge, Oxford, Manchester) may not set `Access-Control-Allow-Origin` headers, or may restrict them. The puzzle tool needs pixel-level access for both background removal and composite export.
+
+**Consequences:** Cannot apply background removal in-browser. Cannot export canvas to PNG/JPEG. Cannot serialize/deserialize fragment images. Tool is non-functional on web.
+
+**Prevention:**
+- Do NOT load IIIF images directly onto the JS canvas. Instead:
+  1. Proxy images through the NiceGUI server (existing `web/api.py` already has proxy endpoints at lines 145, 208, 285, 345, 402)
+  2. Apply background removal server-side (Python OpenCV) and send processed images as base64 data URLs
+  3. Base64 data URLs are same-origin by definition -- no CORS issues
+  4. Alternative: serve processed images via `/api/puzzle_image/{fl_id}` HTTP endpoint (avoids WebSocket payload issues too)
+- On desktop: no CORS issue (Qt's `QNetworkAccessManager` is not subject to browser same-origin policy).
+
+**Detection:** Test early with NLI and Cambridge IIIF URLs in Fabric.js. If `canvas.toDataURL()` throws, CORS is the problem.
+
+**Confidence:** HIGH (standard web security constraint; existing proxy pattern verified in web/api.py)
 
 ---
 
@@ -157,251 +148,193 @@ Issues that cause incorrect behavior, poor performance, or significant rework.
 
 ---
 
-### Pitfall 5: Deduplication Between PGP Editions and FJMS Transcriptions
+### Pitfall 7: WebSocket Overhead for Real-Time Canvas State + Large Payloads
 
-**What goes wrong:** Both PGP (via `document_sources`) and FJMS contain scholarly transcriptions of the same Genizah manuscripts. The same text -- e.g., a Goitein transcription of T-S 13J6.13 -- may appear in both sources with slight variations (different formatting, different section boundaries, different attribution strings). Without deduplication, the UI shows duplicate entries in the transcription selector.
-
-**Why it happens:**
-1. PGP organizes by `pgpid` (document ID), FJMS organizes by `AlmaId` (sys_id). The same manuscript has different identifiers in each system.
-2. PGP's `source_scholar` field (e.g., "S.D. Goitein") and FJMS's scholar attribution may not match exactly (name variants, initials vs full names).
-3. PGP's `doc_relation` uses "Digital Edition" while FJMS may use different terminology.
-4. The text content itself differs: PGP stores cleaned transcription text, FJMS may store the same text with different Unicode normalization, different line breaks, or different section markers.
-
-**Consequences:**
-- User sees the same transcription twice with different labels, causing confusion.
-- If both are treated as independent sources, the "source count" badges are inflated.
-- If dedup is too aggressive, distinct scholarly editions are incorrectly merged (scholar A's reading vs scholar B's reading of the same manuscript).
+**What goes wrong:** Two related issues: (a) If canvas state (fragment positions) is managed in Python and pushed to the browser on every change, the WebSocket becomes a bottleneck during drag operations (60+ updates/second). (b) Sending large base64-encoded images (2000px RGBA = ~10MB base64) through NiceGUI's WebSocket causes timeouts, disconnections, or memory issues. The 200-result cap lesson from search (WebSocket safety) applies here.
 
 **Prevention:**
-1. Dedup by (sys_id, normalized_scholar_name, relation_type) -- not by text content. Two different scholars' transcriptions of the same manuscript are legitimately different.
-2. Build a scholar name normalization map: "S.D. Goitein" = "Goitein, S. D." = "Goitein" for matching purposes.
-3. When overlap is detected, prefer PGP's version (it's more recently curated and has structured section data) but surface FJMS as an alternative if it has additional content (e.g., FJMS might have a fuller transcription or different sections).
-4. Add a `source_system` field to the unified data model: "pgp" or "fjms" so the UI can indicate provenance.
-5. Test with known-overlapping manuscripts: find 10 sys_ids that appear in both PGP `document_fragments` and FJMS, manually verify the dedup logic produces correct results.
+- Canvas state during manipulation must live entirely in JavaScript (client-side). Only sync to Python on "drop" (mouseup) or explicit "save" events.
+- Use debounced sync: batch position updates and send to Python at most once per 500ms.
+- Serve processed images via HTTP endpoints (`/api/`), not WebSocket messages.
+- Set processed images as server-served files and pass URLs to Fabric.js.
+- Python is an event consumer, not the state authority during active editing.
 
-**Detection:** After sidecar build, query: `SELECT sys_id, COUNT(*) FROM (all sources) GROUP BY sys_id, scholar_normalized HAVING COUNT(*) > 1` -- any results indicate unresolved duplicates.
+**Detection:** Load 3+ fragments. If connection drops, UI freezes, or drag is laggy, the communication pattern is wrong.
 
-**Which phase should address it:** Must be addressed in the sidecar build phase when combining data from both sources. The dedup logic must be part of the build script, not the runtime service.
+**Confidence:** HIGH (known NiceGUI WebSocket limitation; existing lesson about parent_slot timer crash documented in project memory)
 
 ---
 
-### Pitfall 6: `get_all_distinct_tags()` Full Table Scan on 35K Rows
+### Pitfall 8: Recto/Verso Auto-Generation Assumes Mirror Symmetry
 
-**What goes wrong:** The current `get_all_distinct_tags()` fetches ALL documents' `tags` column from Supabase and aggregates in Python. In Supabase, this is acceptable because PostgREST streams results. In SQLite, this requires reading 35K rows and parsing JSON for each. If additionally 65K FJMS documents have tags, this becomes 100K rows.
-
-**Why it happens:** The current implementation (line 561-575 of `document_service.py`) does:
-```python
-response = client.table('documents').select('tags').not_.is_('tags', 'null').execute()
-all_tags = set()
-for row in (response.data or []):
-    tags = row.get('tags', [])
-    for tag in tags:
-        all_tags.add(tag)
-return sorted(all_tags)
-```
-
-This pattern works with PostgREST (returns all rows as JSON array in HTTP response), but in SQLite it's better expressed as a single SQL query using `json_each()`.
+**What goes wrong:** The recto/verso feature auto-generates a verso arrangement by mirroring the recto layout. But manuscript fragments are not perfectly flat -- they curl, have variable thickness, and were photographed from different angles for recto vs verso. Simple horizontal mirroring produces a verso where fragments do not align with each other, especially at join edges.
 
 **Prevention:**
-1. Replace with a pure SQL query:
-   ```sql
-   SELECT DISTINCT t.value FROM documents, json_each(documents.tags) AS t
-   WHERE documents.tags IS NOT NULL AND documents.tags != '[]'
-   ORDER BY t.value
-   ```
-2. Or, if using the junction table from Pitfall 2: `SELECT DISTINCT tag FROM document_tags ORDER BY tag`
-3. Cache the result (tag list changes only when sidecar is rebuilt, not at runtime).
+- Auto-generate verso as an initial approximation only (horizontal flip of positions + individual fragment horizontal flip). Clearly label it "auto-generated."
+- Make verso independently editable -- researchers must be able to adjust each fragment's position on verso separately from recto.
+- Store recto and verso arrangements as separate position arrays in the PuzzleDocument model, not as a derived transform of recto.
+- Load actual verso images (different IIIF folio/canvas index) rather than flipping recto images programmatically.
+- Show a toggle between recto/verso views, not a simultaneous split view (reduces confusion and memory usage).
 
-**Detection:** Benchmark the `get_all_distinct_tags()` call. If > 100ms, optimize.
-
-**Which phase should address it:** Service implementation phase, when rewriting `document_service.py` queries.
+**Confidence:** MEDIUM (informed by manuscript handling knowledge; specific fragment curl behavior is domain expertise)
 
 ---
 
-### Pitfall 7: `document_sources.sections` JSONB Contains Nested Objects with Large Text
+### Pitfall 9: Join Document Schema Designed Too Narrowly
 
-**What goes wrong:** The `sections` column on `document_sources` stores arrays of objects, each containing a `text` field that can be hundreds of lines. In PostgreSQL, JSONB provides efficient storage. In SQLite, storing 9,364 rows where each row's `sections` field might be 10KB+ of JSON text dramatically increases the sidecar file size and memory usage.
-
-**Why it happens:** The `sections` column was designed for PostgreSQL JSONB which has binary compression. In SQLite TEXT storage, the JSON is uncompressed, and parsing it requires reading the entire string.
-
-**Consequences:**
-- The sidecar database could be 200MB+ instead of 50MB if sections are stored as JSON text.
-- Loading sections for a document requires parsing a potentially large JSON blob for every source row.
-- If the developer attempts to index into the JSON for canvas-based lookups, SQLite's O(N) JSON parsing makes each lookup slow.
+**What goes wrong:** The initial schema captures only "fragment A joins fragment B" with positions. But Genizah joins are more complex: fragments can overlap (palimpsests), join types vary (adjacent, overlapping, same-leaf), attribution matters (who proposed the join), and confidence levels exist. A narrow schema requires migration when these needs inevitably emerge.
 
 **Prevention:**
-1. Consider normalizing sections into a separate table:
-   ```sql
-   CREATE TABLE source_sections (
-       source_id INTEGER REFERENCES document_sources(id),
-       canvas_num INTEGER,
-       canvas_url TEXT,
-       label TEXT,
-       text TEXT,
-       PRIMARY KEY (source_id, canvas_num)
-   );
-   ```
-   This allows direct canvas-based lookup without parsing JSON, and SQLite handles large TEXT fields efficiently when they're individual rows.
-2. If keeping JSON: accept the size trade-off and parse in Python (current `get_section_for_page` already does this). The JSON parsing per-document is fast enough for single-document lookups.
-3. Profile the sidecar size with and without normalized sections before deciding.
+- Design the PuzzleDocument schema to include from the start:
+  - `fragments[]`: array of `{sys_id, fl_id, x, y, rotation, scale, flip_h, flip_v, z_order, opacity}`
+  - `recto_arrangement` + `verso_arrangement`: separate position arrays
+  - `join_type`: enum (adjacent, overlapping, uncertain)
+  - `notes`: free text (Hebrew + English)
+  - `confidence`: enum (certain, probable, possible)
+  - `attribution`: who created this join document
+  - `status`: draft / published / reviewed
+  - `composite_image_url`: optional saved composite
+  - `created_at`, `updated_at`
+- Store in Supabase (community features pattern) with personal workspace default + publish workflow.
+- Match existing FJMS join data fields where possible (48K joins in fjms_enrichment.db provide a reference model for required attributes).
 
-**Detection:** Check sidecar file size after build. If > 300MB, consider normalization.
-
-**Which phase should address it:** Schema design phase. Decision on sections storage format affects the entire data model.
+**Confidence:** HIGH (existing join data structure in fjms_enrichment.db is well-understood)
 
 ---
 
-### Pitfall 8: SQLite Variable Limit (999) with `IN` Queries for Batch Lookups
+### Pitfall 10: NiceGUI Page Navigation Destroys Canvas State
 
-**What goes wrong:** The existing batch lookup pattern uses `.in_()` for enriching search results (up to 500 IDs per batch). Both existing sidecar services (`fjms_service.py:188`, `nli_crossref_service.py:206`) handle this correctly with `batch_size = 500`. But the new PGP sidecar service must implement the same batching, and it must handle the additional dimension of multi-table lookups (documents + fragments + sources).
-
-**Why it happens:** SQLite has a compile-time limit of 999 variables per query (SQLITE_MAX_VARIABLE_NUMBER). A query like `SELECT * FROM documents WHERE pgpid IN (?, ?, ..., ?)` with 1000 IDs fails. The existing services already know this (they use 500 as batch size), but the new service's batch lookups are more complex: one batch for documents, one for fragments, one for sources.
-
-**Consequences:**
-- `OperationalError: too many SQL variables` crashes search results when > 999 results.
-- If batch lookups aren't parallelized across tables, the enrichment step becomes 3x slower (serial document + fragment + source queries).
+**What goes wrong:** User navigates away from puzzle page and back. Fabric.js canvas and all fragment state is destroyed because NiceGUI recreates the page DOM on navigation.
 
 **Prevention:**
-1. Copy the proven batch pattern from `fjms_service.py:186-209`:
-   ```python
-   batch_size = 500
-   for i in range(0, len(sys_ids), batch_size):
-       batch = sys_ids[i:i + batch_size]
-       placeholders = ','.join('?' * len(batch))
-       cursor = self._conn.execute(
-           f"SELECT ... WHERE sys_id IN ({placeholders})", batch
-       )
-   ```
-2. For multi-table enrichment: do ONE batch query per table, then join in Python. Do NOT do nested queries (document -> fragments -> sources per document) as this causes N+1 query patterns.
-3. The `get_sys_ids_with_transcriptions()` function currently chunks at 200 for Supabase URL length limits. SQLite doesn't have URL limits, so the chunk size can increase to 500, matching the other services.
+- Auto-save canvas state to database (Supabase or local SQLite) on every significant change (fragment added, moved, rotated).
+- On page load, check for unsaved state and offer to restore.
+- Use `app.on_disconnect` handler to save state before connection closes.
+- Follow the session persistence pattern from v6.5.0 which successfully preserves search state, browse tabs, and composition summary across navigation.
 
-**Detection:** Test with a search returning 1000+ results. If enrichment crashes or takes > 5 seconds, the batching is wrong.
-
-**Which phase should address it:** Service implementation phase. Each batch method must be reviewed for the 999-variable limit.
+**Confidence:** HIGH (existing session persistence pattern verified in v6.5.0)
 
 ---
 
-### Pitfall 9: `pgp_url` Generated Column Cannot Be Replicated in SQLite
+### Pitfall 11: Background Removal Runs Server-Side, Blocks Event Loop
 
-**What goes wrong:** The `documents` table has a generated column: `pgp_url TEXT GENERATED ALWAYS AS ('https://geniza.princeton.edu/documents/' || pgpid || '/') STORED`. SQLite supports generated columns (since 3.31.0), but the syntax differs slightly and some tools don't handle them well.
-
-**Why it happens:** Developer copies the PostgreSQL schema directly, and either:
-1. SQLite accepts the `GENERATED ALWAYS AS` syntax but requires slightly different syntax for the expression.
-2. Or the developer forgets the generated column entirely and the `pgp_url` field is NULL everywhere.
-
-**Consequences:**
-- Links to PGP website don't work in the UI.
-- Minor but confusing: the URL is easy to compute in Python, so this is low-risk.
+**What goes wrong:** OpenCV background removal (HSV conversion, morphological operations, GrabCut) is CPU-intensive. Running it in the NiceGUI async event loop blocks all other users. Running it in the desktop main thread freezes the UI.
 
 **Prevention:**
-1. Either define the generated column in SQLite (which DOES support it):
-   ```sql
-   pgp_url TEXT GENERATED ALWAYS AS ('https://geniza.princeton.edu/documents/' || pgpid || '/') STORED
-   ```
-2. Or compute it in the service layer (simpler, less surprising):
-   ```python
-   def _add_pgp_url(doc: dict) -> dict:
-       doc['pgp_url'] = f"https://geniza.princeton.edu/documents/{doc['pgpid']}/"
-       return doc
-   ```
-3. Prefer option 2 -- the service already transforms database rows into dicts, so adding one computed field is trivial.
+- On web: run background removal via `run.cpu_bound()` to offload to a worker process (preferred for OpenCV since it is CPU-bound, not I/O-bound). `run.io_bound()` is acceptable but does not release the GIL as effectively.
+- On desktop: run in a QThread (following existing `gui_threads.py` pattern with `SearchThread`).
+- Show a progress indicator: "Removing background..." with cancel option.
+- Consider pre-computing background removal when images are first loaded to the canvas (background task) rather than on-demand when the user toggles it.
 
-**Detection:** Check that PGP links work in both apps after migration.
-
-**Which phase should address it:** Schema design phase (trivial).
+**Confidence:** HIGH (matches existing patterns for CPU-intensive work in both apps)
 
 ---
 
-### Pitfall 10: Data Staleness and Sidecar Update Strategy
+### Pitfall 12: Image Caching Strategy Collision with Existing Viewer
 
-**What goes wrong:** Unlike Supabase (which can be updated in real-time via the import scripts), a SQLite sidecar is a static file distributed with the application. Once shipped, the PGP data is frozen until the next sidecar rebuild and distribution.
-
-**Why it happens:** The existing FJMS and NLI sidecars update infrequently (the underlying data changes rarely). But PGP data does change -- new transcriptions are added to the Princeton Geniza Project, new document links are created, tag corrections are made. If the sidecar is built from a snapshot and never updated, the data drifts from the PGP source.
-
-**Consequences:**
-- New PGP documents are invisible to GenizahSearch users until the next sidecar rebuild.
-- Corrections made on PGP's side don't propagate.
-- Users may report "stale data" or "missing documents."
+**What goes wrong:** The existing image viewer has its own caching (`v2 cache: high resolution (2000px)` per genizah_app.py line 2155). The puzzle tool fetches the same images at different resolutions (800px for canvas, 2000px for export). Two caching systems for the same images create confusion, memory bloat, and cache invalidation bugs.
 
 **Prevention:**
-1. Document the sidecar build frequency (e.g., "rebuilt monthly" or "rebuilt per release").
-2. Include a `meta` table with build date and source version (matching existing pattern in fjms_service and nli_crossref_service).
-3. Display the sidecar version/date in the UI (e.g., "PGP data: February 2026") so users understand the data currency.
-4. Keep the sidecar build script as a standalone tool that can be run by the maintainer to refresh data.
-5. Consider a future hybrid approach: SQLite for bulk reads, Supabase for "hot" updates -- but this adds complexity and should NOT be in v1 of the migration.
+- Use the existing image cache infrastructure. Extend it to support multiple resolution tiers per image rather than building a separate cache.
+- Key cache entries by `(fl_id, resolution)` tuple, not just fl_id.
+- On desktop: share the `QNetworkAccessManager` and disk cache already in use.
+- On web: browser HTTP cache handles IIIF URLs naturally (different URLs for different resolutions produce distinct cache entries automatically -- `/full/800,/` vs `/full/2000,/`).
 
-**Detection:** Compare sidecar row counts against live PGP data periodically.
-
-**Which phase should address it:** Build script phase. The meta table and version display should be part of the initial implementation.
+**Confidence:** HIGH (existing cache code verified in genizah_app.py)
 
 ---
 
 ## Minor Pitfalls
 
-Issues that cause minor bugs, slight inefficiencies, or developer confusion.
+Issues that cause minor bugs, UX friction, or developer confusion.
 
 ---
 
-### Pitfall 11: `SERIAL`/`BIGSERIAL` Primary Keys Don't Exist in SQLite
+### Pitfall 13: Undo/Redo Missing from Initial Implementation
 
-**What goes wrong:** The Supabase schema uses `SERIAL` and `BIGSERIAL` auto-increment types. SQLite uses `INTEGER PRIMARY KEY AUTOINCREMENT` (or just `INTEGER PRIMARY KEY` which auto-increments without the `AUTOINCREMENT` keyword).
-
-**Prevention:** Use `INTEGER PRIMARY KEY` in SQLite schema. For the `documents` table, `pgpid INTEGER PRIMARY KEY` is sufficient (it's a natural key, not auto-generated). For junction tables like `document_fragments`, use `INTEGER PRIMARY KEY AUTOINCREMENT` or omit the ID entirely if it's not needed (look up by composite key instead).
-
-**Which phase should address it:** Schema design phase (trivial).
-
----
-
-### Pitfall 12: `TIMESTAMPTZ` Columns Don't Exist in SQLite
-
-**What goes wrong:** Supabase uses `TIMESTAMPTZ DEFAULT NOW()` for `created_at` columns. SQLite has no native timestamp type -- it stores text, real, or integer.
-
-**Prevention:** For a read-only sidecar, `created_at` is informational only. Either:
-1. Store as TEXT in ISO 8601 format: `'2026-02-16T12:00:00Z'`
-2. Or omit entirely -- the sidecar is a snapshot, so creation timestamps are meaningless.
-
-**Which phase should address it:** Schema design phase (trivial).
-
----
-
-### Pitfall 13: Foreign Key Enforcement Off by Default in SQLite
-
-**What goes wrong:** SQLite does not enforce foreign key constraints by default. The `document_fragments.document_id REFERENCES documents(pgpid)` constraint is parsed but not enforced unless `PRAGMA foreign_keys = ON` is set.
+**What goes wrong:** Fragment assembly involves lots of trial and error. Without undo/redo, researchers are afraid to experiment. Retrofitting undo/redo after the canvas is built is far harder than building it in from the start because it requires wrapping every mutation in a command object.
 
 **Prevention:**
-1. For a read-only sidecar, foreign keys are informational -- the data integrity was validated during the build process.
-2. If desired, add `PRAGMA foreign_keys = ON` in the build script to validate during import, then remove for runtime (slightly faster reads).
-3. The existing sidecar services do NOT enable foreign keys (they have flat tables), so this is consistent.
+- Implement undo/redo from the first version.
+- Use a command pattern: each operation (move, rotate, flip, add, remove) is a reversible command.
+- On desktop (QGraphicsScene): Qt has `QUndoStack` built in -- use it.
+- On web (JS canvas): maintain a state history array (snapshot of all fragment positions per action). Both Fabric.js and Konva.js have undo examples in their ecosystems.
 
-**Which phase should address it:** Build script phase (optional, not critical).
-
----
-
-### Pitfall 14: Desktop App File Locking on Windows
-
-**What goes wrong:** On Windows, the SQLite database file is locked while open. If the desktop app holds a connection and the user tries to update the sidecar file (e.g., replacing `pgp_data.db` with a new version), the file replacement fails with a "file in use" error.
-
-**Why it happens:** The existing sidecar services open a connection at startup and hold it for the app's lifetime (singleton pattern). On Windows NTFS, this prevents other processes from writing to the file.
-
-**Prevention:**
-1. Open the sidecar in read-only mode (already done: `?mode=ro` in URI). This allows concurrent readers on most platforms but still locks on Windows.
-2. Document the update procedure: close the desktop app, replace the sidecar file, restart.
-3. This is consistent with the existing FJMS and NLI sidecar behavior -- no special handling needed.
-
-**Which phase should address it:** Documentation phase (not a code change).
+**Confidence:** HIGH (standard UX requirement; Qt's QUndoStack verified)
 
 ---
 
-### Pitfall 15: Supabase PostgREST `.single()` Has No SQLite Equivalent
+### Pitfall 14: Composite Image Export Loses Fragment Metadata
 
-**What goes wrong:** Several queries in `document_service.py` use `.single().execute()` which tells PostgREST to expect exactly one row and return it as a dict (not a list). In SQLite, `cursor.fetchone()` returns a single row, but if multiple rows exist, `.single()` throws an error while `fetchone()` silently returns only the first.
+**What goes wrong:** The exported composite PNG/JPEG is just pixels -- it contains no information about which fragments are included, their positions, or the join metadata. Researchers share the image but recipients cannot reconstruct or verify the join.
 
 **Prevention:**
-1. For queries that should return exactly one row (e.g., `get_document_metadata`), use `fetchone()` and accept that it silently returns the first match.
-2. Add a defensive check if needed: `rows = cursor.fetchall(); assert len(rows) <= 1`
-3. For `get_document_for_fragment()`, which navigates fragment -> document with potentially multiple matches (recto/verso), the existing logic already handles this by iterating results. No change needed.
+- Always save both the composite image AND the PuzzleDocument JSON (structured metadata).
+- Embed fragment IDs in PNG metadata (tEXt chunks) or use a sidecar JSON file alongside the image.
+- When sharing/publishing, always link composite image to PuzzleDocument record in Supabase.
+- Consider SVG export as an alternative -- it preserves individual fragment boundaries as separate elements and is zoomable.
 
-**Which phase should address it:** Service implementation phase (straightforward).
+**Confidence:** HIGH (data integrity requirement)
+
+---
+
+### Pitfall 15: Hebrew RTL Text and Right-to-Left Fragment Ordering
+
+**What goes wrong:** Two related issues: (a) Fragment labels, join notes, and metadata fields contain Hebrew text. UI components default to LTR layout, causing garbled display. (b) Hebrew manuscripts read right-to-left. Default left-to-right fragment placement on the canvas confuses researchers -- the "first" fragment should be on the right.
+
+**Prevention:**
+- Apply the same RTL patterns used throughout the existing codebase (dir="rtl" on relevant elements, Hebrew font stacks).
+- Notes/annotation text area must support bidirectional text (researchers write mixed Hebrew/English).
+- Default canvas layout should place fragments right-to-left (first fragment on the right).
+- Fragment labels derived from shelfmarks (e.g., "T-S 12.123") are LTR but may be embedded in Hebrew context.
+
+**Confidence:** HIGH (existing pattern in codebase; known constraint)
+
+---
+
+### Pitfall 16: Fragment Z-Order Conflicts at Overlap Points
+
+**What goes wrong:** When fragments overlap (common in Genizah joins where edges are placed adjacent with slight overlap), clicking in the overlap zone always selects the top fragment. Researchers cannot easily select or manipulate the bottom fragment without moving the top one first.
+
+**Prevention:**
+- Implement a fragment list panel (like Photoshop layers) showing z-order. Click to select any fragment regardless of overlap.
+- Tab/cycle key to iterate through overlapping fragments at click point.
+- Right-click context menu: "Select fragment underneath".
+
+**Confidence:** MEDIUM (standard graphics editor UX)
+
+---
+
+### Pitfall 17: OpenCV Dependency Size for Desktop Distribution
+
+**What goes wrong:** Adding `opencv-python` to the desktop build adds ~50-80MB to the installer package. The full OpenCV package includes GUI modules that conflict with PyQt6.
+
+**Prevention:**
+- Use `opencv-python-headless` instead of `opencv-python` (smaller, no GUI dependencies).
+- Alternatively, for simple HSV segmentation only, Pillow + NumPy may suffice without OpenCV (convert to HSV via NumPy, threshold, apply mask via Pillow). Add OpenCV only if GrabCut or advanced morphological operations are needed.
+- Profile the installer size delta before committing to the dependency.
+
+**Confidence:** MEDIUM (opencv-python-headless is a known lighter alternative; Pillow-only approach needs validation)
+
+---
+
+### Pitfall 18: IIIF Image Orientation Metadata
+
+**What goes wrong:** Some IIIF images are stored rotated (metadata says "rotate 90") but served un-rotated. Or the opposite -- served rotated but the tool applies rotation again, causing double rotation.
+
+**Prevention:** Check IIIF info.json for rotation metadata. Most NLI images are 0 rotation, but verify. Ignore EXIF orientation (IIIF servers normalize this). If the image service's `profile` includes rotation support, the `/0/` in the URL path already handles it.
+
+**Confidence:** LOW (needs runtime verification with actual IIIF endpoints)
+
+---
+
+### Pitfall 19: Fabric.js State Serialization Losing Image Data
+
+**What goes wrong:** `canvas.toJSON()` serializes object properties but not the actual image pixel data. On reload, if the original image URL is no longer available (or was a one-time data URL from background removal), the fragment image is lost.
+
+**Prevention:** Store fragment metadata (sys_id, fl_id, IIIF URL, position, rotation, scale, background_removal_params) separately from canvas state. On reload, re-fetch images from IIIF and re-apply background removal using saved parameters. Never depend on Fabric.js serialization for persistence -- the PuzzleDocument model is the source of truth.
+
+**Confidence:** HIGH (Fabric.js serialization behavior is documented)
 
 ---
 
@@ -409,42 +342,32 @@ Issues that cause minor bugs, slight inefficiencies, or developer confusion.
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|---------------|------------|
-| Schema design | JSONB columns need TEXT + json_each() (Pitfall 1, 2) | Design tag junction table early, validate JSON on import |
-| Sidecar build script | Data export from Supabase must handle pagination (> 1000 rows) | Use `.range()` pagination pattern from `import_pgp_sections.py:282` |
-| Sidecar build script | sections column bloats file size (Pitfall 7) | Profile both normalized and JSON approaches |
-| Service implementation | Thread safety for web app (Pitfall 4) | Copy constructor pattern from fjms_service.py exactly |
-| Service implementation | Batch lookups need 500-item chunking (Pitfall 8) | Copy batch pattern from existing services |
-| Service implementation | PostgREST-specific operators need SQL rewrite (Pitfall 2) | Map every Supabase call to SQL equivalent before coding |
-| FJMS integration | Deduplication between PGP and FJMS (Pitfall 5) | Build scholar name normalization, dedup by (sys_id, scholar, type) |
-| Cutover / migration | Supabase user data must remain untouched (Pitfall 3) | Dependency map before removing any Supabase imports |
-| Cutover / migration | Dual-read period needed for validation | Run both backends in parallel, compare results, then switch |
-
----
-
-## Supabase Query to SQLite Query Translation Guide
-
-This table maps every Supabase PostgREST pattern used in `document_service.py` to its SQLite equivalent. Useful as a reference during service implementation.
-
-| Supabase Pattern | SQLite Equivalent | Used In |
-|------------------|-------------------|---------|
-| `.select('*').eq('pgpid', v).single()` | `SELECT * FROM documents WHERE pgpid = ?` + `fetchone()` | `get_document_for_fragment`, `get_document_metadata` |
-| `.select('document_id, page_info').eq('sys_id', v)` | `SELECT document_id, page_info FROM document_fragments WHERE sys_id = ?` | `get_document_for_fragment` |
-| `.select('*').eq('document_id', v).order('sequence_order')` | `SELECT * FROM document_fragments WHERE document_id = ? ORDER BY sequence_order` | `get_fragments_for_document` |
-| `.select('transcription').eq('pgpid', v).single()` | `SELECT transcription FROM documents WHERE pgpid = ?` + `fetchone()` | `get_transcription_for_document` |
-| `.select('*').eq('pgpid', v).order('doc_relation').order('sequence_order')` | `SELECT * FROM document_sources WHERE pgpid = ? ORDER BY doc_relation, sequence_order` | `get_sources_for_document` |
-| `.like('doc_relation', '%Edition%')` | `WHERE doc_relation LIKE '%Edition%'` (identical) | `get_editions_for_document` |
-| `.like('doc_relation', '%Translation%')` | `WHERE doc_relation LIKE '%Translation%'` (identical) | `get_translations_for_document` |
-| `.in_('sys_id', chunk)` | `WHERE sys_id IN (?,?,...)` with batching | `get_sys_ids_with_transcriptions` |
-| `.filter('tags', 'cs', json.dumps([tag]))` | `FROM documents d, json_each(d.tags) t WHERE t.value = ?` | `get_fragments_by_tag` |
-| `.select('tags').not_.is_('tags', 'null')` | `SELECT tags FROM documents WHERE tags IS NOT NULL AND tags != '[]'` | `get_all_distinct_tags` |
+| Data model / schema | Pitfall 9: Too narrow join schema | Design with FJMS join fields as reference; include recto/verso positions from start |
+| Background removal | Pitfall 4: Edge quality on parchment | Prototype with NLI blue + Cambridge images early; add alpha feathering; make optional |
+| Background removal | Pitfall 11: CPU blocks event loop | Use `run.cpu_bound()` on web, QThread on desktop |
+| DPI calibration | Pitfall 5: No physicalScale in IIIF info.json | Probe actual endpoints first; build per-library DPI fallback table |
+| Desktop canvas | Memory risk (Pitfall 3) | Load at 800-1000px for interaction; full-res only for export |
+| Web canvas | Pitfall 1 + 6 + 7: Must use JS library; CORS; WebSocket limits | Fabric.js/Konva.js in NiceGUI; proxy images; JS-authoritative state |
+| Cross-platform parity | Pitfall 2: Two canvas implementations will diverge | Shared PuzzleDocument model is the contract; test roundtrip early |
+| Recto/verso | Pitfall 8: Mirror symmetry is only approximate | Independent verso editing; load actual verso images |
+| Image loading | Pitfall 3 + 12: Memory and cache conflicts | Multi-resolution strategy; extend existing cache by resolution tier |
+| Composite export (web) | Pitfall 6: CORS taints canvas | Proxy through NiceGUI server or composite server-side via Pillow |
+| State persistence | Pitfall 10: Navigation destroys canvas | Auto-save on changes; follow v6.5.0 session persistence pattern |
+| UX polish | Pitfall 13: No undo = researchers afraid to experiment | Implement undo/redo from v1; QUndoStack on desktop, state history on web |
+| Desktop packaging | Pitfall 17: OpenCV bloats installer | Use opencv-python-headless or evaluate Pillow-only approach |
 
 ---
 
 ## Sources
 
-- [SQLite JSON Functions And Operators](https://sqlite.org/json1.html) -- official reference for json_each(), json_extract(), json_valid()
-- [SQLite JSONB Format](https://sqlite.org/jsonb.html) -- confirms SQLite JSONB is NOT binary-compatible with PostgreSQL JSONB
-- [Using SQLite In Multi-Threaded Applications](https://www.sqlite.org/threadsafe.html) -- official thread-safety documentation
-- [SQLite Write-Ahead Logging](https://sqlite.org/wal.html) -- WAL mode for concurrent reads
-- [SQLite json_each() Tutorial](https://www.sqlitetutorial.net/sqlite-json-functions/sqlite-json_each-function/) -- table-valued function for JSON array iteration
-- Codebase analysis: `shared/fjms_service.py` (proven SQLite sidecar pattern), `shared/nli_crossref_service.py` (proven thread-safe singleton), `shared/document_service.py` (all Supabase queries being migrated), `web/supabase_client.py` (user data -- NOT being migrated)
+- [NiceGUI ui.interactive_image documentation](https://nicegui.io/documentation/interactive_image) -- verified capabilities and limitations (HIGH confidence)
+- [NiceGUI canvas API discussion #2513](https://github.com/zauberzeug/nicegui/discussions/2513) -- community requests for canvas features
+- [NiceGUI draggable image discussion #3427](https://github.com/zauberzeug/nicegui/discussions/3427) -- drag limitations
+- [NiceGUI drag image discussion #1339](https://github.com/zauberzeug/nicegui/discussions/1339) -- no built-in drag support
+- [Qt QGraphicsScene documentation](https://doc.qt.io/qt-6/qgraphicsscene.html) -- BSP tree indexing, item flags, performance
+- [IIIF Physical Dimensions Service](https://iiif.io/api/annex/services/) -- physicalScale spec (physicalScale float + physicalUnits mm/cm/in)
+- [IIIF Image API 2.1](https://iiif.io/api/image/2.1/) -- info.json structure, pixel dimensions
+- [IIIF-discuss: DPI in image information](https://groups.google.com/g/iiif-discuss/c/uut9voeev_E) -- community discussion confirming low adoption
+- [OpenCV HSV Color Segmentation](https://realpython.com/python-opencv-color-spaces/) -- technique for solid-background removal
+- [Fragmentarium project (University of Fribourg)](https://www.unifr.ch/env/en/info/news/17667/next) -- existing DH manuscript fragment assembly platform
+- Existing codebase: genizah_app.py `ZoomableScrollArea` (line 1391), IIIF URLs (lines 1708, 1858, 1930), image cache (line 2155), web/api.py proxy (lines 145, 208, 285, 345, 402)
