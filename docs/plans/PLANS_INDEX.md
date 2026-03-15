@@ -1,6 +1,6 @@
 # GenizahSearch - Plans & Documentation Index
 
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-15
 
 ---
 
@@ -50,6 +50,7 @@
 | [LISTS_UNIFICATION_PLAN.md](LISTS_UNIFICATION_PLAN.md) | Planned | Unifying Projects & Lists (post-Supabase) |
 | [MOBILE_RESPONSIVE_PLAN.md](MOBILE_RESPONSIVE_PLAN.md) | Planned | Mobile/tablet responsive design |
 | [JOINS_FEED_PLAN.md](JOINS_FEED_PLAN.md) | Planned | Fragment joins in discovery feed |
+| [JOIN_FINDER_IMPLEMENTATION_PLAN.md](JOIN_FINDER_IMPLEMENTATION_PLAN.md) | Planned | Direction-aware join finder, caching, and manuscript-view UI |
 | [USER_TEXT_SEARCH_PLAN.md](USER_TEXT_SEARCH_PLAN.md) | Planned | User-added text search for parallels |
 | [FIX_PLAN.md](FIX_PLAN.md) | Ongoing | Bug fix tracking |
 

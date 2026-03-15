@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-03-13
+> Last updated: 2026-03-15
 
 This directory contains all project documentation, organized by category.
 
@@ -16,6 +16,7 @@ This directory contains all project documentation, organized by category.
 | Find a specific file | [FILE_INDEX.md](FILE_INDEX.md) |
 | Understand the code structure | [CODE_INDEX.md](CODE_INDEX.md) |
 | See implementation plans | [plans/PLANS_INDEX.md](plans/PLANS_INDEX.md) |
+| Review join-finder research | [JOIN_FINDER_REPORT.md](JOIN_FINDER_REPORT.md) |
 | Check translation stats | [TRANSLATION_STATS.md](TRANSLATION_STATS.md) |
 
 ---
@@ -97,6 +98,7 @@ docs/
 | [LISTS_UNIFICATION_PLAN.md](plans/LISTS_UNIFICATION_PLAN.md) | Planned | Unifying Projects & Lists |
 | [MOBILE_RESPONSIVE_PLAN.md](plans/MOBILE_RESPONSIVE_PLAN.md) | Planned | Mobile/tablet responsive design |
 | [JOINS_FEED_PLAN.md](plans/JOINS_FEED_PLAN.md) | Planned | Fragment joins in discovery feed |
+| [JOIN_FINDER_IMPLEMENTATION_PLAN.md](plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md) | Planned | Direction-aware join finder for manuscript view |
 | [USER_TEXT_SEARCH_PLAN.md](plans/USER_TEXT_SEARCH_PLAN.md) | Planned | User-added text search |
 
 ### Completed Plans
@@ -136,6 +138,7 @@ Detailed specifications for complex features:
 | [FJMS_API_REFERENCE.md](FJMS_API_REFERENCE.md) | Friedberg Manuscript Society API reference |
 | [TRANSLATION_STATS.md](TRANSLATION_STATS.md) | Translation coverage statistics |
 | [FJMS_EXPORT_AND_TRANSLATION_BUGS.md](FJMS_EXPORT_AND_TRANSLATION_BUGS.md) | Known FJMS data issues |
+| [JOIN_FINDER_REPORT.md](JOIN_FINDER_REPORT.md) | Join-finder research report, benchmarks, and algorithm analysis |
 
 ---
 
