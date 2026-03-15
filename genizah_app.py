@@ -1586,18 +1586,19 @@ class ManuscriptViewerWidget(QWidget):
         btn_rot_right.setFixedWidth(30)
         btn_rot_right.clicked.connect(lambda: self.adjust_rotation(90))
 
-        btn_rot_reset = QPushButton(tr("Reset"))
+        btn_rot_reset = QPushButton(f"↩️ {tr('Reset')}")
         btn_rot_reset.setToolTip(tr("Reset rotation"))
-        btn_rot_reset.setFixedWidth(50)
+        btn_rot_reset.setFixedWidth(60)
         btn_rot_reset.clicked.connect(lambda: self.slider_rotation.setValue(0))
 
-        self.btn_external = QPushButton(tr("External Website"))
+        self.btn_external = QPushButton(f"🔗 {tr('External')}")
+        self.btn_external.setToolTip(tr("External Website"))
         self.btn_external.setVisible(False)
         self.btn_external.clicked.connect(self.open_external)
 
         # KTIV / NLI Viewer button (Phase 31)
-        self.btn_ktiv = QPushButton(tr("View on Ktiv"))
-        self.btn_ktiv.setToolTip(tr("View image in Ktiv"))
+        self.btn_ktiv = QPushButton(f"🔗 {tr('Ktiv')}")
+        self.btn_ktiv.setToolTip(tr("View on Ktiv"))
         self.btn_ktiv.setVisible(False)
         self.btn_ktiv.clicked.connect(self._open_ktiv_viewer)
         self._ktiv_sys_id = None
@@ -1761,15 +1762,15 @@ class ManuscriptViewerWidget(QWidget):
 
         if self.external_url:
             if self.external_provider == "cambridge":
-                btn_label = tr("Cambridge")
+                btn_label = f"🔗 {tr('Cambridge')}"
             elif self.external_provider == "oxford":
-                btn_label = tr("Oxford")
+                btn_label = f"🔗 {tr('Oxford')}"
             elif self.external_provider == "manchester":
-                btn_label = "Manchester LUNA"
+                btn_label = "🔗 Manchester"
             elif self.external_provider == "jts":
-                btn_label = "Princeton Digital Library"
+                btn_label = "🔗 Princeton"
             else:
-                btn_label = tr("External Website")
+                btn_label = f"🔗 {tr('External')}"
             self.btn_external.setText(btn_label)
         self.btn_external.setVisible(bool(self.external_url))
 
@@ -2603,11 +2604,13 @@ class ResultDialog(QDialog):
 
         # Add to List (compact)
         self.btn_compact_add_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_compact_add_list.setToolTip(tr("Add to List"))
         self.btn_compact_add_list.clicked.connect(self.add_current_to_list)
         compact_layout.addWidget(self.btn_compact_add_list)
 
         # Extended Info (compact)
-        self.btn_compact_ext_info = QPushButton(tr("Show Extended Info"))
+        self.btn_compact_ext_info = QPushButton(f"ℹ️ {tr('Info')}")
+        self.btn_compact_ext_info.setToolTip(tr("Show Extended Info"))
         self.btn_compact_ext_info.setCheckable(True)
         self.btn_compact_ext_info.setVisible(False)  # shown when extended info available
         self.btn_compact_ext_info.toggled.connect(self.toggle_extended_info)
@@ -2644,7 +2647,7 @@ class ResultDialog(QDialog):
         self.btn_compact_translations.setCheckable(True)
         _trans_on_c = load_app_config().get('show_translations', False)
         self.btn_compact_translations.setChecked(_trans_on_c)
-        self.btn_compact_translations.setText(tr('Translations ON') if _trans_on_c else tr('Translations OFF'))
+        self.btn_compact_translations.setText(f"🌐 {tr('Trans ON')}" if _trans_on_c else f"🌐 {tr('Trans OFF')}")
         self.btn_compact_translations.setStyleSheet(
             "QPushButton { background-color: #0369a1; color: white; border-radius: 4px; padding: 2px 8px; font-size: 11px; }"
             "QPushButton:checked { background-color: #059669; }"
@@ -2701,16 +2704,20 @@ class ResultDialog(QDialog):
         nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
         action_row = QHBoxLayout()
-        self.btn_view_transcription = QPushButton(tr("Browse manuscript")) # Renamed
+        self.btn_view_transcription = QPushButton(f"📖 {tr('Browse')}")
+        self.btn_view_transcription.setToolTip(tr("Browse manuscript"))
         self.btn_view_transcription.clicked.connect(self.open_full_transcription)
-        self.btn_search_parallels = QPushButton(tr("Search for parallels"))
+        self.btn_search_parallels = QPushButton(f"🔍 {tr('Parallels')}")
+        self.btn_search_parallels.setToolTip(tr("Search for parallels"))
         self.btn_search_parallels.clicked.connect(self.search_for_parallels)
 
         # Add to List button
         self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_add_to_list.setToolTip(tr("Add to List"))
         self.btn_add_to_list.clicked.connect(self.add_current_to_list)
 
-        self.btn_ext_info = QPushButton(tr("Show Extended Info"))
+        self.btn_ext_info = QPushButton(f"ℹ️ {tr('Info')}")
+        self.btn_ext_info.setToolTip(tr("Show Extended Info"))
         self.btn_ext_info.setCheckable(True)
         self.btn_ext_info.toggled.connect(self.toggle_extended_info)
         self.btn_ext_info.setVisible(False)
@@ -2731,7 +2738,8 @@ class ResultDialog(QDialog):
         self.btn_rd_bib_nli = QPushButton()
         self.btn_rd_bib_nli.setVisible(False)
         self.btn_rd_bib_nli.clicked.connect(self._show_rd_nli_bib)
-        self.btn_rd_catalog = QPushButton(f"{tr('Catalog Records')} (0)")
+        self.btn_rd_catalog = QPushButton(f"📋 {tr('Catalog')} (0)")
+        self.btn_rd_catalog.setToolTip(tr("Catalog Records"))
         self.btn_rd_catalog.setEnabled(False)
         self.btn_rd_catalog.setVisible(False)
         self.btn_rd_catalog.clicked.connect(self._show_rd_catalog)
@@ -2744,7 +2752,8 @@ class ResultDialog(QDialog):
         self.btn_rd_translations.setCheckable(True)
         _trans_on = load_app_config().get('show_translations', False)
         self.btn_rd_translations.setChecked(_trans_on)
-        self.btn_rd_translations.setText(tr('Translations ON') if _trans_on else tr('Translations OFF'))
+        self.btn_rd_translations.setText(f"🌐 {tr('Trans ON')}" if _trans_on else f"🌐 {tr('Trans OFF')}")
+        self.btn_rd_translations.setToolTip(tr("Toggle translations"))
         self.btn_rd_translations.setStyleSheet(
             "QPushButton { background-color: #0369a1; color: white; border-radius: 4px; padding: 2px 8px; }"
             "QPushButton:checked { background-color: #059669; }"
@@ -2815,7 +2824,8 @@ class ResultDialog(QDialog):
         community_row.addWidget(self.btn_comment)
 
         # View Corrections button
-        self.btn_view_corrections = QPushButton(tr("View Corrections"))
+        self.btn_view_corrections = QPushButton(f"📝 {tr('Corrections')}")
+        self.btn_view_corrections.setToolTip(tr("View Corrections"))
         self.btn_view_corrections.clicked.connect(self.view_corrections)
         community_row.addWidget(self.btn_view_corrections)
 
@@ -4543,7 +4553,7 @@ class ResultDialog(QDialog):
     def toggle_extended_info(self, checked):
         self.extended_info_visible = checked
         self.txt_extended_info.setVisible(checked)
-        label = tr("Hide Extended Info") if checked else tr("Show Extended Info")
+        label = f"ℹ️ {tr('Hide Info')}" if checked else f"ℹ️ {tr('Info')}"
         self.btn_ext_info.setText(label)
         if hasattr(self, 'btn_compact_ext_info'):
             self.btn_compact_ext_info.blockSignals(True)
@@ -4594,12 +4604,13 @@ class ResultDialog(QDialog):
         self._rd_trans_syncing = True
         try:
             save_app_config({'show_translations': checked})
+            _rd_label = f"🌐 {tr('Trans ON')}" if checked else f"🌐 {tr('Trans OFF')}"
             _label = tr('Translations ON') if checked else tr('Translations OFF')
             self.btn_rd_translations.setChecked(checked)
-            self.btn_rd_translations.setText(_label)
+            self.btn_rd_translations.setText(_rd_label)
             if hasattr(self, 'btn_compact_translations'):
                 self.btn_compact_translations.setChecked(checked)
-                self.btn_compact_translations.setText(_label)
+                self.btn_compact_translations.setText(_rd_label)
             # Sync Settings checkbox
             parent = self.parent()
             if parent:
@@ -4827,19 +4838,23 @@ class ResultDialog(QDialog):
         marc_bib = marc.get('bibliography', [])
         if fjms_bib:
             self._rd_fjms_bib = fjms_bib
-            lbl = f"{tr('Bibliography FJMS')} ({len(fjms_bib)})"
+            lbl = f"📚 {tr('Bib FJMS')} ({len(fjms_bib)})"
             self.btn_rd_bib_fjms.setText(lbl)
+            self.btn_rd_bib_fjms.setToolTip(tr("Bibliography FJMS"))
             self.btn_rd_bib_fjms.setVisible(True)
             if hasattr(self, 'btn_compact_bib_fjms'):
                 self.btn_compact_bib_fjms.setText(lbl)
+                self.btn_compact_bib_fjms.setToolTip(tr("Bibliography FJMS"))
                 self.btn_compact_bib_fjms.setVisible(True)
         if marc_bib:
             self._rd_marc_bib = marc_bib
-            lbl = f"{tr('Bibliography Ktiv')} ({len(marc_bib)})"
+            lbl = f"📚 {tr('Bib Ktiv')} ({len(marc_bib)})"
             self.btn_rd_bib_nli.setText(lbl)
+            self.btn_rd_bib_nli.setToolTip(tr("Bibliography Ktiv"))
             self.btn_rd_bib_nli.setVisible(True)
             if hasattr(self, 'btn_compact_bib_nli'):
                 self.btn_compact_bib_nli.setText(lbl)
+                self.btn_compact_bib_nli.setToolTip(tr("Bibliography Ktiv"))
                 self.btn_compact_bib_nli.setVisible(True)
 
         # Catalog Records button
@@ -4851,11 +4866,12 @@ class ResultDialog(QDialog):
             if fjms_svc.is_available():
                 source_names = fjms_svc.get_source_names(self.current_sys_id)
                 catalog_count = len(source_names)
-                self.btn_rd_catalog.setText(f"{tr('Catalog Records')} ({catalog_count})")
+                self.btn_rd_catalog.setText(f"📋 {tr('Catalog')} ({catalog_count})")
                 self.btn_rd_catalog.setEnabled(catalog_count > 0)
                 self.btn_rd_catalog.setVisible(True)
                 if hasattr(self, 'btn_compact_catalog'):
-                    self.btn_compact_catalog.setText(f"{tr('Catalog Records')} ({catalog_count})")
+                    self.btn_compact_catalog.setText(f"📋 {tr('Catalog')} ({catalog_count})")
+                    self.btn_compact_catalog.setToolTip(tr("Catalog Records"))
                     self.btn_compact_catalog.setEnabled(catalog_count > 0)
                     self.btn_compact_catalog.setVisible(True)
         except Exception:
@@ -5131,7 +5147,7 @@ class ListsTreeWidget(QTreeWidget):
 
 def _format_add_to_list_label(in_list=False):
     star = "⭐" if in_list else "☆"
-    return f"{star} {tr('Add to List')}"
+    return f"{star} {tr('List')}"
 
 
 def _format_list_star(in_list=False):
@@ -10682,6 +10698,7 @@ class GenizahGUI(QMainWindow):
 
         # Add to List button
         self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_add_to_list.setToolTip(tr("Add to List"))
         self.btn_add_to_list.clicked.connect(self.search_add_selected_to_list)
         self.btn_add_to_list.setEnabled(False)
         bot.addWidget(self.btn_add_to_list)
@@ -11025,6 +11042,7 @@ class GenizahGUI(QMainWindow):
         
         exp_layout = QHBoxLayout()
         self.btn_comp_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_comp_add_to_list.setToolTip(tr("Add to List"))
         self.btn_comp_add_to_list.clicked.connect(self.comp_add_selected_to_list)
         self.btn_comp_add_to_list.setEnabled(False)
         exp_layout.addWidget(self.btn_comp_add_to_list)
@@ -11139,6 +11157,7 @@ class GenizahGUI(QMainWindow):
 
         # Add to List button for browse tab
         self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
+        self.btn_browse_add_to_list.setToolTip(tr("Add to List"))
         self.btn_browse_add_to_list.clicked.connect(self.browse_add_to_list)
         self.btn_browse_add_to_list.setEnabled(False)
         row1.addWidget(self.btn_browse_add_to_list)
