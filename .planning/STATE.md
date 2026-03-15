@@ -4,8 +4,8 @@ milestone: v7.0.0
 milestone_name: Transcription Search
 status: not_started
 stopped_at: null
-last_updated: "2026-03-14T21:00:00.000Z"
-last_activity: 2026-03-14 - Completed quick task 20: Move language change button to top bar in web app
+last_updated: "2026-03-15T05:07:00.000Z"
+last_activity: 2026-03-15 - Completed quick task 21: Convert ResultDialog buttons to icon+short text format
 progress:
   total_phases: 4
   completed_phases: 0
@@ -73,9 +73,10 @@ See PROJECT.md Key Decisions table for full history.
 | 18 | Fix composition search ResultDialog parent_slot error and missing next/prev for filtered results | 2026-03-13 | a0a8c9d2 | [18-fix-composition-search-resultdialog-pare](./quick/18-fix-composition-search-resultdialog-pare/) |
 | 19 | Fix desktop session restore for browse tabs, composition summary, and active tab | 2026-03-14 | f64690d8 | [19-fix-desktop-session-restore-parallel-sea](./quick/19-fix-desktop-session-restore-parallel-sea/) |
 | 20 | Move language toggle from sidebar to header bar | 2026-03-14 | 55ee8d6d | [20-move-language-change-button-to-top-bar-i](./quick/20-move-language-change-button-to-top-bar-i/) |
+| 21 | Convert ResultDialog buttons to icon+short text format | 2026-03-15 | dc1b9c34 | [21-desktop-resultdialog-convert-buttons-to-](./quick/21-desktop-resultdialog-convert-buttons-to-/) |
 
 ## Session Continuity
 
-Last session: 2026-03-14
-Stopped at: Completed v6.5.0 milestone archival
+Last session: 2026-03-15
+Stopped at: Completed quick task 21: Convert ResultDialog buttons to icon+short text format
 Resume file: None
