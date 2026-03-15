@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-13 (Fixed P1 fragment joins — CHECK constraint, attribution, notes, RLS visibility, stats)
+> **Last Updated:** 2026-03-15 (Fixed web first-load drawer/RTL bootstrap race in theme bootstrap)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 4 | 4 |
-| P2 Medium Bugs | 2 | 8 | 10 |
+| P2 Medium Bugs | 2 | 9 | 11 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 7 | 0 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **10** | **43** | **53** |
+| **Total** | **10** | **44** | **54** |
 
 ---
 
@@ -79,6 +79,7 @@ Move to "Completed Issues" section at bottom with date
 | **FJMS catalog translation toggle shows wrong language by default (desktop + web RT)** | genizah_app.py:6784-7000, web/components/catalog_dialog.py:274-286, shared/translation_service.py:392-420 | ✅ Fixed (2026-03-11) | Translation directions are mixed: RunningTitle/FullText are en2he, FreeDesc is he2en. Service layer drops direction column. Desktop: 3 confirmed wrong-default toggle sections (RunningTitle en2he, FreeDesc he2en, FullText en2he). Web: RunningTitle replacement confirmed broken (replaces EN with HE in EN UI); FreeDesc works by coincidence; FullText has no translation logic. Fix: (1) return direction from translation_service, (2) make desktop renderer + web RT replacement direction-aware. See `docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md`. |
 | **PGP verso-only transcription shown on recto page** | shared/document_service.py, web/pages/browse.py, genizah_app.py | ✅ Fixed (2026-03-13) | 3 bugs: (1) get_section_for_page uses fragment_page_info to suppress unmarked transcriptions on wrong page, (2) desktop NLI image nav used images_ext instead of active_list, (3) desktop _browse_refresh_pgp_for_page bailed on empty sources list. Affects ENA and other NLI-only manuscripts with page-specific PGP links. |
 | **Fragment joins broken — CHECK constraint, no attribution, no notes** | supabase_corrections_client.py, corrections_ui.py, web/supabase_client.py, web/components/joins_panel.py, supabase_setup.sql | ✅ Fixed (2026-03-13) | 5 bugs: (1) UI sent `physical_join`/`same_composition` but DB CHECK only allows `physical`/`content`/`uncertain`, (2) creator name blank — SELECT didn't resolve profiles, INSERT didn't fill from current user, (3) notes column missing from desktop detail table, (4) RLS policy hid proposed joins from other users, (5) community stats "User Joins" always 0 — query was missing. Also: display label maps updated in 8 files to handle both UI and DB join type keys. |
+| **Web first-load drawer appears on wrong side before settling after reload/navigation** | `web/main.py` | ✅ Fixed (2026-03-15) | Root cause was bootstrap drift: `apply_theme_immediately()` could use stale/default language state and only tried Quasar RTL activation once. On cold load the first paint could render the drawer on the wrong side until a later navigation/reload. Fix: unify language resolution via `_resolve_ui_language()` and retry Quasar layout activation until the framework is ready. |
 | **Browse title toggle keeps RTL classes** | web/pages/browse.py:2093,2098,2253,2257 | ג… Fixed (2026-03-10) | Changed `.classes()` to use `remove=/add=` for proper class swapping |
 | **Debug prints in code** | `genizah_app.py`, `parallels.py` | ג… Fixed (2026-02-03) | Removed all `[DEBUG]` print statements |
 | **List Rename** | `web/pages/lists.py:414-423` | ג… Fixed (2026-02-03) | Uses `create_inline_edit_label` for inline editing |
@@ -210,6 +211,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-15 | Fixed web first-load sidebar/drawer initialization race in `web/main.py`: unified persisted language resolution for head bootstrap + layout, and made Quasar RTL activation retry on cold load so Hebrew UI no longer paints the drawer on the wrong side before navigation/reload. | Codex |
 | 2026-03-13 | Updated all 4 docs/guides/ files: WEBSITE_ADMIN_GUIDE (added sidecars, translations, PostHog), DEPLOYMENT_TECHNICAL (fixed DB versions/sizes, expanded shared/ listing, added libraries_translations.db), DEVELOPER_GUIDE (full project structure with pages/components/shared), SUPABASE_GUIDE (fixed author_id column in query). Web citation bar updated to full author list. | Claude |
 | 2026-03-11 | Added P2: FJMS export MAX(Version) drops ~38K catalog records (9.2%); P2: Desktop translation toggle shows wrong language by default. Full report in docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md | Claude |
 | 2026-03-11 | MARC field translations: added translate badges for Date, Subjects, People; Hebrew date gematria converter avoids Dicta errors; marked for testing | Claude |

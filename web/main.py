@@ -27,7 +27,7 @@ from nicegui import ui, app, run
 logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
-from web.translations import tr, is_rtl, get_dir, set_language, get_language
+from web.translations import tr, set_language, get_language
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager, Config
 
 # App configuration
@@ -120,6 +120,20 @@ from web.analytics import posthog_capture  # noqa: F401 — re-export
 COMMON_STYLES = '<link rel="stylesheet" href="/static/common.css">'
 
 
+def _resolve_ui_language() -> str:
+    """Return the persisted UI language so layout and bootstrap agree on first render."""
+    try:
+        saved_lang = app.storage.user.get('ui_language')
+    except Exception:
+        saved_lang = None
+
+    if saved_lang in ('he', 'en'):
+        return saved_lang
+
+    current_lang = get_language()
+    return current_lang if current_lang in ('he', 'en') else 'he'
+
+
 # ============================================================================
 # Layout Components
 # ============================================================================
@@ -127,16 +141,11 @@ COMMON_STYLES = '<link rel="stylesheet" href="/static/common.css">'
 def create_layout():
     """Create the main application layout with modern Header and Sidebar."""
 
-    # Restore persisted language preference (survives ui.navigate.reload)
-    try:
-        saved_lang = app.storage.user.get('ui_language')
-        if saved_lang in ('he', 'en'):
-            set_language(saved_lang)
-    except Exception:
-        pass
+    resolved_lang = _resolve_ui_language()
+    set_language(resolved_lang)
 
     current_page = app.storage.user.get('current_page', '/')
-    rtl_mode = is_rtl()
+    rtl_mode = resolved_lang == 'he'
 
     # Page loading progress bar element (CSS in COMMON_STYLES)
     ui.html('<div class="page-loading-bar" id="pageLoadingBar"></div>', sanitize=False)
@@ -564,11 +573,11 @@ def _show_citation_reminder(lang: str):
 def apply_theme_immediately():
     """Add script to apply theme before page renders to prevent flash."""
     current_theme = app.storage.user.get('theme', 'light')
-    current_lang = get_language()
+    current_lang = _resolve_ui_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
 
     # Use proper direction based on language (RTL for Hebrew, LTR for English)
-    dir_attr = get_dir()
+    dir_attr = 'rtl' if current_lang == 'he' else 'ltr'
 
     # Add Hebrew-specific class if needed
     body_class_script = 'document.body.classList.add("hebrew-mode");' if current_lang == 'he' else 'document.body.classList.remove("hebrew-mode");'
@@ -616,17 +625,49 @@ def apply_theme_immediately():
                 }}
             }};
 
-            // Activate Quasar RTL mode when ready
-            var activateQuasarRtl = function() {{
-                if (typeof Quasar !== 'undefined' && isRtl) {{
+            // Activate Quasar layout direction as soon as Quasar is available.
+            // On first cold load Quasar may appear after DOMContentLoaded, so
+            // a single attempt can miss and leave the drawer on the wrong side.
+            var activateQuasarLayout = function() {{
+                if (typeof Quasar === 'undefined' || !Quasar.lang || !Quasar.lang.set) {{
+                    return false;
+                }}
+
+                if (isRtl) {{
                     // Try to use Hebrew language pack first, fallback to generic RTL
-                    if (Quasar.lang && Quasar.lang.he) {{
+                    if (Quasar.lang.he) {{
                         Quasar.lang.set(Quasar.lang.he);
-                    }} else if (Quasar.lang && Quasar.lang.set) {{
-                        // Fallback: Set RTL mode without full language pack
+                    }} else {{
                         Quasar.lang.set({{ rtl: true }});
                     }}
+                }} else {{
+                    Quasar.lang.set({{ rtl: false }});
                 }}
+
+                document.documentElement.setAttribute("data-quasar-rtl-ready", "true");
+                if (document.body) {{
+                    document.body.setAttribute("data-quasar-rtl-ready", "true");
+                }}
+                return true;
+            }};
+
+            var scheduleQuasarActivation = function() {{
+                if (activateQuasarLayout()) {{
+                    return;
+                }}
+
+                var attempts = 0;
+                var maxAttempts = 40;
+                var retryDelayMs = 50;
+
+                var retry = function() {{
+                    attempts += 1;
+                    if (!activateQuasarLayout() && attempts < maxAttempts) {{
+                        window.setTimeout(retry, retryDelayMs);
+                    }}
+                }};
+
+                window.setTimeout(retry, retryDelayMs);
             }};
 
             // Execute immediately
@@ -636,11 +677,16 @@ def apply_theme_immediately():
             if (document.readyState === 'loading') {{
                 document.addEventListener('DOMContentLoaded', function() {{
                     applyTheme();
-                    activateQuasarRtl();
+                    scheduleQuasarActivation();
                 }});
             }} else {{
-                activateQuasarRtl();
+                scheduleQuasarActivation();
             }}
+
+            window.addEventListener('load', function() {{
+                applyTheme();
+                scheduleQuasarActivation();
+            }}, {{ once: true }});
         }})();
     </script>'''
 
