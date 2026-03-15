@@ -1,4 +1,4 @@
-# Genizah Search Pro 6.5.2
+# Genizah Search Pro 6.5.3
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,10 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 6.5.1?
+## What's New in Version 6.5.3?
+
+### v6.5.3: Image Viewer — Copy & Save
+* **Right-click image menu:** Copy or save manuscript images directly from the viewer with rotation preserved (desktop)
 
 ### v6.5.1: Bug Fixes & Session Restore
 * **Session restore improvements:** Browse tabs (Shelfmark with text+images, Identification with all filters), composition search results, and active tab now persist across restarts (desktop)
@@ -131,7 +134,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 6.5.2 | אתר הגניזה של דיקטה
+# Genizah Search Pro 6.5.3 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 

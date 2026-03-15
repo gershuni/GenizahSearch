@@ -4,6 +4,14 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.5.3] - 2026-03-15
+
+### Improvements
+
+- **Desktop image viewer — right-click menu**: Added context menu to the manuscript image viewer (both ResultDialog and Browse by Shelfmark) with "Copy Image" and "Save Image As..." options. Supports PNG, JPEG, and BMP export. Rotation is preserved in both copy and save
+
+---
+
 ## [6.5.2] - 2026-03-15
 
 ### Improvements

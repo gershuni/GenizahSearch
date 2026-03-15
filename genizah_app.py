@@ -1420,6 +1420,50 @@ class ZoomableScrollArea(QGraphicsView):
         self._rotation = 0
         self._auto_fit_enabled = False
 
+        # Right-click context menu for copy/save
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_image_context_menu)
+
+    def _show_image_context_menu(self, pos):
+        """Show context menu with Copy/Save options for the displayed image."""
+        if not self._pixmap or self._pixmap.isNull():
+            return
+        menu = QMenu(self)
+        act_copy = menu.addAction(tr("Copy Image"))
+        act_save = menu.addAction(tr("Save Image As..."))
+        action = menu.exec(self.mapToGlobal(pos))
+        if action == act_copy:
+            self._copy_image()
+        elif action == act_save:
+            self._save_image()
+
+    def _copy_image(self):
+        """Copy current image (with rotation) to clipboard."""
+        pix = self._get_rotated_pixmap()
+        if pix:
+            QApplication.clipboard().setPixmap(pix)
+
+    def _save_image(self):
+        """Save current image (with rotation) to file."""
+        pix = self._get_rotated_pixmap()
+        if not pix:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Save Image As..."), "",
+            "PNG (*.png);;JPEG (*.jpg *.jpeg);;BMP (*.bmp)")
+        if path:
+            pix.save(path)
+
+    def _get_rotated_pixmap(self):
+        """Return the current pixmap with rotation applied."""
+        if not self._pixmap or self._pixmap.isNull():
+            return None
+        if self._rotation == 0:
+            return self._pixmap
+        transform = QTransform()
+        transform.rotate(self._rotation)
+        return self._pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
     def set_image(self, pixmap):
         self._pixmap = pixmap
         self._rotation = 0

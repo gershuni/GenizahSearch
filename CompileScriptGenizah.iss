@@ -3,7 +3,7 @@
 ; License: CC BY-NC-SA 4.0 (Non-commercial use only)
 
 #define MyAppName "Genizah Search Pro"
-#define MyAppVersion "6.5.2"
+#define MyAppVersion "6.5.3"
 #define MyAppPublisher "Hillel Gershuni / Dicta"
 #define MyAppURL "https://www.GenizahSearch.com/"
 #define MyAppExeName "GenizahSearchPro.exe"
@@ -34,7 +34,7 @@ DisableDirPage=no
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 OutputDir=C:\GenizahSearch\dist
-OutputBaseFilename=GenizahSearchPro_V6.5.2_Setup
+OutputBaseFilename=GenizahSearchPro_V6.5.3_Setup
 SetupIconFile=C:\GenizahSearch\icon.ico
 SolidCompression=yes
 WizardStyle=modern dynamic
