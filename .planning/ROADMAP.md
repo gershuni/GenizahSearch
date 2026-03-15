@@ -12,7 +12,7 @@
 - ✅ **v6.0.0 Local Data Architecture** -- Phases 35-40 (shipped 2026-02-22)
 - ✅ **v6.1.0 Catalog Browse & Navigation** -- Phase 41 (shipped 2026-02-27)
 - ✅ **v6.5.0 Search UX & Filtered Search** -- Phases 42-46 (shipped 2026-03-14)
-- **v7.0.0 Transcription Search** -- Phases 47-50 (planned)
+- **v7.0.0 Transcription Search** -- Phases 47-49 (planned)
 
 ## Phases
 
@@ -138,8 +138,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 
 - [ ] **Phase 47: Transcription Import** - FJMS ~30K transcriptions from FIST.db into fjms_enrichment.db with shared service access
 - [ ] **Phase 48: Transcription Indexing & Search** - Unified Tantivy index over PGP + FJMS + user transcription text with source badges and ranking
-- [ ] **Phase 49: Index Distribution & Upgrade** - Pre-built index download, desktop upgrade path, and fresh install support
-- [ ] **Phase 50: Pre-built index distribution with in-app download** - [To be planned] (depends on Phase 49)
+- [ ] **Phase 49: Index Distribution & In-App Download** - Pre-built index hosted on genizahsearch.com server, independent version manifests for index vs DB sidecars (only download what changed), in-app download with progress (extend SidecarDownloadThread), schema version detection for upgrade prompts, fresh install support (replaces manual build_index.py workflow)
 
 ## Progress
 
@@ -151,8 +150,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 |-------|----------------|--------|-----------|
 | 47. Transcription Import | 0/TBD | Not started | - |
 | 48. Transcription Indexing & Search | 0/TBD | Not started | - |
-| 49. Index Distribution & Upgrade | 0/TBD | Not started | - |
-| 50. Pre-built index distribution | 0/TBD | Not started | - |
+| 49. Index Distribution & In-App Download | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
