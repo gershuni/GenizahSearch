@@ -155,7 +155,11 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
   3. User can adjust the removal sensitivity threshold and see the mask update
   4. PuzzleDocument/PuzzleFragment data model serializes and deserializes fragment positions, rotations, scales, and flip states correctly (roundtrip test)
   5. joins.db SQLite sidecar schema is created and follows the established sidecar pattern (pgp.db, fjms_enrichment.db)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 47-01-PLAN.md -- Data model (PuzzleDocument/PuzzleFragment) and joins.db sidecar service
+- [ ] 47-02-PLAN.md -- HSV background removal engine with Pillow + NumPy
+- [ ] 47-03-PLAN.md -- Interactive visual preview tool for quality validation
 
 ### Phase 48: Desktop Canvas
 **Goal**: Researchers can visually arrange manuscript fragment images on a desktop canvas with full spatial manipulation
@@ -221,7 +225,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 47. Foundation + Background Removal | 0/TBD | Not started | - |
+| 47. Foundation + Background Removal | 0/3 | Not started | - |
 | 48. Desktop Canvas | 0/TBD | Not started | - |
 | 49. Web Canvas | 0/TBD | Not started | - |
 | 50. Join Documents | 0/TBD | Not started | - |
@@ -230,4 +234,4 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-15 after v7.0.0 Fragment Puzzle roadmap creation*
+*Last updated: 2026-03-15 after Phase 47 planning (3 plans)*
