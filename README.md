@@ -13,6 +13,10 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 ### v6.5.3: Image Viewer — Copy & Save
 * **Right-click image menu:** Copy or save manuscript images directly from the viewer with rotation preserved (desktop)
 
+### v6.5.2: UI Polish
+* **Desktop compact buttons:** ResultDialog action/community/image toolbar buttons converted to icon+short text format with full-text tooltips
+* **Web language toggle:** Moved language switch from sidebar footer to header bar for better visibility
+
 ### v6.5.1: Bug Fixes & Session Restore
 * **Session restore improvements:** Browse tabs (Shelfmark with text+images, Identification with all filters), composition search results, and active tab now persist across restarts (desktop)
 * **Composition search navigation:** Fixed missing next/prev in ResultDialog for filtered and appendix results (desktop)
