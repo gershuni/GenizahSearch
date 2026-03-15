@@ -2793,4 +2793,11 @@ LIBRARY_CODES_HE = {
     'Goldsmith': 'מוזיאון גולדסמית',
     'SOS': 'החברה האורתודוקסית הנפרדת',
     'MotB': 'מוזיאון התנ״ך',
+
+    # --- Quick-21: Short button labels for icon+text compact ---
+    "Parallels": "מקבילות",
+    "Trans ON": "תרגום פעיל",
+    "Trans OFF": "תרגום כבוי",
+    "Hide Info": "הסתר מידע",
+    "External": "חיצוני",
 }
