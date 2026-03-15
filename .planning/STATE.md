@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
 milestone: v7.0.0
-milestone_name: Transcription Search
+milestone_name: Fragment Puzzle
 status: not_started
 stopped_at: null
-last_updated: "2026-03-15T05:07:00.000Z"
-last_activity: 2026-03-15 - Completed quick task 21: Convert ResultDialog buttons to icon+short text format
+last_updated: "2026-03-15T12:00:00.000Z"
+last_activity: 2026-03-15 - Milestone v7.0.0 Fragment Puzzle started
 progress:
-  total_phases: 3
+  total_phases: 0
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-14)
+See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.0.0 Transcription Search — not yet started
+**Current focus:** v7.0.0 Fragment Puzzle — defining requirements
 
 ## Current Position
 
-Milestone: v7.0.0 Transcription Search
-Phase: None started
-Status: Between milestones — v6.5.0 shipped, v7.0.0 not yet planned
-Last activity: 2026-03-14 - Completed quick task 20: Move language change button to top bar in web app
+Milestone: v7.0.0 Fragment Puzzle
+Phase: Not started (defining requirements)
+Status: Defining requirements
+Last activity: 2026-03-15 — Milestone v7.0.0 started
 
 ## Performance Metrics
 

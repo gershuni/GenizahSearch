@@ -8,14 +8,18 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.0.0 Transcription Search
+## Current Milestone: v7.0.0 Fragment Puzzle
 
-**Goal:** Import FJMS transcriptions and build unified searchable index over all human transcription text alongside OCR.
+**Goal:** Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal, DPI calibration, and join document creation.
 
 **Target features:**
-- FJMS transcription import (~30K from FIST.db)
-- Unified Tantivy index (PGP + FJMS + user corrections) with source badges and ranking
-- Pre-built index distribution and desktop upgrade path
+- Canvas-based fragment assembly with drag, rotate, flip, resize per piece
+- Automatic background removal (color-based segmentation of solid library backgrounds)
+- DPI-calibrated auto-sizing using IIIF image metadata
+- Recto + verso views (auto-generated and independently editable)
+- Save as join document (composite image + structured metadata: fragment IDs, join type, notes)
+- Personal workspace by default, publishable for community review
+- Both web (NiceGUI) and desktop (PyQt6)
 
 ## Current State (after v6.5.0 shipped)
 
@@ -125,9 +129,12 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-- FJMS transcription import: ~30K transcriptions from FIST.db into fjms_enrichment.db
-- Transcription search: unified Tantivy index over PGP + FJMS + user transcription text, prioritizing human transcriptions (both apps)
-- Index distribution: pre-built index download, desktop upgrade path
+- Fragment puzzle canvas: visual assembly tool for physical joins with drag, rotate, flip, resize
+- Background removal: automatic segmentation of fragments from solid-color library backgrounds
+- DPI calibration: auto-sizing fragments to real-world scale using IIIF metadata
+- Join document creation: composite image + metadata saved to personal workspace, publishable for community
+- Recto/verso support: auto-generated verso from recto arrangement, both editable
+- Both apps: NiceGUI web + PyQt6 desktop
 
 ### Out of Scope
 
@@ -143,6 +150,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
 - FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
 - Search tabs / multi-search workspace (יג) -- deferred, too architectural
+- Transcription search (FJMS import + unified index + distribution) -- deferred to future milestone
 
 ## Context
 
@@ -186,7 +194,8 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Bidirectional filtered search | Pre-filter from search + "search within" from browse — same restrict_sys_ids mechanism | Good |
 | Dicta Translation for all data | Multilingual access + search completeness, scholarly few-shot prompts | Good — 580K translations, 0 failures |
 | Translation QA with heuristic checks | Catch hallucinations, script mismatches, length anomalies before display | Good — found and fixed 12,827 issues |
-| Transcription deferred to v7.0.0 | v6.5.0 focuses on UX + filtering; transcription is separate milestone | Good |
+| Transcription deferred to v7.0.0 | v6.5.0 focuses on UX + filtering; transcription is separate milestone | ⚠️ Revisit — v7.0.0 now Fragment Puzzle; transcription deferred further |
+| Fragment Puzzle as v7.0.0 | Visual join assembly tool is a unique research capability; transcription search deferred | — Pending |
 
 ---
-*Last updated: 2026-03-14 after v6.5.0 milestone shipped*
+*Last updated: 2026-03-15 after v7.0.0 Fragment Puzzle milestone started*
