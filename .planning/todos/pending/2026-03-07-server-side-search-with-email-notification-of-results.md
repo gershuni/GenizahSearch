@@ -18,11 +18,18 @@ The user wants the ability to run searches on the server in the background and r
 
 ## Solution
 
-TBD — high-level considerations:
-- Server-side search worker (background task/queue) that runs searches independently of the web session
-- Email integration (SMTP or transactional email service like SendGrid/Resend) to notify users
-- Results storage: save search results to DB or file, provide a link to view them
-- Authentication: tie searches to user accounts (Supabase auth already exists)
-- Rate limiting: prevent abuse of server resources
-- Could reuse existing SearchEngine + composition search logic from genizah_core.py
-- Desktop app could also benefit from a "search on server" mode for very large searches
+Milestone-level feature (v7.0+), not a single phase. Requires multiple new subsystems:
+
+1. **Background search worker** — decouple search from web session (Celery/RQ/asyncio task queue)
+2. **Results persistence** — store completed results in Supabase or sidecar DB with retrieval endpoint
+3. **Email notification** — transactional email service (Resend/SendGrid), results summary + link template
+4. **Async search UI** — submit form, "my searches" status/results page, cancel option
+5. **Rate limiting & auth guards** — per-user quotas to prevent resource abuse
+
+### Notes (2026-03-15)
+- v6.2.0 already mitigated the worst pain: ETA display, cancel with partial results, desktop notifications, sleep prevention
+- No existing background task system or email infrastructure — this is greenfield
+- Composition searches are the primary use case (minutes to hours)
+- Related to power user feedback items ב (ETA) and ג (partial results on cancel), both already shipped
+- Reuse existing SearchEngine + composition logic from genizah_core.py
+- Desktop app could also benefit from a "search on server" mode
