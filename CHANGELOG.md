@@ -4,6 +4,15 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.5.2] - 2026-03-15
+
+### Improvements
+
+- **Desktop ResultDialog — icon+text buttons**: Converted cluttered text-only buttons to compact icon+short text format across action row (📖 Browse, 🔍 Parallels, ⭐ List, ℹ️ Info, 📚 Bib, 📋 Catalog, 🌐 Trans), community row (📝 Corrections), and image toolbar (↩️ Reset, 🔗 External/Ktiv). All buttons include full-text tooltips
+- **Web language toggle**: Moved language switch button from sidebar footer to header bar for better visibility
+
+---
+
 ## [6.5.1] - 2026-03-14
 
 ### Improvements
@@ -11,8 +20,6 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **Desktop session persistence — browse tabs**: Browse by Shelfmark restores the last viewed manuscript (text + images) on restart. Browse by Identification restores domain tree selection, date range, text filter chips, and undated checkbox
 - **Desktop session persistence — composition search**: Composition search restores results (flat view), summary bar, sort mode, and appendix threshold
 - **Desktop session persistence — active tab**: The last active tab is restored on restart (previously always returned to Search tab)
-- **Desktop ResultDialog — icon+text buttons**: Converted cluttered text-only buttons to compact icon+short text format across action row (📖 Browse, 🔍 Parallels, ⭐ List, ℹ️ Info, 📚 Bib, 📋 Catalog, 🌐 Trans), community row (📝 Corrections), and image toolbar (↩️ Reset, 🔗 External/Ktiv). All buttons include full-text tooltips
-- **Web language toggle**: Moved language switch button from sidebar footer to header bar for better visibility
 
 ### Bug Fixes
 

@@ -1,4 +1,4 @@
-# Genizah Search Pro 6.5.1
+# Genizah Search Pro 6.5.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -131,7 +131,7 @@ Special thanks to Avi Shmidman, Elisha Rosenzweig, Efraim Meiri, Elazar Gershuni
 
 # Hebrew (עברית)
 
-# Genizah Search Pro 6.5.1 | אתר הגניזה של דיקטה
+# Genizah Search Pro 6.5.2 | אתר הגניזה של דיקטה
 
 **פלטפורמת מחקר שיתופית לגניזה הקהירית**
 
