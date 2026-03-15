@@ -4,10 +4,10 @@ milestone: v7.0.0
 milestone_name: Fragment Puzzle
 status: not_started
 stopped_at: null
-last_updated: "2026-03-15T12:00:00.000Z"
-last_activity: 2026-03-15 - Milestone v7.0.0 Fragment Puzzle started
+last_updated: "2026-03-15T14:00:00.000Z"
+last_activity: 2026-03-15 - Roadmap created for v7.0.0 Fragment Puzzle (6 phases, 23 requirements)
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,14 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.0.0 Fragment Puzzle — defining requirements
+**Current focus:** Phase 47 - Foundation + Background Removal
 
 ## Current Position
 
 Milestone: v7.0.0 Fragment Puzzle
-Phase: Not started (defining requirements)
-Status: Defining requirements
-Last activity: 2026-03-15 — Milestone v7.0.0 started
+Phase: 47 (1 of 6 in milestone)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-03-15 -- Roadmap created for v7.0.0 Fragment Puzzle (6 phases, 23 requirements)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -47,12 +50,19 @@ Last activity: 2026-03-15 — Milestone v7.0.0 started
 
 See PROJECT.md Key Decisions table for full history.
 
+Recent decisions affecting current work:
+- [v7.0.0]: Fabric.js (web) + QGraphicsScene (desktop), shared PuzzleDocument model only -- no shared canvas abstraction
+- [v7.0.0]: Pillow + NumPy for background removal (no OpenCV, no ML models)
+- [v7.0.0]: Desktop-first build order -- QGraphicsScene validates data model before Fabric.js/NiceGUI
+- [v7.0.0]: joins.db SQLite sidecar for local persistence, optional Supabase for community publish
+- [v7.0.0]: 800px images for canvas interaction, full-res only for server-side composite export
+
 ### Pending Todos
 
 - Migrate desktop corrections fetch to shared corrections_service
 - CUT-01: Remove read-only PGP tables from Supabase (legacy desktop users depend on them)
-- Date range filter using CopyToDate (21K rows) — show "from-to" date display
-- Creation type filter via code_values (CreationTypeCode, 69K rows) — Original/Copy/Commentary/Tafsir
+- Date range filter using CopyToDate (21K rows) -- show "from-to" date display
+- Creation type filter via code_values (CreationTypeCode, 69K rows) -- Original/Copy/Commentary/Tafsir
 - Display scholarly Comment (100K rows) and Colophon (789 rows) in expanded detail rows
 - Script/vocalization/cantillation filters for paleography researchers
 - Copyist name browse axis (CopyName, 1.6K rows)
@@ -60,8 +70,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ### Blockers/Concerns
 
-- FIST.db access required for v7.0.0 Phase 47 (FJMS transcription import) -- confirm file available
-- v7.0.0 Phase 48 extends Tantivy schema -- need backward-compatible index upgrade strategy
+- IIIF physicalScale metadata availability unverified -- DPI calibration may reduce to per-library lookup table + manual override
+- Background removal edge quality on real Genizah manuscripts needs empirical testing (Phase 47)
+- NLI S1/S2 recto/verso pairing convention needs verification across libraries (Phase 51)
 
 ### Quick Tasks Completed
 
@@ -78,5 +89,5 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed quick task 21: Convert ResultDialog buttons to icon+short text format
+Stopped at: Roadmap created for v7.0.0 Fragment Puzzle (6 phases, 23 requirements)
 Resume file: None

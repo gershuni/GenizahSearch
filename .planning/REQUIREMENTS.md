@@ -102,35 +102,35 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CANV-01 | TBD | Pending |
-| CANV-02 | TBD | Pending |
-| CANV-03 | TBD | Pending |
-| CANV-04 | TBD | Pending |
-| CANV-05 | TBD | Pending |
-| CANV-06 | TBD | Pending |
-| CANV-07 | TBD | Pending |
-| CANV-08 | TBD | Pending |
-| BGRM-01 | TBD | Pending |
-| BGRM-02 | TBD | Pending |
-| BGRM-03 | TBD | Pending |
-| RVRS-01 | TBD | Pending |
-| RVRS-02 | TBD | Pending |
-| JDOC-01 | TBD | Pending |
-| JDOC-02 | TBD | Pending |
-| JDOC-03 | TBD | Pending |
-| JDOC-04 | TBD | Pending |
-| JDOC-05 | TBD | Pending |
-| COMM-01 | TBD | Pending |
-| COMM-02 | TBD | Pending |
-| COMM-03 | TBD | Pending |
-| PLAT-01 | TBD | Pending |
-| PLAT-02 | TBD | Pending |
+| BGRM-01 | Phase 47 | Pending |
+| BGRM-02 | Phase 47 | Pending |
+| BGRM-03 | Phase 47 | Pending |
+| CANV-01 | Phase 48 | Pending |
+| CANV-03 | Phase 48 | Pending |
+| CANV-04 | Phase 48 | Pending |
+| CANV-05 | Phase 48 | Pending |
+| CANV-06 | Phase 48 | Pending |
+| PLAT-02 | Phase 48 | Pending |
+| CANV-07 | Phase 49 | Pending |
+| CANV-08 | Phase 49 | Pending |
+| PLAT-01 | Phase 49 | Pending |
+| JDOC-01 | Phase 50 | Pending |
+| JDOC-02 | Phase 50 | Pending |
+| JDOC-03 | Phase 50 | Pending |
+| JDOC-04 | Phase 50 | Pending |
+| JDOC-05 | Phase 50 | Pending |
+| RVRS-01 | Phase 51 | Pending |
+| RVRS-02 | Phase 51 | Pending |
+| CANV-02 | Phase 52 | Pending |
+| COMM-01 | Phase 52 | Pending |
+| COMM-02 | Phase 52 | Pending |
+| COMM-03 | Phase 52 | Pending |
 
 **Coverage:**
 - v7.0.0 requirements: 23 total
-- Mapped to phases: 0
-- Unmapped: 23 ⚠️
+- Mapped to phases: 23
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-15*
-*Last updated: 2026-03-15 after initial definition*
+*Last updated: 2026-03-15 after roadmap creation (all 23 requirements mapped to phases 47-52)*
