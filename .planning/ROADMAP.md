@@ -157,10 +157,10 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
   5. joins.db SQLite sidecar is created with WAL mode and an explicit concurrency model for NiceGUI multi-request safety
 **Plans**: 4 plans
 Plans:
-- [ ] 47-01-PLAN.md — Data model + joins.db sidecar with concurrency and fragment index
-- [ ] 47-02-PLAN.md — Background removal engine with low-saturation fallback
-- [ ] 47-03-PLAN.md — Shared image resolver/cache service
-- [ ] 47-04-PLAN.md — Visual preview tool + quality checkpoint
+- [x] 47-01-PLAN.md — Data model + joins.db sidecar with concurrency and fragment index
+- [x] 47-02-PLAN.md — Background removal engine with low-saturation fallback
+- [x] 47-03-PLAN.md — Shared image resolver/cache service
+- [x] 47-04-PLAN.md — Visual preview tool + quality checkpoint
 
 ### Phase 48: Desktop Canvas
 **Goal**: Researchers can visually arrange manuscript fragment images on a desktop canvas with full spatial manipulation
@@ -172,7 +172,11 @@ Plans:
   3. Multiple fragments (3+) can coexist on the canvas simultaneously without performance degradation
   4. Background-removed fragments overlay correctly, showing parchment shapes rather than overlapping rectangles
   5. The desktop puzzle is accessible from the app's main navigation
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 48-01-PLAN.md — Core canvas building blocks (PuzzleFragmentItem, PuzzleCanvasView, PuzzleImageLoaderThread)
+- [ ] 48-02-PLAN.md — PuzzleCanvasWindow with toolbar, shelfmark autocomplete, and singleton pattern
+- [ ] 48-03-PLAN.md — Integration buttons (Browse, ResultDialog, Lists) + visual checkpoint
 
 ### Phase 49: Web Canvas
 **Goal**: Researchers can perform the same fragment assembly in the web app using Fabric.js, with full manipulation parity to desktop
@@ -221,13 +225,13 @@ Plans:
 ## Progress
 
 **Total milestones shipped:** 10
-**Total phases completed:** 46 (Phases 1-46)
-**Total plans completed:** ~161
+**Total phases completed:** 47 (Phases 1-47)
+**Total plans completed:** ~165
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 47. Foundation + Background Removal | 4/4 | Complete    | 2026-03-16 |
-| 48. Desktop Canvas | 0/TBD | Not started | - |
+| 48. Desktop Canvas | 0/3 | Not started | - |
 | 49. Web Canvas | 0/TBD | Not started | - |
 | 50. Join Documents | 0/TBD | Not started | - |
 | 51. Recto/Verso | 0/TBD | Not started | - |
@@ -235,4 +239,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-16 after Phase 47 replanning (4 plans)*
+*Last updated: 2026-03-16 after Phase 48 planning (3 plans)*
