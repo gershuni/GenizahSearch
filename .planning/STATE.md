@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: not_started
-stopped_at: Phase 50 context gathered
-last_updated: "2026-03-16T17:02:09.215Z"
+stopped_at: Completed 50-01-PLAN.md
+last_updated: "2026-03-16T18:11:23.247Z"
 last_activity: 2026-03-16 -- Completed 49-01 web puzzle page with Fabric.js canvas, API endpoints, nav integration
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 12
+  completed_plans: 10
 ---
 
 ---
@@ -171,6 +171,9 @@ Recent decisions affecting current work:
 - [Phase 48-03]: Extensive UX improvements during interactive testing -- crop mode, flip-all, 6 backgrounds, keyboard shortcuts, per-edge crop, CUL auto-threshold, hue-weighted bg removal
 - [Phase 49-01]: puzzle_folios endpoint uses IIIF manifest FL IDs (fetch_fl_ids_from_nli), NOT nli_crossref fgp_image_number_id -- FGP numbers are Friedberg photo numbers, not NLI FL IDs
 - [Phase 49-01]: window.puzzleCanvas JS global object pattern (matches window.manuscriptViewer from browse.py); Fabric.js v6.4.3 via CDN
+- [Phase 50]: Crop offsets in 800px canvas-pixel space, scaled to export resolution at compose time
+- [Phase 50]: Thumbnail preserved on metadata-only saves by reading existing DB value
+- [Phase 50]: PIL.rotate angle negated to match clockwise-positive convention (Fabric.js + PyQt)
 
 ### Pending Todos
 
@@ -201,9 +204,10 @@ Recent decisions affecting current work:
 | 20 | Move language toggle from sidebar to header bar | 2026-03-14 | 55ee8d6d | [20-move-language-change-button-to-top-bar-i](./quick/20-move-language-change-button-to-top-bar-i/) |
 | 21 | Convert ResultDialog buttons to icon+short text format | 2026-03-15 | dc1b9c34 | [21-desktop-resultdialog-convert-buttons-to-](./quick/21-desktop-resultdialog-convert-buttons-to-/) |
 | Phase 47 P04 | 4min | 1 tasks | 1 files |
+| Phase 50 P01 | 3min | 2 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-03-16T17:02:09.213Z
-Stopped at: Phase 50 context gathered
-Resume file: .planning/phases/50-pre-built-index-distribution-with-in-app-download/50-CONTEXT.md
+Last session: 2026-03-16T18:11:23.244Z
+Stopped at: Completed 50-01-PLAN.md
+Resume file: None

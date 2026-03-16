@@ -35,8 +35,8 @@ Background removal is **foundational** — without it, rectangular images overla
 
 - [ ] **JDOC-01**: User can save a puzzle arrangement as a join document
 - [ ] **JDOC-02**: User can load a previously saved join document
-- [ ] **JDOC-03**: Join document stores fragment IDs, positions, rotations, scales, and flip state
-- [ ] **JDOC-04**: User can export a composite image of the assembled join
+- [x] **JDOC-03**: Join document stores fragment IDs, positions, rotations, scales, and flip state
+- [x] **JDOC-04**: User can export a composite image of the assembled join
 - [ ] **JDOC-05**: User can add metadata (join type, notes) to a join document
 
 ### Community
@@ -116,8 +116,8 @@ Explicitly excluded. Documented to prevent scope creep.
 | PLAT-01 | Phase 49 | Complete |
 | JDOC-01 | Phase 50 | Pending |
 | JDOC-02 | Phase 50 | Pending |
-| JDOC-03 | Phase 50 | Pending |
-| JDOC-04 | Phase 50 | Pending |
+| JDOC-03 | Phase 50 | Complete |
+| JDOC-04 | Phase 50 | Complete |
 | JDOC-05 | Phase 50 | Pending |
 | RVRS-01 | Phase 51 | Pending |
 | RVRS-02 | Phase 51 | Pending |
