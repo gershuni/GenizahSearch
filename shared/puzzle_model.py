@@ -27,6 +27,13 @@ class PuzzleFragment:
     flip_h: bool = False
     flip_v: bool = False
     bg_removal_threshold: float = 30.0  # HSV color distance threshold
+    # Crop offsets in pixels (applied to original image before other transforms)
+    crop_top: int = 0
+    crop_bottom: int = 0
+    crop_left: int = 0
+    crop_right: int = 0
+    # Whether background removal has been applied
+    processed: bool = True
 
 
 @dataclass
@@ -35,7 +42,7 @@ class PuzzleDocument:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     title: str = ''
     notes: str = ''
-    join_type: str = 'uncertain'  # physical, content, uncertain
+    join_type: str = 'physical'  # always physical for puzzle joins
     fragments: List[PuzzleFragment] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())

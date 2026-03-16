@@ -103,7 +103,7 @@ class PuzzleService:
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
-            INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '1');
+            INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '2');
 
             CREATE TABLE IF NOT EXISTS join_documents (
                 id TEXT PRIMARY KEY,
@@ -129,16 +129,26 @@ class PuzzleService:
             CREATE INDEX IF NOT EXISTS idx_jdf_sys_id ON join_document_fragments(sys_id);
         """)
 
+        # Schema migration to v2: add thumbnail_b64 column
+        try:
+            self._conn.execute("SELECT thumbnail_b64 FROM join_documents LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute("ALTER TABLE join_documents ADD COLUMN thumbnail_b64 TEXT DEFAULT ''")
+            self._conn.commit()
+            logger.info("PuzzleService: migrated schema to v2 (added thumbnail_b64)")
+
     def is_available(self) -> bool:
         """Check if the service has a valid database connection."""
         return self._conn is not None
 
-    def save_document(self, doc: PuzzleDocument) -> Optional[str]:
+    def save_document(self, doc: PuzzleDocument, thumbnail_b64: str = None) -> Optional[str]:
         """
         Save or update a PuzzleDocument.
 
         Args:
             doc: The PuzzleDocument to save.
+            thumbnail_b64: Optional base64-encoded thumbnail PNG. If None,
+                preserves existing thumbnail (avoids overwrite on metadata-only saves).
 
         Returns:
             The document ID on success, None on failure.
@@ -148,21 +158,35 @@ class PuzzleService:
 
         fragments_json = json.dumps(
             [{'sys_id': f.sys_id, 'folio_label': f.folio_label, 'fl_id': f.fl_id,
+              'shelfmark': f.shelfmark,
               'x': f.x, 'y': f.y, 'rotation': f.rotation, 'scale': f.scale,
               'flip_h': f.flip_h, 'flip_v': f.flip_v,
-              'bg_removal_threshold': f.bg_removal_threshold}
+              'bg_removal_threshold': f.bg_removal_threshold,
+              'crop_top': f.crop_top, 'crop_bottom': f.crop_bottom,
+              'crop_left': f.crop_left, 'crop_right': f.crop_right,
+              'processed': f.processed}
              for f in doc.fragments],
             ensure_ascii=False
         )
+
+        # Preserve existing thumbnail when not explicitly provided
+        if thumbnail_b64 is None:
+            try:
+                existing = self._conn.execute(
+                    "SELECT thumbnail_b64 FROM join_documents WHERE id = ?", (doc.id,)
+                ).fetchone()
+                thumbnail_b64 = existing['thumbnail_b64'] if existing else ''
+            except Exception:
+                thumbnail_b64 = ''
 
         with self._write_lock:
             try:
                 self._conn.execute(
                     """INSERT OR REPLACE INTO join_documents
-                       (id, title, notes, join_type, fragments_json, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                       (id, title, notes, join_type, fragments_json, thumbnail_b64, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (doc.id, doc.title, doc.notes, doc.join_type,
-                     fragments_json, doc.created_at, doc.updated_at)
+                     fragments_json, thumbnail_b64, doc.created_at, doc.updated_at)
                 )
                 # Rebuild fragment index
                 self._conn.execute(
@@ -217,16 +241,33 @@ class PuzzleService:
         List all puzzle documents, sorted by updated_at DESC.
 
         Returns:
-            List of dicts with id, title, join_type, updated_at.
+            List of dicts with id, title, join_type, fragments_json,
+            thumbnail_b64, updated_at, shelfmarks_summary.
         """
         if not self.is_available():
             return []
 
         try:
             rows = self._conn.execute(
-                "SELECT id, title, join_type, updated_at FROM join_documents ORDER BY updated_at DESC"
+                "SELECT id, title, join_type, fragments_json, thumbnail_b64, updated_at "
+                "FROM join_documents ORDER BY updated_at DESC"
             ).fetchall()
-            return [dict(r) for r in rows]
+            results = []
+            for r in rows:
+                d = dict(r)
+                # Extract shelfmarks summary from fragments_json
+                try:
+                    frags = json.loads(d.get('fragments_json', '[]'))
+                    seen = []
+                    for f in frags:
+                        sm = f.get('shelfmark', '')
+                        if sm and sm not in seen:
+                            seen.append(sm)
+                    d['shelfmarks_summary'] = ' + '.join(seen) if seen else ''
+                except Exception:
+                    d['shelfmarks_summary'] = ''
+                results.append(d)
+            return results
         except Exception as e:
             logger.error("PuzzleService.list_documents failed: %s", e)
             return []
