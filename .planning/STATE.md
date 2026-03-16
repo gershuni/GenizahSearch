@@ -88,12 +88,12 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 ## Current Position
 
 Milestone: v7.0.0 Fragment Puzzle
-Phase: 48 (2 of 6 in milestone)
-Plan: 2 of 4 in current phase
-Status: In progress
-Last activity: 2026-03-16 -- Completed 48-02 PuzzleCanvasWindow with toolbar, shelfmark autocomplete, async fl_id resolution
+Phase: 48 (2 of 6 in milestone) -- COMPLETE
+Plan: 3 of 3 in current phase (all done)
+Status: Phase 48 complete, ready for Phase 49
+Last activity: 2026-03-16 -- Completed 48-03 integration buttons + visual checkpoint with extensive UX polish
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 33% (2 of 6 phases)
 
 ## Performance Metrics
 
@@ -123,6 +123,7 @@ Recent decisions affecting current work:
 - [Phase 48-01]: View dispatches wheel to items via adjust_scale_from_wheel() to avoid QWheelEvent/QGraphicsSceneWheelEvent type mismatch
 - [Phase 48-01]: Corner-handle rotation on selected items (HANDLE_SIZE=14px), pan on middle-click or left-click on empty canvas
 - [Phase 48-02]: Fragment items keyed by (sys_id, folio_label) tuple for stable tracking across folio navigation; functools.partial for binding item_key to signal callbacks
+- [Phase 48-03]: Extensive UX improvements during interactive testing -- crop mode, flip-all, 6 backgrounds, keyboard shortcuts, per-edge crop, CUL auto-threshold, hue-weighted bg removal
 
 ### Pending Todos
 
@@ -138,7 +139,7 @@ Recent decisions affecting current work:
 ### Blockers/Concerns
 
 - IIIF physicalScale metadata availability unverified -- DPI calibration may reduce to per-library lookup table + manual override
-- Background removal edge quality on real Genizah manuscripts needs empirical testing (Phase 47)
+- Background removal edge quality on real Genizah manuscripts verified good during Phase 48 interactive testing; hue-weighted removal added for colored backgrounds
 - NLI S1/S2 recto/verso pairing convention needs verification across libraries (Phase 51)
 
 ### Quick Tasks Completed
@@ -156,6 +157,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-16T06:27:51Z
-Stopped at: Completed 48-02-PLAN.md
-Resume file: .planning/phases/48-desktop-canvas/48-02-SUMMARY.md
+Last session: 2026-03-16T09:00:51Z
+Stopped at: Completed 48-03-PLAN.md (Phase 48 complete)
+Resume file: .planning/phases/48-desktop-canvas/48-03-SUMMARY.md

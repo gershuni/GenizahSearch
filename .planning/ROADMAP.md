@@ -137,7 +137,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 **Milestone Goal:** Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal, DPI calibration, recto/verso views, join document persistence, and community publishing -- in both web (NiceGUI + Fabric.js) and desktop (PyQt6 + QGraphicsScene).
 
 - [x] **Phase 47: Foundation + Background Removal** - Shared data model, joins.db sidecar, IIIF image loading, HSV background removal engine (completed 2026-03-16)
-- [ ] **Phase 48: Desktop Canvas** - QGraphicsScene-based puzzle widget with drag, rotate, flip, resize, and fragment loading
+- [x] **Phase 48: Desktop Canvas** - QGraphicsScene-based puzzle widget with drag, rotate, flip, resize, crop, keyboard shortcuts, and fragment loading from Browse/ResultDialog/Lists (completed 2026-03-16)
 - [ ] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images
 - [ ] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export
 - [ ] **Phase 51: Recto/Verso** - Auto-generated verso view from recto arrangement with correct verso images
@@ -174,9 +174,9 @@ Plans:
   5. The desktop puzzle is accessible from the app's main navigation
 **Plans**: 3 plans
 Plans:
-- [ ] 48-01-PLAN.md — Core canvas building blocks (PuzzleFragmentItem, PuzzleCanvasView, PuzzleImageLoaderThread)
-- [ ] 48-02-PLAN.md — PuzzleCanvasWindow with toolbar, shelfmark autocomplete, and singleton pattern
-- [ ] 48-03-PLAN.md — Integration buttons (Browse, ResultDialog, Lists) + visual checkpoint
+- [x] 48-01-PLAN.md — Core canvas building blocks (PuzzleFragmentItem, PuzzleCanvasView, PuzzleImageLoaderThread)
+- [x] 48-02-PLAN.md — PuzzleCanvasWindow with toolbar, shelfmark autocomplete, and singleton pattern
+- [x] 48-03-PLAN.md — Integration buttons (Browse, ResultDialog, Lists) + visual checkpoint
 
 ### Phase 49: Web Canvas
 **Goal**: Researchers can perform the same fragment assembly in the web app using Fabric.js, with full manipulation parity to desktop
@@ -231,7 +231,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 47. Foundation + Background Removal | 4/4 | Complete    | 2026-03-16 |
-| 48. Desktop Canvas | 2/3 | In Progress|  |
+| 48. Desktop Canvas | 3/3 | Complete | 2026-03-16 |
 | 49. Web Canvas | 0/TBD | Not started | - |
 | 50. Join Documents | 0/TBD | Not started | - |
 | 51. Recto/Verso | 0/TBD | Not started | - |

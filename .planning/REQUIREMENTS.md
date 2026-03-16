@@ -10,7 +10,7 @@ Requirements for v7.0.0 Fragment Puzzle. Each maps to roadmap phases.
 ### Canvas Manipulation
 
 - [x] **CANV-01**: User can add a fragment to the puzzle canvas by shelfmark
-- [ ] **CANV-02**: User can add a fragment from personal lists or browse/search results
+- [x] **CANV-02**: User can add a fragment from personal lists or browse/search results
 - [x] **CANV-03**: User can drag fragments freely on the canvas
 - [x] **CANV-04**: User can rotate a fragment to any angle
 - [x] **CANV-05**: User can flip a fragment horizontally or vertically
