@@ -97,6 +97,11 @@ window.puzzleCanvas = {
         if (options) {
             img.set(options);
         }
+        // Disable middle edge handles — corners only for proportional resize
+        img.setControlsVisibility({
+            mt: false, mb: false, ml: false, mr: false,
+            tl: true, tr: true, bl: true, br: true, mtr: true
+        });
         if (typeof img.setCoords === 'function') {
             img.setCoords();
         }
@@ -152,7 +157,6 @@ window.puzzleCanvas = {
             this.setupContextMenu();
             this._listenersAttached = true;
         }
-        this.setupSnapGuides();
         this.setupSelectionSync();
 
         // Handle window resize (with cleanup reference)
@@ -237,6 +241,7 @@ window.puzzleCanvas = {
                     hasBorders: true,
                     cornerSize: 12,
                     transparentCorners: false,
+                    lockUniScaling: true,
                     perPixelTargetFind: true,
                     _fragmentKey: key,
                     _imageUrl: imageUrl,
@@ -378,6 +383,20 @@ window.puzzleCanvas = {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
             var active = self.canvas.getActiveObject();
+
+            // In crop mode, arrow keys crop edges; Enter confirms, Escape reverts
+            if (self._cropMode) {
+                var step = e.shiftKey ? 40 : 20;
+                switch(e.key) {
+                    case 'ArrowUp':    self.cropEdge('top', step); e.preventDefault(); break;
+                    case 'ArrowDown':  self.cropEdge('bottom', step); e.preventDefault(); break;
+                    case 'ArrowLeft':  self.cropEdge('left', step); e.preventDefault(); break;
+                    case 'ArrowRight': self.cropEdge('right', step); e.preventDefault(); break;
+                    case 'Enter':      self.cropConfirm(); e.preventDefault(); break;
+                    case 'Escape':     self.cropRevert(); e.preventDefault(); break;
+                }
+                return;
+            }
 
             switch(e.key) {
                 case 'Delete':
@@ -613,91 +632,6 @@ window.puzzleCanvas = {
 
     // === Snap Guides (CANV-08) ===
 
-    setupSnapGuides: function() {
-        var SNAP_THRESHOLD = 8;
-        var self = this;
-        var guidelines = [];
-
-        this.canvas.on('object:moving', function(e) {
-            // Remove old guidelines
-            guidelines.forEach(function(g) { self.canvas.remove(g); });
-            guidelines = [];
-
-            var moving = e.target;
-            if (!moving) return;
-            var movingBR = moving.getBoundingRect();
-
-            self.canvas.getObjects().forEach(function(obj) {
-                if (obj === moving || obj._isGuideline || obj._isPlaceholder) return;
-                var br = obj.getBoundingRect();
-
-                // Left edge alignment
-                if (Math.abs(movingBR.left - br.left) < SNAP_THRESHOLD) {
-                    moving.set('left', br.left + (moving.left - movingBR.left));
-                    var line = new fabric.Line([br.left, 0, br.left, self.canvas.height / self.canvas.getZoom()],
-                        { stroke: '#00FFFF', strokeDashArray: [4, 4], selectable: false, evented: false, _isGuideline: true });
-                    guidelines.push(line);
-                    self.canvas.add(line);
-                }
-                // Right edge alignment
-                var movingRight = movingBR.left + movingBR.width;
-                var objRight = br.left + br.width;
-                if (Math.abs(movingRight - objRight) < SNAP_THRESHOLD) {
-                    moving.set('left', objRight - movingBR.width + (moving.left - movingBR.left));
-                    var line = new fabric.Line([objRight, 0, objRight, self.canvas.height / self.canvas.getZoom()],
-                        { stroke: '#00FFFF', strokeDashArray: [4, 4], selectable: false, evented: false, _isGuideline: true });
-                    guidelines.push(line);
-                    self.canvas.add(line);
-                }
-                // Top edge alignment
-                if (Math.abs(movingBR.top - br.top) < SNAP_THRESHOLD) {
-                    moving.set('top', br.top + (moving.top - movingBR.top));
-                    var line = new fabric.Line([0, br.top, self.canvas.width / self.canvas.getZoom(), br.top],
-                        { stroke: '#00FFFF', strokeDashArray: [4, 4], selectable: false, evented: false, _isGuideline: true });
-                    guidelines.push(line);
-                    self.canvas.add(line);
-                }
-                // Bottom edge alignment
-                var movingBottom = movingBR.top + movingBR.height;
-                var objBottom = br.top + br.height;
-                if (Math.abs(movingBottom - objBottom) < SNAP_THRESHOLD) {
-                    moving.set('top', objBottom - movingBR.height + (moving.top - movingBR.top));
-                    var line = new fabric.Line([0, objBottom, self.canvas.width / self.canvas.getZoom(), objBottom],
-                        { stroke: '#00FFFF', strokeDashArray: [4, 4], selectable: false, evented: false, _isGuideline: true });
-                    guidelines.push(line);
-                    self.canvas.add(line);
-                }
-                // Horizontal center alignment
-                var movingCX = movingBR.left + movingBR.width / 2;
-                var objCX = br.left + br.width / 2;
-                if (Math.abs(movingCX - objCX) < SNAP_THRESHOLD) {
-                    moving.set('left', objCX - movingBR.width / 2 + (moving.left - movingBR.left));
-                    var line = new fabric.Line([objCX, 0, objCX, self.canvas.height / self.canvas.getZoom()],
-                        { stroke: '#00FFFF', strokeDashArray: [3, 3], selectable: false, evented: false, _isGuideline: true });
-                    guidelines.push(line);
-                    self.canvas.add(line);
-                }
-                // Vertical center alignment
-                var movingCY = movingBR.top + movingBR.height / 2;
-                var objCY = br.top + br.height / 2;
-                if (Math.abs(movingCY - objCY) < SNAP_THRESHOLD) {
-                    moving.set('top', objCY - movingBR.height / 2 + (moving.top - movingBR.top));
-                    var line = new fabric.Line([0, objCY, self.canvas.width / self.canvas.getZoom(), objCY],
-                        { stroke: '#00FFFF', strokeDashArray: [3, 3], selectable: false, evented: false, _isGuideline: true });
-                    guidelines.push(line);
-                    self.canvas.add(line);
-                }
-            });
-            self.canvas.requestRenderAll();
-        });
-
-        this.canvas.on('object:modified', function() {
-            guidelines.forEach(function(g) { self.canvas.remove(g); });
-            guidelines = [];
-            self.canvas.requestRenderAll();
-        });
-    },
-
     setupSelectionSync: function() {
         var self = this;
         this.canvas.on('selection:created', function() { self._syncSelection(); });
@@ -802,16 +736,29 @@ window.puzzleCanvas = {
             this._cropMode = true;
             this._cropTarget = active;
             this._cropOffsets = { top: 0, bottom: 0, left: 0, right: 0 };
-            // Store original dimensions for revert
             if (!active._originalWidth) {
                 active._originalWidth = active.width;
                 active._originalHeight = active.height;
                 active._originalCropX = active.cropX || 0;
                 active._originalCropY = active.cropY || 0;
             }
+            // Lock movement/resize during crop — only arrow keys work
+            active.set({ lockMovementX: true, lockMovementY: true, hasControls: false });
+            // Visual cue: red dashed border
+            active.set({ borderColor: '#ff4444', borderDashArray: [5, 3] });
             this.canvas.requestRenderAll();
             return true;
         } else {
+            if (this._cropTarget) {
+                this._cropTarget.set({
+                    lockMovementX: false, lockMovementY: false, hasControls: true,
+                    borderColor: null, borderDashArray: null
+                });
+                this._cropTarget.setControlsVisibility({
+                    mt: false, mb: false, ml: false, mr: false,
+                    tl: true, tr: true, bl: true, br: true, mtr: true
+                });
+            }
             this._cropMode = false;
             this._cropTarget = null;
             this._cropOffsets = null;
@@ -848,7 +795,6 @@ window.puzzleCanvas = {
 
     cropConfirm: function() {
         if (!this._cropTarget) return;
-        // Crop is already applied visually via cropX/cropY/width/height
         this._cropTarget._originalWidth = null;
         this._cropTarget._originalHeight = null;
         this.toggleCropMode(false);
@@ -867,7 +813,6 @@ window.puzzleCanvas = {
             obj._originalWidth = null;
             obj._originalHeight = null;
             obj.setCoords();
-            this.canvas.requestRenderAll();
         }
         this.toggleCropMode(false);
     },
@@ -909,21 +854,22 @@ window.puzzleCanvas = {
 
         // 2. Mirror layout horizontally + negate rotations (like turning a page)
         var objects = keys.map(function(k) { return self.fragments[k]; });
-        var minX = Infinity, maxX = -Infinity;
-        objects.forEach(function(obj) {
-            var bounds = obj.getBoundingRect();
-            minX = Math.min(minX, bounds.left);
-            maxX = Math.max(maxX, bounds.left + bounds.width);
+        // Use object .left positions + scaled widths for mirror calculation
+        var positions = objects.map(function(obj) {
+            var w = (obj.width || 0) * (obj.scaleX || 1);
+            return { obj: obj, left: obj.left, right: obj.left + w, width: w };
         });
+        var minX = Math.min.apply(null, positions.map(function(p) { return p.left; }));
+        var maxX = Math.max.apply(null, positions.map(function(p) { return p.right; }));
         var centerX = (minX + maxX) / 2;
-        objects.forEach(function(obj) {
-            var bounds = obj.getBoundingRect();
-            var objCenterX = bounds.left + bounds.width / 2;
+        positions.forEach(function(p) {
+            var objCenterX = p.left + p.width / 2;
             var newCenterX = 2 * centerX - objCenterX;
-            obj.set('left', newCenterX - bounds.width / 2);
+            p.obj.set('left', newCenterX - p.width / 2);
             // Negate rotation (clockwise ↔ counter-clockwise)
-            var oldAngle = obj.angle || 0;
-            obj.set('angle', (360 - oldAngle) % 360);
+            var oldAngle = p.obj.angle || 0;
+            p.obj.set('angle', (360 - oldAngle) % 360);
+            p.obj.setCoords();
         });
         this.canvas.requestRenderAll();
     },
@@ -1253,7 +1199,7 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
         if s.startswith(('T-S', 'OR.', 'ADD.')):
             is_cul = True
     if is_cul:
-        threshold = 115.0
+        threshold = 150.0
     url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
 
     frag_offset = len(puzzle_meta) * 50
@@ -1364,8 +1310,11 @@ def create_puzzle_page(initial_add: str = None):
                     ).props('dark outlined dense').classes('w-full')
                     items_container = ui.column().classes('w-full max-h-64 overflow-auto')
 
+                    selected_items = []
+
                     async def on_list_selected(e):
                         items_container.clear()
+                        selected_items.clear()
                         list_id = e.value if hasattr(e, 'value') else list_select.value
                         if not list_id:
                             return
@@ -1377,21 +1326,34 @@ def create_puzzle_page(initial_add: str = None):
                                 for item in items:
                                     sid = item.get('sys_id', '')
                                     shelf = item.get('shelfmark', '') or sid
-                                    if not sid:
+                                    if not sid or not shelf:
                                         continue
-                                    async def add_item(s=sid, sh=shelf):
-                                        dlg.close()
-                                        await _add_fragment_by_sys_id(
-                                            s, sh, puzzle_meta, pending_fragment_meta, threshold_slider
-                                        )
-                                    ui.button(
-                                        shelf, on_click=add_item
-                                    ).props('flat dense no-caps dark').classes('w-full text-left').style(
-                                        'color: #90caf9; justify-content: flex-start;'
+                                    cb = ui.checkbox(shelf).props('dark dense').style(
+                                        'color: #e0e0e0;'
                                     )
+                                    selected_items.append({'sys_id': sid, 'shelfmark': shelf, 'cb': cb})
 
                     list_select.on('update:model-value', on_list_selected)
-                    with ui.row().classes('w-full justify-end'):
+
+                    with ui.row().classes('w-full justify-end gap-2'):
+                        async def add_selected():
+                            to_add = [(s['sys_id'], s['shelfmark']) for s in selected_items if s['cb'].value]
+                            dlg.close()
+                            for sid, shelf in to_add:
+                                await _add_fragment_by_sys_id(
+                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider
+                                )
+
+                        async def add_all():
+                            to_add = [(s['sys_id'], s['shelfmark']) for s in selected_items]
+                            dlg.close()
+                            for sid, shelf in to_add:
+                                await _add_fragment_by_sys_id(
+                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider
+                                )
+
+                        ui.button(tr('Add Selected'), on_click=add_selected).props('flat dark color=primary')
+                        ui.button(tr('Add All'), on_click=add_all).props('flat dark color=positive')
                         ui.button(tr('Close'), on_click=dlg.close).props('flat dark')
                 dlg.open()
 
