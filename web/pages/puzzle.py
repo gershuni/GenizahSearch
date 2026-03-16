@@ -1659,7 +1659,6 @@ def create_puzzle_page(initial_add: str = None):
                     from datetime import datetime
                     doc.updated_at = datetime.now().isoformat()
                     await run.io_bound(lambda: _save_doc_with_thumbnail(doc, fragments))
-                    await refresh_docs_list()
 
         loop = asyncio.get_event_loop()
         doc_state['auto_save_handle'] = loop.create_task(do_auto_save())
@@ -1824,7 +1823,7 @@ def create_puzzle_page(initial_add: str = None):
         frag_text = '\n'.join(f"{f.shelfmark} ({f.folio_label})" for f in doc.fragments)
         fragments_label.text = frag_text or tr('No fragments')
         details_container.style('display: block;')
-        await refresh_docs_list()
+        joins_dialog.close()
         ui.notify(tr('Loaded: {}').format(doc.title), type='info')
 
     async def new_puzzle():
@@ -1897,44 +1896,22 @@ def create_puzzle_page(initial_add: str = None):
                 ui.button(tr('Cancel'), on_click=dlg.close).props('flat')
         dlg.open()
 
-    # ── Side panel for saved documents (CSS-positioned, not Quasar drawer) ──
-    # ui.left_drawer requires page-level placement; this panel works inside content columns
-    drawer_visible = {'value': False}
-
-    # Backdrop overlay to close panel on outside click
-    backdrop = ui.element('div').style(
-        'position: fixed; inset: 0; z-index: 199; background: rgba(0,0,0,0.3); '
-        'display: none; cursor: pointer;'
-    )
-
-    drawer = ui.column().classes('gap-0').style(
-        'position: fixed; left: 0; top: 0; height: 100vh; width: 280px; z-index: 200; '
-        'background: var(--bg-card); border-right: 1px solid var(--border-light, #ddd); '
-        'transform: translateX(-100%); transition: transform 0.3s ease; '
-        'overflow-y: auto; padding: 12px; box-shadow: 2px 0 8px rgba(0,0,0,0.15);'
-    )
-
-    def _drawer_toggle():
-        drawer_visible['value'] = not drawer_visible['value']
-        if drawer_visible['value']:
-            drawer.style(add='transform: translateX(0);', remove='transform: translateX(-100%);')
-            backdrop.style(add='display: block;', remove='display: none;')
-        else:
-            drawer.style(add='transform: translateX(-100%);', remove='transform: translateX(0);')
-            backdrop.style(add='display: none;', remove='display: block;')
-
-    backdrop.on('click', lambda: _drawer_toggle())
-
-    # Attach toggle as attribute for toolbar button access
-    drawer.toggle = _drawer_toggle
-
-    with drawer:
+    # ── Saved Joins dialog ──
+    # A modal dialog for browsing, loading, and managing saved join documents.
+    # Elements (title_input, notes_input, etc.) persist in the DOM even when
+    # the dialog is closed, so auto-save can still read their values.
+    joins_dialog = ui.dialog().props('maximized=false position=standard')
+    with joins_dialog, ui.card().classes('w-96').style(
+        'background: var(--bg-card); color: var(--text-primary); max-height: 80vh; overflow-y: auto;'
+    ):
         with ui.row().classes('w-full items-center justify-between q-mb-sm'):
             ui.label(tr('Saved Joins')).classes('text-subtitle1 font-bold').style('color: var(--text-primary);')
-            ui.button(icon='close', on_click=_drawer_toggle).props('flat dense round size=sm').style('color: var(--text-secondary);')
+            ui.button(icon='close', on_click=joins_dialog.close).props('flat dense round size=sm').style('color: var(--text-secondary);')
         docs_container = ui.column().classes('w-full gap-1')
 
-        details_container = ui.column().classes('w-full q-mt-md').style('display: none;')
+        ui.separator().classes('q-my-sm')
+
+        details_container = ui.column().classes('w-full').style('display: none;')
         with details_container:
             ui.label(tr('Details')).classes('text-subtitle2').style('color: var(--text-primary);')
             title_input = ui.input(label=tr('Title')).props('outlined dense').classes('w-full')
@@ -2374,7 +2351,10 @@ def create_puzzle_page(initial_add: str = None):
                 'dense flat dark round size=sm'
             ).tooltip(tr('Export PNG'))
 
-            ui.button(icon='menu', on_click=lambda: drawer.toggle()).props(
+            async def _open_joins_dialog():
+                await refresh_docs_list()
+                joins_dialog.open()
+            ui.button(icon='menu', on_click=_open_joins_dialog).props(
                 'dense flat dark round size=sm'
             ).tooltip(tr('Saved Joins'))
 
@@ -2711,8 +2691,7 @@ def create_puzzle_page(initial_add: str = None):
                     f'{"true" if flipH else "false"}, {"true" if flipV else "false"}, {js_meta})'
                 )
 
-        # Initialize saved documents list in drawer
-        await refresh_docs_list()
+        # Saved documents list is refreshed on-demand when dialog opens
 
     ui.timer(0.5, init_canvas, once=True)
 
