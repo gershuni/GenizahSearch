@@ -1680,7 +1680,7 @@ def create_puzzle_page(initial_add: str = None):
         docs = await run.io_bound(svc.list_documents)
         with docs_container:
             if not docs:
-                ui.label(tr('No saved joins')).style('color: #888; font-style: italic;')
+                ui.label(tr('No saved joins')).style('color: var(--text-secondary); font-style: italic;')
                 return
             for d in docs:
                 doc_id = d['id']
@@ -1690,7 +1690,7 @@ def create_puzzle_page(initial_add: str = None):
                 thumb_b64 = d.get('thumbnail_b64', '')
 
                 with ui.card().classes('w-full cursor-pointer').style(
-                    'background: #2a2a2a; padding: 8px;'
+                    'background: var(--bg-secondary); padding: 8px;'
                 ).on('click', lambda _, did=doc_id: load_document(did)):
                     with ui.row().classes('items-center gap-2 w-full no-wrap'):
                         if thumb_b64:
@@ -1698,16 +1698,16 @@ def create_puzzle_page(initial_add: str = None):
                                 'width: 48px; height: 48px; object-fit: contain; border-radius: 4px;'
                             )
                         else:
-                            ui.icon('image', size='lg').style('color: #666;')
+                            ui.icon('image', size='lg').style('color: var(--text-secondary);')
                         with ui.column().classes('gap-0').style('flex: 1; min-width: 0;'):
                             ui.label(title).classes('text-body2 ellipsis').style(
-                                'color: #e0e0e0; max-width: 180px;'
+                                'color: var(--text-primary); max-width: 160px;'
                             )
                             if shelfmarks:
                                 ui.label(shelfmarks).classes('text-caption ellipsis').style(
-                                    'color: #999; max-width: 180px;'
+                                    'color: var(--text-secondary); max-width: 160px;'
                                 )
-                            ui.label(updated).classes('text-caption').style('color: #666;')
+                            ui.label(updated).classes('text-caption').style('color: var(--text-secondary);')
                     with ui.row().classes('justify-end gap-1'):
                         ui.button(icon='delete', on_click=lambda _, did=doc_id, t=title: confirm_delete(did, t)).props(
                             'dense flat round size=xs color=negative'
@@ -1724,16 +1724,16 @@ def create_puzzle_page(initial_add: str = None):
         fragments = await build_fragments_list()
         suggested_title = auto_suggest_title(fragments)
 
-        with ui.dialog() as dlg, ui.card().classes('w-96').style(
-            'background: #2d2d2d; color: #e0e0e0;'
+        with ui.dialog() as dlg, ui.card().classes('w-96 p-4').style(
+            'background: var(--bg-card); color: var(--text-primary);'
         ):
-            ui.label(tr('Save Join Document')).classes('text-lg font-bold').style('color: #e0e0e0;')
+            ui.label(tr('Save Join Document')).classes('text-lg font-bold').style('color: var(--text-primary);')
             save_title = ui.input(
                 label=tr('Title'), value=doc_state.get('current_doc_id') and title_input.value or suggested_title
-            ).props('dark outlined dense').classes('w-full')
+            ).props('outlined dense').classes('w-full')
             save_notes = ui.textarea(
                 label=tr('Notes'), value=doc_state.get('current_doc_id') and notes_input.value or ''
-            ).props('dark outlined dense').classes('w-full')
+            ).props('outlined dense').classes('w-full')
 
             async def do_save():
                 import uuid
@@ -1757,8 +1757,8 @@ def create_puzzle_page(initial_add: str = None):
                 ui.notify(tr('Saved: {}').format(doc.title), type='positive')
 
             with ui.row().classes('w-full justify-end gap-2'):
-                ui.button(tr('Save'), on_click=do_save).props('flat dark color=primary')
-                ui.button(tr('Cancel'), on_click=dlg.close).props('flat dark')
+                ui.button(tr('Save'), on_click=do_save).props('flat color=primary')
+                ui.button(tr('Cancel'), on_click=dlg.close).props('flat')
         dlg.open()
 
     async def load_document(doc_id):
@@ -1881,8 +1881,8 @@ def create_puzzle_page(initial_add: str = None):
 
     async def confirm_delete(doc_id, title):
         """Delete a saved document with confirmation."""
-        with ui.dialog() as dlg, ui.card().style('background: #2d2d2d; color: #e0e0e0;'):
-            ui.label(tr('Delete "{}"?').format(title)).classes('text-lg').style('color: #e0e0e0;')
+        with ui.dialog() as dlg, ui.card().classes('p-4').style('background: var(--bg-card); color: var(--text-primary);'):
+            ui.label(tr('Delete "{}"?').format(title)).classes('text-lg').style('color: var(--text-primary);')
             with ui.row().classes('w-full justify-end gap-2'):
                 async def do_delete():
                     svc = get_puzzle_service(thread_safe=True)
@@ -1893,42 +1893,53 @@ def create_puzzle_page(initial_add: str = None):
                     dlg.close()
                     await refresh_docs_list()
                     ui.notify(tr('Deleted'), type='info')
-                ui.button(tr('Delete'), on_click=do_delete).props('flat dark color=negative')
-                ui.button(tr('Cancel'), on_click=dlg.close).props('flat dark')
+                ui.button(tr('Delete'), on_click=do_delete).props('flat color=negative')
+                ui.button(tr('Cancel'), on_click=dlg.close).props('flat')
         dlg.open()
 
     # ── Side panel for saved documents (CSS-positioned, not Quasar drawer) ──
     # ui.left_drawer requires page-level placement; this panel works inside content columns
     drawer_visible = {'value': False}
-    drawer = ui.column().classes('w-80 h-full gap-0').style(
-        'position: fixed; left: 0; top: 0; height: 100vh; z-index: 100; '
-        'background: #1e1e1e; border-right: 1px solid #444; '
+
+    # Backdrop overlay to close panel on outside click
+    backdrop = ui.element('div').style(
+        'position: fixed; inset: 0; z-index: 199; background: rgba(0,0,0,0.3); '
+        'display: none; cursor: pointer;'
+    )
+
+    drawer = ui.column().classes('gap-0').style(
+        'position: fixed; left: 0; top: 0; height: 100vh; width: 280px; z-index: 200; '
+        'background: var(--bg-card); border-right: 1px solid var(--border-light, #ddd); '
         'transform: translateX(-100%); transition: transform 0.3s ease; '
-        'overflow-y: auto; padding: 16px;'
+        'overflow-y: auto; padding: 12px; box-shadow: 2px 0 8px rgba(0,0,0,0.15);'
     )
 
     def _drawer_toggle():
         drawer_visible['value'] = not drawer_visible['value']
         if drawer_visible['value']:
             drawer.style(add='transform: translateX(0);', remove='transform: translateX(-100%);')
+            backdrop.style(add='display: block;', remove='display: none;')
         else:
             drawer.style(add='transform: translateX(-100%);', remove='transform: translateX(0);')
+            backdrop.style(add='display: none;', remove='display: block;')
+
+    backdrop.on('click', lambda: _drawer_toggle())
 
     # Attach toggle as attribute for toolbar button access
     drawer.toggle = _drawer_toggle
 
     with drawer:
         with ui.row().classes('w-full items-center justify-between q-mb-sm'):
-            ui.label(tr('Saved Joins')).classes('text-h6').style('color: #e0e0e0;')
-            ui.button(icon='close', on_click=_drawer_toggle).props('flat dense round size=sm').style('color: #999;')
+            ui.label(tr('Saved Joins')).classes('text-subtitle1 font-bold').style('color: var(--text-primary);')
+            ui.button(icon='close', on_click=_drawer_toggle).props('flat dense round size=sm').style('color: var(--text-secondary);')
         docs_container = ui.column().classes('w-full gap-1')
 
         details_container = ui.column().classes('w-full q-mt-md').style('display: none;')
         with details_container:
-            ui.label(tr('Details')).classes('text-subtitle1').style('color: #e0e0e0;')
-            title_input = ui.input(label=tr('Title')).props('dark outlined dense').classes('w-full')
-            notes_input = ui.textarea(label=tr('Notes')).props('dark outlined dense').classes('w-full').style('max-height: 100px;')
-            fragments_label = ui.label('').classes('text-caption').style('color: #888; white-space: pre-wrap;')
+            ui.label(tr('Details')).classes('text-subtitle2').style('color: var(--text-primary);')
+            title_input = ui.input(label=tr('Title')).props('outlined dense').classes('w-full')
+            notes_input = ui.textarea(label=tr('Notes')).props('outlined dense').classes('w-full').style('max-height: 80px;')
+            fragments_label = ui.label('').classes('text-caption').style('color: var(--text-secondary); white-space: pre-wrap;')
 
             def on_title_edit():
                 if doc_state['current_doc_id']:
