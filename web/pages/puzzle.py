@@ -1897,12 +1897,30 @@ def create_puzzle_page(initial_add: str = None):
                 ui.button(tr('Cancel'), on_click=dlg.close).props('flat dark')
         dlg.open()
 
-    # ── Left drawer for saved documents ──
-    drawer = ui.left_drawer(value=False).classes('w-80').style(
-        'background: #1e1e1e; border-right: 1px solid #444;'
+    # ── Side panel for saved documents (CSS-positioned, not Quasar drawer) ──
+    # ui.left_drawer requires page-level placement; this panel works inside content columns
+    drawer_visible = {'value': False}
+    drawer = ui.column().classes('w-80 h-full gap-0').style(
+        'position: fixed; left: 0; top: 0; height: 100vh; z-index: 100; '
+        'background: #1e1e1e; border-right: 1px solid #444; '
+        'transform: translateX(-100%); transition: transform 0.3s ease; '
+        'overflow-y: auto; padding: 16px;'
     )
+
+    def _drawer_toggle():
+        drawer_visible['value'] = not drawer_visible['value']
+        if drawer_visible['value']:
+            drawer.style(add='transform: translateX(0);', remove='transform: translateX(-100%);')
+        else:
+            drawer.style(add='transform: translateX(-100%);', remove='transform: translateX(0);')
+
+    # Attach toggle as attribute for toolbar button access
+    drawer.toggle = _drawer_toggle
+
     with drawer:
-        ui.label(tr('Saved Joins')).classes('text-h6 q-mb-sm').style('color: #e0e0e0;')
+        with ui.row().classes('w-full items-center justify-between q-mb-sm'):
+            ui.label(tr('Saved Joins')).classes('text-h6').style('color: #e0e0e0;')
+            ui.button(icon='close', on_click=_drawer_toggle).props('flat dense round size=sm').style('color: #999;')
         docs_container = ui.column().classes('w-full gap-1')
 
         details_container = ui.column().classes('w-full q-mt-md').style('display: none;')
