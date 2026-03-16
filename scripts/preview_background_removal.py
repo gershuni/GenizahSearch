@@ -46,15 +46,15 @@ from shared.background_removal import (
 
 SAMPLE_IMAGES = [
     # (Label, type, id_or_url)
-    # NLI-hosted images (gray backgrounds typically) -- use FGPImageNumberId as FL ID
-    ("NLI: T-S 12.1 recto (CUL)", "nli", "322229"),
-    ("NLI: T-S 12.1 verso (CUL)", "nli", "322230"),
-    # Oxford (cream backgrounds)
-    ("NLI: MS georg. c.1(P)/1 (Oxford)", "nli", "456361"),
-    ("NLI: MS georg. c.1(P)/2 (Oxford)", "nli", "456362"),
+    # NLI-hosted images -- use real NLI FL IDs (9+ digits from IIIF manifests)
+    ("NLI: T-S 12.1 recto (CUL)", "nli", "166909775"),
+    ("NLI: T-S 12.1 verso (CUL)", "nli", "166909776"),
+    # AIU (Paris)
+    ("NLI: H 147 A recto (AIU)", "nli", "47443607"),
+    ("NLI: H 147 A verso (AIU)", "nli", "47443612"),
     # Manchester
-    ("NLI: A 31 (Manchester)", "nli", "421451"),
-    ("NLI: A 43 (Manchester)", "nli", "421452"),
+    ("NLI: A 1 recto (Manchester)", "nli", "168498808"),
+    ("NLI: A 1 verso (Manchester)", "nli", "168498811"),
     # Cambridge (direct IIIF, not NLI-hosted)
     ("Cambridge: MS-ADD-00863-00002 p1", "cambridge", "MS-ADD-00863-00002"),
     ("Cambridge: MS-TS-00012-00001 p1", "cambridge", "MS-TS-00012-00001"),
