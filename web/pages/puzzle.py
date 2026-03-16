@@ -215,7 +215,7 @@ window.puzzleCanvas = {
             this._pendingAdds = [];
             for (var i = 0; i < pending.length; i++) {
                 var p = pending[i];
-                this.addFragment(p.key, p.url, p.x, p.y, p.rotation, p.scale, p.flipH, p.flipV, p.meta);
+                this.addFragment(p.key, p.url, p.x, p.y, p.rotation, p.scale, p.flipH, p.flipV, p.meta, p.posOrigin);
             }
         }
     },
@@ -236,11 +236,12 @@ window.puzzleCanvas = {
      * @param {boolean} flipV - Whether to flip vertically.
      * @param {Object} [meta] - Fragment metadata (fl_id, threshold, sys_id, etc.).
      */
-    addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV, meta) {
+    addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV, meta, posOrigin) {
+        // posOrigin: if true, x/y are local-origin (PyQt convention) — convert to Fabric left/top after image loads
         if (!this.canvas) {
             // Queue for when canvas is ready
             console.warn('Canvas not ready, queuing fragment:', key);
-            this._pendingAdds.push({key:key, url:imageUrl, x:x, y:y, rotation:rotation, scale:scale, flipH:flipH, flipV:flipV, meta:meta});
+            this._pendingAdds.push({key:key, url:imageUrl, x:x, y:y, rotation:rotation, scale:scale, flipH:flipH, flipV:flipV, meta:meta, posOrigin:posOrigin});
             return;
         }
         var self = this;
@@ -280,8 +281,12 @@ window.puzzleCanvas = {
                         effectiveScale = Math.min(maxW / htmlImg.naturalWidth, maxH / htmlImg.naturalHeight);
                     }
                 }
+                // If posOrigin mode, x/y are local-origin (PyQt pos convention):
+                // convert to Fabric.js left/top: left = pos - (1 - scale) * naturalWidth/2
+                var fabLeft = posOrigin ? x - (1 - effectiveScale) * htmlImg.naturalWidth / 2 : x;
+                var fabTop = posOrigin ? y - (1 - effectiveScale) * htmlImg.naturalHeight / 2 : y;
                 var img = self._buildFragmentImage(htmlImg, {
-                    left: x, top: y,
+                    left: fabLeft, top: fabTop,
                     angle: rotation || 0,
                     scaleX: effectiveScale,
                     scaleY: effectiveScale,
@@ -1152,6 +1157,8 @@ window.puzzleCanvas = {
                 scaleY: obj.scaleY || 1,
                 flipH: !!obj.flipX,
                 flipV: !!obj.flipY,
+                naturalWidth: obj.width || 800,
+                naturalHeight: obj.height || 800,
             };
         }
         return JSON.stringify(stateObj);
@@ -1170,7 +1177,7 @@ window.puzzleCanvas = {
                         scaleX: s.scaleX || 1,
                         scaleY: s.scaleY || 1,
                         flipX: !!s.flipH,
-                        flipY: !!s.flipV,
+                        flipV: !!s.flipV,
                     });
                 }
             }
@@ -1613,15 +1620,30 @@ def create_puzzle_page(initial_add: str = None):
             else:
                 c_left = c_top = c_right = c_bottom = 0
 
+            # Convert Fabric.js left/top (visual top-left of scaled image) to
+            # local-origin position (matching PyQt pos() convention) for
+            # consistent export coordinate handling.
+            # Fabric.js: left = centerX - width*scaleX/2
+            # PyQt pos:  posX = centerX - width/2
+            # So: posX = left + (1 - scaleX) * naturalWidth/2
+            fab_x = spatial.get('x', 0)
+            fab_y = spatial.get('y', 0)
+            sx = spatial.get('scaleX', 1.0)
+            sy = spatial.get('scaleY', 1.0)
+            nat_w = spatial.get('naturalWidth', 800)
+            nat_h = spatial.get('naturalHeight', 800)
+            pos_x = fab_x + (1 - sx) * nat_w / 2
+            pos_y = fab_y + (1 - sy) * nat_h / 2
+
             frag = PuzzleFragment(
                 sys_id=sys_id,
                 folio_label=folio_label,
                 fl_id=meta.get('fl_id', ''),
                 shelfmark=meta.get('shelfmark', ''),
-                x=spatial.get('x', 0),
-                y=spatial.get('y', 0),
+                x=pos_x,
+                y=pos_y,
                 rotation=spatial.get('rotation', 0),
-                scale=spatial.get('scaleX', 1.0),
+                scale=sx,
                 flip_h=spatial.get('flipH', False),
                 flip_v=spatial.get('flipV', False),
                 bg_removal_threshold=meta.get('threshold', 30.0),
@@ -1795,7 +1817,7 @@ def create_puzzle_page(initial_add: str = None):
             ui.run_javascript(
                 f'window.puzzleCanvas.addFragment("{key}", "{url}", '
                 f'{frag.x}, {frag.y}, {frag.rotation}, {frag.scale}, '
-                f'{"true" if frag.flip_h else "false"}, {"true" if frag.flip_v else "false"}, {js_meta})'
+                f'{"true" if frag.flip_h else "false"}, {"true" if frag.flip_v else "false"}, {js_meta}, true)'
             )
 
             # If fragment has crop, store in pending_crops for on_puzzle_add_result
