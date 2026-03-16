@@ -130,15 +130,12 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
         if frag.flip_v:
             scaled_img = scaled_img.transpose(Image.FLIP_TOP_BOTTOM)
 
-        # Position: scale canvas coords by global_scale (uniform for all fragments)
-        tl_x = frag.x * global_scale
-        tl_y = frag.y * global_scale
-
-        # Compute center of the scaled/flipped (unrotated) image
-        half_w = scaled_img.width / 2.0
-        half_h = scaled_img.height / 2.0
-        center_x = tl_x + half_w
-        center_y = tl_y + half_h
+        # Position: frag.x/y is the local origin (top-left of UNSCALED image) in canvas space.
+        # Both PyQt and Fabric.js apply scale/rotation around the image CENTER, so the
+        # center position = pos + (unscaled_size / 2), regardless of scale.
+        # We compute center in export space, then place the scaled image centered on it.
+        center_x = (frag.x + cropped_canvas_w / 2.0) * global_scale
+        center_y = (frag.y + cropped_canvas_h / 2.0) * global_scale
 
         # Apply rotation (negate angle: apps use clockwise-positive, PIL uses CCW)
         if abs(frag.rotation) > 0.01:
