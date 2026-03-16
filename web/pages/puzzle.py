@@ -891,7 +891,7 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, threshold_slid
         'sys_id': sys_id
     }
     meta_json = json.dumps(meta)
-    await ui.run_javascript(
+    ui.run_javascript(
         f'window.puzzleCanvas.addFragment("{key}", "{url}", '
         f'{100 + frag_offset}, {100 + frag_offset}, 0, 1.0, false, false, {meta_json})'
     )
@@ -1130,9 +1130,9 @@ def create_puzzle_page(initial_add: str = None):
                 min=10, max=400, value=100, step=1
             ).props('dense dark label-always').style('min-width: 140px')
 
-            async def on_scale_change(e):
+            def on_scale_change(e):
                 val = e.value if hasattr(e, 'value') else scale_slider.value
-                await ui.run_javascript(
+                ui.run_javascript(
                     f'window.puzzleCanvas.setSelectedScale({val / 100})'
                 )
             scale_slider.on('update:model-value', on_scale_change)
@@ -1144,9 +1144,9 @@ def create_puzzle_page(initial_add: str = None):
                 min=-180, max=180, value=0, step=1
             ).props('dense dark label-always').style('min-width: 140px')
 
-            async def on_rotation_change(e):
+            def on_rotation_change(e):
                 val = e.value if hasattr(e, 'value') else rotation_slider.value
-                await ui.run_javascript(
+                ui.run_javascript(
                     f'window.puzzleCanvas.setSelectedRotation({val})'
                 )
             rotation_slider.on('update:model-value', on_rotation_change)
@@ -1185,9 +1185,8 @@ def create_puzzle_page(initial_add: str = None):
                     'size': 800, 'processed': True,
                     'sys_id': meta.get('sys_id', '')
                 })
-                await ui.run_javascript(
-                    f'window.puzzleCanvas._reloadFragment("{key}", "{url}", {js_meta})',
-                    timeout=15.0
+                ui.run_javascript(
+                    f'window.puzzleCanvas._reloadFragment("{key}", "{url}", {js_meta})'
                 )
                 # Update Python storage
                 meta['threshold'] = new_threshold
@@ -1199,7 +1198,7 @@ def create_puzzle_page(initial_add: str = None):
 
             show_original = ui.checkbox(tr('Show Original')).props('dense dark')
             show_original.on('update:model-value', lambda: ui.run_javascript(
-                'window.puzzleCanvas.toggleSelectedBg()'
+                'if(window.puzzleCanvas && window.puzzleCanvas.canvas) window.puzzleCanvas.toggleSelectedBg()'
             ))
 
         # ── Canvas area ──
@@ -1265,7 +1264,7 @@ def create_puzzle_page(initial_add: str = None):
                     'size': 800, 'processed': True,
                     'sys_id': sys_id
                 })
-                await ui.run_javascript(
+                ui.run_javascript(
                     f'window.puzzleCanvas.addFragment("{key}", "{url}", '
                     f'{x}, {y}, {rotation}, {scaleX}, '
                     f'{"true" if flipH else "false"}, {"true" if flipV else "false"}, {js_meta})'
@@ -1311,7 +1310,7 @@ def create_puzzle_page(initial_add: str = None):
                 'size': 800, 'processed': True,
                 'sys_id': add_sys_id
             })
-            await ui.run_javascript(
+            ui.run_javascript(
                 f'window.puzzleCanvas.addFragment("{key}", "{url}", '
                 f'{100 + frag_offset}, {100 + frag_offset}, 0, 1.0, false, false, {js_meta})'
             )
@@ -1335,11 +1334,14 @@ def create_puzzle_page(initial_add: str = None):
     # ── Periodic state save ──
     async def save_state():
         try:
-            state_json = await ui.run_javascript('window.puzzleCanvas.getState()')
+            state_json = await ui.run_javascript(
+                'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getState() : null',
+                timeout=5.0
+            )
             if state_json:
                 app.storage.tab['puzzle_state'] = state_json
         except Exception:
-            pass  # Page may not be active
+            pass  # Page may not be active or JS not ready
 
     ui.timer(30, save_state)
 
