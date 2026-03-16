@@ -97,8 +97,25 @@ class TestThresholdAndSafety:
     """Tests for threshold control and safety fallback."""
 
     def test_threshold_affects_mask(self):
-        """Lower threshold = tighter removal, higher = more aggressive."""
-        img_bytes = make_test_image((0, 0, 255), (255, 255, 255))
+        """Lower threshold = tighter removal, higher = more aggressive.
+
+        Uses an image with gradient border pixels so threshold difference is visible.
+        """
+        # Create image with gradient transition between bg and fg
+        img = Image.new('RGB', (200, 200), (0, 0, 255))
+        # Center white square
+        for x in range(75, 125):
+            for y in range(75, 125):
+                img.putpixel((x, y), (255, 255, 255))
+        # Add gradient border around the square (colors between blue and white)
+        for x in range(60, 140):
+            for y in range(60, 140):
+                if not (75 <= x < 125 and 75 <= y < 125):
+                    # Intermediate color -- closer to blue but not exact
+                    img.putpixel((x, y), (100, 100, 255))
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        img_bytes = buf.getvalue()
 
         result_tight = remove_background(img_bytes, threshold=5.0)
         result_aggressive = remove_background(img_bytes, threshold=100.0)
@@ -112,7 +129,7 @@ class TestThresholdAndSafety:
         aggressive_opaque = sum(1 for x in range(200) for y in range(200)
                                 if aggressive_img.getpixel((x, y))[3] > 0)
 
-        # Tight threshold should keep more pixels opaque
+        # Tight threshold should keep more pixels opaque (gradient pixels survive)
         assert tight_opaque > aggressive_opaque
 
     def test_safety_check_preserves_content(self):
