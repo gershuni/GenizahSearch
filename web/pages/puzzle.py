@@ -912,32 +912,27 @@ window.puzzleCanvas = {
     },
 
     flipAllPuzzle: function() {
-        // Flip entire puzzle: mirror positions horizontally + navigate to recto/verso
-        // Uses getCenterPoint() for rotation-invariant center, matching desktop approach
+        // Flip entire puzzle: mirror .left positions + negate rotations + navigate to recto/verso
         var self = this;
         var keys = Object.keys(this.fragments);
         if (keys.length === 0) return;
         var objects = keys.map(function(k) { return self.fragments[k]; });
 
-        // 1. Compute group horizontal extent from object centers
-        var centers = objects.map(function(obj) {
-            var cp = obj.getCenterPoint();
-            return cp.x;
+        // 1. Snapshot all positions and compute mirror axis from .left values
+        var snapshots = objects.map(function(obj) {
+            return { obj: obj, left: obj.left };
         });
-        var minCX = Math.min.apply(null, centers);
-        var maxCX = Math.max.apply(null, centers);
-        var groupCenterX = (minCX + maxCX) / 2;
+        var minLeft = Math.min.apply(null, snapshots.map(function(s) { return s.left; }));
+        var maxLeft = Math.max.apply(null, snapshots.map(function(s) { return s.left; }));
+        var axisX = (minLeft + maxLeft) / 2;
 
-        // 2. Mirror each object's center around group center
-        objects.forEach(function(obj) {
-            var cp = obj.getCenterPoint();
-            var newCX = 2 * groupCenterX - cp.x;
-            // Move object so its center is at newCX (keep Y unchanged)
-            obj.set('left', obj.left + (newCX - cp.x));
-            // Negate rotation
-            var oldAngle = obj.angle || 0;
-            obj.set('angle', (360 - oldAngle) % 360);
-            obj.setCoords();
+        // 2. Mirror each .left around axis and negate rotation
+        snapshots.forEach(function(s) {
+            var newLeft = 2 * axisX - s.left;
+            s.obj.set('left', newLeft);
+            var oldAngle = s.obj.angle || 0;
+            s.obj.set('angle', (360 - oldAngle) % 360);
+            s.obj.setCoords();
         });
         this.canvas.requestRenderAll();
 
