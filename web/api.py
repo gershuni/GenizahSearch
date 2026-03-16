@@ -728,6 +728,43 @@ def init_api_routes():
             "is_oxford_shelfmark": shelfmark.lower().startswith('ms heb') or shelfmark.lower().startswith('ms. heb') if shelfmark else False,
         }
 
+    # === Puzzle Canvas API (Phase 49) ===
+
+    @app.get('/api/puzzle_image')
+    def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800, processed: bool = True):
+        """Serve processed/original fragment image for puzzle canvas."""
+        from shared.puzzle_image_service import get_puzzle_image_service
+        service = get_puzzle_image_service()
+        image_bytes = service.resolve_fragment_image(
+            fl_id=fl_id, size=size, threshold=threshold, processed=processed
+        )
+        if image_bytes is None:
+            return Response(content="Image not found", status_code=404)
+        content_type = 'image/png' if processed else 'image/jpeg'
+        return Response(
+            content=image_bytes,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=3600"}
+        )
+
+    @app.get('/api/puzzle_folios/{sys_id}')
+    def puzzle_folios(sys_id: str):
+        """Get ordered folio list for a manuscript (for prev/next navigation).
+
+        Uses the same FL ID resolution as the NLI image viewer: IIIF manifest
+        fetch -> ordered FL ID list. Returns folio labels based on page index.
+        """
+        fl_ids = fetch_fl_ids_from_nli(sys_id)
+        if not fl_ids:
+            return []
+        # Build folio list with labels (1r, 1v, 2r, 2v, ...) or simple indices
+        result = []
+        for i, fid in enumerate(fl_ids):
+            leaf = (i // 2) + 1
+            side = 'r' if i % 2 == 0 else 'v'
+            result.append({'fl_id': fid, 'label': f'{leaf}{side}'})
+        return result
+
     @app.get('/api/proxy_image')
     def proxy_image(url: str):
         """
