@@ -621,6 +621,8 @@ sudo systemctl restart genizah-web
 
 **Note:** All sidecar databases are read-only at runtime. The web app opens them in `?mode=ro` URI mode. No write operations occur during normal operation.
 
+**FJMS Performance Indexes (v6.5.4):** The export script creates 6 performance indexes at build time for domain and catalog queries used during search enrichment. These indexes must be present in the sidecar — they cannot be created at runtime (read-only connection). If you rebuild `fjms_enrichment.db`, verify indexes exist: `idx_domains_parent`, `idx_domains_group`, `idx_domains_domain_alma`, `idx_domains_parent_alma`, `idx_catalog_author`, `idx_catalog_title`.
+
 ### PGP Data Maintenance
 
 PGP data is updated regularly on GitHub at [princeton-geniza-project](https://github.com/Princeton-CDH/geniza). When updated:
