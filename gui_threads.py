@@ -899,3 +899,30 @@ class SidecarDownloadThread(QThread):
 
         except Exception as e:
             self.finished_signal.emit(False, str(e), self.sidecar_name)
+
+
+class PuzzleImageLoaderThread(QThread):
+    """Load and process a fragment image in the background via PuzzleImageService."""
+    image_ready = pyqtSignal(str, bytes)   # (fl_id, rgba_png_bytes or jpeg_bytes)
+    load_failed = pyqtSignal(str, str)     # (fl_id, error_message)
+
+    def __init__(self, fl_id: str, threshold: float = 30.0, size: int = 800, processed: bool = True):
+        super().__init__()
+        self.fl_id = fl_id
+        self.threshold = threshold
+        self.size = size
+        self.processed = processed
+
+    def run(self):
+        try:
+            from shared.puzzle_image_service import resolve_fragment_image
+            result = resolve_fragment_image(
+                self.fl_id, size=self.size,
+                threshold=self.threshold, processed=self.processed
+            )
+            if result:
+                self.image_ready.emit(self.fl_id, result)
+            else:
+                self.load_failed.emit(self.fl_id, "Image not available")
+        except Exception as e:
+            self.load_failed.emit(self.fl_id, str(e))
