@@ -150,16 +150,17 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 **Depends on**: Nothing (first phase of milestone)
 **Requirements**: BGRM-01, BGRM-02, BGRM-03
 **Success Criteria** (what must be TRUE):
-  1. A fragment image from NLI/Cambridge/Manchester can be loaded and its solid-color background removed, revealing the parchment shape with transparent surroundings
-  2. User can toggle between the stripped (transparent background) and original rectangular image
-  3. User can adjust the removal sensitivity threshold and see the mask update
-  4. PuzzleDocument/PuzzleFragment data model serializes and deserializes fragment positions, rotations, scales, and flip states correctly (roundtrip test)
-  5. joins.db SQLite sidecar schema is created and follows the established sidecar pattern (pgp.db, fjms_enrichment.db)
-**Plans**: 3 plans
+  1. A fragment image from NLI/Cambridge/Manchester can be loaded and its solid-color background removed, revealing the parchment shape with transparent surroundings — including low-saturation (gray/cream) backgrounds
+  2. Background removal module exposes toggle (original vs stripped) and adjustable threshold that Phases 48-49 will wire into app UI
+  3. A shared image resolver/cache resolves fragment images by (sys_id, folio, size, threshold) with cache invalidation on threshold change — usable by both web and desktop
+  4. PuzzleDocument/PuzzleFragment data model serializes and deserializes correctly with proper nested dataclass rehydration (roundtrip test)
+  5. joins.db SQLite sidecar is created with WAL mode and an explicit concurrency model for NiceGUI multi-request safety
+**Plans**: 4 plans
 Plans:
-- [ ] 47-01-PLAN.md -- Data model (PuzzleDocument/PuzzleFragment) and joins.db sidecar service
-- [ ] 47-02-PLAN.md -- HSV background removal engine with Pillow + NumPy
-- [ ] 47-03-PLAN.md -- Interactive visual preview tool for quality validation
+- [ ] 47-01-PLAN.md — Data model + joins.db sidecar with concurrency and fragment index
+- [ ] 47-02-PLAN.md — Background removal engine with low-saturation fallback
+- [ ] 47-03-PLAN.md — Shared image resolver/cache service
+- [ ] 47-04-PLAN.md — Visual preview tool + quality checkpoint
 
 ### Phase 48: Desktop Canvas
 **Goal**: Researchers can visually arrange manuscript fragment images on a desktop canvas with full spatial manipulation
@@ -225,7 +226,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 47. Foundation + Background Removal | 0/3 | Not started | - |
+| 47. Foundation + Background Removal | 0/4 | Not started | - |
 | 48. Desktop Canvas | 0/TBD | Not started | - |
 | 49. Web Canvas | 0/TBD | Not started | - |
 | 50. Join Documents | 0/TBD | Not started | - |
@@ -234,4 +235,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-15 after Phase 47 planning (3 plans)*
+*Last updated: 2026-03-16 after Phase 47 replanning (4 plans)*
