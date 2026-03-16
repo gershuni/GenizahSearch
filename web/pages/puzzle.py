@@ -912,25 +912,28 @@ window.puzzleCanvas = {
     },
 
     flipAllPuzzle: function() {
-        // Flip entire puzzle: navigate ALL to recto/verso + mirror positions
-        // Matching desktop _flip_entire_puzzle: use bounding rect centers
+        // Flip entire puzzle: mirror positions horizontally + navigate to recto/verso
+        // Uses getCenterPoint() for rotation-invariant center, matching desktop approach
         var self = this;
         var keys = Object.keys(this.fragments);
         if (keys.length === 0) return;
         var objects = keys.map(function(k) { return self.fragments[k]; });
 
-        // 1. Compute group bounds using getBoundingRect (accounts for rotation)
-        var allRects = objects.map(function(obj) { return obj.getBoundingRect(true); });
-        var groupLeft = Math.min.apply(null, allRects.map(function(r) { return r.left; }));
-        var groupRight = Math.max.apply(null, allRects.map(function(r) { return r.left + r.width; }));
-        var groupCenterX = (groupLeft + groupRight) / 2;
+        // 1. Compute group horizontal extent from object centers
+        var centers = objects.map(function(obj) {
+            var cp = obj.getCenterPoint();
+            return cp.x;
+        });
+        var minCX = Math.min.apply(null, centers);
+        var maxCX = Math.max.apply(null, centers);
+        var groupCenterX = (minCX + maxCX) / 2;
 
-        // 2. Mirror each object's position around group center (desktop approach)
+        // 2. Mirror each object's center around group center
         objects.forEach(function(obj) {
-            var br = obj.getBoundingRect(true);
-            var itemCenterX = br.left + br.width / 2;
-            var dx = 2 * groupCenterX - 2 * itemCenterX;
-            obj.set('left', obj.left + dx);
+            var cp = obj.getCenterPoint();
+            var newCX = 2 * groupCenterX - cp.x;
+            // Move object so its center is at newCX (keep Y unchanged)
+            obj.set('left', obj.left + (newCX - cp.x));
             // Negate rotation
             var oldAngle = obj.angle || 0;
             obj.set('angle', (360 - oldAngle) % 360);
