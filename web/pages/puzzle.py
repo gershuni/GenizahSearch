@@ -1031,6 +1031,21 @@ PUZZLE_STYLES = '''
     border-bottom: 1px solid #444;
     align-items: center;
     min-height: 32px;
+    color: #e0e0e0 !important;
+}
+.puzzle-toolbar * {
+    color: #e0e0e0 !important;
+}
+.puzzle-toolbar .q-btn {
+    color: #90caf9 !important;
+}
+.puzzle-toolbar .q-field__native,
+.puzzle-toolbar .q-field__input,
+.puzzle-toolbar input {
+    color: #e0e0e0 !important;
+}
+.puzzle-toolbar .q-checkbox__label {
+    color: #e0e0e0 !important;
 }
 .puzzle-toolbar .q-input {
     max-width: 220px;
@@ -1226,7 +1241,9 @@ def create_puzzle_page(initial_add: str = None):
                 """Show dialog to pick a manuscript from personal lists."""
                 from web.supabase_client import get_user_lists, get_list_items
                 from web.auth_state import GlobalAuthState
+                logged_in = GlobalAuthState.is_logged_in()
                 user_id = GlobalAuthState.get_user_id()
+                logger.info(f"Add from list: logged_in={logged_in}, user_id={user_id}")
                 if not user_id:
                     ui.notify(tr('Please log in to access lists'), type='warning')
                     return
@@ -1295,15 +1312,12 @@ def create_puzzle_page(initial_add: str = None):
 
             ui.separator().props('vertical').style('height: 20px')
 
-            ui.button(icon='flip', on_click=lambda: ui.run_javascript(
+            ui.button(tr('Flip'), icon='swap_horiz', on_click=lambda: ui.run_javascript(
                 'window.puzzleCanvas.flipSelectedH()'
-            )).props('dense flat dark round size=sm').tooltip(tr('Flip Horizontal'))
-            ui.button(icon='flip', on_click=lambda: ui.run_javascript(
-                'window.puzzleCanvas.flipSelectedV()'
-            )).props('dense flat dark round size=sm').style('transform: rotate(90deg)').tooltip(tr('Flip Vertical'))
-            ui.button(icon='sync_alt', on_click=lambda: ui.run_javascript(
+            )).props('dense flat dark size=sm').tooltip(tr('Flip selected fragment'))
+            ui.button(tr('Flip Puzzle'), icon='sync_alt', on_click=lambda: ui.run_javascript(
                 'window.puzzleCanvas.flipAllPuzzle()'
-            )).props('dense flat dark round size=sm').tooltip(tr('Flip Puzzle (Recto/Verso)'))
+            )).props('dense flat dark size=sm').tooltip(tr('Flip all — show recto/verso'))
 
             ui.separator().props('vertical').style('height: 20px')
 
