@@ -742,16 +742,60 @@ window.puzzleCanvas = {
                 active._originalCropX = active.cropX || 0;
                 active._originalCropY = active.cropY || 0;
             }
-            // Lock movement/resize during crop — only arrow keys work
-            active.set({ lockMovementX: true, lockMovementY: true, hasControls: false });
-            // Visual cue: red dashed border
-            active.set({ borderColor: '#ff4444', borderDashArray: [5, 3] });
+            // Show only edge handles for crop (not corners for resize)
+            active.set({
+                lockMovementX: true, lockMovementY: true,
+                lockRotation: true, lockScalingX: true, lockScalingY: true,
+                hasControls: true,
+                borderColor: '#ff4444', borderDashArray: [5, 3]
+            });
+            active.setControlsVisibility({
+                mt: true, mb: true, ml: true, mr: true,  // edge handles for crop
+                tl: false, tr: false, bl: false, br: false, mtr: false  // no corners/rotation
+            });
+
+            // Override scaling to become cropping
+            var self = this;
+            this._cropScalingHandler = function(e) {
+                if (!self._cropMode || !self._cropTarget) return;
+                var obj = e.target || e.transform && e.transform.target;
+                if (obj !== self._cropTarget) return;
+
+                var transform = e.transform;
+                if (!transform) return;
+                var corner = transform.corner;
+                var origW = self._cropTarget._originalWidth;
+                var origH = self._cropTarget._originalHeight;
+
+                // Revert the scale change — we want crop, not resize
+                obj.set({ scaleX: obj._lastScaleX || obj.scaleX, scaleY: obj._lastScaleY || obj.scaleY });
+
+                // Calculate crop amount from mouse delta
+                var pointer = self.canvas.getPointer(e.e);
+                var delta = 20;  // fixed step per drag event
+
+                if (corner === 'mt') { self.cropEdge('top', delta); }
+                else if (corner === 'mb') { self.cropEdge('bottom', delta); }
+                else if (corner === 'ml') { self.cropEdge('left', delta); }
+                else if (corner === 'mr') { self.cropEdge('right', delta); }
+            };
+            this.canvas.on('object:scaling', this._cropScalingHandler);
+            // Save current scale to revert
+            active._lastScaleX = active.scaleX;
+            active._lastScaleY = active.scaleY;
+
             this.canvas.requestRenderAll();
             return true;
         } else {
+            if (this._cropScalingHandler) {
+                this.canvas.off('object:scaling', this._cropScalingHandler);
+                this._cropScalingHandler = null;
+            }
             if (this._cropTarget) {
                 this._cropTarget.set({
-                    lockMovementX: false, lockMovementY: false, hasControls: true,
+                    lockMovementX: false, lockMovementY: false,
+                    lockRotation: false, lockScalingX: false, lockScalingY: false,
+                    hasControls: true,
                     borderColor: null, borderDashArray: null
                 });
                 this._cropTarget.setControlsVisibility({
@@ -836,12 +880,33 @@ window.puzzleCanvas = {
     },
 
     flipAllPuzzle: function() {
-        // Flip entire puzzle: navigate ALL fragments to recto/verso + mirror layout
+        // Flip entire puzzle: navigate ALL to recto/verso + mirror positions
+        // Matching desktop _flip_entire_puzzle: use bounding rect centers
         var self = this;
         var keys = Object.keys(this.fragments);
         if (keys.length === 0) return;
+        var objects = keys.map(function(k) { return self.fragments[k]; });
 
-        // 1. Navigate each fragment to its recto/verso counterpart
+        // 1. Compute group bounds using getBoundingRect (accounts for rotation)
+        var allRects = objects.map(function(obj) { return obj.getBoundingRect(true); });
+        var groupLeft = Math.min.apply(null, allRects.map(function(r) { return r.left; }));
+        var groupRight = Math.max.apply(null, allRects.map(function(r) { return r.left + r.width; }));
+        var groupCenterX = (groupLeft + groupRight) / 2;
+
+        // 2. Mirror each object's position around group center (desktop approach)
+        objects.forEach(function(obj) {
+            var br = obj.getBoundingRect(true);
+            var itemCenterX = br.left + br.width / 2;
+            var dx = 2 * groupCenterX - 2 * itemCenterX;
+            obj.set('left', obj.left + dx);
+            // Negate rotation
+            var oldAngle = obj.angle || 0;
+            obj.set('angle', (360 - oldAngle) % 360);
+            obj.setCoords();
+        });
+        this.canvas.requestRenderAll();
+
+        // 3. Navigate each fragment to recto/verso counterpart
         keys.forEach(function(key) {
             var data = self.folioData[key];
             if (!data || data.folios.length < 2) return;
@@ -851,27 +916,6 @@ window.puzzleCanvas = {
                 self.navigateFolio(key, newIdx - ci);
             }
         });
-
-        // 2. Mirror layout horizontally + negate rotations (like turning a page)
-        var objects = keys.map(function(k) { return self.fragments[k]; });
-        // Use object .left positions + scaled widths for mirror calculation
-        var positions = objects.map(function(obj) {
-            var w = (obj.width || 0) * (obj.scaleX || 1);
-            return { obj: obj, left: obj.left, right: obj.left + w, width: w };
-        });
-        var minX = Math.min.apply(null, positions.map(function(p) { return p.left; }));
-        var maxX = Math.max.apply(null, positions.map(function(p) { return p.right; }));
-        var centerX = (minX + maxX) / 2;
-        positions.forEach(function(p) {
-            var objCenterX = p.left + p.width / 2;
-            var newCenterX = 2 * centerX - objCenterX;
-            p.obj.set('left', newCenterX - p.width / 2);
-            // Negate rotation (clockwise ↔ counter-clockwise)
-            var oldAngle = p.obj.angle || 0;
-            p.obj.set('angle', (360 - oldAngle) % 360);
-            p.obj.setCoords();
-        });
-        this.canvas.requestRenderAll();
     },
 
     setSelectedScale: function(scale) {
@@ -1507,12 +1551,12 @@ def create_puzzle_page(initial_add: str = None):
                             puzzle_meta[key]['folio_label'] = label or ''
                             app.storage.tab['puzzle_fragments'] = puzzle_meta
 
-            ui.button(icon='chevron_right', on_click=on_folio_prev).props(
+            ui.button('<', on_click=on_folio_prev).props(
                 'dense flat dark round size=sm'
-            ).tooltip(tr('Previous Folio'))
-            ui.button(icon='chevron_left', on_click=on_folio_next).props(
+            ).tooltip(tr('Previous Folio')).style('min-width: 28px; font-weight: bold;')
+            ui.button('>', on_click=on_folio_next).props(
                 'dense flat dark round size=sm'
-            ).tooltip(tr('Next Folio'))
+            ).tooltip(tr('Next Folio')).style('min-width: 28px; font-weight: bold;')
 
         # ── Toolbar Row 2: Sliders (compact) ──
         with ui.row().classes('puzzle-toolbar items-center gap-1'):
@@ -1592,15 +1636,6 @@ def create_puzzle_page(initial_add: str = None):
 
             threshold_slider.on('change', lambda: on_threshold_change())
 
-            ui.separator().props('vertical')
-
-            show_original = ui.checkbox(tr('Show Original')).props('dense dark')
-            show_original.on('update:model-value', lambda: (
-                None if control_sync['active'] else ui.run_javascript(
-                    f'if(window.puzzleCanvas && window.puzzleCanvas.canvas) window.puzzleCanvas.setSelectedOriginal({str(bool(show_original.value)).lower()})'
-                )
-            ))
-
         # ── Canvas area ──
         with ui.element('div').classes('puzzle-canvas-wrap') as canvas_wrap:
             ui.element('canvas').props('id=puzzleCanvas').style('width: 100%; height: 100%; display: block;')
@@ -1609,9 +1644,6 @@ def create_puzzle_page(initial_add: str = None):
         def _sync_control_values(*, processed=None, threshold=None, scale=None, rotation=None, folio_label=None):
             control_sync['active'] = True
             try:
-                if processed is not None:
-                    show_original.value = not processed
-                    show_original.update()
                 if threshold is not None:
                     threshold_slider.value = int(round(threshold))
                     threshold_slider.update()
