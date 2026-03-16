@@ -141,8 +141,12 @@ class PuzzleImageService:
         if not digits:
             return None
         url = f"{NLI_IIIF_BASE}/FL{digits}/full/{size},/0/default.jpg"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.nli.org.il/',
+        }
         try:
-            resp = requests.get(url, timeout=30)
+            resp = requests.get(url, headers=headers, timeout=30)
             resp.raise_for_status()
             return resp.content
         except Exception as e:

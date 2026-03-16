@@ -793,15 +793,20 @@ PUZZLE_STYLES = '''
 }
 .puzzle-toolbar {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px 12px;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 4px 8px;
     background: #2d2d2d;
     border-bottom: 1px solid #444;
     align-items: center;
+    min-height: 32px;
 }
 .puzzle-toolbar .q-input {
-    max-width: 300px;
+    max-width: 220px;
+}
+.puzzle-toolbar .q-slider {
+    padding: 0;
+    margin: 0;
 }
 .puzzle-canvas-wrap {
     flex: 1;
@@ -926,11 +931,11 @@ def create_puzzle_page(initial_add: str = None):
     # ── Main container ──
     with ui.column().classes('puzzle-container w-full'):
 
-        # ── Toolbar Row 1: Shelfmark input + action buttons ──
-        with ui.row().classes('puzzle-toolbar'):
+        # ── Toolbar Row 1: Add fragments + actions ──
+        with ui.row().classes('puzzle-toolbar items-center gap-1'):
             shelfmark_input = ui.input(
                 placeholder=tr('Enter shelfmark...')
-            ).props('dense outlined dark').classes('q-mr-sm').style('min-width: 250px')
+            ).props('dense outlined dark').style('width: 220px')
 
             async def on_add_shelfmark():
                 text = shelfmark_input.value
@@ -958,9 +963,9 @@ def create_puzzle_page(initial_add: str = None):
 
             shelfmark_input.on('keydown.enter', lambda: on_add_shelfmark())
 
-            ui.button(tr('Add'), icon='add', on_click=on_add_shelfmark).props(
-                'dense flat dark color=primary'
-            )
+            ui.button(icon='add', on_click=on_add_shelfmark).props(
+                'dense flat dark color=primary round size=sm'
+            ).tooltip(tr('Add fragment'))
 
             async def on_add_from_list():
                 """Show dialog to pick a manuscript from personal lists."""
@@ -1016,7 +1021,7 @@ def create_puzzle_page(initial_add: str = None):
                 dlg.open()
 
             ui.button(icon='list', on_click=on_add_from_list).props(
-                'dense flat dark'
+                'dense flat dark round size=sm'
             ).tooltip(tr('Add from List'))
             async def on_delete_selected():
                 try:
@@ -1031,24 +1036,26 @@ def create_puzzle_page(initial_add: str = None):
                         puzzle_meta.pop(key, None)
                     app.storage.tab['puzzle_fragments'] = puzzle_meta
 
-            ui.button(tr('Remove Selected'), icon='delete', on_click=on_delete_selected).props(
-                'dense flat dark color=negative'
-            )
+            ui.separator().props('vertical').style('height: 20px')
 
-            ui.separator().props('vertical')
+            ui.button(icon='delete', on_click=on_delete_selected).props(
+                'dense flat dark round size=sm color=negative'
+            ).tooltip(tr('Remove Selected'))
+
+            ui.separator().props('vertical').style('height: 20px')
 
             ui.button(icon='palette', on_click=lambda: ui.run_javascript(
                 'window.puzzleCanvas.cycleBgMode()'
-            )).props('dense flat dark').tooltip('Cycle background')
-
-            ui.button(tr('Fit All'), icon='fit_screen', on_click=lambda: ui.run_javascript(
+            )).props('dense flat dark round size=sm').tooltip(tr('Cycle background'))
+            ui.button(icon='fit_screen', on_click=lambda: ui.run_javascript(
                 'window.puzzleCanvas.fitAll()'
-            )).props('dense flat dark')
+            )).props('dense flat dark round size=sm').tooltip(tr('Fit All'))
+
+            ui.separator().props('vertical').style('height: 20px')
 
             # Folio navigation (CANV-07)
-            ui.separator().props('vertical')
             folio_label_display = ui.label('').classes('text-grey-3 text-caption').style(
-                'min-width: 30px; text-align: center;'
+                'min-width: 24px; text-align: center;'
             )
 
             async def on_folio_prev():
@@ -1123,12 +1130,12 @@ def create_puzzle_page(initial_add: str = None):
                 'dense flat dark round size=sm'
             ).tooltip(tr('Next Folio'))
 
-        # ── Toolbar Row 2: Sliders ──
-        with ui.row().classes('puzzle-toolbar'):
-            ui.label(tr('Scale')).classes('text-grey-5 text-caption')
+        # ── Toolbar Row 2: Sliders (compact) ──
+        with ui.row().classes('puzzle-toolbar items-center gap-1'):
+            ui.icon('zoom_in', size='xs').classes('text-grey-5')
             scale_slider = ui.slider(
                 min=10, max=400, value=100, step=1
-            ).props('dense dark label-always').style('min-width: 140px')
+            ).props('dense dark').style('width: 120px')
 
             def on_scale_change(e):
                 val = e.value if hasattr(e, 'value') else scale_slider.value
@@ -1137,12 +1144,12 @@ def create_puzzle_page(initial_add: str = None):
                 )
             scale_slider.on('update:model-value', on_scale_change)
 
-            ui.separator().props('vertical')
+            ui.separator().props('vertical').style('height: 20px')
 
-            ui.label(tr('Rotation')).classes('text-grey-5 text-caption')
+            ui.icon('rotate_right', size='xs').classes('text-grey-5')
             rotation_slider = ui.slider(
                 min=-180, max=180, value=0, step=1
-            ).props('dense dark label-always').style('min-width: 140px')
+            ).props('dense dark').style('width: 120px')
 
             def on_rotation_change(e):
                 val = e.value if hasattr(e, 'value') else rotation_slider.value
@@ -1151,12 +1158,12 @@ def create_puzzle_page(initial_add: str = None):
                 )
             rotation_slider.on('update:model-value', on_rotation_change)
 
-            ui.separator().props('vertical')
+            ui.separator().props('vertical').style('height: 20px')
 
-            ui.label(tr('Threshold')).classes('text-grey-5 text-caption')
+            ui.icon('tune', size='xs').classes('text-grey-5')
             threshold_slider = ui.slider(
                 min=10, max=80, value=30, step=1
-            ).props('dense dark label-always').style('min-width: 120px')
+            ).props('dense dark').style('width: 100px')
 
             async def on_threshold_change():
                 """Re-fetch selected fragment image at new threshold."""
