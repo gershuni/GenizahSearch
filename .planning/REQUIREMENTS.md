@@ -22,9 +22,9 @@ Requirements for v7.0.0 Fragment Puzzle. Each maps to roadmap phases.
 
 Background removal is **foundational** — without it, rectangular images overlap and physical join assembly is impossible.
 
-- [ ] **BGRM-01**: Fragment images are automatically stripped of solid-color backgrounds (parchment shape visible)
+- [x] **BGRM-01**: Fragment images are automatically stripped of solid-color backgrounds (parchment shape visible)
 - [ ] **BGRM-02**: User can toggle between stripped and original image view
-- [ ] **BGRM-03**: User can adjust the background removal threshold
+- [x] **BGRM-03**: User can adjust the background removal threshold
 
 ### Recto/Verso
 
@@ -102,9 +102,9 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BGRM-01 | Phase 47 | Pending |
+| BGRM-01 | Phase 47 | Complete |
 | BGRM-02 | Phase 47 | Pending |
-| BGRM-03 | Phase 47 | Pending |
+| BGRM-03 | Phase 47 | Complete |
 | CANV-01 | Phase 48 | Pending |
 | CANV-03 | Phase 48 | Pending |
 | CANV-04 | Phase 48 | Pending |
