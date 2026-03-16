@@ -33,14 +33,28 @@ window.puzzleCanvas = {
     _panning: false,
     _lastPosX: 0,
     _lastPosY: 0,
+    _pendingAdds: [],
+    _listenersAttached: false,
+    _resizeHandler: null,
 
     init: function(canvasId) {
         var el = document.getElementById(canvasId);
         if (!el) { console.error('Canvas element not found:', canvasId); return; }
 
+        // Dispose previous canvas if re-visiting
+        if (this.canvas) {
+            try { this.canvas.dispose(); } catch(e) {}
+            this.canvas = null;
+            this.fragments = {};
+        }
+        // Clean up old listeners
+        if (this._resizeHandler) {
+            window.removeEventListener('resize', this._resizeHandler);
+        }
+
         var container = el.parentElement;
         var w = container.clientWidth || 1200;
-        var h = container.clientHeight || 800;
+        var h = Math.max(container.clientHeight, 400) || 600;
 
         this.canvas = new fabric.Canvas(canvasId, {
             backgroundColor: '#333333',
@@ -57,28 +71,48 @@ window.puzzleCanvas = {
 
         this.setupWheelZoom();
         this.setupPan();
-        this.setupKeyboard();
-        this.setupContextMenu();
+        if (!this._listenersAttached) {
+            this.setupKeyboard();
+            this.setupContextMenu();
+            this._listenersAttached = true;
+        }
         this.setupSnapGuides();
         this.setupSelectionSync();
 
-        // Handle window resize
+        // Handle window resize (with cleanup reference)
         var self = this;
-        window.addEventListener('resize', function() {
+        this._resizeHandler = function() {
             if (!self.canvas) return;
             var c = document.getElementById(canvasId);
             if (!c) return;
             var p = c.parentElement;
             self.canvas.setWidth(p.clientWidth);
-            self.canvas.setHeight(p.clientHeight);
+            self.canvas.setHeight(Math.max(p.clientHeight, 400));
             self.canvas.requestRenderAll();
-        });
+        };
+        window.addEventListener('resize', this._resizeHandler);
 
         console.log('Puzzle canvas initialized:', w, 'x', h);
+
+        // Process any fragments queued before init
+        if (this._pendingAdds.length > 0) {
+            console.log('Processing', this._pendingAdds.length, 'queued fragments');
+            var pending = this._pendingAdds.slice();
+            this._pendingAdds = [];
+            for (var i = 0; i < pending.length; i++) {
+                var p = pending[i];
+                this.addFragment(p.key, p.url, p.x, p.y, p.rotation, p.scale, p.flipH, p.flipV, p.meta);
+            }
+        }
     },
 
     addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV, meta) {
-        if (!this.canvas) return;
+        if (!this.canvas) {
+            // Queue for when canvas is ready
+            console.warn('Canvas not ready, queuing fragment:', key);
+            this._pendingAdds.push({key:key, url:imageUrl, x:x, y:y, rotation:rotation, scale:scale, flipH:flipH, flipV:flipV, meta:meta});
+            return;
+        }
         var self = this;
 
         // Remove existing fragment with same key
@@ -172,7 +206,16 @@ window.puzzleCanvas = {
         });
         this.canvas.discardActiveObject();
         this.canvas.requestRenderAll();
-        // Return removed keys so Python can update storage
+
+        // Notify Python of removed keys (works for keyboard, context-menu, and toolbar)
+        if (removedKeys.length > 0) {
+            var el = document.getElementById('puzzleCanvas');
+            if (el) {
+                el.dispatchEvent(new CustomEvent('puzzle-delete', {
+                    detail: JSON.stringify(removedKeys), bubbles: true
+                }));
+            }
+        }
         return removedKeys;
     },
 
@@ -1209,8 +1252,20 @@ def create_puzzle_page(initial_add: str = None):
             ))
 
         # ── Canvas area ──
-        with ui.element('div').classes('puzzle-canvas-wrap'):
+        with ui.element('div').classes('puzzle-canvas-wrap') as canvas_wrap:
             ui.html('<canvas id="puzzleCanvas"></canvas>')
+
+        # Listen for JS delete events (keyboard, context menu, toolbar all dispatch this)
+        def on_puzzle_delete(e):
+            try:
+                removed = json.loads(e.args) if isinstance(e.args, str) else e.args
+                if isinstance(removed, list):
+                    for key in removed:
+                        puzzle_meta.pop(key, None)
+                    app.storage.tab['puzzle_fragments'] = puzzle_meta
+            except Exception:
+                pass
+        canvas_wrap.on('puzzle-delete', on_puzzle_delete)
 
     # ── Initialize canvas after DOM is ready ──
     async def init_canvas():
@@ -1224,7 +1279,14 @@ def create_puzzle_page(initial_add: str = None):
                 }, 100);
                 setTimeout(function() { clearInterval(check); resolve(); }, 10000);
             });
-            window.puzzleCanvas.init("puzzleCanvas");
+            if (typeof fabric === "undefined") {
+                console.error("Fabric.js failed to load from CDN!");
+            } else {
+                console.log("Fabric.js loaded:", fabric.version);
+                window.puzzleCanvas.init("puzzleCanvas");
+                console.log("Canvas size:", window.puzzleCanvas.canvas.getWidth(), "x", window.puzzleCanvas.canvas.getHeight());
+                console.log("Canvas element:", document.getElementById("puzzleCanvas"));
+            }
             ''',
             timeout=15.0
         )
