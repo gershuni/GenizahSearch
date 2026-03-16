@@ -24,6 +24,10 @@ FABRIC_JS_CDN = '<script src="https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/ind
 
 PUZZLE_CANVAS_JS = '''
 <script>
+if (window.puzzleCanvas && typeof window.puzzleCanvas.destroy === 'function') {
+    try { window.puzzleCanvas.destroy(); } catch (e) { console.warn('Puzzle canvas cleanup failed:', e); }
+}
+
 window.puzzleCanvas = {
     canvas: null,
     fragments: {},
@@ -36,6 +40,77 @@ window.puzzleCanvas = {
     _pendingAdds: [],
     _listenersAttached: false,
     _resizeHandler: null,
+    _keyboardHandler: null,
+    _hideMenuClickHandler: null,
+    _hideMenuEscapeHandler: null,
+    _contextMenuSuppressHandler: null,
+    _contextMenuTarget: null,
+
+    destroy: function() {
+        this._hideContextMenu();
+        if (this._resizeHandler) {
+            window.removeEventListener('resize', this._resizeHandler);
+            this._resizeHandler = null;
+        }
+        if (this._keyboardHandler) {
+            document.removeEventListener('keydown', this._keyboardHandler);
+            this._keyboardHandler = null;
+        }
+        if (this._hideMenuClickHandler) {
+            document.removeEventListener('click', this._hideMenuClickHandler);
+            this._hideMenuClickHandler = null;
+        }
+        if (this._hideMenuEscapeHandler) {
+            document.removeEventListener('keydown', this._hideMenuEscapeHandler);
+            this._hideMenuEscapeHandler = null;
+        }
+        if (this._contextMenuTarget && this._contextMenuSuppressHandler) {
+            this._contextMenuTarget.removeEventListener('contextmenu', this._contextMenuSuppressHandler);
+        }
+        this._contextMenuTarget = null;
+        this._contextMenuSuppressHandler = null;
+        this._listenersAttached = false;
+        this._pendingAdds = [];
+        this.fragments = {};
+        this.folioData = {};
+        if (this.canvas) {
+            try { this.canvas.dispose(); } catch (e) {}
+            this.canvas = null;
+        }
+    },
+
+    _emitEvent: function(name, detail) {
+        var el = document.getElementById('puzzleCanvas');
+        if (!el) return;
+        el.dispatchEvent(new CustomEvent(name, {
+            detail: JSON.stringify(detail || {}),
+            bubbles: true
+        }));
+    },
+
+    _buildFragmentImage: function(htmlImg, options) {
+        var ImageCtor = fabric.Image || fabric.FabricImage;
+        if (!ImageCtor) {
+            throw new Error('Fabric image constructor is unavailable');
+        }
+        var img = new ImageCtor(htmlImg);
+        if (options) {
+            img.set(options);
+        }
+        if (typeof img.setCoords === 'function') {
+            img.setCoords();
+        }
+        return img;
+    },
+
+    _removePlaceholder: function(key) {
+        if (!this.canvas) return;
+        this.canvas.getObjects().forEach(function(obj) {
+            if (obj._isPlaceholder && obj._placeholderKey === key) {
+                this.canvas.remove(obj);
+            }
+        }, this);
+    },
 
     init: function(canvasId) {
         var el = document.getElementById(canvasId);
@@ -47,9 +122,9 @@ window.puzzleCanvas = {
             this.canvas = null;
             this.fragments = {};
         }
-        // Clean up old listeners
         if (this._resizeHandler) {
             window.removeEventListener('resize', this._resizeHandler);
+            this._resizeHandler = null;
         }
 
         var container = el.parentElement;
@@ -134,48 +209,64 @@ window.puzzleCanvas = {
         console.log('Loading fragment image:', key, imageUrl);
         var htmlImg = new Image();
         htmlImg.crossOrigin = 'anonymous';
+        htmlImg.decoding = 'async';
         htmlImg.onload = function() {
             console.log('Image loaded:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
-            self.canvas.getObjects().forEach(function(obj) {
-                if (obj._isPlaceholder && obj._placeholderKey === key) {
-                    self.canvas.remove(obj);
+            try {
+                self._removePlaceholder(key);
+                var img = self._buildFragmentImage(htmlImg, {
+                    left: x, top: y,
+                    angle: rotation || 0,
+                    scaleX: scale || 1.0,
+                    scaleY: scale || 1.0,
+                    flipX: !!flipH,
+                    flipY: !!flipV,
+                    hasControls: true,
+                    hasBorders: true,
+                    cornerSize: 12,
+                    transparentCorners: false,
+                    perPixelTargetFind: true,
+                    _fragmentKey: key,
+                    _imageUrl: imageUrl,
+                    _fragmentMeta: meta ? Object.assign({}, meta) : null
+                });
+
+                self.canvas.add(img);
+                self.fragments[key] = img;
+                self.canvas.setActiveObject(img);
+                self.canvas.requestRenderAll();
+                self._syncSelection();
+
+                // Auto-load folios if meta has sys_id
+                if (meta && meta.sys_id) {
+                    self.loadFolios(key, meta.sys_id);
                 }
-            });
 
-            var img = new fabric.Image(htmlImg, {
-                left: x, top: y,
-                angle: rotation || 0,
-                scaleX: scale || 1.0,
-                scaleY: scale || 1.0,
-                flipX: !!flipH,
-                flipY: !!flipV,
-                hasControls: true,
-                hasBorders: true,
-                cornerSize: 12,
-                transparentCorners: false,
-                perPixelTargetFind: true,
-                _fragmentKey: key,
-                _imageUrl: imageUrl,
-                _fragmentMeta: meta || null
-            });
-
-            self.canvas.add(img);
-            self.fragments[key] = img;
-            self.canvas.setActiveObject(img);
-            self.canvas.requestRenderAll();
-
-            // Auto-load folios if meta has sys_id
-            if (meta && meta.sys_id) {
-                self.loadFolios(key, meta.sys_id);
+                self._emitEvent('puzzle-add-result', {
+                    key: key,
+                    success: true,
+                    meta: img._fragmentMeta || null
+                });
+            } catch (err) {
+                console.error('Failed to construct fabric image for', key, err);
+                self._removePlaceholder(key);
+                var constructErr = new fabric.Text('Render failed: ' + key, {
+                    left: x, top: y,
+                    fontSize: 12, fill: '#ff6666',
+                    selectable: false, evented: false
+                });
+                self.canvas.add(constructErr);
+                self.canvas.requestRenderAll();
+                self._emitEvent('puzzle-add-result', {
+                    key: key,
+                    success: false,
+                    error: String(err)
+                });
             }
         };
         htmlImg.onerror = function(err) {
             console.error('Failed to load image for', key, imageUrl, err);
-            self.canvas.getObjects().forEach(function(obj) {
-                if (obj._isPlaceholder && obj._placeholderKey === key) {
-                    self.canvas.remove(obj);
-                }
-            });
+            self._removePlaceholder(key);
             var errText = new fabric.Text('Image load failed: ' + key, {
                 left: x, top: y,
                 fontSize: 12, fill: '#ff6666',
@@ -183,6 +274,11 @@ window.puzzleCanvas = {
             });
             self.canvas.add(errText);
             self.canvas.requestRenderAll();
+            self._emitEvent('puzzle-add-result', {
+                key: key,
+                success: false,
+                error: 'image-load-failed'
+            });
         };
         htmlImg.src = imageUrl;
     },
@@ -264,7 +360,7 @@ window.puzzleCanvas = {
 
     setupKeyboard: function() {
         var self = this;
-        document.addEventListener('keydown', function(e) {
+        this._keyboardHandler = function(e) {
             if (!self.canvas) return;
             // Don't capture when typing in inputs
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -318,7 +414,8 @@ window.puzzleCanvas = {
                     }
                     break;
             }
-        });
+        };
+        document.addEventListener('keydown', this._keyboardHandler);
     },
 
     setupContextMenu: function() {
@@ -327,7 +424,9 @@ window.puzzleCanvas = {
         // Prevent browser context menu on canvas
         var upperCanvas = this.canvas.upperCanvasEl || this.canvas.wrapperEl;
         if (upperCanvas) {
-            upperCanvas.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+            this._contextMenuTarget = upperCanvas;
+            this._contextMenuSuppressHandler = function(e) { e.preventDefault(); };
+            upperCanvas.addEventListener('contextmenu', this._contextMenuSuppressHandler);
         }
 
         this.canvas.on('mouse:down', function(opt) {
@@ -339,10 +438,12 @@ window.puzzleCanvas = {
         });
 
         // Hide on click anywhere
-        document.addEventListener('click', function() { self._hideContextMenu(); });
-        document.addEventListener('keydown', function(e) {
+        this._hideMenuClickHandler = function() { self._hideContextMenu(); };
+        this._hideMenuEscapeHandler = function(e) {
             if (e.key === 'Escape') self._hideContextMenu();
-        });
+        };
+        document.addEventListener('click', this._hideMenuClickHandler);
+        document.addEventListener('keydown', this._hideMenuEscapeHandler);
     },
 
     _showContextMenu: function(event, target) {
@@ -360,11 +461,8 @@ window.puzzleCanvas = {
             {label: 'Flip Vertical', action: function() { target.set('flipY', !target.flipY); }},
             {label: '---'},
             {label: 'Delete', action: function() {
-                for (var key in this.fragments) {
-                    if (this.fragments[key] === target) { delete this.fragments[key]; break; }
-                }
-                this.canvas.remove(target);
-                this.canvas.discardActiveObject();
+                this.canvas.setActiveObject(target);
+                this.removeSelected();
             }.bind(this)},
             {label: '---'},
             {label: 'Toggle Background', action: function() {
@@ -447,25 +545,44 @@ window.puzzleCanvas = {
         var self = this;
         var meta = obj._fragmentMeta || {};
         var threshold = meta.threshold || 30;
-        var url = '/api/puzzle_image?fl_id=' + folio.fl_id + '&threshold=' + threshold + '&size=800';
+        var size = meta.size || 800;
+        var processed = meta.processed !== false;
+        var url = '/api/puzzle_image?fl_id=' + folio.fl_id +
+                  '&threshold=' + threshold +
+                  '&size=' + size +
+                  '&processed=' + processed;
 
         return new Promise(function(resolve) {
             var htmlImg = new Image();
             htmlImg.crossOrigin = 'anonymous';
+            htmlImg.decoding = 'async';
             htmlImg.onload = function() {
-                self.canvas.remove(obj);
-                var img = new fabric.Image(htmlImg, pos);
-                img.set({
-                    hasControls: true, hasBorders: true,
-                    cornerSize: 12, transparentCorners: false,
-                    perPixelTargetFind: true, _fragmentKey: key,
-                    _imageUrl: url
-                });
-                img._fragmentMeta = Object.assign({}, meta, { fl_id: folio.fl_id });
-                self.canvas.add(img);
-                self.fragments[key] = img;
-                self.canvas.setActiveObject(img);
-                self.canvas.requestRenderAll();
+                try {
+                    self.canvas.remove(obj);
+                    var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
+                        hasControls: true, hasBorders: true,
+                        cornerSize: 12, transparentCorners: false,
+                        perPixelTargetFind: true, _fragmentKey: key,
+                        _imageUrl: url,
+                        _fragmentMeta: Object.assign({}, meta, {
+                            fl_id: folio.fl_id,
+                            threshold: threshold,
+                            size: size,
+                            processed: processed
+                        })
+                    }));
+                    self.canvas.add(img);
+                    self.fragments[key] = img;
+                    self.canvas.setActiveObject(img);
+                    self.canvas.requestRenderAll();
+                    self._syncSelection();
+                    self._emitEvent('puzzle-fragment-meta', {
+                        key: key,
+                        meta: img._fragmentMeta || null
+                    });
+                } catch (err) {
+                    console.error('Failed to render folio image:', key, err);
+                }
                 resolve(folio.label);
             };
             htmlImg.onerror = function() {
@@ -571,16 +688,31 @@ window.puzzleCanvas = {
 
     setupSelectionSync: function() {
         var self = this;
-        this.canvas.on('selection:created', function(e) { self._syncSelection(e); });
-        this.canvas.on('selection:updated', function(e) { self._syncSelection(e); });
+        this.canvas.on('selection:created', function() { self._syncSelection(); });
+        this.canvas.on('selection:updated', function() { self._syncSelection(); });
         this.canvas.on('selection:cleared', function() {
-            // Could notify Python side if needed
+            self._emitEvent('puzzle-selection', { key: null, hasSelection: false });
         });
     },
 
-    _syncSelection: function(e) {
-        // Sync selected object properties — called on selection change
-        // No-op for now; Python reads state via getSelectedKey/getState when needed
+    _syncSelection: function() {
+        if (!this.canvas) return;
+        var active = this.canvas.getActiveObject();
+        if (!active) {
+            this._emitEvent('puzzle-selection', { key: null, hasSelection: false });
+            return;
+        }
+        var meta = active._fragmentMeta || {};
+        var key = active._fragmentKey || null;
+        this._emitEvent('puzzle-selection', {
+            key: key,
+            hasSelection: true,
+            processed: meta.processed !== false,
+            threshold: meta.threshold || 30,
+            scale: active.scaleX || 1,
+            rotation: active.angle || 0,
+            folioLabel: key ? (this.getCurrentFolioLabel(key) || '') : ''
+        });
     },
 
     cycleBgMode: function() {
@@ -764,6 +896,17 @@ window.puzzleCanvas = {
         if (active) this._toggleFragmentBg(active);
     },
 
+    setSelectedOriginal: function(showOriginal) {
+        if (!this.canvas) return;
+        var active = this.canvas.getActiveObject();
+        if (!active || !active._fragmentMeta) return;
+        var processed = active._fragmentMeta.processed !== false;
+        var desiredProcessed = !showOriginal;
+        if (processed !== desiredProcessed) {
+            this._toggleFragmentBg(active);
+        }
+    },
+
     _reloadFragment: function(key, newUrl, newMeta) {
         // Reload a fragment image in-place (same position/rotation/scale)
         var obj = this.fragments[key];
@@ -776,19 +919,28 @@ window.puzzleCanvas = {
         };
         var htmlImg = new Image();
         htmlImg.crossOrigin = 'anonymous';
+        htmlImg.decoding = 'async';
         htmlImg.onload = function() {
-            self.canvas.remove(obj);
-            var img = new fabric.Image(htmlImg, pos);
-            img.set({
-                hasControls: true, hasBorders: true,
-                cornerSize: 12, transparentCorners: false,
-                perPixelTargetFind: true, _fragmentKey: key,
-                _imageUrl: newUrl, _fragmentMeta: newMeta || obj._fragmentMeta
-            });
-            self.canvas.add(img);
-            self.fragments[key] = img;
-            self.canvas.setActiveObject(img);
-            self.canvas.requestRenderAll();
+            try {
+                self.canvas.remove(obj);
+                var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
+                    hasControls: true, hasBorders: true,
+                    cornerSize: 12, transparentCorners: false,
+                    perPixelTargetFind: true, _fragmentKey: key,
+                    _imageUrl: newUrl, _fragmentMeta: newMeta || obj._fragmentMeta
+                }));
+                self.canvas.add(img);
+                self.fragments[key] = img;
+                self.canvas.setActiveObject(img);
+                self.canvas.requestRenderAll();
+                self._syncSelection();
+                self._emitEvent('puzzle-fragment-meta', {
+                    key: key,
+                    meta: img._fragmentMeta || null
+                });
+            } catch (err) {
+                console.error('Failed to rebuild fragment:', key, err);
+            }
         };
         htmlImg.onerror = function() {
             console.error('Failed to reload fragment:', key);
@@ -801,25 +953,14 @@ window.puzzleCanvas = {
         var meta = target._fragmentMeta;
         if (!meta) return;
 
-        var self = this;
         var isProcessed = meta.processed !== false;
         var newProcessed = !isProcessed;
         var url = '/api/puzzle_image?fl_id=' + meta.fl_id +
                   '&threshold=' + (meta.threshold || 30) +
                   '&size=' + (meta.size || 800) +
                   '&processed=' + newProcessed;
-
-        var htmlImg = new Image();
-        htmlImg.crossOrigin = 'anonymous';
-        htmlImg.onload = function() {
-            target.setElement(htmlImg);
-            meta.processed = newProcessed;
-            self.canvas.requestRenderAll();
-        };
-        htmlImg.onerror = function() {
-            console.error('Failed to toggle background for', target._fragmentKey);
-        };
-        htmlImg.src = url;
+        var newMeta = Object.assign({}, meta, { processed: newProcessed });
+        this._reloadFragment(target._fragmentKey, url, newMeta);
     }
 };
 </script>
@@ -917,7 +1058,20 @@ def _invalidate_and_refetch(fl_id: str, new_threshold: float):
         logger.error(f"Threshold refetch failed for {fl_id}: {e}")
 
 
-async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, threshold_slider):
+def _parse_puzzle_event_args(args):
+    """Parse CustomEvent payloads from the puzzle canvas."""
+    payload = args
+    if isinstance(payload, dict) and 'detail' in payload:
+        payload = payload['detail']
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return payload
+    return payload
+
+
+async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider):
     """Shared helper: resolve folios and add first folio to canvas."""
     folios = await run.io_bound(_resolve_folios, sys_id)
     if not folios:
@@ -944,15 +1098,15 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, threshold_slid
         f'{100 + frag_offset}, {100 + frag_offset}, 0, 1.0, false, false, {meta_json})'
     )
 
-    puzzle_meta[key] = {
+    pending_fragment_meta[key] = {
         'sys_id': sys_id,
         'shelfmark': shelfmark,
         'folio_label': folio_label,
         'fl_id': fl_id,
         'threshold': threshold,
+        'processed': True,
+        'size': 800,
     }
-    app.storage.tab['puzzle_fragments'] = puzzle_meta
-    ui.notify(f'{shelfmark} ({folio_label})', type='positive')
 
 
 def create_puzzle_page(initial_add: str = None):
@@ -970,6 +1124,8 @@ def create_puzzle_page(initial_add: str = None):
     # NOTE: app.storage.tab requires client connection, so start empty
     # and populate in init_canvas() after client connects
     puzzle_meta = {}
+    pending_fragment_meta = {}
+    control_sync = {'active': False}
 
     # ── Main container ──
     with ui.column().classes('puzzle-container w-full'):
@@ -1001,7 +1157,7 @@ def create_puzzle_page(initial_add: str = None):
                 shelfmark = result.get('selected_shelfmark') or text
                 shelfmark_input.value = ''
                 await _add_fragment_by_sys_id(
-                    sys_id, shelfmark, puzzle_meta, threshold_slider
+                    sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider
                 )
 
             shelfmark_input.on('keydown.enter', lambda: on_add_shelfmark())
@@ -1052,7 +1208,7 @@ def create_puzzle_page(initial_add: str = None):
                                     async def add_item(s=sid, sh=shelf):
                                         dlg.close()
                                         await _add_fragment_by_sys_id(
-                                            s, sh, puzzle_meta, threshold_slider
+                                            s, sh, puzzle_meta, pending_fragment_meta, threshold_slider
                                         )
                                     ui.button(
                                         shelf, on_click=add_item
@@ -1181,6 +1337,8 @@ def create_puzzle_page(initial_add: str = None):
             ).props('dense dark').style('width: 120px')
 
             def on_scale_change(e):
+                if control_sync['active']:
+                    return
                 val = e.value if hasattr(e, 'value') else scale_slider.value
                 ui.run_javascript(
                     f'window.puzzleCanvas.setSelectedScale({val / 100})'
@@ -1195,6 +1353,8 @@ def create_puzzle_page(initial_add: str = None):
             ).props('dense dark').style('width: 120px')
 
             def on_rotation_change(e):
+                if control_sync['active']:
+                    return
                 val = e.value if hasattr(e, 'value') else rotation_slider.value
                 ui.run_javascript(
                     f'window.puzzleCanvas.setSelectedRotation({val})'
@@ -1210,6 +1370,8 @@ def create_puzzle_page(initial_add: str = None):
 
             async def on_threshold_change():
                 """Re-fetch selected fragment image at new threshold."""
+                if control_sync['active']:
+                    return
                 try:
                     key = await ui.run_javascript(
                         'window.puzzleCanvas && window.puzzleCanvas.canvas ? '
@@ -1225,14 +1387,15 @@ def create_puzzle_page(initial_add: str = None):
                 fl_id = meta.get('fl_id', '')
                 if not fl_id:
                     return
+                processed = meta.get('processed', True)
                 # Invalidate cache for old threshold
                 await run.io_bound(
                     _invalidate_and_refetch, fl_id, new_threshold
                 )
-                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={new_threshold}&size=800&processed=true"
+                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={new_threshold}&size=800&processed={str(bool(processed)).lower()}"
                 js_meta = json.dumps({
                     'fl_id': fl_id, 'threshold': new_threshold,
-                    'size': 800, 'processed': True,
+                    'size': 800, 'processed': processed,
                     'sys_id': meta.get('sys_id', '')
                 })
                 ui.run_javascript(
@@ -1247,25 +1410,127 @@ def create_puzzle_page(initial_add: str = None):
             ui.separator().props('vertical')
 
             show_original = ui.checkbox(tr('Show Original')).props('dense dark')
-            show_original.on('update:model-value', lambda: ui.run_javascript(
-                'if(window.puzzleCanvas && window.puzzleCanvas.canvas) window.puzzleCanvas.toggleSelectedBg()'
+            show_original.on('update:model-value', lambda: (
+                None if control_sync['active'] else ui.run_javascript(
+                    f'if(window.puzzleCanvas && window.puzzleCanvas.canvas) window.puzzleCanvas.setSelectedOriginal({str(bool(show_original.value)).lower()})'
+                )
             ))
 
         # ── Canvas area ──
         with ui.element('div').classes('puzzle-canvas-wrap') as canvas_wrap:
-            ui.html('<canvas id="puzzleCanvas"></canvas>')
+            ui.element('canvas').props('id=puzzleCanvas').style('width: 100%; height: 100%; display: block;')
 
         # Listen for JS delete events (keyboard, context menu, toolbar all dispatch this)
+        def _sync_control_values(*, processed=None, threshold=None, scale=None, rotation=None, folio_label=None):
+            control_sync['active'] = True
+            try:
+                if processed is not None:
+                    show_original.value = not processed
+                    show_original.update()
+                if threshold is not None:
+                    threshold_slider.value = int(round(threshold))
+                    threshold_slider.update()
+                if scale is not None:
+                    scale_slider.value = int(round(scale * 100))
+                    scale_slider.update()
+                if rotation is not None:
+                    rotation_slider.value = int(round(rotation))
+                    rotation_slider.update()
+                if folio_label is not None:
+                    folio_label_display.text = folio_label
+                    folio_label_display.update()
+            finally:
+                control_sync['active'] = False
+
+        def _prune_saved_state(removed_keys):
+            try:
+                saved_state = app.storage.tab.get('puzzle_state')
+            except RuntimeError:
+                return
+            if not saved_state:
+                return
+            try:
+                state_data = json.loads(saved_state) if isinstance(saved_state, str) else saved_state
+            except (json.JSONDecodeError, TypeError):
+                return
+            if not isinstance(state_data, dict):
+                return
+            changed = False
+            for key in removed_keys:
+                if key in state_data:
+                    state_data.pop(key, None)
+                    changed = True
+            if changed:
+                app.storage.tab['puzzle_state'] = json.dumps(state_data)
+
         def on_puzzle_delete(e):
             try:
-                removed = json.loads(e.args) if isinstance(e.args, str) else e.args
+                removed = _parse_puzzle_event_args(e.args)
                 if isinstance(removed, list):
                     for key in removed:
                         puzzle_meta.pop(key, None)
+                        pending_fragment_meta.pop(key, None)
                     app.storage.tab['puzzle_fragments'] = puzzle_meta
+                    _prune_saved_state(removed)
             except Exception:
                 pass
         canvas_wrap.on('puzzle-delete', on_puzzle_delete)
+
+        def on_puzzle_add_result(e):
+            payload = _parse_puzzle_event_args(e.args)
+            if not isinstance(payload, dict):
+                return
+            key = payload.get('key')
+            if not key:
+                return
+            pending = pending_fragment_meta.pop(key, None)
+            if not payload.get('success'):
+                if pending:
+                    ui.notify(f'Failed to load {pending.get("shelfmark", key)}', type='negative')
+                return
+            if not pending:
+                return
+            js_meta = payload.get('meta') or {}
+            if isinstance(js_meta, dict):
+                pending['fl_id'] = js_meta.get('fl_id', pending.get('fl_id', ''))
+                pending['threshold'] = js_meta.get('threshold', pending.get('threshold', 30))
+                pending['processed'] = js_meta.get('processed', pending.get('processed', True))
+                pending['size'] = js_meta.get('size', pending.get('size', 800))
+            puzzle_meta[key] = pending
+            app.storage.tab['puzzle_fragments'] = puzzle_meta
+            ui.notify(f'{pending.get("shelfmark", key)} ({pending.get("folio_label", "")})', type='positive')
+        canvas_wrap.on('puzzle-add-result', on_puzzle_add_result)
+
+        def on_puzzle_fragment_meta(e):
+            payload = _parse_puzzle_event_args(e.args)
+            if not isinstance(payload, dict):
+                return
+            key = payload.get('key')
+            meta = payload.get('meta')
+            if not key or key not in puzzle_meta or not isinstance(meta, dict):
+                return
+            puzzle_meta[key]['fl_id'] = meta.get('fl_id', puzzle_meta[key].get('fl_id', ''))
+            puzzle_meta[key]['threshold'] = meta.get('threshold', puzzle_meta[key].get('threshold', 30))
+            puzzle_meta[key]['processed'] = meta.get('processed', puzzle_meta[key].get('processed', True))
+            puzzle_meta[key]['size'] = meta.get('size', puzzle_meta[key].get('size', 800))
+            app.storage.tab['puzzle_fragments'] = puzzle_meta
+        canvas_wrap.on('puzzle-fragment-meta', on_puzzle_fragment_meta)
+
+        def on_puzzle_selection(e):
+            payload = _parse_puzzle_event_args(e.args)
+            if not isinstance(payload, dict):
+                return
+            if not payload.get('hasSelection'):
+                _sync_control_values(folio_label='')
+                return
+            _sync_control_values(
+                processed=payload.get('processed', True),
+                threshold=payload.get('threshold', 30),
+                scale=payload.get('scale', 1),
+                rotation=payload.get('rotation', 0),
+                folio_label=payload.get('folioLabel', '')
+            )
+        canvas_wrap.on('puzzle-selection', on_puzzle_selection)
 
     # ── Initialize canvas after DOM is ready ──
     async def init_canvas():
@@ -1303,10 +1568,11 @@ def create_puzzle_page(initial_add: str = None):
             for key, meta in saved_meta.items():
                 fl_id = meta.get('fl_id', '')
                 threshold = meta.get('threshold', 30)
+                processed = meta.get('processed', True)
                 if not fl_id:
                     continue
 
-                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
+                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}"
 
                 # Default positions if no saved state
                 x, y = 100, 100
@@ -1331,7 +1597,7 @@ def create_puzzle_page(initial_add: str = None):
                 sys_id = meta.get('sys_id', '')
                 js_meta = json.dumps({
                     'fl_id': fl_id, 'threshold': threshold,
-                    'size': 800, 'processed': True,
+                    'size': 800, 'processed': processed,
                     'sys_id': sys_id
                 })
                 ui.run_javascript(
@@ -1390,14 +1656,15 @@ def create_puzzle_page(initial_add: str = None):
                 sm, _ = state.meta_mgr.get_meta_for_id(add_sys_id)
                 shelfmark = sm or ''
 
-            puzzle_meta[key] = {
+            pending_fragment_meta[key] = {
                 'sys_id': add_sys_id,
                 'shelfmark': shelfmark,
                 'folio_label': folio_label,
                 'fl_id': fl_id,
                 'threshold': threshold,
+                'processed': True,
+                'size': 800,
             }
-            app.storage.tab['puzzle_fragments'] = puzzle_meta
 
         ui.timer(1.5, auto_add, once=True)
 

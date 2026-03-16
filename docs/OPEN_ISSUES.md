@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-15 (Added join-finder research findings and implementation planning docs)
+> **Last Updated:** 2026-03-16 (Fixed web puzzle canvas image-loading root cause and related state-sync issues)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 4 | 4 |
-| P2 Medium Bugs | 3 | 9 | 12 |
+| P2 Medium Bugs | 3 | 10 | 13 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 7 | 0 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **11** | **44** | **55** |
+| **Total** | **11** | **45** | **56** |
 
 ---
 
@@ -75,6 +75,7 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
+| **Web puzzle canvas v49 is not app-ready: fragment-meta race, dead threshold slider, delete not persisted, and processed-image response can advertise the wrong MIME type** | `web/pages/puzzle.py`, `web/api.py`, `shared/puzzle_image_service.py` | ✅ Fixed (2026-03-16) | Fixed in multiple passes on 2026-03-16. The final root cause for “images are not loading” was that `ui.html('<canvas id="puzzleCanvas"></canvas>')` rendered as an empty `<div>` in NiceGUI, so Fabric never found a canvas element and every add was queued forever. Replaced it with a real `ui.element('canvas').props('id=puzzleCanvas')`, then verified in a live headless browser that Fabric initializes, `/api/puzzle_image` loads, and the fragment is present on the canvas. Earlier same-day fixes also added JS→Python add-result/meta events, persisted delete handling, selection sync, processed/original toggle reloads, threshold reprocessing wiring, and MIME-safe API responses. |
 | **Translation batch script rewires stdio on import and breaks pytest capture** | scripts/translate_pgp_descriptions.py, scripts/translate_libraries_titles.py | ג… Fixed (2026-03-11) | Moved UTF-8 stdio setup from import-time into `_configure_utf8_stdio()` called only from `if __name__ == "__main__":`. Uses `reconfigure()` when available. Fixed in both translation scripts. |
 | **FJMS export drops ~38K catalog records (MAX(Version) filter)** | scripts/export_fist_enrichment.py | ✅ Fixed (2026-03-11) | MAX(Version) join on dbo_Signature drops child records when latest version lacks data but earlier versions have it. Affects 6 functions (catalog, running_titles, sizes, fields, textual_frames, mentions). 37,962 catalog recs lost (9.2%), 33,410 AlmaIds affected. 3 other functions (free_desc, full_texts, bibliography) already fixed. Fix: remove MAX(Version) from 6 functions. UnitCatalogRecId never on multiple versions — verified 0 for all 6 child tables (UnitCatalogRec, CatalogMultiRunningTitle, CatalogMultiSize, CatalogMultiField, CatalogMultiMention). See `docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md`. |
 | **FJMS catalog translation toggle shows wrong language by default (desktop + web RT)** | genizah_app.py:6784-7000, web/components/catalog_dialog.py:274-286, shared/translation_service.py:392-420 | ✅ Fixed (2026-03-11) | Translation directions are mixed: RunningTitle/FullText are en2he, FreeDesc is he2en. Service layer drops direction column. Desktop: 3 confirmed wrong-default toggle sections (RunningTitle en2he, FreeDesc he2en, FullText en2he). Web: RunningTitle replacement confirmed broken (replaces EN with HE in EN UI); FreeDesc works by coincidence; FullText has no translation logic. Fix: (1) return direction from translation_service, (2) make desktop renderer + web RT replacement direction-aware. See `docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md`. |
@@ -212,7 +213,9 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-16 | Fixed the web puzzle canvas image-loading failure in `web/pages/puzzle.py`: NiceGUI `ui.html('<canvas...>')` was rendering an empty `<div>`, so Fabric never found `#puzzleCanvas`. Replaced it with `ui.element('canvas').props('id=puzzleCanvas')` and verified via live headless Edge/CDP that the canvas initializes and a fragment image loads onto it. Also landed same-day state-sync fixes for add-result persistence, delete persistence, selection sync, threshold reloads, and processed/original toggling. | Codex |
 | 2026-03-15 | Added open join-finder issue after reviewing `docs/JOIN_FINDER_REPORT.md` and active scripts: current v7/v8 is a strong prototype but is not ready for manuscript-view embedding because it is effectively LEFT-only, mixes page/system scopes, and takes ~83-101s on the two benchmark cases. Added implementation-plan docs. | Codex |
+| 2026-03-16 | Added open P2 web puzzle canvas v49 issue after reviewing `web/pages/puzzle.py`, `web/api.py`, and `shared/puzzle_image_service.py`: async fragment-meta race, dead threshold slider, JS-only deletion persistence bug, wrong MIME type on processed-image fallback, dead selection bridge, and no-op context-menu background toggle. | Codex |
 | 2026-03-15 | Fixed web first-load sidebar/drawer initialization race in `web/main.py`: unified persisted language resolution for head bootstrap + layout, and made Quasar RTL activation retry on cold load so Hebrew UI no longer paints the drawer on the wrong side before navigation/reload. | Codex |
 | 2026-03-13 | Updated all 4 docs/guides/ files: WEBSITE_ADMIN_GUIDE (added sidecars, translations, PostHog), DEPLOYMENT_TECHNICAL (fixed DB versions/sizes, expanded shared/ listing, added libraries_translations.db), DEVELOPER_GUIDE (full project structure with pages/components/shared), SUPABASE_GUIDE (fixed author_id column in query). Web citation bar updated to full author list. | Claude |
 | 2026-03-11 | Added P2: FJMS export MAX(Version) drops ~38K catalog records (9.2%); P2: Desktop translation toggle shows wrong language by default. Full report in docs/FJMS_EXPORT_AND_TRANSLATION_BUGS.md | Claude |
