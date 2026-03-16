@@ -4,6 +4,7 @@
 import sys
 import os
 import re
+import math
 import threading
 import json
 import time
@@ -19,9 +20,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
-                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsSimpleTextItem,
+                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem, QGraphicsSimpleTextItem,
                              QCompleter, QAbstractItemView)
-from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF, QPoint)
+from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF, QPoint, QPointF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
 from PyQt6 import sip
@@ -46,7 +47,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleImageLoaderThread
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -2555,6 +2556,295 @@ class ExcludeDialog(QDialog):
                 seen.add(stripped)
 
         return "\n".join(entries)
+
+
+# ── Puzzle Canvas Building Blocks (Phase 48) ────────────────────────────
+
+
+class PuzzleFragmentItem(QGraphicsPixmapItem):
+    """A positioned fragment image on the puzzle canvas.
+
+    Supports drag, corner-handle rotation, flip H/V, wheel-resize,
+    Shift-snap to 20px grid, and multi-select with visual handles.
+    """
+
+    HANDLE_SIZE = 14  # corner handle hit radius in pixels
+
+    def __init__(self, puzzle_frag, pixmap, parent=None):
+        super().__init__(pixmap, parent)
+        from shared.puzzle_model import PuzzleFragment  # type check guard
+        self.puzzle_frag = puzzle_frag
+
+        # Enable interaction flags
+        self.setFlags(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable
+            | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
+        )
+        self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        self.setTransformOriginPoint(self.boundingRect().center())
+
+        # Apply initial state from data model
+        self.setPos(puzzle_frag.x, puzzle_frag.y)
+        self.setRotation(puzzle_frag.rotation)
+        self.setScale(puzzle_frag.scale)
+        self._apply_flip()
+
+        # Rotation interaction state
+        self._rotating = False
+        self._rotation_start_angle = 0.0
+
+    # ── Flip ──
+
+    def _apply_flip(self):
+        """Apply horizontal/vertical flip via QTransform."""
+        t = QTransform()
+        if self.puzzle_frag.flip_h:
+            t.scale(-1, 1)
+            t.translate(-self.boundingRect().width(), 0)
+        if self.puzzle_frag.flip_v:
+            t.scale(1, -1)
+            t.translate(0, -self.boundingRect().height())
+        self.setTransform(t)
+
+    def flip_horizontal(self):
+        """Toggle horizontal flip."""
+        self.puzzle_frag.flip_h = not self.puzzle_frag.flip_h
+        self._apply_flip()
+
+    def flip_vertical(self):
+        """Toggle vertical flip."""
+        self.puzzle_frag.flip_v = not self.puzzle_frag.flip_v
+        self._apply_flip()
+
+    # ── Corner-handle rotation ──
+
+    def _is_near_corner(self, pos):
+        """Return True if pos is within HANDLE_SIZE of any bounding-rect corner."""
+        br = self.boundingRect()
+        corners = [br.topLeft(), br.topRight(), br.bottomLeft(), br.bottomRight()]
+        for corner in corners:
+            dx = pos.x() - corner.x()
+            dy = pos.y() - corner.y()
+            if math.hypot(dx, dy) < self.HANDLE_SIZE:
+                return True
+        return False
+
+    def mousePressEvent(self, event):
+        if self.isSelected() and self._is_near_corner(event.pos()):
+            # Enter rotation mode
+            self._rotating = True
+            center = self.boundingRect().center()
+            pos = event.pos()
+            self._rotation_start_angle = (
+                math.degrees(math.atan2(pos.y() - center.y(), pos.x() - center.x()))
+                - self.rotation()
+            )
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._rotating:
+            center = self.boundingRect().center()
+            pos = event.pos()
+            angle = math.degrees(math.atan2(pos.y() - center.y(), pos.x() - center.x()))
+            new_rotation = (angle - self._rotation_start_angle) % 360
+            self.setRotation(new_rotation)
+            self.puzzle_frag.rotation = new_rotation
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+
+        # Shift-snap to 20px grid
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            x, y = self.pos().x(), self.pos().y()
+            self.setPos(round(x / 20) * 20, round(y / 20) * 20)
+
+        # Sync position back to data model
+        self.puzzle_frag.x = self.pos().x()
+        self.puzzle_frag.y = self.pos().y()
+
+    def mouseReleaseEvent(self, event):
+        self._rotating = False
+        super().mouseReleaseEvent(event)
+
+    # ── Resize (wheel) ──
+
+    def adjust_scale_from_wheel(self, delta_y):
+        """Resize fragment from a wheel delta (called by PuzzleCanvasView)."""
+        factor = 1.05 if delta_y > 0 else 0.95
+        new_scale = max(0.1, min(4.0, self.scale() * factor))
+        self.setScale(new_scale)
+        self.puzzle_frag.scale = new_scale
+
+    def wheelEvent(self, event):
+        """Handle wheel events dispatched directly by the scene."""
+        delta = event.delta() if hasattr(event, 'delta') else event.angleDelta().y()
+        self.adjust_scale_from_wheel(delta)
+        event.accept()
+
+    # ── Visual feedback ──
+
+    def paint(self, painter, option, widget=None):
+        super().paint(painter, option, widget)
+        if self.isSelected():
+            br = self.boundingRect()
+            # Dashed selection border
+            painter.setPen(QPen(QColor(255, 255, 255, 180), 1, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(br)
+            # Corner handles
+            painter.setPen(QPen(QColor(255, 255, 255), 1))
+            painter.setBrush(QBrush(QColor(255, 255, 255, 128)))
+            r = self.HANDLE_SIZE / 2
+            for corner in [br.topLeft(), br.topRight(), br.bottomLeft(), br.bottomRight()]:
+                painter.drawEllipse(corner, r, r)
+
+    # ── Utilities ──
+
+    def update_pixmap(self, pixmap):
+        """Replace displayed image (e.g. folio nav or threshold change)."""
+        self.setPixmap(pixmap)
+        self.setTransformOriginPoint(self.boundingRect().center())
+
+    def shape(self):
+        """Return bounding rect as shape for accurate hit testing."""
+        path = QPainterPath()
+        path.addRect(self.boundingRect())
+        return path
+
+
+class PuzzleCanvasView(QGraphicsView):
+    """A QGraphicsView hosting PuzzleFragmentItem instances.
+
+    Features: Ctrl+wheel zoom, hand-drag pan, dark gray / checkerboard background.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        self.scene.setSceneRect(QRectF(-10000, -10000, 20000, 20000))
+
+        # Render quality
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        # We handle pan manually (not ScrollHandDrag) so items can be dragged
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+        # Hide scrollbars
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # State
+        self._checkerboard = False
+        self._panning = False
+        self._pan_start = QPointF()
+
+        self.setStyleSheet("border: none;")
+
+    # ── Background ──
+
+    def set_checkerboard(self, enabled):
+        """Toggle between dark gray and checkerboard background."""
+        self._checkerboard = enabled
+        self.scene.invalidate()
+
+    def drawBackground(self, painter, rect):
+        if not self._checkerboard:
+            painter.fillRect(rect, QColor(0x33, 0x33, 0x33))
+            return
+        # 20px checkerboard
+        tile = 20
+        light = QColor(0xC8, 0xC8, 0xC8)
+        dark = QColor(0x96, 0x96, 0x96)
+        left = int(rect.left()) - (int(rect.left()) % tile)
+        top = int(rect.top()) - (int(rect.top()) % tile)
+        x = left
+        while x < rect.right():
+            y = top
+            while y < rect.bottom():
+                color = light if ((x // tile) + (y // tile)) % 2 == 0 else dark
+                painter.fillRect(QRectF(x, y, tile, tile), color)
+                y += tile
+            x += tile
+
+    # ── Pan ──
+
+    def mousePressEvent(self, event):
+        # Middle-button or left-click on empty canvas => pan
+        is_middle = event.button() == Qt.MouseButton.MiddleButton
+        is_left_no_item = (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self.itemAt(event.position().toPoint())
+        )
+        if is_middle or is_left_no_item:
+            self._panning = True
+            self._pan_start = event.position()
+            self.setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._panning:
+            delta = event.position() - self._pan_start
+            self._pan_start = event.position()
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - int(delta.x())
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - int(delta.y())
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._panning:
+            self._panning = False
+            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    # ── Zoom / item resize ──
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            # Ctrl+wheel: zoom view
+            factor = 1.15 if delta > 0 else 1.0 / 1.15
+            current_scale = self.transform().m11()
+            new_scale = current_scale * factor
+            if 0.05 <= new_scale <= 10.0:
+                self.scale(factor, factor)
+            event.accept()
+            return
+
+        # No Ctrl: resize item under mouse
+        item = self.itemAt(event.position().toPoint())
+        if isinstance(item, PuzzleFragmentItem):
+            item.adjust_scale_from_wheel(delta)
+            event.accept()
+            return
+
+        event.ignore()
+
+    # ── Accessors ──
+
+    def get_fragment_items(self):
+        """Return all PuzzleFragmentItem instances on the scene."""
+        return [i for i in self.scene.items() if isinstance(i, PuzzleFragmentItem)]
+
+    def get_selected_fragments(self):
+        """Return selected PuzzleFragmentItem instances."""
+        return [i for i in self.scene.selectedItems() if isinstance(i, PuzzleFragmentItem)]
+
 
 class ResultDialog(QDialog):
     """Allow browsing a single search result and its surrounding pages."""
