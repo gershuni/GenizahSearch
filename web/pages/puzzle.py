@@ -1137,7 +1137,20 @@ def create_puzzle_page(initial_add: str = None):
 
     # ── Initialize canvas after DOM is ready ──
     async def init_canvas():
-        await ui.run_javascript('window.puzzleCanvas.init("puzzleCanvas")')
+        # Wait for Fabric.js CDN to load (may take a few seconds on first visit)
+        await ui.run_javascript(
+            '''
+            await new Promise(function(resolve) {
+                if (typeof fabric !== "undefined") return resolve();
+                var check = setInterval(function() {
+                    if (typeof fabric !== "undefined") { clearInterval(check); resolve(); }
+                }, 100);
+                setTimeout(function() { clearInterval(check); resolve(); }, 10000);
+            });
+            window.puzzleCanvas.init("puzzleCanvas");
+            ''',
+            timeout=15.0
+        )
 
         # Restore saved fragments (app.storage.tab is safe here — client connected)
         saved_meta = app.storage.tab.get('puzzle_fragments', {})
