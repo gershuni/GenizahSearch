@@ -46,6 +46,11 @@ window.puzzleCanvas = {
     _contextMenuSuppressHandler: null,
     _contextMenuTarget: null,
 
+    /**
+     * Tear down the puzzle canvas, removing all event listeners, fragments,
+     * folio data, and disposing the Fabric.js canvas instance.
+     * Called on page navigation or before re-initialization.
+     */
     destroy: function() {
         this._hideContextMenu();
         if (this._resizeHandler) {
@@ -79,6 +84,11 @@ window.puzzleCanvas = {
         }
     },
 
+    /**
+     * Dispatch a CustomEvent on the canvas DOM element for Python-side handling.
+     * @param {string} name - Event name (e.g. 'puzzle-add-result', 'puzzle-selection').
+     * @param {Object} detail - Event payload, JSON-stringified into event.detail.
+     */
     _emitEvent: function(name, detail) {
         var el = document.getElementById('puzzleCanvas');
         if (!el) return;
@@ -88,6 +98,14 @@ window.puzzleCanvas = {
         }));
     },
 
+    /**
+     * Construct a Fabric.js Image object from an HTML Image element.
+     * Disables middle edge handles (corners-only for proportional resize)
+     * and calls setCoords() for accurate hit detection.
+     * @param {HTMLImageElement} htmlImg - Loaded HTML image element.
+     * @param {Object} [options] - Fabric.js properties to set (left, top, angle, etc.).
+     * @returns {fabric.Image} The constructed Fabric image object.
+     */
     _buildFragmentImage: function(htmlImg, options) {
         var ImageCtor = fabric.Image || fabric.FabricImage;
         if (!ImageCtor) {
@@ -117,6 +135,13 @@ window.puzzleCanvas = {
         }, this);
     },
 
+    /**
+     * Initialize the Fabric.js canvas on the given DOM element.
+     * Sets up wheel zoom, pan, keyboard shortcuts, context menu, selection
+     * sync, window resize handling, and processes any fragments queued
+     * before initialization.
+     * @param {string} canvasId - DOM id of the <canvas> element.
+     */
     init: function(canvasId) {
         var el = document.getElementById(canvasId);
         if (!el) { console.error('Canvas element not found:', canvasId); return; }
@@ -186,6 +211,22 @@ window.puzzleCanvas = {
         }
     },
 
+    /**
+     * Load a fragment image and add it to the canvas.
+     * Shows a "Loading..." placeholder while the image fetches. On success,
+     * auto-fits large images to ~60% of canvas, selects the new fragment,
+     * auto-loads its folio list, and emits 'puzzle-add-result'.
+     * If the canvas is not yet initialized, the request is queued.
+     * @param {string} key - Unique fragment key, typically "sys_id,folio_label".
+     * @param {string} imageUrl - URL to fetch the fragment image from.
+     * @param {number} x - Initial left position on canvas.
+     * @param {number} y - Initial top position on canvas.
+     * @param {number} rotation - Initial rotation angle in degrees.
+     * @param {number} scale - Initial uniform scale factor (1.0 = original).
+     * @param {boolean} flipH - Whether to flip horizontally.
+     * @param {boolean} flipV - Whether to flip vertically.
+     * @param {Object} [meta] - Fragment metadata (fl_id, threshold, sys_id, etc.).
+     */
     addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV, meta) {
         if (!this.canvas) {
             // Queue for when canvas is ready
@@ -300,6 +341,12 @@ window.puzzleCanvas = {
         htmlImg.src = imageUrl;
     },
 
+    /**
+     * Remove all currently selected fragment(s) from the canvas.
+     * Dispatches a 'puzzle-delete' CustomEvent with the removed keys array
+     * so Python can update session storage.
+     * @returns {string[]} Array of removed fragment keys.
+     */
     removeSelected: function() {
         if (!this.canvas) return;
         var active = this.canvas.getActiveObjects();
@@ -534,6 +581,11 @@ window.puzzleCanvas = {
         }
     },
 
+    /**
+     * Get the fragment key of the currently selected canvas object.
+     * @returns {string|null} The fragment key (e.g. "sys_id,1r") or null if
+     *     no fragment is selected.
+     */
     getSelectedKey: function() {
         var active = this.canvas.getActiveObject();
         if (!active) return null;
@@ -544,6 +596,13 @@ window.puzzleCanvas = {
 
     folioData: {},  // key -> {sys_id, folios: [{fl_id, label}], currentIndex}
 
+    /**
+     * Fetch the ordered list of folios for a manuscript from the server
+     * and store them in folioData for navigation. Identifies the current
+     * folio index by matching the fragment's fl_id.
+     * @param {string} key - Fragment key to associate folio data with.
+     * @param {string} sys_id - Manuscript system identifier for the API call.
+     */
     loadFolios: async function(key, sys_id) {
         try {
             var resp = await fetch('/api/puzzle_folios/' + sys_id);
@@ -562,6 +621,14 @@ window.puzzleCanvas = {
         }
     },
 
+    /**
+     * Navigate a fragment to a different folio page within the same manuscript.
+     * Loads the new folio image at the same position/rotation/scale/flip as
+     * the current one, then emits 'puzzle-fragment-meta' to sync Python state.
+     * @param {string} key - Fragment key to navigate.
+     * @param {number} direction - Folio offset: +1 for next, -1 for previous.
+     * @returns {Promise<string>} The label of the new folio (e.g. "1v", "2r").
+     */
     navigateFolio: async function(key, direction) {
         var data = this.folioData[key];
         if (!data || !data.folios.length) return '';
@@ -661,6 +728,11 @@ window.puzzleCanvas = {
         });
     },
 
+    /**
+     * Cycle the canvas background through 6 modes in order:
+     * dark gray (#333), black, white, checkerboard, light table (#F5F0E0),
+     * and measurement grid. Updates bgModeIndex for round-robin cycling.
+     */
     cycleBgMode: function() {
         if (!this.canvas) return;
         this.bgModeIndex = (this.bgModeIndex + 1) % this.BG_MODES.length;
@@ -729,6 +801,15 @@ window.puzzleCanvas = {
     _cropTarget: null,
     _cropOffsets: null,  // {top, bottom, left, right}
 
+    /**
+     * Enter or exit crop mode on the currently selected fragment.
+     * In crop mode, movement/rotation are locked, edge handles become crop
+     * handles (scaling events are intercepted and converted to cropEdge calls),
+     * and the border turns red-dashed. Arrow keys crop edges; Enter confirms,
+     * Escape reverts.
+     * @param {boolean} enable - True to enter crop mode, false to exit.
+     * @returns {boolean} Whether crop mode is now active.
+     */
     toggleCropMode: function(enable) {
         if (enable) {
             var active = this.canvas.getActiveObject();
@@ -822,6 +903,14 @@ window.puzzleCanvas = {
         }
     },
 
+    /**
+     * Crop a specific edge of the fragment in crop mode.
+     * Positive amount crops inward (removes pixels), negative un-crops
+     * (restores previously cropped pixels up to the original dimensions).
+     * Minimum remaining dimension is 50px.
+     * @param {string} edge - Which edge to crop: 'top', 'bottom', 'left', or 'right'.
+     * @param {number} [amount=20] - Pixels to crop (positive) or restore (negative).
+     */
     cropEdge: function(edge, amount) {
         // Positive amount = crop inward, negative = un-crop (restore)
         if (!this._cropMode || !this._cropTarget) return;
@@ -869,6 +958,11 @@ window.puzzleCanvas = {
         this.canvas.requestRenderAll();
     },
 
+    /**
+     * Confirm the current crop, making it permanent.
+     * Clears the original dimension references so cropRevert can no longer
+     * undo, then exits crop mode.
+     */
     cropConfirm: function() {
         if (!this._cropTarget) return;
         this._cropTarget._originalWidth = null;
@@ -876,6 +970,10 @@ window.puzzleCanvas = {
         this.toggleCropMode(false);
     },
 
+    /**
+     * Revert all crop changes on the current fragment, restoring original
+     * dimensions and crop offsets, then exit crop mode.
+     */
     cropRevert: function() {
         if (!this._cropTarget) return;
         var obj = this._cropTarget;
@@ -893,8 +991,13 @@ window.puzzleCanvas = {
         this.toggleCropMode(false);
     },
 
+    /**
+     * Navigate each selected fragment to its recto/verso counterpart.
+     * Even-indexed folios (0, 2, 4...) are recto; odd (1, 3, 5...) are verso.
+     * Toggles each selected fragment to the opposite side by calling
+     * navigateFolio with +1 or -1.
+     */
     flipRectoVerso: function() {
-        // Navigate selected fragment(s) to recto/verso counterpart (other side)
         var self = this;
         var active = this.canvas.getActiveObjects();
         if (!active || active.length === 0) return;
@@ -911,8 +1014,13 @@ window.puzzleCanvas = {
         });
     },
 
+    /**
+     * Flip the entire puzzle arrangement for verso viewing.
+     * Mirrors all fragment positions horizontally around the group center axis,
+     * negates rotation angles, and navigates each fragment to its recto/verso
+     * counterpart image. This simulates turning over the assembled join.
+     */
     flipAllPuzzle: function() {
-        // Flip entire puzzle: mirror visual centers + negate rotations + navigate to recto/verso
         var self = this;
         var keys = Object.keys(this.fragments);
         if (keys.length === 0) return;
@@ -971,6 +1079,11 @@ window.puzzleCanvas = {
         }
     },
 
+    /**
+     * Zoom and pan the canvas viewport to fit all fragment objects within
+     * 90% of the visible area. Caps zoom at 3x to avoid over-magnification.
+     * Excludes placeholder text objects.
+     */
     fitAll: function() {
         if (!this.canvas) return;
         var objects = this.canvas.getObjects().filter(function(o) { return !o._isPlaceholder; });
@@ -1012,6 +1125,12 @@ window.puzzleCanvas = {
         this.canvas.requestRenderAll();
     },
 
+    /**
+     * Serialize the spatial state of all fragments to a JSON string.
+     * Captures position (x, y), rotation, scale (scaleX, scaleY), and
+     * flip state (flipH, flipV) for each fragment key.
+     * @returns {string} JSON string of fragment spatial states.
+     */
     getState: function() {
         var stateObj = {};
         for (var key in this.fragments) {
@@ -1068,8 +1187,15 @@ window.puzzleCanvas = {
         }
     },
 
+    /**
+     * Reload a fragment's image in-place, preserving its position, rotation,
+     * scale, and flip state. Used when toggling background removal or
+     * changing the threshold.
+     * @param {string} key - Fragment key to reload.
+     * @param {string} newUrl - New image URL to load.
+     * @param {Object} [newMeta] - Updated metadata to attach to the fragment.
+     */
     _reloadFragment: function(key, newUrl, newMeta) {
-        // Reload a fragment image in-place (same position/rotation/scale)
         var obj = this.fragments[key];
         if (!obj) return;
         var self = this;
@@ -1109,6 +1235,13 @@ window.puzzleCanvas = {
         htmlImg.src = newUrl;
     },
 
+    /**
+     * Toggle background removal on a specific fragment.
+     * Switches between processed (transparent background) and original
+     * (full IIIF image) by reloading via _reloadFragment with the
+     * flipped 'processed' flag.
+     * @param {fabric.Image} target - The Fabric image object to toggle.
+     */
     _toggleFragmentBg: function(target) {
         if (!target || !target._fragmentKey) return;
         var meta = target._fragmentMeta;
@@ -1199,7 +1332,19 @@ PUZZLE_STYLES = '''
 
 
 def _resolve_folios(sys_id: str) -> list:
-    """Resolve folio FL IDs from NLI IIIF manifest for a sys_id."""
+    """Resolve folio FL IDs from NLI IIIF manifest for a manuscript.
+
+    Fetches the IIIF v2.1 manifest for the given sys_id, extracts FL IDs
+    from each canvas's image service URL, and assigns recto/verso labels
+    based on page index parity (even=recto, odd=verso).
+
+    Args:
+        sys_id: NLI system number (e.g. '990001234560205171').
+
+    Returns:
+        List of dicts with 'fl_id' (str) and 'label' (str, e.g. '1r', '1v').
+        Empty list if manifest fetch fails or contains no FL IDs.
+    """
     import re as _re
     import requests as _requests
     try:
@@ -1232,7 +1377,16 @@ def _resolve_folios(sys_id: str) -> list:
 
 
 def _invalidate_and_refetch(fl_id: str, new_threshold: float):
-    """Invalidate cache for a fragment so it gets re-processed at new threshold."""
+    """Invalidate the cached processed image and pre-fetch at a new threshold.
+
+    Called when the user adjusts the background removal threshold slider.
+    Clears existing cached images for the given fl_id (all thresholds),
+    then triggers a new background removal at the specified threshold.
+
+    Args:
+        fl_id: NLI folio leaf identifier.
+        new_threshold: New HSV distance threshold for background removal.
+    """
     try:
         from shared.puzzle_image_service import get_puzzle_image_service
         service = get_puzzle_image_service()
@@ -1244,7 +1398,18 @@ def _invalidate_and_refetch(fl_id: str, new_threshold: float):
 
 
 def _parse_puzzle_event_args(args):
-    """Parse CustomEvent payloads from the puzzle canvas."""
+    """Parse CustomEvent payloads dispatched from the puzzle canvas JavaScript.
+
+    NiceGUI delivers CustomEvent args in various forms depending on the
+    event source. This normalizes them: extracts 'detail' from wrapper dicts,
+    JSON-decodes strings, and passes through dicts/lists unchanged.
+
+    Args:
+        args: Raw event arguments from NiceGUI event handler.
+
+    Returns:
+        Parsed payload as dict, list, or string.
+    """
     payload = args
     if isinstance(payload, dict) and 'detail' in payload:
         payload = payload['detail']
@@ -1257,7 +1422,20 @@ def _parse_puzzle_event_args(args):
 
 
 async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragment_meta, threshold_slider):
-    """Shared helper: resolve folios and add first folio to canvas."""
+    """Resolve a manuscript's folios and add the first folio image to the canvas.
+
+    Fetches the NLI IIIF manifest to get FL IDs, determines the appropriate
+    background removal threshold (150 for CUL/T-S blue backgrounds, 30 default),
+    issues a JavaScript addFragment() call, and registers the fragment in
+    pending_fragment_meta for confirmation tracking.
+
+    Args:
+        sys_id: Manuscript system number.
+        shelfmark: Display shelfmark string (used for CUL detection and notifications).
+        puzzle_meta: Dict of confirmed fragment metadata keyed by fragment key.
+        pending_fragment_meta: Dict of fragments awaiting JS confirmation.
+        threshold_slider: NiceGUI slider widget (unused here, passed for API compat).
+    """
     folios = await run.io_bound(_resolve_folios, sys_id)
     if not folios:
         ui.notify(tr('No images found'), type='warning')
@@ -1307,10 +1485,24 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
 
 
 def create_puzzle_page(initial_add: str = None):
-    """Create the Fragment Puzzle page content.
+    """Create the Fragment Puzzle page with Fabric.js canvas and toolbar.
+
+    Builds the full puzzle UI: shelfmark input for adding fragments, action
+    buttons (delete, flip, crop, background cycle, fit-all), folio navigation
+    (prev/next), scale/rotation/threshold sliders, and the Fabric.js canvas.
+
+    Handles session persistence via app.storage.tab: fragment metadata is saved
+    to 'puzzle_fragments' and spatial state (positions/rotations) to 'puzzle_state'.
+    State is auto-saved every 30 seconds and restored on page revisit.
+
+    Listens for JavaScript CustomEvents (puzzle-delete, puzzle-add-result,
+    puzzle-fragment-meta, puzzle-selection) to keep Python-side state in sync
+    with the Fabric.js canvas.
 
     Args:
-        initial_add: Optional 'sys_id,fl_id' string to auto-add a fragment on load.
+        initial_add: Optional fragment to auto-add on page load. Format is
+            'sys_id,fl_id' or just 'sys_id' (first folio resolved automatically).
+            Passed via /puzzle?add=... query parameter from entry points.
     """
     # Add Fabric.js CDN and page-specific styles
     ui.add_head_html(FABRIC_JS_CDN)
@@ -1336,6 +1528,7 @@ def create_puzzle_page(initial_add: str = None):
             )
 
             async def on_add_shelfmark():
+                """Resolve the shelfmark input to a sys_id and add that fragment to the canvas."""
                 text = shelfmark_input.value
                 if not text or not text.strip():
                     return
@@ -1580,6 +1773,7 @@ def create_puzzle_page(initial_add: str = None):
             ).tooltip(tr('Add from Known Joins'))
 
             async def on_delete_selected():
+                """Remove selected fragment(s) via JS and update session storage."""
                 try:
                     removed = await ui.run_javascript(
                         'window.puzzleCanvas.removeSelected()',
@@ -1662,6 +1856,7 @@ def create_puzzle_page(initial_add: str = None):
             )
 
             async def on_folio_prev():
+                """Navigate the selected fragment to the previous folio page."""
                 try:
                     key = await ui.run_javascript(
                         'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getSelectedKey() : null',
@@ -1694,6 +1889,7 @@ def create_puzzle_page(initial_add: str = None):
                             app.storage.tab['puzzle_fragments'] = puzzle_meta
 
             async def on_folio_next():
+                """Navigate the selected fragment to the next folio page."""
                 try:
                     key = await ui.run_javascript(
                         'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getSelectedKey() : null',
@@ -1741,6 +1937,7 @@ def create_puzzle_page(initial_add: str = None):
             ).props('dense dark').style('width: 120px')
 
             def on_scale_change(e):
+                """Apply scale slider value to the selected fragment via JS."""
                 if control_sync['active']:
                     return
                 val = e.value if hasattr(e, 'value') else scale_slider.value
@@ -1757,6 +1954,7 @@ def create_puzzle_page(initial_add: str = None):
             ).props('dense dark').style('width: 120px')
 
             def on_rotation_change(e):
+                """Apply rotation slider value to the selected fragment via JS."""
                 if control_sync['active']:
                     return
                 val = e.value if hasattr(e, 'value') else rotation_slider.value
@@ -1817,6 +2015,7 @@ def create_puzzle_page(initial_add: str = None):
 
         # Listen for JS delete events (keyboard, context menu, toolbar all dispatch this)
         def _sync_control_values(*, processed=None, threshold=None, scale=None, rotation=None, folio_label=None):
+            """Update toolbar slider/label values from JS selection state without triggering change handlers."""
             control_sync['active'] = True
             try:
                 if threshold is not None:
@@ -1835,6 +2034,7 @@ def create_puzzle_page(initial_add: str = None):
                 control_sync['active'] = False
 
         def _prune_saved_state(removed_keys):
+            """Remove deleted fragment keys from the saved spatial state in session storage."""
             try:
                 saved_state = app.storage.tab.get('puzzle_state')
             except RuntimeError:
@@ -1856,6 +2056,7 @@ def create_puzzle_page(initial_add: str = None):
                 app.storage.tab['puzzle_state'] = json.dumps(state_data)
 
         def on_puzzle_delete(e):
+            """Handle 'puzzle-delete' event: remove deleted keys from puzzle_meta and session."""
             try:
                 removed = _parse_puzzle_event_args(e.args)
                 if isinstance(removed, list):
@@ -1869,6 +2070,7 @@ def create_puzzle_page(initial_add: str = None):
         canvas_wrap.on('puzzle-delete', on_puzzle_delete)
 
         def on_puzzle_add_result(e):
+            """Handle 'puzzle-add-result' event: promote pending fragment to puzzle_meta on success."""
             payload = _parse_puzzle_event_args(e.args)
             if not isinstance(payload, dict):
                 return
@@ -1894,6 +2096,7 @@ def create_puzzle_page(initial_add: str = None):
         canvas_wrap.on('puzzle-add-result', on_puzzle_add_result)
 
         def on_puzzle_fragment_meta(e):
+            """Handle 'puzzle-fragment-meta' event: update stored metadata after folio nav or bg toggle."""
             payload = _parse_puzzle_event_args(e.args)
             if not isinstance(payload, dict):
                 return
@@ -1909,6 +2112,7 @@ def create_puzzle_page(initial_add: str = None):
         canvas_wrap.on('puzzle-fragment-meta', on_puzzle_fragment_meta)
 
         def on_puzzle_selection(e):
+            """Handle 'puzzle-selection' event: sync toolbar controls with selected fragment state."""
             payload = _parse_puzzle_event_args(e.args)
             if not isinstance(payload, dict):
                 return
@@ -1926,6 +2130,13 @@ def create_puzzle_page(initial_add: str = None):
 
     # ── Initialize canvas after DOM is ready ──
     async def init_canvas():
+        """Initialize the Fabric.js canvas and restore saved session state.
+
+        Waits for Fabric.js CDN to load (retries up to 10 seconds), then
+        initializes the canvas. Restores previously saved fragment metadata
+        and spatial state from app.storage.tab, re-adding each fragment
+        at its saved position/rotation/scale.
+        """
         # Fire-and-forget: JS will retry until Fabric.js CDN loads
         ui.run_javascript('''
             (function tryInit(attempts) {
@@ -2007,6 +2218,7 @@ def create_puzzle_page(initial_add: str = None):
         add_fl_id = parts[1].strip() if len(parts) > 1 else ''
 
         async def auto_add():
+            """Auto-add a fragment from the initial_add query parameter after canvas init."""
             import asyncio
             await asyncio.sleep(1.0)
 
@@ -2074,6 +2286,7 @@ def create_puzzle_page(initial_add: str = None):
 
     # ── Periodic state save ──
     async def save_state():
+        """Periodically save canvas spatial state to session storage (every 30s)."""
         try:
             state_json = await ui.run_javascript(
                 'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getState() : null',
