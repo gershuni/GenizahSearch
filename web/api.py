@@ -126,6 +126,37 @@ def init_api_routes():
         fl_ids = fetch_fl_ids_from_nli(sys_id)
         return fl_ids
 
+    @app.get('/api/puzzle_image')
+    def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800, processed: bool = True):
+        """Serve processed/original fragment image for puzzle canvas."""
+        from shared.puzzle_image_service import get_puzzle_image_service
+        service = get_puzzle_image_service()
+        image_bytes = service.resolve_fragment_image(
+            fl_id=fl_id, size=size, threshold=threshold, processed=processed
+        )
+        if image_bytes is None:
+            return Response(content="Image not found", status_code=404)
+        content_type = 'image/png' if processed else 'image/jpeg'
+        return Response(
+            content=image_bytes,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=3600"}
+        )
+
+    @app.get('/api/puzzle_folios/{sys_id}')
+    def puzzle_folios(sys_id: str):
+        """Get ordered folio list for a manuscript (for prev/next navigation).
+
+        Returns FL IDs resolved from NLI IIIF manifest, suitable for use
+        with /api/puzzle_image endpoint. Note: nli_crossref_service returns
+        FGP image numbers (NOT FL IDs), so we use the IIIF manifest fetch
+        which produces real NLI FL IDs.
+        """
+        fl_ids = fetch_fl_ids_from_nli(sys_id)
+        if not fl_ids:
+            return Response(content="No folios found", status_code=404)
+        return [{'fl_id': fid, 'label': f'{i // 2 + 1}{"r" if i % 2 == 0 else "v"}'} for i, fid in enumerate(fl_ids)]
+
     @app.get('/api/nli_image/{fl_id}')
     def nli_image(fl_id: str):
         """
