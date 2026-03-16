@@ -52,9 +52,11 @@ SAMPLE_IMAGES = [
     # AIU (Paris)
     ("NLI: H 147 A recto (AIU)", "nli", "47443607"),
     ("NLI: H 147 A verso (AIU)", "nli", "47443612"),
-    # Manchester
-    ("NLI: A 1 recto (Manchester)", "nli", "168498808"),
-    ("NLI: A 1 verso (Manchester)", "nli", "168498811"),
+    # Manchester (via LUNA direct URL -- NLI returns 503 for Manchester FL IDs)
+    ("Manchester: A 1 recto (LUNA)", "manchester_luna",
+     "https://luna.manchester.ac.uk/MediaManager/srvr?mediafile=/Size4/ManchesterDev-2-NA/1120/jrl0708074dc.jpg"),
+    ("Manchester: A 1 verso (LUNA)", "manchester_luna",
+     "https://luna.manchester.ac.uk/MediaManager/srvr?mediafile=/Size4/ManchesterDev-2-NA/1120/jrl0708075dc.jpg"),
     # Cambridge (direct IIIF, not NLI-hosted)
     ("Cambridge: MS-ADD-00863-00002 p1", "cambridge", "MS-ADD-00863-00002"),
     ("Cambridge: MS-TS-00012-00001 p1", "cambridge", "MS-TS-00012-00001"),
@@ -224,6 +226,9 @@ class BackgroundRemovalPreview(QMainWindow):
         elif img_type == "cambridge":
             self._fl_input.setText(f"cambridge:{img_id}")
             self._load_cambridge_image(img_id)
+        elif img_type == "manchester_luna":
+            self._fl_input.setText(f"luna:{img_id[:40]}...")
+            self._load_direct_url(img_id, "Manchester LUNA")
 
     def _on_load_clicked(self):
         """Handle Load button click."""
@@ -233,6 +238,8 @@ class BackgroundRemovalPreview(QMainWindow):
             return
         if text.startswith("cambridge:"):
             self._load_cambridge_image(text[len("cambridge:"):])
+        elif text.startswith("http"):
+            self._load_direct_url(text, "Direct URL")
         else:
             self._load_nli_image(text)
 
@@ -265,6 +272,21 @@ class BackgroundRemovalPreview(QMainWindow):
             self._original_bytes = resp.content
         except Exception as e:
             self.statusBar().showMessage(f"Cambridge fetch failed: {e}")
+            return
+
+        self._apply_background_removal()
+
+    def _load_direct_url(self, url: str, source_label: str = "Direct"):
+        """Load image from a direct URL (Manchester LUNA, etc.)."""
+        self.statusBar().showMessage(f"Fetching {source_label} image...")
+        QApplication.processEvents()
+
+        try:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            self._original_bytes = resp.content
+        except Exception as e:
+            self.statusBar().showMessage(f"{source_label} fetch failed: {e}")
             return
 
         self._apply_background_removal()
