@@ -12,8 +12,7 @@
 - ✅ **v6.0.0 Local Data Architecture** -- Phases 35-40 (shipped 2026-02-22)
 - ✅ **v6.1.0 Catalog Browse & Navigation** -- Phase 41 (shipped 2026-02-27)
 - ✅ **v6.5.0 Search UX & Filtered Search** -- Phases 42-46 (shipped 2026-03-14)
-- **v7.0.0 Fragment Puzzle** -- Phases 47-50 (planned)
-- **v7.1.0 Recto/Verso & Community** -- Phases 51-52 (future)
+- **v7.0.0 Fragment Puzzle** -- Phases 47-52 (planned)
 
 ## Phases
 
@@ -137,13 +136,11 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 
 **Milestone Goal:** Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal, DPI calibration, recto/verso views, join document persistence, and community publishing -- in both web (NiceGUI + Fabric.js) and desktop (PyQt6 + QGraphicsScene).
 
-**v7.0.0 Fragment Puzzle (Phases 47-50):**
+**v7.0.0 Fragment Puzzle (Phases 47-52):**
 - [x] **Phase 47: Foundation + Background Removal** - Shared data model, joins.db sidecar, IIIF image loading, HSV background removal engine (completed 2026-03-16)
 - [x] **Phase 48: Desktop Canvas** - QGraphicsScene-based puzzle widget with drag, rotate, flip, resize, crop, keyboard shortcuts, and fragment loading from Browse/ResultDialog/Lists (completed 2026-03-16)
 - [ ] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images
 - [ ] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export
-
-**v7.1.0 Recto/Verso & Community (Phases 51-52) — future:**
 - [ ] **Phase 51: Recto/Verso** - Auto-generated verso view from recto arrangement with correct verso images
 - [ ] **Phase 52: Community + Integration** - Personal workspace, publish for review, browse published joins, entry points from browse/search
 
