@@ -202,8 +202,12 @@ Plans:
   1. User can save the current puzzle arrangement and reload it later with all fragment positions, rotations, scales, and flip states preserved exactly
   2. User can maintain multiple saved join documents and switch between them
   3. User can export a composite PNG image of the assembled join (background-removed fragments composited at full resolution)
-  4. User can add and edit metadata on a join document: join type classification, free-text notes, and fragment identifiers
-**Plans**: TBD
+  4. User can add and edit metadata on a join document: title, free-text notes, and fragment identifiers
+**Plans**: 3 plans
+Plans:
+- [ ] 50-01-PLAN.md — Shared layer: model cleanup, schema v2 migration, composite export service
+- [ ] 50-02-PLAN.md — Desktop UI: QDockWidget side panel, save/load/export, auto-save
+- [ ] 50-03-PLAN.md — Web UI: left drawer, API endpoints, save/load/export, auto-save
 
 ### Phase 51: Recto/Verso
 **Goal**: Researchers can view both sides of an assembled join, with verso auto-generated from the recto arrangement
@@ -237,10 +241,10 @@ Plans:
 | 47. Foundation + Background Removal | 4/4 | Complete    | 2026-03-16 |
 | 48. Desktop Canvas | 3/3 | Complete    | 2026-03-16 |
 | 49. Web Canvas | 2/2 | Complete    | 2026-03-16 |
-| 50. Join Documents | 0/TBD | Not started | - |
+| 50. Join Documents | 0/3 | Not started | - |
 | 51. Recto/Verso | 0/TBD | Not started | - |
 | 52. Community + Integration | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-16 after Phase 49 completion (2/2 plans)*
+*Last updated: 2026-03-16 after Phase 50 planning (3 plans created)*
