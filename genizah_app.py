@@ -2965,9 +2965,30 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
     # ── Utilities ──
 
     def update_pixmap(self, pixmap):
-        """Replace displayed image (e.g. folio nav or threshold change)."""
+        """Replace displayed image (e.g. folio nav or threshold change).
+
+        Re-applies any active crop offsets to the new image so crop
+        state is preserved across folio flips and threshold changes.
+        """
         self.prepareGeometryChange()
-        self.setPixmap(pixmap)
+        offsets = getattr(self, '_crop_offsets', None)
+        if offsets and any(o > 0 for o in offsets):
+            # Re-apply crop to the new full image
+            self._original_pixmap = pixmap.copy()
+            t, b, l, r = offsets
+            w, h = pixmap.width(), pixmap.height()
+            # Scale offsets proportionally if new image is different size
+            if self._original_pixmap is not None:
+                cropped = pixmap.copy(
+                    min(l, w // 3), min(t, h // 3),
+                    max(50, w - min(l, w // 3) - min(r, w // 3)),
+                    max(50, h - min(t, h // 3) - min(b, h // 3))
+                )
+                self.setPixmap(cropped)
+            else:
+                self.setPixmap(pixmap)
+        else:
+            self.setPixmap(pixmap)
         self.setTransformOriginPoint(self._pixmap_rect().center())
 
     def shape(self):
