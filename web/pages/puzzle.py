@@ -1471,17 +1471,25 @@ def create_puzzle_page(initial_add: str = None):
                 if not sel_sys_id:
                     return
 
+                # Resolve shelfmark from puzzle_meta or meta_mgr
                 sel_shelfmark = ''
-                if sel_sys_id in puzzle_meta:
-                    sel_shelfmark = puzzle_meta[sel_sys_id + ',' + key.split(',')[-1]].get('shelfmark', '') if key in puzzle_meta else ''
+                if key in puzzle_meta:
+                    sel_shelfmark = puzzle_meta[key].get('shelfmark', '')
                 if not sel_shelfmark and state.meta_mgr:
                     sel_shelfmark, _ = state.meta_mgr.get_meta_for_id(sel_sys_id)
                     sel_shelfmark = sel_shelfmark or sel_sys_id
 
-                # Fetch connected fragments (user joins + PGP joins)
+                # Fetch connected fragments — prefer document_id (more reliable)
                 joins_data = await run.io_bound(
-                    fetch_connected_fragments, sel_shelfmark, sel_sys_id, None, True
+                    fetch_connected_fragments,
+                    sel_shelfmark,  # shelfmark
+                    sel_sys_id,     # document_id
+                    None,           # pgpid
+                    True            # force_refresh
                 )
+
+                total = joins_data.get('total_joins', 0) if joins_data else 0
+                logger.info(f"Joins for {sel_sys_id} ({sel_shelfmark}): {total} user/PGP joins")
 
                 # Also fetch FJMS scientific joins
                 fjms_joins = []
