@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
                              QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem, QGraphicsSimpleTextItem, QGraphicsTextItem,
-                             QCompleter, QAbstractItemView)
+                             QCompleter, QAbstractItemView, QDockWidget)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF, QPoint, QPointF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor, QAction)
@@ -3182,6 +3182,16 @@ class PuzzleCanvasWindow(QMainWindow):
         self._placeholder_items = {}    # (sys_id, folio_label) -> QGraphicsTextItem
         self._next_x = 50.0
 
+        # Join document state
+        self._current_doc_id = None        # None = scratch pad, str = saved document
+        self._has_unsaved_changes = False   # For scratch pad save prompt
+        self._loading_document = False     # True while async image loads are in progress (guards auto-save)
+        self._load_pending_count = 0       # Number of image loads still in flight during document load
+        self._auto_save_timer = QTimer()
+        self._auto_save_timer.setSingleShot(True)
+        self._auto_save_timer.setInterval(1500)  # 1.5s debounce
+        self._auto_save_timer.timeout.connect(self._auto_save)
+
         # --- Central widget layout ---
         central = QWidget()
         self.setCentralWidget(central)
@@ -3244,6 +3254,23 @@ class PuzzleCanvasWindow(QMainWindow):
         self.lbl_selected_info = QLabel(tr("No selection"))
         self.lbl_selected_info.setMinimumWidth(120)
         row1.addWidget(self.lbl_selected_info)
+
+        row1.addWidget(QLabel("|"))
+
+        btn_save = QPushButton(tr("Save Join"))
+        btn_save.setToolTip(tr("Save current puzzle as a join document"))
+        btn_save.clicked.connect(self._on_save_join)
+        row1.addWidget(btn_save)
+
+        btn_new = QPushButton(tr("New"))
+        btn_new.setToolTip(tr("Clear canvas and start a new puzzle"))
+        btn_new.clicked.connect(self._on_new_puzzle)
+        row1.addWidget(btn_new)
+
+        btn_export = QPushButton(tr("Export PNG"))
+        btn_export.setToolTip(tr("Export composite image at full resolution"))
+        btn_export.clicked.connect(self._on_export_png)
+        row1.addWidget(btn_export)
 
         row1.addStretch()
 
@@ -3378,6 +3405,66 @@ class PuzzleCanvasWindow(QMainWindow):
 
         # Status bar for messages
         self.statusBar().showMessage(tr("Ready"))
+
+        # --- Document side panel ---
+        self._docs_dock = QDockWidget(tr("Saved Joins"), self)
+        self._docs_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self._docs_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
+
+        dock_widget = QWidget()
+        dock_layout = QVBoxLayout(dock_widget)
+        dock_layout.setContentsMargins(4, 4, 4, 4)
+        dock_layout.setSpacing(4)
+
+        # Document list
+        self._docs_list = QListWidget()
+        self._docs_list.setIconSize(QSize(80, 80))
+        self._docs_list.itemClicked.connect(self._on_doc_list_clicked)
+        self._docs_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._docs_list.customContextMenuRequested.connect(self._on_doc_context_menu)
+        dock_layout.addWidget(self._docs_list, stretch=3)
+
+        # Details section (shown when a saved doc is active)
+        self._details_group = QGroupBox(tr("Details"))
+        details_layout = QVBoxLayout(self._details_group)
+        details_layout.setSpacing(4)
+
+        self._title_edit = QLineEdit()
+        self._title_edit.setPlaceholderText(tr("Join title"))
+        self._title_edit.editingFinished.connect(self._on_title_changed)
+        details_layout.addWidget(QLabel(tr("Title:")))
+        details_layout.addWidget(self._title_edit)
+
+        self._notes_edit = QTextEdit()
+        self._notes_edit.setPlaceholderText(tr("Notes and observations..."))
+        self._notes_edit.setMaximumHeight(100)
+        self._notes_edit.textChanged.connect(self._on_notes_changed)
+        details_layout.addWidget(QLabel(tr("Notes:")))
+        details_layout.addWidget(self._notes_edit)
+
+        self._fragments_label = QLabel("")
+        self._fragments_label.setWordWrap(True)
+        self._fragments_label.setStyleSheet("color: #888; font-size: 11px;")
+        details_layout.addWidget(QLabel(tr("Fragments:")))
+        details_layout.addWidget(self._fragments_label)
+
+        self._details_group.setVisible(False)
+        dock_layout.addWidget(self._details_group, stretch=1)
+
+        self._docs_dock.setWidget(dock_widget)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._docs_dock)
+        self._docs_dock.setMinimumWidth(220)
+        self._docs_dock.setMaximumWidth(350)
+
+        # Initial refresh
+        self._refresh_docs_list()
+
+        # Event-driven auto-save: scene.changed fires after any visual change (drag, rotate, scale)
+        self.canvas_view.scene.changed.connect(self._on_scene_changed)
+        self._scene_change_debounce = QTimer()
+        self._scene_change_debounce.setSingleShot(True)
+        self._scene_change_debounce.setInterval(500)  # 500ms debounce to batch rapid changes
+        self._scene_change_debounce.timeout.connect(self._schedule_auto_save)
 
     # ── Public API ──
 
@@ -3665,6 +3752,13 @@ class PuzzleCanvasWindow(QMainWindow):
             existing.update_pixmap(pixmap)
             # Remove from pending if present
             self._pending_fragments.pop(item_key, None)
+            # Decrement loading counter for update path too
+            if self._loading_document:
+                self._load_pending_count -= 1
+                if self._load_pending_count <= 0:
+                    self._loading_document = False
+                    self._load_pending_count = 0
+                    logger.info("Document load complete: all fragments loaded")
             return
 
         # New fragment path
@@ -3688,6 +3782,14 @@ class PuzzleCanvasWindow(QMainWindow):
 
         # Auto-fit view to show all fragments
         self._fit_all_fragments()
+
+        # Decrement loading counter and clear guard when all fragments are loaded
+        if self._loading_document:
+            self._load_pending_count -= 1
+            if self._load_pending_count <= 0:
+                self._loading_document = False
+                self._load_pending_count = 0
+                logger.info("Document load complete: all fragments loaded")
 
     def _fit_all_fragments(self):
         """Fit view to show all fragments with some padding."""
@@ -3718,6 +3820,12 @@ class PuzzleCanvasWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Failed to load image: {}").format(error), 5000
         )
+        # Decrement loading counter for failed loads
+        if self._loading_document:
+            self._load_pending_count -= 1
+            if self._load_pending_count <= 0:
+                self._loading_document = False
+                self._load_pending_count = 0
 
     # ── Selection tracking ──
 
@@ -4076,6 +4184,7 @@ class PuzzleCanvasWindow(QMainWindow):
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
             thread.start()
+        self._schedule_auto_save()
 
     def _delete_selected(self):
         """Remove selected fragments from the canvas."""
@@ -4086,6 +4195,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self._fragment_items.pop(item_key, None)
             self._pending_fragments.pop(item_key, None)
         self._refresh_fragment_combo()
+        self._schedule_auto_save()
 
     # ── Fragment combo ──
 
@@ -4163,6 +4273,375 @@ class PuzzleCanvasWindow(QMainWindow):
         menu.addAction(act_delete)
 
         menu.exec(self.canvas_view.mapToGlobal(pos))
+
+    # ── Join document management ──
+
+    def _refresh_docs_list(self):
+        """Refresh the saved documents list in the side panel."""
+        self._docs_list.clear()
+        from shared.puzzle_service import get_puzzle_service
+        svc = get_puzzle_service()
+        if not svc.is_available():
+            return
+        docs = svc.list_documents()
+        for doc in docs:
+            item = QListWidgetItem()
+            title = doc.get('title', '') or 'Untitled'
+            updated = doc.get('updated_at', '')[:10]
+            shelfmarks = doc.get('shelfmarks_summary', '')
+            item.setText(f"{title}\n{shelfmarks}\n{updated}")
+            item.setData(Qt.ItemDataRole.UserRole, doc['id'])
+
+            thumb_b64 = doc.get('thumbnail_b64', '')
+            if thumb_b64:
+                try:
+                    import base64
+                    thumb_bytes = base64.b64decode(thumb_b64)
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(thumb_bytes)
+                    item.setIcon(QIcon(pixmap))
+                except Exception:
+                    pass
+            self._docs_list.addItem(item)
+
+    def _on_doc_list_clicked(self, item):
+        """Load a document when clicked in the side panel."""
+        doc_id = item.data(Qt.ItemDataRole.UserRole)
+        if not doc_id:
+            return
+        if self._current_doc_id is None and self._has_unsaved_changes and self._fragment_items:
+            reply = QMessageBox.question(
+                self, tr("Save current work?"),
+                tr("Save current puzzle before loading?"),
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            if reply == QMessageBox.StandardButton.Save:
+                self._on_save_join()
+        self._load_document(doc_id)
+
+    def _load_document(self, doc_id):
+        """Load a PuzzleDocument onto the canvas, replacing current content."""
+        from shared.puzzle_service import get_puzzle_service
+        svc = get_puzzle_service()
+        doc = svc.load_document(doc_id)
+        if doc is None:
+            QMessageBox.warning(self, tr("Error"), tr("Could not load document"))
+            return
+
+        # Clear canvas
+        self._clear_canvas()
+
+        # Set state
+        self._current_doc_id = doc.id
+        self._has_unsaved_changes = False
+
+        # Set loading guard to prevent auto-save from overwriting
+        # a partially-loaded document
+        self._loading_document = True
+        self._load_pending_count = len(doc.fragments)
+
+        # Add each fragment via the existing _pending_fragments + _on_image_loaded pipeline
+        for frag in doc.fragments:
+            item_key = (frag.sys_id, frag.folio_label)
+            self._pending_fragments[item_key] = frag
+
+            thread = PuzzleImageLoaderThread(
+                frag.fl_id,
+                threshold=frag.bg_removal_threshold,
+                size=800,
+                processed=frag.processed
+            )
+            thread.image_ready.connect(partial(self._on_image_loaded, item_key))
+            thread.load_failed.connect(self._on_image_failed)
+            self._loader_threads.append(thread)
+            thread.start()
+
+            # Rebuild folio lists for each unique sys_id
+            if frag.sys_id not in self._folio_lists:
+                self._spawn_meta_loader(frag.sys_id, frag.shelfmark)
+
+        # If doc has zero fragments, clear loading guard immediately
+        if not doc.fragments:
+            self._loading_document = False
+            self._load_pending_count = 0
+
+        # Update details panel
+        self._title_edit.setText(doc.title)
+        self._notes_edit.setPlainText(doc.notes)
+        self._update_fragments_label()
+        self._details_group.setVisible(True)
+        self.setWindowTitle(f"{tr('Fragment Puzzle')} - {doc.title}")
+
+    def _spawn_meta_loader(self, sys_id, shelfmark=''):
+        """Spawn a PuzzleMetaLoaderThread to fetch folio lists for a sys_id."""
+        thread = PuzzleMetaLoaderThread(self.app.meta_mgr, sys_id, shelfmark)
+        thread.meta_ready.connect(self._on_meta_ready_for_load)
+        thread.meta_failed.connect(lambda sid, err: logger.warning("Meta load failed for %s: %s", sid, err))
+        self._meta_threads.append(thread)
+        thread.start()
+
+    def _on_meta_ready_for_load(self, sys_id, shelfmark, images_nli):
+        """Handle meta_ready from folio list rebuild during document load."""
+        if sip.isdeleted(self):
+            return
+        self._folio_lists[sys_id] = images_nli
+
+    def _on_save_join(self):
+        """Save current puzzle as a join document (new or update)."""
+        if not self._fragment_items:
+            QMessageBox.information(self, tr("Empty"), tr("Add fragments before saving"))
+            return
+
+        from shared.puzzle_model import PuzzleDocument
+        from shared.puzzle_export import auto_suggest_title, generate_thumbnail
+        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_service import get_puzzle_service
+
+        fragments = self._build_fragments_list()
+
+        if self._current_doc_id is None:
+            suggested = auto_suggest_title(fragments)
+            title, ok = QInputDialog.getText(
+                self, tr("Save Join"), tr("Title:"),
+                QLineEdit.EchoMode.Normal, suggested
+            )
+            if not ok or not title.strip():
+                return
+            doc = PuzzleDocument(title=title.strip(), fragments=fragments)
+        else:
+            svc = get_puzzle_service()
+            doc = svc.load_document(self._current_doc_id)
+            if doc is None:
+                doc = PuzzleDocument(id=self._current_doc_id, fragments=fragments)
+            doc.fragments = fragments
+            doc.title = self._title_edit.text() or doc.title
+            doc.notes = self._notes_edit.toPlainText()
+            import datetime
+            doc.updated_at = datetime.datetime.now().isoformat()
+
+        # Generate thumbnail
+        img_svc = get_puzzle_image_service()
+        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
+
+        svc = get_puzzle_service()
+        doc_id = svc.save_document(doc, thumbnail_b64=thumb)
+        if doc_id:
+            self._current_doc_id = doc_id
+            self._has_unsaved_changes = False
+            self._details_group.setVisible(True)
+            self._title_edit.setText(doc.title)
+            self._notes_edit.setPlainText(doc.notes)
+            self._update_fragments_label()
+            self._refresh_docs_list()
+            self.setWindowTitle(f"{tr('Fragment Puzzle')} - {doc.title}")
+            self.statusBar().showMessage(tr("Saved"), 3000)
+
+    def _build_fragments_list(self):
+        """Build list of PuzzleFragment from current canvas items."""
+        fragments = []
+        for key, item in self._fragment_items.items():
+            sys_id, folio_label = key
+            pf = item.puzzle_frag
+            # Sync current position to puzzle_frag
+            pf.x = item.pos().x()
+            pf.y = item.pos().y()
+            pf.rotation = item.rotation()
+            pf.scale = item.scale()
+            pf.flip_h = item.transform().m11() < 0
+            pf.flip_v = item.transform().m22() < 0
+            fragments.append(pf)
+        return fragments
+
+    def _on_new_puzzle(self):
+        """Clear canvas to a fresh scratch pad."""
+        if self._current_doc_id is None and self._has_unsaved_changes and self._fragment_items:
+            reply = QMessageBox.question(
+                self, tr("Save current work?"),
+                tr("Save current puzzle before starting new?"),
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            if reply == QMessageBox.StandardButton.Save:
+                self._on_save_join()
+        self._clear_canvas()
+        self._current_doc_id = None
+        self._has_unsaved_changes = False
+        self._details_group.setVisible(False)
+        self.setWindowTitle(tr("Fragment Puzzle"))
+
+    def _clear_canvas(self):
+        """Remove all fragments from canvas."""
+        scene = self.canvas_view.scene
+        for key in list(self._fragment_items.keys()):
+            item = self._fragment_items.pop(key, None)
+            if item and item.scene():
+                scene.removeItem(item)
+        for key in list(self._placeholder_items.keys()):
+            item = self._placeholder_items.pop(key, None)
+            if item and item.scene():
+                scene.removeItem(item)
+        self._pending_fragments.clear()
+        self._folio_lists.clear()
+        self._next_x = 50.0
+        self._refresh_fragment_combo()
+
+    def _on_export_png(self):
+        """Export composite PNG at full resolution."""
+        if not self._fragment_items:
+            QMessageBox.information(self, tr("Empty"), tr("Add fragments before exporting"))
+            return
+
+        from shared.puzzle_export import auto_suggest_title, compose_puzzle_export
+        from shared.puzzle_image_service import get_puzzle_image_service
+
+        fragments = self._build_fragments_list()
+        suggested_name = auto_suggest_title(fragments).replace(' ', '_').replace('+', '_') + '.png'
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export Composite Image"), suggested_name,
+            "PNG Images (*.png)"
+        )
+        if not path:
+            return
+
+        progress = QProgressDialog(tr("Exporting..."), tr("Cancel"), 0, 0, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+        QApplication.processEvents()
+
+        try:
+            img_svc = get_puzzle_image_service()
+            result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
+            if result:
+                result.save(path, 'PNG')
+                self.statusBar().showMessage(tr("Exported to") + f" {path}", 5000)
+            else:
+                QMessageBox.warning(self, tr("Error"), tr("Export failed"))
+        except Exception as e:
+            QMessageBox.warning(self, tr("Error"), str(e))
+        finally:
+            progress.close()
+
+    def _on_doc_context_menu(self, pos):
+        """Show context menu on right-click in document list."""
+        item = self._docs_list.itemAt(pos)
+        if not item:
+            return
+        doc_id = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        delete_action = menu.addAction(tr("Delete"))
+        rename_action = menu.addAction(tr("Rename"))
+        action = menu.exec(self._docs_list.mapToGlobal(pos))
+        if action == delete_action:
+            self._delete_document(doc_id)
+        elif action == rename_action:
+            self._rename_document(doc_id)
+
+    def _delete_document(self, doc_id):
+        """Delete a saved join document with confirmation."""
+        reply = QMessageBox.question(
+            self, tr("Delete join?"),
+            tr("Are you sure you want to delete this join document?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from shared.puzzle_service import get_puzzle_service
+        svc = get_puzzle_service()
+        svc.delete_document(doc_id)
+        if self._current_doc_id == doc_id:
+            self._current_doc_id = None
+            self._has_unsaved_changes = False
+            self._details_group.setVisible(False)
+            self.setWindowTitle(tr("Fragment Puzzle"))
+        self._refresh_docs_list()
+
+    def _rename_document(self, doc_id):
+        """Rename a saved join document."""
+        from shared.puzzle_service import get_puzzle_service
+        svc = get_puzzle_service()
+        doc = svc.load_document(doc_id)
+        if not doc:
+            return
+        title, ok = QInputDialog.getText(
+            self, tr("Rename"), tr("New title:"),
+            QLineEdit.EchoMode.Normal, doc.title
+        )
+        if ok and title.strip():
+            doc.title = title.strip()
+            import datetime
+            doc.updated_at = datetime.datetime.now().isoformat()
+            # Use thumbnail_b64=None to preserve existing thumbnail
+            svc.save_document(doc)
+            self._refresh_docs_list()
+            if self._current_doc_id == doc_id:
+                self._title_edit.setText(doc.title)
+                self.setWindowTitle(f"{tr('Fragment Puzzle')} - {doc.title}")
+
+    def _on_title_changed(self):
+        """Handle title edit finished -- auto-save if editing a saved document."""
+        if self._current_doc_id is None:
+            return
+        self._schedule_auto_save()
+
+    def _on_notes_changed(self):
+        """Handle notes text changed -- auto-save if editing a saved document."""
+        if self._current_doc_id is None:
+            return
+        self._schedule_auto_save()
+
+    def _on_scene_changed(self, region_list):
+        """Handle scene.changed signal -- debounce and trigger auto-save for saved documents."""
+        if self._current_doc_id is not None and self._fragment_items:
+            self._scene_change_debounce.start()
+
+    def _schedule_auto_save(self):
+        """Schedule a debounced auto-save (1.5s)."""
+        if self._current_doc_id is None:
+            self._has_unsaved_changes = True
+            return
+        self._auto_save_timer.start()  # restarts if already running
+
+    def _auto_save(self):
+        """Perform auto-save for the current document."""
+        if self._current_doc_id is None:
+            return
+        # Do NOT auto-save while document is still loading
+        if self._loading_document:
+            return
+
+        from shared.puzzle_service import get_puzzle_service
+        from shared.puzzle_export import generate_thumbnail
+        from shared.puzzle_image_service import get_puzzle_image_service
+
+        fragments = self._build_fragments_list()
+        svc = get_puzzle_service()
+        doc = svc.load_document(self._current_doc_id)
+        if doc is None:
+            return
+        doc.fragments = fragments
+        doc.title = self._title_edit.text() or doc.title
+        doc.notes = self._notes_edit.toPlainText()
+        import datetime
+        doc.updated_at = datetime.datetime.now().isoformat()
+        # Regenerate thumbnail
+        img_svc = get_puzzle_image_service()
+        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
+        svc.save_document(doc, thumbnail_b64=thumb)
+        self._refresh_docs_list()
+        self.statusBar().showMessage(tr("Auto-saved"), 1500)
+
+    def _update_fragments_label(self):
+        """Update the fragments read-only label in the details panel."""
+        parts = []
+        for key, item in self._fragment_items.items():
+            sys_id, folio_label = key
+            pf = item.puzzle_frag
+            sm = pf.shelfmark or sys_id
+            parts.append(f"{sm} ({folio_label})")
+        self._fragments_label.setText('\n'.join(parts) if parts else tr("No fragments"))
 
     # ── Cleanup ──
 
