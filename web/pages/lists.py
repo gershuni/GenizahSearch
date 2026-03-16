@@ -513,6 +513,12 @@ def create_lists_page():
                                     on_click=lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
                                 ).props('flat round dense').tooltip(tr('Browse'))
 
+                                # Add to Puzzle button (Phase 49)
+                                ui.button(
+                                    icon='extension',
+                                    on_click=lambda sid=sys_id: ui.navigate.to(f'/puzzle?add={sid}')
+                                ).props('flat round dense').tooltip(tr('Add to Puzzle'))
+
                                 # Edit button
                                 ui.button(
                                     icon='edit',

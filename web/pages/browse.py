@@ -2180,6 +2180,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             on_click=add_manuscript_to_list
                         ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('In List') if star_icon == 'star' else tr('Add to List'))
 
+                        # Add to Puzzle button (Phase 49)
+                        def add_to_puzzle():
+                            sid = state.sys_id
+                            fl = state.current_page.fl_id if state.current_page else None
+                            param = f'{sid},{fl}' if fl else str(sid)
+                            ui.navigate.to(f'/puzzle?add={param}')
+                        ui.button(
+                            icon='extension',
+                            on_click=add_to_puzzle
+                        ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Puzzle'))
+
                     # Next Shelfmark Button
                     ui.button(
                         icon='skip_previous' if is_rtl() else 'skip_next',

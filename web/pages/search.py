@@ -4676,6 +4676,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     'flat round size=sm'
                                 ).style('color: var(--accent-amber);').tooltip(tr('In List') if adv_result_in_list else tr('Add to List'))
 
+                                # Add to Puzzle button (Phase 49)
+                                def _make_puzzle_handler(sid=adv_result_sys_id, fid=fl_id):
+                                    def handler():
+                                        param = f'{sid},{fid}' if fid else str(sid)
+                                        ui.navigate.to(f'/puzzle?add={param}')
+                                    return handler
+                                ui.button(icon='extension', on_click=_make_puzzle_handler()).props(
+                                    'flat round size=sm'
+                                ).tooltip(tr('Add to Puzzle'))
+
                                 if has_image:
                                     def toggle_image():
                                         adv_state.show_image_panel = not adv_state.show_image_panel
