@@ -1499,21 +1499,26 @@ def create_puzzle_page(initial_add: str = None):
                 # Build unique fragment map: sys_id -> shelfmark
                 frag_map = {}
                 if joins_data:
-                    for join in joins_data.get('joins', []):
-                        for doc_key, shelf_key in [('document_id_a', 'fragment_a'), ('document_id_b', 'fragment_b')]:
-                            doc_id = join.get(doc_key, '')
-                            frag_shelf = join.get(shelf_key, '')
-                            if doc_id and doc_id != sel_sys_id and doc_id not in frag_map:
-                                frag_map[doc_id] = frag_shelf or doc_id
+                    # Use fragment_details which has document_id + shelfmark
+                    for fd in joins_data.get('fragment_details', []):
+                        doc_id = fd.get('document_id', '')
+                        shelf = fd.get('shelfmark', '')
+                        if doc_id and doc_id != sel_sys_id and doc_id not in frag_map:
+                            frag_map[doc_id] = shelf or doc_id
 
-                    # Also from fragments list
+                    # Fallback: resolve shelfmarks from fragments list
                     for frag_shelf in joins_data.get('fragments', []):
-                        if isinstance(frag_shelf, str) and state.meta_mgr:
-                            from genizah_core import normalize_shelfmark
-                            norm = normalize_shelfmark(frag_shelf)
-                            sid = state.meta_mgr._shelf_to_sys.get(norm) if hasattr(state.meta_mgr, '_shelf_to_sys') else None
-                            if sid and sid != sel_sys_id and sid not in frag_map:
-                                frag_map[sid] = frag_shelf
+                        if isinstance(frag_shelf, str):
+                            # Check if already in frag_map by shelfmark
+                            if frag_shelf in [v for v in frag_map.values()]:
+                                continue
+                            # Resolve to sys_id
+                            if state.meta_mgr:
+                                from genizah_core import normalize_shelfmark
+                                norm = normalize_shelfmark(frag_shelf)
+                                sid = state.meta_mgr._shelf_to_sys.get(norm) if hasattr(state.meta_mgr, '_shelf_to_sys') else None
+                                if sid and sid != sel_sys_id and sid not in frag_map:
+                                    frag_map[sid] = frag_shelf
 
                 # Add FJMS joins
                 for fj in fjms_joins:
