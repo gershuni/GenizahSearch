@@ -2569,13 +2569,14 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
     flip H/V, wheel-resize, Shift-snap to 20px grid, multi-select with visual handles.
     """
 
-    HANDLE_SIZE = 10  # handle square half-size in pixels
-    _HANDLE_HIT = 14  # hit-test radius (slightly larger than visual)
+    HANDLE_SIZE = 10  # handle visual half-size in pixels
+    _BORDER_ZONE = 30  # width of the interactive border strip (pixels)
+    _CORNER_ZONE = 40  # corner zone size (pixels from corner)
 
     # Handle identifiers
     _H_NONE = 0
     _H_TL = 1; _H_TR = 2; _H_BL = 3; _H_BR = 4  # corners = rotate
-    _H_T = 5; _H_B = 6; _H_L = 7; _H_R = 8       # edges = resize
+    _H_T = 5; _H_B = 6; _H_L = 7; _H_R = 8       # edges = resize (or crop)
 
     def __init__(self, puzzle_frag, pixmap, parent=None):
         super().__init__(pixmap, parent)
@@ -2621,10 +2622,46 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
         }
 
     def _hit_handle(self, pos):
-        """Return handle id under pos, or _H_NONE."""
-        for hid, hpt in self._handle_points().items():
-            if math.hypot(pos.x() - hpt.x(), pos.y() - hpt.y()) < self._HANDLE_HIT:
-                return hid
+        """Return handle id under pos using wide border zones.
+
+        The entire border strip (_BORDER_ZONE px from edge) is interactive.
+        Corners (within _CORNER_ZONE of each corner) → rotate handles.
+        Edge strips between corners → resize/crop handles.
+        """
+        br = self._pixmap_rect()
+        x, y = pos.x(), pos.y()
+        bz = self._BORDER_ZONE
+        cz = self._CORNER_ZONE
+
+        # Check if in the border zone at all
+        near_top = y < br.top() + bz
+        near_bottom = y > br.bottom() - bz
+        near_left = x < br.left() + bz
+        near_right = x > br.right() - bz
+
+        if not (near_top or near_bottom or near_left or near_right):
+            return self._H_NONE
+
+        # Corner zones (priority over edges)
+        if near_top and near_left and (x < br.left() + cz) and (y < br.top() + cz):
+            return self._H_TL
+        if near_top and near_right and (x > br.right() - cz) and (y < br.top() + cz):
+            return self._H_TR
+        if near_bottom and near_left and (x < br.left() + cz) and (y > br.bottom() - cz):
+            return self._H_BL
+        if near_bottom and near_right and (x > br.right() - cz) and (y > br.bottom() - cz):
+            return self._H_BR
+
+        # Edge zones
+        if near_top:
+            return self._H_T
+        if near_bottom:
+            return self._H_B
+        if near_left:
+            return self._H_L
+        if near_right:
+            return self._H_R
+
         return self._H_NONE
 
     # ── Flip ──
@@ -2651,10 +2688,25 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
 
     # ── Mouse interaction ──
 
+    def _is_crop_mode(self):
+        """Check if crop mode is active (set by PuzzleCanvasWindow)."""
+        return getattr(self, '_crop_mode', False)
+
     def mousePressEvent(self, event):
         if self.isSelected():
             hid = self._hit_handle(event.pos())
-            if hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR):
+            if self._is_crop_mode() and hid in (self._H_T, self._H_B, self._H_L, self._H_R):
+                # Crop mode: edge drag crops
+                self._cropping = True
+                self._crop_handle = hid
+                self._crop_start_pos = event.pos()
+                # Save original for revert
+                if not hasattr(self, '_original_pixmap') or self._original_pixmap is None:
+                    self._original_pixmap = self.pixmap().copy()
+                    self._crop_offsets = [0, 0, 0, 0]
+                event.accept()
+                return
+            elif hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR):
                 # Corner = rotation
                 self._rotating = True
                 center = self._pixmap_rect().center()
@@ -2671,7 +2723,6 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
                 self._resize_handle = hid
                 self._resize_start_pos = event.pos()
                 self._resize_start_scale = self.scale()
-                # Store base scales on all selected items for proportional resize
                 scene = self.scene()
                 if scene:
                     for sel_item in scene.selectedItems():
@@ -2682,6 +2733,31 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if getattr(self, '_cropping', False):
+            delta = event.pos() - self._crop_start_pos
+            hid = self._crop_handle
+            pm = self.pixmap()
+            if pm.isNull():
+                event.accept()
+                return
+            w, h = pm.width(), pm.height()
+            # Compute how many pixels to crop based on drag distance
+            if hid == self._H_T:
+                amount = max(0, int(delta.y()))
+            elif hid == self._H_B:
+                amount = max(0, int(-delta.y()))
+            elif hid == self._H_L:
+                amount = max(0, int(delta.x()))
+            elif hid == self._H_R:
+                amount = max(0, int(-delta.x()))
+            else:
+                amount = 0
+            # Live preview: show crop overlay via update
+            self._crop_preview_amount = amount
+            self.update()
+            event.accept()
+            return
+
         if self._rotating:
             center = self._pixmap_rect().center()
             pos = event.pos()
@@ -2750,6 +2826,40 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
         self.puzzle_frag.y = self.pos().y()
 
     def mouseReleaseEvent(self, event):
+        if getattr(self, '_cropping', False):
+            # Apply the crop
+            amount = getattr(self, '_crop_preview_amount', 0)
+            if amount > 0:
+                hid = self._crop_handle
+                edge = {self._H_T: "top", self._H_B: "bottom",
+                        self._H_L: "left", self._H_R: "right"}.get(hid)
+                if edge:
+                    pm = self.pixmap()
+                    w, h = pm.width(), pm.height()
+                    a = min(amount, w // 3 if edge in ("left", "right") else h // 3)
+                    t = a if edge == "top" else 0
+                    b = a if edge == "bottom" else 0
+                    l = a if edge == "left" else 0
+                    r = a if edge == "right" else 0
+                    if w - l - r >= 50 and h - t - b >= 50:
+                        cropped = pm.copy(l, t, w - l - r, h - t - b)
+                        self._crop_offsets[0] += t
+                        self._crop_offsets[1] += b
+                        self._crop_offsets[2] += l
+                        self._crop_offsets[3] += r
+                        self.prepareGeometryChange()
+                        self.setPixmap(cropped)
+                        self.setTransformOriginPoint(self._pixmap_rect().center())
+                        self.setPos(self.pos().x() + l * self.scale(),
+                                    self.pos().y() + t * self.scale())
+                        self.puzzle_frag.x = self.pos().x()
+                        self.puzzle_frag.y = self.pos().y()
+            self._cropping = False
+            self._crop_handle = self._H_NONE
+            self._crop_preview_amount = 0
+            self.update()
+            event.accept()
+            return
         self._rotating = False
         self._resizing = False
         self._resize_handle = self._H_NONE
@@ -2761,16 +2871,15 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
     def hoverMoveEvent(self, event):
         if self.isSelected():
             hid = self._hit_handle(event.pos())
+            crop = self._is_crop_mode()
             if hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR):
-                # Corners = rotation cursor
-                # Use crosshair-like cursor for rotation (no native rotate cursor in Qt)
-                self.setCursor(Qt.CursorShape.CrossCursor)
+                self.setCursor(Qt.CursorShape.CrossCursor)  # rotation
             elif hid in (self._H_L, self._H_R):
-                self.setCursor(Qt.CursorShape.SizeHorCursor)
+                self.setCursor(Qt.CursorShape.SplitHCursor if crop else Qt.CursorShape.SizeHorCursor)
             elif hid in (self._H_T, self._H_B):
-                self.setCursor(Qt.CursorShape.SizeVerCursor)
+                self.setCursor(Qt.CursorShape.SplitVCursor if crop else Qt.CursorShape.SizeVerCursor)
             else:
-                self.setCursor(Qt.CursorShape.SizeAllCursor)  # drag move
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
         super().hoverMoveEvent(event)
@@ -2808,25 +2917,50 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
         if not self.isSelected():
             return
         pr = self._pixmap_rect()
-        # Dashed selection border
-        painter.setPen(QPen(QColor(255, 255, 255, 180), 1, Qt.PenStyle.DashLine))
+        crop = self._is_crop_mode()
+
+        # Crop preview overlay — darken the area being cropped
+        preview_amt = getattr(self, '_crop_preview_amount', 0)
+        if crop and preview_amt > 0 and getattr(self, '_cropping', False):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(255, 0, 0, 80)))
+            hid = getattr(self, '_crop_handle', self._H_NONE)
+            a = preview_amt
+            if hid == self._H_T:
+                painter.drawRect(QRectF(pr.left(), pr.top(), pr.width(), min(a, pr.height() / 3)))
+            elif hid == self._H_B:
+                painter.drawRect(QRectF(pr.left(), pr.bottom() - min(a, pr.height() / 3), pr.width(), min(a, pr.height() / 3)))
+            elif hid == self._H_L:
+                painter.drawRect(QRectF(pr.left(), pr.top(), min(a, pr.width() / 3), pr.height()))
+            elif hid == self._H_R:
+                painter.drawRect(QRectF(pr.right() - min(a, pr.width() / 3), pr.top(), min(a, pr.width() / 3), pr.height()))
+
+        # Selection border
+        border_color = QColor(255, 120, 50, 200) if crop else QColor(255, 255, 255, 180)
+        painter.setPen(QPen(border_color, 2 if crop else 1, Qt.PenStyle.DashLine))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(pr)
-        # Draw handles
+
+        # Corner handles = circles (rotation)
         hs = self.HANDLE_SIZE
-        handles = self._handle_points()
-        for hid, pt in handles.items():
-            is_corner = hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR)
-            if is_corner:
-                # Corner handles = circles (rotation)
-                painter.setPen(QPen(QColor(255, 255, 255), 1))
-                painter.setBrush(QBrush(QColor(255, 255, 255, 128)))
-                painter.drawEllipse(pt, hs / 2, hs / 2)
-            else:
-                # Edge handles = squares (resize)
-                painter.setPen(QPen(QColor(200, 200, 255), 1))
-                painter.setBrush(QBrush(QColor(200, 200, 255, 160)))
-                painter.drawRect(QRectF(pt.x() - hs / 2, pt.y() - hs / 2, hs, hs))
+        painter.setPen(QPen(QColor(255, 255, 255), 1))
+        painter.setBrush(QBrush(QColor(255, 255, 255, 128)))
+        for hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR):
+            pt = self._handle_points()[hid]
+            painter.drawEllipse(pt, hs / 2, hs / 2)
+
+        # Edge handles — different visual for crop vs resize mode
+        if crop:
+            # Orange triangles pointing inward for crop
+            painter.setPen(QPen(QColor(255, 120, 50), 1))
+            painter.setBrush(QBrush(QColor(255, 120, 50, 180)))
+        else:
+            # Blue squares for resize
+            painter.setPen(QPen(QColor(200, 200, 255), 1))
+            painter.setBrush(QBrush(QColor(200, 200, 255, 160)))
+        for hid in (self._H_T, self._H_B, self._H_L, self._H_R):
+            pt = self._handle_points()[hid]
+            painter.drawRect(QRectF(pt.x() - hs / 2, pt.y() - hs / 2, hs, hs))
 
     # ── Utilities ──
 
@@ -2866,8 +3000,17 @@ class PuzzleCanvasView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # State
-        self._checkerboard = False
+        # State: background mode cycles through options
+        # 0=dark gray, 1=black, 2=white, 3=checkerboard, 4=light table (warm), 5=grid
+        self._bg_mode = 0
+        self._BG_MODES = [
+            ("dark_gray", QColor(0x33, 0x33, 0x33)),
+            ("black", QColor(0x00, 0x00, 0x00)),
+            ("white", QColor(0xFF, 0xFF, 0xFF)),
+            ("checkerboard", None),
+            ("light_table", QColor(0xF5, 0xF0, 0xE0)),  # warm cream (simulates light table)
+            ("grid", QColor(0x28, 0x28, 0x28)),
+        ]
         self._panning = False
         self._pan_start = QPointF()
 
@@ -2875,29 +3018,50 @@ class PuzzleCanvasView(QGraphicsView):
 
     # ── Background ──
 
+    def cycle_background(self):
+        """Cycle to the next background mode."""
+        self._bg_mode = (self._bg_mode + 1) % len(self._BG_MODES)
+        self.scene.invalidate()
+        return self._BG_MODES[self._bg_mode][0]
+
     def set_checkerboard(self, enabled):
-        """Toggle between dark gray and checkerboard background."""
-        self._checkerboard = enabled
+        """Legacy toggle — switches between dark gray and checkerboard."""
+        self._bg_mode = 3 if enabled else 0
         self.scene.invalidate()
 
     def drawBackground(self, painter, rect):
-        if not self._checkerboard:
-            painter.fillRect(rect, QColor(0x33, 0x33, 0x33))
-            return
-        # 20px checkerboard
-        tile = 20
-        light = QColor(0xC8, 0xC8, 0xC8)
-        dark = QColor(0x96, 0x96, 0x96)
-        left = int(rect.left()) - (int(rect.left()) % tile)
-        top = int(rect.top()) - (int(rect.top()) % tile)
-        x = left
-        while x < rect.right():
+        mode_name, color = self._BG_MODES[self._bg_mode]
+
+        if mode_name == "checkerboard":
+            tile = 20
+            light = QColor(0xC8, 0xC8, 0xC8)
+            dark = QColor(0x96, 0x96, 0x96)
+            left = int(rect.left()) - (int(rect.left()) % tile)
+            top = int(rect.top()) - (int(rect.top()) % tile)
+            x = left
+            while x < rect.right():
+                y = top
+                while y < rect.bottom():
+                    c = light if ((x // tile) + (y // tile)) % 2 == 0 else dark
+                    painter.fillRect(QRectF(x, y, tile, tile), c)
+                    y += tile
+                x += tile
+        elif mode_name == "grid":
+            painter.fillRect(rect, color)
+            painter.setPen(QPen(QColor(0x40, 0x40, 0x40), 1))
+            step = 50
+            left = int(rect.left()) - (int(rect.left()) % step)
+            top = int(rect.top()) - (int(rect.top()) % step)
+            x = left
+            while x < rect.right():
+                painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+                x += step
             y = top
             while y < rect.bottom():
-                color = light if ((x // tile) + (y // tile)) % 2 == 0 else dark
-                painter.fillRect(QRectF(x, y, tile, tile), color)
-                y += tile
-            x += tile
+                painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+                y += step
+        else:
+            painter.fillRect(rect, color)
 
     # ── Pan ──
 
@@ -3122,8 +3286,8 @@ class PuzzleCanvasWindow(QMainWindow):
         row2.addStretch()
 
         self.btn_bg_toggle = QPushButton(tr("Background"))
-        self.btn_bg_toggle.setCheckable(True)
-        self.btn_bg_toggle.setToolTip(tr("Toggle checkerboard background"))
+        self.btn_bg_toggle.setToolTip(tr("Cycle background: dark gray → black → white → checkerboard → light table → grid"))
+        self.btn_bg_toggle.clicked.connect(self._cycle_bg)
         row2.addWidget(self.btn_bg_toggle)
 
         main_layout.addLayout(row2)
@@ -3181,7 +3345,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
         # --- Canvas view ---
         self.canvas_view = PuzzleCanvasView(self)
-        self.btn_bg_toggle.toggled.connect(self.canvas_view.set_checkerboard)
+        # bg toggle is now cycle-click, not toggled
         main_layout.addWidget(self.canvas_view, 1)
 
         # Selection tracking
@@ -3570,6 +3734,19 @@ class PuzzleCanvasWindow(QMainWindow):
     def _flip_selected_v(self):
         for item in self.canvas_view.get_selected_fragments():
             item.flip_vertical()
+
+    def _cycle_bg(self):
+        """Cycle to next background mode and show name in status bar."""
+        bg_names = {
+            "dark_gray": tr("Dark Gray"),
+            "black": tr("Black"),
+            "white": tr("White"),
+            "checkerboard": tr("Checkerboard"),
+            "light_table": tr("Light Table"),
+            "grid": tr("Grid"),
+        }
+        mode = self.canvas_view.cycle_background()
+        self.statusBar().showMessage(bg_names.get(mode, mode), 2000)
 
     def _rotate_selected(self, degrees):
         """Rotate selected fragments by given degrees."""
@@ -4010,34 +4187,26 @@ class PuzzleCanvasWindow(QMainWindow):
             self._nudge_scale(5)
         elif key == Qt.Key.Key_Minus:
             self._nudge_scale(-5)
-        elif key == Qt.Key.Key_Up:
+        elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Right):
             if crop_active:
-                self._crop_edge("top")
+                edge_map = {Qt.Key.Key_Up: "top", Qt.Key.Key_Down: "bottom",
+                            Qt.Key.Key_Left: "left", Qt.Key.Key_Right: "right"}
+                self._crop_edge(edge_map[key])
             else:
+                # Convert view-space direction to scene-space delta
+                # This handles any view transform (zoom, fitInView flips)
+                step = 5
+                view_dx = {Qt.Key.Key_Left: -step, Qt.Key.Key_Right: step}.get(key, 0)
+                view_dy = {Qt.Key.Key_Up: -step, Qt.Key.Key_Down: step}.get(key, 0)
+                # Map a view-space vector to scene-space
+                origin = self.canvas_view.mapToScene(0, 0)
+                target = self.canvas_view.mapToScene(int(view_dx), int(view_dy))
+                dx = target.x() - origin.x()
+                dy = target.y() - origin.y()
                 for it in self.canvas_view.get_selected_fragments():
-                    it.setPos(it.pos().x(), it.pos().y() - 1)
-                    it.puzzle_frag.y = it.pos().y()
-        elif key == Qt.Key.Key_Down:
-            if crop_active:
-                self._crop_edge("bottom")
-            else:
-                for it in self.canvas_view.get_selected_fragments():
-                    it.setPos(it.pos().x(), it.pos().y() + 1)
-                    it.puzzle_frag.y = it.pos().y()
-        elif key == Qt.Key.Key_Left:
-            if crop_active:
-                self._crop_edge("left")
-            else:
-                for it in self.canvas_view.get_selected_fragments():
-                    it.setPos(it.pos().x() - 1, it.pos().y())
+                    it.setPos(it.pos().x() + dx, it.pos().y() + dy)
                     it.puzzle_frag.x = it.pos().x()
-        elif key == Qt.Key.Key_Right:
-            if crop_active:
-                self._crop_edge("right")
-            else:
-                for it in self.canvas_view.get_selected_fragments():
-                    it.setPos(it.pos().x() + 1, it.pos().y())
-                    it.puzzle_frag.x = it.pos().x()
+                    it.puzzle_frag.y = it.pos().y()
         else:
             super().keyPressEvent(event)
 

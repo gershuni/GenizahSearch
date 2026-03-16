@@ -2778,6 +2778,17 @@ TRANSLATIONS = {
     "Add Joined Fragments": "הוסף קטעים מצורפים",
     "Joins for: {}": "צירופים עבור: {}",
     "Could not resolve: {}": "לא ניתן לזהות: {}",
+    "Dark Gray": "אפור כהה",
+    "Black": "שחור",
+    "White": "לבן",
+    "Checkerboard": "משבצות",
+    "Light Table": "שולחן אור",
+    "Grid": "רשת",
+    "Cycle background: dark gray → black → white → checkerboard → light table → grid": "החלף רקע: אפור כהה → שחור → לבן → משבצות → שולחן אור → רשת",
+    "Enter crop mode — drag edges to trim": "מצב חיתוך — גרור שוליים לחיתוך",
+    "Crop mode: drag edges with arrow keys (↑↓←→), Enter=OK, Esc=revert": "מצב חיתוך: גרור שוליים עם חצים (↑↓←→), Enter=אישור, Esc=ביטול",
+    "Select a fragment first": "בחר קטע קודם",
+    "All joined fragments are already on canvas": "כל הקטעים המצורפים כבר על הקנבס",
 }
 
 # Hebrew library display names (keyed by library_code)
