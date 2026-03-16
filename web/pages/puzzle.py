@@ -77,7 +77,7 @@ window.puzzleCanvas = {
         console.log('Puzzle canvas initialized:', w, 'x', h);
     },
 
-    addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV) {
+    addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV, meta) {
         if (!this.canvas) return;
         var self = this;
 
@@ -98,12 +98,10 @@ window.puzzleCanvas = {
         this.canvas.requestRenderAll();
 
         console.log('Loading fragment image:', key, imageUrl);
-        // Use Image element directly for reliable cross-browser loading
         var htmlImg = new Image();
         htmlImg.crossOrigin = 'anonymous';
         htmlImg.onload = function() {
-            console.log('Image loaded successfully:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
-            // Remove placeholder
+            console.log('Image loaded:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
             self.canvas.getObjects().forEach(function(obj) {
                 if (obj._isPlaceholder && obj._placeholderKey === key) {
                     self.canvas.remove(obj);
@@ -123,24 +121,27 @@ window.puzzleCanvas = {
                 transparentCorners: false,
                 perPixelTargetFind: true,
                 _fragmentKey: key,
-                _imageUrl: imageUrl
+                _imageUrl: imageUrl,
+                _fragmentMeta: meta || null
             });
 
             self.canvas.add(img);
             self.fragments[key] = img;
             self.canvas.setActiveObject(img);
             self.canvas.requestRenderAll();
-            console.log('Fragment added to canvas:', key);
+
+            // Auto-load folios if meta has sys_id
+            if (meta && meta.sys_id) {
+                self.loadFolios(key, meta.sys_id);
+            }
         };
         htmlImg.onerror = function(err) {
             console.error('Failed to load image for', key, imageUrl, err);
-            // Remove placeholder on error
             self.canvas.getObjects().forEach(function(obj) {
                 if (obj._isPlaceholder && obj._placeholderKey === key) {
                     self.canvas.remove(obj);
                 }
             });
-            // Show error text
             var errText = new fabric.Text('Image load failed: ' + key, {
                 left: x, top: y,
                 fontSize: 12, fill: '#ff6666',
@@ -158,10 +159,11 @@ window.puzzleCanvas = {
         if (!active || active.length === 0) return;
 
         var self = this;
+        var removedKeys = [];
         active.forEach(function(obj) {
-            // Find and remove from fragments dict
             for (var key in self.fragments) {
                 if (self.fragments[key] === obj) {
+                    removedKeys.push(key);
                     delete self.fragments[key];
                     break;
                 }
@@ -170,6 +172,8 @@ window.puzzleCanvas = {
         });
         this.canvas.discardActiveObject();
         this.canvas.requestRenderAll();
+        // Return removed keys so Python can update storage
+        return removedKeys;
     },
 
     setupWheelZoom: function() {
@@ -321,17 +325,7 @@ window.puzzleCanvas = {
             }.bind(this)},
             {label: '---'},
             {label: 'Toggle Background', action: function() {
-                // Toggle between processed and original by swapping image URL
-                var key = target._fragmentKey;
-                if (key && target._imageUrl) {
-                    var url = target._imageUrl;
-                    var isProcessed = !url.includes('processed=false');
-                    var newUrl = isProcessed ?
-                        url.replace(/processed=true|$/, 'processed=false').replace('&&', '&') :
-                        url.replace('processed=false', 'processed=true');
-                    // Simple toggle flag
-                    target._isOriginal = !target._isOriginal;
-                }
+                self._toggleFragmentBg(target);
             }}
         ];
 
@@ -542,19 +536,8 @@ window.puzzleCanvas = {
     },
 
     _syncSelection: function(e) {
-        // Sync selected object properties to Python-side sliders
-        var active = this.canvas.getActiveObject();
-        if (!active) return;
-        // Emit selection info for Python to update sliders
-        var info = {
-            scale: Math.round(Math.abs(active.scaleX || 1) * 100),
-            rotation: Math.round(active.angle || 0),
-            key: active._fragmentKey || ''
-        };
-        // Use NiceGUI emit if available
-        if (window.emitEvent) {
-            window.emitEvent('puzzle_selection', info);
-        }
+        // Sync selected object properties — called on selection change
+        // No-op for now; Python reads state via getSelectedKey/getState when needed
     },
 
     cycleBgMode: function() {
@@ -734,11 +717,45 @@ window.puzzleCanvas = {
     },
 
     toggleSelectedBg: function() {
-        // For the selected fragment, toggle between processed and original
         var active = this.canvas.getActiveObject();
-        if (!active || !active._fragmentKey) return;
-        var key = active._fragmentKey;
-        var meta = active._fragmentMeta;
+        if (active) this._toggleFragmentBg(active);
+    },
+
+    _reloadFragment: function(key, newUrl, newMeta) {
+        // Reload a fragment image in-place (same position/rotation/scale)
+        var obj = this.fragments[key];
+        if (!obj) return;
+        var self = this;
+        var pos = {
+            left: obj.left, top: obj.top, angle: obj.angle,
+            scaleX: obj.scaleX, scaleY: obj.scaleY,
+            flipX: obj.flipX, flipY: obj.flipY
+        };
+        var htmlImg = new Image();
+        htmlImg.crossOrigin = 'anonymous';
+        htmlImg.onload = function() {
+            self.canvas.remove(obj);
+            var img = new fabric.Image(htmlImg, pos);
+            img.set({
+                hasControls: true, hasBorders: true,
+                cornerSize: 12, transparentCorners: false,
+                perPixelTargetFind: true, _fragmentKey: key,
+                _imageUrl: newUrl, _fragmentMeta: newMeta || obj._fragmentMeta
+            });
+            self.canvas.add(img);
+            self.fragments[key] = img;
+            self.canvas.setActiveObject(img);
+            self.canvas.requestRenderAll();
+        };
+        htmlImg.onerror = function() {
+            console.error('Failed to reload fragment:', key);
+        };
+        htmlImg.src = newUrl;
+    },
+
+    _toggleFragmentBg: function(target) {
+        if (!target || !target._fragmentKey) return;
+        var meta = target._fragmentMeta;
         if (!meta) return;
 
         var self = this;
@@ -749,11 +766,17 @@ window.puzzleCanvas = {
                   '&size=' + (meta.size || 800) +
                   '&processed=' + newProcessed;
 
-        fabric.Image.fromURL(url, {crossOrigin: 'anonymous'}).then(function(newImg) {
-            active.setElement(newImg.getElement());
+        var htmlImg = new Image();
+        htmlImg.crossOrigin = 'anonymous';
+        htmlImg.onload = function() {
+            target.setElement(htmlImg);
             meta.processed = newProcessed;
             self.canvas.requestRenderAll();
-        });
+        };
+        htmlImg.onerror = function() {
+            console.error('Failed to toggle background for', target._fragmentKey);
+        };
+        htmlImg.src = url;
     }
 };
 </script>
@@ -801,6 +824,33 @@ PUZZLE_STYLES = '''
 '''
 
 
+def _resolve_folios(sys_id: str) -> list:
+    """Resolve folio list for a sys_id using NLI manifest (same process, no HTTP)."""
+    try:
+        from web.api import fetch_fl_ids_from_nli
+        fl_ids = fetch_fl_ids_from_nli(sys_id)
+        if not fl_ids:
+            return []
+        return [
+            {'fl_id': fid, 'label': f'{(i // 2) + 1}{"r" if i % 2 == 0 else "v"}'}
+            for i, fid in enumerate(fl_ids)
+        ]
+    except Exception:
+        return []
+
+
+def _invalidate_and_refetch(fl_id: str, new_threshold: float):
+    """Invalidate cache for a fragment so it gets re-processed at new threshold."""
+    try:
+        from shared.puzzle_image_service import get_puzzle_image_service
+        service = get_puzzle_image_service()
+        service.invalidate_cache(fl_id, threshold=None)
+        # Pre-fetch at new threshold
+        service.resolve_fragment_image(fl_id=fl_id, size=800, threshold=new_threshold, processed=True)
+    except Exception as e:
+        logger.error(f"Threshold refetch failed for {fl_id}: {e}")
+
+
 def create_puzzle_page(initial_add: str = None):
     """Create the Fragment Puzzle page content.
 
@@ -846,17 +896,8 @@ def create_puzzle_page(initial_add: str = None):
                     return
 
                 shelfmark = result.get('selected_shelfmark') or text
-                # Get folios via API
-                import httpx
-                try:
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.get(
-                            f'http://localhost:{_get_port()}/api/puzzle_folios/{sys_id}',
-                            timeout=15
-                        )
-                        folios = resp.json() if resp.status_code == 200 else []
-                except Exception:
-                    folios = []
+                # Get folios directly (same process, no localhost call)
+                folios = await run.io_bound(_resolve_folios, sys_id)
 
                 if not folios:
                     ui.notify(tr('No images found'), type='warning')
@@ -871,15 +912,24 @@ def create_puzzle_page(initial_add: str = None):
                 url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
 
                 # Position at center with offset for each new fragment
-                offset = len(puzzle_meta) * 50
-                x = 100 + offset
-                y = 100 + offset
+                frag_offset = len(puzzle_meta) * 50
+                x = 100 + frag_offset
+                y = 100 + frag_offset
 
+                # Pass meta into JS addFragment so _fragmentMeta is set
+                # synchronously when the image loads (no race condition)
+                meta = {
+                    'fl_id': fl_id, 'threshold': threshold,
+                    'size': 800, 'processed': True,
+                    'sys_id': sys_id
+                }
+                meta_json = json.dumps(meta)
                 await ui.run_javascript(
-                    f'window.puzzleCanvas.addFragment("{key}", "{url}", {x}, {y}, 0, 1.0, false, false)'
+                    f'window.puzzleCanvas.addFragment("{key}", "{url}", '
+                    f'{x}, {y}, 0, 1.0, false, false, {meta_json})'
                 )
 
-                # Store metadata
+                # Store metadata in Python storage
                 puzzle_meta[key] = {
                     'sys_id': sys_id,
                     'shelfmark': shelfmark,
@@ -889,21 +939,6 @@ def create_puzzle_page(initial_add: str = None):
                 }
                 app.storage.tab['puzzle_fragments'] = puzzle_meta
 
-                # Also set fragment meta in JS for toggle bg
-                meta_json = json.dumps({
-                    'fl_id': fl_id, 'threshold': threshold,
-                    'size': 800, 'processed': True
-                })
-                await ui.run_javascript(
-                    f'if(window.puzzleCanvas.fragments["{key}"]) '
-                    f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta = {meta_json};'
-                )
-
-                # Load folio list for prev/next navigation (CANV-07)
-                await ui.run_javascript(
-                    f'window.puzzleCanvas.loadFolios("{key}", "{sys_id}")'
-                )
-
                 shelfmark_input.value = ''
                 ui.notify(f'{shelfmark} ({folio_label})', type='positive')
 
@@ -912,9 +947,22 @@ def create_puzzle_page(initial_add: str = None):
             ui.button(tr('Add'), icon='add', on_click=on_add_shelfmark).props(
                 'dense flat dark color=primary'
             )
-            ui.button(tr('Remove Selected'), icon='delete', on_click=lambda: ui.run_javascript(
-                'window.puzzleCanvas.removeSelected()'
-            )).props('dense flat dark color=negative')
+            async def on_delete_selected():
+                try:
+                    removed = await ui.run_javascript(
+                        'window.puzzleCanvas.removeSelected()',
+                        timeout=3.0
+                    )
+                except TimeoutError:
+                    return
+                if removed and isinstance(removed, list):
+                    for key in removed:
+                        puzzle_meta.pop(key, None)
+                    app.storage.tab['puzzle_fragments'] = puzzle_meta
+
+            ui.button(tr('Remove Selected'), icon='delete', on_click=on_delete_selected).props(
+                'dense flat dark color=negative'
+            )
 
             ui.separator().props('vertical')
 
@@ -1039,6 +1087,43 @@ def create_puzzle_page(initial_add: str = None):
                 min=10, max=80, value=30, step=1
             ).props('dense dark label-always').style('min-width: 120px')
 
+            async def on_threshold_change():
+                """Re-fetch selected fragment image at new threshold."""
+                try:
+                    key = await ui.run_javascript(
+                        'window.puzzleCanvas && window.puzzleCanvas.canvas ? '
+                        'window.puzzleCanvas.getSelectedKey() : null',
+                        timeout=3.0
+                    )
+                except TimeoutError:
+                    return
+                if not key or key not in puzzle_meta:
+                    return
+                meta = puzzle_meta[key]
+                new_threshold = threshold_slider.value
+                fl_id = meta.get('fl_id', '')
+                if not fl_id:
+                    return
+                # Invalidate cache for old threshold
+                await run.io_bound(
+                    _invalidate_and_refetch, fl_id, new_threshold
+                )
+                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={new_threshold}&size=800&processed=true"
+                js_meta = json.dumps({
+                    'fl_id': fl_id, 'threshold': new_threshold,
+                    'size': 800, 'processed': True,
+                    'sys_id': meta.get('sys_id', '')
+                })
+                await ui.run_javascript(
+                    f'window.puzzleCanvas._reloadFragment("{key}", "{url}", {js_meta})',
+                    timeout=15.0
+                )
+                # Update Python storage
+                meta['threshold'] = new_threshold
+                app.storage.tab['puzzle_fragments'] = puzzle_meta
+
+            threshold_slider.on('change', lambda: on_threshold_change())
+
             ui.separator().props('vertical')
 
             show_original = ui.checkbox(tr('Show Original')).props('dense dark')
@@ -1090,24 +1175,16 @@ def create_puzzle_page(initial_add: str = None):
                     except (json.JSONDecodeError, TypeError):
                         pass
 
+                sys_id = meta.get('sys_id', '')
+                js_meta = json.dumps({
+                    'fl_id': fl_id, 'threshold': threshold,
+                    'size': 800, 'processed': True,
+                    'sys_id': sys_id
+                })
                 await ui.run_javascript(
                     f'window.puzzleCanvas.addFragment("{key}", "{url}", '
                     f'{x}, {y}, {rotation}, {scaleX}, '
-                    f'{"true" if flipH else "false"}, {"true" if flipV else "false"})'
-                )
-
-                # Set fragment meta for toggle bg and load folios
-                sys_id = meta.get('sys_id', '')
-                meta_json = json.dumps({
-                    'fl_id': fl_id, 'threshold': threshold,
-                    'size': 800, 'processed': True
-                })
-                await ui.run_javascript(
-                    f'setTimeout(function() {{ '
-                    f'if(window.puzzleCanvas.fragments["{key}"]) '
-                    f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta = {meta_json}; '
-                    + (f'window.puzzleCanvas.loadFolios("{key}", "{sys_id}"); ' if sys_id else '')
-                    + f'}}, 2000)'
+                    f'{"true" if flipH else "false"}, {"true" if flipV else "false"}, {js_meta})'
                 )
 
     ui.timer(0.5, init_canvas, once=True)
@@ -1119,29 +1196,17 @@ def create_puzzle_page(initial_add: str = None):
         add_fl_id = parts[1].strip() if len(parts) > 1 else ''
 
         async def auto_add():
-            # Wait for canvas to be ready
             import asyncio
             await asyncio.sleep(1.0)
 
             fl_id = add_fl_id
             folio_label = '1r'
 
-            # If no FL ID provided, resolve from API (sys_id-only format)
             if not fl_id:
-                try:
-                    import httpx
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.get(
-                            f'http://localhost:{_get_port()}/api/puzzle_folios/{add_sys_id}',
-                            timeout=15
-                        )
-                        if resp.status_code == 200:
-                            folios = resp.json()
-                            if folios:
-                                fl_id = folios[0].get('fl_id', '')
-                                folio_label = folios[0].get('label', '1r')
-                except Exception:
-                    pass
+                folios = await run.io_bound(_resolve_folios, add_sys_id)
+                if folios:
+                    fl_id = folios[0].get('fl_id', '')
+                    folio_label = folios[0].get('label', '1r')
 
             if not fl_id:
                 ui.notify(tr('No images found for this manuscript'), type='warning')
@@ -1149,7 +1214,6 @@ def create_puzzle_page(initial_add: str = None):
 
             key = f"{add_sys_id},{folio_label}"
             threshold = 30
-            # CUL threshold adjustment
             if state.meta_mgr:
                 lib_code = state.meta_mgr.get_library_for_id(add_sys_id) or ''
                 if lib_code == 'CUL':
@@ -1157,13 +1221,17 @@ def create_puzzle_page(initial_add: str = None):
 
             url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
 
-            offset = len(puzzle_meta) * 50
+            frag_offset = len(puzzle_meta) * 50
+            js_meta = json.dumps({
+                'fl_id': fl_id, 'threshold': threshold,
+                'size': 800, 'processed': True,
+                'sys_id': add_sys_id
+            })
             await ui.run_javascript(
                 f'window.puzzleCanvas.addFragment("{key}", "{url}", '
-                f'{100 + offset}, {100 + offset}, 0, 1.0, false, false)'
+                f'{100 + frag_offset}, {100 + frag_offset}, 0, 1.0, false, false, {js_meta})'
             )
 
-            # Store metadata
             shelfmark = ''
             if state.meta_mgr:
                 sm, _ = state.meta_mgr.get_meta_for_id(add_sys_id)
@@ -1177,19 +1245,6 @@ def create_puzzle_page(initial_add: str = None):
                 'threshold': threshold,
             }
             app.storage.tab['puzzle_fragments'] = puzzle_meta
-
-            # Set JS meta and load folios
-            meta_json = json.dumps({
-                'fl_id': fl_id, 'threshold': threshold,
-                'size': 800, 'processed': True
-            })
-            await ui.run_javascript(
-                f'setTimeout(function() {{ '
-                f'if(window.puzzleCanvas.fragments["{key}"]) '
-                f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta = {meta_json}; '
-                f'window.puzzleCanvas.loadFolios("{key}", "{add_sys_id}"); '
-                f'}}, 2000)'
-            )
 
         ui.timer(1.5, auto_add, once=True)
 

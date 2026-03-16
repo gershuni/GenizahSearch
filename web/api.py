@@ -709,7 +709,8 @@ def init_api_routes():
         )
         if image_bytes is None:
             return Response(content="Image not found", status_code=404)
-        content_type = 'image/png' if processed else 'image/jpeg'
+        # Detect actual content type from bytes (bg removal may fallback to JPEG)
+        content_type = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
         return Response(
             content=image_bytes,
             media_type=content_type,
