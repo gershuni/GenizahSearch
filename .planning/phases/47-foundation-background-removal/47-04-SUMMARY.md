@@ -75,10 +75,21 @@ Each task was committed atomically:
 
 ## Deviations from Plan
 
-None - plan executed exactly as written.
+- **NLI FL IDs fixed**: Original sample IDs were FGP image numbers (6 digits), not real NLI FL IDs (9+ digits from manifests). Fixed with verified FL IDs from NLI manifests.
+- **Manchester LUNA fallback**: NLI returns 503 for Manchester FL IDs. Added Manchester LUNA Size4 direct URL support as fallback with `_load_direct_url()` method.
+- **Oxford deferred**: No easy IIIF access without UUID-style image identifiers. Oxford images available through Oxford parts JSON files (noted for future phases).
+- **Threshold tuning**: CUL works best at ~115 (higher than default 30). Per-library defaults may be beneficial in future.
+
+## Checkpoint Verification (approved 2026-03-16)
+
+- CUL (NLI IIIF): Background removal works, threshold ~115 optimal
+- AIU (NLI IIIF): Background removal works
+- Manchester (LUNA direct): Background removal works
+- Cambridge (direct IIIF): Background removal works
+- **User approved** visual quality across 4 library sources
 
 ## Issues Encountered
-None.
+- NLI IIIF returns 503 for some library FL IDs (Manchester, Oxford) — rate limiting or incomplete coverage.
 
 ## User Setup Required
 None - no external service configuration required.
