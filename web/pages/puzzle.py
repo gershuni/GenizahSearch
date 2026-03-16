@@ -790,29 +790,124 @@ window.puzzleCanvas = {
         this.canvas.backgroundImage = null;
     },
 
-    flipSelectedH: function() {
-        var active = this.canvas.getActiveObject();
-        if (active) {
-            active.set('flipX', !active.flipX);
+    // === Crop Mode ===
+    _cropMode: false,
+    _cropTarget: null,
+    _cropOffsets: null,  // {top, bottom, left, right}
+
+    toggleCropMode: function(enable) {
+        if (enable) {
+            var active = this.canvas.getActiveObject();
+            if (!active || !active._fragmentKey) return false;
+            this._cropMode = true;
+            this._cropTarget = active;
+            this._cropOffsets = { top: 0, bottom: 0, left: 0, right: 0 };
+            // Store original dimensions for revert
+            if (!active._originalWidth) {
+                active._originalWidth = active.width;
+                active._originalHeight = active.height;
+                active._originalCropX = active.cropX || 0;
+                active._originalCropY = active.cropY || 0;
+            }
             this.canvas.requestRenderAll();
+            return true;
+        } else {
+            this._cropMode = false;
+            this._cropTarget = null;
+            this._cropOffsets = null;
+            this.canvas.requestRenderAll();
+            return false;
         }
     },
 
-    flipSelectedV: function() {
-        var active = this.canvas.getActiveObject();
-        if (active) {
-            active.set('flipY', !active.flipY);
+    cropEdge: function(edge, amount) {
+        if (!this._cropMode || !this._cropTarget) return;
+        amount = amount || 20;
+        var obj = this._cropTarget;
+        var w = obj.width;
+        var h = obj.height;
+        var cropX = obj.cropX || 0;
+        var cropY = obj.cropY || 0;
+
+        if (edge === 'top' && h - amount > 50) {
+            obj.set({ cropY: cropY + amount, height: h - amount });
+            this._cropOffsets.top += amount;
+        } else if (edge === 'bottom' && h - amount > 50) {
+            obj.set({ height: h - amount });
+            this._cropOffsets.bottom += amount;
+        } else if (edge === 'left' && w - amount > 50) {
+            obj.set({ cropX: cropX + amount, width: w - amount });
+            this._cropOffsets.left += amount;
+        } else if (edge === 'right' && w - amount > 50) {
+            obj.set({ width: w - amount });
+            this._cropOffsets.right += amount;
+        }
+        obj.setCoords();
+        this.canvas.requestRenderAll();
+    },
+
+    cropConfirm: function() {
+        if (!this._cropTarget) return;
+        // Crop is already applied visually via cropX/cropY/width/height
+        this._cropTarget._originalWidth = null;
+        this._cropTarget._originalHeight = null;
+        this.toggleCropMode(false);
+    },
+
+    cropRevert: function() {
+        if (!this._cropTarget) return;
+        var obj = this._cropTarget;
+        if (obj._originalWidth) {
+            obj.set({
+                width: obj._originalWidth,
+                height: obj._originalHeight,
+                cropX: obj._originalCropX || 0,
+                cropY: obj._originalCropY || 0
+            });
+            obj._originalWidth = null;
+            obj._originalHeight = null;
+            obj.setCoords();
             this.canvas.requestRenderAll();
         }
+        this.toggleCropMode(false);
+    },
+
+    flipRectoVerso: function() {
+        // Navigate selected fragment(s) to recto/verso counterpart (other side)
+        var self = this;
+        var active = this.canvas.getActiveObjects();
+        if (!active || active.length === 0) return;
+        active.forEach(function(obj) {
+            var key = obj._fragmentKey;
+            if (!key) return;
+            var data = self.folioData[key];
+            if (!data || data.folios.length < 2) return;
+            var ci = data.currentIndex;
+            var newIdx = (ci % 2 === 0) ? Math.min(ci + 1, data.folios.length - 1) : Math.max(ci - 1, 0);
+            if (newIdx !== ci) {
+                self.navigateFolio(key, newIdx - ci);
+            }
+        });
     },
 
     flipAllPuzzle: function() {
-        // Flip all fragments to show recto/verso: navigate each to its counterpart folio
+        // Flip entire puzzle: navigate ALL fragments to recto/verso + mirror layout
         var self = this;
         var keys = Object.keys(this.fragments);
         if (keys.length === 0) return;
 
-        // Mirror X positions around center
+        // 1. Navigate each fragment to its recto/verso counterpart
+        keys.forEach(function(key) {
+            var data = self.folioData[key];
+            if (!data || data.folios.length < 2) return;
+            var ci = data.currentIndex;
+            var newIdx = (ci % 2 === 0) ? Math.min(ci + 1, data.folios.length - 1) : Math.max(ci - 1, 0);
+            if (newIdx !== ci) {
+                self.navigateFolio(key, newIdx - ci);
+            }
+        });
+
+        // 2. Mirror layout horizontally + negate rotations (like turning a page)
         var objects = keys.map(function(k) { return self.fragments[k]; });
         var minX = Infinity, maxX = -Infinity;
         objects.forEach(function(obj) {
@@ -824,19 +919,11 @@ window.puzzleCanvas = {
         objects.forEach(function(obj) {
             var bounds = obj.getBoundingRect();
             var objCenterX = bounds.left + bounds.width / 2;
-            var newCenterX = centerX + (centerX - objCenterX);
+            var newCenterX = 2 * centerX - objCenterX;
             obj.set('left', newCenterX - bounds.width / 2);
-        });
-
-        // Navigate each fragment to its recto/verso counterpart
-        keys.forEach(function(key) {
-            var data = self.folioData[key];
-            if (!data || data.folios.length < 2) return;
-            var ci = data.currentIndex;
-            var newIdx = (ci % 2 === 0) ? Math.min(ci + 1, data.folios.length - 1) : Math.max(ci - 1, 0);
-            if (newIdx !== ci) {
-                self.navigateFolio(key, newIdx - ci);
-            }
+            // Negate rotation (clockwise ↔ counter-clockwise)
+            var oldAngle = obj.angle || 0;
+            obj.set('angle', (360 - oldAngle) % 360);
         });
         this.canvas.requestRenderAll();
     },
@@ -1047,6 +1134,15 @@ PUZZLE_STYLES = '''
 .puzzle-toolbar .q-checkbox__label {
     color: #e0e0e0 !important;
 }
+.puzzle-toolbar .q-field__control {
+    background: rgba(255,255,255,0.1) !important;
+}
+.puzzle-toolbar .q-field--outlined .q-field__control:before {
+    border-color: #666 !important;
+}
+.puzzle-toolbar .q-field__native::placeholder {
+    color: #999 !important;
+}
 .puzzle-toolbar .q-input {
     max-width: 220px;
 }
@@ -1145,16 +1241,19 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
     folio_label = first.get('label', '1r')
     key = f"{sys_id},{folio_label}"
 
-    # CUL/T-S threshold matching desktop defaults
-    threshold = threshold_slider.value if threshold_slider else 30
+    # CUL/T-S threshold matching desktop defaults (115 for blue backgrounds)
+    threshold = 30.0
+    is_cul = False
     if state.meta_mgr:
         lib_code = state.meta_mgr.get_library_for_id(sys_id) or ''
         if lib_code == 'CUL':
-            threshold = 115
-        elif shelfmark:
-            s = shelfmark.upper()
-            if s.startswith(('T-S', 'OR.', 'ADD.')):
-                threshold = 115
+            is_cul = True
+    if not is_cul and shelfmark:
+        s = shelfmark.upper()
+        if s.startswith(('T-S', 'OR.', 'ADD.')):
+            is_cul = True
+    if is_cul:
+        threshold = 115.0
     url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
 
     frag_offset = len(puzzle_meta) * 50
@@ -1205,7 +1304,9 @@ def create_puzzle_page(initial_add: str = None):
         with ui.row().classes('puzzle-toolbar items-center gap-1'):
             shelfmark_input = ui.input(
                 placeholder=tr('Enter shelfmark...')
-            ).props('dense outlined dark').style('width: 220px')
+            ).props('dense outlined dark color=white').style(
+                'width: 220px; --q-field-border-color: #666;'
+            )
 
             async def on_add_shelfmark():
                 text = shelfmark_input.value
@@ -1253,12 +1354,14 @@ def create_puzzle_page(initial_add: str = None):
                     ui.notify(tr('No lists found'), type='info')
                     return
 
-                with ui.dialog() as dlg, ui.card().classes('w-96'):
-                    ui.label(tr('Add from List')).classes('text-lg font-bold')
+                with ui.dialog() as dlg, ui.card().classes('w-96').style(
+                    'background: #2d2d2d; color: #e0e0e0;'
+                ):
+                    ui.label(tr('Add from List')).classes('text-lg font-bold').style('color: #e0e0e0;')
                     list_select = ui.select(
                         {l['id']: l['name'] for l in lists},
                         label=tr('Select list')
-                    ).classes('w-full')
+                    ).props('dark outlined dense').classes('w-full')
                     items_container = ui.column().classes('w-full max-h-64 overflow-auto')
 
                     async def on_list_selected(e):
@@ -1269,11 +1372,13 @@ def create_puzzle_page(initial_add: str = None):
                         items = await run.io_bound(get_list_items, int(list_id))
                         with items_container:
                             if not items:
-                                ui.label(tr('Empty list')).classes('text-grey')
+                                ui.label(tr('Empty list')).style('color: #999;')
                             else:
                                 for item in items:
-                                    sid = item.get('system_number', '')
-                                    shelf = item.get('shelfmark', sid)
+                                    sid = item.get('sys_id', '')
+                                    shelf = item.get('shelfmark', '') or sid
+                                    if not sid:
+                                        continue
                                     async def add_item(s=sid, sh=shelf):
                                         dlg.close()
                                         await _add_fragment_by_sys_id(
@@ -1281,11 +1386,13 @@ def create_puzzle_page(initial_add: str = None):
                                         )
                                     ui.button(
                                         shelf, on_click=add_item
-                                    ).props('flat dense no-caps').classes('w-full text-left')
+                                    ).props('flat dense no-caps dark').classes('w-full text-left').style(
+                                        'color: #90caf9; justify-content: flex-start;'
+                                    )
 
                     list_select.on('update:model-value', on_list_selected)
                     with ui.row().classes('w-full justify-end'):
-                        ui.button(tr('Close'), on_click=dlg.close).props('flat')
+                        ui.button(tr('Close'), on_click=dlg.close).props('flat dark')
                 dlg.open()
 
             ui.button(icon='list', on_click=on_add_from_list).props(
@@ -1313,11 +1420,49 @@ def create_puzzle_page(initial_add: str = None):
             ui.separator().props('vertical').style('height: 20px')
 
             ui.button(tr('Flip'), icon='swap_horiz', on_click=lambda: ui.run_javascript(
-                'window.puzzleCanvas.flipSelectedH()'
-            )).props('dense flat dark size=sm').tooltip(tr('Flip selected fragment'))
+                'window.puzzleCanvas.flipRectoVerso()'
+            )).props('dense flat dark size=sm').tooltip(tr('Show other side (recto/verso)'))
             ui.button(tr('Flip Puzzle'), icon='sync_alt', on_click=lambda: ui.run_javascript(
                 'window.puzzleCanvas.flipAllPuzzle()'
-            )).props('dense flat dark size=sm').tooltip(tr('Flip all — show recto/verso'))
+            )).props('dense flat dark size=sm').tooltip(tr('Flip all + mirror positions'))
+
+            ui.separator().props('vertical').style('height: 20px')
+
+            # Crop controls
+            crop_btn = ui.button(tr('Crop'), icon='crop', on_click=lambda: _toggle_crop()).props(
+                'dense flat dark size=sm'
+            ).tooltip(tr('Crop edges of selected fragment'))
+            crop_ok_btn = ui.button(icon='check', on_click=lambda: _crop_confirm()).props(
+                'dense flat dark round size=sm color=positive'
+            ).tooltip(tr('Apply crop'))
+            crop_revert_btn = ui.button(icon='undo', on_click=lambda: _crop_revert()).props(
+                'dense flat dark round size=sm color=warning'
+            ).tooltip(tr('Revert crop'))
+            crop_ok_btn.set_visibility(False)
+            crop_revert_btn.set_visibility(False)
+
+            def _toggle_crop():
+                ui.run_javascript('''
+                    var active = window.puzzleCanvas._cropMode;
+                    if (active) {
+                        window.puzzleCanvas.cropRevert();
+                    } else {
+                        window.puzzleCanvas.toggleCropMode(true);
+                    }
+                ''')
+                is_cropping = not crop_ok_btn.visible
+                crop_ok_btn.set_visibility(is_cropping)
+                crop_revert_btn.set_visibility(is_cropping)
+
+            def _crop_confirm():
+                ui.run_javascript('window.puzzleCanvas.cropConfirm()')
+                crop_ok_btn.set_visibility(False)
+                crop_revert_btn.set_visibility(False)
+
+            def _crop_revert():
+                ui.run_javascript('window.puzzleCanvas.cropRevert()')
+                crop_ok_btn.set_visibility(False)
+                crop_revert_btn.set_visibility(False)
 
             ui.separator().props('vertical').style('height: 20px')
 
