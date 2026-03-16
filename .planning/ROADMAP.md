@@ -140,7 +140,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 - [x] **Phase 47: Foundation + Background Removal** - Shared data model, joins.db sidecar, IIIF image loading, HSV background removal engine (completed 2026-03-16)
 - [x] **Phase 48: Desktop Canvas** - QGraphicsScene-based puzzle widget with drag, rotate, flip, resize, crop, keyboard shortcuts, and fragment loading from Browse/ResultDialog/Lists (completed 2026-03-16)
 - [x] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images (completed 2026-03-16)
-- [ ] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export
+- [x] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export (completed 2026-03-16)
 - [ ] **Phase 51: Recto/Verso** - Auto-generated verso view from recto arrangement with correct verso images
 - [ ] **Phase 52: Community + Integration** - Personal workspace, publish for review, browse published joins, entry points from browse/search
 
@@ -241,7 +241,7 @@ Plans:
 | 47. Foundation + Background Removal | 4/4 | Complete    | 2026-03-16 |
 | 48. Desktop Canvas | 3/3 | Complete    | 2026-03-16 |
 | 49. Web Canvas | 2/2 | Complete    | 2026-03-16 |
-| 50. Join Documents | 2/3 | In Progress|  |
+| 50. Join Documents | 3/3 | Complete   | 2026-03-16 |
 | 51. Recto/Verso | 0/TBD | Not started | - |
 | 52. Community + Integration | 0/TBD | Not started | - |
 

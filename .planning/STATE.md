@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: not_started
-stopped_at: Completed 50-02-PLAN.md
-last_updated: "2026-03-16T18:16:38.273Z"
+stopped_at: Completed 50-03-PLAN.md
+last_updated: "2026-03-16T18:19:14.395Z"
 last_activity: 2026-03-16 -- Completed 49-01 web puzzle page with Fabric.js canvas, API endpoints, nav integration
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 ---
@@ -175,6 +175,7 @@ Recent decisions affecting current work:
 - [Phase 50]: Thumbnail preserved on metadata-only saves by reading existing DB value
 - [Phase 50]: PIL.rotate angle negated to match clockwise-positive convention (Fabric.js + PyQt)
 - [Phase 50]: Event-driven auto-save via scene.changed with dual-timer debounce; loading guard prevents partial-state overwrites
+- [Phase 50]: getCropState reads per-object Fabric.js properties, not transient _cropOffsets; crop restore in on_puzzle_add_result callback
 
 ### Pending Todos
 
@@ -207,9 +208,10 @@ Recent decisions affecting current work:
 | Phase 47 P04 | 4min | 1 tasks | 1 files |
 | Phase 50 P01 | 3min | 2 tasks | 3 files |
 | Phase 50 P02 | 3min | 1 tasks | 1 files |
+| Phase 50 P03 | 5min | 2 tasks | 2 files |
 
 ## Session Continuity
 
-Last session: 2026-03-16T18:16:38.270Z
-Stopped at: Completed 50-02-PLAN.md
+Last session: 2026-03-16T18:19:14.392Z
+Stopped at: Completed 50-03-PLAN.md
 Resume file: None
