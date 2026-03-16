@@ -2565,15 +2565,20 @@ class ExcludeDialog(QDialog):
 class PuzzleFragmentItem(QGraphicsPixmapItem):
     """A positioned fragment image on the puzzle canvas.
 
-    Supports drag, corner-handle rotation, flip H/V, wheel-resize,
-    Shift-snap to 20px grid, and multi-select with visual handles.
+    Supports drag, corner-handle rotation, border-handle resize (aspect-locked),
+    flip H/V, wheel-resize, Shift-snap to 20px grid, multi-select with visual handles.
     """
 
-    HANDLE_SIZE = 14  # corner handle hit radius in pixels
+    HANDLE_SIZE = 10  # handle square half-size in pixels
+    _HANDLE_HIT = 14  # hit-test radius (slightly larger than visual)
+
+    # Handle identifiers
+    _H_NONE = 0
+    _H_TL = 1; _H_TR = 2; _H_BL = 3; _H_BR = 4  # corners = rotate
+    _H_T = 5; _H_B = 6; _H_L = 7; _H_R = 8       # edges = resize
 
     def __init__(self, puzzle_frag, pixmap, parent=None):
         super().__init__(pixmap, parent)
-        from shared.puzzle_model import PuzzleFragment  # type check guard
         self.puzzle_frag = puzzle_frag
 
         # Enable interaction flags
@@ -2583,7 +2588,8 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
         self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-        self.setTransformOriginPoint(self.boundingRect().center())
+        self.setTransformOriginPoint(self._pixmap_rect().center())
+        self.setAcceptHoverEvents(True)
 
         # Apply initial state from data model
         self.setPos(puzzle_frag.x, puzzle_frag.y)
@@ -2591,68 +2597,144 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
         self.setScale(puzzle_frag.scale)
         self._apply_flip()
 
-        # Rotation interaction state
+        # Interaction state
         self._rotating = False
         self._rotation_start_angle = 0.0
+        self._resizing = False
+        self._resize_handle = self._H_NONE
+        self._resize_start_pos = QPointF()
+        self._resize_start_scale = 1.0
+
+    def _pixmap_rect(self):
+        """The actual pixmap bounding rect (without handle margin)."""
+        return super().boundingRect()
+
+    def _handle_points(self):
+        """Return dict of handle_id -> QPointF center positions."""
+        br = self._pixmap_rect()
+        mx, my = br.center().x(), br.center().y()
+        return {
+            self._H_TL: br.topLeft(), self._H_TR: br.topRight(),
+            self._H_BL: br.bottomLeft(), self._H_BR: br.bottomRight(),
+            self._H_T: QPointF(mx, br.top()), self._H_B: QPointF(mx, br.bottom()),
+            self._H_L: QPointF(br.left(), my), self._H_R: QPointF(br.right(), my),
+        }
+
+    def _hit_handle(self, pos):
+        """Return handle id under pos, or _H_NONE."""
+        for hid, hpt in self._handle_points().items():
+            if math.hypot(pos.x() - hpt.x(), pos.y() - hpt.y()) < self._HANDLE_HIT:
+                return hid
+        return self._H_NONE
 
     # ── Flip ──
 
     def _apply_flip(self):
         """Apply horizontal/vertical flip via QTransform."""
         t = QTransform()
+        pr = self._pixmap_rect()
         if self.puzzle_frag.flip_h:
             t.scale(-1, 1)
-            t.translate(-self.boundingRect().width(), 0)
+            t.translate(-pr.width(), 0)
         if self.puzzle_frag.flip_v:
             t.scale(1, -1)
-            t.translate(0, -self.boundingRect().height())
+            t.translate(0, -pr.height())
         self.setTransform(t)
 
     def flip_horizontal(self):
-        """Toggle horizontal flip."""
         self.puzzle_frag.flip_h = not self.puzzle_frag.flip_h
         self._apply_flip()
 
     def flip_vertical(self):
-        """Toggle vertical flip."""
         self.puzzle_frag.flip_v = not self.puzzle_frag.flip_v
         self._apply_flip()
 
-    # ── Corner-handle rotation ──
-
-    def _is_near_corner(self, pos):
-        """Return True if pos is within HANDLE_SIZE of any bounding-rect corner."""
-        br = self.boundingRect()
-        corners = [br.topLeft(), br.topRight(), br.bottomLeft(), br.bottomRight()]
-        for corner in corners:
-            dx = pos.x() - corner.x()
-            dy = pos.y() - corner.y()
-            if math.hypot(dx, dy) < self.HANDLE_SIZE:
-                return True
-        return False
+    # ── Mouse interaction ──
 
     def mousePressEvent(self, event):
-        if self.isSelected() and self._is_near_corner(event.pos()):
-            # Enter rotation mode
-            self._rotating = True
-            center = self.boundingRect().center()
-            pos = event.pos()
-            self._rotation_start_angle = (
-                math.degrees(math.atan2(pos.y() - center.y(), pos.x() - center.x()))
-                - self.rotation()
-            )
-            event.accept()
-            return
+        if self.isSelected():
+            hid = self._hit_handle(event.pos())
+            if hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR):
+                # Corner = rotation
+                self._rotating = True
+                center = self._pixmap_rect().center()
+                pos = event.pos()
+                self._rotation_start_angle = (
+                    math.degrees(math.atan2(pos.y() - center.y(), pos.x() - center.x()))
+                    - self.rotation()
+                )
+                event.accept()
+                return
+            elif hid != self._H_NONE:
+                # Edge = resize (aspect-locked)
+                self._resizing = True
+                self._resize_handle = hid
+                self._resize_start_pos = event.pos()
+                self._resize_start_scale = self.scale()
+                # Store base scales on all selected items for proportional resize
+                scene = self.scene()
+                if scene:
+                    for sel_item in scene.selectedItems():
+                        if isinstance(sel_item, PuzzleFragmentItem):
+                            sel_item._group_resize_base = sel_item.puzzle_frag.scale
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._rotating:
-            center = self.boundingRect().center()
+            center = self._pixmap_rect().center()
             pos = event.pos()
             angle = math.degrees(math.atan2(pos.y() - center.y(), pos.x() - center.x()))
             new_rotation = (angle - self._rotation_start_angle) % 360
+            old_rotation = self.rotation()
+            delta_rot = new_rotation - old_rotation
             self.setRotation(new_rotation)
             self.puzzle_frag.rotation = new_rotation
+            # Apply same rotation delta to all other selected items
+            scene = self.scene()
+            if scene:
+                for sel_item in scene.selectedItems():
+                    if isinstance(sel_item, PuzzleFragmentItem) and sel_item is not self:
+                        r = (sel_item.rotation() + delta_rot) % 360
+                        sel_item.setRotation(r)
+                        sel_item.puzzle_frag.rotation = r
+            event.accept()
+            return
+
+        if self._resizing:
+            delta = event.pos() - self._resize_start_pos
+            # Use the drag axis that matches the handle direction
+            if self._resize_handle in (self._H_T, self._H_B):
+                d = -delta.y() if self._resize_handle == self._H_T else delta.y()
+            elif self._resize_handle in (self._H_L, self._H_R):
+                d = -delta.x() if self._resize_handle == self._H_L else delta.x()
+            else:
+                d = 0
+            pr = self._pixmap_rect()
+            ref_size = max(pr.width(), pr.height(), 1)
+            factor = 1.0 + d / ref_size
+            new_scale = max(0.1, min(4.0, self._resize_start_scale * factor))
+            # Apply proportional resize to all selected items
+            ratio = new_scale / self._resize_start_scale if self._resize_start_scale > 0 else 1.0
+            scene = self.scene()
+            if scene:
+                for sel_item in scene.selectedItems():
+                    if isinstance(sel_item, PuzzleFragmentItem):
+                        if sel_item is self:
+                            sel_item.prepareGeometryChange()
+                            sel_item.setScale(new_scale)
+                            sel_item.puzzle_frag.scale = new_scale
+                        else:
+                            base = getattr(sel_item, '_group_resize_base', sel_item.puzzle_frag.scale)
+                            s = max(0.1, min(4.0, base * ratio))
+                            sel_item.prepareGeometryChange()
+                            sel_item.setScale(s)
+                            sel_item.puzzle_frag.scale = s
+            else:
+                self.prepareGeometryChange()
+                self.setScale(new_scale)
+                self.puzzle_frag.scale = new_scale
             event.accept()
             return
 
@@ -2669,7 +2751,33 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
 
     def mouseReleaseEvent(self, event):
         self._rotating = False
+        self._resizing = False
+        self._resize_handle = self._H_NONE
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseReleaseEvent(event)
+
+    # ── Hover cursor ──
+
+    def hoverMoveEvent(self, event):
+        if self.isSelected():
+            hid = self._hit_handle(event.pos())
+            if hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR):
+                # Corners = rotation cursor
+                # Use crosshair-like cursor for rotation (no native rotate cursor in Qt)
+                self.setCursor(Qt.CursorShape.CrossCursor)
+            elif hid in (self._H_L, self._H_R):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif hid in (self._H_T, self._H_B):
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
+            else:
+                self.setCursor(Qt.CursorShape.SizeAllCursor)  # drag move
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverLeaveEvent(event)
 
     # ── Resize (wheel) ──
 
@@ -2677,43 +2785,60 @@ class PuzzleFragmentItem(QGraphicsPixmapItem):
         """Resize fragment from a wheel delta (called by PuzzleCanvasView)."""
         factor = 1.05 if delta_y > 0 else 0.95
         new_scale = max(0.1, min(4.0, self.scale() * factor))
+        self.prepareGeometryChange()
         self.setScale(new_scale)
         self.puzzle_frag.scale = new_scale
 
     def wheelEvent(self, event):
-        """Handle wheel events dispatched directly by the scene."""
         delta = event.delta() if hasattr(event, 'delta') else event.angleDelta().y()
         self.adjust_scale_from_wheel(delta)
         event.accept()
 
     # ── Visual feedback ──
 
+    def boundingRect(self):
+        """Always include handle margin so Qt repaints handle areas on move."""
+        br = self._pixmap_rect()
+        m = self.HANDLE_SIZE + 2
+        return br.adjusted(-m, -m, m, m)
+
     def paint(self, painter, option, widget=None):
-        super().paint(painter, option, widget)
-        if self.isSelected():
-            br = self.boundingRect()
-            # Dashed selection border
-            painter.setPen(QPen(QColor(255, 255, 255, 180), 1, Qt.PenStyle.DashLine))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(br)
-            # Corner handles
-            painter.setPen(QPen(QColor(255, 255, 255), 1))
-            painter.setBrush(QBrush(QColor(255, 255, 255, 128)))
-            r = self.HANDLE_SIZE / 2
-            for corner in [br.topLeft(), br.topRight(), br.bottomLeft(), br.bottomRight()]:
-                painter.drawEllipse(corner, r, r)
+        # Draw the pixmap in its original rect
+        painter.drawPixmap(self._pixmap_rect().topLeft().toPoint(), self.pixmap())
+        if not self.isSelected():
+            return
+        pr = self._pixmap_rect()
+        # Dashed selection border
+        painter.setPen(QPen(QColor(255, 255, 255, 180), 1, Qt.PenStyle.DashLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(pr)
+        # Draw handles
+        hs = self.HANDLE_SIZE
+        handles = self._handle_points()
+        for hid, pt in handles.items():
+            is_corner = hid in (self._H_TL, self._H_TR, self._H_BL, self._H_BR)
+            if is_corner:
+                # Corner handles = circles (rotation)
+                painter.setPen(QPen(QColor(255, 255, 255), 1))
+                painter.setBrush(QBrush(QColor(255, 255, 255, 128)))
+                painter.drawEllipse(pt, hs / 2, hs / 2)
+            else:
+                # Edge handles = squares (resize)
+                painter.setPen(QPen(QColor(200, 200, 255), 1))
+                painter.setBrush(QBrush(QColor(200, 200, 255, 160)))
+                painter.drawRect(QRectF(pt.x() - hs / 2, pt.y() - hs / 2, hs, hs))
 
     # ── Utilities ──
 
     def update_pixmap(self, pixmap):
         """Replace displayed image (e.g. folio nav or threshold change)."""
+        self.prepareGeometryChange()
         self.setPixmap(pixmap)
-        self.setTransformOriginPoint(self.boundingRect().center())
+        self.setTransformOriginPoint(self._pixmap_rect().center())
 
     def shape(self):
-        """Return bounding rect as shape for accurate hit testing."""
         path = QPainterPath()
-        path.addRect(self.boundingRect())
+        path.addRect(self._pixmap_rect())
         return path
 
 
@@ -2856,7 +2981,7 @@ class PuzzleCanvasWindow(QMainWindow):
     """
 
     def __init__(self, app):
-        super().__init__()
+        super().__init__(app)
         self.app = app
         self.setWindowTitle(tr("Fragment Puzzle"))
         self.setMinimumSize(900, 600)
@@ -2879,9 +3004,9 @@ class PuzzleCanvasWindow(QMainWindow):
         main_layout.setContentsMargins(4, 4, 4, 4)
         main_layout.setSpacing(2)
 
-        # --- Top toolbar ---
-        top_toolbar = QHBoxLayout()
-        top_toolbar.setSpacing(4)
+        # --- Row 1: Shelfmark input + fragment list + selection info ---
+        row1 = QHBoxLayout()
+        row1.setSpacing(4)
 
         # Shelfmark input with autocomplete
         self.shelfmark_input = QLineEdit()
@@ -2899,82 +3024,160 @@ class PuzzleCanvasWindow(QMainWindow):
             completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
             self.shelfmark_input.setCompleter(completer)
         self.shelfmark_input.returnPressed.connect(self._on_add_shelfmark)
-        top_toolbar.addWidget(self.shelfmark_input)
+        row1.addWidget(self.shelfmark_input)
 
         self.btn_add = QPushButton(tr("Add"))
         self.btn_add.clicked.connect(self._on_add_shelfmark)
-        top_toolbar.addWidget(self.btn_add)
+        row1.addWidget(self.btn_add)
 
-        top_toolbar.addWidget(QLabel("|"))
+        # Add from personal list
+        btn_from_list = QPushButton("📋")
+        btn_from_list.setFixedWidth(30)
+        btn_from_list.setToolTip(tr("Add from personal list"))
+        btn_from_list.clicked.connect(self._show_add_from_list)
+        row1.addWidget(btn_from_list)
+
+        # Add from joins
+        btn_from_joins = QPushButton("🔗")
+        btn_from_joins.setFixedWidth(30)
+        btn_from_joins.setToolTip(tr("Add connected fragments (joins)"))
+        btn_from_joins.clicked.connect(self._show_add_from_joins)
+        row1.addWidget(btn_from_joins)
+
+        row1.addWidget(QLabel("|"))
+
+        # Fragment dropdown — shows shelfmark for each fragment on canvas
+        self.combo_fragments = QComboBox()
+        self.combo_fragments.setMinimumWidth(200)
+        self.combo_fragments.setPlaceholderText(tr("Fragments on canvas"))
+        self.combo_fragments.currentIndexChanged.connect(self._on_fragment_combo_changed)
+        row1.addWidget(self.combo_fragments)
+
+        row1.addWidget(QLabel("|"))
 
         # Selection info
         self.lbl_selected_info = QLabel(tr("No selection"))
         self.lbl_selected_info.setMinimumWidth(120)
-        top_toolbar.addWidget(self.lbl_selected_info)
+        row1.addWidget(self.lbl_selected_info)
 
-        top_toolbar.addWidget(QLabel("|"))
+        row1.addStretch()
 
-        # Flip buttons
-        self.btn_flip_h = QPushButton(tr("Flip H"))
-        self.btn_flip_h.clicked.connect(self._flip_selected_h)
-        top_toolbar.addWidget(self.btn_flip_h)
+        main_layout.addLayout(row1)
 
-        self.btn_flip_v = QPushButton(tr("Flip V"))
-        self.btn_flip_v.clicked.connect(self._flip_selected_v)
-        top_toolbar.addWidget(self.btn_flip_v)
+        # --- Row 2: Transform + Flip + Folio ---
+        row2 = QHBoxLayout()
+        row2.setSpacing(4)
 
-        # Threshold
-        top_toolbar.addWidget(QLabel(tr("Threshold:")))
-        self.slider_threshold = QSlider(Qt.Orientation.Horizontal)
-        self.slider_threshold.setRange(5, 80)
-        self.slider_threshold.setValue(30)
-        self.slider_threshold.setMaximumWidth(100)
-        self.lbl_threshold_val = QLabel("30")
-        self.lbl_threshold_val.setMinimumWidth(20)
-        self.slider_threshold.valueChanged.connect(
-            lambda v: self.lbl_threshold_val.setText(str(v))
-        )
-        self.slider_threshold.sliderReleased.connect(self._on_threshold_changed)
-        top_toolbar.addWidget(self.slider_threshold)
-        top_toolbar.addWidget(self.lbl_threshold_val)
+        btn_rotate_ccw = QPushButton("↺")
+        btn_rotate_ccw.setToolTip(tr("Rotate left 1°"))
+        btn_rotate_ccw.setFixedWidth(30)
+        btn_rotate_ccw.clicked.connect(lambda: self._rotate_selected(-1))
+        row2.addWidget(btn_rotate_ccw)
 
-        # Folio navigation
+        btn_rotate_cw = QPushButton("↻")
+        btn_rotate_cw.setToolTip(tr("Rotate right 1°"))
+        btn_rotate_cw.setFixedWidth(30)
+        btn_rotate_cw.clicked.connect(lambda: self._rotate_selected(1))
+        row2.addWidget(btn_rotate_cw)
+
+        row2.addWidget(QLabel("|"))
+
+        self.btn_flip_rv = QPushButton(tr("Flip"))
+        self.btn_flip_rv.setToolTip(tr("Flip selected fragment (recto/verso)"))
+        self.btn_flip_rv.clicked.connect(self._flip_recto_verso)
+        row2.addWidget(self.btn_flip_rv)
+
+        self.btn_flip_puzzle = QPushButton(tr("Flip Puzzle"))
+        self.btn_flip_puzzle.setToolTip(tr("Flip all fragments — show other side of joined page"))
+        self.btn_flip_puzzle.clicked.connect(self._flip_entire_puzzle)
+        row2.addWidget(self.btn_flip_puzzle)
+
+        row2.addWidget(QLabel("|"))
+
         self.btn_folio_prev = QPushButton("<")
         self.btn_folio_prev.setMaximumWidth(30)
         self.btn_folio_prev.clicked.connect(lambda: self._navigate_folio(-1))
-        top_toolbar.addWidget(self.btn_folio_prev)
+        row2.addWidget(self.btn_folio_prev)
 
         self.btn_folio_next = QPushButton(">")
         self.btn_folio_next.setMaximumWidth(30)
         self.btn_folio_next.clicked.connect(lambda: self._navigate_folio(1))
-        top_toolbar.addWidget(self.btn_folio_next)
+        row2.addWidget(self.btn_folio_next)
 
-        # Scale
-        top_toolbar.addWidget(QLabel(tr("Scale:")))
+        row2.addWidget(QLabel("|"))
+
+        # Crop mode
+        self.btn_crop = QPushButton(tr("Crop"))
+        self.btn_crop.setToolTip(tr("Enter crop mode — drag edges to trim"))
+        self.btn_crop.setCheckable(True)
+        self.btn_crop.toggled.connect(self._toggle_crop_mode)
+        row2.addWidget(self.btn_crop)
+
+        row2.addWidget(QLabel("|"))
+
+        self.btn_delete = QPushButton(tr("Delete"))
+        self.btn_delete.clicked.connect(self._delete_selected)
+        row2.addWidget(self.btn_delete)
+
+        row2.addStretch()
+
+        self.btn_bg_toggle = QPushButton(tr("Background"))
+        self.btn_bg_toggle.setCheckable(True)
+        self.btn_bg_toggle.setToolTip(tr("Toggle checkerboard background"))
+        row2.addWidget(self.btn_bg_toggle)
+
+        main_layout.addLayout(row2)
+
+        # --- Row 3: Sliders ---
+        row3 = QHBoxLayout()
+        row3.setSpacing(4)
+
+        row3.addWidget(QLabel(tr("Threshold:")))
+        btn_thr_minus = QPushButton("-")
+        btn_thr_minus.setFixedWidth(24)
+        btn_thr_minus.clicked.connect(lambda: self._nudge_threshold(-1))
+        row3.addWidget(btn_thr_minus)
+        self.slider_threshold = QSlider(Qt.Orientation.Horizontal)
+        self.slider_threshold.setRange(0, 150)
+        self.slider_threshold.setValue(30)
+        self.slider_threshold.setMinimumWidth(140)
+        self.lbl_threshold_val = QLabel("30")
+        self.lbl_threshold_val.setMinimumWidth(28)
+        self.slider_threshold.valueChanged.connect(
+            lambda v: self.lbl_threshold_val.setText("OFF" if v == 0 else str(v))
+        )
+        self.slider_threshold.sliderReleased.connect(self._on_threshold_changed)
+        row3.addWidget(self.slider_threshold)
+        row3.addWidget(self.lbl_threshold_val)
+        btn_thr_plus = QPushButton("+")
+        btn_thr_plus.setFixedWidth(24)
+        btn_thr_plus.clicked.connect(lambda: self._nudge_threshold(1))
+        row3.addWidget(btn_thr_plus)
+
+        row3.addWidget(QLabel("  "))
+
+        row3.addWidget(QLabel(tr("Scale:")))
+        btn_scale_minus = QPushButton("-")
+        btn_scale_minus.setFixedWidth(24)
+        btn_scale_minus.clicked.connect(lambda: self._nudge_scale(-5))
+        row3.addWidget(btn_scale_minus)
         self.slider_scale = QSlider(Qt.Orientation.Horizontal)
         self.slider_scale.setRange(10, 400)
         self.slider_scale.setValue(100)
-        self.slider_scale.setMaximumWidth(100)
+        self.slider_scale.setMinimumWidth(140)
         self.lbl_scale_val = QLabel("100%")
-        self.lbl_scale_val.setMinimumWidth(30)
+        self.lbl_scale_val.setMinimumWidth(35)
         self.slider_scale.valueChanged.connect(self._on_scale_changed)
-        top_toolbar.addWidget(self.slider_scale)
-        top_toolbar.addWidget(self.lbl_scale_val)
+        row3.addWidget(self.slider_scale)
+        row3.addWidget(self.lbl_scale_val)
+        btn_scale_plus = QPushButton("+")
+        btn_scale_plus.setFixedWidth(24)
+        btn_scale_plus.clicked.connect(lambda: self._nudge_scale(5))
+        row3.addWidget(btn_scale_plus)
 
-        # Delete
-        self.btn_delete = QPushButton(tr("Delete"))
-        self.btn_delete.clicked.connect(self._delete_selected)
-        top_toolbar.addWidget(self.btn_delete)
+        row3.addStretch()
 
-        top_toolbar.addStretch()
-
-        # Background toggle
-        self.btn_bg_toggle = QPushButton("BG")
-        self.btn_bg_toggle.setCheckable(True)
-        self.btn_bg_toggle.setToolTip(tr("Toggle checkerboard background"))
-        top_toolbar.addWidget(self.btn_bg_toggle)
-
-        main_layout.addLayout(top_toolbar)
+        main_layout.addLayout(row3)
 
         # --- Canvas view ---
         self.canvas_view = PuzzleCanvasView(self)
@@ -3008,12 +3211,25 @@ class PuzzleCanvasWindow(QMainWindow):
             return
 
         from shared.puzzle_model import PuzzleFragment
+        # CUL images have blue scanning backgrounds requiring higher threshold
+        threshold = 30.0
+        lib_code = ''
+        if hasattr(self.app, 'meta_mgr') and self.app.meta_mgr:
+            lib_code = self.app.meta_mgr.get_library_for_id(sys_id) or ''
+        if lib_code == 'CUL':
+            threshold = 115.0
+        elif shelfmark:
+            s = shelfmark.upper()
+            if s.startswith(('T-S', 'OR.', 'ADD.')):
+                threshold = 115.0
         puzzle_frag = PuzzleFragment(
             sys_id=sys_id,
             folio_label=folio_label,
             fl_id=fl_id,
+            shelfmark=shelfmark,
             x=self._next_x,
             y=50.0,
+            bg_removal_threshold=threshold,
         )
         self._pending_fragments[item_key] = puzzle_frag
 
@@ -3025,7 +3241,8 @@ class PuzzleCanvasWindow(QMainWindow):
         self._placeholder_items[item_key] = placeholder
 
         # Start image loader thread
-        thread = PuzzleImageLoaderThread(fl_id, threshold=puzzle_frag.bg_removal_threshold)
+        thr = puzzle_frag.bg_removal_threshold
+        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=(thr > 0))
         thread.image_ready.connect(partial(self._on_image_loaded, item_key))
         thread.load_failed.connect(self._on_image_failed)
         self._loader_threads.append(thread)
@@ -3069,6 +3286,159 @@ class PuzzleCanvasWindow(QMainWindow):
             thread.start()
 
         self.shelfmark_input.clear()
+
+    def _show_add_from_list(self):
+        """Show picker to add fragments from a personal list."""
+        lists_mgr = getattr(self.app, 'lists_mgr', None)
+        if not lists_mgr:
+            self.statusBar().showMessage(tr("Lists not available"), 2000)
+            return
+        all_lists = lists_mgr.get_all_lists(include_recent=False)
+        if not all_lists:
+            self.statusBar().showMessage(tr("No personal lists found"), 2000)
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Add from Personal List"))
+        dlg.setMinimumSize(400, 500)
+        layout = QVBoxLayout(dlg)
+
+        combo = QComboBox()
+        for lst in all_lists:
+            combo.addItem(lst.get('name', lst.get('id', '?')), lst.get('id'))
+        layout.addWidget(combo)
+
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        layout.addWidget(list_widget)
+
+        def load_items():
+            list_widget.clear()
+            list_id = combo.currentData()
+            if not list_id:
+                return
+            items = lists_mgr.get_items_in_list(list_id)
+            for it in items:
+                sid = it.get('sys_id', '')
+                shelf, _ = self.app.meta_mgr.get_meta_for_id(sid) if sid else ('', '')
+                display = shelf or sid
+                lw_item = QListWidgetItem(display)
+                lw_item.setData(Qt.ItemDataRole.UserRole, {'sys_id': sid, 'shelfmark': shelf or sid})
+                list_widget.addItem(lw_item)
+
+        combo.currentIndexChanged.connect(lambda: load_items())
+        load_items()
+
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton(tr("Add Selected"))
+        btn_add_all = QPushButton(tr("Add All"))
+        btn_close = QPushButton(tr("Close"))
+        btn_row.addWidget(btn_add)
+        btn_row.addWidget(btn_add_all)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        def add_items(items_to_add):
+            for lw_item in items_to_add:
+                data = lw_item.data(Qt.ItemDataRole.UserRole)
+                if data:
+                    self.app.add_to_puzzle(data['sys_id'], data['shelfmark'])
+
+        btn_add.clicked.connect(lambda: add_items(list_widget.selectedItems()))
+        btn_add_all.clicked.connect(lambda: add_items([list_widget.item(i) for i in range(list_widget.count())]))
+        btn_close.clicked.connect(dlg.close)
+        dlg.show()
+
+    def _show_add_from_joins(self):
+        """Show connected fragments for the selected fragment and add them."""
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            self.statusBar().showMessage(tr("Select a fragment first to find its joins"), 3000)
+            return
+        joins_mgr = getattr(self.app, 'joins_mgr', None)
+        if not joins_mgr:
+            self.statusBar().showMessage(tr("Joins data not available"), 2000)
+            return
+
+        pf = selected[0].puzzle_frag
+        shelfmark = pf.shelfmark or pf.sys_id
+
+        # Try by document_id first, then by shelfmark
+        connected = joins_mgr.get_connected_fragments_by_id(pf.sys_id)
+        if not connected or connected.get('total_fragments', 0) <= 1:
+            connected = joins_mgr.get_connected_fragments(shelfmark)
+
+        if not connected or connected.get('total_fragments', 0) <= 1:
+            self.statusBar().showMessage(tr("No joins found for {}").format(shelfmark), 3000)
+            return
+
+        # Build a map of document_id -> shelfmark from the joins data
+        frag_map = {}  # doc_id -> shelfmark
+        for join in connected.get('joins', []):
+            for doc_key, shelf_key in [('document_id_a', 'fragment_a'), ('document_id_b', 'fragment_b')]:
+                doc_id = join.get(doc_key, '')
+                frag_shelf = join.get(shelf_key, '')
+                if doc_id and doc_id not in frag_map:
+                    frag_map[doc_id] = frag_shelf or doc_id
+
+        # Also from fragments list (shelfmark-only joins that lack document_id)
+        for frag_shelf in connected.get('fragments', []):
+            if isinstance(frag_shelf, str) and frag_shelf not in frag_map.values():
+                # Try resolving to sys_id
+                norm = normalize_shelfmark(frag_shelf)
+                shelf_to_sys = getattr(self.app, '_shelf_to_sys', None)
+                sid = shelf_to_sys.get(norm) if shelf_to_sys else None
+                if sid and sid not in frag_map:
+                    frag_map[sid] = frag_shelf
+
+        if not frag_map:
+            self.statusBar().showMessage(tr("No joins found for {}").format(shelfmark), 3000)
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Add Joined Fragments"))
+        dlg.setMinimumSize(350, 400)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(tr("Joins for: {}").format(shelfmark)))
+
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        for doc_id, frag_shelf in frag_map.items():
+            # Skip the fragment already on canvas
+            if doc_id == pf.sys_id:
+                continue
+            lw_item = QListWidgetItem(frag_shelf or doc_id)
+            lw_item.setData(Qt.ItemDataRole.UserRole, (doc_id, frag_shelf))
+            list_widget.addItem(lw_item)
+        layout.addWidget(list_widget)
+
+        if list_widget.count() == 0:
+            layout.addWidget(QLabel(tr("All joined fragments are already on canvas")))
+
+        # Select all by default
+        list_widget.selectAll()
+
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton(tr("Add Selected"))
+        btn_close = QPushButton(tr("Close"))
+        btn_row.addWidget(btn_add)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        def add_joined():
+            for lw_item in list_widget.selectedItems():
+                data = lw_item.data(Qt.ItemDataRole.UserRole)
+                if not data:
+                    continue
+                doc_id, frag_shelf = data
+                self.app.add_to_puzzle(doc_id, frag_shelf or doc_id)
+            dlg.close()
+
+        btn_add.clicked.connect(add_joined)
+        btn_close.clicked.connect(dlg.close)
+        dlg.show()
 
     def _on_meta_resolved(self, sys_id, shelfmark, images_nli):
         """Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio."""
@@ -3128,6 +3498,26 @@ class PuzzleCanvasWindow(QMainWindow):
         # Advance placement position based on actual pixmap width
         self._next_x = puzzle_frag.x + pixmap.width() * puzzle_frag.scale + 50
 
+        # Update fragment dropdown
+        self._refresh_fragment_combo()
+
+        # Auto-fit view to show all fragments
+        self._fit_all_fragments()
+
+    def _fit_all_fragments(self):
+        """Fit view to show all fragments with some padding."""
+        items = self.canvas_view.get_fragment_items()
+        if not items:
+            return
+        # Compute bounding rect of all items in scene coords
+        rect = QRectF()
+        for item in items:
+            rect = rect.united(item.sceneBoundingRect())
+        # Add padding (10% on each side, minimum 50px)
+        pad = max(50, rect.width() * 0.1, rect.height() * 0.1)
+        rect.adjust(-pad, -pad, pad, pad)
+        self.canvas_view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
     def _on_image_failed(self, fl_id, error):
         """Called when PuzzleImageLoaderThread fails."""
         if sip.isdeleted(self):
@@ -3152,13 +3542,15 @@ class PuzzleCanvasWindow(QMainWindow):
         if len(selected) == 1:
             frag = selected[0]
             pf = frag.puzzle_frag
-            self.lbl_selected_info.setText(f"{pf.sys_id} / {pf.folio_label}")
+            label = pf.shelfmark or pf.sys_id
+            self.lbl_selected_info.setText(f"{label} / {pf.folio_label}")
 
             # Sync sliders without triggering callbacks
             self.slider_threshold.blockSignals(True)
             self.slider_threshold.setValue(int(pf.bg_removal_threshold))
             self.slider_threshold.blockSignals(False)
-            self.lbl_threshold_val.setText(str(int(pf.bg_removal_threshold)))
+            tv = int(pf.bg_removal_threshold)
+            self.lbl_threshold_val.setText("OFF" if tv == 0 else str(tv))
 
             self.slider_scale.blockSignals(True)
             self.slider_scale.setValue(int(pf.scale * 100))
@@ -3179,26 +3571,261 @@ class PuzzleCanvasWindow(QMainWindow):
         for item in self.canvas_view.get_selected_fragments():
             item.flip_vertical()
 
+    def _rotate_selected(self, degrees):
+        """Rotate selected fragments by given degrees."""
+        for item in self.canvas_view.get_selected_fragments():
+            new_rot = (item.rotation() + degrees) % 360
+            item.setRotation(new_rot)
+            item.puzzle_frag.rotation = new_rot
+
+    def _flip_recto_verso(self):
+        """Flip selected fragment(s) to show recto/verso — navigates to next/prev folio."""
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            self.statusBar().showMessage(tr("No selection"), 2000)
+            return
+        for item in selected:
+            pf = item.puzzle_frag
+            folio_list = self._folio_lists.get(pf.sys_id)
+            if not folio_list or len(folio_list) < 2:
+                self.statusBar().showMessage(tr("No folio list available"), 2000)
+                continue
+            # Find current index
+            current_idx = 0
+            for i, entry in enumerate(folio_list):
+                if entry.get('fl_id') == pf.fl_id:
+                    current_idx = i
+                    break
+            # Recto (odd index 0,2,4..) -> verso (1,3,5..), verso -> recto
+            if current_idx % 2 == 0:
+                new_idx = min(current_idx + 1, len(folio_list) - 1)
+            else:
+                new_idx = max(current_idx - 1, 0)
+            if new_idx == current_idx:
+                continue
+            new_entry = folio_list[new_idx]
+            # Re-key and fetch new image
+            old_key = (pf.sys_id, pf.folio_label)
+            new_label = new_entry.get('label', pf.folio_label)
+            new_key = (pf.sys_id, new_label)
+            self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
+            pf.fl_id = new_entry.get('fl_id', '')
+            pf.folio_label = new_label
+            self._pending_fragments[new_key] = pf
+            thr = pf.bg_removal_threshold
+            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0))
+            thread.image_ready.connect(partial(self._on_image_loaded, new_key))
+            thread.load_failed.connect(self._on_image_failed)
+            self._loader_threads.append(thread)
+            thread.start()
+        self._refresh_fragment_combo()
+
+    def _flip_entire_puzzle(self):
+        """Flip ALL fragments — shows the other side of the joined page.
+
+        Physically turning a page over means:
+        1. Each fragment shows its recto/verso counterpart (other folio image)
+        2. The horizontal layout is mirrored (left↔right)
+        NLI verso images are already photographed from the verso side,
+        so we do NOT additionally flip each image — just load the other folio.
+        """
+        items = self.canvas_view.get_fragment_items()
+        if not items:
+            return
+
+        # 1. Navigate each fragment to its recto/verso counterpart
+        for item in items:
+            pf = item.puzzle_frag
+            folio_list = self._folio_lists.get(pf.sys_id)
+            if not folio_list or len(folio_list) < 2:
+                continue
+            current_idx = 0
+            for i, entry in enumerate(folio_list):
+                if entry.get('fl_id') == pf.fl_id:
+                    current_idx = i
+                    break
+            new_idx = current_idx + 1 if current_idx % 2 == 0 else current_idx - 1
+            new_idx = max(0, min(new_idx, len(folio_list) - 1))
+            if new_idx == current_idx:
+                continue
+            new_entry = folio_list[new_idx]
+            old_key = (pf.sys_id, pf.folio_label)
+            new_label = new_entry.get('label', pf.folio_label)
+            new_key = (pf.sys_id, new_label)
+            self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
+            pf.fl_id = new_entry.get('fl_id', '')
+            pf.folio_label = new_label
+            self._pending_fragments[new_key] = pf
+            thr = pf.bg_removal_threshold
+            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0))
+            thread.image_ready.connect(partial(self._on_image_loaded, new_key))
+            thread.load_failed.connect(self._on_image_failed)
+            self._loader_threads.append(thread)
+            thread.start()
+
+        # 2. Mirror layout horizontally: swap positions + negate rotations + toggle flip_h
+        #    Use sceneBoundingRect for accurate bounds (accounts for rotation)
+        if items:
+            scene_rects = [it.sceneBoundingRect() for it in items]
+            left = min(r.left() for r in scene_rects)
+            right = max(r.right() for r in scene_rects)
+            center_x = (left + right) / 2.0
+
+            for item in items:
+                # Mirror x-position around center
+                sr = item.sceneBoundingRect()
+                item_center_x = sr.center().x()
+                new_center_x = 2 * center_x - item_center_x
+                # Offset from item pos to scene center
+                dx = new_center_x - item_center_x
+                item.setPos(item.pos().x() + dx, item.pos().y())
+                item.puzzle_frag.x = item.pos().x()
+
+                # Negate rotation (clockwise ↔ counter-clockwise)
+                old_rot = item.rotation()
+                new_rot = (360 - old_rot) % 360
+                item.setRotation(new_rot)
+                item.puzzle_frag.rotation = new_rot
+
+        self._refresh_fragment_combo()
+
+    def _toggle_crop_mode(self, checked):
+        """Enter/exit crop mode. In crop mode, drag edges of selected fragment to trim."""
+        if checked:
+            selected = self.canvas_view.get_selected_fragments()
+            if not selected:
+                self.statusBar().showMessage(tr("Select a fragment first"), 2000)
+                self.btn_crop.setChecked(False)
+                return
+            item = selected[0]
+            # Save original for revert
+            if not hasattr(item, '_original_pixmap') or item._original_pixmap is None:
+                item._original_pixmap = item.pixmap().copy()
+                item._crop_offsets = [0, 0, 0, 0]  # top, bottom, left, right
+            item._crop_mode = True
+            self.statusBar().showMessage(
+                tr("Crop mode: drag edges with arrow keys (↑↓←→), Enter=OK, Esc=revert"), 0)
+        else:
+            # Exit crop mode
+            for item in self.canvas_view.get_fragment_items():
+                if hasattr(item, '_crop_mode'):
+                    item._crop_mode = False
+            self.statusBar().showMessage(tr("Ready"), 2000)
+
+    def _crop_edge(self, edge, amount=None):
+        """Crop a specific edge from selected fragment."""
+        if amount is None:
+            amount = 20  # default step for arrow key crop
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            return
+        for item in selected:
+            pm = item.pixmap()
+            if pm.isNull():
+                continue
+            if not hasattr(item, '_original_pixmap') or item._original_pixmap is None:
+                item._original_pixmap = pm.copy()
+                item._crop_offsets = [0, 0, 0, 0]
+            w, h = pm.width(), pm.height()
+            t = min(amount, h // 3) if edge == "top" else 0
+            b = min(amount, h // 3) if edge == "bottom" else 0
+            l = min(amount, w // 3) if edge == "left" else 0
+            r = min(amount, w // 3) if edge == "right" else 0
+            if w - l - r < 50 or h - t - b < 50:
+                continue
+            cropped = pm.copy(l, t, w - l - r, h - t - b)
+            item._crop_offsets[0] += t
+            item._crop_offsets[1] += b
+            item._crop_offsets[2] += l
+            item._crop_offsets[3] += r
+            item.prepareGeometryChange()
+            item.setPixmap(cropped)
+            item.setTransformOriginPoint(item._pixmap_rect().center())
+            item.setPos(item.pos().x() + l * item.scale(), item.pos().y() + t * item.scale())
+            item.puzzle_frag.x = item.pos().x()
+            item.puzzle_frag.y = item.pos().y()
+
+    def _revert_crop(self):
+        """Revert selected fragments to original uncropped image."""
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            return
+        for item in selected:
+            if not hasattr(item, '_original_pixmap') or item._original_pixmap is None:
+                continue
+            offsets = item._crop_offsets
+            item.prepareGeometryChange()
+            item.setPixmap(item._original_pixmap)
+            item.setTransformOriginPoint(item._pixmap_rect().center())
+            item.setPos(item.pos().x() - offsets[2] * item.scale(),
+                        item.pos().y() - offsets[0] * item.scale())
+            item.puzzle_frag.x = item.pos().x()
+            item.puzzle_frag.y = item.pos().y()
+            item._original_pixmap = None
+            item._crop_offsets = [0, 0, 0, 0]
+            if hasattr(item, '_crop_mode'):
+                item._crop_mode = False
+        self.btn_crop.setChecked(False)
+        self.statusBar().showMessage(tr("Crop reverted"), 2000)
+
+    def _nudge_threshold(self, delta):
+        """Increment/decrement threshold by delta, then apply."""
+        v = max(0, min(150, self.slider_threshold.value() + delta))
+        self.slider_threshold.setValue(v)
+        self._on_threshold_changed()
+
     def _on_threshold_changed(self):
-        """Re-fetch images with new threshold for selected fragments (on sliderReleased)."""
+        """Re-fetch images with new threshold for selected fragments."""
         value = self.slider_threshold.value()
+        processed = value > 0  # 0 = no bg removal
         for item in self.canvas_view.get_selected_fragments():
             pf = item.puzzle_frag
             pf.bg_removal_threshold = float(value)
             item_key = (pf.sys_id, pf.folio_label)
             self._pending_fragments[item_key] = pf
-            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=float(value))
+            thread = PuzzleImageLoaderThread(
+                pf.fl_id, threshold=float(value), processed=processed
+            )
             thread.image_ready.connect(partial(self._on_image_loaded, item_key))
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
             thread.start()
 
+    def _nudge_scale(self, delta):
+        """Increment/decrement scale by delta percent."""
+        v = max(10, min(400, self.slider_scale.value() + delta))
+        self.slider_scale.setValue(v)
+
     def _on_scale_changed(self, value):
-        """Update scale for selected fragments."""
+        """Update scale for selected fragments proportionally.
+
+        When multiple fragments are selected with different scales (e.g., A=125%, B=74%),
+        the slider shows the first item's scale. Moving the slider applies the same
+        RATIO to all selected items, preserving their relative sizes.
+        """
         self.lbl_scale_val.setText(f"{value}%")
-        for item in self.canvas_view.get_selected_fragments():
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            return
+        if len(selected) == 1:
+            # Single item: set absolute scale
+            item = selected[0]
+            item.prepareGeometryChange()
             item.setScale(value / 100.0)
             item.puzzle_frag.scale = value / 100.0
+        else:
+            # Multiple items: apply same ratio change to all
+            # Use the reference item (first selected) to compute the ratio
+            ref = selected[0]
+            old_ref_scale = ref.puzzle_frag.scale
+            if old_ref_scale <= 0:
+                old_ref_scale = 1.0
+            ratio = (value / 100.0) / old_ref_scale
+            for item in selected:
+                new_scale = max(0.1, min(4.0, item.puzzle_frag.scale * ratio))
+                item.prepareGeometryChange()
+                item.setScale(new_scale)
+                item.puzzle_frag.scale = new_scale
 
     def _navigate_folio(self, direction):
         """Navigate folio prev/next for selected fragments."""
@@ -3260,6 +3887,30 @@ class PuzzleCanvasWindow(QMainWindow):
             self.canvas_view.scene.removeItem(item)
             self._fragment_items.pop(item_key, None)
             self._pending_fragments.pop(item_key, None)
+        self._refresh_fragment_combo()
+
+    # ── Fragment combo ──
+
+    def _refresh_fragment_combo(self):
+        """Rebuild the fragment dropdown from current items."""
+        self.combo_fragments.blockSignals(True)
+        self.combo_fragments.clear()
+        for item_key, item in self._fragment_items.items():
+            pf = item.puzzle_frag
+            label = pf.shelfmark or pf.sys_id
+            display = f"{label} / {pf.folio_label}"
+            self.combo_fragments.addItem(display, item_key)
+        self.combo_fragments.blockSignals(False)
+
+    def _on_fragment_combo_changed(self, index):
+        """Select the fragment chosen in the dropdown."""
+        if index < 0:
+            return
+        item_key = self.combo_fragments.itemData(index)
+        if item_key and item_key in self._fragment_items:
+            # Clear current selection, select this one
+            self.canvas_view.scene.clearSelection()
+            self._fragment_items[item_key].setSelected(True)
 
     # ── Context menu ──
 
@@ -3276,6 +3927,29 @@ class PuzzleCanvasWindow(QMainWindow):
             item.setSelected(True)
 
         menu = QMenu(self)
+
+        act_rotate_ccw = QAction(tr("Rotate left 1°"), self)
+        act_rotate_ccw.triggered.connect(lambda: self._rotate_selected(-1))
+        menu.addAction(act_rotate_ccw)
+
+        act_rotate_cw = QAction(tr("Rotate right 1°"), self)
+        act_rotate_cw.triggered.connect(lambda: self._rotate_selected(1))
+        menu.addAction(act_rotate_cw)
+
+        act_rotate_ccw90 = QAction(tr("Rotate left 90°"), self)
+        act_rotate_ccw90.triggered.connect(lambda: self._rotate_selected(-90))
+        menu.addAction(act_rotate_ccw90)
+
+        act_rotate_cw90 = QAction(tr("Rotate right 90°"), self)
+        act_rotate_cw90.triggered.connect(lambda: self._rotate_selected(90))
+        menu.addAction(act_rotate_cw90)
+
+        menu.addSeparator()
+
+        act_flip_rv = QAction(tr("Flip") + " (recto/verso)", self)
+        act_flip_rv.triggered.connect(self._flip_recto_verso)
+        menu.addAction(act_flip_rv)
+
         act_flip_h = QAction(tr("Flip Horizontal"), self)
         act_flip_h.triggered.connect(self._flip_selected_h)
         menu.addAction(act_flip_h)
@@ -3293,6 +3967,79 @@ class PuzzleCanvasWindow(QMainWindow):
         menu.exec(self.canvas_view.mapToGlobal(pos))
 
     # ── Cleanup ──
+
+    def keyPressEvent(self, event):
+        """Keyboard shortcuts for puzzle canvas.
+
+        Esc         - Exit crop mode, or close window
+        Delete      - Delete selected fragments
+        R / Shift+R - Rotate selected 1° CW / CCW
+        F           - Flip recto/verso
+        Ctrl+A      - Select all
+        Ctrl+0      - Fit all fragments in view
+        Arrow keys  - Move selected (or crop edges in crop mode)
+        +/-         - Scale up/down
+        """
+        key = event.key()
+        mod = event.modifiers()
+        crop_active = self.btn_crop.isChecked()
+
+        if key == Qt.Key.Key_Escape:
+            if crop_active:
+                self._revert_crop()
+            else:
+                self.close()
+        elif key == Qt.Key.Key_Return and crop_active:
+            # Confirm crop
+            self.btn_crop.setChecked(False)
+        elif key == Qt.Key.Key_Delete:
+            self._delete_selected()
+        elif key == Qt.Key.Key_R:
+            if mod & Qt.KeyboardModifier.ShiftModifier:
+                self._rotate_selected(-1)
+            else:
+                self._rotate_selected(1)
+        elif key == Qt.Key.Key_F and not (mod & Qt.KeyboardModifier.ControlModifier):
+            self._flip_recto_verso()
+        elif key == Qt.Key.Key_A and mod & Qt.KeyboardModifier.ControlModifier:
+            for item in self.canvas_view.get_fragment_items():
+                item.setSelected(True)
+        elif key == Qt.Key.Key_0 and mod & Qt.KeyboardModifier.ControlModifier:
+            self._fit_all_fragments()
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self._nudge_scale(5)
+        elif key == Qt.Key.Key_Minus:
+            self._nudge_scale(-5)
+        elif key == Qt.Key.Key_Up:
+            if crop_active:
+                self._crop_edge("top")
+            else:
+                for it in self.canvas_view.get_selected_fragments():
+                    it.setPos(it.pos().x(), it.pos().y() - 1)
+                    it.puzzle_frag.y = it.pos().y()
+        elif key == Qt.Key.Key_Down:
+            if crop_active:
+                self._crop_edge("bottom")
+            else:
+                for it in self.canvas_view.get_selected_fragments():
+                    it.setPos(it.pos().x(), it.pos().y() + 1)
+                    it.puzzle_frag.y = it.pos().y()
+        elif key == Qt.Key.Key_Left:
+            if crop_active:
+                self._crop_edge("left")
+            else:
+                for it in self.canvas_view.get_selected_fragments():
+                    it.setPos(it.pos().x() - 1, it.pos().y())
+                    it.puzzle_frag.x = it.pos().x()
+        elif key == Qt.Key.Key_Right:
+            if crop_active:
+                self._crop_edge("right")
+            else:
+                for it in self.canvas_view.get_selected_fragments():
+                    it.setPos(it.pos().x() + 1, it.pos().y())
+                    it.puzzle_frag.x = it.pos().x()
+        else:
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         """Wait for active loader threads before closing."""

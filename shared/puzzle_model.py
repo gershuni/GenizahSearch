@@ -19,6 +19,7 @@ class PuzzleFragment:
     sys_id: str
     folio_label: str          # e.g., "1r", "2v"
     fl_id: str                # NLI FL ID for image loading
+    shelfmark: str = ''       # display shelfmark (e.g., "T-S 12.1")
     x: float = 0.0
     y: float = 0.0
     rotation: float = 0.0    # degrees

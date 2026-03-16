@@ -45,25 +45,48 @@ def detect_background_color(hsv_array: np.ndarray) -> np.ndarray:
     return np.median(all_pixels, axis=0)
 
 
+HIGH_SATURATION_THRESHOLD = 100  # S > 100 = colored background (blue, green, etc.)
+
+
+def _circular_hue_distance(h_array, h_bg):
+    """Circular distance on PIL's 0-255 hue wheel (period=256)."""
+    raw = np.abs(h_array.astype(float) - float(h_bg))
+    return np.minimum(raw, 256.0 - raw)
+
+
 def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
                 threshold: float) -> Image.Image:
     """Create binary foreground mask. Foreground=255, background=0.
 
-    When background saturation is low (S < 30 on 0-255 scale), uses
-    Value-channel-only distance instead of full HSV Euclidean distance.
-    This handles gray/cream/white backgrounds where hue is circular
-    and noisy (Finding 5).
+    Three modes based on background saturation:
 
-    Otherwise uses full Euclidean distance in HSV space (all channels 0-255).
-    Applies morphological cleanup: MinFilter(3) erode then MaxFilter(5) dilate.
+    1. Low saturation (S < 30): gray/cream/white backgrounds.
+       Use Value-channel-only distance (hue is noisy at low S).
+
+    2. High saturation (S > 100): colored backgrounds like CUL blue.
+       Use hue-dominant distance: circular hue distance * 3 + S distance + V distance.
+       The hue channel is the primary discriminant — parchment hue is far from blue
+       but S and V values can be similar, so raw Euclidean fails.
+       Threshold is interpreted as this weighted distance (typical range 30-120).
+
+    3. Medium saturation (30-100): mixed. Use standard HSV Euclidean.
+
+    All apply morphological cleanup: MinFilter(3) erode then MaxFilter(5) dilate.
     """
     bg_saturation = bg_color[1]  # S channel, 0-255 scale
 
     if bg_saturation < LOW_SATURATION_THRESHOLD:
         # Low saturation: hue is meaningless, use Value channel only
         diff = np.abs(hsv_array[:, :, 2].astype(float) - float(bg_color[2]))
+    elif bg_saturation > HIGH_SATURATION_THRESHOLD:
+        # High saturation (colored bg like CUL blue): hue-dominant distance
+        h_dist = _circular_hue_distance(hsv_array[:, :, 0], bg_color[0])
+        s_dist = np.abs(hsv_array[:, :, 1].astype(float) - float(bg_color[1]))
+        v_dist = np.abs(hsv_array[:, :, 2].astype(float) - float(bg_color[2]))
+        # Weight hue heavily — it's the key discriminant for colored backgrounds
+        diff = h_dist * 3.0 + s_dist + v_dist
     else:
-        # Normal saturation: full HSV Euclidean distance
+        # Medium saturation: standard HSV Euclidean distance
         diff = np.sqrt(np.sum((hsv_array.astype(float) - bg_color) ** 2, axis=2))
 
     mask_array = np.where(diff > threshold, 255, 0).astype(np.uint8)
