@@ -3,6 +3,7 @@ import logging
 from nicegui import app
 from fastapi import Response
 from fastapi.responses import RedirectResponse
+from starlette.requests import Request
 from web.state import state
 from web.export_service import get_export_service, encode_filename_for_header
 import requests
@@ -734,6 +735,135 @@ def init_api_routes():
             side = 'r' if i % 2 == 0 else 'v'
             result.append({'fl_id': fid, 'label': f'{leaf}{side}'})
         return result
+
+    # === Puzzle Document CRUD + Export (Phase 50) ===
+
+    @app.get('/api/puzzle_documents')
+    def puzzle_documents_list():
+        """List all saved puzzle documents."""
+        from shared.puzzle_service import get_puzzle_service
+        svc = get_puzzle_service(thread_safe=True)
+        return svc.list_documents()
+
+    @app.get('/api/puzzle_document/{doc_id}')
+    def puzzle_document_get(doc_id: str):
+        """Load a specific puzzle document."""
+        from shared.puzzle_service import get_puzzle_service
+        svc = get_puzzle_service(thread_safe=True)
+        doc = svc.load_document(doc_id)
+        if doc is None:
+            from starlette.responses import JSONResponse
+            return JSONResponse({'error': 'not found'}, status_code=404)
+        return {
+            'id': doc.id, 'title': doc.title, 'notes': doc.notes,
+            'join_type': doc.join_type,
+            'fragments': [
+                {'sys_id': f.sys_id, 'folio_label': f.folio_label, 'fl_id': f.fl_id,
+                 'shelfmark': f.shelfmark, 'x': f.x, 'y': f.y,
+                 'rotation': f.rotation, 'scale': f.scale,
+                 'flip_h': f.flip_h, 'flip_v': f.flip_v,
+                 'bg_removal_threshold': f.bg_removal_threshold,
+                 'crop_top': f.crop_top, 'crop_bottom': f.crop_bottom,
+                 'crop_left': f.crop_left, 'crop_right': f.crop_right,
+                 'processed': f.processed}
+                for f in doc.fragments
+            ],
+            'created_at': doc.created_at, 'updated_at': doc.updated_at
+        }
+
+    @app.post('/api/puzzle_document')
+    async def puzzle_document_save(request: Request):
+        """Save or update a puzzle document."""
+        from shared.puzzle_service import get_puzzle_service
+        from shared.puzzle_model import PuzzleDocument, PuzzleFragment
+        from shared.puzzle_export import generate_thumbnail
+        from shared.puzzle_image_service import get_puzzle_image_service
+        import json
+        import uuid
+
+        body = await request.json()
+        fragments = [PuzzleFragment(**f) for f in body.get('fragments', [])]
+        doc = PuzzleDocument(
+            id=body.get('id', ''),
+            title=body.get('title', ''),
+            notes=body.get('notes', ''),
+            fragments=fragments,
+        )
+        if not doc.id:
+            doc.id = str(uuid.uuid4())
+
+        # Generate thumbnail
+        img_svc = get_puzzle_image_service()
+        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
+
+        svc = get_puzzle_service(thread_safe=True)
+        doc_id = svc.save_document(doc, thumbnail_b64=thumb)
+        if doc_id:
+            return {'id': doc_id, 'status': 'ok'}
+        from starlette.responses import JSONResponse
+        return JSONResponse({'error': 'save failed'}, status_code=500)
+
+    @app.delete('/api/puzzle_document/{doc_id}')
+    def puzzle_document_delete(doc_id: str):
+        """Delete a puzzle document."""
+        from shared.puzzle_service import get_puzzle_service
+        svc = get_puzzle_service(thread_safe=True)
+        ok = svc.delete_document(doc_id)
+        if ok:
+            return {'status': 'ok'}
+        from starlette.responses import JSONResponse
+        return JSONResponse({'error': 'not found'}, status_code=404)
+
+    @app.post('/api/puzzle_export')
+    async def puzzle_export(request: Request):
+        """Export composite PNG from fragment data."""
+        from shared.puzzle_model import PuzzleFragment
+        from shared.puzzle_export import compose_puzzle_export
+        from shared.puzzle_image_service import get_puzzle_image_service
+        import io
+
+        body = await request.json()
+        fragments = [PuzzleFragment(**f) for f in body.get('fragments', [])]
+        if not fragments:
+            from starlette.responses import JSONResponse
+            return JSONResponse({'error': 'no fragments'}, status_code=400)
+
+        img_svc = get_puzzle_image_service()
+        result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
+        if result is None:
+            from starlette.responses import JSONResponse
+            return JSONResponse({'error': 'export failed'}, status_code=500)
+
+        buf = io.BytesIO()
+        result.save(buf, 'PNG')
+        buf.seek(0)
+        return Response(
+            content=buf.getvalue(),
+            media_type='image/png',
+            headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"'}
+        )
+
+    @app.get('/api/puzzle_thumbnail/{doc_id}')
+    def puzzle_thumbnail(doc_id: str):
+        """Serve thumbnail image for a document."""
+        from shared.puzzle_service import get_puzzle_service
+        import base64
+
+        svc = get_puzzle_service(thread_safe=True)
+        docs = svc.list_documents()
+        for d in docs:
+            if d['id'] == doc_id:
+                thumb_b64 = d.get('thumbnail_b64', '')
+                if thumb_b64:
+                    return Response(
+                        content=base64.b64decode(thumb_b64),
+                        media_type='image/png'
+                    )
+        # Return 1x1 transparent pixel as fallback
+        return Response(
+            content=b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82',
+            media_type='image/png'
+        )
 
     @app.get('/api/proxy_image')
     def proxy_image(url: str):
