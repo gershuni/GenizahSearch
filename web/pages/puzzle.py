@@ -825,17 +825,35 @@ PUZZLE_STYLES = '''
 
 
 def _resolve_folios(sys_id: str) -> list:
-    """Resolve folio list for a sys_id using NLI manifest (same process, no HTTP)."""
+    """Resolve folio FL IDs from NLI IIIF manifest for a sys_id."""
+    import re as _re
+    import requests as _requests
     try:
-        from web.api import fetch_fl_ids_from_nli
-        fl_ids = fetch_fl_ids_from_nli(sys_id)
+        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{sys_id}-1/manifest"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        resp = _requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        fl_ids = []
+        if 'sequences' in data and data['sequences']:
+            for canvas in data['sequences'][0].get('canvases', []):
+                images = canvas.get('images', [])
+                if images:
+                    resource = images[0].get('resource', {})
+                    service = resource.get('service', {})
+                    service_id = service.get('@id', '')
+                    m = _re.search(r'/FL(\d+)', service_id)
+                    if m:
+                        fl_ids.append(m.group(1))
         if not fl_ids:
             return []
         return [
             {'fl_id': fid, 'label': f'{(i // 2) + 1}{"r" if i % 2 == 0 else "v"}'}
             for i, fid in enumerate(fl_ids)
         ]
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to resolve folios for {sys_id}: {e}")
         return []
 
 
@@ -849,6 +867,44 @@ def _invalidate_and_refetch(fl_id: str, new_threshold: float):
         service.resolve_fragment_image(fl_id=fl_id, size=800, threshold=new_threshold, processed=True)
     except Exception as e:
         logger.error(f"Threshold refetch failed for {fl_id}: {e}")
+
+
+async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, threshold_slider):
+    """Shared helper: resolve folios and add first folio to canvas."""
+    folios = await run.io_bound(_resolve_folios, sys_id)
+    if not folios:
+        ui.notify(tr('No images found'), type='warning')
+        return
+
+    first = folios[0]
+    fl_id = first.get('fl_id', '')
+    folio_label = first.get('label', '1r')
+    key = f"{sys_id},{folio_label}"
+
+    threshold = threshold_slider.value if threshold_slider else 30
+    url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
+
+    frag_offset = len(puzzle_meta) * 50
+    meta = {
+        'fl_id': fl_id, 'threshold': threshold,
+        'size': 800, 'processed': True,
+        'sys_id': sys_id
+    }
+    meta_json = json.dumps(meta)
+    await ui.run_javascript(
+        f'window.puzzleCanvas.addFragment("{key}", "{url}", '
+        f'{100 + frag_offset}, {100 + frag_offset}, 0, 1.0, false, false, {meta_json})'
+    )
+
+    puzzle_meta[key] = {
+        'sys_id': sys_id,
+        'shelfmark': shelfmark,
+        'folio_label': folio_label,
+        'fl_id': fl_id,
+        'threshold': threshold,
+    }
+    app.storage.tab['puzzle_fragments'] = puzzle_meta
+    ui.notify(f'{shelfmark} ({folio_label})', type='positive')
 
 
 def create_puzzle_page(initial_add: str = None):
@@ -882,7 +938,6 @@ def create_puzzle_page(initial_add: str = None):
                     return
                 text = text.strip()
 
-                # Resolve shelfmark to sys_id
                 if not state.meta_mgr:
                     ui.notify(tr('Shelfmark not found'), type='warning')
                     return
@@ -896,57 +951,73 @@ def create_puzzle_page(initial_add: str = None):
                     return
 
                 shelfmark = result.get('selected_shelfmark') or text
-                # Get folios directly (same process, no localhost call)
-                folios = await run.io_bound(_resolve_folios, sys_id)
-
-                if not folios:
-                    ui.notify(tr('No images found'), type='warning')
-                    return
-
-                first = folios[0]
-                fl_id = first.get('fl_id', '')
-                folio_label = first.get('label', '1r')
-                key = f"{sys_id},{folio_label}"
-
-                threshold = threshold_slider.value if threshold_slider else 30
-                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
-
-                # Position at center with offset for each new fragment
-                frag_offset = len(puzzle_meta) * 50
-                x = 100 + frag_offset
-                y = 100 + frag_offset
-
-                # Pass meta into JS addFragment so _fragmentMeta is set
-                # synchronously when the image loads (no race condition)
-                meta = {
-                    'fl_id': fl_id, 'threshold': threshold,
-                    'size': 800, 'processed': True,
-                    'sys_id': sys_id
-                }
-                meta_json = json.dumps(meta)
-                await ui.run_javascript(
-                    f'window.puzzleCanvas.addFragment("{key}", "{url}", '
-                    f'{x}, {y}, 0, 1.0, false, false, {meta_json})'
-                )
-
-                # Store metadata in Python storage
-                puzzle_meta[key] = {
-                    'sys_id': sys_id,
-                    'shelfmark': shelfmark,
-                    'folio_label': folio_label,
-                    'fl_id': fl_id,
-                    'threshold': threshold,
-                }
-                app.storage.tab['puzzle_fragments'] = puzzle_meta
-
                 shelfmark_input.value = ''
-                ui.notify(f'{shelfmark} ({folio_label})', type='positive')
+                await _add_fragment_by_sys_id(
+                    sys_id, shelfmark, puzzle_meta, threshold_slider
+                )
 
             shelfmark_input.on('keydown.enter', lambda: on_add_shelfmark())
 
             ui.button(tr('Add'), icon='add', on_click=on_add_shelfmark).props(
                 'dense flat dark color=primary'
             )
+
+            async def on_add_from_list():
+                """Show dialog to pick a manuscript from personal lists."""
+                from web.supabase_client import get_user_lists, get_list_items
+                from web.state import state as web_state
+                user = getattr(web_state, 'user', None)
+                if not user:
+                    ui.notify(tr('Please log in to access lists'), type='warning')
+                    return
+                user_id = user.get('id', '') if isinstance(user, dict) else getattr(user, 'id', '')
+                if not user_id:
+                    ui.notify(tr('Please log in to access lists'), type='warning')
+                    return
+
+                lists = await run.io_bound(get_user_lists, user_id)
+                if not lists:
+                    ui.notify(tr('No lists found'), type='info')
+                    return
+
+                with ui.dialog() as dlg, ui.card().classes('w-96'):
+                    ui.label(tr('Add from List')).classes('text-lg font-bold')
+                    list_select = ui.select(
+                        {l['id']: l['name'] for l in lists},
+                        label=tr('Select list')
+                    ).classes('w-full')
+                    items_container = ui.column().classes('w-full max-h-64 overflow-auto')
+
+                    async def on_list_selected(e):
+                        items_container.clear()
+                        list_id = e.value if hasattr(e, 'value') else list_select.value
+                        if not list_id:
+                            return
+                        items = await run.io_bound(get_list_items, int(list_id))
+                        with items_container:
+                            if not items:
+                                ui.label(tr('Empty list')).classes('text-grey')
+                            else:
+                                for item in items:
+                                    sid = item.get('system_number', '')
+                                    shelf = item.get('shelfmark', sid)
+                                    async def add_item(s=sid, sh=shelf):
+                                        dlg.close()
+                                        await _add_fragment_by_sys_id(
+                                            s, sh, puzzle_meta, threshold_slider
+                                        )
+                                    ui.button(
+                                        shelf, on_click=add_item
+                                    ).props('flat dense no-caps').classes('w-full text-left')
+
+                    list_select.on('update:model-value', on_list_selected)
+                    with ui.row().classes('w-full justify-end'):
+                        ui.button(tr('Close'), on_click=dlg.close).props('flat')
+                dlg.open()
+
+            ui.button(icon='list', on_click=on_add_from_list).props(
+                'dense flat dark'
+            ).tooltip(tr('Add from List'))
             async def on_delete_selected():
                 try:
                     removed = await ui.run_javascript(
