@@ -89,11 +89,11 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 
 Milestone: v7.0.0 Fragment Puzzle
 Phase: 48 (2 of 6 in milestone)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: In progress
-Last activity: 2026-03-16 -- Completed 48-01 canvas building blocks (PuzzleFragmentItem, PuzzleCanvasView, PuzzleImageLoaderThread)
+Last activity: 2026-03-16 -- Completed 48-02 PuzzleCanvasWindow with toolbar, shelfmark autocomplete, async fl_id resolution
 
-Progress: [██░░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -122,6 +122,7 @@ Recent decisions affecting current work:
 - [Phase 47]: Cambridge IIIF fetched directly (not NLI-hosted), separate code path
 - [Phase 48-01]: View dispatches wheel to items via adjust_scale_from_wheel() to avoid QWheelEvent/QGraphicsSceneWheelEvent type mismatch
 - [Phase 48-01]: Corner-handle rotation on selected items (HANDLE_SIZE=14px), pan on middle-click or left-click on empty canvas
+- [Phase 48-02]: Fragment items keyed by (sys_id, folio_label) tuple for stable tracking across folio navigation; functools.partial for binding item_key to signal callbacks
 
 ### Pending Todos
 
@@ -155,6 +156,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-16T06:20:40Z
-Stopped at: Completed 48-01-PLAN.md
-Resume file: .planning/phases/48-desktop-canvas/48-01-SUMMARY.md
+Last session: 2026-03-16T06:27:51Z
+Stopped at: Completed 48-02-PLAN.md
+Resume file: .planning/phases/48-desktop-canvas/48-02-SUMMARY.md

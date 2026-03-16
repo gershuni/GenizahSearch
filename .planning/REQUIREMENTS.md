@@ -9,7 +9,7 @@ Requirements for v7.0.0 Fragment Puzzle. Each maps to roadmap phases.
 
 ### Canvas Manipulation
 
-- [ ] **CANV-01**: User can add a fragment to the puzzle canvas by shelfmark
+- [x] **CANV-01**: User can add a fragment to the puzzle canvas by shelfmark
 - [ ] **CANV-02**: User can add a fragment from personal lists or browse/search results
 - [x] **CANV-03**: User can drag fragments freely on the canvas
 - [x] **CANV-04**: User can rotate a fragment to any angle
@@ -48,7 +48,7 @@ Background removal is **foundational** — without it, rectangular images overla
 ### Platform
 
 - [ ] **PLAT-01**: Puzzle works in the web app (NiceGUI + Fabric.js)
-- [ ] **PLAT-02**: Puzzle works in the desktop app (PyQt6 + QGraphicsScene)
+- [x] **PLAT-02**: Puzzle works in the desktop app (PyQt6 + QGraphicsScene)
 
 ## Future Requirements
 
@@ -105,12 +105,12 @@ Explicitly excluded. Documented to prevent scope creep.
 | BGRM-01 | Phase 47 | Complete |
 | BGRM-02 | Phase 47 | Complete |
 | BGRM-03 | Phase 47 | Complete |
-| CANV-01 | Phase 48 | Pending |
+| CANV-01 | Phase 48 | Complete |
 | CANV-03 | Phase 48 | Complete |
 | CANV-04 | Phase 48 | Complete |
 | CANV-05 | Phase 48 | Complete |
 | CANV-06 | Phase 48 | Complete |
-| PLAT-02 | Phase 48 | Pending |
+| PLAT-02 | Phase 48 | Complete |
 | CANV-07 | Phase 49 | Pending |
 | CANV-08 | Phase 49 | Pending |
 | PLAT-01 | Phase 49 | Pending |
