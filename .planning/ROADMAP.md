@@ -189,7 +189,10 @@ Plans:
   3. Snap guides appear when dragging a fragment near the edge or center of another fragment
   4. All IIIF images load correctly through the server proxy without CORS errors
   5. The web puzzle is accessible from the app's main navigation
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 49-01-PLAN.md — API endpoints + Fabric.js canvas page with full manipulation
+- [ ] 49-02-PLAN.md — Folio navigation, snap guides, entry points + visual checkpoint
 
 ### Phase 50: Join Documents
 **Goal**: Researchers can save their puzzle arrangements as persistent join documents and export composite images for publication
@@ -226,18 +229,18 @@ Plans:
 ## Progress
 
 **Total milestones shipped:** 10
-**Total phases completed:** 47 (Phases 1-47)
-**Total plans completed:** ~165
+**Total phases completed:** 48 (Phases 1-48)
+**Total plans completed:** ~168
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 47. Foundation + Background Removal | 4/4 | Complete    | 2026-03-16 |
 | 48. Desktop Canvas | 3/3 | Complete    | 2026-03-16 |
-| 49. Web Canvas | 0/TBD | Not started | - |
+| 49. Web Canvas | 0/2 | Planning complete | - |
 | 50. Join Documents | 0/TBD | Not started | - |
 | 51. Recto/Verso | 0/TBD | Not started | - |
 | 52. Community + Integration | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-16 after Phase 48 planning (3 plans)*
+*Last updated: 2026-03-16 after Phase 49 planning (2 plans)*
