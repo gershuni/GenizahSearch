@@ -97,7 +97,12 @@ window.puzzleCanvas = {
         this.canvas.add(placeholder);
         this.canvas.requestRenderAll();
 
-        fabric.Image.fromURL(imageUrl, {crossOrigin: 'anonymous'}).then(function(img) {
+        console.log('Loading fragment image:', key, imageUrl);
+        // Use Image element directly for reliable cross-browser loading
+        var htmlImg = new Image();
+        htmlImg.crossOrigin = 'anonymous';
+        htmlImg.onload = function() {
+            console.log('Image loaded successfully:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
             // Remove placeholder
             self.canvas.getObjects().forEach(function(obj) {
                 if (obj._isPlaceholder && obj._placeholderKey === key) {
@@ -105,7 +110,7 @@ window.puzzleCanvas = {
                 }
             });
 
-            img.set({
+            var img = new fabric.Image(htmlImg, {
                 left: x, top: y,
                 angle: rotation || 0,
                 scaleX: scale || 1.0,
@@ -117,23 +122,34 @@ window.puzzleCanvas = {
                 cornerSize: 12,
                 transparentCorners: false,
                 perPixelTargetFind: true,
-                _fragmentKey: key
+                _fragmentKey: key,
+                _imageUrl: imageUrl
             });
 
             self.canvas.add(img);
             self.fragments[key] = img;
             self.canvas.setActiveObject(img);
             self.canvas.requestRenderAll();
-        }).catch(function(err) {
-            console.error('Failed to load image for', key, err);
+            console.log('Fragment added to canvas:', key);
+        };
+        htmlImg.onerror = function(err) {
+            console.error('Failed to load image for', key, imageUrl, err);
             // Remove placeholder on error
             self.canvas.getObjects().forEach(function(obj) {
                 if (obj._isPlaceholder && obj._placeholderKey === key) {
                     self.canvas.remove(obj);
                 }
             });
+            // Show error text
+            var errText = new fabric.Text('Image load failed: ' + key, {
+                left: x, top: y,
+                fontSize: 12, fill: '#ff6666',
+                selectable: false, evented: false
+            });
+            self.canvas.add(errText);
             self.canvas.requestRenderAll();
-        });
+        };
+        htmlImg.src = imageUrl;
     },
 
     removeSelected: function() {
@@ -396,25 +412,31 @@ window.puzzleCanvas = {
         var threshold = meta.threshold || 30;
         var url = '/api/puzzle_image?fl_id=' + folio.fl_id + '&threshold=' + threshold + '&size=800';
 
-        try {
-            var img = await fabric.Image.fromURL(url, {crossOrigin: 'anonymous'});
-            self.canvas.remove(obj);
-            img.set(pos);
-            img.set({
-                hasControls: true, hasBorders: true,
-                cornerSize: 12, transparentCorners: false,
-                perPixelTargetFind: true, _fragmentKey: key
-            });
-            // Copy meta
-            img._fragmentMeta = Object.assign({}, meta, { fl_id: folio.fl_id });
-            self.canvas.add(img);
-            self.fragments[key] = img;
-            self.canvas.setActiveObject(img);
-            self.canvas.requestRenderAll();
-        } catch(e) {
-            console.error('Failed to load folio image:', e);
-        }
-        return folio.label;
+        return new Promise(function(resolve) {
+            var htmlImg = new Image();
+            htmlImg.crossOrigin = 'anonymous';
+            htmlImg.onload = function() {
+                self.canvas.remove(obj);
+                var img = new fabric.Image(htmlImg, pos);
+                img.set({
+                    hasControls: true, hasBorders: true,
+                    cornerSize: 12, transparentCorners: false,
+                    perPixelTargetFind: true, _fragmentKey: key,
+                    _imageUrl: url
+                });
+                img._fragmentMeta = Object.assign({}, meta, { fl_id: folio.fl_id });
+                self.canvas.add(img);
+                self.fragments[key] = img;
+                self.canvas.setActiveObject(img);
+                self.canvas.requestRenderAll();
+                resolve(folio.label);
+            };
+            htmlImg.onerror = function() {
+                console.error('Failed to load folio image:', url);
+                resolve(folio.label);
+            };
+            htmlImg.src = url;
+        });
     },
 
     getCurrentFolioLabel: function(key) {
@@ -911,38 +933,65 @@ def create_puzzle_page(initial_add: str = None):
             )
 
             async def on_folio_prev():
-                key = await ui.run_javascript('window.puzzleCanvas.getSelectedKey()')
-                if key:
-                    label = await ui.run_javascript(
-                        f'window.puzzleCanvas.navigateFolio("{key}", -1)'
+                try:
+                    key = await ui.run_javascript(
+                        'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getSelectedKey() : null',
+                        timeout=3.0
                     )
-                    folio_label_display.text = label or ''
-                    # Update stored fl_id
-                    if key in puzzle_meta:
-                        new_fl_id = await ui.run_javascript(
-                            f'window.puzzleCanvas.fragments["{key}"] && '
-                            f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta ? '
-                            f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta.fl_id : ""'
+                except TimeoutError:
+                    return
+                if key:
+                    try:
+                        label = await ui.run_javascript(
+                            f'window.puzzleCanvas.navigateFolio("{key}", -1)',
+                            timeout=15.0
                         )
+                    except TimeoutError:
+                        return
+                    folio_label_display.text = label or ''
+                    if key in puzzle_meta:
+                        try:
+                            new_fl_id = await ui.run_javascript(
+                                f'window.puzzleCanvas.fragments["{key}"] && '
+                                f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta ? '
+                                f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta.fl_id : ""',
+                                timeout=3.0
+                            )
+                        except TimeoutError:
+                            new_fl_id = None
                         if new_fl_id:
                             puzzle_meta[key]['fl_id'] = new_fl_id
                             puzzle_meta[key]['folio_label'] = label or ''
                             app.storage.tab['puzzle_fragments'] = puzzle_meta
 
             async def on_folio_next():
-                key = await ui.run_javascript('window.puzzleCanvas.getSelectedKey()')
-                if key:
-                    label = await ui.run_javascript(
-                        f'window.puzzleCanvas.navigateFolio("{key}", 1)'
+                try:
+                    key = await ui.run_javascript(
+                        'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getSelectedKey() : null',
+                        timeout=3.0
                     )
+                except TimeoutError:
+                    return
+                if key:
+                    try:
+                        label = await ui.run_javascript(
+                            f'window.puzzleCanvas.navigateFolio("{key}", 1)',
+                            timeout=15.0
+                        )
+                    except TimeoutError:
+                        return
                     folio_label_display.text = label or ''
                     # Update stored fl_id
                     if key in puzzle_meta:
-                        new_fl_id = await ui.run_javascript(
-                            f'window.puzzleCanvas.fragments["{key}"] && '
-                            f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta ? '
-                            f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta.fl_id : ""'
-                        )
+                        try:
+                            new_fl_id = await ui.run_javascript(
+                                f'window.puzzleCanvas.fragments["{key}"] && '
+                                f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta ? '
+                                f'window.puzzleCanvas.fragments["{key}"]._fragmentMeta.fl_id : ""',
+                                timeout=3.0
+                            )
+                        except TimeoutError:
+                            new_fl_id = None
                         if new_fl_id:
                             puzzle_meta[key]['fl_id'] = new_fl_id
                             puzzle_meta[key]['folio_label'] = label or ''
