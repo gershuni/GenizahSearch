@@ -791,9 +791,9 @@ def create_puzzle_page(initial_add: str = None):
     ui.add_body_html(PUZZLE_CANVAS_JS)
 
     # Track fragment metadata (Python-side)
-    puzzle_meta = app.storage.tab.get('puzzle_fragments', {})
-    if not isinstance(puzzle_meta, dict):
-        puzzle_meta = {}
+    # NOTE: app.storage.tab requires client connection, so start empty
+    # and populate in init_canvas() after client connects
+    puzzle_meta = {}
 
     # ── Main container ──
     with ui.column().classes('puzzle-container w-full'):
@@ -1005,9 +1005,12 @@ def create_puzzle_page(initial_add: str = None):
     async def init_canvas():
         await ui.run_javascript('window.puzzleCanvas.init("puzzleCanvas")')
 
-        # Restore saved fragments
+        # Restore saved fragments (app.storage.tab is safe here — client connected)
         saved_meta = app.storage.tab.get('puzzle_fragments', {})
         saved_state = app.storage.tab.get('puzzle_state')
+        # Populate outer puzzle_meta so callbacks can find existing fragments
+        if saved_meta and isinstance(saved_meta, dict):
+            puzzle_meta.update(saved_meta)
 
         if saved_meta and isinstance(saved_meta, dict):
             for key, meta in saved_meta.items():
