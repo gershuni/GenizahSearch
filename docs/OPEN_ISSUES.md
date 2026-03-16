@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-16 (Fixed web puzzle canvas image-loading root cause and related state-sync issues)
+> **Last Updated:** 2026-03-16 (Search performance: staged enrichment, FJMS build-time indexes)
 > **Status:** Active working document
 
 ---
@@ -52,10 +52,10 @@ Move to "Completed Issues" section at bottom with date
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 0 | 6 | 6 |
-| Untested Areas | 7 | 0 | 7 |
+| Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **11** | **45** | **56** |
+| **Total** | **10** | **46** | **56** |
 
 ---
 
@@ -135,7 +135,7 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 | **End-to-End Integration** | ❌ Not Tested | Full flows: Search→View→Edit→Submit→Approve |
 | **Concurrency** | ❌ Not Tested | Two users editing same correction simultaneously |
 | **Browser Compatibility** | ❌ Not Tested | Chrome, Firefox, Safari, Edge, Mobile |
-| **Performance** | ❌ Not Tested | 1000+ results, 100+ list items, stress tests |
+| **Performance** | ✅ Fixed (2026-03-16) | Staged search enrichment: render results before metadata loads. FJMS indexes moved to build-time. Perf timing spans added to logger (`first_render_ms`, `visible_enrichment_ms`, `background_enrichment_ms`). Needs rebuild of `fjms_enrichment.db` to include new indexes. |
 | **In-App Update (Desktop)** | ❌ Test on Next Release | Build test version with 5.0.0, verify full update flow works (download → install → auto-restart) |
 | **Translation QA / hallucination audit** | ✅ Fixed (2026-03-11) | QC module (`shared/translation_qc.py`), audit script, report component, disclaimers added. 12,827 rows fixed: Piyyut (10,256), Bible (979), Mahzor (317), Selihot (347), Kinot (218), stuttering nulled (257), FJMS hallucinations deleted (445), PGP collapsed nulled (8). DBs uploaded to server. |
 | **MARC field translations (Date/Subjects/People)** | ❌ Needs Testing | Added translate badges for Date, Subjects, People in ResultDialog and Browse extended info. Hebrew dates use direct gematria converter (`_translate_hebrew_date`) to avoid Dicta errors (e.g. "מאה ט״ו" → "15th century"). Subjects/People use Dicta on-demand. Test: open records with Hebrew dates, subjects, people in EN UI with translations ON. Verify badges appear, translations are correct, toggle works. Test record: sys_id 990001430180205171. |
@@ -262,6 +262,7 @@ All completed items have been moved to `docs/archive/`:
 | 2026-02-03 | Marked CSV/Word exports as "Won't Fix" per user request | Claude |
 | 2026-02-03 | Verified all P2 bugs - list rename already fixed, updated counts | Claude |
 | 2026-02-03 | Verified P1 path traversal bug already fixed in `filter_text_dialog.py` | Claude |
+| 2026-03-16 | Search performance: staged enrichment (3-phase render), FJMS build-time indexes (6 added to export script, runtime DDL removed), generation guard race fix, Stage-2 re-render fix. Reviewed by GPT Codex. | Claude |
 | 2026-02-03 | Initial creation from documentation audit | Claude |
 
 ---

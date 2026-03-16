@@ -4,6 +4,17 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [6.5.4] - 2026-03-16
+
+### Performance
+
+- **Staged search enrichment**: Search results now appear immediately after core search completes, before metadata (domains, transcription badges, catalog counts, printed flags, translations) finishes loading. Enrichment runs in three progressive stages: title translations first (~1ms), then visible page (50 IDs), then remaining results in background chunks (200 IDs each)
+- **FJMS build-time indexes**: 6 database indexes previously attempted at runtime (silently failing on read-only connection) are now pre-built in `fjms_enrichment.db` during export. Requires sidecar rebuild
+- **Search generation guard**: New searches immediately cancel stale background enrichment from previous searches, preventing data overwrites
+- **Performance instrumentation**: Timing spans added to search logger (`first_render_ms`, `visible_enrichment_ms`, `background_enrichment_ms`) for regression tracking
+
+---
+
 ## [6.5.3] - 2026-03-15
 
 ### Improvements
