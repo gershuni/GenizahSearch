@@ -20,16 +20,17 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QStyleOptionButton, QSizePolicy, QInputDialog,
-                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem, QGraphicsSimpleTextItem,
+                             QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem, QGraphicsSimpleTextItem, QGraphicsTextItem,
                              QCompleter, QAbstractItemView)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF, QPoint, QPointF)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
-                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor)
+                         QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor, QAction)
 from PyQt6 import sip
 
 from version import APP_VERSION
 
 from collections import defaultdict
+from functools import partial
 
 _CORE_IMPORT_ERROR = None
 try:
@@ -47,7 +48,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleImageLoaderThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleImageLoaderThread, PuzzleMetaLoaderThread
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -2844,6 +2845,461 @@ class PuzzleCanvasView(QGraphicsView):
     def get_selected_fragments(self):
         """Return selected PuzzleFragmentItem instances."""
         return [i for i in self.scene.selectedItems() if isinstance(i, PuzzleFragmentItem)]
+
+
+class PuzzleCanvasWindow(QMainWindow):
+    """Standalone puzzle workspace for assembling fragment images.
+
+    Provides toolbar controls (shelfmark autocomplete, flip, threshold, folio
+    navigation, scale, delete, background toggle) around a PuzzleCanvasView.
+    Singleton pattern: GenizahGUI.add_to_puzzle() reuses this window.
+    """
+
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.setWindowTitle(tr("Fragment Puzzle"))
+        self.setMinimumSize(900, 600)
+        if hasattr(app, 'windowIcon'):
+            self.setWindowIcon(app.windowIcon())
+
+        # Thread and item tracking
+        self._loader_threads = []
+        self._meta_threads = []
+        self._fragment_items = {}       # (sys_id, folio_label) -> PuzzleFragmentItem
+        self._pending_fragments = {}    # (sys_id, folio_label) -> PuzzleFragment
+        self._folio_lists = {}          # sys_id -> list of {'fl_id': str, 'label': str, ...}
+        self._placeholder_items = {}    # (sys_id, folio_label) -> QGraphicsTextItem
+        self._next_x = 50.0
+
+        # --- Central widget layout ---
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(2)
+
+        # --- Top toolbar ---
+        top_toolbar = QHBoxLayout()
+        top_toolbar.setSpacing(4)
+
+        # Shelfmark input with autocomplete
+        self.shelfmark_input = QLineEdit()
+        self.shelfmark_input.setPlaceholderText(tr("Enter shelfmark..."))
+        self.shelfmark_input.setMinimumWidth(180)
+        self.shelfmark_input.setMaximumWidth(280)
+        if hasattr(self.app, 'shelf_model') and self.app.shelf_model:
+            completer = ShelfmarkCompleter(
+                self.app.shelf_model, self,
+                valid_keys=getattr(self.app, 'valid_shelf_keys', set())
+            )
+            completer.setCompletionRole(Qt.ItemDataRole.UserRole)
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+            completer.setFilterMode(Qt.MatchFlag.MatchStartsWith)
+            self.shelfmark_input.setCompleter(completer)
+        self.shelfmark_input.returnPressed.connect(self._on_add_shelfmark)
+        top_toolbar.addWidget(self.shelfmark_input)
+
+        self.btn_add = QPushButton(tr("Add"))
+        self.btn_add.clicked.connect(self._on_add_shelfmark)
+        top_toolbar.addWidget(self.btn_add)
+
+        top_toolbar.addWidget(QLabel("|"))
+
+        # Selection info
+        self.lbl_selected_info = QLabel(tr("No selection"))
+        self.lbl_selected_info.setMinimumWidth(120)
+        top_toolbar.addWidget(self.lbl_selected_info)
+
+        top_toolbar.addWidget(QLabel("|"))
+
+        # Flip buttons
+        self.btn_flip_h = QPushButton(tr("Flip H"))
+        self.btn_flip_h.clicked.connect(self._flip_selected_h)
+        top_toolbar.addWidget(self.btn_flip_h)
+
+        self.btn_flip_v = QPushButton(tr("Flip V"))
+        self.btn_flip_v.clicked.connect(self._flip_selected_v)
+        top_toolbar.addWidget(self.btn_flip_v)
+
+        # Threshold
+        top_toolbar.addWidget(QLabel(tr("Threshold:")))
+        self.slider_threshold = QSlider(Qt.Orientation.Horizontal)
+        self.slider_threshold.setRange(5, 80)
+        self.slider_threshold.setValue(30)
+        self.slider_threshold.setMaximumWidth(100)
+        self.lbl_threshold_val = QLabel("30")
+        self.lbl_threshold_val.setMinimumWidth(20)
+        self.slider_threshold.valueChanged.connect(
+            lambda v: self.lbl_threshold_val.setText(str(v))
+        )
+        self.slider_threshold.sliderReleased.connect(self._on_threshold_changed)
+        top_toolbar.addWidget(self.slider_threshold)
+        top_toolbar.addWidget(self.lbl_threshold_val)
+
+        # Folio navigation
+        self.btn_folio_prev = QPushButton("<")
+        self.btn_folio_prev.setMaximumWidth(30)
+        self.btn_folio_prev.clicked.connect(lambda: self._navigate_folio(-1))
+        top_toolbar.addWidget(self.btn_folio_prev)
+
+        self.btn_folio_next = QPushButton(">")
+        self.btn_folio_next.setMaximumWidth(30)
+        self.btn_folio_next.clicked.connect(lambda: self._navigate_folio(1))
+        top_toolbar.addWidget(self.btn_folio_next)
+
+        # Scale
+        top_toolbar.addWidget(QLabel(tr("Scale:")))
+        self.slider_scale = QSlider(Qt.Orientation.Horizontal)
+        self.slider_scale.setRange(10, 400)
+        self.slider_scale.setValue(100)
+        self.slider_scale.setMaximumWidth(100)
+        self.lbl_scale_val = QLabel("100%")
+        self.lbl_scale_val.setMinimumWidth(30)
+        self.slider_scale.valueChanged.connect(self._on_scale_changed)
+        top_toolbar.addWidget(self.slider_scale)
+        top_toolbar.addWidget(self.lbl_scale_val)
+
+        # Delete
+        self.btn_delete = QPushButton(tr("Delete"))
+        self.btn_delete.clicked.connect(self._delete_selected)
+        top_toolbar.addWidget(self.btn_delete)
+
+        top_toolbar.addStretch()
+
+        # Background toggle
+        self.btn_bg_toggle = QPushButton("BG")
+        self.btn_bg_toggle.setCheckable(True)
+        self.btn_bg_toggle.setToolTip(tr("Toggle checkerboard background"))
+        top_toolbar.addWidget(self.btn_bg_toggle)
+
+        main_layout.addLayout(top_toolbar)
+
+        # --- Canvas view ---
+        self.canvas_view = PuzzleCanvasView(self)
+        self.btn_bg_toggle.toggled.connect(self.canvas_view.set_checkerboard)
+        main_layout.addWidget(self.canvas_view, 1)
+
+        # Selection tracking
+        self.canvas_view.scene.selectionChanged.connect(self._on_selection_changed)
+
+        # Context menu on canvas view
+        self.canvas_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.canvas_view.customContextMenuRequested.connect(self._on_canvas_context_menu)
+
+        # Status bar for messages
+        self.statusBar().showMessage(tr("Ready"))
+
+    # ── Public API ──
+
+    def add_fragment(self, sys_id, shelfmark, folio_label, fl_id):
+        """Add a fragment to the puzzle canvas. Starts async image load."""
+        item_key = (sys_id, folio_label)
+
+        # Dedup: already loaded
+        if item_key in self._fragment_items:
+            existing = self._fragment_items[item_key]
+            existing.setSelected(True)
+            return
+
+        # Dedup: already loading
+        if item_key in self._pending_fragments:
+            return
+
+        from shared.puzzle_model import PuzzleFragment
+        puzzle_frag = PuzzleFragment(
+            sys_id=sys_id,
+            folio_label=folio_label,
+            fl_id=fl_id,
+            x=self._next_x,
+            y=50.0,
+        )
+        self._pending_fragments[item_key] = puzzle_frag
+
+        # Placeholder on canvas
+        placeholder = QGraphicsTextItem(f"{shelfmark}\n{tr('Loading...')}")
+        placeholder.setDefaultTextColor(QColor(200, 200, 200))
+        placeholder.setPos(self._next_x, 50.0)
+        self.canvas_view.scene.addItem(placeholder)
+        self._placeholder_items[item_key] = placeholder
+
+        # Start image loader thread
+        thread = PuzzleImageLoaderThread(fl_id, threshold=puzzle_frag.bg_removal_threshold)
+        thread.image_ready.connect(partial(self._on_image_loaded, item_key))
+        thread.load_failed.connect(self._on_image_failed)
+        self._loader_threads.append(thread)
+        thread.start()
+
+    # ── Shelfmark input ──
+
+    def _on_add_shelfmark(self):
+        """Handle shelfmark entry: resolve sys_id, then async fl_id resolution."""
+        text = self.shelfmark_input.text().strip()
+        if not text:
+            return
+
+        # Ensure shelf map is populated
+        if hasattr(self.app, '_ensure_shelf_map'):
+            self.app._ensure_shelf_map()
+
+        norm = normalize_shelfmark(text)
+        shelf_to_sys = getattr(self.app, '_shelf_to_sys', None)
+        sys_id = shelf_to_sys.get(norm) if shelf_to_sys else None
+        if not sys_id:
+            self.statusBar().showMessage(tr("Shelfmark not found"), 3000)
+            return
+
+        shelfmark, _ = self.app.meta_mgr.get_meta_for_id(sys_id)
+        if not shelfmark or shelfmark == "Unknown":
+            shelfmark = text
+
+        # Check cached folio list
+        if sys_id in self._folio_lists and self._folio_lists[sys_id]:
+            images = self._folio_lists[sys_id]
+            first = images[0]
+            self.add_fragment(sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''))
+        else:
+            # Async fl_id resolution via PuzzleMetaLoaderThread
+            self.statusBar().showMessage(tr("Resolving images..."), 5000)
+            thread = PuzzleMetaLoaderThread(self.app.meta_mgr, sys_id, shelfmark)
+            thread.meta_ready.connect(self._on_meta_resolved)
+            thread.meta_failed.connect(self._on_meta_failed)
+            self._meta_threads.append(thread)
+            thread.start()
+
+        self.shelfmark_input.clear()
+
+    def _on_meta_resolved(self, sys_id, shelfmark, images_nli):
+        """Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio."""
+        if sip.isdeleted(self):
+            return
+        self._folio_lists[sys_id] = images_nli
+        first = images_nli[0]
+        self.add_fragment(sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''))
+        self.statusBar().showMessage(
+            tr("Added {} ({} folios)").format(shelfmark, len(images_nli)), 3000
+        )
+
+    def _on_meta_failed(self, sys_id, error):
+        """Callback from PuzzleMetaLoaderThread -- show error."""
+        if sip.isdeleted(self):
+            return
+        self.statusBar().showMessage(
+            tr("Failed to resolve images: {}").format(error), 5000
+        )
+
+    # ── Image loading callbacks ──
+
+    def _on_image_loaded(self, item_key, fl_id, image_bytes):
+        """Called when PuzzleImageLoaderThread finishes -- create or update item."""
+        if sip.isdeleted(self):
+            return
+
+        # Remove placeholder
+        placeholder = self._placeholder_items.pop(item_key, None)
+        if placeholder and placeholder.scene():
+            self.canvas_view.scene.removeItem(placeholder)
+
+        # Check for folio/threshold update path (item already exists)
+        if item_key in self._fragment_items:
+            existing = self._fragment_items[item_key]
+            img = QImage()
+            img.loadFromData(image_bytes)
+            pixmap = QPixmap.fromImage(img)
+            existing.update_pixmap(pixmap)
+            # Remove from pending if present
+            self._pending_fragments.pop(item_key, None)
+            return
+
+        # New fragment path
+        puzzle_frag = self._pending_fragments.pop(item_key, None)
+        if puzzle_frag is None:
+            return  # was deleted while loading
+
+        img = QImage()
+        img.loadFromData(image_bytes)
+        pixmap = QPixmap.fromImage(img)
+
+        item = PuzzleFragmentItem(puzzle_frag, pixmap)
+        self.canvas_view.scene.addItem(item)
+        self._fragment_items[item_key] = item
+
+        # Advance placement position based on actual pixmap width
+        self._next_x = puzzle_frag.x + pixmap.width() * puzzle_frag.scale + 50
+
+    def _on_image_failed(self, fl_id, error):
+        """Called when PuzzleImageLoaderThread fails."""
+        if sip.isdeleted(self):
+            return
+        # Find and remove placeholder for this fl_id
+        for key, pf in list(self._pending_fragments.items()):
+            if pf.fl_id == fl_id:
+                placeholder = self._placeholder_items.pop(key, None)
+                if placeholder and placeholder.scene():
+                    self.canvas_view.scene.removeItem(placeholder)
+                self._pending_fragments.pop(key, None)
+                break
+        self.statusBar().showMessage(
+            tr("Failed to load image: {}").format(error), 5000
+        )
+
+    # ── Selection tracking ──
+
+    def _on_selection_changed(self):
+        """Update toolbar to reflect current selection."""
+        selected = self.canvas_view.get_selected_fragments()
+        if len(selected) == 1:
+            frag = selected[0]
+            pf = frag.puzzle_frag
+            self.lbl_selected_info.setText(f"{pf.sys_id} / {pf.folio_label}")
+
+            # Sync sliders without triggering callbacks
+            self.slider_threshold.blockSignals(True)
+            self.slider_threshold.setValue(int(pf.bg_removal_threshold))
+            self.slider_threshold.blockSignals(False)
+            self.lbl_threshold_val.setText(str(int(pf.bg_removal_threshold)))
+
+            self.slider_scale.blockSignals(True)
+            self.slider_scale.setValue(int(pf.scale * 100))
+            self.slider_scale.blockSignals(False)
+            self.lbl_scale_val.setText(f"{int(pf.scale * 100)}%")
+        elif len(selected) > 1:
+            self.lbl_selected_info.setText(tr("{} selected").format(len(selected)))
+        else:
+            self.lbl_selected_info.setText(tr("No selection"))
+
+    # ── Toolbar actions ──
+
+    def _flip_selected_h(self):
+        for item in self.canvas_view.get_selected_fragments():
+            item.flip_horizontal()
+
+    def _flip_selected_v(self):
+        for item in self.canvas_view.get_selected_fragments():
+            item.flip_vertical()
+
+    def _on_threshold_changed(self):
+        """Re-fetch images with new threshold for selected fragments (on sliderReleased)."""
+        value = self.slider_threshold.value()
+        for item in self.canvas_view.get_selected_fragments():
+            pf = item.puzzle_frag
+            pf.bg_removal_threshold = float(value)
+            item_key = (pf.sys_id, pf.folio_label)
+            self._pending_fragments[item_key] = pf
+            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=float(value))
+            thread.image_ready.connect(partial(self._on_image_loaded, item_key))
+            thread.load_failed.connect(self._on_image_failed)
+            self._loader_threads.append(thread)
+            thread.start()
+
+    def _on_scale_changed(self, value):
+        """Update scale for selected fragments."""
+        self.lbl_scale_val.setText(f"{value}%")
+        for item in self.canvas_view.get_selected_fragments():
+            item.setScale(value / 100.0)
+            item.puzzle_frag.scale = value / 100.0
+
+    def _navigate_folio(self, direction):
+        """Navigate folio prev/next for selected fragments."""
+        for item in self.canvas_view.get_selected_fragments():
+            pf = item.puzzle_frag
+            folio_list = self._folio_lists.get(pf.sys_id)
+            if not folio_list:
+                self.statusBar().showMessage(tr("No folio list available"), 3000)
+                continue
+
+            # Find current index by fl_id
+            current_idx = None
+            for i, entry in enumerate(folio_list):
+                if entry.get('fl_id') == pf.fl_id:
+                    current_idx = i
+                    break
+            if current_idx is None:
+                # Try matching by label
+                for i, entry in enumerate(folio_list):
+                    if entry.get('label') == pf.folio_label:
+                        current_idx = i
+                        break
+            if current_idx is None:
+                current_idx = 0
+
+            new_idx = current_idx + direction
+            if new_idx < 0 or new_idx >= len(folio_list):
+                self.statusBar().showMessage(tr("No more folios"), 2000)
+                continue
+
+            new_entry = folio_list[new_idx]
+            new_fl_id = new_entry.get('fl_id', '')
+            new_label = new_entry.get('label', pf.folio_label)
+
+            # Re-key the item
+            old_key = (pf.sys_id, pf.folio_label)
+            new_key = (pf.sys_id, new_label)
+            self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
+
+            # Update fragment data
+            pf.fl_id = new_fl_id
+            pf.folio_label = new_label
+
+            # Store in pending for update path in _on_image_loaded
+            self._pending_fragments[new_key] = pf
+
+            # Fetch new image
+            thread = PuzzleImageLoaderThread(new_fl_id, threshold=pf.bg_removal_threshold)
+            thread.image_ready.connect(partial(self._on_image_loaded, new_key))
+            thread.load_failed.connect(self._on_image_failed)
+            self._loader_threads.append(thread)
+            thread.start()
+
+    def _delete_selected(self):
+        """Remove selected fragments from the canvas."""
+        for item in self.canvas_view.get_selected_fragments():
+            pf = item.puzzle_frag
+            item_key = (pf.sys_id, pf.folio_label)
+            self.canvas_view.scene.removeItem(item)
+            self._fragment_items.pop(item_key, None)
+            self._pending_fragments.pop(item_key, None)
+
+    # ── Context menu ──
+
+    def _on_canvas_context_menu(self, pos):
+        """Show right-click context menu on fragment items."""
+        scene_pos = self.canvas_view.mapToScene(pos)
+        item = self.canvas_view.scene.itemAt(scene_pos, self.canvas_view.transform())
+        if not isinstance(item, PuzzleFragmentItem):
+            return
+
+        # Select the item under cursor if not already selected
+        if not item.isSelected():
+            self.canvas_view.scene.clearSelection()
+            item.setSelected(True)
+
+        menu = QMenu(self)
+        act_flip_h = QAction(tr("Flip Horizontal"), self)
+        act_flip_h.triggered.connect(self._flip_selected_h)
+        menu.addAction(act_flip_h)
+
+        act_flip_v = QAction(tr("Flip Vertical"), self)
+        act_flip_v.triggered.connect(self._flip_selected_v)
+        menu.addAction(act_flip_v)
+
+        menu.addSeparator()
+
+        act_delete = QAction(tr("Delete Fragment"), self)
+        act_delete.triggered.connect(self._delete_selected)
+        menu.addAction(act_delete)
+
+        menu.exec(self.canvas_view.mapToGlobal(pos))
+
+    # ── Cleanup ──
+
+    def closeEvent(self, event):
+        """Wait for active loader threads before closing."""
+        for t in self._loader_threads + self._meta_threads:
+            if t.isRunning():
+                t.wait(2000)
+        super().closeEvent(event)
 
 
 class ResultDialog(QDialog):
@@ -8731,6 +9187,9 @@ class GenizahGUI(QMainWindow):
         # Shelfmark to sys_id mapping for community features
         self._shelf_to_sys = None
 
+        # Puzzle window singleton (Phase 48)
+        self._puzzle_window = None
+
         self.init_ui()
 
         # Step 2: Start heavy initialization in background
@@ -8964,6 +9423,16 @@ class GenizahGUI(QMainWindow):
             QPushButton:hover { background-color: #1a73e8; color: white; }
         """)
         corner_layout.addWidget(self.corner_website_btn)
+        corner_layout.addWidget(_corner_sep())
+
+        # Puzzle canvas button
+        self.corner_puzzle_btn = QPushButton("\U0001F9E9")  # puzzle piece emoji
+        self.corner_puzzle_btn.setFlat(True)
+        self.corner_puzzle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_puzzle_btn.setToolTip(tr("Fragment Puzzle"))
+        self.corner_puzzle_btn.setStyleSheet("font-size: 16px;")
+        self.corner_puzzle_btn.clicked.connect(self._open_puzzle_window)
+        corner_layout.addWidget(self.corner_puzzle_btn)
         corner_layout.addWidget(_corner_sep())
 
         # Settings gear
@@ -18699,6 +19168,38 @@ class GenizahGUI(QMainWindow):
 
         dialog = JoinsFeedDialog(self, self.corrections_client, on_browse=browse_shelfmark)
         dialog.exec()
+
+    def _open_puzzle_window(self):
+        """Open the puzzle canvas window (or bring existing one to front)."""
+        if self._puzzle_window is None or sip.isdeleted(self._puzzle_window):
+            self._puzzle_window = PuzzleCanvasWindow(self)
+        self._puzzle_window.show()
+        self._puzzle_window.raise_()
+        self._puzzle_window.activateWindow()
+
+    def add_to_puzzle(self, sys_id, shelfmark, folio_label=None, fl_id=None):
+        """Add a fragment to the puzzle canvas. Opens puzzle window if needed."""
+        if self._puzzle_window is None or sip.isdeleted(self._puzzle_window):
+            self._puzzle_window = PuzzleCanvasWindow(self)
+        if fl_id:
+            self._puzzle_window.add_fragment(sys_id, shelfmark, folio_label or '1r', fl_id)
+        else:
+            # No fl_id provided -- need async resolution via PuzzleMetaLoaderThread
+            if sys_id in self._puzzle_window._folio_lists and self._puzzle_window._folio_lists[sys_id]:
+                images = self._puzzle_window._folio_lists[sys_id]
+                first = images[0]
+                self._puzzle_window.add_fragment(
+                    sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', '')
+                )
+            else:
+                thread = PuzzleMetaLoaderThread(self.meta_mgr, sys_id, shelfmark)
+                thread.meta_ready.connect(self._puzzle_window._on_meta_resolved)
+                thread.meta_failed.connect(self._puzzle_window._on_meta_failed)
+                self._puzzle_window._meta_threads.append(thread)
+                thread.start()
+        self._puzzle_window.show()
+        self._puzzle_window.raise_()
+        self._puzzle_window.activateWindow()
 
     def _open_settings_dialog(self):
         """Open the settings dialog."""

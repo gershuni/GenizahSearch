@@ -926,3 +926,38 @@ class PuzzleImageLoaderThread(QThread):
                 self.load_failed.emit(self.fl_id, "Image not available")
         except Exception as e:
             self.load_failed.emit(self.fl_id, str(e))
+
+
+class PuzzleMetaLoaderThread(QThread):
+    """Resolve images_nli (with fl_ids) for a sys_id in the background.
+
+    FL IDs are NOT available from CSV cache -- they require a network fetch
+    of the NLI MARC record and/or IIIF manifest. This thread wraps that
+    async resolution so PuzzleCanvasWindow._on_add_shelfmark doesn't block.
+    """
+    meta_ready = pyqtSignal(str, str, list)   # (sys_id, shelfmark, images_nli_list)
+    meta_failed = pyqtSignal(str, str)        # (sys_id, error_message)
+
+    def __init__(self, meta_mgr, sys_id: str, shelfmark: str = ''):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.sys_id = sys_id
+        self.shelfmark = shelfmark
+
+    def run(self):
+        try:
+            # enrich_metadata fetches NLI MARC + IIIF manifest, populating images_nli with fl_ids
+            data = self.meta_mgr.enrich_metadata(self.sys_id)
+            images_nli = data.get('images_nli', []) if data else []
+            if not images_nli:
+                # Fallback: try fetch_nli_data directly
+                nli_data = self.meta_mgr.fetch_nli_data(self.sys_id)
+                if nli_data and nli_data.get('fl_ids'):
+                    # Convert fl_ids list to images_nli format
+                    images_nli = [{'fl_id': fid, 'label': f'FL{fid}', 'url': ''} for fid in nli_data['fl_ids']]
+            if images_nli:
+                self.meta_ready.emit(self.sys_id, self.shelfmark, images_nli)
+            else:
+                self.meta_failed.emit(self.sys_id, "No images found for this manuscript")
+        except Exception as e:
+            self.meta_failed.emit(self.sys_id, str(e))
