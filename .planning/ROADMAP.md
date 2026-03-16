@@ -136,7 +136,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 
 **Milestone Goal:** Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal, DPI calibration, recto/verso views, join document persistence, and community publishing -- in both web (NiceGUI + Fabric.js) and desktop (PyQt6 + QGraphicsScene).
 
-- [ ] **Phase 47: Foundation + Background Removal** - Shared data model, joins.db sidecar, IIIF image loading, HSV background removal engine
+- [x] **Phase 47: Foundation + Background Removal** - Shared data model, joins.db sidecar, IIIF image loading, HSV background removal engine (completed 2026-03-16)
 - [ ] **Phase 48: Desktop Canvas** - QGraphicsScene-based puzzle widget with drag, rotate, flip, resize, and fragment loading
 - [ ] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images
 - [ ] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export
@@ -226,7 +226,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 47. Foundation + Background Removal | 3/4 | In Progress|  |
+| 47. Foundation + Background Removal | 4/4 | Complete   | 2026-03-16 |
 | 48. Desktop Canvas | 0/TBD | Not started | - |
 | 49. Web Canvas | 0/TBD | Not started | - |
 | 50. Join Documents | 0/TBD | Not started | - |

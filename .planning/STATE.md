@@ -3,11 +3,27 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: not_started
+stopped_at: "Completed 47-04-PLAN.md (checkpoint: human-verify pending)"
+last_updated: "2026-03-16T03:19:49.668Z"
+last_activity: 2026-03-16 -- Completed 47-03 puzzle image service with IIIF fetch, bg removal, disk cache
+progress:
+  total_phases: 6
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 4
+  percent: 100
+---
+
+---
+gsd_state_version: 1.0
+milestone: v5.6
+milestone_name: milestone
+status: not_started
 stopped_at: Completed 47-03-PLAN.md
 last_updated: "2026-03-16T03:15:20.367Z"
 last_activity: 2026-03-16 -- Completed 47-02 background removal engine
 progress:
-  total_phases: 6
+  [██████████] 100%
   completed_phases: 0
   total_plans: 4
   completed_plans: 3
@@ -103,6 +119,7 @@ Recent decisions affecting current work:
 - [v7.0.0]: joins.db SQLite sidecar for local persistence, optional Supabase for community publish
 - [v7.0.0]: 800px images for canvas interaction, full-res only for server-side composite export
 - [Phase 47-02]: Pillow HSV 0-255 scale; low-saturation S<30 triggers value-only distance; MIN_FOREGROUND_RATIO=0.05 (5%)
+- [Phase 47]: Cambridge IIIF fetched directly (not NLI-hosted), separate code path
 
 ### Pending Todos
 
@@ -132,9 +149,10 @@ Recent decisions affecting current work:
 | 19 | Fix desktop session restore for browse tabs, composition summary, and active tab | 2026-03-14 | f64690d8 | [19-fix-desktop-session-restore-parallel-sea](./quick/19-fix-desktop-session-restore-parallel-sea/) |
 | 20 | Move language toggle from sidebar to header bar | 2026-03-14 | 55ee8d6d | [20-move-language-change-button-to-top-bar-i](./quick/20-move-language-change-button-to-top-bar-i/) |
 | 21 | Convert ResultDialog buttons to icon+short text format | 2026-03-15 | dc1b9c34 | [21-desktop-resultdialog-convert-buttons-to-](./quick/21-desktop-resultdialog-convert-buttons-to-/) |
+| Phase 47 P04 | 4min | 1 tasks | 1 files |
 
 ## Session Continuity
 
-Last session: 2026-03-16T03:12:57Z
-Stopped at: Completed 47-03-PLAN.md
-Resume file: .planning/phases/47-foundation-background-removal/47-03-SUMMARY.md
+Last session: 2026-03-16T03:19:49.665Z
+Stopped at: Completed 47-04-PLAN.md (checkpoint: human-verify pending)
+Resume file: None
