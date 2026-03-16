@@ -1447,6 +1447,126 @@ def create_puzzle_page(initial_add: str = None):
             ui.button(icon='list', on_click=on_add_from_list).props(
                 'dense flat dark round size=sm'
             ).tooltip(tr('Add from List'))
+
+            async def on_add_from_joins():
+                """Show joined fragments for selected fragment and add them."""
+                from web.components.joins_panel import fetch_connected_fragments
+                from shared.fjms_service import get_fjms_service
+
+                # Get selected fragment's sys_id
+                try:
+                    key = await ui.run_javascript(
+                        'window.puzzleCanvas && window.puzzleCanvas.canvas ? '
+                        'window.puzzleCanvas.getSelectedKey() : null',
+                        timeout=3.0
+                    )
+                except TimeoutError:
+                    key = None
+
+                if not key:
+                    ui.notify(tr('Select a fragment first'), type='warning')
+                    return
+
+                sel_sys_id = key.split(',')[0] if key else ''
+                if not sel_sys_id:
+                    return
+
+                sel_shelfmark = ''
+                if sel_sys_id in puzzle_meta:
+                    sel_shelfmark = puzzle_meta[sel_sys_id + ',' + key.split(',')[-1]].get('shelfmark', '') if key in puzzle_meta else ''
+                if not sel_shelfmark and state.meta_mgr:
+                    sel_shelfmark, _ = state.meta_mgr.get_meta_for_id(sel_sys_id)
+                    sel_shelfmark = sel_shelfmark or sel_sys_id
+
+                # Fetch connected fragments (user joins + PGP joins)
+                joins_data = await run.io_bound(
+                    fetch_connected_fragments, sel_shelfmark, sel_sys_id, None, True
+                )
+
+                # Also fetch FJMS scientific joins
+                fjms_joins = []
+                fjms_svc = get_fjms_service()
+                if fjms_svc and fjms_svc.is_available():
+                    fjms_joins = await run.io_bound(fjms_svc.get_join_group, sel_sys_id)
+
+                # Build unique fragment map: sys_id -> shelfmark
+                frag_map = {}
+                if joins_data:
+                    for join in joins_data.get('joins', []):
+                        for doc_key, shelf_key in [('document_id_a', 'fragment_a'), ('document_id_b', 'fragment_b')]:
+                            doc_id = join.get(doc_key, '')
+                            frag_shelf = join.get(shelf_key, '')
+                            if doc_id and doc_id != sel_sys_id and doc_id not in frag_map:
+                                frag_map[doc_id] = frag_shelf or doc_id
+
+                    # Also from fragments list
+                    for frag_shelf in joins_data.get('fragments', []):
+                        if isinstance(frag_shelf, str) and state.meta_mgr:
+                            from genizah_core import normalize_shelfmark
+                            norm = normalize_shelfmark(frag_shelf)
+                            sid = state.meta_mgr._shelf_to_sys.get(norm) if hasattr(state.meta_mgr, '_shelf_to_sys') else None
+                            if sid and sid != sel_sys_id and sid not in frag_map:
+                                frag_map[sid] = frag_shelf
+
+                # Add FJMS joins
+                for fj in fjms_joins:
+                    alma_id = fj.get('alma_id', '')
+                    if alma_id and alma_id != sel_sys_id and alma_id not in frag_map:
+                        shelf = ''
+                        if state.meta_mgr:
+                            shelf, _ = state.meta_mgr.get_meta_for_id(alma_id)
+                        scholars = ', '.join(fj.get('scholar_names', []))
+                        label = (shelf or alma_id)
+                        if scholars:
+                            label += f' ({scholars})'
+                        frag_map[alma_id] = label
+
+                if not frag_map:
+                    ui.notify(tr('No joins found for {}').format(sel_shelfmark), type='info')
+                    return
+
+                # Show dialog with checkboxes
+                with ui.dialog() as dlg, ui.card().classes('w-96').style(
+                    'background: #2d2d2d; color: #e0e0e0;'
+                ):
+                    ui.label(tr('Joins for: {}').format(sel_shelfmark)).classes(
+                        'text-lg font-bold'
+                    ).style('color: #e0e0e0;')
+
+                    items_list = []
+                    with ui.column().classes('w-full max-h-72 overflow-auto'):
+                        # Skip fragments already on canvas
+                        canvas_sys_ids = set(k.split(',')[0] for k in puzzle_meta)
+                        for doc_id, label in frag_map.items():
+                            if doc_id in canvas_sys_ids:
+                                continue
+                            cb = ui.checkbox(label, value=True).props('dark dense').style(
+                                'color: #e0e0e0;'
+                            )
+                            # Extract clean shelfmark (strip scholar attribution)
+                            clean_shelf = label.split(' (')[0] if ' (' in label else label
+                            items_list.append({'sys_id': doc_id, 'shelfmark': clean_shelf, 'cb': cb})
+
+                    if not items_list:
+                        ui.label(tr('All joined fragments already on canvas')).style('color: #999;')
+
+                    with ui.row().classes('w-full justify-end gap-2'):
+                        async def add_joins():
+                            to_add = [(s['sys_id'], s['shelfmark']) for s in items_list if s['cb'].value]
+                            dlg.close()
+                            for sid, shelf in to_add:
+                                await _add_fragment_by_sys_id(
+                                    sid, shelf, puzzle_meta, pending_fragment_meta, threshold_slider
+                                )
+
+                        ui.button(tr('Add Selected'), on_click=add_joins).props('flat dark color=primary')
+                        ui.button(tr('Close'), on_click=dlg.close).props('flat dark')
+                dlg.open()
+
+            ui.button(icon='link', on_click=on_add_from_joins).props(
+                'dense flat dark round size=sm'
+            ).tooltip(tr('Add from Known Joins'))
+
             async def on_delete_selected():
                 try:
                     removed = await ui.run_javascript(
