@@ -118,10 +118,10 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 ## Current Position
 
 Milestone: v7.0.0 Fragment Puzzle
-Phase: 49 (3 of 6 in milestone) -- NEXT
-Plan: 0 of TBD
-Status: Phase 48 complete, ready for Phase 49
-Last activity: 2026-03-16 -- Completed Phase 48 (Desktop Canvas) with full interactive verification
+Phase: 49 (3 of 6 in milestone) -- IN PROGRESS
+Plan: 1 of 2 complete
+Status: Completed 49-01-PLAN.md (puzzle page + API endpoints)
+Last activity: 2026-03-16 -- Completed 49-01 web puzzle page with Fabric.js canvas, API endpoints, nav integration
 
 Progress: [████░░░░░░] 33% (2 of 6 phases: 47, 48 complete)
 
@@ -154,6 +154,8 @@ Recent decisions affecting current work:
 - [Phase 48-01]: Corner-handle rotation on selected items (HANDLE_SIZE=14px), pan on middle-click or left-click on empty canvas
 - [Phase 48-02]: Fragment items keyed by (sys_id, folio_label) tuple for stable tracking across folio navigation; functools.partial for binding item_key to signal callbacks
 - [Phase 48-03]: Extensive UX improvements during interactive testing -- crop mode, flip-all, 6 backgrounds, keyboard shortcuts, per-edge crop, CUL auto-threshold, hue-weighted bg removal
+- [Phase 49-01]: puzzle_folios endpoint uses IIIF manifest FL IDs (fetch_fl_ids_from_nli), NOT nli_crossref fgp_image_number_id -- FGP numbers are Friedberg photo numbers, not NLI FL IDs
+- [Phase 49-01]: window.puzzleCanvas JS global object pattern (matches window.manuscriptViewer from browse.py); Fabric.js v6.4.3 via CDN
 
 ### Pending Todos
 
@@ -187,6 +189,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-16T10:08:03.836Z
-Stopped at: Phase 49 context gathered
-Resume file: .planning/phases/49-web-canvas/49-CONTEXT.md
+Last session: 2026-03-16T11:19:00Z
+Stopped at: Completed 49-01-PLAN.md
+Resume file: .planning/phases/49-web-canvas/49-02-PLAN.md

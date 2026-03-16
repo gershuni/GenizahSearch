@@ -47,7 +47,7 @@ Background removal is **foundational** — without it, rectangular images overla
 
 ### Platform
 
-- [ ] **PLAT-01**: Puzzle works in the web app (NiceGUI + Fabric.js)
+- [x] **PLAT-01**: Puzzle works in the web app (NiceGUI + Fabric.js)
 - [x] **PLAT-02**: Puzzle works in the desktop app (PyQt6 + QGraphicsScene)
 
 ## Future Requirements
@@ -113,7 +113,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | PLAT-02 | Phase 48 | Complete |
 | CANV-07 | Phase 49 | Pending |
 | CANV-08 | Phase 49 | Pending |
-| PLAT-01 | Phase 49 | Pending |
+| PLAT-01 | Phase 49 | Complete |
 | JDOC-01 | Phase 50 | Pending |
 | JDOC-02 | Phase 50 | Pending |
 | JDOC-03 | Phase 50 | Pending |
