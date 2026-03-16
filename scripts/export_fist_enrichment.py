@@ -101,6 +101,10 @@ def export_domains(source, target):
 
     target.execute("CREATE INDEX idx_domains_alma ON domains(AlmaId)")
     target.execute("CREATE INDEX idx_domains_domain ON domains(Domain)")
+    target.execute("CREATE INDEX idx_domains_parent ON domains(ParentDomain)")
+    target.execute("CREATE INDEX idx_domains_group ON domains(Domain, ParentDomain, DomainHeb, ParentDomainHeb, AlmaId)")
+    target.execute("CREATE INDEX idx_domains_domain_alma ON domains(Domain, AlmaId)")
+    target.execute("CREATE INDEX idx_domains_parent_alma ON domains(ParentDomain, AlmaId)")
     target.connection.commit()
 
     distinct_alma = target.execute(
@@ -341,6 +345,8 @@ def export_catalog(source, target):
     target.execute("CREATE INDEX idx_catalog_ucrid ON catalog(UnitCatalogRecId)")
     target.execute("CREATE INDEX idx_catalog_genizah_title ON catalog(GenizahTitleId)")
     target.execute("CREATE INDEX idx_catalog_author_fk ON catalog(Author)")
+    target.execute("CREATE INDEX idx_catalog_author ON catalog(AuthorText)")
+    target.execute("CREATE INDEX idx_catalog_title ON catalog(Title)")
     target.connection.commit()
 
     distinct_alma = target.execute(

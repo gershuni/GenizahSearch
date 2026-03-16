@@ -1913,22 +1913,9 @@ class FjmsService:
             return
         if self._load_browse_cache():
             return
-        # Create performance indexes (heavy on first run, runs in background thread)
-        try:
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_author ON catalog (AuthorText)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_title ON catalog (Title)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_catalog_alma ON catalog (AlmaId)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains (Domain)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_parent ON domains (ParentDomain)")
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_domains_group "
-                "ON domains(Domain, ParentDomain, DomainHeb, ParentDomainHeb, AlmaId)"
-            )
-            # Composite indexes for domain-filtered browse queries (JOIN + WHERE)
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_domain_alma ON domains (Domain, AlmaId)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_parent_alma ON domains (ParentDomain, AlmaId)")
-        except Exception:
-            pass
+        # Performance indexes are pre-built in the sidecar by export_fist_enrichment.py.
+        # No runtime DDL needed (connection is read-only).
+        logger.debug("FjmsService: indexes expected pre-built in sidecar artifact")
         self.get_domain_hierarchy()
         self.get_unclassified_count()
         self.get_browse_authors()

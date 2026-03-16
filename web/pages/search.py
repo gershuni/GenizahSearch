@@ -93,6 +93,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Translation enrichment (Phase 46)
             self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
             self.title_translations: dict = {}  # sys_id -> {original_title, english_title, hebrew_title, source}
+            self.search_generation: int = 0  # Monotonic counter to discard stale background enrichment
 
     search_state = SearchUIState()
 
@@ -3180,6 +3181,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.status = tr("Starting...")
         search_state.search_start_time = time.time()
         search_state.results = []
+        search_state.search_generation += 1  # Invalidate stale background enrichment
 
         # Immediate visual feedback — swap buttons before the 500ms timer tick
         search_btn.style('display: none;')
@@ -3347,121 +3349,109 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results(results, page=0)
             return
 
-        # Collect sys_ids for enrichment (all results, not just displayed 200)
+        # --- Staged enrichment: render fast, enrich progressively ---
         all_sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+        this_generation = search_state.search_generation
+        _t_stage0 = time.perf_counter()
 
-        def collect_all_domains(sys_ids):
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            return fjms.get_domains_for_sys_ids(sys_ids) if fjms.is_available() else {}
+        # --- STAGE 0: Fast title translations + immediate render ---
+        # (Reuses the fast path from cancel flow — ~1ms SQLite lookup)
+        if all_sys_ids:
+            try:
+                def _fetch_titles_fast():
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    tt = svc.get_title_translations_batch(all_sys_ids) if svc.titles_available() else {}
+                    svc.close()
+                    return tt
+                search_state.title_translations = await run.io_bound(_fetch_titles_fast)
+            except Exception:
+                pass
 
-        def collect_catalog_counts(sys_ids):
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            return fjms.get_catalog_source_counts(sys_ids) if fjms.is_available() else {}
+        # Finalize search state for immediate display
+        state.last_results = results
+        search_state.is_running = False
+        search_state.is_cancelled = False
+        search_state.progress = 1.0
+        search_state.results = results
+        # Initialize enrichment fields to empty (will be populated progressively)
+        search_state.transcription_sys_ids = set()
+        search_state.all_result_domains = {}
+        search_state.result_domains = {}
+        search_state.domain_name_map = {}
+        search_state.has_domain_data = False
+        search_state.catalog_source_counts = {}
+        search_state.printed_ids = set()
+        search_state.translation_data = {}
+        search_state.domain_excluded_results = []
+        search_state.word_search_excluded_results = []
 
-        def collect_printed_ids(sys_ids):
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
+        # Compute elapsed time
+        total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
+        if total_elapsed >= 3600:
+            total_elapsed_str = f"{int(total_elapsed // 3600)}:{int((total_elapsed % 3600) // 60):02d}:{int(total_elapsed % 60):02d}"
+        else:
+            total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
 
-        # Read show_translations from main thread before entering thread pool
-        _show_trans_for_enrich = False
+        # Build filter summary suffix
+        _filter_suffix = ''
+        if _has_active_filters() and search_state.filter_manuscript_count is not None:
+            filter_parts = []
+            opts_d = domain_select.options if hasattr(domain_select, 'options') else {}
+            opts_a = author_select.options if hasattr(author_select, 'options') else {}
+            opts_w = work_select.options if hasattr(work_select, 'options') else {}
+            for d in search_state.filter_domains:
+                filter_parts.append(_get_display_name(d, opts_d))
+            for a in search_state.filter_authors:
+                filter_parts.append(_get_display_name(a, opts_a))
+            for w in search_state.filter_works:
+                filter_parts.append(_get_display_name(w, opts_w))
+            if filter_parts:
+                _filter_suffix = f" ({tr('filtered')}: {', '.join(filter_parts)}, {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
+            else:
+                _filter_suffix = f" ({tr('filtered')}: {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
+
+        # Status line
+        status_label.text = f"{tr('Search completed in')} {total_elapsed_str} \u2014 {len(results)} {tr('Results')}{_filter_suffix}"
+        expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+        if expanded_count > 0:
+            results_count.text = f"{len(results)} {tr('Results')} ({tr('searching')} {expanded_count} {tr('expanded terms')})"
+        else:
+            results_count.text = f"{len(results)} {tr('Results')}"
+
+        # Responsa explosion guard warning
+        if results and results[0].get('responsa_warning'):
+            ui.notify(results[0]['responsa_warning'], type='warning', timeout=5000)
+
+        # PostHog event
+        from web.analytics import posthog_capture
+        posthog_capture('search_executed', {
+            'query': clean_query[:100],
+            'mode': mode,
+            'result_count': len(results),
+            'duration_seconds': round(total_elapsed, 1),
+            'was_cancelled': False,
+        })
+
+        # URL state persistence
         try:
-            _show_trans_for_enrich = app.storage.user.get('show_translations', False)
+            params = f'?q={quote(clean_query)}'
+            tag_value = tag_select.value if mode_select.value == 'pgp_tags' else None
+            if tag_value:
+                params += f'&tag={quote(str(tag_value))}'
+            if mode_select.value == 'responsa':
+                params += '&mode=responsa'
+                if responsa_variants_cb.value: params += '&variants=1'
+                if responsa_ja_cb.value: params += '&ja=1'
+                if responsa_flex_cb.value: params += '&flex_spaces=1'
+                if bidirectional_cb.value: params += '&bidirectional=1'
+            ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
         except Exception:
             pass
 
-        def collect_translations(sys_ids, show_trans=False):
-            """Batch-fetch PGP translations and title translations by sys_id (Phase 46)."""
-            try:
-                from shared.translation_service import TranslationService
-                svc = TranslationService(thread_safe=True)
-                pgp_trans = {}
-                title_trans = {}
-                # PGP description/type translations only when toggle is ON
-                if show_trans and svc.pgp_available():
-                    pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids)
-                # Title translations always fetched (language-aware, not toggle-gated)
-                if svc.titles_available():
-                    title_trans = svc.get_title_translations_batch(sys_ids)
-                svc.close()
-                return pgp_trans, title_trans
-            except Exception as e:
-                logger.warning("Translation batch lookup failed: %s", e)
-                return {}, {}
-
-        # Run five independent enrichment queries in parallel
-        raw_domains, transcription_ids, catalog_counts, printed_ids, trans_tuple = await asyncio.gather(
-            run.io_bound(collect_all_domains, all_sys_ids),
-            run.io_bound(get_sys_ids_with_transcriptions, all_sys_ids),
-            run.io_bound(collect_catalog_counts, all_sys_ids),
-            run.io_bound(collect_printed_ids, all_sys_ids),
-            run.io_bound(collect_translations, all_sys_ids, _show_trans_for_enrich),
-        )
-        trans_data, title_trans_data = trans_tuple
-
-        # Process domains into deduplicated domain names per sys_id
-        # Also build English->Hebrew display name map
-        search_state.all_result_domains = {}
-        search_state.domain_name_map = {}  # English name -> Hebrew name
-        from shared.fjms_service import qualify_domain_name
-        for sys_id, doms in raw_domains.items():
-            child_names = {d['domain'] for d in doms}
-            filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
-            if filtered:
-                search_state.all_result_domains[sys_id] = filtered
-            for d in doms:
-                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
-                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
-                    search_state.domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
-                if d.get('domain_heb') and d['domain'] not in search_state.domain_name_map:
-                    search_state.domain_name_map[d['domain']] = d['domain_heb']
-                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
-                    search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
-        search_state.has_domain_data = bool(search_state.all_result_domains)
-
-        # Pre-cache domain hierarchy for filter dialog (depends on domain data, so sequential)
-        if search_state.has_domain_data:
-            def fetch_hierarchy():
-                from shared.fjms_service import get_fjms_service
-                fjms = get_fjms_service(thread_safe=True)
-                return fjms.get_domain_hierarchy() if fjms.is_available() else {}
-            search_state.domain_hierarchy = await run.io_bound(fetch_hierarchy)
-        else:
-            search_state.domain_hierarchy = {}
-
-        # Assign parallel results
-        search_state.transcription_sys_ids = transcription_ids
-        search_state.catalog_source_counts = catalog_counts
-        search_state.printed_ids = printed_ids
-        search_state.translation_data = trans_data  # Phase 46: sys_id -> {description_he, ...}
-        search_state.title_translations = title_trans_data  # Phase 46: sys_id -> {hebrew_title, english_title, ...}
-
-        # Show/hide printed filter button if there are printed items among results
-        _set_btn_visible(printed_filter_btn, len(printed_ids) > 0)
-
-        # Slice result_domains from all_result_domains for badge rendering
-        search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(all_sys_ids)}
-
-        # Show/hide domain filter button and update styling
-        _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
-        _update_domain_filter_btn()
-
-        # Check if search was cancelled before resetting
-        was_cancelled = search_state.is_cancelled
-
-        # Save results
-        state.last_results = results
-        search_state.is_running = False
-        search_state.is_cancelled = False  # Reset flag
-        search_state.progress = 1.0
-        search_state.results = results
-
+        # Storage persistence (cap at 1000, strip full_text)
         try:
-            # Cap stored results at 1000 (pagination makes all results accessible during session, storage is for page refresh recovery)
             capped = results[:1000]
-            # Strip full_text from stored results (only needed for display, not persistence)
             storage_results = []
             for r in capped:
                 sr = dict(r)
@@ -3476,7 +3466,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass
 
-        # Add to search history (use lightweight copies, cap at 500 for storage)
+        # Search history
         try:
             hist_results = []
             for r in results[:500]:
@@ -3519,104 +3509,165 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass
 
-        # Compute total elapsed time for summary
-        total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
-        if total_elapsed >= 3600:
-            total_elapsed_str = f"{int(total_elapsed // 3600)}:{int((total_elapsed % 3600) // 60):02d}:{int(total_elapsed % 60):02d}"
-        else:
-            total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
+        # IMMEDIATE RENDER — user sees results with title translations only
+        render_results(results, page=0)
+        _t_render = time.perf_counter()
+        logger.info("Search perf: first_render_ms=%.0f (results=%d)", (_t_render - _t_stage0) * 1000, len(results))
 
-        # Build filter summary suffix for status line
-        _filter_suffix = ''
-        if _has_active_filters() and search_state.filter_manuscript_count is not None:
-            filter_parts = []
-            opts_d = domain_select.options if hasattr(domain_select, 'options') else {}
-            opts_a = author_select.options if hasattr(author_select, 'options') else {}
-            opts_w = work_select.options if hasattr(work_select, 'options') else {}
-            for d in search_state.filter_domains:
-                filter_parts.append(_get_display_name(d, opts_d))
-            for a in search_state.filter_authors:
-                filter_parts.append(_get_display_name(a, opts_a))
-            for w in search_state.filter_works:
-                filter_parts.append(_get_display_name(w, opts_w))
-            if filter_parts:
-                _filter_suffix = f" ({tr('filtered')}: {', '.join(filter_parts)}, {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
-            else:
-                _filter_suffix = f" ({tr('filtered')}: {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
+        # --- Enrichment helper functions (defined once, used for both stages) ---
+        def collect_all_domains(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            return fjms.get_domains_for_sys_ids(sys_ids) if fjms.is_available() else {}
 
-        # Show message if results are partial (search was cancelled)
-        if was_cancelled:
-            status_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {len(results)} {tr('Results')}{_filter_suffix}"
-            ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
-            results_count.text = f"{len(results)} {tr('Results')} ({tr('partial')})"
-        else:
-            # Set summary line that stays visible until next search
-            status_label.text = f"{tr('Search completed in')} {total_elapsed_str} \u2014 {len(results)} {tr('Results')}{_filter_suffix}"
-            # Update count -- include expanded term count for Responsa mode
-            expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
-            if expanded_count > 0:
-                results_count.text = f"{len(results)} {tr('Results')} ({tr('searching')} {expanded_count} {tr('expanded terms')})"
-            else:
-                results_count.text = f"{len(results)} {tr('Results')}"
+        def collect_catalog_counts(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            return fjms.get_catalog_source_counts(sys_ids) if fjms.is_available() else {}
 
-        # --- Responsa explosion guard warning ---
-        if results and results[0].get('responsa_warning'):
-            ui.notify(results[0]['responsa_warning'], type='warning', timeout=5000)
+        def collect_printed_ids(sys_ids):
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
 
-        # --- PostHog custom event ---
-        from web.analytics import posthog_capture
-        posthog_capture('search_executed', {
-            'query': clean_query[:100],
-            'mode': mode,
-            'result_count': len(results),
-            'duration_seconds': round(total_elapsed, 1),
-            'was_cancelled': was_cancelled,
-        })
-
-        # --- URL state persistence (history.replaceState without page reload) ---
+        _show_trans_for_enrich = False
         try:
-            params = f'?q={quote(clean_query)}'
-            tag_value = tag_select.value if mode_select.value == 'pgp_tags' else None
-            if tag_value:
-                params += f'&tag={quote(str(tag_value))}'
-            if mode_select.value == 'responsa':
-                params += '&mode=responsa'
-                if responsa_variants_cb.value: params += '&variants=1'
-                if responsa_ja_cb.value: params += '&ja=1'
-                if responsa_flex_cb.value: params += '&flex_spaces=1'
-                if bidirectional_cb.value: params += '&bidirectional=1'
-            ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
+            _show_trans_for_enrich = app.storage.user.get('show_translations', False)
         except Exception:
-            pass  # URL update is best-effort
+            pass
 
-        # Apply word search per-result exclusions (if any)
-        display_results = results  # Start with full results
-        if search_state.word_search_excluded_ids:
-            ws_filtered = []
-            ws_excluded = []
-            for r in results:
-                sid = r.get('display', {}).get('id')
-                if sid and sid in search_state.word_search_excluded_ids:
-                    ws_excluded.append({'result': r, 'reason': tr('Excluded')})
+        def collect_translations(sys_ids, show_trans=False):
+            try:
+                from shared.translation_service import TranslationService
+                svc = TranslationService(thread_safe=True)
+                pgp_trans = {}
+                title_trans = {}
+                if show_trans and svc.pgp_available():
+                    pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids)
+                if svc.titles_available():
+                    title_trans = svc.get_title_translations_batch(sys_ids)
+                svc.close()
+                return pgp_trans, title_trans
+            except Exception as e:
+                logger.warning("Translation batch lookup failed: %s", e)
+                return {}, {}
+
+        def _process_domain_data(raw_domains):
+            """Process raw domain data into search_state fields."""
+            from shared.fjms_service import qualify_domain_name
+            for sys_id, doms in raw_domains.items():
+                child_names = {d['domain'] for d in doms}
+                filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+                if filtered:
+                    search_state.all_result_domains[sys_id] = filtered
+                for d in doms:
+                    qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                    if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                        search_state.domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
+                    if d.get('domain_heb') and d['domain'] not in search_state.domain_name_map:
+                        search_state.domain_name_map[d['domain']] = d['domain_heb']
+                    if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
+                        search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
+
+        def _apply_enrichment_to_ui():
+            """Update UI elements after enrichment data changes."""
+            search_state.has_domain_data = bool(search_state.all_result_domains)
+            search_state.result_domains = dict(search_state.all_result_domains)
+            _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
+            _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
+            _update_domain_filter_btn()
+
+        def _render_with_filters():
+            """Re-render applying exclusions and filters."""
+            display_results = results
+            if search_state.word_search_excluded_ids:
+                ws_filtered = []
+                ws_excluded = []
+                for r in results:
+                    sid = r.get('display', {}).get('id')
+                    if sid and sid in search_state.word_search_excluded_ids:
+                        ws_excluded.append({'result': r, 'reason': tr('Excluded')})
+                    else:
+                        ws_filtered.append(r)
+                search_state.word_search_excluded_results = ws_excluded
+                display_results = ws_filtered
+            else:
+                search_state.word_search_excluded_results = []
+
+            if search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions()
+            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+                search_state.domain_excluded_results = []
+                _apply_printed_filter_and_render(display_results)
+            else:
+                search_state.domain_excluded_results = []
+                render_results(display_results, page=0)
+
+        # --- STAGE 1: Enrich visible page (first PAGE_SIZE sys_ids) ---
+        _t_stage1 = time.perf_counter()
+        visible_ids = all_sys_ids[:PAGE_SIZE]
+        if visible_ids and search_state.search_generation == this_generation:
+            raw_domains, transcription_ids, catalog_counts, printed_ids, trans_tuple = await asyncio.gather(
+                run.io_bound(collect_all_domains, visible_ids),
+                run.io_bound(get_sys_ids_with_transcriptions, visible_ids),
+                run.io_bound(collect_catalog_counts, visible_ids),
+                run.io_bound(collect_printed_ids, visible_ids),
+                run.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
+            )
+            # Check generation before applying (user may have started a new search)
+            if search_state.search_generation == this_generation:
+                trans_data, title_trans_data = trans_tuple
+                _process_domain_data(raw_domains)
+                search_state.transcription_sys_ids = transcription_ids
+                search_state.catalog_source_counts = catalog_counts
+                search_state.printed_ids = printed_ids
+                search_state.translation_data = trans_data
+                search_state.title_translations.update(title_trans_data)
+                # Pre-cache domain hierarchy
+                if search_state.all_result_domains:
+                    def fetch_hierarchy():
+                        from shared.fjms_service import get_fjms_service
+                        fjms = get_fjms_service(thread_safe=True)
+                        return fjms.get_domain_hierarchy() if fjms.is_available() else {}
+                    search_state.domain_hierarchy = await run.io_bound(fetch_hierarchy)
                 else:
-                    ws_filtered.append(r)
-            search_state.word_search_excluded_results = ws_excluded
-            display_results = ws_filtered
-        else:
-            search_state.word_search_excluded_results = []
+                    search_state.domain_hierarchy = {}
+                _apply_enrichment_to_ui()
+                _render_with_filters()
 
-        # Render results (apply remembered exclusions and printed filter if active)
-        if search_state.domain_exclusions and search_state.has_domain_data:
-            # Delegate to _apply_domain_exclusions which tracks excluded results with reasons
-            # (also applies printed filter internally)
-            # Note: _apply_domain_exclusions reads from search_state.results
-            _apply_domain_exclusions()
-        elif search_state.printed_filter != 'all' and search_state.printed_ids:
-            search_state.domain_excluded_results = []
-            _apply_printed_filter_and_render(display_results)
-        else:
-            search_state.domain_excluded_results = []
-            render_results(display_results, page=0)
+        _t_stage1_done = time.perf_counter()
+        logger.info("Search perf: visible_enrichment_ms=%.0f (ids=%d)", (_t_stage1_done - _t_stage1) * 1000, len(visible_ids))
+
+        # --- STAGE 2: Background-enrich remaining sys_ids in chunks ---
+        _t_stage2 = time.perf_counter()
+        remaining_ids = all_sys_ids[PAGE_SIZE:]
+        if remaining_ids and search_state.search_generation == this_generation:
+            CHUNK_SIZE = 200
+            for chunk_start in range(0, len(remaining_ids), CHUNK_SIZE):
+                if search_state.search_generation != this_generation:
+                    break  # New search started, abandon background enrichment
+                chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
+                bg_domains, bg_trans_ids, bg_counts, bg_printed, bg_trans_tuple = await asyncio.gather(
+                    run.io_bound(collect_all_domains, chunk_ids),
+                    run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
+                    run.io_bound(collect_catalog_counts, chunk_ids),
+                    run.io_bound(collect_printed_ids, chunk_ids),
+                    run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
+                )
+                if search_state.search_generation != this_generation:
+                    break
+                bg_trans_data, bg_title_trans = bg_trans_tuple
+                _process_domain_data(bg_domains)
+                search_state.transcription_sys_ids |= bg_trans_ids
+                search_state.catalog_source_counts.update(bg_counts)
+                search_state.printed_ids |= bg_printed
+                search_state.translation_data.update(bg_trans_data)
+                search_state.title_translations.update(bg_title_trans)
+            # Final UI update after all background chunks complete
+            if search_state.search_generation == this_generation:
+                _apply_enrichment_to_ui()
+            _t_stage2_done = time.perf_counter()
+            logger.info("Search perf: background_enrichment_ms=%.0f (ids=%d)", (_t_stage2_done - _t_stage2) * 1000, len(remaining_ids))
 
     def render_results(results, page=None, scroll_to_top=False):
         results_container.clear()
