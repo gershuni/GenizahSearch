@@ -743,9 +743,10 @@ window.puzzleCanvas = {
                 active._originalCropY = active.cropY || 0;
             }
             // Show only edge handles for crop (not corners for resize)
+            // Do NOT lock scaling — we intercept scaling events as crop operations
             active.set({
                 lockMovementX: true, lockMovementY: true,
-                lockRotation: true, lockScalingX: true, lockScalingY: true,
+                lockRotation: true,
                 hasControls: true,
                 borderColor: '#ff4444', borderDashArray: [5, 3]
             });
@@ -756,33 +757,43 @@ window.puzzleCanvas = {
 
             // Override scaling to become cropping
             var self = this;
+            active._lastScaleX = active.scaleX;
+            active._lastScaleY = active.scaleY;
+            active._lastWidth = active.width;
+            active._lastHeight = active.height;
+
             this._cropScalingHandler = function(e) {
                 if (!self._cropMode || !self._cropTarget) return;
-                var obj = e.target || e.transform && e.transform.target;
+                var obj = e.target || (e.transform && e.transform.target);
                 if (obj !== self._cropTarget) return;
 
                 var transform = e.transform;
                 if (!transform) return;
                 var corner = transform.corner;
-                var origW = self._cropTarget._originalWidth;
-                var origH = self._cropTarget._originalHeight;
 
-                // Revert the scale change — we want crop, not resize
-                obj.set({ scaleX: obj._lastScaleX || obj.scaleX, scaleY: obj._lastScaleY || obj.scaleY });
+                // Compute how much the user dragged (in pixels of image space)
+                var newW = obj.width * obj.scaleX;
+                var oldW = obj._lastWidth * obj._lastScaleX;
+                var newH = obj.height * obj.scaleY;
+                var oldH = obj._lastHeight * obj._lastScaleY;
+                var dw = oldW - newW;  // positive = shrunk = crop
+                var dh = oldH - newH;
 
-                // Calculate crop amount from mouse delta
-                var pointer = self.canvas.getPointer(e.e);
-                var delta = 20;  // fixed step per drag event
+                // Revert the scale — keep original scale, crop via width/height/cropX/cropY
+                obj.scaleX = obj._lastScaleX;
+                obj.scaleY = obj._lastScaleY;
 
-                if (corner === 'mt') { self.cropEdge('top', delta); }
-                else if (corner === 'mb') { self.cropEdge('bottom', delta); }
-                else if (corner === 'ml') { self.cropEdge('left', delta); }
-                else if (corner === 'mr') { self.cropEdge('right', delta); }
+                var amount;
+                if (corner === 'ml' && dw > 5) { amount = Math.round(dw / obj.scaleX); self.cropEdge('left', Math.max(5, amount)); }
+                else if (corner === 'mr' && dw > 5) { amount = Math.round(dw / obj.scaleX); self.cropEdge('right', Math.max(5, amount)); }
+                else if (corner === 'mt' && dh > 5) { amount = Math.round(dh / obj.scaleY); self.cropEdge('top', Math.max(5, amount)); }
+                else if (corner === 'mb' && dh > 5) { amount = Math.round(dh / obj.scaleY); self.cropEdge('bottom', Math.max(5, amount)); }
+
+                // Update last known dimensions
+                obj._lastWidth = obj.width;
+                obj._lastHeight = obj.height;
             };
             this.canvas.on('object:scaling', this._cropScalingHandler);
-            // Save current scale to revert
-            active._lastScaleX = active.scaleX;
-            active._lastScaleY = active.scaleY;
 
             this.canvas.requestRenderAll();
             return true;
@@ -794,7 +805,7 @@ window.puzzleCanvas = {
             if (this._cropTarget) {
                 this._cropTarget.set({
                     lockMovementX: false, lockMovementY: false,
-                    lockRotation: false, lockScalingX: false, lockScalingY: false,
+                    lockRotation: false,
                     hasControls: true,
                     borderColor: null, borderDashArray: null
                 });
@@ -1369,9 +1380,15 @@ def create_puzzle_page(initial_add: str = None):
                             else:
                                 for item in items:
                                     sid = item.get('sys_id', '')
-                                    shelf = item.get('shelfmark', '') or sid
-                                    if not sid or not shelf:
+                                    if not sid:
                                         continue
+                                    shelf = item.get('shelfmark', '')
+                                    # Resolve shelfmark from metadata if not stored in list
+                                    if not shelf and state.meta_mgr:
+                                        resolved, _ = state.meta_mgr.get_meta_for_id(sid)
+                                        shelf = resolved or ''
+                                    if not shelf:
+                                        shelf = sid  # last resort fallback
                                     cb = ui.checkbox(shelf).props('dark dense').style(
                                         'color: #e0e0e0;'
                                     )
