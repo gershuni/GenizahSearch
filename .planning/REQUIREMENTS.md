@@ -15,8 +15,8 @@ Requirements for v7.0.0 Fragment Puzzle. Each maps to roadmap phases.
 - [x] **CANV-04**: User can rotate a fragment to any angle
 - [x] **CANV-05**: User can flip a fragment horizontally or vertically
 - [x] **CANV-06**: User can resize a fragment independently
-- [ ] **CANV-07**: User can navigate folios (next/prev) within a fragment's shelfmark
-- [ ] **CANV-08**: User can see snap guides when aligning fragments
+- [x] **CANV-07**: User can navigate folios (next/prev) within a fragment's shelfmark
+- [x] **CANV-08**: User can see snap guides when aligning fragments
 
 ### Background Removal
 
@@ -111,8 +111,8 @@ Explicitly excluded. Documented to prevent scope creep.
 | CANV-05 | Phase 48 | Complete |
 | CANV-06 | Phase 48 | Complete |
 | PLAT-02 | Phase 48 | Complete |
-| CANV-07 | Phase 49 | Pending |
-| CANV-08 | Phase 49 | Pending |
+| CANV-07 | Phase 49 | Complete |
+| CANV-08 | Phase 49 | Complete |
 | PLAT-01 | Phase 49 | Complete |
 | JDOC-01 | Phase 50 | Pending |
 | JDOC-02 | Phase 50 | Pending |

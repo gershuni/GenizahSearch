@@ -139,7 +139,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 **v7.0.0 Fragment Puzzle (Phases 47-52):**
 - [x] **Phase 47: Foundation + Background Removal** - Shared data model, joins.db sidecar, IIIF image loading, HSV background removal engine (completed 2026-03-16)
 - [x] **Phase 48: Desktop Canvas** - QGraphicsScene-based puzzle widget with drag, rotate, flip, resize, crop, keyboard shortcuts, and fragment loading from Browse/ResultDialog/Lists (completed 2026-03-16)
-- [ ] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images
+- [x] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images (completed 2026-03-16)
 - [ ] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export
 - [ ] **Phase 51: Recto/Verso** - Auto-generated verso view from recto arrangement with correct verso images
 - [ ] **Phase 52: Community + Integration** - Personal workspace, publish for review, browse published joins, entry points from browse/search
@@ -191,8 +191,8 @@ Plans:
   5. The web puzzle is accessible from the app's main navigation
 **Plans**: 2 plans
 Plans:
-- [ ] 49-01-PLAN.md — API endpoints + Fabric.js canvas page with full manipulation
-- [ ] 49-02-PLAN.md — Folio navigation, snap guides, entry points + visual checkpoint
+- [x] 49-01-PLAN.md — API endpoints + Fabric.js canvas page with full manipulation
+- [x] 49-02-PLAN.md — Folio navigation, snap guides, entry points + visual checkpoint
 
 ### Phase 50: Join Documents
 **Goal**: Researchers can save their puzzle arrangements as persistent join documents and export composite images for publication
@@ -229,18 +229,18 @@ Plans:
 ## Progress
 
 **Total milestones shipped:** 10
-**Total phases completed:** 48 (Phases 1-48)
-**Total plans completed:** ~168
+**Total phases completed:** 49 (Phases 1-49)
+**Total plans completed:** ~170
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 47. Foundation + Background Removal | 4/4 | Complete    | 2026-03-16 |
 | 48. Desktop Canvas | 3/3 | Complete    | 2026-03-16 |
-| 49. Web Canvas | 1/2 | In Progress|  |
+| 49. Web Canvas | 2/2 | Complete   | 2026-03-16 |
 | 50. Join Documents | 0/TBD | Not started | - |
 | 51. Recto/Verso | 0/TBD | Not started | - |
 | 52. Community + Integration | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-16 after Phase 49 planning (2 plans)*
+*Last updated: 2026-03-16 after Phase 49 completion (2/2 plans)*
