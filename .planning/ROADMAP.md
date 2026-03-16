@@ -226,7 +226,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 47. Foundation + Background Removal | 2/4 | In Progress|  |
+| 47. Foundation + Background Removal | 3/4 | In Progress|  |
 | 48. Desktop Canvas | 0/TBD | Not started | - |
 | 49. Web Canvas | 0/TBD | Not started | - |
 | 50. Join Documents | 0/TBD | Not started | - |
