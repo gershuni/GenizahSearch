@@ -112,7 +112,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | CANV-06 | Phase 48 | Complete |
 | PLAT-02 | Phase 48 | Complete |
 | CANV-07 | Phase 49 | Complete |
-| CANV-08 | Phase 49 | Complete |
+| CANV-08 | Phase 49 | Deferred (user decision — removed snap guides as not needed) |
 | PLAT-01 | Phase 49 | Complete |
 | JDOC-01 | Phase 50 | Pending |
 | JDOC-02 | Phase 50 | Pending |
