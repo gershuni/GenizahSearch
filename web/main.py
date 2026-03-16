@@ -403,6 +403,7 @@ def create_layout():
                     ('/catalog-browse', 'category', tr('Browse by Identification'), None),
                     ('/discoveries', 'lightbulb', tr('Community'), None),
                     ('/lists', 'star', tr('My Lists'), None),
+                    ('/puzzle', 'extension', tr('Fragment Puzzle'), None),
                 ]
 
                 for path, icon, label, badge in nav_items:
@@ -809,6 +810,20 @@ def lists_page_route():
     with content:
         from web.pages.lists import create_lists_page
         create_lists_page()
+
+@ui.page('/puzzle')
+def puzzle_page_route(add: str = None):
+    set_current_page('/puzzle')
+    ui.add_head_html(META_TAGS)
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+
+    content = create_layout()
+    with content:
+        from web.pages.puzzle import create_puzzle_page
+        create_puzzle_page(initial_add=add)
 
 @ui.page('/reset-hints')
 def reset_hints_route():
