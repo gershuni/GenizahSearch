@@ -8,6 +8,7 @@ navigate folios. Session state persists across page navigations via
 app.storage.tab.
 """
 
+import asyncio
 import logging
 import json
 
@@ -183,6 +184,14 @@ window.puzzleCanvas = {
             this._listenersAttached = true;
         }
         this.setupSelectionSync();
+
+        // Event-driven auto-save: fires on drag-end, rotate-end, scale-end
+        var self = this;
+        this.canvas.on('object:modified', function(e) {
+            self._emitEvent('puzzle-object-modified', {
+                key: e.target ? e.target._fragmentKey : null
+            });
+        });
 
         // Handle window resize (with cleanup reference)
         var self = this;
@@ -1242,6 +1251,40 @@ window.puzzleCanvas = {
      * flipped 'processed' flag.
      * @param {fabric.Image} target - The Fabric image object to toggle.
      */
+    clearAll: function() {
+        if (!this.canvas) return;
+        var keys = Object.keys(this.fragments);
+        for (var i = 0; i < keys.length; i++) {
+            var obj = this.fragments[keys[i]];
+            if (obj) this.canvas.remove(obj);
+        }
+        this.fragments = {};
+        this.folioData = {};
+        this.canvas.requestRenderAll();
+        this._emitEvent('puzzle-clear', {});
+    },
+
+    getCropState: function() {
+        var cropState = {};
+        for (var key in this.fragments) {
+            var obj = this.fragments[key];
+            if (obj._originalWidth && (
+                (obj.cropX || 0) > 0 || (obj.cropY || 0) > 0 ||
+                obj.width < obj._originalWidth || obj.height < obj._originalHeight
+            )) {
+                cropState[key] = {
+                    cropX: obj.cropX || 0,
+                    cropY: obj.cropY || 0,
+                    width: obj.width,
+                    height: obj.height,
+                    originalWidth: obj._originalWidth,
+                    originalHeight: obj._originalHeight
+                };
+            }
+        }
+        return JSON.stringify(cropState);
+    },
+
     _toggleFragmentBg: function(target) {
         if (!target || !target._fragmentKey) return;
         var meta = target._fragmentMeta;
@@ -1515,6 +1558,365 @@ def create_puzzle_page(initial_add: str = None):
     puzzle_meta = {}
     pending_fragment_meta = {}
     control_sync = {'active': False}
+
+    # Join document state tracking
+    # NOTE: Web joins.db is shared across all users (same as pgp.db, fjms_enrichment.db).
+    # User-scoped persistence with auth is Phase 52 (Community + Integration).
+    # For v1, the web app serves a single researcher.
+    doc_state = {
+        'current_doc_id': None,       # None = scratch pad
+        'has_unsaved_changes': False,
+        'auto_save_handle': None,     # for cancelling debounced auto-save
+        'loading': False,             # True while fragment images are loading (guards auto-save)
+        'load_pending': 0,            # Number of fragments still loading
+        'pending_crops': {},          # Crop state to apply after each fragment loads {key: {cropX, cropY, width, height}}
+    }
+
+    from shared.puzzle_service import get_puzzle_service
+    from shared.puzzle_export import auto_suggest_title
+    from shared.puzzle_model import PuzzleDocument, PuzzleFragment
+
+    # ── Document management functions ──
+
+    async def build_fragments_list():
+        """Build PuzzleFragment list from current canvas state."""
+        state_json = await ui.run_javascript(
+            'window.puzzleCanvas.getState()', timeout=5.0
+        )
+        state_data = json.loads(state_json) if state_json else {}
+        # Get crop state from per-object Fabric.js properties
+        crop_json = await ui.run_javascript(
+            'window.puzzleCanvas.getCropState()', timeout=5.0
+        )
+        crop_data = json.loads(crop_json) if crop_json else {}
+
+        fragments = []
+        for key, meta in puzzle_meta.items():
+            parts = key.split(',', 1)
+            sys_id = parts[0]
+            folio_label = parts[1] if len(parts) > 1 else '1r'
+            spatial = state_data.get(key, {})
+            crop = crop_data.get(key, {})
+
+            # Convert Fabric.js crop properties to crop_top/bottom/left/right.
+            crop_x = crop.get('cropX', 0)
+            crop_y = crop.get('cropY', 0)
+            crop_w = crop.get('width', 0)
+            crop_h = crop.get('height', 0)
+            orig_w = crop.get('originalWidth', 0)
+            orig_h = crop.get('originalHeight', 0)
+            if orig_w > 0 and orig_h > 0:
+                c_left = int(crop_x)
+                c_top = int(crop_y)
+                c_right = int(orig_w - (crop_x + crop_w))
+                c_bottom = int(orig_h - (crop_y + crop_h))
+            else:
+                c_left = c_top = c_right = c_bottom = 0
+
+            frag = PuzzleFragment(
+                sys_id=sys_id,
+                folio_label=folio_label,
+                fl_id=meta.get('fl_id', ''),
+                shelfmark=meta.get('shelfmark', ''),
+                x=spatial.get('x', 0),
+                y=spatial.get('y', 0),
+                rotation=spatial.get('rotation', 0),
+                scale=spatial.get('scaleX', 1.0),
+                flip_h=spatial.get('flipH', False),
+                flip_v=spatial.get('flipV', False),
+                bg_removal_threshold=meta.get('threshold', 30.0),
+                crop_top=c_top,
+                crop_bottom=c_bottom,
+                crop_left=c_left,
+                crop_right=c_right,
+                processed=meta.get('processed', True),
+            )
+            fragments.append(frag)
+        return fragments
+
+    def schedule_auto_save():
+        """Schedule a debounced auto-save using asyncio."""
+        if doc_state['current_doc_id'] is None:
+            doc_state['has_unsaved_changes'] = True
+            return
+        # Do NOT schedule auto-save while document is still loading.
+        if doc_state.get('loading'):
+            return
+        import asyncio
+        if doc_state.get('auto_save_handle'):
+            doc_state['auto_save_handle'].cancel()
+
+        async def do_auto_save():
+            await asyncio.sleep(1.5)
+            if doc_state['current_doc_id'] and not doc_state.get('loading'):
+                fragments = await build_fragments_list()
+                svc = get_puzzle_service(thread_safe=True)
+                doc = await run.io_bound(svc.load_document, doc_state['current_doc_id'])
+                if doc:
+                    doc.fragments = fragments
+                    doc.title = title_input.value or doc.title
+                    doc.notes = notes_input.value or ''
+                    from datetime import datetime
+                    doc.updated_at = datetime.now().isoformat()
+                    await run.io_bound(lambda: _save_doc_with_thumbnail(doc, fragments))
+                    await refresh_docs_list()
+
+        loop = asyncio.get_event_loop()
+        doc_state['auto_save_handle'] = loop.create_task(do_auto_save())
+
+    def _save_doc_with_thumbnail(doc, fragments):
+        """Save document with thumbnail (runs in thread via io_bound)."""
+        from shared.puzzle_export import generate_thumbnail
+        from shared.puzzle_image_service import get_puzzle_image_service
+        img_svc = get_puzzle_image_service()
+        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
+        svc = get_puzzle_service(thread_safe=True)
+        svc.save_document(doc, thumbnail_b64=thumb)
+
+    async def refresh_docs_list():
+        """Refresh the saved documents list in the left drawer."""
+        docs_container.clear()
+        svc = get_puzzle_service(thread_safe=True)
+        docs = await run.io_bound(svc.list_documents)
+        with docs_container:
+            if not docs:
+                ui.label(tr('No saved joins')).style('color: #888; font-style: italic;')
+                return
+            for d in docs:
+                doc_id = d['id']
+                title = d.get('title', '') or 'Untitled'
+                shelfmarks = d.get('shelfmarks_summary', '')
+                updated = d.get('updated_at', '')[:10]
+                thumb_b64 = d.get('thumbnail_b64', '')
+
+                with ui.card().classes('w-full cursor-pointer').style(
+                    'background: #2a2a2a; padding: 8px;'
+                ).on('click', lambda _, did=doc_id: load_document(did)):
+                    with ui.row().classes('items-center gap-2 w-full no-wrap'):
+                        if thumb_b64:
+                            ui.image(f'/api/puzzle_thumbnail/{doc_id}').style(
+                                'width: 48px; height: 48px; object-fit: contain; border-radius: 4px;'
+                            )
+                        else:
+                            ui.icon('image', size='lg').style('color: #666;')
+                        with ui.column().classes('gap-0').style('flex: 1; min-width: 0;'):
+                            ui.label(title).classes('text-body2 ellipsis').style(
+                                'color: #e0e0e0; max-width: 180px;'
+                            )
+                            if shelfmarks:
+                                ui.label(shelfmarks).classes('text-caption ellipsis').style(
+                                    'color: #999; max-width: 180px;'
+                                )
+                            ui.label(updated).classes('text-caption').style('color: #666;')
+                    with ui.row().classes('justify-end gap-1'):
+                        ui.button(icon='delete', on_click=lambda _, did=doc_id, t=title: confirm_delete(did, t)).props(
+                            'dense flat round size=xs color=negative'
+                        ).tooltip(tr('Delete'))
+                        is_active = doc_state['current_doc_id'] == doc_id
+                        if is_active:
+                            ui.icon('check_circle', size='xs').style('color: #4caf50;')
+
+    async def save_join():
+        """Save current canvas as a join document."""
+        if not puzzle_meta:
+            ui.notify(tr('Add fragments before saving'), type='warning')
+            return
+        fragments = await build_fragments_list()
+        suggested_title = auto_suggest_title(fragments)
+
+        with ui.dialog() as dlg, ui.card().classes('w-96').style(
+            'background: #2d2d2d; color: #e0e0e0;'
+        ):
+            ui.label(tr('Save Join Document')).classes('text-lg font-bold').style('color: #e0e0e0;')
+            save_title = ui.input(
+                label=tr('Title'), value=doc_state.get('current_doc_id') and title_input.value or suggested_title
+            ).props('dark outlined dense').classes('w-full')
+            save_notes = ui.textarea(
+                label=tr('Notes'), value=doc_state.get('current_doc_id') and notes_input.value or ''
+            ).props('dark outlined dense').classes('w-full')
+
+            async def do_save():
+                import uuid
+                doc_id = doc_state['current_doc_id'] or str(uuid.uuid4())
+                doc = PuzzleDocument(
+                    id=doc_id,
+                    title=save_title.value or suggested_title,
+                    notes=save_notes.value or '',
+                    fragments=fragments,
+                )
+                await run.io_bound(lambda: _save_doc_with_thumbnail(doc, fragments))
+                doc_state['current_doc_id'] = doc_id
+                doc_state['has_unsaved_changes'] = False
+                title_input.value = doc.title
+                notes_input.value = doc.notes
+                frag_text = '\n'.join(f"{f.shelfmark} ({f.folio_label})" for f in fragments)
+                fragments_label.text = frag_text or tr('No fragments')
+                details_container.style('display: block;')
+                dlg.close()
+                await refresh_docs_list()
+                ui.notify(tr('Saved: {}').format(doc.title), type='positive')
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Save'), on_click=do_save).props('flat dark color=primary')
+                ui.button(tr('Cancel'), on_click=dlg.close).props('flat dark')
+        dlg.open()
+
+    async def load_document(doc_id):
+        """Load a saved document onto the canvas."""
+        svc = get_puzzle_service(thread_safe=True)
+        doc = await run.io_bound(svc.load_document, doc_id)
+        if doc is None:
+            ui.notify(tr('Could not load document'), type='warning')
+            return
+
+        await ui.run_javascript('window.puzzleCanvas.clearAll()')
+        puzzle_meta.clear()
+        pending_fragment_meta.clear()
+
+        doc_state['current_doc_id'] = doc.id
+        doc_state['has_unsaved_changes'] = False
+
+        # Set loading guard to prevent auto-save from overwriting
+        # a partially-loaded document with a subset of fragments.
+        doc_state['loading'] = True
+        doc_state['load_pending'] = len(doc.fragments)
+
+        # Store pending crop state per fragment key.
+        doc_state['pending_crops'] = {}
+
+        for frag in doc.fragments:
+            key = f"{frag.sys_id},{frag.folio_label}"
+            threshold = frag.bg_removal_threshold
+            processed = frag.processed
+            url = f"/api/puzzle_image?fl_id={frag.fl_id}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}"
+            js_meta = json.dumps({
+                'fl_id': frag.fl_id, 'threshold': threshold,
+                'size': 800, 'processed': processed, 'sys_id': frag.sys_id
+            })
+            ui.run_javascript(
+                f'window.puzzleCanvas.addFragment("{key}", "{url}", '
+                f'{frag.x}, {frag.y}, {frag.rotation}, {frag.scale}, '
+                f'{"true" if frag.flip_h else "false"}, {"true" if frag.flip_v else "false"}, {js_meta})'
+            )
+
+            # If fragment has crop, store in pending_crops for on_puzzle_add_result
+            if frag.crop_top or frag.crop_bottom or frag.crop_left or frag.crop_right:
+                doc_state['pending_crops'][key] = {
+                    'cropX': frag.crop_left,
+                    'cropY': frag.crop_top,
+                    'crop_right': frag.crop_right,
+                    'crop_bottom': frag.crop_bottom,
+                }
+
+            puzzle_meta[key] = {
+                'sys_id': frag.sys_id, 'shelfmark': frag.shelfmark,
+                'folio_label': frag.folio_label, 'fl_id': frag.fl_id,
+                'threshold': threshold, 'processed': processed, 'size': 800,
+            }
+
+        # If doc has zero fragments, clear loading guard immediately
+        if not doc.fragments:
+            doc_state['loading'] = False
+            doc_state['load_pending'] = 0
+
+        title_input.value = doc.title
+        notes_input.value = doc.notes
+        frag_text = '\n'.join(f"{f.shelfmark} ({f.folio_label})" for f in doc.fragments)
+        fragments_label.text = frag_text or tr('No fragments')
+        details_container.style('display: block;')
+        await refresh_docs_list()
+        ui.notify(tr('Loaded: {}').format(doc.title), type='info')
+
+    async def new_puzzle():
+        """Clear canvas and reset to scratch pad state."""
+        await ui.run_javascript('window.puzzleCanvas.clearAll()')
+        puzzle_meta.clear()
+        pending_fragment_meta.clear()
+        doc_state['current_doc_id'] = None
+        doc_state['has_unsaved_changes'] = False
+        doc_state['loading'] = False
+        doc_state['load_pending'] = 0
+        doc_state['pending_crops'] = {}
+        title_input.value = ''
+        notes_input.value = ''
+        fragments_label.text = ''
+        details_container.style('display: none;')
+        try:
+            app.storage.tab['puzzle_fragments'] = {}
+            app.storage.tab['puzzle_state'] = None
+        except RuntimeError:
+            pass
+
+    async def export_png():
+        """Export current canvas as full-resolution PNG."""
+        if not puzzle_meta:
+            ui.notify(tr('Add fragments before exporting'), type='warning')
+            return
+        fragments = await build_fragments_list()
+        ui.notify(tr('Generating export...'), type='info')
+
+        def _do_export():
+            from shared.puzzle_export import compose_puzzle_export
+            from shared.puzzle_image_service import get_puzzle_image_service
+            import io
+            img_svc = get_puzzle_image_service()
+            result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
+            if result is None:
+                return None
+            buf = io.BytesIO()
+            result.save(buf, 'PNG')
+            return buf.getvalue()
+
+        png_bytes = await run.io_bound(_do_export)
+        if png_bytes:
+            import tempfile, os
+            filename = auto_suggest_title(fragments).replace(' ', '_').replace('+', '_') + '.png'
+            tmp = os.path.join(tempfile.gettempdir(), filename)
+            with open(tmp, 'wb') as fout:
+                fout.write(png_bytes)
+            ui.download(tmp, filename)
+            ui.notify(tr('Export ready'), type='positive')
+        else:
+            ui.notify(tr('Export failed'), type='negative')
+
+    async def confirm_delete(doc_id, title):
+        """Delete a saved document with confirmation."""
+        with ui.dialog() as dlg, ui.card().style('background: #2d2d2d; color: #e0e0e0;'):
+            ui.label(tr('Delete "{}"?').format(title)).classes('text-lg').style('color: #e0e0e0;')
+            with ui.row().classes('w-full justify-end gap-2'):
+                async def do_delete():
+                    svc = get_puzzle_service(thread_safe=True)
+                    await run.io_bound(svc.delete_document, doc_id)
+                    if doc_state['current_doc_id'] == doc_id:
+                        doc_state['current_doc_id'] = None
+                        details_container.style('display: none;')
+                    dlg.close()
+                    await refresh_docs_list()
+                    ui.notify(tr('Deleted'), type='info')
+                ui.button(tr('Delete'), on_click=do_delete).props('flat dark color=negative')
+                ui.button(tr('Cancel'), on_click=dlg.close).props('flat dark')
+        dlg.open()
+
+    # ── Left drawer for saved documents ──
+    drawer = ui.left_drawer(value=False).classes('w-80').style(
+        'background: #1e1e1e; border-right: 1px solid #444;'
+    )
+    with drawer:
+        ui.label(tr('Saved Joins')).classes('text-h6 q-mb-sm').style('color: #e0e0e0;')
+        docs_container = ui.column().classes('w-full gap-1')
+
+        details_container = ui.column().classes('w-full q-mt-md').style('display: none;')
+        with details_container:
+            ui.label(tr('Details')).classes('text-subtitle1').style('color: #e0e0e0;')
+            title_input = ui.input(label=tr('Title')).props('dark outlined dense').classes('w-full')
+            notes_input = ui.textarea(label=tr('Notes')).props('dark outlined dense').classes('w-full').style('max-height: 100px;')
+            fragments_label = ui.label('').classes('text-caption').style('color: #888; white-space: pre-wrap;')
+
+            def on_title_edit():
+                if doc_state['current_doc_id']:
+                    schedule_auto_save()
+            title_input.on('blur', on_title_edit)
+            notes_input.on('blur', lambda: schedule_auto_save() if doc_state['current_doc_id'] else None)
 
     # ── Main container ──
     with ui.column().classes('puzzle-container w-full'):
@@ -1929,6 +2331,24 @@ def create_puzzle_page(initial_add: str = None):
                 'dense flat dark round size=sm'
             ).tooltip(tr('Next Folio')).style('min-width: 28px; font-weight: bold;')
 
+            ui.separator().props('vertical').style('height: 20px')
+
+            ui.button(icon='save', on_click=save_join).props(
+                'dense flat dark color=primary round size=sm'
+            ).tooltip(tr('Save Join'))
+
+            ui.button(icon='note_add', on_click=new_puzzle).props(
+                'dense flat dark round size=sm'
+            ).tooltip(tr('New Puzzle'))
+
+            ui.button(icon='image', on_click=export_png).props(
+                'dense flat dark round size=sm'
+            ).tooltip(tr('Export PNG'))
+
+            ui.button(icon='menu', on_click=lambda: drawer.toggle()).props(
+                'dense flat dark round size=sm'
+            ).tooltip(tr('Saved Joins'))
+
         # ── Toolbar Row 2: Sliders (compact) ──
         with ui.row().classes('puzzle-toolbar items-center gap-1'):
             ui.icon('zoom_in', size='xs').classes('text-grey-5')
@@ -2065,11 +2485,17 @@ def create_puzzle_page(initial_add: str = None):
                         pending_fragment_meta.pop(key, None)
                     app.storage.tab['puzzle_fragments'] = puzzle_meta
                     _prune_saved_state(removed)
+                    schedule_auto_save()
             except Exception:
                 pass
         canvas_wrap.on('puzzle-delete', on_puzzle_delete)
 
-        def on_puzzle_add_result(e):
+        def on_puzzle_object_modified(e):
+            """Handle Fabric.js object:modified -- trigger auto-save for saved documents."""
+            schedule_auto_save()
+        canvas_wrap.on('puzzle-object-modified', on_puzzle_object_modified)
+
+        async def on_puzzle_add_result(e):
             """Handle 'puzzle-add-result' event: promote pending fragment to puzzle_meta on success."""
             payload = _parse_puzzle_event_args(e.args)
             if not isinstance(payload, dict):
@@ -2081,18 +2507,65 @@ def create_puzzle_page(initial_add: str = None):
             if not payload.get('success'):
                 if pending:
                     ui.notify(f'Failed to load {pending.get("shelfmark", key)}', type='negative')
+                # Still decrement loading counter on failure
+                if doc_state.get('loading'):
+                    doc_state['load_pending'] = doc_state.get('load_pending', 1) - 1
+                    if doc_state['load_pending'] <= 0:
+                        doc_state['loading'] = False
+                        doc_state['load_pending'] = 0
                 return
             if not pending:
-                return
-            js_meta = payload.get('meta') or {}
-            if isinstance(js_meta, dict):
-                pending['fl_id'] = js_meta.get('fl_id', pending.get('fl_id', ''))
-                pending['threshold'] = js_meta.get('threshold', pending.get('threshold', 30))
-                pending['processed'] = js_meta.get('processed', pending.get('processed', True))
-                pending['size'] = js_meta.get('size', pending.get('size', 800))
-            puzzle_meta[key] = pending
-            app.storage.tab['puzzle_fragments'] = puzzle_meta
-            ui.notify(f'{pending.get("shelfmark", key)} ({pending.get("folio_label", "")})', type='positive')
+                # Fragment loaded but not from pending_fragment_meta (e.g. from load_document)
+                # Still need to handle crop restore and loading counter
+                pass
+            else:
+                js_meta = payload.get('meta') or {}
+                if isinstance(js_meta, dict):
+                    pending['fl_id'] = js_meta.get('fl_id', pending.get('fl_id', ''))
+                    pending['threshold'] = js_meta.get('threshold', pending.get('threshold', 30))
+                    pending['processed'] = js_meta.get('processed', pending.get('processed', True))
+                    pending['size'] = js_meta.get('size', pending.get('size', 800))
+                puzzle_meta[key] = pending
+                app.storage.tab['puzzle_fragments'] = puzzle_meta
+                ui.notify(f'{pending.get("shelfmark", key)} ({pending.get("folio_label", "")})', type='positive')
+
+            # Apply pending crop state for this fragment (from load_document).
+            # Reliable because on_puzzle_add_result fires AFTER the image is fully loaded.
+            pending_crop = doc_state.get('pending_crops', {}).get(key)
+            if pending_crop:
+                try:
+                    await ui.run_javascript(f'''
+                        var obj = window.puzzleCanvas.fragments["{key}"];
+                        if (obj) {{
+                            obj._originalWidth = obj._originalWidth || obj.width;
+                            obj._originalHeight = obj._originalHeight || obj.height;
+                            var cropX = {pending_crop['cropX']};
+                            var cropY = {pending_crop['cropY']};
+                            var cropRight = {pending_crop['crop_right']};
+                            var cropBottom = {pending_crop['crop_bottom']};
+                            obj.set({{
+                                cropX: cropX,
+                                cropY: cropY,
+                                width: obj._originalWidth - cropX - cropRight,
+                                height: obj._originalHeight - cropY - cropBottom
+                            }});
+                            obj.setCoords();
+                            window.puzzleCanvas.canvas.requestRenderAll();
+                        }}
+                    ''')
+                except Exception:
+                    pass
+                doc_state['pending_crops'].pop(key, None)
+
+            # Decrement loading counter and clear guard when all fragments loaded.
+            if doc_state.get('loading'):
+                doc_state['load_pending'] = doc_state.get('load_pending', 1) - 1
+                if doc_state['load_pending'] <= 0:
+                    doc_state['loading'] = False
+                    doc_state['load_pending'] = 0
+
+            # Trigger auto-save after fragment added
+            schedule_auto_save()
         canvas_wrap.on('puzzle-add-result', on_puzzle_add_result)
 
         def on_puzzle_fragment_meta(e):
@@ -2208,6 +2681,9 @@ def create_puzzle_page(initial_add: str = None):
                     f'{x}, {y}, {rotation}, {scaleX}, '
                     f'{"true" if flipH else "false"}, {"true" if flipV else "false"}, {js_meta})'
                 )
+
+        # Initialize saved documents list in drawer
+        await refresh_docs_list()
 
     ui.timer(0.5, init_canvas, once=True)
 
