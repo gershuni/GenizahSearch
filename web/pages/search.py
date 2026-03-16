@@ -3632,8 +3632,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.domain_hierarchy = await run.io_bound(fetch_hierarchy)
                 else:
                     search_state.domain_hierarchy = {}
-                _apply_enrichment_to_ui()
-                _render_with_filters()
+                # Re-check generation after hierarchy await (P1 fix: close race window)
+                if search_state.search_generation == this_generation:
+                    _apply_enrichment_to_ui()
+                    _render_with_filters()
 
         _t_stage1_done = time.perf_counter()
         logger.info("Search perf: visible_enrichment_ms=%.0f (ids=%d)", (_t_stage1_done - _t_stage1) * 1000, len(visible_ids))
@@ -3663,9 +3665,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.printed_ids |= bg_printed
                 search_state.translation_data.update(bg_trans_data)
                 search_state.title_translations.update(bg_title_trans)
-            # Final UI update after all background chunks complete
+            # Final UI update + re-render after all background chunks complete
+            # (P2 fix: apply filters/exclusions to newly discovered domains/printed IDs)
             if search_state.search_generation == this_generation:
                 _apply_enrichment_to_ui()
+                _render_with_filters()
             _t_stage2_done = time.perf_counter()
             logger.info("Search perf: background_enrichment_ms=%.0f (ids=%d)", (_t_stage2_done - _t_stage2) * 1000, len(remaining_ids))
 
