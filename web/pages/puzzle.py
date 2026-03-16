@@ -282,9 +282,9 @@ window.puzzleCanvas = {
                     }
                 }
                 // If posOrigin mode, x/y are local-origin (PyQt pos convention):
-                // convert to Fabric.js left/top: left = pos - (1 - scale) * naturalWidth/2
-                var fabLeft = posOrigin ? x - (1 - effectiveScale) * htmlImg.naturalWidth / 2 : x;
-                var fabTop = posOrigin ? y - (1 - effectiveScale) * htmlImg.naturalHeight / 2 : y;
+                // convert to Fabric.js left/top: left = pos + (1 - scale) * naturalWidth/2
+                var fabLeft = posOrigin ? x + (1 - effectiveScale) * htmlImg.naturalWidth / 2 : x;
+                var fabTop = posOrigin ? y + (1 - effectiveScale) * htmlImg.naturalHeight / 2 : y;
                 var img = self._buildFragmentImage(htmlImg, {
                     left: fabLeft, top: fabTop,
                     angle: rotation || 0,
@@ -1620,20 +1620,18 @@ def create_puzzle_page(initial_add: str = None):
             else:
                 c_left = c_top = c_right = c_bottom = 0
 
-            # Convert Fabric.js left/top (visual top-left of scaled image) to
-            # local-origin position (matching PyQt pos() convention) for
-            # consistent export coordinate handling.
-            # Fabric.js: left = centerX - width*scaleX/2
-            # PyQt pos:  posX = centerX - width/2
-            # So: posX = left + (1 - scaleX) * naturalWidth/2
+            # Convert Fabric.js left/top to local-origin position (PyQt pos convention).
+            # Fabric.js center = left + width*scaleX/2
+            # PyQt center      = pos  + width/2
+            # Equating: pos = left - (1 - scaleX) * width/2
             fab_x = spatial.get('x', 0)
             fab_y = spatial.get('y', 0)
             sx = spatial.get('scaleX', 1.0)
             sy = spatial.get('scaleY', 1.0)
             nat_w = spatial.get('naturalWidth', 800)
             nat_h = spatial.get('naturalHeight', 800)
-            pos_x = fab_x + (1 - sx) * nat_w / 2
-            pos_y = fab_y + (1 - sy) * nat_h / 2
+            pos_x = fab_x - (1 - sx) * nat_w / 2
+            pos_y = fab_y - (1 - sy) * nat_h / 2
 
             frag = PuzzleFragment(
                 sys_id=sys_id,
