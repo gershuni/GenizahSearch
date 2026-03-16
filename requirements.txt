@@ -10,3 +10,5 @@ supabase
 gotrue
 python-dotenv
 keyring
+Pillow
+numpy
