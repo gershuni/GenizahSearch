@@ -1269,31 +1269,32 @@ def create_puzzle_page(initial_add: str = None):
 
     # ── Initialize canvas after DOM is ready ──
     async def init_canvas():
-        # Wait for Fabric.js CDN to load (may take a few seconds on first visit)
-        await ui.run_javascript(
-            '''
-            await new Promise(function(resolve) {
-                if (typeof fabric !== "undefined") return resolve();
-                var check = setInterval(function() {
-                    if (typeof fabric !== "undefined") { clearInterval(check); resolve(); }
-                }, 100);
-                setTimeout(function() { clearInterval(check); resolve(); }, 10000);
-            });
-            if (typeof fabric === "undefined") {
-                console.error("Fabric.js failed to load from CDN!");
-            } else {
-                console.log("Fabric.js loaded:", fabric.version);
-                window.puzzleCanvas.init("puzzleCanvas");
-                console.log("Canvas size:", window.puzzleCanvas.canvas.getWidth(), "x", window.puzzleCanvas.canvas.getHeight());
-                console.log("Canvas element:", document.getElementById("puzzleCanvas"));
-            }
-            ''',
-            timeout=15.0
-        )
+        # Fire-and-forget: JS will retry until Fabric.js CDN loads
+        ui.run_javascript('''
+            (function tryInit(attempts) {
+                if (typeof fabric !== "undefined") {
+                    console.log("Fabric.js loaded:", fabric.version);
+                    window.puzzleCanvas.init("puzzleCanvas");
+                    if (window.puzzleCanvas.canvas) {
+                        console.log("Canvas size:", window.puzzleCanvas.canvas.getWidth(), "x", window.puzzleCanvas.canvas.getHeight());
+                    } else {
+                        console.error("Canvas init failed — canvas element missing?");
+                    }
+                } else if (attempts < 50) {
+                    setTimeout(function() { tryInit(attempts + 1); }, 200);
+                } else {
+                    console.error("Fabric.js failed to load after 10s");
+                }
+            })(0);
+        ''')
 
-        # Restore saved fragments (app.storage.tab is safe here — client connected)
-        saved_meta = app.storage.tab.get('puzzle_fragments', {})
-        saved_state = app.storage.tab.get('puzzle_state')
+        # Restore saved fragments (client should be connected via timer delay)
+        try:
+            saved_meta = app.storage.tab.get('puzzle_fragments', {})
+            saved_state = app.storage.tab.get('puzzle_state')
+        except RuntimeError:
+            saved_meta = {}
+            saved_state = None
         # Populate outer puzzle_meta so callbacks can find existing fragments
         if saved_meta and isinstance(saved_meta, dict):
             puzzle_meta.update(saved_meta)
