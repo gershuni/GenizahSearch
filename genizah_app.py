@@ -3506,6 +3506,11 @@ class ResultDialog(QDialog):
         self.btn_add_to_list.setToolTip(tr("Add to List"))
         self.btn_add_to_list.clicked.connect(self.add_current_to_list)
 
+        # Add to Puzzle button
+        self.btn_add_to_puzzle = QPushButton(f"\U0001f9e9 {tr('Puzzle')}")
+        self.btn_add_to_puzzle.setToolTip(tr("Add to Fragment Puzzle"))
+        self.btn_add_to_puzzle.clicked.connect(self._add_to_puzzle)
+
         self.btn_ext_info = QPushButton(f"ℹ️ {tr('Info')}")
         self.btn_ext_info.setToolTip(tr("Show Extended Info"))
         self.btn_ext_info.setCheckable(True)
@@ -3553,6 +3558,7 @@ class ResultDialog(QDialog):
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_add_to_list)
+        action_row.addWidget(self.btn_add_to_puzzle)
         action_row.addWidget(self.btn_ext_info)
         action_row.addWidget(self.btn_rd_bib_fjms)
         action_row.addWidget(self.btn_rd_bib_nli)
@@ -3817,6 +3823,24 @@ class ResultDialog(QDialog):
             # Also add to recently viewed
             parent.lists_mgr.add_to_recent(sys_id, fl_id=fl_id, img=img)
             self._update_add_to_list_button()
+
+    def _add_to_puzzle(self):
+        """Add current result to puzzle canvas."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, 'add_to_puzzle'):
+            return
+        sys_id = self.current_sys_id
+        if not sys_id:
+            return
+        fl_id = self.current_fl_id or ''
+        # Get shelfmark from current result
+        if self.all_results and 0 <= self.current_result_idx < len(self.all_results):
+            result = self.all_results[self.current_result_idx]
+            shelfmark = result.get('shelfmark', result.get('call_number', str(sys_id)))
+        else:
+            shelfmark = str(sys_id)
+        folio_label = '1r'  # default; could be improved with current page info
+        parent.add_to_puzzle(sys_id, shelfmark, folio_label, fl_id)
 
     def _update_add_to_list_button(self):
         parent = self.parent()
@@ -11956,6 +11980,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_add_to_view.clicked.connect(self._browse_add_to_view)
         row1.addWidget(self.btn_b_add_to_view)
 
+        # Add to Puzzle button (Fragment Puzzle canvas)
+        self.btn_b_add_to_puzzle = QPushButton(f"\U0001f9e9 {tr('Puzzle')}")
+        self.btn_b_add_to_puzzle.setToolTip(tr("Add current manuscript to Fragment Puzzle"))
+        self.btn_b_add_to_puzzle.setEnabled(False)
+        self.btn_b_add_to_puzzle.clicked.connect(self._browse_add_to_puzzle)
+        row1.addWidget(self.btn_b_add_to_puzzle)
+
         row1.addWidget(self.btn_find_parallels)
 
         # Add to List button for browse tab
@@ -12632,6 +12663,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_joins.setEnabled(True)
         self.browse_version_combo.setEnabled(True)
         self.btn_b_add_to_view.setEnabled(True)
+        self.btn_b_add_to_puzzle.setEnabled(True)
 
         # Check for comments and corrections FIRST (resets PGP state and version combo)
         self._check_document_community_status()
@@ -13960,6 +13992,27 @@ class GenizahGUI(QMainWindow):
         else:
             # Add current manuscript to existing reading desk
             self._browse_rd_add_entry(sid, shelfmark)
+
+    def _browse_add_to_puzzle(self):
+        """Add current browse manuscript to the puzzle canvas."""
+        if not self.current_browse_sid:
+            return
+        sid = self.current_browse_sid
+        shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+        if not shelfmark or shelfmark == "Unknown":
+            shelfmark = sid
+        # Get the current FL ID from the browse viewer if available
+        fl_id = None
+        folio_label = '1r'
+        if hasattr(self, 'browse_viewer') and self.browse_viewer:
+            # Only use fl_id if we're on the NLI image list (images_ext don't have fl_ids)
+            if self.browse_viewer.active_list is self.browse_viewer.images_nli:
+                if self.browse_viewer.current_idx < len(self.browse_viewer.active_list):
+                    current_img = self.browse_viewer.active_list[self.browse_viewer.current_idx]
+                    fl_id = current_img.get('fl_id', '')
+                    folio_label = current_img.get('label', '1r')
+        # add_to_puzzle handles missing fl_id via PuzzleMetaLoaderThread (NLI resolution)
+        self.add_to_puzzle(sid, shelfmark, folio_label, fl_id)
 
     def _browse_rd_add_entry(self, sys_id, shelfmark, sequence_order=None):
         """Add a single manuscript entry to the reading desk (duplicate-safe).
@@ -16721,6 +16774,9 @@ class GenizahGUI(QMainWindow):
             btn_copy = self._create_action_button("📋", tr("Copy Info"), lambda _, iid=item_id: self.lists_copy_info_by_id(iid), parent=self.lists_items_table)
             actions_widget.add_btn(btn_copy)
 
+            btn_puzzle = self._create_action_button("\U0001f9e9", tr("Add to Puzzle"), lambda _, iid=item_id: self._lists_add_to_puzzle(iid), parent=self.lists_items_table)
+            actions_widget.add_btn(btn_puzzle)
+
             btn_remove = self._create_action_button("🗑️", tr("Remove from List"), lambda _, iid=item_id: self.lists_remove_item_by_id(iid), parent=self.lists_items_table)
             actions_widget.add_btn(btn_remove)
 
@@ -17574,6 +17630,19 @@ class GenizahGUI(QMainWindow):
         """Copy current item info to clipboard."""
         if self.lists_current_item_id:
             self.lists_copy_info_by_id(self.lists_current_item_id)
+
+    def _lists_add_to_puzzle(self, item_id):
+        """Add a list item to the puzzle canvas."""
+        if not self.lists_mgr:
+            return
+        item = self.lists_mgr.get_item(item_id)
+        if not item:
+            return
+        sys_id = item.get('sys_id', '')
+        if not sys_id:
+            return
+        shelfmark = item.get('shelfmark', item.get('call_number', sys_id))
+        self.add_to_puzzle(sys_id, shelfmark)
 
     def lists_copy_info_by_id(self, item_id):
         """Copy item info to clipboard with format options."""
