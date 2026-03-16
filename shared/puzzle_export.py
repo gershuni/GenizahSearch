@@ -8,9 +8,15 @@ Provides functions to:
 - Generate small base64-encoded PNG thumbnails for document listings
 
 Coordinate system (matching both Fabric.js and PyQt):
-- x/y = top-left corner of the unrotated image in 800px canvas space
+- x/y = top-left corner of the unrotated image in canvas space (pixels)
+- scale = display scale factor applied to the ~800px canvas image
 - Rotation pivots around the center of the (scaled, flipped) image
 - PIL.rotate is counter-clockwise, so we negate the angle (apps use clockwise-positive)
+
+Export strategy:
+- A single global resolution multiplier scales ALL positions uniformly
+- Each fragment image is resized to its correct visual size at that resolution
+- This avoids per-fragment coord_scale drift when source images vary in size
 """
 
 import base64
@@ -25,7 +31,7 @@ from shared.puzzle_model import PuzzleFragment
 
 logger = logging.getLogger(__name__)
 
-# Canvas images are loaded at this width for interaction
+# Canvas images are loaded at approximately this width for interaction
 CANVAS_IMAGE_WIDTH = 800
 
 
@@ -51,13 +57,13 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
                           margin: int = 20) -> Optional[Image.Image]:
     """Compose full-resolution RGBA PNG from positioned fragments.
 
-    Uses top-left origin with centered rotation pivot, matching both
-    Fabric.js and PyQt canvas behavior.
+    Uses a single global resolution multiplier so all fragment positions
+    and sizes scale uniformly, regardless of per-image source dimensions.
 
     Args:
         fragments: List of positioned PuzzleFragment objects.
         image_service: PuzzleImageService instance with resolve_fragment_image().
-        export_size: Width in pixels for fetching high-res images (default 3000).
+        export_size: Width hint for fetching high-res images (default 3000).
         margin: Padding in pixels around the auto-cropped result (default 20).
 
     Returns:
@@ -65,6 +71,9 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
     """
     if not fragments:
         return None
+
+    # Global resolution multiplier: scales canvas coords to export coords
+    global_scale = export_size / float(CANVAS_IMAGE_WIDTH)
 
     # Phase 1: Transform each fragment and compute placement coordinates
     placed = []  # list of (paste_x, paste_y, rotated_img)
@@ -86,15 +95,14 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
             logger.warning("compose_puzzle_export: failed to open image for fl_id=%s: %s", frag.fl_id, e)
             continue
 
-        # Coordinate scale: map 800px canvas coords to export-size coords
-        coord_scale = export_img.width / float(CANVAS_IMAGE_WIDTH)
+        # Per-fragment image scale: ratio of actual loaded width to canvas width
+        img_scale = export_img.width / float(CANVAS_IMAGE_WIDTH)
 
-        # Apply crop (crop values are in 800px canvas-pixel space)
-        crop_scale = coord_scale
-        ct = int(frag.crop_top * crop_scale)
-        cb = int(frag.crop_bottom * crop_scale)
-        cl = int(frag.crop_left * crop_scale)
-        cr = int(frag.crop_right * crop_scale)
+        # Apply crop (crop values are in ~800px canvas-pixel space)
+        ct = int(frag.crop_top * img_scale)
+        cb = int(frag.crop_bottom * img_scale)
+        cl = int(frag.crop_left * img_scale)
+        cr = int(frag.crop_right * img_scale)
         if ct + cb + cl + cr > 0:
             new_left = cl
             new_top = ct
@@ -102,10 +110,19 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
             new_bottom = max(export_img.height - cb, new_top + 1)
             export_img = export_img.crop((new_left, new_top, new_right, new_bottom))
 
-        # Apply scale
-        new_w = max(1, int(export_img.width * frag.scale))
-        new_h = max(1, int(export_img.height * frag.scale))
-        scaled_img = export_img.resize((new_w, new_h), Image.LANCZOS)
+        # Target visual size in export space:
+        # On canvas, the image (after crop) is displayed at approximately:
+        #   canvas_visual_w = (cropped_canvas_w) * frag.scale
+        # In export space, we want:
+        #   export_visual_w = canvas_visual_w * global_scale
+        # = (cropped_canvas_w) * frag.scale * global_scale
+        #
+        # cropped_canvas_w = export_img.width / img_scale  (map back to canvas space)
+        cropped_canvas_w = export_img.width / img_scale
+        cropped_canvas_h = export_img.height / img_scale
+        target_w = max(1, int(cropped_canvas_w * frag.scale * global_scale))
+        target_h = max(1, int(cropped_canvas_h * frag.scale * global_scale))
+        scaled_img = export_img.resize((target_w, target_h), Image.LANCZOS)
 
         # Apply flips
         if frag.flip_h:
@@ -113,9 +130,11 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
         if frag.flip_v:
             scaled_img = scaled_img.transpose(Image.FLIP_TOP_BOTTOM)
 
-        # Compute center of the scaled/flipped (unrotated) image in export space
-        tl_x = frag.x * coord_scale
-        tl_y = frag.y * coord_scale
+        # Position: scale canvas coords by global_scale (uniform for all fragments)
+        tl_x = frag.x * global_scale
+        tl_y = frag.y * global_scale
+
+        # Compute center of the scaled/flipped (unrotated) image
         half_w = scaled_img.width / 2.0
         half_h = scaled_img.height / 2.0
         center_x = tl_x + half_w

@@ -3789,6 +3789,7 @@ class PuzzleCanvasWindow(QMainWindow):
             if self._load_pending_count <= 0:
                 self._loading_document = False
                 self._load_pending_count = 0
+                self._update_fragments_label()
                 logger.info("Document load complete: all fragments loaded")
 
     def _fit_all_fragments(self):
