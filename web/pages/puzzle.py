@@ -912,31 +912,38 @@ window.puzzleCanvas = {
     },
 
     flipAllPuzzle: function() {
-        // Flip entire puzzle: mirror .left positions + negate rotations + navigate to recto/verso
+        // Flip entire puzzle: mirror visual centers + negate rotations + navigate to recto/verso
         var self = this;
         var keys = Object.keys(this.fragments);
         if (keys.length === 0) return;
         var objects = keys.map(function(k) { return self.fragments[k]; });
 
-        // 1. Snapshot all positions and compute mirror axis from .left values
+        // 1. Snapshot visual centers BEFORE any changes
         var snapshots = objects.map(function(obj) {
-            return { obj: obj, left: obj.left };
+            var cp = obj.getCenterPoint();
+            return { obj: obj, cx: cp.x, origLeft: obj.left, origAngle: obj.angle || 0 };
         });
-        var minLeft = Math.min.apply(null, snapshots.map(function(s) { return s.left; }));
-        var maxLeft = Math.max.apply(null, snapshots.map(function(s) { return s.left; }));
-        var axisX = (minLeft + maxLeft) / 2;
 
-        // 2. Mirror each .left around axis and negate rotation
+        // 2. Compute mirror axis from visual centers
+        var allCx = snapshots.map(function(s) { return s.cx; });
+        var axisX = (Math.min.apply(null, allCx) + Math.max.apply(null, allCx)) / 2;
+
+        // 3. Compute all new positions, THEN apply atomically
         snapshots.forEach(function(s) {
-            var newLeft = 2 * axisX - s.left;
-            s.obj.set('left', newLeft);
-            var oldAngle = s.obj.angle || 0;
-            s.obj.set('angle', (360 - oldAngle) % 360);
+            var mirroredCx = 2 * axisX - s.cx;
+            var dx = mirroredCx - s.cx;
+            s.newLeft = s.origLeft + dx;
+            s.newAngle = (360 - s.origAngle) % 360;
+        });
+
+        // 4. Apply all changes
+        snapshots.forEach(function(s) {
+            s.obj.set({ left: s.newLeft, angle: s.newAngle });
             s.obj.setCoords();
         });
         this.canvas.requestRenderAll();
 
-        // 3. Navigate each fragment to recto/verso counterpart
+        // 5. Navigate each fragment to recto/verso counterpart
         keys.forEach(function(key) {
             var data = self.folioData[key];
             if (!data || data.folios.length < 2) return;
