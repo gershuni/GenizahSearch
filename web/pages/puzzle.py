@@ -771,25 +771,25 @@ window.puzzleCanvas = {
                 if (!transform) return;
                 var corner = transform.corner;
 
-                // Compute how much the user dragged (in pixels of image space)
+                // Compute drag delta in image-space pixels
                 var newW = obj.width * obj.scaleX;
                 var oldW = obj._lastWidth * obj._lastScaleX;
                 var newH = obj.height * obj.scaleY;
                 var oldH = obj._lastHeight * obj._lastScaleY;
-                var dw = oldW - newW;  // positive = shrunk = crop
-                var dh = oldH - newH;
 
-                // Revert the scale — keep original scale, crop via width/height/cropX/cropY
+                // Revert the scale — all changes go through cropEdge
                 obj.scaleX = obj._lastScaleX;
                 obj.scaleY = obj._lastScaleY;
 
-                var amount;
-                if (corner === 'ml' && dw > 5) { amount = Math.round(dw / obj.scaleX); self.cropEdge('left', Math.max(5, amount)); }
-                else if (corner === 'mr' && dw > 5) { amount = Math.round(dw / obj.scaleX); self.cropEdge('right', Math.max(5, amount)); }
-                else if (corner === 'mt' && dh > 5) { amount = Math.round(dh / obj.scaleY); self.cropEdge('top', Math.max(5, amount)); }
-                else if (corner === 'mb' && dh > 5) { amount = Math.round(dh / obj.scaleY); self.cropEdge('bottom', Math.max(5, amount)); }
+                // Positive delta = shrunk = crop inward; negative = expanded = un-crop
+                var dw = Math.round((oldW - newW) / obj._lastScaleX);
+                var dh = Math.round((oldH - newH) / obj._lastScaleY);
 
-                // Update last known dimensions
+                if (corner === 'ml' && Math.abs(dw) > 3) { self.cropEdge('left', dw); }
+                else if (corner === 'mr' && Math.abs(dw) > 3) { self.cropEdge('right', dw); }
+                else if (corner === 'mt' && Math.abs(dh) > 3) { self.cropEdge('top', dh); }
+                else if (corner === 'mb' && Math.abs(dh) > 3) { self.cropEdge('bottom', dh); }
+
                 obj._lastWidth = obj.width;
                 obj._lastHeight = obj.height;
             };
@@ -823,26 +823,47 @@ window.puzzleCanvas = {
     },
 
     cropEdge: function(edge, amount) {
+        // Positive amount = crop inward, negative = un-crop (restore)
         if (!this._cropMode || !this._cropTarget) return;
         amount = amount || 20;
         var obj = this._cropTarget;
-        var w = obj.width;
-        var h = obj.height;
+        var origW = obj._originalWidth || obj.width;
+        var origH = obj._originalHeight || obj.height;
         var cropX = obj.cropX || 0;
         var cropY = obj.cropY || 0;
+        var w = obj.width;
+        var h = obj.height;
 
-        if (edge === 'top' && h - amount > 50) {
-            obj.set({ cropY: cropY + amount, height: h - amount });
-            this._cropOffsets.top += amount;
-        } else if (edge === 'bottom' && h - amount > 50) {
-            obj.set({ height: h - amount });
-            this._cropOffsets.bottom += amount;
-        } else if (edge === 'left' && w - amount > 50) {
-            obj.set({ cropX: cropX + amount, width: w - amount });
-            this._cropOffsets.left += amount;
-        } else if (edge === 'right' && w - amount > 50) {
-            obj.set({ width: w - amount });
-            this._cropOffsets.right += amount;
+        if (edge === 'top') {
+            var newCropY = Math.max(0, Math.min(cropY + amount, cropY + h - 50));
+            var delta = newCropY - cropY;
+            if (delta !== 0) {
+                obj.set({ cropY: newCropY, height: h - delta });
+                this._cropOffsets.top += delta;
+            }
+        } else if (edge === 'bottom') {
+            // Max we can crop: current height - 50. Un-crop limited by original.
+            var maxH = origH - (obj.cropY || 0) - this._cropOffsets.bottom;
+            var newBottom = Math.max(0, Math.min(this._cropOffsets.bottom + amount, origH - (obj.cropY || 0) - 50));
+            var delta = newBottom - this._cropOffsets.bottom;
+            if (delta !== 0) {
+                obj.set({ height: h - delta });
+                this._cropOffsets.bottom = newBottom;
+            }
+        } else if (edge === 'left') {
+            var newCropX = Math.max(0, Math.min(cropX + amount, cropX + w - 50));
+            var delta = newCropX - cropX;
+            if (delta !== 0) {
+                obj.set({ cropX: newCropX, width: w - delta });
+                this._cropOffsets.left += delta;
+            }
+        } else if (edge === 'right') {
+            var newRight = Math.max(0, Math.min(this._cropOffsets.right + amount, origW - (obj.cropX || 0) - 50));
+            var delta = newRight - this._cropOffsets.right;
+            if (delta !== 0) {
+                obj.set({ width: w - delta });
+                this._cropOffsets.right = newRight;
+            }
         }
         obj.setCoords();
         this.canvas.requestRenderAll();
@@ -1866,11 +1887,23 @@ def create_puzzle_page(initial_add: str = None):
                 return
 
             key = f"{add_sys_id},{folio_label}"
-            threshold = 30
+            # CUL/T-S threshold matching desktop defaults
+            threshold = 30.0
+            is_cul = False
             if state.meta_mgr:
                 lib_code = state.meta_mgr.get_library_for_id(add_sys_id) or ''
                 if lib_code == 'CUL':
-                    threshold = 50
+                    is_cul = True
+            if not is_cul:
+                sm = ''
+                if state.meta_mgr:
+                    sm, _ = state.meta_mgr.get_meta_for_id(add_sys_id)
+                if sm:
+                    s = sm.upper()
+                    if s.startswith(('T-S', 'OR.', 'ADD.')):
+                        is_cul = True
+            if is_cul:
+                threshold = 150.0
 
             url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
 
