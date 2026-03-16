@@ -137,6 +137,7 @@ window.puzzleCanvas = {
             preserveObjectStacking: true,
             stopContextMenu: true,
             fireRightClick: true,
+            uniformScaling: true,
             width: w,
             height: h
         });
@@ -214,11 +215,22 @@ window.puzzleCanvas = {
             console.log('Image loaded:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
             try {
                 self._removePlaceholder(key);
+                // Auto-fit: if using default scale (1.0), shrink large images to ~60% of canvas
+                var effectiveScale = scale || 1.0;
+                if (effectiveScale === 1.0 && self.canvas) {
+                    var cw = self.canvas.getWidth();
+                    var ch = self.canvas.getHeight();
+                    var maxW = cw * 0.6;
+                    var maxH = ch * 0.6;
+                    if (htmlImg.naturalWidth > maxW || htmlImg.naturalHeight > maxH) {
+                        effectiveScale = Math.min(maxW / htmlImg.naturalWidth, maxH / htmlImg.naturalHeight);
+                    }
+                }
                 var img = self._buildFragmentImage(htmlImg, {
                     left: x, top: y,
                     angle: rotation || 0,
-                    scaleX: scale || 1.0,
-                    scaleY: scale || 1.0,
+                    scaleX: effectiveScale,
+                    scaleY: effectiveScale,
                     flipX: !!flipH,
                     flipY: !!flipV,
                     hasControls: true,
@@ -794,6 +806,41 @@ window.puzzleCanvas = {
         }
     },
 
+    flipAllPuzzle: function() {
+        // Flip all fragments to show recto/verso: navigate each to its counterpart folio
+        var self = this;
+        var keys = Object.keys(this.fragments);
+        if (keys.length === 0) return;
+
+        // Mirror X positions around center
+        var objects = keys.map(function(k) { return self.fragments[k]; });
+        var minX = Infinity, maxX = -Infinity;
+        objects.forEach(function(obj) {
+            var bounds = obj.getBoundingRect();
+            minX = Math.min(minX, bounds.left);
+            maxX = Math.max(maxX, bounds.left + bounds.width);
+        });
+        var centerX = (minX + maxX) / 2;
+        objects.forEach(function(obj) {
+            var bounds = obj.getBoundingRect();
+            var objCenterX = bounds.left + bounds.width / 2;
+            var newCenterX = centerX + (centerX - objCenterX);
+            obj.set('left', newCenterX - bounds.width / 2);
+        });
+
+        // Navigate each fragment to its recto/verso counterpart
+        keys.forEach(function(key) {
+            var data = self.folioData[key];
+            if (!data || data.folios.length < 2) return;
+            var ci = data.currentIndex;
+            var newIdx = (ci % 2 === 0) ? Math.min(ci + 1, data.folios.length - 1) : Math.max(ci - 1, 0);
+            if (newIdx !== ci) {
+                self.navigateFolio(key, newIdx - ci);
+            }
+        });
+        this.canvas.requestRenderAll();
+    },
+
     setSelectedScale: function(scale) {
         var active = this.canvas.getActiveObject();
         if (active) {
@@ -1083,7 +1130,16 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
     folio_label = first.get('label', '1r')
     key = f"{sys_id},{folio_label}"
 
+    # CUL/T-S threshold matching desktop defaults
     threshold = threshold_slider.value if threshold_slider else 30
+    if state.meta_mgr:
+        lib_code = state.meta_mgr.get_library_for_id(sys_id) or ''
+        if lib_code == 'CUL':
+            threshold = 115
+        elif shelfmark:
+            s = shelfmark.upper()
+            if s.startswith(('T-S', 'OR.', 'ADD.')):
+                threshold = 115
     url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
 
     frag_offset = len(puzzle_meta) * 50
@@ -1169,12 +1225,8 @@ def create_puzzle_page(initial_add: str = None):
             async def on_add_from_list():
                 """Show dialog to pick a manuscript from personal lists."""
                 from web.supabase_client import get_user_lists, get_list_items
-                from web.state import state as web_state
-                user = getattr(web_state, 'user', None)
-                if not user:
-                    ui.notify(tr('Please log in to access lists'), type='warning')
-                    return
-                user_id = user.get('id', '') if isinstance(user, dict) else getattr(user, 'id', '')
+                from web.auth_state import GlobalAuthState
+                user_id = GlobalAuthState.get_user_id()
                 if not user_id:
                     ui.notify(tr('Please log in to access lists'), type='warning')
                     return
@@ -1240,6 +1292,18 @@ def create_puzzle_page(initial_add: str = None):
             ui.button(icon='delete', on_click=on_delete_selected).props(
                 'dense flat dark round size=sm color=negative'
             ).tooltip(tr('Remove Selected'))
+
+            ui.separator().props('vertical').style('height: 20px')
+
+            ui.button(icon='flip', on_click=lambda: ui.run_javascript(
+                'window.puzzleCanvas.flipSelectedH()'
+            )).props('dense flat dark round size=sm').tooltip(tr('Flip Horizontal'))
+            ui.button(icon='flip', on_click=lambda: ui.run_javascript(
+                'window.puzzleCanvas.flipSelectedV()'
+            )).props('dense flat dark round size=sm').style('transform: rotate(90deg)').tooltip(tr('Flip Vertical'))
+            ui.button(icon='sync_alt', on_click=lambda: ui.run_javascript(
+                'window.puzzleCanvas.flipAllPuzzle()'
+            )).props('dense flat dark round size=sm').tooltip(tr('Flip Puzzle (Recto/Verso)'))
 
             ui.separator().props('vertical').style('height: 20px')
 
@@ -1322,10 +1386,10 @@ def create_puzzle_page(initial_add: str = None):
                             puzzle_meta[key]['folio_label'] = label or ''
                             app.storage.tab['puzzle_fragments'] = puzzle_meta
 
-            ui.button(icon='chevron_left', on_click=on_folio_prev).props(
+            ui.button(icon='chevron_right', on_click=on_folio_prev).props(
                 'dense flat dark round size=sm'
             ).tooltip(tr('Previous Folio'))
-            ui.button(icon='chevron_right', on_click=on_folio_next).props(
+            ui.button(icon='chevron_left', on_click=on_folio_next).props(
                 'dense flat dark round size=sm'
             ).tooltip(tr('Next Folio'))
 
@@ -1365,7 +1429,7 @@ def create_puzzle_page(initial_add: str = None):
 
             ui.icon('tune', size='xs').classes('text-grey-5')
             threshold_slider = ui.slider(
-                min=10, max=80, value=30, step=1
+                min=10, max=150, value=30, step=1
             ).props('dense dark').style('width: 100px')
 
             async def on_threshold_change():
