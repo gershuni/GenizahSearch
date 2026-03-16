@@ -83,17 +83,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 47 - Foundation + Background Removal
+**Current focus:** Phase 48 - Desktop Canvas
 
 ## Current Position
 
 Milestone: v7.0.0 Fragment Puzzle
-Phase: 47 (1 of 6 in milestone)
-Plan: 3 of 4 in current phase
+Phase: 48 (2 of 6 in milestone)
+Plan: 1 of 4 in current phase
 Status: In progress
-Last activity: 2026-03-16 -- Completed 47-03 puzzle image service with IIIF fetch, bg removal, disk cache
+Last activity: 2026-03-16 -- Completed 48-01 canvas building blocks (PuzzleFragmentItem, PuzzleCanvasView, PuzzleImageLoaderThread)
 
-Progress: [████████░░] 75%
+Progress: [██░░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -120,6 +120,8 @@ Recent decisions affecting current work:
 - [v7.0.0]: 800px images for canvas interaction, full-res only for server-side composite export
 - [Phase 47-02]: Pillow HSV 0-255 scale; low-saturation S<30 triggers value-only distance; MIN_FOREGROUND_RATIO=0.05 (5%)
 - [Phase 47]: Cambridge IIIF fetched directly (not NLI-hosted), separate code path
+- [Phase 48-01]: View dispatches wheel to items via adjust_scale_from_wheel() to avoid QWheelEvent/QGraphicsSceneWheelEvent type mismatch
+- [Phase 48-01]: Corner-handle rotation on selected items (HANDLE_SIZE=14px), pan on middle-click or left-click on empty canvas
 
 ### Pending Todos
 
@@ -153,6 +155,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-16T05:31:08.137Z
-Stopped at: Phase 48 context gathered
-Resume file: .planning/phases/48-desktop-canvas/48-CONTEXT.md
+Last session: 2026-03-16T06:20:40Z
+Stopped at: Completed 48-01-PLAN.md
+Resume file: .planning/phases/48-desktop-canvas/48-01-SUMMARY.md
