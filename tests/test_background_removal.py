@@ -12,7 +12,7 @@ from PIL import Image
 from shared.background_removal import (
     remove_background,
     detect_background_color,
-    detect_edge_midpoint_color,
+    create_cul_blue_mask,
     create_mask,
     DEFAULT_THRESHOLD,
     MIN_FOREGROUND_RATIO,
@@ -254,17 +254,17 @@ def make_two_layer_image(outer_color, inner_color, fg_color,
     return buf.getvalue()
 
 
-class TestTwoLayerBackground:
-    """Tests for two-pass background removal (border frame + colored mat)."""
+class TestCulBlueMatRemoval:
+    """Tests for CUL blue conservation mat removal (is_cul=True)."""
 
     def test_gray_border_blue_mat_both_removed(self):
-        """Gray border + blue mat: both should become transparent, parchment stays opaque."""
+        """Gray border + blue mat + is_cul: both removed, parchment stays opaque."""
         img_bytes = make_two_layer_image(
             outer_color=(180, 180, 180),  # gray border
             inner_color=(0, 0, 255),       # blue mat
             fg_color=(220, 200, 170),      # parchment-like
         )
-        result = remove_background(img_bytes)
+        result = remove_background(img_bytes, is_cul=True)
         result_img = open_result(result)
 
         assert result_img.mode == 'RGBA'
@@ -275,68 +275,74 @@ class TestTwoLayerBackground:
         # Center (parchment) should be opaque
         assert result_img.getpixel((150, 150))[3] == 255
 
-    def test_white_border_green_mat_both_removed(self):
-        """White border + green mat: both removed, foreground kept."""
+    def test_darker_blue_mat_removed(self):
+        """CUL blue mat with more realistic darker blue shade."""
         img_bytes = make_two_layer_image(
-            outer_color=(240, 240, 240),  # white border
-            inner_color=(0, 128, 0),       # green mat
-            fg_color=(200, 180, 150),      # parchment-like
+            outer_color=(200, 200, 200),   # light gray border
+            inner_color=(30, 50, 180),      # darker CUL blue
+            fg_color=(210, 190, 160),       # parchment
         )
-        result = remove_background(img_bytes)
+        result = remove_background(img_bytes, is_cul=True)
         result_img = open_result(result)
 
-        # Corner (white) should be transparent
-        assert result_img.getpixel((5, 5))[3] == 0
-        # Green mat should be transparent
-        assert result_img.getpixel((50, 150))[3] == 0
-        # Center (parchment) should be opaque
-        assert result_img.getpixel((150, 150))[3] == 255
+        assert result_img.getpixel((5, 5))[3] == 0      # gray border removed
+        assert result_img.getpixel((50, 150))[3] == 0    # blue mat removed
+        assert result_img.getpixel((150, 150))[3] == 255 # parchment kept
 
-    def test_single_layer_blue_unchanged(self):
-        """Single blue background (no border): behavior unchanged from before."""
-        img_bytes = make_test_image((0, 0, 255), (255, 255, 255))
-        result = remove_background(img_bytes)
+    def test_blue_only_no_border_cul(self):
+        """CUL image with only blue background (no gray border)."""
+        img_bytes = make_test_image((0, 0, 255), (220, 200, 170))
+        result = remove_background(img_bytes, is_cul=True)
         result_img = open_result(result)
 
-        # Blue corners transparent, white center opaque (same as before)
+        # Blue removed, parchment kept
         assert result_img.getpixel((5, 5))[3] == 0
         assert result_img.getpixel((100, 100))[3] == 255
 
-    def test_single_layer_gray_unchanged(self):
-        """Single gray background (no border): behavior unchanged from before."""
-        img_bytes = make_test_image((128, 128, 128), (255, 255, 255))
-        result = remove_background(img_bytes)
+    def test_is_cul_false_does_not_affect_non_cul(self):
+        """Without is_cul=True, blue mat NOT removed when corners detect gray border."""
+        img_bytes = make_two_layer_image(
+            outer_color=(180, 180, 180),  # gray border (corners detect this)
+            inner_color=(0, 0, 255),       # blue mat
+            fg_color=(220, 200, 170),      # parchment
+        )
+        # Without is_cul, the corner-based detection finds gray, NOT blue
+        result = remove_background(img_bytes, is_cul=False)
         result_img = open_result(result)
 
-        assert result_img.getpixel((5, 5))[3] == 0
-        assert result_img.getpixel((100, 100))[3] == 255
+        # Blue mat is NOT removed (corners only found gray)
+        # This confirms is_cul flag is needed for CUL images
+        assert result_img.getpixel((50, 150))[3] == 255  # blue still opaque
 
-    def test_detect_edge_midpoint_color_two_layer(self):
-        """Edge midpoints should detect inner mat color, not outer border."""
-        img = Image.new('RGB', (300, 300), (180, 180, 180))  # gray border
-        # Blue inner mat
-        for x in range(40, 260):
-            for y in range(40, 260):
-                img.putpixel((x, y), (0, 0, 255))
-        # Small white center
-        for x in range(120, 180):
-            for y in range(120, 180):
-                img.putpixel((x, y), (255, 255, 255))
+    def test_cul_blue_mask_direct(self):
+        """create_cul_blue_mask correctly identifies blue pixels by hue range."""
+        img = Image.new('RGB', (200, 200), (30, 60, 180))  # blue
+        # Parchment center
+        for x in range(80, 120):
+            for y in range(80, 120):
+                img.putpixel((x, y), (220, 200, 170))
 
         hsv_array = np.array(img.convert('HSV'))
-        edge_color = detect_edge_midpoint_color(hsv_array)
+        mask = create_cul_blue_mask(hsv_array)
+        mask_arr = np.array(mask)
 
-        # Edge midpoints should detect the blue mat (high saturation)
-        assert edge_color.shape == (3,)
-        assert edge_color[1] > 200  # high saturation = blue
+        # Blue corners should be 0 (background)
+        assert mask_arr[5, 5] == 0
+        # Parchment center should be 255 (foreground)
+        assert mask_arr[100, 100] == 255
 
-    def test_same_color_edges_no_second_pass(self):
-        """When edge midpoints match corners (same single bg), no second pass triggered."""
-        # Uniform blue background with white center — edges and corners both blue
-        img_bytes = make_test_image((0, 0, 255), (255, 255, 255), size=200, fg_size=80)
-        result = remove_background(img_bytes)
-        result_img = open_result(result)
+    def test_non_cul_images_unaffected(self):
+        """Standard gray/white background images work the same with or without is_cul."""
+        img_bytes = make_test_image((128, 128, 128), (255, 255, 255))
 
-        # Should work exactly as single-pass: blue removed, white kept
-        assert result_img.getpixel((5, 5))[3] == 0
-        assert result_img.getpixel((100, 100))[3] == 255
+        result_normal = remove_background(img_bytes, is_cul=False)
+        result_cul = remove_background(img_bytes, is_cul=True)
+
+        normal_img = open_result(result_normal)
+        cul_img = open_result(result_cul)
+
+        # Both should remove gray and keep white
+        assert normal_img.getpixel((5, 5))[3] == 0
+        assert cul_img.getpixel((5, 5))[3] == 0
+        assert normal_img.getpixel((100, 100))[3] == 255
+        assert cul_img.getpixel((100, 100))[3] == 255

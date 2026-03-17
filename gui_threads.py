@@ -906,19 +906,22 @@ class PuzzleImageLoaderThread(QThread):
     image_ready = pyqtSignal(str, bytes)   # (fl_id, rgba_png_bytes or jpeg_bytes)
     load_failed = pyqtSignal(str, str)     # (fl_id, error_message)
 
-    def __init__(self, fl_id: str, threshold: float = 30.0, size: int = 800, processed: bool = True):
+    def __init__(self, fl_id: str, threshold: float = 30.0, size: int = 800,
+                 processed: bool = True, is_cul: bool = False):
         super().__init__()
         self.fl_id = fl_id
         self.threshold = threshold
         self.size = size
         self.processed = processed
+        self.is_cul = is_cul
 
     def run(self):
         try:
             from shared.puzzle_image_service import resolve_fragment_image
             result = resolve_fragment_image(
                 self.fl_id, size=self.size,
-                threshold=self.threshold, processed=self.processed
+                threshold=self.threshold, processed=self.processed,
+                is_cul=self.is_cul
             )
             if result:
                 self.image_ready.emit(self.fl_id, result)

@@ -3584,7 +3584,8 @@ class PuzzleCanvasWindow(QMainWindow):
 
         # Start image loader thread
         thr = puzzle_frag.bg_removal_threshold
-        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=(thr > 0))
+        is_cul = (lib_code == 'CUL') or (shelfmark and shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
+        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=(thr > 0), is_cul=is_cul)
         thread.image_ready.connect(partial(self._on_image_loaded, item_key))
         thread.load_failed.connect(self._on_image_failed)
         self._loader_threads.append(thread)

@@ -67,18 +67,21 @@ class PuzzleImageService:
 
     def get_cache_path(self, fl_id: str, size: int = 800,
                        threshold: float = DEFAULT_THRESHOLD,
-                       processed: bool = True) -> Path:
+                       processed: bool = True,
+                       is_cul: bool = False) -> Path:
         """Deterministic cache path for a specific (fl_id, size, threshold) combination."""
         safe_id = _safe_filename(fl_id)
         if processed:
             # Include threshold in filename (rounded to 1 decimal to avoid float noise)
-            return self._cache_dir / f"{safe_id}_{size}_{threshold:.1f}.png"
+            suffix = '_cul' if is_cul else ''
+            return self._cache_dir / f"{safe_id}_{size}_{threshold:.1f}{suffix}.png"
         else:
             return self._cache_dir / f"{safe_id}_{size}_original.jpg"
 
     def resolve_fragment_image(self, fl_id: str, size: int = 800,
                                 threshold: float = DEFAULT_THRESHOLD,
-                                processed: bool = True) -> Optional[bytes]:
+                                processed: bool = True,
+                                is_cul: bool = False) -> Optional[bytes]:
         """Fetch IIIF image, apply background removal, cache result.
 
         Args:
@@ -86,11 +89,12 @@ class PuzzleImageService:
             size: Image width in pixels (default 800)
             threshold: Background removal threshold (default 30.0)
             processed: If True, apply background removal. If False, return original.
+            is_cul: If True, also remove CUL blue conservation mat.
 
         Returns:
             Image bytes (RGBA PNG if processed, JPEG if original), or None on failure.
         """
-        cache_path = self.get_cache_path(fl_id, size, threshold, processed)
+        cache_path = self.get_cache_path(fl_id, size, threshold, processed, is_cul)
 
         # Return cached if exists
         if cache_path.exists():
@@ -108,7 +112,7 @@ class PuzzleImageService:
 
         # Apply background removal
         try:
-            result_bytes = remove_background(raw_bytes, threshold=threshold)
+            result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
         except Exception as e:
             logger.error(f"Background removal failed for {fl_id}: {e}")
             return raw_bytes  # fallback to original on error
@@ -177,18 +181,20 @@ def reset_puzzle_image_service():
 
 def resolve_fragment_image(fl_id: str, size: int = 800,
                             threshold: float = DEFAULT_THRESHOLD,
-                            processed: bool = True) -> Optional[bytes]:
+                            processed: bool = True,
+                            is_cul: bool = False) -> Optional[bytes]:
     """Module-level convenience for resolve_fragment_image."""
     return get_puzzle_image_service().resolve_fragment_image(
-        fl_id, size, threshold, processed
+        fl_id, size, threshold, processed, is_cul
     )
 
 
 def get_cache_path(fl_id: str, size: int = 800,
                    threshold: float = DEFAULT_THRESHOLD,
-                   processed: bool = True) -> Path:
+                   processed: bool = True,
+                   is_cul: bool = False) -> Path:
     """Module-level convenience for get_cache_path."""
-    return get_puzzle_image_service().get_cache_path(fl_id, size, threshold, processed)
+    return get_puzzle_image_service().get_cache_path(fl_id, size, threshold, processed, is_cul)
 
 
 def invalidate_cache(fl_id: str, threshold: Optional[float] = None):

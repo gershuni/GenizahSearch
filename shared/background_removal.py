@@ -46,39 +46,42 @@ def detect_background_color(hsv_array: np.ndarray) -> np.ndarray:
 
 
 HIGH_SATURATION_THRESHOLD = 100  # S > 100 = colored background (blue, green, etc.)
-SECONDARY_BG_MIN_HUE_DISTANCE = 20  # Min circular hue distance to consider colors "different"
 
-
-def detect_edge_midpoint_color(hsv_array: np.ndarray) -> np.ndarray:
-    """Sample inset edge midpoints to detect inner mat color.
-
-    Samples 4 patches inset ~20% from each edge at the midpoint of that edge.
-    This avoids thin outer borders/frames and catches the inner background
-    (e.g., blue conservation mat on CUL images).
-
-    Returns median HSV as numpy array of shape (3,).
-    """
-    h, w = hsv_array.shape[:2]
-    s = min(CORNER_SAMPLE_SIZE, h // 4, w // 4)
-    mid_h, mid_w = h // 2, w // 2
-    # Inset 20% from each edge to skip border frames
-    inset_y = max(s, h // 5)
-    inset_x = max(s, w // 5)
-
-    edges = [
-        hsv_array[inset_y:inset_y+s, mid_w-s:mid_w+s],       # top side, inset
-        hsv_array[h-inset_y-s:h-inset_y, mid_w-s:mid_w+s],   # bottom side, inset
-        hsv_array[mid_h-s:mid_h+s, inset_x:inset_x+s],       # left side, inset
-        hsv_array[mid_h-s:mid_h+s, w-inset_x-s:w-inset_x],   # right side, inset
-    ]
-    all_pixels = np.concatenate([e.reshape(-1, 3) for e in edges], axis=0)
-    return np.median(all_pixels, axis=0)
+# CUL blue conservation mat HSV range (Pillow 0-255 scale)
+# CUL images consistently use a blue mat; the exact shade varies but hue
+# is always in the blue range with clearly saturated color.
+CUL_BLUE_HUE_MIN = 135   # ~190 degrees
+CUL_BLUE_HUE_MAX = 185   # ~261 degrees
+CUL_BLUE_SAT_MIN = 60    # must be clearly colored (not gray/brown)
 
 
 def _circular_hue_distance(h_array, h_bg):
     """Circular distance on PIL's 0-255 hue wheel (period=256)."""
     raw = np.abs(h_array.astype(float) - float(h_bg))
     return np.minimum(raw, 256.0 - raw)
+
+
+def create_cul_blue_mask(hsv_array: np.ndarray) -> Image.Image:
+    """Create mask targeting CUL blue conservation mat by hue range.
+
+    Uses domain knowledge: CUL images have a distinctive blue mat.
+    Any pixel with blue hue + sufficient saturation is marked as background.
+    This is deterministic and doesn't depend on sampling.
+
+    Returns: PIL Image mask (foreground=255, blue background=0).
+    """
+    h_chan = hsv_array[:, :, 0].astype(float)
+    s_chan = hsv_array[:, :, 1].astype(float)
+    is_blue = (
+        (h_chan >= CUL_BLUE_HUE_MIN) &
+        (h_chan <= CUL_BLUE_HUE_MAX) &
+        (s_chan >= CUL_BLUE_SAT_MIN)
+    )
+    mask_array = np.where(is_blue, 0, 255).astype(np.uint8)
+    mask_img = Image.fromarray(mask_array, mode='L')
+    mask_img = mask_img.filter(ImageFilter.MinFilter(3))   # erode noise
+    mask_img = mask_img.filter(ImageFilter.MaxFilter(5))   # dilate foreground
+    return mask_img
 
 
 def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
@@ -100,14 +103,13 @@ def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
     3. Medium saturation (30-100): mixed. Use standard HSV Euclidean.
 
     If force_euclidean=True, always uses HSV Euclidean regardless of saturation.
-    Used in two-pass mode where V-only would conflate border with parchment.
+    Used for CUL border removal where V-only would conflate border with parchment.
 
     All apply morphological cleanup: MinFilter(3) erode then MaxFilter(5) dilate.
     """
     bg_saturation = bg_color[1]  # S channel, 0-255 scale
 
     if force_euclidean:
-        # Full HSV Euclidean -- used in two-pass mode for primary (border) mask
         diff = np.sqrt(np.sum((hsv_array.astype(float) - bg_color) ** 2, axis=2))
     elif bg_saturation < LOW_SATURATION_THRESHOLD:
         # Low saturation: hue is meaningless, use Value channel only
@@ -132,7 +134,8 @@ def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
 
 def remove_background(image_bytes: bytes,
                       threshold: float = DEFAULT_THRESHOLD,
-                      min_foreground_ratio: float = MIN_FOREGROUND_RATIO) -> bytes:
+                      min_foreground_ratio: float = MIN_FOREGROUND_RATIO,
+                      is_cul: bool = False) -> bytes:
     """Remove solid-color background from image bytes.
 
     Args:
@@ -141,6 +144,9 @@ def remove_background(image_bytes: bytes,
                    Higher = more aggressive removal. Default 30.0.
         min_foreground_ratio: Safety threshold -- if less than this fraction
                    of pixels are foreground, skip removal. Default 0.05 (5%).
+        is_cul: If True, also remove CUL blue conservation mat by hue range.
+                CUL images have a blue mat that may be surrounded by a gray
+                border frame. The hue-range mask handles this reliably.
 
     Returns:
         RGBA PNG bytes with transparent background.
@@ -152,27 +158,18 @@ def remove_background(image_bytes: bytes,
     hsv_array = np.array(hsv_img)
 
     bg_color = detect_background_color(hsv_array)
-    mask = create_mask(hsv_array, bg_color, threshold)
 
-    # Two-pass: check for secondary background (e.g., blue mat inside gray border)
-    edge_color = detect_edge_midpoint_color(hsv_array)
-    if edge_color[1] > HIGH_SATURATION_THRESHOLD:
-        # Edge midpoints found a high-saturation color -- check it differs from corners
-        corner_hue_dist = _circular_hue_distance(
-            np.array([edge_color[0]]), bg_color[0]
-        )[0]
-        if corner_hue_dist > SECONDARY_BG_MIN_HUE_DISTANCE:
-            # Secondary background detected (different hue, high saturation)
-            # Recompute primary mask with full HSV Euclidean -- V-only is too
-            # imprecise when border and parchment have similar brightness
-            primary_mask = create_mask(hsv_array, bg_color, threshold,
-                                       force_euclidean=True)
-            secondary_mask = create_mask(hsv_array, edge_color, threshold)
-            # Combine: foreground only if different from BOTH backgrounds
-            mask_array_combined = np.minimum(
-                np.array(primary_mask), np.array(secondary_mask)
-            )
-            mask = Image.fromarray(mask_array_combined, mode='L')
+    if is_cul:
+        # CUL-specific: remove blue mat by hue range + border by Euclidean distance.
+        # Force Euclidean for border mask because V-only can't distinguish gray
+        # borders from parchment when they have similar brightness.
+        border_mask = create_mask(hsv_array, bg_color, threshold, force_euclidean=True)
+        blue_mask = create_cul_blue_mask(hsv_array)
+        # Combine: foreground only if NOT border-bg AND NOT blue-mat
+        mask_array_combined = np.minimum(np.array(border_mask), np.array(blue_mask))
+        mask = Image.fromarray(mask_array_combined, mode='L')
+    else:
+        mask = create_mask(hsv_array, bg_color, threshold)
 
     # Safety check
     mask_array = np.array(mask)

@@ -701,12 +701,14 @@ def init_api_routes():
     # === Puzzle Canvas API (Phase 49) ===
 
     @app.get('/api/puzzle_image')
-    def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800, processed: bool = True):
+    def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800,
+                     processed: bool = True, is_cul: bool = False):
         """Serve processed/original fragment image for puzzle canvas."""
         from shared.puzzle_image_service import get_puzzle_image_service
         service = get_puzzle_image_service()
         image_bytes = service.resolve_fragment_image(
-            fl_id=fl_id, size=size, threshold=threshold, processed=processed
+            fl_id=fl_id, size=size, threshold=threshold, processed=processed,
+            is_cul=is_cul
         )
         if image_bytes is None:
             return Response(content="Image not found", status_code=404)

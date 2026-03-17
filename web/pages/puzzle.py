@@ -699,10 +699,12 @@ window.puzzleCanvas = {
         var threshold = meta.threshold || 30;
         var size = meta.size || 800;
         var processed = meta.processed !== false;
+        var isCul = meta.is_cul || false;
         var url = '/api/puzzle_image?fl_id=' + folio.fl_id +
                   '&threshold=' + threshold +
                   '&size=' + size +
-                  '&processed=' + processed;
+                  '&processed=' + processed +
+                  '&is_cul=' + isCul;
 
         return new Promise(function(resolve) {
             var htmlImg = new Image();
@@ -1427,7 +1429,8 @@ window.puzzleCanvas = {
         var url = '/api/puzzle_image?fl_id=' + meta.fl_id +
                   '&threshold=' + (meta.threshold || 30) +
                   '&size=' + (meta.size || 800) +
-                  '&processed=' + newProcessed;
+                  '&processed=' + newProcessed +
+                  '&is_cul=' + (meta.is_cul || false);
         var newMeta = Object.assign({}, meta, { processed: newProcessed });
         this._reloadFragment(target._fragmentKey, url, newMeta);
     }
@@ -1634,13 +1637,13 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
             is_cul = True
     if is_cul:
         threshold = 150.0
-    url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
+    url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true&is_cul={'true' if is_cul else 'false'}"
 
     frag_offset = len(puzzle_meta) * 50
     meta = {
         'fl_id': fl_id, 'threshold': threshold,
         'size': 800, 'processed': True,
-        'sys_id': sys_id
+        'sys_id': sys_id, 'is_cul': is_cul
     }
     meta_json = json.dumps(meta)
     ui.run_javascript(
@@ -1936,10 +1939,14 @@ def create_puzzle_page(initial_add: str = None):
             key = f"{frag.sys_id},{frag.folio_label}"
             threshold = frag.bg_removal_threshold
             processed = frag.processed
-            url = f"/api/puzzle_image?fl_id={frag.fl_id}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}"
+            frag_is_cul = bool(frag.shelfmark and frag.shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
+            if not frag_is_cul and state.meta_mgr:
+                frag_is_cul = (state.meta_mgr.get_library_for_id(frag.sys_id) or '') == 'CUL'
+            url = f"/api/puzzle_image?fl_id={frag.fl_id}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}&is_cul={'true' if frag_is_cul else 'false'}"
             js_meta = json.dumps({
                 'fl_id': frag.fl_id, 'threshold': threshold,
-                'size': 800, 'processed': processed, 'sys_id': frag.sys_id
+                'size': 800, 'processed': processed, 'sys_id': frag.sys_id,
+                'is_cul': frag_is_cul
             })
             ui.run_javascript(
                 f'window.puzzleCanvas.addFragment("{key}", "{url}", '
@@ -2583,11 +2590,13 @@ def create_puzzle_page(initial_add: str = None):
                 await run.io_bound(
                     _invalidate_and_refetch, fl_id, new_threshold
                 )
-                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={new_threshold}&size=800&processed={str(bool(processed)).lower()}"
+                meta_is_cul = meta.get('is_cul', False)
+                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={new_threshold}&size=800&processed={str(bool(processed)).lower()}&is_cul={str(bool(meta_is_cul)).lower()}"
                 js_meta = json.dumps({
                     'fl_id': fl_id, 'threshold': new_threshold,
                     'size': 800, 'processed': processed,
-                    'sys_id': meta.get('sys_id', '')
+                    'sys_id': meta.get('sys_id', ''),
+                    'is_cul': meta_is_cul
                 })
                 ui.run_javascript(
                     f'window.puzzleCanvas._reloadFragment("{key}", "{url}", {js_meta})'
@@ -2837,7 +2846,8 @@ def create_puzzle_page(initial_add: str = None):
                 if not fl_id:
                     continue
 
-                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}"
+                meta_is_cul = meta.get('is_cul', False)
+                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}&is_cul={str(bool(meta_is_cul)).lower()}"
 
                 # Default positions if no saved state
                 x, y = 100, 100
@@ -2929,13 +2939,13 @@ def create_puzzle_page(initial_add: str = None):
             if is_cul:
                 threshold = 150.0
 
-            url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true"
+            url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true&is_cul={'true' if is_cul else 'false'}"
 
             frag_offset = len(puzzle_meta) * 50
             js_meta = json.dumps({
                 'fl_id': fl_id, 'threshold': threshold,
                 'size': 800, 'processed': True,
-                'sys_id': add_sys_id
+                'sys_id': add_sys_id, 'is_cul': is_cul
             })
             ui.run_javascript(
                 f'window.puzzleCanvas.addFragment("{key}", "{url}", '
