@@ -2840,7 +2840,7 @@ TRANSLATIONS = {
     "Notes:": "הערות:",
     "Optional notes about this join...": "הערות אופציונליות על צירוף זה...",
     "Bring Forward": "הבא קדימה",
-    "Send Backward": "שלח אחורה",
+    "Send Backward": "העבר אחורה",
 }
 
 # Hebrew library display names (keyed by library_code)
