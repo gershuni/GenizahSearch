@@ -1763,20 +1763,31 @@ class SupabaseCorrectionsClient:
             return {}
 
     def get_discovery_stats(self) -> Dict:
-        """Get discovery statistics."""
+        """Get discovery statistics matching web stat card keys."""
         client = self._get_client()
         if not client:
             return {}
 
+        stats = {
+            'words_corrected': 0,
+            'documents_edited': 0,
+            'total_discoveries': 0,
+            'open_questions': 0,
+            'active_contributors': 0,
+            'user_joins': 0,
+        }
         try:
-            response = client.table('discoveries').select('type', count='exact').execute()
-            stats = {'total': len(response.data or [])}
-            for item in response.data or []:
-                dtype = item.get('type', 'discovery')
-                stats[dtype] = stats.get(dtype, 0) + 1
-            return stats
-        except Exception:
-            return {}
+            discoveries = client.table('discoveries').select('id', count='exact').execute()
+            stats['total_discoveries'] = discoveries.count or 0
+            corrections = client.table('corrections').select('id', count='exact').eq('status', 'approved').execute()
+            stats['documents_edited'] = corrections.count or 0
+            profiles = client.table('profiles').select('id', count='exact').execute()
+            stats['active_contributors'] = profiles.count or 0
+            joins = client.table('fragment_joins').select('id', count='exact').execute()
+            stats['user_joins'] = joins.count or 0
+        except Exception as e:
+            logger.error(f"Error loading discovery stats: {e}")
+        return stats
 
     # ==================== Additional Methods ====================
 
