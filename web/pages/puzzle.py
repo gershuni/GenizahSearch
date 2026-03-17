@@ -2074,6 +2074,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 doc_state['is_published'] = False
                 publish_btn.props(remove='color')
                 publish_btn.tooltip(tr('Publish to Community'))
+                publish_btn.update()
                 ui.notify(tr('Unpublished'), type='info')
             except Exception as e:
                 logger.error(f"Unpublish failed: {e}")
@@ -2106,11 +2107,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
                     img_svc = get_puzzle_image_service()
                     client = get_user_client()
-                    await run.io_bound(publish_join, client, user_id, doc, img_svc)
+                    published_id = await run.io_bound(publish_join, client, user_id, doc, img_svc)
                     doc_state['is_published'] = True
                     publish_btn.props('color=green')
                     publish_btn.tooltip(tr('Published -- click to unpublish'))
-                    ui.notify(tr('Published successfully!'), type='positive')
+                    publish_btn.update()
+                    share_url = f'/puzzle?doc={published_id}'
+                    ui.notify(tr('Published successfully! Share link: {}').format(share_url), type='positive', timeout=10000)
                 except Exception as e:
                     logger.error(f"Publish failed: {e}")
                     ui.notify(tr('Publish failed: {}').format(str(e)), type='negative')

@@ -4832,7 +4832,7 @@ class JoinsFeedDialog(QDialog):
         header.setStyleSheet("font-weight: bold; font-size: 16px;")
         layout.addWidget(header)
 
-        # Tabs for My Joins / All Joins
+        # Tabs for My Joins / All Joins / All Puzzles / My Puzzles
         self.tabs = QTabWidget()
 
         # My Joins tab
@@ -4842,6 +4842,14 @@ class JoinsFeedDialog(QDialog):
         # All Joins tab
         self.all_joins_widget = self._create_joins_tab(is_my_joins=False)
         self.tabs.addTab(self.all_joins_widget, tr("All Joins"))
+
+        # All Puzzles tab
+        self.all_puzzles_widget = self._create_puzzles_tab(is_my=False)
+        self.tabs.addTab(self.all_puzzles_widget, tr("All Puzzles"))
+
+        # My Puzzles tab
+        self.my_puzzles_widget = self._create_puzzles_tab(is_my=True)
+        self.tabs.addTab(self.my_puzzles_widget, tr("My Puzzles"))
 
         self.tabs.currentChanged.connect(self.on_tab_changed)
         layout.addWidget(self.tabs)
@@ -4947,23 +4955,21 @@ class JoinsFeedDialog(QDialog):
 
     def load_joins_safe(self):
         """Load joins with error handling to prevent freezing"""
-        # Check server availability first with short timeout
         try:
-            is_my_tab = self.tabs.currentIndex() == 0
-            self.load_joins(is_my_tab)
+            idx = self.tabs.currentIndex()
+            if idx <= 1:
+                self.load_joins(idx == 0)
+            else:
+                self.load_puzzles(idx == 3)
         except Exception as e:
             print(f"[ERROR] Failed to load joins: {e}", flush=True)
-            # Show error in status
-            status = self._get_widget("my_status" if self.tabs.currentIndex() == 0 else "all_status",
-                                      self.tabs.currentIndex() == 0)
-            if status:
-                status.setText(tr("Failed to load joins. Server may be unavailable."))
 
     def on_tab_changed(self, index):
         """Load data when tab changes"""
-        is_my_joins = (index == 0)
-        # Load in background
-        QTimer.singleShot(50, lambda: self.load_joins(is_my_joins))
+        if index <= 1:
+            QTimer.singleShot(50, lambda: self.load_joins(index == 0))
+        else:
+            QTimer.singleShot(50, lambda: self.load_puzzles(index == 3))
 
     def load_joins(self, is_my_joins: bool):
         """Load joins from server"""
@@ -5194,3 +5200,160 @@ class JoinsFeedDialog(QDialog):
                 self.load_joins(is_my_joins)
             else:
                 QMessageBox.critical(self, tr("Error"), tr("Failed to delete: {}").format(msg))
+
+    # ── Puzzle Tabs ──
+
+    def _create_puzzles_tab(self, is_my: bool):
+        """Create a tab widget for published puzzle joins."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        prefix = "mypz_" if is_my else "allpz_"
+
+        # Status
+        status_label = QLabel("")
+        status_label.setObjectName(f"{prefix}status")
+        layout.addWidget(status_label)
+
+        # Table
+        table = QTableWidget()
+        table.setObjectName(f"{prefix}table")
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels([
+            tr("Title"), tr("Shelfmarks"), tr("Author"), tr("Date")
+        ])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(
+            lambda pos: self._show_puzzle_context_menu(pos, table, is_my)
+        )
+        table.doubleClicked.connect(lambda: self._open_puzzle_from_table(table))
+        layout.addWidget(table)
+
+        # Refresh button
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_refresh = QPushButton(tr("Refresh"))
+        btn_refresh.setObjectName(f"{prefix}refresh")
+        btn_refresh.clicked.connect(lambda: self.load_puzzles(is_my))
+        btn_row.addWidget(btn_refresh)
+        layout.addLayout(btn_row)
+
+        return widget
+
+    def load_puzzles(self, is_my: bool):
+        """Load published puzzle joins into the puzzle tab."""
+        prefix = "mypz_" if is_my else "allpz_"
+        parent = self.my_puzzles_widget if is_my else self.all_puzzles_widget
+        table = parent.findChild(QTableWidget, f"{prefix}table")
+        status_label = parent.findChild(QLabel, f"{prefix}status")
+
+        if not table:
+            return
+
+        table.setRowCount(0)
+        if status_label:
+            status_label.setText(tr("Loading..."))
+
+        if not self.client.is_server_available():
+            if status_label:
+                status_label.setText(tr("Server unavailable"))
+            return
+
+        try:
+            puzzles = self.client.get_published_puzzle_joins(limit=100)
+
+            if is_my and self.client.is_logged_in():
+                my_user_id = self.client.current_user.id if self.client.current_user else None
+                if my_user_id:
+                    puzzles = [p for p in puzzles if p.get('user_id') == my_user_id]
+            elif is_my:
+                if status_label:
+                    status_label.setText(tr("Login required to view your puzzles"))
+                return
+
+            if status_label:
+                status_label.setText(tr("{} puzzles").format(len(puzzles)))
+
+            for pz in puzzles:
+                row = table.rowCount()
+                table.insertRow(row)
+
+                title_item = QTableWidgetItem(pz.get('title', '') or tr('Untitled'))
+                title_item.setData(Qt.ItemDataRole.UserRole, pz)
+                table.setItem(row, 0, title_item)
+
+                shelfmarks = pz.get('shelfmarks', [])
+                table.setItem(row, 1, QTableWidgetItem(', '.join(shelfmarks)))
+                table.setItem(row, 2, QTableWidgetItem(pz.get('author_name', '')))
+                table.setItem(row, 3, QTableWidgetItem(safe_date_str(pz.get('created_at', ''))))
+
+            table.resizeColumnsToContents()
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load puzzles: {e}", flush=True)
+            if status_label:
+                status_label.setText(tr("Failed to load puzzles"))
+
+    def _show_puzzle_context_menu(self, pos, table: QTableWidget, is_my: bool):
+        """Show context menu for puzzle row."""
+        item = table.itemAt(pos)
+        if not item:
+            return
+        row = item.row()
+        data = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        menu = QMenu(self)
+
+        action_open = menu.addAction(tr("Open in Puzzle"))
+        action_open.triggered.connect(lambda: self._fork_and_open_puzzle(data.get('id')))
+
+        shelfmarks = data.get('shelfmarks', [])
+        if shelfmarks:
+            action_copy = menu.addAction(tr("Copy shelfmarks"))
+            action_copy.triggered.connect(
+                lambda: self._copy_puzzle_shelfmarks(shelfmarks)
+            )
+
+        menu.exec(table.viewport().mapToGlobal(pos))
+
+    def _open_puzzle_from_table(self, table: QTableWidget):
+        """Handle double-click on puzzle row — fork and open."""
+        selected = table.selectedItems()
+        if not selected:
+            return
+        row = selected[0].row()
+        data = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if data:
+            self._fork_and_open_puzzle(data.get('id'))
+
+    def _copy_puzzle_shelfmarks(self, shelfmarks):
+        """Copy puzzle shelfmarks to clipboard."""
+        from PyQt6.QtWidgets import QApplication
+        QApplication.clipboard().setText(', '.join(shelfmarks))
+
+    def _fork_and_open_puzzle(self, join_id: str):
+        """Fork a published puzzle join and open in PuzzleCanvasWindow."""
+        if not join_id:
+            return
+        new_doc_id = self.client.fork_puzzle_join(join_id)
+        if not new_doc_id:
+            QMessageBox.warning(self, tr("Error"), tr("Could not fork join"))
+            return
+
+        self.accept()  # Close dialog
+
+        # Find GenizahGUI parent and open puzzle with the forked doc
+        parent = self.parent()
+        while parent and not hasattr(parent, '_open_puzzle_window'):
+            parent = parent.parent()
+        if parent and hasattr(parent, '_open_puzzle_window'):
+            parent._open_puzzle_window()
+            if parent._puzzle_window:
+                QTimer.singleShot(200, lambda: parent._puzzle_window._load_document(new_doc_id))
+        else:
+            QMessageBox.information(self, tr("Forked"),
+                tr("Puzzle forked as document {}. Open Fragment Puzzle to view.").format(new_doc_id))

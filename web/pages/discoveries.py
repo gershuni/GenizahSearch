@@ -233,9 +233,9 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
                             'text-sm'
                         ).style('color: var(--primary-600);')
 
-                    def do_fork(jid=join_id):
+                    async def do_fork(jid=join_id):
                         dlg.close()
-                        _fork_puzzle_join_and_navigate(jid)
+                        await _fork_puzzle_join_and_navigate(jid)
 
                     ui.button(tr('Open in Puzzle'), icon='extension', on_click=do_fork).props('outlined dense color=cyan')
 
@@ -367,6 +367,7 @@ def create_discoveries_page():
                     corrections = client.table('corrections').select('id', count='exact').eq('status', 'approved').execute()
                     profiles = client.table('profiles').select('id', count='exact').execute()
                     joins = client.table('fragment_joins').select('id', count='exact').execute()
+                    published_puzzles = client.table('published_joins').select('id', count='exact').eq('is_published', True).execute()
                     return {
                         'words_corrected': 0,
                         'documents_edited': corrections.count or 0,
@@ -374,6 +375,7 @@ def create_discoveries_page():
                         'open_questions': 0,
                         'active_contributors': profiles.count or 0,
                         'user_joins': joins.count or 0,
+                        'published_puzzles': published_puzzles.count or 0,
                     }
                 except Exception as e:
                     logger.error("Error loading stats: %s", e)
@@ -418,6 +420,7 @@ def _render_stat_cards(stats: dict):
         {'icon': 'help_outline', 'value': stats.get('open_questions', 0), 'label': tr('Open Questions'), 'color': 'purple'},
         {'icon': 'people', 'value': stats.get('active_contributors', 0), 'label': tr('Active Contributors'), 'color': 'teal'},
         {'icon': 'link', 'value': stats.get('user_joins', 0), 'label': tr('User Joins'), 'color': 'green'},
+        {'icon': 'extension', 'value': stats.get('published_puzzles', 0), 'label': tr('Published Puzzles'), 'color': 'cyan'},
     ]
     for card in stat_cards:
         with ui.card().classes('flex-1 p-4 min-w-36'):
@@ -518,6 +521,12 @@ def load_stats(container):
                 'value': stats.get('user_joins', 0),
                 'label': tr('User Joins'),
                 'color': 'green'
+            },
+            {
+                'icon': 'extension',
+                'value': stats.get('published_puzzles', 0),
+                'label': tr('Published Puzzles'),
+                'color': 'cyan'
             },
         ]
 
@@ -1015,9 +1024,9 @@ def create_feed_item(item: dict, on_refresh=None):
 
                                 ui.button(tr('View Details'), icon='visibility', on_click=open_puzzle_join_detail).props('outlined dense')
 
-                                def fork_and_open(jid=pj_raw_id):
+                                async def fork_and_open(jid=pj_raw_id):
                                     """Fork the join and open in puzzle page."""
-                                    _fork_puzzle_join_and_navigate(jid)
+                                    await _fork_puzzle_join_and_navigate(jid)
 
                                 ui.button(tr('Open in Puzzle'), icon='extension', on_click=fork_and_open).props('outlined dense color=cyan')
                         else:
