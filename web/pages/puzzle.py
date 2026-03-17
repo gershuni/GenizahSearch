@@ -1160,6 +1160,24 @@ window.puzzleCanvas = {
      * 90% of the visible area. Caps zoom at 3x to avoid over-magnification.
      * Excludes placeholder text objects.
      */
+    bringForward: function() {
+        if (!this.canvas) return;
+        var active = this.canvas.getActiveObject();
+        if (active) {
+            this.canvas.bringObjectForward(active);
+            this.canvas.requestRenderAll();
+        }
+    },
+
+    sendBackward: function() {
+        if (!this.canvas) return;
+        var active = this.canvas.getActiveObject();
+        if (active) {
+            this.canvas.sendObjectBackwards(active);
+            this.canvas.requestRenderAll();
+        }
+    },
+
     fitAll: function() {
         if (!this.canvas) return;
         var objects = this.canvas.getObjects().filter(function(o) { return !o._isPlaceholder; });
@@ -2379,6 +2397,15 @@ def create_puzzle_page(initial_add: str = None):
                 ui.run_javascript('window.puzzleCanvas.cropRevert()')
                 crop_ok_btn.set_visibility(False)
                 crop_revert_btn.set_visibility(False)
+
+            ui.separator().props('vertical').style('height: 20px')
+
+            ui.button(icon='flip_to_front', on_click=lambda: ui.run_javascript(
+                'window.puzzleCanvas.bringForward()'
+            )).props('dense flat dark round size=sm').tooltip(tr('Bring Forward'))
+            ui.button(icon='flip_to_back', on_click=lambda: ui.run_javascript(
+                'window.puzzleCanvas.sendBackward()'
+            )).props('dense flat dark round size=sm').tooltip(tr('Send Backward'))
 
             ui.separator().props('vertical').style('height: 20px')
 

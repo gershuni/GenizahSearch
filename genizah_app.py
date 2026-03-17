@@ -3386,6 +3386,20 @@ class PuzzleCanvasWindow(QMainWindow):
         self.btn_delete.clicked.connect(self._delete_selected)
         row2.addWidget(self.btn_delete)
 
+        row2.addWidget(QLabel("|"))
+
+        btn_bring_fwd = QPushButton("⬆")
+        btn_bring_fwd.setFixedWidth(28)
+        btn_bring_fwd.setToolTip(tr("Bring Forward"))
+        btn_bring_fwd.clicked.connect(lambda: self._change_z_order(1))
+        row2.addWidget(btn_bring_fwd)
+
+        btn_send_bwd = QPushButton("⬇")
+        btn_send_bwd.setFixedWidth(28)
+        btn_send_bwd.setToolTip(tr("Send Backward"))
+        btn_send_bwd.clicked.connect(lambda: self._change_z_order(-1))
+        row2.addWidget(btn_send_bwd)
+
         row2.addStretch()
 
         self.btn_bg_toggle = QPushButton("🎨")
@@ -4252,6 +4266,16 @@ class PuzzleCanvasWindow(QMainWindow):
             thread.start()
         self._schedule_auto_save()
 
+    def _change_z_order(self, direction):
+        """Move selected fragment one layer up (+1) or down (-1)."""
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            return
+        for item in selected:
+            item.setZValue(item.zValue() + direction)
+        self.canvas_view.scene.update()
+        self._schedule_auto_save()
+
     def _delete_selected(self):
         """Remove selected fragments from the canvas."""
         for item in self.canvas_view.get_selected_fragments():
@@ -4331,6 +4355,16 @@ class PuzzleCanvasWindow(QMainWindow):
         act_flip_v = QAction(tr("Flip Vertical"), self)
         act_flip_v.triggered.connect(self._flip_selected_v)
         menu.addAction(act_flip_v)
+
+        menu.addSeparator()
+
+        act_bring_fwd = QAction(tr("Bring Forward"), self)
+        act_bring_fwd.triggered.connect(lambda: self._change_z_order(1))
+        menu.addAction(act_bring_fwd)
+
+        act_send_bwd = QAction(tr("Send Backward"), self)
+        act_send_bwd.triggered.connect(lambda: self._change_z_order(-1))
+        menu.addAction(act_send_bwd)
 
         menu.addSeparator()
 

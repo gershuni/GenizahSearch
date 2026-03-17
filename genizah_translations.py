@@ -2839,6 +2839,8 @@ TRANSLATIONS = {
     "Export composite image at full resolution": "ייצוא תמונה מורכבת ברזולוציה מלאה",
     "Notes:": "הערות:",
     "Optional notes about this join...": "הערות אופציונליות על צירוף זה...",
+    "Bring Forward": "הבא קדימה",
+    "Send Backward": "שלח אחורה",
 }
 
 # Hebrew library display names (keyed by library_code)
