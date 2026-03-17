@@ -164,50 +164,6 @@ window.puzzleCanvas = {
         return false;
     },
 
-    _fetchWithTimeout: function(url, options, timeoutMs) {
-        if (typeof AbortController === 'function') {
-            var controller = new AbortController();
-            var timer = window.setTimeout(function() { controller.abort(); }, timeoutMs || 1500);
-            var requestOptions = Object.assign({}, options || {}, { signal: controller.signal });
-            return fetch(url, requestOptions).finally(function() {
-                window.clearTimeout(timer);
-            });
-        }
-
-        return new Promise(function(resolve, reject) {
-            var timeout = window.setTimeout(function() {
-                reject(new Error('timeout'));
-            }, timeoutMs || 1500);
-            fetch(url, options || {}).then(function(resp) {
-                window.clearTimeout(timeout);
-                resolve(resp);
-            }).catch(function(err) {
-                window.clearTimeout(timeout);
-                reject(err);
-            });
-        });
-    },
-
-    _checkLocalHelperAvailable: async function(force) {
-        if (!this._isLocalHelperEnabled()) {
-            return false;
-        }
-
-        var now = Date.now();
-        if (!force && this._localHelperAvailable !== null && (now - this._localHelperCheckedAt) < 10000) {
-            return this._localHelperAvailable;
-        }
-
-        try {
-            var resp = await this._fetchWithTimeout(this._localHelperBase + '/health', {}, 1200);
-            this._localHelperAvailable = !!(resp && resp.ok);
-        } catch (err) {
-            this._localHelperAvailable = false;
-        }
-        this._localHelperCheckedAt = now;
-        return this._localHelperAvailable;
-    },
-
     _deriveLocalHelperPage: function(key, meta, flIdOverride) {
         var data = this.folioData[key];
         if (data && data.folios && data.folios.length) {
@@ -274,8 +230,8 @@ window.puzzleCanvas = {
             return false;
         }
 
-        var available = await this._checkLocalHelperAvailable(false);
-        if (!available) {
+        var now = Date.now();
+        if (this._localHelperAvailable === false && (now - this._localHelperCheckedAt) < 5000) {
             if (typeof onUnavailable === 'function') onUnavailable();
             return false;
         }
@@ -294,6 +250,11 @@ window.puzzleCanvas = {
             self._localHelperCheckedAt = Date.now();
             if (typeof onUnavailable === 'function') onUnavailable();
         };
+        htmlImg.addEventListener('load', function markLocalHelperSuccess() {
+            self._localHelperAvailable = true;
+            self._localHelperCheckedAt = Date.now();
+            htmlImg.removeEventListener('load', markLocalHelperSuccess);
+        });
         htmlImg.src = localUrl;
         return true;
     },
