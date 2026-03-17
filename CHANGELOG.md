@@ -52,6 +52,10 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **BrowseState.meta_mgr AttributeError**: Guarded with `getattr` in joined view Oxford detection
 - **Reading Desk from joined view**: Added `meta_mgr.resolve_system_by_shelfmark()` as fallback for fragment resolution
 - **Desktop corrections showing anonymous**: Added profile batch-fetch to `get_my_corrections` and `get_all_corrections`
+- **Index rebuild fails on Windows (WinError 5)**: Tantivy memory-mapped files were locked by the live searcher during rebuild. Now releases index before `shutil.rmtree` and reopens after
+- **Publish broken joins**: `publish_join()` now fails fast if composite image generation returns None, with storage rollback on partial upload failure
+- **Stale fragment selector after folio nav**: Fragment combobox now refreshes on folio prev/next and meta updates (both apps)
+- **Web puzzle reload loses document identity**: `current_doc_id` now persisted to session storage and restored on page reload
 
 ---
 
