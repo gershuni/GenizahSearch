@@ -2945,6 +2945,11 @@ TRANSLATIONS = {
     "Could not load join details": "לא ניתן לטעון פרטי צירוף",
     "OFF": "כבוי",
     "by {}": "מאת {}",
+    "Could not fork puzzle join": "לא ניתן להעתיק צירוף פאזל",
+    "Join forked to local workspace. Open Fragment Puzzle to view it.": "הצירוף הועתק לסביבת העבודה המקומית. פתחו פאזל קטעים לצפייה.",
+    "Loading feed...": "טוען פיד...",
+    "Unpublishing...": "מבטל פרסום...",
+    "Original (V0.8)": "מקור (V0.8)",
 }
 
 # Hebrew library display names (keyed by library_code)

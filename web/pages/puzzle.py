@@ -1927,6 +1927,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 await run.io_bound(lambda: _save_doc_with_thumbnail(doc, fragments))
                 doc_state['current_doc_id'] = doc_id
                 doc_state['has_unsaved_changes'] = False
+                try:
+                    app.storage.tab['puzzle_doc_id'] = doc_id
+                except RuntimeError:
+                    pass
                 title_input.value = doc.title
                 notes_input.value = doc.notes
                 frag_text = '\n'.join(f"{f.shelfmark} ({f.folio_label})" for f in fragments)
@@ -1955,6 +1959,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         doc_state['current_doc_id'] = doc.id
         doc_state['has_unsaved_changes'] = False
+        try:
+            app.storage.tab['puzzle_doc_id'] = doc.id
+        except RuntimeError:
+            pass
 
         # Set loading guard to prevent auto-save from overwriting
         # a partially-loaded document with a subset of fragments.
@@ -2032,6 +2040,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         try:
             app.storage.tab['puzzle_fragments'] = {}
             app.storage.tab['puzzle_state'] = None
+            app.storage.tab['puzzle_doc_id'] = None
         except RuntimeError:
             pass
         try:
@@ -3000,6 +3009,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             if meta.get('folio_label'):
                 puzzle_meta[key]['folio_label'] = meta.get('folio_label')
             app.storage.tab['puzzle_fragments'] = puzzle_meta
+            _refresh_fragment_select()
             schedule_auto_save()
         canvas_wrap.on('puzzle-fragment-meta', on_puzzle_fragment_meta)
 
@@ -3064,9 +3074,27 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         try:
             saved_meta = app.storage.tab.get('puzzle_fragments', {})
             saved_state = app.storage.tab.get('puzzle_state')
+            saved_doc_id = app.storage.tab.get('puzzle_doc_id')
         except RuntimeError:
             saved_meta = {}
             saved_state = None
+            saved_doc_id = None
+        # Restore saved document identity
+        if saved_doc_id:
+            doc_state['current_doc_id'] = saved_doc_id
+            # Restore details panel from saved doc
+            try:
+                svc = get_puzzle_service(thread_safe=True)
+                doc = await run.io_bound(svc.load_document, saved_doc_id)
+                if doc:
+                    title_input.value = doc.title
+                    notes_input.value = doc.notes
+                    frag_text = '\n'.join(f"{f.shelfmark} ({f.folio_label})" for f in doc.fragments)
+                    fragments_label.text = frag_text or ''
+                    details_container.style('display: block;')
+                    await check_publish_state()
+            except Exception:
+                pass
         # Populate outer puzzle_meta so callbacks can find existing fragments
         if saved_meta and isinstance(saved_meta, dict):
             puzzle_meta.update(saved_meta)
