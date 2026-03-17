@@ -231,7 +231,7 @@ Plans:
   4. Published join documents are browsable by other users with fragment identifiers, join type, and notes visible
 **Plans**: 3 plans
 Plans:
-- [ ] 52-01-PLAN.md — Shared publish service + Supabase schema + tests
+- [x] 52-01-PLAN.md — Shared publish service + Supabase schema + tests
 - [ ] 52-02-PLAN.md — Web publish UI + Discoveries feed + joins panel community section
 - [ ] 52-03-PLAN.md — Desktop publish + Discoveries feed + JoinsDialog community section
 

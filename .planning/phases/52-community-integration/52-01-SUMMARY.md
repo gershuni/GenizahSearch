@@ -48,7 +48,7 @@ completed: 2026-03-17
 - **Duration:** 3 min
 - **Started:** 2026-03-17T10:19:11Z
 - **Completed:** 2026-03-17T10:22:26Z
-- **Tasks:** 1 of 2 (Task 2 is human-action checkpoint)
+- **Tasks:** 2 of 2
 - **Files modified:** 3
 
 ## Accomplishments
@@ -63,8 +63,9 @@ Each task was committed atomically:
 
 1. **Task 1 RED:** Failing tests for publish service - `4eab271a` (test)
 2. **Task 1 GREEN:** Implement publish service + schema docs - `ae2c4d74` (feat)
+3. **Task 2:** Supabase tables + storage bucket created (human-action, no commit)
 
-_TDD task: test-first, then implementation._
+_TDD task: test-first, then implementation. Task 2 was manual Supabase setup._
 
 ## Files Created/Modified
 - `shared/puzzle_publish_service.py` - All publish/unpublish/list/detail/fork/resolve operations
@@ -84,14 +85,23 @@ None - plan executed exactly as written.
 
 None.
 
-## User Setup Required
+## Supabase Setup (Completed)
 
-**Supabase tables and storage bucket must be created manually.** Task 2 (human-action checkpoint) provides step-by-step instructions for running the SQL in Supabase Dashboard.
+User created all Supabase objects manually via Dashboard:
+- `published_joins` table with all columns and indexes
+- `published_join_fragments` table with cascade FK and indexes
+- RLS policies on both tables (SELECT, INSERT, UPDATE, DELETE on published_joins; SELECT, INSERT, DELETE on published_join_fragments)
+- `puzzle-images` storage bucket with public read access
+- Storage RLS policies for authenticated upload/delete in own folder
 
 ## Next Phase Readiness
 - Publish service ready for integration into web puzzle page (52-02)
-- Supabase tables must be created before integration testing
-- Storage bucket puzzle-images must be created with public read access
+- Supabase tables and storage bucket are live and ready
+- Desktop integration planned in 52-03
+
+## Self-Check: PASSED
+
+All files and commits verified.
 
 ---
 *Phase: 52-community-integration*
