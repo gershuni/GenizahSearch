@@ -726,7 +726,8 @@ def init_api_routes():
     @app.post('/api/puzzle_process')
     async def puzzle_process(request: Request):
         """Process client-fetched image bytes with background removal.
-        Used when server can't fetch IIIF directly (e.g., NLI blocks server IP).
+        This endpoint is a fallback for when server-side fetch via proxy also fails.
+        Primary path is GET /api/puzzle_image which now uses Cloudflare proxy.
         Client fetches the IIIF image in the browser, POSTs raw bytes here.
         Server applies bg removal, caches, and returns processed image.
         """
@@ -750,6 +751,10 @@ def init_api_routes():
 
         # Clamp parameters to valid ranges
         threshold = max(0, min(255, threshold))
+        # Validate size against known presets (400, 800, 1200, 2000)
+        valid_sizes = {400, 800, 1200, 2000}
+        if size not in valid_sizes:
+            size = min(valid_sizes, key=lambda s: abs(s - size))
         size = max(100, min(2000, size))
 
         # Check cache first
