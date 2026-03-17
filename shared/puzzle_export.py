@@ -23,7 +23,7 @@ import base64
 import io
 import logging
 import math
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from PIL import Image
 
@@ -54,7 +54,9 @@ def auto_suggest_title(fragments: List[PuzzleFragment]) -> str:
 def compose_puzzle_export(fragments: List[PuzzleFragment],
                           image_service,
                           export_size: int = 3000,
-                          margin: int = 20) -> Optional[Image.Image]:
+                          margin: int = 20,
+                          progress_callback: Optional[Callable[[int, int, str], None]] = None,
+                          check_cancel: Optional[Callable[[], bool]] = None) -> Optional[Image.Image]:
     """Compose full-resolution RGBA PNG from positioned fragments.
 
     Uses a single global resolution multiplier so all fragment positions
@@ -65,6 +67,8 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
         image_service: PuzzleImageService instance with resolve_fragment_image().
         export_size: Width hint for fetching high-res images (default 3000).
         margin: Padding in pixels around the auto-cropped result (default 20).
+        progress_callback: Optional callback receiving (current, total, message).
+        check_cancel: Optional callable returning True when the export should abort.
 
     Returns:
         PIL RGBA Image with transparent background, or None if no fragments rendered.
@@ -78,10 +82,20 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
     # Phase 1: Transform each fragment and compute placement coordinates
     placed = []  # list of (paste_x, paste_y, rotated_img)
 
-    for frag in fragments:
-        # Fetch high-res image
+    total = len(fragments)
+    for idx, frag in enumerate(fragments, start=1):
+        if check_cancel and check_cancel():
+            raise InterruptedError("Puzzle export cancelled")
+
+        display_size = CANVAS_IMAGE_WIDTH if frag.processed else export_size
+        if progress_callback:
+            progress_callback(idx - 1, total, f"Loading {frag.shelfmark or frag.fl_id}")
+
+        # For processed fragments, reuse the same canvas-sized processed image that the
+        # researcher already approved visually. This keeps export output faithful to the
+        # on-canvas appearance instead of re-running background removal at a new size.
         img_bytes = image_service.resolve_fragment_image(
-            frag.fl_id, size=export_size,
+            frag.fl_id, size=display_size,
             threshold=frag.bg_removal_threshold,
             processed=frag.processed
         )
@@ -151,6 +165,8 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
         paste_y = center_y - rotated_img.height / 2.0
 
         placed.append((paste_x, paste_y, rotated_img))
+        if progress_callback:
+            progress_callback(idx, total, f"Composed {idx}/{total}")
 
     if not placed:
         return None

@@ -3157,6 +3157,54 @@ class PuzzleCanvasView(QGraphicsView):
         return [i for i in self.scene.selectedItems() if isinstance(i, PuzzleFragmentItem)]
 
 
+class PuzzleExportThread(QThread):
+    """Compose and save a puzzle PNG without blocking the desktop UI."""
+
+    progress_signal = pyqtSignal(int, int, str)  # current, total, label
+    finished_signal = pyqtSignal(str)            # saved path
+    cancelled_signal = pyqtSignal()
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, fragments, path: str, export_size: int = 2000, margin: int = 20, parent=None):
+        super().__init__(parent)
+        self.fragments = list(fragments)
+        self.path = path
+        self.export_size = export_size
+        self.margin = margin
+
+    def run(self):
+        try:
+            from shared.puzzle_export import compose_puzzle_export
+            from shared.puzzle_image_service import get_puzzle_image_service
+
+            img_svc = get_puzzle_image_service()
+            result = compose_puzzle_export(
+                self.fragments,
+                img_svc,
+                export_size=self.export_size,
+                margin=self.margin,
+                progress_callback=lambda current, total, message: self.progress_signal.emit(current, total, message),
+                check_cancel=self.isInterruptionRequested,
+            )
+            if self.isInterruptionRequested():
+                raise InterruptedError("Puzzle export cancelled")
+            if result is None:
+                self.error_signal.emit("Export failed")
+                return
+            total = max(1, len(self.fragments))
+            self.progress_signal.emit(total, total, "Saving PNG")
+            if self.isInterruptionRequested():
+                raise InterruptedError("Puzzle export cancelled")
+            result.save(self.path, 'PNG')
+            if self.isInterruptionRequested():
+                raise InterruptedError("Puzzle export cancelled")
+            self.finished_signal.emit(self.path)
+        except InterruptedError:
+            self.cancelled_signal.emit()
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+
 class PuzzleCanvasWindow(QMainWindow):
     """Standalone puzzle workspace for assembling fragment images.
 
@@ -3191,6 +3239,8 @@ class PuzzleCanvasWindow(QMainWindow):
         self._auto_save_timer.setSingleShot(True)
         self._auto_save_timer.setInterval(1500)  # 1.5s debounce
         self._auto_save_timer.timeout.connect(self._auto_save)
+        self._export_thread = None
+        self._export_progress = None
 
         # --- Central widget layout ---
         central = QWidget()
@@ -4490,15 +4540,35 @@ class PuzzleCanvasWindow(QMainWindow):
         self._refresh_fragment_combo()
 
     def _on_export_png(self):
-        """Export composite PNG at full resolution."""
+        """Export composite PNG in a background thread."""
         if not self._fragment_items:
             QMessageBox.information(self, tr("Empty"), tr("Add fragments before exporting"))
             return
+        if self._export_thread and self._export_thread.isRunning():
+            QMessageBox.information(self, tr("Export"), tr("An export is already in progress"))
+            return
 
-        from shared.puzzle_export import auto_suggest_title, compose_puzzle_export
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_export import auto_suggest_title
 
         fragments = self._build_fragments_list()
+        resolution_items = [
+            ("Draft (1000 px)", 1000),
+            ("Standard (2000 px)", 2000),
+            ("Full (3000 px)", 3000),
+        ]
+        labels = [label for label, _ in resolution_items]
+        selected_label, ok = QInputDialog.getItem(
+            self,
+            tr("Export PNG"),
+            tr("Resolution:"),
+            labels,
+            1,
+            False,
+        )
+        if not ok or not selected_label:
+            return
+        export_size = dict(resolution_items).get(selected_label, 2000)
+
         suggested_name = auto_suggest_title(fragments).replace(' ', '_').replace('+', '_') + '.png'
         path, _ = QFileDialog.getSaveFileName(
             self, tr("Export Composite Image"), suggested_name,
@@ -4507,23 +4577,68 @@ class PuzzleCanvasWindow(QMainWindow):
         if not path:
             return
 
-        progress = QProgressDialog(tr("Exporting..."), tr("Cancel"), 0, 0, self)
+        progress = QProgressDialog(tr("Preparing export..."), tr("Cancel"), 0, max(1, len(fragments)), self)
+        progress.setWindowTitle(tr("Export PNG"))
         progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.canceled.connect(self._cancel_export_thread)
         progress.show()
-        QApplication.processEvents()
 
-        try:
-            img_svc = get_puzzle_image_service()
-            result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
-            if result:
-                result.save(path, 'PNG')
-                self.statusBar().showMessage(tr("Exported to") + f" {path}", 5000)
-            else:
-                QMessageBox.warning(self, tr("Error"), tr("Export failed"))
-        except Exception as e:
-            QMessageBox.warning(self, tr("Error"), str(e))
-        finally:
+        thread = PuzzleExportThread(fragments, path, export_size=export_size, margin=20, parent=self)
+        thread.progress_signal.connect(self._on_export_progress)
+        thread.finished_signal.connect(self._on_export_finished)
+        thread.cancelled_signal.connect(self._on_export_cancelled)
+        thread.error_signal.connect(self._on_export_error)
+
+        self._export_progress = progress
+        self._export_thread = thread
+        thread.start()
+
+    def _cancel_export_thread(self):
+        """Request cancellation of the active export thread."""
+        if self._export_thread and self._export_thread.isRunning():
+            self._export_thread.requestInterruption()
+        if self._export_progress:
+            self._export_progress.setLabelText(tr("Cancelling export..."))
+
+    def _on_export_progress(self, current, total, label):
+        """Update the desktop export progress dialog."""
+        if not self._export_progress:
+            return
+        self._export_progress.setMaximum(max(1, total))
+        self._export_progress.setValue(max(0, min(current, max(1, total))))
+        if label:
+            self._export_progress.setLabelText(label)
+
+    def _clear_export_ui(self):
+        """Close and release the active export UI objects."""
+        progress = self._export_progress
+        thread = self._export_thread
+        self._export_progress = None
+        self._export_thread = None
+        if progress:
             progress.close()
+            progress.deleteLater()
+        if thread:
+            thread.deleteLater()
+
+    def _on_export_finished(self, path):
+        """Handle successful export completion."""
+        self._clear_export_ui()
+        self.statusBar().showMessage(tr("Exported to") + f" {path}", 5000)
+
+    def _on_export_cancelled(self):
+        """Handle user-cancelled export."""
+        self._clear_export_ui()
+        self.statusBar().showMessage(tr("Export cancelled"), 3000)
+
+    def _on_export_error(self, error):
+        """Handle export failure."""
+        self._clear_export_ui()
+        QMessageBox.warning(self, tr("Error"), error or tr("Export failed"))
 
     def _on_doc_context_menu(self, pos):
         """Show context menu on right-click in document list."""
@@ -4713,6 +4828,9 @@ class PuzzleCanvasWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Wait for active loader threads before closing."""
+        if self._export_thread and self._export_thread.isRunning():
+            self._export_thread.requestInterruption()
+            self._export_thread.wait(3000)
         for t in self._loader_threads + self._meta_threads:
             if t.isRunning():
                 t.wait(2000)

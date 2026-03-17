@@ -136,6 +136,16 @@ window.puzzleCanvas = {
         }, this);
     },
 
+    _removeFragmentsByKey: function(key) {
+        if (!this.canvas) return;
+        this.canvas.getObjects().slice().forEach(function(obj) {
+            if (obj && obj._fragmentKey === key) {
+                this.canvas.remove(obj);
+            }
+        }, this);
+        delete this.fragments[key];
+    },
+
     /**
      * Initialize the Fabric.js canvas on the given DOM element.
      * Sets up wheel zoom, pan, keyboard shortcuts, context menu, selection
@@ -215,7 +225,7 @@ window.puzzleCanvas = {
             this._pendingAdds = [];
             for (var i = 0; i < pending.length; i++) {
                 var p = pending[i];
-                this.addFragment(p.key, p.url, p.x, p.y, p.rotation, p.scale, p.flipH, p.flipV, p.meta, p.posOrigin);
+                this.addFragment(p.key, p.url, p.x, p.y, p.rotation, p.scale, p.flipH, p.flipV, p.meta, p.posOrigin, p.centerOrigin);
             }
         }
     },
@@ -236,20 +246,21 @@ window.puzzleCanvas = {
      * @param {boolean} flipV - Whether to flip vertically.
      * @param {Object} [meta] - Fragment metadata (fl_id, threshold, sys_id, etc.).
      */
-    addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV, meta, posOrigin) {
-        // posOrigin: if true, x/y are local-origin (PyQt convention) — convert to Fabric left/top after image loads
+    addFragment: function(key, imageUrl, x, y, rotation, scale, flipH, flipV, meta, posOrigin, centerOrigin) {
+        // posOrigin: if true, x/y come from the shared desktop model and will be
+        // placed via the fragment's visual center after the image is created.
+        // centerOrigin: if true, x/y are already the desired visual center.
         if (!this.canvas) {
             // Queue for when canvas is ready
             console.warn('Canvas not ready, queuing fragment:', key);
-            this._pendingAdds.push({key:key, url:imageUrl, x:x, y:y, rotation:rotation, scale:scale, flipH:flipH, flipV:flipV, meta:meta, posOrigin:posOrigin});
+            this._pendingAdds.push({key:key, url:imageUrl, x:x, y:y, rotation:rotation, scale:scale, flipH:flipH, flipV:flipV, meta:meta, posOrigin:posOrigin, centerOrigin:centerOrigin});
             return;
         }
         var self = this;
 
         // Remove existing fragment with same key
         if (this.fragments[key]) {
-            this.canvas.remove(this.fragments[key]);
-            delete this.fragments[key];
+            this._removeFragmentsByKey(key);
         }
 
         // Show loading placeholder
@@ -272,7 +283,7 @@ window.puzzleCanvas = {
                 self._removePlaceholder(key);
                 // Auto-fit: if using default scale (1.0), shrink large images to ~60% of canvas
                 var effectiveScale = scale || 1.0;
-                if (effectiveScale === 1.0 && self.canvas) {
+                if (effectiveScale === 1.0 && self.canvas && !posOrigin && !centerOrigin) {
                     var cw = self.canvas.getWidth();
                     var ch = self.canvas.getHeight();
                     var maxW = cw * 0.6;
@@ -281,12 +292,8 @@ window.puzzleCanvas = {
                         effectiveScale = Math.min(maxW / htmlImg.naturalWidth, maxH / htmlImg.naturalHeight);
                     }
                 }
-                // If posOrigin mode, x/y are local-origin (PyQt pos convention):
-                // convert to Fabric.js left/top: left = pos + (1 - scale) * naturalWidth/2
-                var fabLeft = posOrigin ? x + (1 - effectiveScale) * htmlImg.naturalWidth / 2 : x;
-                var fabTop = posOrigin ? y + (1 - effectiveScale) * htmlImg.naturalHeight / 2 : y;
                 var img = self._buildFragmentImage(htmlImg, {
-                    left: fabLeft, top: fabTop,
+                    left: x, top: y,
                     angle: rotation || 0,
                     scaleX: effectiveScale,
                     scaleY: effectiveScale,
@@ -302,6 +309,25 @@ window.puzzleCanvas = {
                     _imageUrl: imageUrl,
                     _fragmentMeta: meta ? Object.assign({}, meta) : null
                 });
+                if (posOrigin && typeof img.setPositionByOrigin === 'function') {
+                    // Persisted puzzle docs store x/y in the desktop model:
+                    // the translation component whose visual center is x + width/2, y + height/2.
+                    // Using center placement here is more reliable than reverse-engineering Fabric's
+                    // left/top semantics under scaling/cropping.
+                    var centerX = x + (img.width || htmlImg.naturalWidth || 0) / 2;
+                    var centerY = y + (img.height || htmlImg.naturalHeight || 0) / 2;
+                    var pt = (typeof fabric.Point === 'function')
+                        ? new fabric.Point(centerX, centerY)
+                        : { x: centerX, y: centerY };
+                    img.setPositionByOrigin(pt, 'center', 'center');
+                    img.setCoords();
+                } else if (centerOrigin && typeof img.setPositionByOrigin === 'function') {
+                    var centerPt = (typeof fabric.Point === 'function')
+                        ? new fabric.Point(x, y)
+                        : { x: x, y: y };
+                    img.setPositionByOrigin(centerPt, 'center', 'center');
+                    img.setCoords();
+                }
 
                 self.canvas.add(img);
                 self.fragments[key] = img;
@@ -653,7 +679,21 @@ window.puzzleCanvas = {
         var obj = this.fragments[key];
         if (!obj) return folio.label;
 
-        var pos = { left: obj.left, top: obj.top, angle: obj.angle, scaleX: obj.scaleX, scaleY: obj.scaleY, flipX: obj.flipX, flipY: obj.flipY };
+        var center = (typeof obj.getCenterPoint === 'function')
+            ? obj.getCenterPoint()
+            : {
+                x: (obj.left || 0) + ((obj.width || 0) * (obj.scaleX || 1) / 2),
+                y: (obj.top || 0) + ((obj.height || 0) * (obj.scaleY || 1) / 2)
+            };
+        var pos = {
+            centerX: center.x,
+            centerY: center.y,
+            angle: obj.angle,
+            scaleX: obj.scaleX,
+            scaleY: obj.scaleY,
+            flipX: obj.flipX,
+            flipY: obj.flipY
+        };
         var self = this;
         var meta = obj._fragmentMeta || {};
         var threshold = meta.threshold || 30;
@@ -670,7 +710,10 @@ window.puzzleCanvas = {
             htmlImg.decoding = 'async';
             htmlImg.onload = function() {
                 try {
-                    self.canvas.remove(obj);
+                    if (self.canvas && typeof self.canvas.discardActiveObject === 'function') {
+                        self.canvas.discardActiveObject();
+                    }
+                    self._removeFragmentsByKey(key);
                     var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
                         hasControls: true, hasBorders: true,
                         cornerSize: 12, transparentCorners: false,
@@ -683,6 +726,13 @@ window.puzzleCanvas = {
                             processed: processed
                         })
                     }));
+                    if (typeof img.setPositionByOrigin === 'function') {
+                        var pt = (typeof fabric.Point === 'function')
+                            ? new fabric.Point(pos.centerX, pos.centerY)
+                            : { x: pos.centerX, y: pos.centerY };
+                        img.setPositionByOrigin(pt, 'center', 'center');
+                        img.setCoords();
+                    }
                     self.canvas.add(img);
                     self.fragments[key] = img;
                     self.canvas.setActiveObject(img);
@@ -690,7 +740,9 @@ window.puzzleCanvas = {
                     self._syncSelection();
                     self._emitEvent('puzzle-fragment-meta', {
                         key: key,
-                        meta: img._fragmentMeta || null
+                        meta: Object.assign({}, img._fragmentMeta || {}, {
+                            folio_label: folio.label || ''
+                        })
                     });
                 } catch (err) {
                     console.error('Failed to render folio image:', key, err);
@@ -1038,12 +1090,15 @@ window.puzzleCanvas = {
         var self = this;
         var keys = Object.keys(this.fragments);
         if (keys.length === 0) return;
+        if (this.canvas && typeof this.canvas.discardActiveObject === 'function') {
+            this.canvas.discardActiveObject();
+        }
         var objects = keys.map(function(k) { return self.fragments[k]; });
 
         // 1. Snapshot visual centers BEFORE any changes
         var snapshots = objects.map(function(obj) {
             var cp = obj.getCenterPoint();
-            return { obj: obj, cx: cp.x, origLeft: obj.left, origAngle: obj.angle || 0 };
+            return { obj: obj, cx: cp.x, cy: cp.y, origAngle: obj.angle || 0 };
         });
 
         // 2. Compute mirror axis from visual centers
@@ -1052,15 +1107,22 @@ window.puzzleCanvas = {
 
         // 3. Compute all new positions, THEN apply atomically
         snapshots.forEach(function(s) {
-            var mirroredCx = 2 * axisX - s.cx;
-            var dx = mirroredCx - s.cx;
-            s.newLeft = s.origLeft + dx;
+            s.mirroredCx = 2 * axisX - s.cx;
             s.newAngle = (360 - s.origAngle) % 360;
         });
 
         // 4. Apply all changes
         snapshots.forEach(function(s) {
-            s.obj.set({ left: s.newLeft, angle: s.newAngle });
+            s.obj.set({ angle: s.newAngle });
+            if (typeof s.obj.setPositionByOrigin === 'function') {
+                var pt = (typeof fabric.Point === 'function')
+                    ? new fabric.Point(s.mirroredCx, s.cy)
+                    : { x: s.mirroredCx, y: s.cy };
+                s.obj.setPositionByOrigin(pt, 'center', 'center');
+            } else {
+                var w = (s.obj.width || 0) * (s.obj.scaleX || 1);
+                s.obj.set({ left: s.mirroredCx - w / 2 });
+            }
             s.obj.setCoords();
         });
         this.canvas.requestRenderAll();
@@ -1149,9 +1211,17 @@ window.puzzleCanvas = {
         var stateObj = {};
         for (var key in this.fragments) {
             var obj = this.fragments[key];
+            var center = (typeof obj.getCenterPoint === 'function')
+                ? obj.getCenterPoint()
+                : {
+                    x: (obj.left || 0) + ((obj.width || 0) * (obj.scaleX || 1) / 2),
+                    y: (obj.top || 0) + ((obj.height || 0) * (obj.scaleY || 1) / 2)
+                };
             stateObj[key] = {
                 x: obj.left,
                 y: obj.top,
+                centerX: center.x,
+                centerY: center.y,
                 rotation: obj.angle || 0,
                 scaleX: obj.scaleX || 1,
                 scaleY: obj.scaleY || 1,
@@ -1159,6 +1229,8 @@ window.puzzleCanvas = {
                 flipV: !!obj.flipY,
                 naturalWidth: obj.width || 800,
                 naturalHeight: obj.height || 800,
+                unscaledWidth: obj.width || 800,
+                unscaledHeight: obj.height || 800,
             };
         }
         return JSON.stringify(stateObj);
@@ -1171,14 +1243,27 @@ window.puzzleCanvas = {
             for (var key in parsed) {
                 if (this.fragments[key]) {
                     var s = parsed[key];
-                    this.fragments[key].set({
-                        left: s.x, top: s.y,
+                    var obj = this.fragments[key];
+                    obj.set({
                         angle: s.rotation || 0,
                         scaleX: s.scaleX || 1,
                         scaleY: s.scaleY || 1,
                         flipX: !!s.flipH,
                         flipV: !!s.flipV,
                     });
+                    if (typeof obj.setPositionByOrigin === 'function' &&
+                        s.centerX !== undefined && s.centerY !== undefined) {
+                        var pt = (typeof fabric.Point === 'function')
+                            ? new fabric.Point(s.centerX, s.centerY)
+                            : { x: s.centerX, y: s.centerY };
+                        obj.setPositionByOrigin(pt, 'center', 'center');
+                    } else {
+                        obj.set({
+                            left: s.x,
+                            top: s.y,
+                        });
+                    }
+                    obj.setCoords();
                 }
             }
             this.canvas.requestRenderAll();
@@ -1215,8 +1300,16 @@ window.puzzleCanvas = {
         var obj = this.fragments[key];
         if (!obj) return;
         var self = this;
+        var center = (typeof obj.getCenterPoint === 'function')
+            ? obj.getCenterPoint()
+            : {
+                x: (obj.left || 0) + ((obj.width || 0) * (obj.scaleX || 1) / 2),
+                y: (obj.top || 0) + ((obj.height || 0) * (obj.scaleY || 1) / 2)
+            };
         var pos = {
-            left: obj.left, top: obj.top, angle: obj.angle,
+            centerX: center.x,
+            centerY: center.y,
+            angle: obj.angle,
             scaleX: obj.scaleX, scaleY: obj.scaleY,
             flipX: obj.flipX, flipY: obj.flipY
         };
@@ -1225,13 +1318,23 @@ window.puzzleCanvas = {
         htmlImg.decoding = 'async';
         htmlImg.onload = function() {
             try {
-                self.canvas.remove(obj);
+                if (self.canvas && typeof self.canvas.discardActiveObject === 'function') {
+                    self.canvas.discardActiveObject();
+                }
+                self._removeFragmentsByKey(key);
                 var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
                     hasControls: true, hasBorders: true,
                     cornerSize: 12, transparentCorners: false,
                     perPixelTargetFind: true, _fragmentKey: key,
                     _imageUrl: newUrl, _fragmentMeta: newMeta || obj._fragmentMeta
                 }));
+                if (typeof img.setPositionByOrigin === 'function') {
+                    var pt = (typeof fabric.Point === 'function')
+                        ? new fabric.Point(pos.centerX, pos.centerY)
+                        : { x: pos.centerX, y: pos.centerY };
+                    img.setPositionByOrigin(pt, 'center', 'center');
+                    img.setCoords();
+                }
                 self.canvas.add(img);
                 self.fragments[key] = img;
                 self.canvas.setActiveObject(img);
@@ -1267,6 +1370,10 @@ window.puzzleCanvas = {
         }
         this.fragments = {};
         this.folioData = {};
+        if (typeof this.canvas.discardActiveObject === 'function') {
+            this.canvas.discardActiveObject();
+        }
+        this.canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
         this.canvas.requestRenderAll();
         this._emitEvent('puzzle-clear', {});
     },
@@ -1601,7 +1708,7 @@ def create_puzzle_page(initial_add: str = None):
         for key, meta in puzzle_meta.items():
             parts = key.split(',', 1)
             sys_id = parts[0]
-            folio_label = parts[1] if len(parts) > 1 else '1r'
+            folio_label = meta.get('folio_label') or (parts[1] if len(parts) > 1 else '1r')
             spatial = state_data.get(key, {})
             crop = crop_data.get(key, {})
 
@@ -1620,18 +1727,22 @@ def create_puzzle_page(initial_add: str = None):
             else:
                 c_left = c_top = c_right = c_bottom = 0
 
-            # Convert Fabric.js left/top to local-origin position (PyQt pos convention).
-            # Fabric.js center = left + width*scaleX/2
-            # PyQt center      = pos  + width/2
-            # Equating: pos = left - (1 - scaleX) * width/2
-            fab_x = spatial.get('x', 0)
-            fab_y = spatial.get('y', 0)
+            # Build export/save coordinates from the visual center rather than Fabric's
+            # left/top translation. This matches the desktop/QGraphics model:
+            #   center = pos + (unscaled cropped size / 2)
+            center_x = spatial.get('centerX')
+            center_y = spatial.get('centerY')
             sx = spatial.get('scaleX', 1.0)
             sy = spatial.get('scaleY', 1.0)
-            nat_w = spatial.get('naturalWidth', 800)
-            nat_h = spatial.get('naturalHeight', 800)
-            pos_x = fab_x - (1 - sx) * nat_w / 2
-            pos_y = fab_y - (1 - sy) * nat_h / 2
+            nat_w = spatial.get('unscaledWidth', spatial.get('naturalWidth', 800))
+            nat_h = spatial.get('unscaledHeight', spatial.get('naturalHeight', 800))
+            if center_x is None or center_y is None:
+                fab_x = spatial.get('x', 0)
+                fab_y = spatial.get('y', 0)
+                center_x = fab_x + nat_w * sx / 2.0
+                center_y = fab_y + nat_h * sy / 2.0
+            pos_x = center_x - nat_w / 2.0
+            pos_y = center_y - nat_h / 2.0
 
             frag = PuzzleFragment(
                 sys_id=sys_id,
@@ -1825,6 +1936,8 @@ def create_puzzle_page(initial_add: str = None):
                     'cropY': frag.crop_top,
                     'crop_right': frag.crop_right,
                     'crop_bottom': frag.crop_bottom,
+                    'x': frag.x,
+                    'y': frag.y,
                 }
 
             puzzle_meta[key] = {
@@ -2578,6 +2691,14 @@ def create_puzzle_page(initial_add: str = None):
                                 width: obj._originalWidth - cropX - cropRight,
                                 height: obj._originalHeight - cropY - cropBottom
                             }});
+                            if (typeof obj.setPositionByOrigin === 'function') {{
+                                var centerX = {pending_crop['x']} + obj.width / 2;
+                                var centerY = {pending_crop['y']} + obj.height / 2;
+                                var pt = (typeof fabric.Point === 'function')
+                                    ? new fabric.Point(centerX, centerY)
+                                    : {{ x: centerX, y: centerY }};
+                                obj.setPositionByOrigin(pt, 'center', 'center');
+                            }}
                             obj.setCoords();
                             window.puzzleCanvas.canvas.requestRenderAll();
                         }}
@@ -2592,6 +2713,10 @@ def create_puzzle_page(initial_add: str = None):
                 if doc_state['load_pending'] <= 0:
                     doc_state['loading'] = False
                     doc_state['load_pending'] = 0
+                    try:
+                        await ui.run_javascript('window.puzzleCanvas && window.puzzleCanvas.fitAll()')
+                    except Exception:
+                        pass
 
             # Trigger auto-save after fragment added
             schedule_auto_save()
@@ -2610,7 +2735,10 @@ def create_puzzle_page(initial_add: str = None):
             puzzle_meta[key]['threshold'] = meta.get('threshold', puzzle_meta[key].get('threshold', 30))
             puzzle_meta[key]['processed'] = meta.get('processed', puzzle_meta[key].get('processed', True))
             puzzle_meta[key]['size'] = meta.get('size', puzzle_meta[key].get('size', 800))
+            if meta.get('folio_label'):
+                puzzle_meta[key]['folio_label'] = meta.get('folio_label')
             app.storage.tab['puzzle_fragments'] = puzzle_meta
+            schedule_auto_save()
         canvas_wrap.on('puzzle-fragment-meta', on_puzzle_fragment_meta)
 
         def on_puzzle_selection(e):
@@ -2668,6 +2796,11 @@ def create_puzzle_page(initial_add: str = None):
         # Populate outer puzzle_meta so callbacks can find existing fragments
         if saved_meta and isinstance(saved_meta, dict):
             puzzle_meta.update(saved_meta)
+            doc_state['loading'] = True
+            doc_state['load_pending'] = len(saved_meta)
+        else:
+            doc_state['loading'] = False
+            doc_state['load_pending'] = 0
 
         if saved_meta and isinstance(saved_meta, dict):
             for key, meta in saved_meta.items():
@@ -2696,8 +2829,18 @@ def create_puzzle_page(initial_add: str = None):
                             scaleY = s.get('scaleY', 1.0)
                             flipH = s.get('flipH', False)
                             flipV = s.get('flipV', False)
+                            if s.get('centerX') is not None and s.get('centerY') is not None:
+                                x = s.get('centerX', x)
+                                y = s.get('centerY', y)
+                                center_origin = True
+                            else:
+                                center_origin = False
+                        else:
+                            center_origin = False
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        center_origin = False
+                else:
+                    center_origin = False
 
                 sys_id = meta.get('sys_id', '')
                 js_meta = json.dumps({
@@ -2708,7 +2851,8 @@ def create_puzzle_page(initial_add: str = None):
                 ui.run_javascript(
                     f'window.puzzleCanvas.addFragment("{key}", "{url}", '
                     f'{x}, {y}, {rotation}, {scaleX}, '
-                    f'{"true" if flipH else "false"}, {"true" if flipV else "false"}, {js_meta})'
+                    f'{"true" if flipH else "false"}, {"true" if flipV else "false"}, {js_meta}, false, '
+                    f'{"true" if center_origin else "false"})'
                 )
 
         # Saved documents list is refreshed on-demand when dialog opens
