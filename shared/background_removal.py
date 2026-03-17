@@ -160,14 +160,12 @@ def remove_background(image_bytes: bytes,
     bg_color = detect_background_color(hsv_array)
 
     if is_cul:
-        # CUL-specific: remove blue mat by hue range + border by Euclidean distance.
-        # Force Euclidean for border mask because V-only can't distinguish gray
-        # borders from parchment when they have similar brightness.
-        border_mask = create_mask(hsv_array, bg_color, threshold, force_euclidean=True)
-        blue_mask = create_cul_blue_mask(hsv_array)
-        # Combine: foreground only if NOT border-bg AND NOT blue-mat
-        mask_array_combined = np.minimum(np.array(border_mask), np.array(blue_mask))
-        mask = Image.fromarray(mask_array_combined, mode='L')
+        # CUL-specific: remove blue mat by hue range only.
+        # Do NOT combine with corner-based border mask — CUL border frames are
+        # often cream/beige colored, nearly identical to parchment in HSV space,
+        # so any corner-based mask risks removing parchment. The thin border
+        # frame is acceptable; the blue mat is what matters.
+        mask = create_cul_blue_mask(hsv_array)
     else:
         mask = create_mask(hsv_array, bg_color, threshold)
 

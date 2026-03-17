@@ -257,8 +257,8 @@ def make_two_layer_image(outer_color, inner_color, fg_color,
 class TestCulBlueMatRemoval:
     """Tests for CUL blue conservation mat removal (is_cul=True)."""
 
-    def test_gray_border_blue_mat_both_removed(self):
-        """Gray border + blue mat + is_cul: both removed, parchment stays opaque."""
+    def test_blue_mat_removed_border_kept(self):
+        """is_cul removes blue mat only; border frame is kept (cream borders match parchment)."""
         img_bytes = make_two_layer_image(
             outer_color=(180, 180, 180),  # gray border
             inner_color=(0, 0, 255),       # blue mat
@@ -268,9 +268,9 @@ class TestCulBlueMatRemoval:
         result_img = open_result(result)
 
         assert result_img.mode == 'RGBA'
-        # Corner (gray border) should be transparent
-        assert result_img.getpixel((5, 5))[3] == 0
-        # Inner mat area (blue) should also be transparent
+        # Corner (gray border) stays opaque — CUL mode only targets blue
+        assert result_img.getpixel((5, 5))[3] == 255
+        # Inner mat area (blue) should be transparent
         assert result_img.getpixel((50, 150))[3] == 0
         # Center (parchment) should be opaque
         assert result_img.getpixel((150, 150))[3] == 255
@@ -285,9 +285,10 @@ class TestCulBlueMatRemoval:
         result = remove_background(img_bytes, is_cul=True)
         result_img = open_result(result)
 
-        assert result_img.getpixel((5, 5))[3] == 0      # gray border removed
-        assert result_img.getpixel((50, 150))[3] == 0    # blue mat removed
-        assert result_img.getpixel((150, 150))[3] == 255 # parchment kept
+        # Border kept (CUL only targets blue), blue removed, parchment kept
+        assert result_img.getpixel((5, 5))[3] == 255     # border kept
+        assert result_img.getpixel((50, 150))[3] == 0     # blue mat removed
+        assert result_img.getpixel((150, 150))[3] == 255  # parchment kept
 
     def test_blue_only_no_border_cul(self):
         """CUL image with only blue background (no gray border)."""
@@ -331,8 +332,8 @@ class TestCulBlueMatRemoval:
         # Parchment center should be 255 (foreground)
         assert mask_arr[100, 100] == 255
 
-    def test_non_cul_images_unaffected(self):
-        """Standard gray/white background images work the same with or without is_cul."""
+    def test_is_cul_only_targets_blue(self):
+        """is_cul=True only removes blue pixels, not gray/white backgrounds."""
         img_bytes = make_test_image((128, 128, 128), (255, 255, 255))
 
         result_normal = remove_background(img_bytes, is_cul=False)
@@ -341,8 +342,9 @@ class TestCulBlueMatRemoval:
         normal_img = open_result(result_normal)
         cul_img = open_result(result_cul)
 
-        # Both should remove gray and keep white
+        # Without is_cul: gray removed normally
         assert normal_img.getpixel((5, 5))[3] == 0
-        assert cul_img.getpixel((5, 5))[3] == 0
         assert normal_img.getpixel((100, 100))[3] == 255
+        # With is_cul: gray NOT removed (only blue is targeted)
+        assert cul_img.getpixel((5, 5))[3] == 255
         assert cul_img.getpixel((100, 100))[3] == 255
