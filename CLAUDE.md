@@ -23,6 +23,8 @@ Web App (NiceGUI) ──────────────┐
          │   (FJMS scholarly)    │
          ├── nli_crossref.db     │
          │   (NLI images/meta)   │
+         ├── joins.db (SQLite)   │
+         │   (saved puzzle joins)│
 Desktop App (PyQt6) ────────────┘
 ```
 
@@ -39,6 +41,14 @@ Desktop App (PyQt6) ────────────┘
 - `web/pages/` - Page components (search.py, browse.py, lists.py, etc.)
 - `web/components/` - Reusable UI components
 - `web/supabase_client.py` - Supabase integration
+
+### Puzzle (Fragment Puzzle / Join Documents)
+- `shared/puzzle_model.py` - PuzzleDocument/PuzzleFragment dataclasses
+- `shared/puzzle_service.py` - SQLite CRUD for joins.db sidecar
+- `shared/puzzle_export.py` - Composite PNG export, thumbnail generation
+- `shared/puzzle_image_service.py` - IIIF image fetch + background removal
+- `shared/background_removal.py` - HSV-based background removal engine
+- `web/pages/puzzle.py` - Web puzzle page (Fabric.js canvas + UI)
 
 ### Desktop
 - `supabase_corrections_client.py` - Desktop Supabase client
@@ -93,6 +103,11 @@ system_number,oxford_part_id,call_numbers,library_code,,,,titles_non_placeholder
 - `AIU` - Alliance Israélite Universelle
 - `Mosseri`, `Gaster`, `Halper` - Private collections
 - And others (see `genizah_core.LIBRARY_CODES`)
+
+### joins.db (SQLite sidecar)
+Stores saved puzzle/join documents. Created automatically in `joins_data/` on first save.
+- `join_documents` - Document records (id, title, notes, fragments_json, thumbnail_b64)
+- `join_document_fragments` - Fragment index for reverse lookups (doc_id, fl_id, sys_id)
 
 ## Documentation
 
@@ -207,6 +222,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- March 2026: v7.0.0-alpha Phase 50 Join Documents -- save/load puzzle arrangements to joins.db, composite PNG export with resolution choices, auto-save, Bring Forward/Send Backward layer controls, compact icon toolbar, theme-aware web dialogs, 25+ Hebrew translations (both apps)
 - March 2026: v6.5.3 Image viewer copy & save -- right-click context menu on manuscript images with Copy Image and Save Image As (desktop)
 - March 2026: v6.5.2 UI polish -- desktop ResultDialog icon+text compact buttons, web language toggle moved to header
 - March 2026: v6.5.1 Bug fixes + session restore -- desktop composition ResultDialog nav for filtered/appendix results, web parallels parent_slot timer crash, session persistence for browse tabs/composition summary/active tab

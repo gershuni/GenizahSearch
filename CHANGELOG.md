@@ -4,6 +4,41 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.0.0-alpha] - Phase 50: Join Documents - 2026-03-17
+
+### New Features
+
+- **Save/Load puzzle arrangements**: Researchers can save their fragment puzzle arrangements as persistent "join documents" to a local `joins.db` SQLite sidecar. Documents include title, notes, and all fragment positions/transforms. Auto-save fires after canvas changes (both apps)
+- **Composite PNG export**: Export the assembled puzzle as a full-resolution RGBA PNG with transparent background. Desktop offers draft (1000px) / standard (2000px) / full (3000px) resolution choices with progress dialog. Web downloads directly
+- **Thumbnail previews**: Saved documents show auto-generated composite thumbnails in the document list
+- **Bring Forward / Send Backward**: Layer ordering controls for overlapping fragments — toolbar buttons and desktop context menu (both apps)
+- **Saved Joins panel** (desktop): Non-closable QDockWidget side panel listing all saved documents with thumbnails, details editing (title, notes), delete, and rename
+- **Saved Joins dialog** (web): Modal dialog accessible from toolbar, listing documents with load/delete/metadata editing
+
+### Improvements
+
+- **Desktop toolbar compacted**: Text buttons (Save Join, New, Export PNG, Flip, Crop, Delete, Background) replaced with emoji icon buttons (28px) with translated tooltips
+- **Save dialog with notes**: New document save dialog includes both title and notes fields (was title-only)
+- **Fragment dropdown syncs selection**: Clicking a fragment on canvas syncs the toolbar dropdown; removed duplicate "No selection" label
+- **Theme-aware web dialogs**: Save, delete, and document list dialogs use CSS variables for light/dark mode compatibility
+- **Hebrew translations**: 25+ new strings for all puzzle document management UI
+
+### Bug Fixes
+
+- **Web puzzle page crash**: `ui.left_drawer` cannot be nested inside a column — replaced with `ui.dialog` modal
+- **Export position accuracy**: Fixed per-fragment `coord_scale` drift when source images have different widths — now uses single global scale factor. Fixed center computation using unscaled canvas dimensions instead of scaled
+- **Export bg-removal fidelity**: Export now reuses the same 800px processed image shown on canvas instead of re-running background removal at export resolution (which could produce different results)
+- **Desktop export UI freeze**: Export moved to background thread with cancelable progress dialog
+- **Desktop "No fragments" label**: Fragment list label now updates after images finish loading, not before
+- **Translations in wrong dict**: Puzzle management translations were accidentally placed in `LIBRARY_CODES_HE` instead of `TRANSLATIONS` — moved to correct location
+
+### Known Issues
+
+- **Web export positions still slightly off**: Fabric.js left/top to PyQt pos() coordinate conversion needs further empirical verification
+- **CUL blue conservation mat**: Background removal algorithm samples corners for bg color; CUL images with blue mats can have inverted removal (keeps blue, removes parchment)
+
+---
+
 ## [6.5.4] - 2026-03-16
 
 ### Performance
