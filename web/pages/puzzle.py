@@ -800,8 +800,27 @@ window.puzzleCanvas = {
                 resolve(folio.label);
             };
             htmlImg.onerror = function() {
-                console.error('Failed to load folio image:', url);
-                resolve(folio.label);
+                // Server fetch failed — try client-side IIIF fallback
+                var digits = (folio.fl_id || '').replace(/\D/g, '');
+                if (!digits) { console.error('No fl_id for folio fallback'); resolve(''); return; }
+                var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + size + ',/0/default.jpg';
+                fetch(iiifUrl).then(function(r) {
+                    if (!r.ok) throw new Error('IIIF ' + r.status);
+                    return r.blob();
+                }).then(function(blob) {
+                    var params = new URLSearchParams({
+                        fl_id: folio.fl_id, threshold: String(threshold),
+                        size: String(size), processed: String(processed), is_cul: String(isCul)
+                    });
+                    return fetch('/api/puzzle_process?' + params, { method: 'POST', body: blob });
+                }).then(function(r) { return r.blob(); })
+                .then(function(b) {
+                    htmlImg.onerror = function() { resolve(''); };
+                    htmlImg.src = URL.createObjectURL(b);
+                }).catch(function(e) {
+                    console.error('Folio fallback failed:', key, e);
+                    resolve('');
+                });
             };
             htmlImg.src = url;
         });

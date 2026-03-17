@@ -730,14 +730,27 @@ def init_api_routes():
         Client fetches the IIIF image in the browser, POSTs raw bytes here.
         Server applies bg removal, caches, and returns processed image.
         """
+        import re as _re
         from shared.puzzle_image_service import get_puzzle_image_service
         from shared.background_removal import remove_background
+        from PIL import Image as _PILImage
+        import io as _io
+
+        MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
 
         fl_id = request.query_params.get('fl_id', '')
+        # Validate fl_id: must be digits only (NLI FL IDs are numeric)
+        if not fl_id or not _re.match(r'^[\d]+$', _re.sub(r'\D', '', fl_id)):
+            return Response(content="Invalid fl_id", status_code=400)
+
         threshold = float(request.query_params.get('threshold', 30))
         is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
         processed = request.query_params.get('processed', 'true').lower() == 'true'
         size = int(request.query_params.get('size', 800))
+
+        # Clamp parameters to valid ranges
+        threshold = max(0, min(255, threshold))
+        size = max(100, min(2000, size))
 
         # Check cache first
         service = get_puzzle_image_service()
@@ -751,13 +764,30 @@ def init_api_routes():
             except Exception:
                 pass
 
-        # Read client-uploaded image bytes
+        # Read and validate client-uploaded image bytes
+        content_length = int(request.headers.get('content-length', 0))
+        if content_length > MAX_BODY_SIZE:
+            return Response(content="Image too large", status_code=413)
+
         raw_bytes = await request.body()
-        if not raw_bytes:
-            return Response(content="No image data", status_code=400)
+        if not raw_bytes or len(raw_bytes) > MAX_BODY_SIZE:
+            return Response(content="No image data or too large", status_code=400)
+
+        # Validate it's actually an image (JPEG or PNG magic bytes)
+        is_jpeg = raw_bytes[:2] == b'\xff\xd8'
+        is_png = raw_bytes[:4] == b'\x89PNG'
+        if not is_jpeg and not is_png:
+            return Response(content="Invalid image format", status_code=400)
+
+        # Verify Pillow can open it (prevents crafted payloads)
+        try:
+            img = _PILImage.open(_io.BytesIO(raw_bytes))
+            img.verify()
+        except Exception:
+            return Response(content="Corrupt image data", status_code=400)
 
         if not processed:
-            # Cache original and return
+            # Cache original and return (validated as real image)
             try:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cache_path.write_bytes(raw_bytes)
