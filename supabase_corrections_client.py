@@ -1580,6 +1580,89 @@ class SupabaseCorrectionsClient:
 
         return joins
 
+    # ==================== Puzzle Publish ====================
+
+    def publish_puzzle_join(self, doc) -> Tuple[bool, str]:
+        """Publish a puzzle join document to community.
+        Args:
+            doc: PuzzleDocument object
+        Returns:
+            (success: bool, message: str)
+        """
+        client = self._get_client()
+        if not client or not self.current_user or not self.current_user._uuid:
+            return False, "Must be logged in to publish"
+        try:
+            from shared.puzzle_publish_service import publish_join
+            from shared.puzzle_image_service import get_puzzle_image_service
+            img_svc = get_puzzle_image_service()
+            join_id = publish_join(client, self.current_user._uuid, doc, img_svc)
+            return True, f"Published: {join_id}"
+        except Exception as e:
+            return False, str(e)
+
+    def unpublish_puzzle_join(self, join_id: str) -> Tuple[bool, str]:
+        """Unpublish a puzzle join."""
+        client = self._get_client()
+        if not client or not self.current_user or not self.current_user._uuid:
+            return False, "Must be logged in"
+        try:
+            from shared.puzzle_publish_service import unpublish_join
+            unpublish_join(client, self.current_user._uuid, join_id)
+            return True, "Unpublished"
+        except Exception as e:
+            return False, str(e)
+
+    def check_is_published(self, join_id: str) -> bool:
+        """Check if a join document is currently published."""
+        client = self._get_client()
+        if not client:
+            return False
+        try:
+            from shared.puzzle_publish_service import get_published_join_detail
+            detail = get_published_join_detail(client, join_id)
+            return detail is not None and detail.get('is_published', False)
+        except Exception:
+            return False
+
+    def get_published_puzzle_joins(self, limit: int = 50) -> List[Dict]:
+        """Get published puzzle joins for feed display."""
+        client = self._get_client()
+        if not client:
+            return []
+        try:
+            from shared.puzzle_publish_service import list_published_joins
+            return list_published_joins(client, limit=limit)
+        except Exception as e:
+            logger.error(f"Error fetching published puzzle joins: {e}")
+            return []
+
+    def get_published_joins_for_fragment(self, sys_id: str) -> List[Dict]:
+        """Get published puzzle joins containing a specific fragment."""
+        client = self._get_client()
+        if not client:
+            return []
+        try:
+            from shared.puzzle_publish_service import get_published_joins_for_fragment
+            return get_published_joins_for_fragment(client, sys_id)
+        except Exception as e:
+            logger.error(f"Error fetching published joins for fragment: {e}")
+            return []
+
+    def fork_puzzle_join(self, join_id: str) -> Optional[str]:
+        """Fork a published puzzle join to local workspace."""
+        client = self._get_client()
+        if not client:
+            return None
+        try:
+            from shared.puzzle_publish_service import fork_published_join
+            from shared.puzzle_service import get_puzzle_service
+            svc = get_puzzle_service()
+            return fork_published_join(client, join_id, svc)
+        except Exception as e:
+            logger.error(f"Error forking puzzle join: {e}")
+            return None
+
     # ==================== Feed ====================
 
     def get_feed(
@@ -1595,32 +1678,64 @@ class SupabaseCorrectionsClient:
             return [], 0
 
         try:
-            # For now, just return discoveries as feed items
-            discoveries, total = self.get_discoveries(
-                discovery_type=item_type if item_type != 'all' else None,
-                page=page,
-                page_size=page_size
-            )
-
             feed_items = []
-            for d in discoveries:
-                feed_items.append(FeedItem(
-                    id=f"discovery_{d.id}",
-                    item_type=d.discovery_type,
-                    title=d.title,
-                    content_preview=d.content[:200] if d.content else '',
-                    author_username=d.author_username,
-                    author_full_name=d.author_full_name,
-                    is_anonymous=d.is_anonymous,
-                    shelfmark=d.shelfmark,
-                    created_at=d.created_at,
-                    response_count=d.response_count,
-                    is_featured=d.is_featured,
-                    is_pinned=d.is_pinned,
-                    is_answered=d.is_answered,
-                    upvotes=d.upvotes,
-                    downvotes=d.downvotes
-                ))
+
+            # Fetch discoveries (unless filtering to puzzle_join only)
+            if item_type != 'puzzle_join':
+                discoveries, total = self.get_discoveries(
+                    discovery_type=item_type if item_type != 'all' else None,
+                    page=page,
+                    page_size=page_size
+                )
+
+                for d in discoveries:
+                    feed_items.append(FeedItem(
+                        id=f"discovery_{d.id}",
+                        item_type=d.discovery_type,
+                        title=d.title,
+                        content_preview=d.content[:200] if d.content else '',
+                        author_username=d.author_username,
+                        author_full_name=d.author_full_name,
+                        is_anonymous=d.is_anonymous,
+                        shelfmark=d.shelfmark,
+                        created_at=d.created_at,
+                        response_count=d.response_count,
+                        is_featured=d.is_featured,
+                        is_pinned=d.is_pinned,
+                        is_answered=d.is_answered,
+                        upvotes=d.upvotes,
+                        downvotes=d.downvotes
+                    ))
+
+            # Merge published puzzle joins into feed (if not filtering to a non-puzzle type)
+            if item_type is None or item_type == 'puzzle_join':
+                try:
+                    puzzle_joins = self.get_published_puzzle_joins(limit=page_size)
+                    for pj in puzzle_joins:
+                        shelfmarks = pj.get('shelfmarks', [])
+                        feed_items.append(FeedItem(
+                            id=f"puzzle_join_{pj['id']}",
+                            item_type='puzzle_join',
+                            title=pj.get('title', 'Untitled Join'),
+                            content_preview=' + '.join(shelfmarks[:5]) if shelfmarks else '',
+                            author_username=pj.get('author_name', ''),
+                            author_full_name=pj.get('author_name', ''),
+                            is_anonymous=False,
+                            shelfmark=shelfmarks[0] if shelfmarks else '',
+                            created_at=pj.get('created_at', ''),
+                            response_count=0,
+                            is_featured=False,
+                            is_pinned=False,
+                            is_answered=False,
+                            upvotes=0,
+                            downvotes=0,
+                        ))
+                except Exception as e:
+                    logger.warning(f"Failed to merge puzzle joins into feed: {e}")
+
+            # Sort merged feed by created_at descending
+            feed_items.sort(key=lambda x: x.created_at or '', reverse=True)
+            total = len(feed_items)
 
             return feed_items, total
 

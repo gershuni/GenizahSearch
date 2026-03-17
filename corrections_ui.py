@@ -1181,8 +1181,8 @@ class DiscoveriesDialog(QDialog):
 
         filter_layout.addWidget(QLabel(tr("Type:")))
         self.type_combo = QComboBox()
-        self.type_combo.addItems([tr("All"), tr("Discoveries"), tr("Questions"), tr("Corrections"), tr("Comments"), tr("Joins")])
-        self.type_values = ['all', 'discovery', 'question', 'correction', 'comment', 'join']
+        self.type_combo.addItems([tr("All"), tr("Discoveries"), tr("Questions"), tr("Corrections"), tr("Comments"), tr("Joins"), tr("Puzzle Joins")])
+        self.type_values = ['all', 'discovery', 'question', 'correction', 'comment', 'join', 'puzzle_join']
         self.type_combo.currentIndexChanged.connect(self.load_feed)
         filter_layout.addWidget(self.type_combo)
 
@@ -1279,14 +1279,16 @@ class DiscoveriesDialog(QDialog):
             'question': '#9b59b6',
             'correction': '#3498db',
             'comment': '#1abc9c',
-            'join': '#27ae60'
+            'join': '#27ae60',
+            'puzzle_join': '#00bcd4'
         }
         type_labels = {
             'discovery': tr('Discovery'),
             'question': tr('Question'),
             'correction': tr('Correction'),
             'comment': tr('Comment'),
-            'join': tr('Join (noun)')
+            'join': tr('Join (noun)'),
+            'puzzle_join': tr('Puzzle Join')
         }
         type_badge = QLabel(type_labels.get(item.item_type, item.item_type))
         type_badge.setStyleSheet(f"""
@@ -1417,6 +1419,27 @@ class DiscoveriesDialog(QDialog):
             join_layout.addStretch()
             layout.addWidget(join_frame)
 
+        # For puzzle joins: show shelfmarks and "Open in Puzzle" button
+        if item.item_type == 'puzzle_join':
+            pj_frame = QFrame()
+            pj_frame.setStyleSheet("padding: 5px; border-radius: 3px; border: 1px solid #00bcd4; background-color: rgba(0, 188, 212, 0.1);")
+            pj_layout = QHBoxLayout(pj_frame)
+
+            if item.content_preview:
+                shelfmarks_label = QLabel(item.content_preview)
+                shelfmarks_label.setStyleSheet("color: #00bcd4; font-family: monospace; font-size: 11px;")
+                pj_layout.addWidget(shelfmarks_label)
+
+            pj_layout.addStretch()
+
+            btn_fork = QPushButton(tr("Open in Puzzle"))
+            btn_fork.setStyleSheet("background-color: #00bcd4; color: white; border-radius: 3px; padding: 4px 8px;")
+            join_id = item.id.replace('puzzle_join_', '')
+            btn_fork.clicked.connect(lambda _, jid=join_id: self._fork_and_open(jid))
+            pj_layout.addWidget(btn_fork)
+
+            layout.addWidget(pj_frame)
+
         # Footer row
         footer_layout = QHBoxLayout()
 
@@ -1469,6 +1492,26 @@ class DiscoveriesDialog(QDialog):
             frag_a = getattr(item, 'fragment_a', None)
             if self.on_browse and (frag_a or doc_id_a):
                 self.on_browse(frag_a or doc_id_a)
+
+    def _fork_and_open(self, join_id):
+        """Fork a community join and open it in PuzzleCanvasWindow."""
+        if not self.client:
+            return
+        new_doc_id = self.client.fork_puzzle_join(join_id)
+        if not new_doc_id:
+            QMessageBox.warning(self, tr("Error"), tr("Could not fork puzzle join"))
+            return
+        # Walk parent chain to find GenizahGUI
+        widget = self.parent()
+        while widget and not hasattr(widget, '_open_puzzle_window'):
+            widget = widget.parent()
+        if widget:
+            widget._open_puzzle_window()
+            if widget._puzzle_window:
+                widget._puzzle_window._load_document(new_doc_id)
+            self.accept()
+        else:
+            QMessageBox.information(self, tr("Forked"), tr("Join forked to local workspace. Open Fragment Puzzle to view it."))
 
     def open_create_dialog(self):
         """Open dialog to create new discovery"""
@@ -3324,7 +3367,7 @@ class JoinsDialog(QDialog):
 
         # ---- Joins Table ----
         joins_group = QGroupBox(tr("Join Details"))
-        joins_layout = QVBoxLayout(joins_group)
+        self.joins_layout = QVBoxLayout(joins_group)
 
         self.table = QTableWidget()
         self.table.setColumnCount(7)
@@ -3335,7 +3378,13 @@ class JoinsDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setMinimumHeight(150)
-        joins_layout.addWidget(self.table)
+        self.joins_layout.addWidget(self.table)
+
+        # Community Puzzle Joins container — cleared and repopulated in load_joins()
+        self.community_container = QWidget()
+        self.community_layout = QVBoxLayout(self.community_container)
+        self.community_layout.setContentsMargins(0, 0, 0, 0)
+        self.joins_layout.addWidget(self.community_container)
 
         splitter.addWidget(joins_group)
 
@@ -3779,8 +3828,12 @@ class JoinsDialog(QDialog):
         Args:
             force_fresh: If True, try to refresh from API first (but fall back to cache if unavailable)
         """
+        # Always clear community section before repopulating
+        self._clear_community_section()
+
         if not self.shelfmark and not self.document_id:
             self.cluster_info.setText(tr("No shelfmark available"))
+            self._load_community_joins()
             return
 
         self.fragments_list.clear()
@@ -3824,6 +3877,7 @@ class JoinsDialog(QDialog):
                         self._display_pgp_only_joins(fjms_frags, fjms_joins, fjms_details)
                     else:
                         self.cluster_info.setText(tr("No joins found (offline)"))
+            self._load_community_joins()
             return
 
         # Server is available
@@ -3832,6 +3886,7 @@ class JoinsDialog(QDialog):
             cached = get_local_cache()
             if cached and (cached.get('total_joins', 0) > 0 or cached.get('total_fragments', 0) > 1):
                 self._display_cached_joins(cached)
+                self._load_community_joins()
                 return
 
         # Load from API - prefer document_id lookup
@@ -3852,6 +3907,7 @@ class JoinsDialog(QDialog):
                     self._display_pgp_only_joins(fjms_frags, fjms_joins, fjms_details)
                 else:
                     self.cluster_info.setText(tr("No joins found"))
+            self._load_community_joins()
             return
 
         # Update local cache with fetched data
@@ -3859,6 +3915,75 @@ class JoinsDialog(QDialog):
             self._update_local_cache(self.connected_data)
 
         self._display_connected_data(self.connected_data)
+        self._load_community_joins()
+
+    def _clear_community_section(self):
+        """Clear all widgets from the community container."""
+        while self.community_layout.count():
+            item = self.community_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _load_community_joins(self):
+        """Load published community puzzle joins for the current fragment."""
+        if not self.document_id or not self.client:
+            return
+        try:
+            community_joins = self.client.get_published_joins_for_fragment(self.document_id)
+            if not community_joins:
+                return
+
+            separator = QFrame()
+            separator.setFrameShape(QFrame.Shape.HLine)
+            self.community_layout.addWidget(separator)
+
+            header = QLabel(f"<b>{tr('Community Puzzle Joins')}</b>")
+            header.setStyleSheet("font-size: 13px; color: #00bcd4;")
+            self.community_layout.addWidget(header)
+
+            for cj in community_joins:
+                cj_frame = QFrame()
+                cj_frame.setStyleSheet("border: 1px solid #00bcd4; border-radius: 4px; padding: 6px;")
+                cj_layout = QHBoxLayout(cj_frame)
+                cj_layout.addWidget(QLabel(cj.get('title', 'Untitled')))
+                author = cj.get('author_name', '')
+                if author:
+                    author_label = QLabel(f"by {author}")
+                    author_label.setStyleSheet("color: gray; font-size: 11px;")
+                    cj_layout.addWidget(author_label)
+                shelfmarks = cj.get('shelfmarks', [])
+                if shelfmarks:
+                    sm_label = QLabel(' + '.join(shelfmarks[:3]))
+                    sm_label.setStyleSheet("color: #3498db; font-family: monospace; font-size: 11px;")
+                    cj_layout.addWidget(sm_label)
+                cj_layout.addStretch()
+                btn_open = QPushButton(tr("Open in Puzzle"))
+                btn_open.setStyleSheet("background-color: #00bcd4; color: white; border-radius: 3px; padding: 4px 8px;")
+                btn_open.clicked.connect(lambda _, jid=cj['id']: self._fork_and_open_puzzle(jid))
+                cj_layout.addWidget(btn_open)
+                self.community_layout.addWidget(cj_frame)
+        except Exception as e:
+            logger.error(f"Error loading community puzzle joins: {e}")
+
+    def _fork_and_open_puzzle(self, join_id: str):
+        """Fork a community join and open it in PuzzleCanvasWindow."""
+        if not self.client:
+            return
+        new_doc_id = self.client.fork_puzzle_join(join_id)
+        if not new_doc_id:
+            QMessageBox.warning(self, tr("Error"), tr("Could not fork puzzle join"))
+            return
+        # Walk parent chain to find GenizahGUI (may be 1 or 2 hops up)
+        widget = self.parent()
+        while widget and not hasattr(widget, '_open_puzzle_window'):
+            widget = widget.parent()
+        if widget:
+            widget._open_puzzle_window()
+            if widget._puzzle_window:
+                widget._puzzle_window._load_document(new_doc_id)
+            self.accept()
+        else:
+            QMessageBox.information(self, tr("Forked"), tr("Join forked to local workspace. Open Fragment Puzzle to view it."))
 
     def _update_local_cache(self, connected_data):
         """Update the local JoinsManager cache with data fetched from API."""

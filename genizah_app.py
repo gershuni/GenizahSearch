@@ -3205,6 +3205,28 @@ class PuzzleExportThread(QThread):
             self.error_signal.emit(str(e))
 
 
+class PuzzlePublishThread(QThread):
+    """Worker thread for publish/unpublish operations."""
+    finished = pyqtSignal(bool, str)  # success, message
+
+    def __init__(self, client, doc=None, join_id=None, unpublish=False, parent=None):
+        super().__init__(parent)
+        self.client = client
+        self.doc = doc
+        self.join_id = join_id
+        self.unpublish = unpublish
+
+    def run(self):
+        try:
+            if self.unpublish:
+                success, msg = self.client.unpublish_puzzle_join(self.join_id)
+            else:
+                success, msg = self.client.publish_puzzle_join(self.doc)
+            self.finished.emit(success, msg)
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
 class PuzzleCanvasWindow(QMainWindow):
     """Standalone puzzle workspace for assembling fragment images.
 
@@ -3319,6 +3341,14 @@ class PuzzleCanvasWindow(QMainWindow):
         btn_export.setToolTip(tr("Export PNG"))
         btn_export.clicked.connect(self._on_export_png)
         row1.addWidget(btn_export)
+
+        self.btn_publish = QPushButton("🌐")
+        self.btn_publish.setFixedWidth(28)
+        self.btn_publish.setToolTip(tr("Publish to Community"))
+        self.btn_publish.clicked.connect(self._on_publish)
+        row1.addWidget(self.btn_publish)
+        self._is_published = False
+        self._publish_thread = None
 
         row1.addStretch()
 
@@ -4497,6 +4527,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self._update_fragments_label()
         self._details_group.setVisible(True)
         self.setWindowTitle(f"{tr('Fragment Puzzle')} - {doc.title}")
+        self._check_publish_state()
 
     def _spawn_meta_loader(self, sys_id, shelfmark=''):
         """Spawn a PuzzleMetaLoaderThread to fetch folio lists for a sys_id."""
@@ -4622,6 +4653,9 @@ class PuzzleCanvasWindow(QMainWindow):
         self._clear_canvas()
         self._current_doc_id = None
         self._has_unsaved_changes = False
+        self._is_published = False
+        self.btn_publish.setToolTip(tr("Publish to Community"))
+        self.btn_publish.setStyleSheet("")
         self._details_group.setVisible(False)
         self.setWindowTitle(tr("Fragment Puzzle"))
 
@@ -4741,6 +4775,123 @@ class PuzzleCanvasWindow(QMainWindow):
         """Handle export failure."""
         self._clear_export_ui()
         QMessageBox.warning(self, tr("Error"), error or tr("Export failed"))
+
+    # ── Community Publish ──
+
+    def _on_publish(self):
+        """Toggle publish/unpublish for current puzzle join."""
+        if not hasattr(self.app, 'corrections_client') or not self.app.corrections_client:
+            QMessageBox.warning(self, tr("Login Required"), tr("Please log in to publish"))
+            return
+        if not self.app.corrections_client.current_user:
+            QMessageBox.warning(self, tr("Login Required"), tr("Please log in to publish"))
+            return
+        if not self._current_doc_id:
+            QMessageBox.warning(self, tr("Save First"), tr("Save the puzzle before publishing"))
+            return
+
+        if self._is_published:
+            # UNPUBLISH flow
+            reply = QMessageBox.question(
+                self, tr("Unpublish"),
+                tr("Remove this join from community view?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self._run_publish_worker(unpublish=True)
+        else:
+            # PUBLISH flow
+            if not self._fragment_items:
+                QMessageBox.warning(self, tr("No Fragments"), tr("Add fragments before publishing"))
+                return
+            reply = QMessageBox.question(
+                self, tr("Publish to Community"),
+                tr("This will make your puzzle join visible to all users.\n\nPublish now?"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self._run_publish_worker(unpublish=False)
+
+    def _run_publish_worker(self, unpublish=False):
+        """Run publish/unpublish on a worker thread to avoid freezing UI."""
+        self._publish_progress = QProgressDialog(
+            tr("Unpublishing...") if unpublish else tr("Publishing..."),
+            None,  # No cancel button
+            0, 0,  # Indeterminate
+            self
+        )
+        self._publish_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._publish_progress.show()
+
+        if unpublish:
+            self._publish_thread = PuzzlePublishThread(
+                self.app.corrections_client,
+                join_id=self._current_doc_id,
+                unpublish=True,
+                parent=self
+            )
+        else:
+            # Save current state first, then publish
+            from shared.puzzle_service import get_puzzle_service
+            svc = get_puzzle_service()
+            doc = svc.load_document(self._current_doc_id)
+            if not doc:
+                self._publish_progress.close()
+                QMessageBox.warning(self, tr("Error"), tr("Could not load document"))
+                return
+            doc.fragments = self._build_fragments_list()
+            if hasattr(self, '_title_edit'):
+                doc.title = self._title_edit.text() or doc.title
+            if hasattr(self, '_notes_edit'):
+                doc.notes = self._notes_edit.toPlainText() or ''
+
+            self._publish_thread = PuzzlePublishThread(
+                self.app.corrections_client,
+                doc=doc,
+                unpublish=False,
+                parent=self
+            )
+
+        self._publish_thread.finished.connect(self._on_publish_finished)
+        self._publish_thread.start()
+
+    def _on_publish_finished(self, success: bool, message: str):
+        """Handle publish/unpublish completion on main thread."""
+        if hasattr(self, '_publish_progress') and self._publish_progress:
+            self._publish_progress.close()
+        if success:
+            if self._is_published:
+                # Was published, now unpublished
+                self._is_published = False
+                self.btn_publish.setToolTip(tr("Publish to Community"))
+                self.btn_publish.setStyleSheet("")
+                QMessageBox.information(self, tr("Unpublished"), tr("Your puzzle join is no longer visible to the community"))
+            else:
+                # Was unpublished, now published
+                self._is_published = True
+                self.btn_publish.setToolTip(tr("Published -- click to unpublish"))
+                self.btn_publish.setStyleSheet("background-color: #4caf50; color: white; border-radius: 4px;")
+                QMessageBox.information(self, tr("Published"), tr("Your puzzle join is now visible to the community"))
+        else:
+            QMessageBox.warning(self, tr("Error"), message)
+
+    def _check_publish_state(self):
+        """Check if current doc is published and update button state."""
+        if not self._current_doc_id or not hasattr(self.app, 'corrections_client') or not self.app.corrections_client:
+            self._is_published = False
+            return
+        try:
+            self._is_published = self.app.corrections_client.check_is_published(self._current_doc_id)
+            if self._is_published:
+                self.btn_publish.setToolTip(tr("Published -- click to unpublish"))
+                self.btn_publish.setStyleSheet("background-color: #4caf50; color: white; border-radius: 4px;")
+            else:
+                self.btn_publish.setToolTip(tr("Publish to Community"))
+                self.btn_publish.setStyleSheet("")
+        except Exception:
+            self._is_published = False
 
     def _on_doc_context_menu(self, pos):
         """Show context menu on right-click in document list."""
