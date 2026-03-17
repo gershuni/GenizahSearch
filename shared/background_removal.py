@@ -85,8 +85,7 @@ def create_cul_blue_mask(hsv_array: np.ndarray) -> Image.Image:
 
 
 def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
-                threshold: float,
-                force_euclidean: bool = False) -> Image.Image:
+                threshold: float) -> Image.Image:
     """Create binary foreground mask. Foreground=255, background=0.
 
     Three modes based on background saturation:
@@ -102,16 +101,11 @@ def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
 
     3. Medium saturation (30-100): mixed. Use standard HSV Euclidean.
 
-    If force_euclidean=True, always uses HSV Euclidean regardless of saturation.
-    Used for CUL border removal where V-only would conflate border with parchment.
-
     All apply morphological cleanup: MinFilter(3) erode then MaxFilter(5) dilate.
     """
     bg_saturation = bg_color[1]  # S channel, 0-255 scale
 
-    if force_euclidean:
-        diff = np.sqrt(np.sum((hsv_array.astype(float) - bg_color) ** 2, axis=2))
-    elif bg_saturation < LOW_SATURATION_THRESHOLD:
+    if bg_saturation < LOW_SATURATION_THRESHOLD:
         # Low saturation: hue is meaningless, use Value channel only
         diff = np.abs(hsv_array[:, :, 2].astype(float) - float(bg_color[2]))
     elif bg_saturation > HIGH_SATURATION_THRESHOLD:
