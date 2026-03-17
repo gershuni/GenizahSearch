@@ -305,6 +305,7 @@ def get_published_join_detail(client, join_id: str) -> Optional[Dict]:
         'user_id': r['user_id'],
         'author_name': profiles.get(r['user_id'], 'Anonymous'),
         'created_at': r['created_at'],
+        'is_published': r.get('is_published', False),
     }
 
 
