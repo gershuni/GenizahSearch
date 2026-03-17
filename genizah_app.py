@@ -4654,15 +4654,15 @@ class PuzzleCanvasWindow(QMainWindow):
 
         fragments = self._build_fragments_list()
         resolution_items = [
-            ("Draft (1000 px)", 1000),
-            ("Standard (2000 px)", 2000),
-            ("Full (3000 px)", 3000),
+            (tr("Draft (1000 px)"), 1000),
+            (tr("Standard (2000 px)"), 2000),
+            (tr("Full (3000 px)"), 3000),
         ]
         labels = [label for label, _ in resolution_items]
         selected_label, ok = QInputDialog.getItem(
             self,
             tr("Export PNG"),
-            tr("Resolution:"),
+            tr("Select resolution:"),
             labels,
             1,
             False,

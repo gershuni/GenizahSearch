@@ -2841,6 +2841,10 @@ TRANSLATIONS = {
     "Optional notes about this join...": "הערות אופציונליות על צירוף זה...",
     "Bring Forward": "הבא קדימה",
     "Send Backward": "העבר אחורה",
+    "Select resolution:": "בחר רזולוציה:",
+    "Draft (1000 px)": "טיוטה (1000 פיקסלים)",
+    "Standard (2000 px)": "רגיל (2000 פיקסלים)",
+    "Full (3000 px)": "מלא (3000 פיקסלים)",
 }
 
 # Hebrew library display names (keyed by library_code)
