@@ -2912,4 +2912,10 @@ LIBRARY_CODES_HE = {
     "Add fragments before exporting": "הוסף קטעים לפני ייצוא",
     "Could not load document": "לא ניתן לטעון מסמך",
     "Export failed": "הייצוא נכשל",
+    "Add fragment": "הוסף קטע",
+    "Delete selected fragment": "מחק קטע נבחר",
+    "Flip selected fragment (recto/verso)": "הפוך קטע נבחר (רקטו/ורסו)",
+    "Flip all fragments — show other side of joined page": "הפוך את כל הקטעים — הצג צד שני של הדף המחובר",
+    "Crop — drag edges to trim": "חיתוך — גרור קצוות לחיתוך",
+    "Cycle background: dark gray / black / white / checkerboard / light table / grid": "החלף רקע: אפור כהה / שחור / לבן / משבצות / שולחן אור / רשת",
 }

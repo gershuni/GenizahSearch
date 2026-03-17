@@ -3271,7 +3271,9 @@ class PuzzleCanvasWindow(QMainWindow):
         self.shelfmark_input.returnPressed.connect(self._on_add_shelfmark)
         row1.addWidget(self.shelfmark_input)
 
-        self.btn_add = QPushButton(tr("Add"))
+        self.btn_add = QPushButton("+")
+        self.btn_add.setFixedWidth(28)
+        self.btn_add.setToolTip(tr("Add fragment"))
         self.btn_add.clicked.connect(self._on_add_shelfmark)
         row1.addWidget(self.btn_add)
 
@@ -3307,18 +3309,21 @@ class PuzzleCanvasWindow(QMainWindow):
 
         row1.addWidget(QLabel("|"))
 
-        btn_save = QPushButton(tr("Save Join"))
-        btn_save.setToolTip(tr("Save current puzzle as a join document"))
+        btn_save = QPushButton("💾")
+        btn_save.setFixedWidth(28)
+        btn_save.setToolTip(tr("Save Join"))
         btn_save.clicked.connect(self._on_save_join)
         row1.addWidget(btn_save)
 
-        btn_new = QPushButton(tr("New"))
-        btn_new.setToolTip(tr("Clear canvas and start a new puzzle"))
+        btn_new = QPushButton("📄")
+        btn_new.setFixedWidth(28)
+        btn_new.setToolTip(tr("New Puzzle"))
         btn_new.clicked.connect(self._on_new_puzzle)
         row1.addWidget(btn_new)
 
-        btn_export = QPushButton(tr("Export PNG"))
-        btn_export.setToolTip(tr("Export composite image at full resolution"))
+        btn_export = QPushButton("🖼")
+        btn_export.setFixedWidth(28)
+        btn_export.setToolTip(tr("Export PNG"))
         btn_export.clicked.connect(self._on_export_png)
         row1.addWidget(btn_export)
 
@@ -3344,12 +3349,14 @@ class PuzzleCanvasWindow(QMainWindow):
 
         row2.addWidget(QLabel("|"))
 
-        self.btn_flip_rv = QPushButton(tr("Flip"))
+        self.btn_flip_rv = QPushButton("↔")
+        self.btn_flip_rv.setFixedWidth(28)
         self.btn_flip_rv.setToolTip(tr("Flip selected fragment (recto/verso)"))
         self.btn_flip_rv.clicked.connect(self._flip_recto_verso)
         row2.addWidget(self.btn_flip_rv)
 
-        self.btn_flip_puzzle = QPushButton(tr("Flip Puzzle"))
+        self.btn_flip_puzzle = QPushButton("⇄")
+        self.btn_flip_puzzle.setFixedWidth(28)
         self.btn_flip_puzzle.setToolTip(tr("Flip all fragments — show other side of joined page"))
         self.btn_flip_puzzle.clicked.connect(self._flip_entire_puzzle)
         row2.addWidget(self.btn_flip_puzzle)
@@ -3369,22 +3376,26 @@ class PuzzleCanvasWindow(QMainWindow):
         row2.addWidget(QLabel("|"))
 
         # Crop mode
-        self.btn_crop = QPushButton(tr("Crop"))
-        self.btn_crop.setToolTip(tr("Enter crop mode — drag edges to trim"))
+        self.btn_crop = QPushButton("✂")
+        self.btn_crop.setFixedWidth(28)
+        self.btn_crop.setToolTip(tr("Crop — drag edges to trim"))
         self.btn_crop.setCheckable(True)
         self.btn_crop.toggled.connect(self._toggle_crop_mode)
         row2.addWidget(self.btn_crop)
 
         row2.addWidget(QLabel("|"))
 
-        self.btn_delete = QPushButton(tr("Delete"))
+        self.btn_delete = QPushButton("🗑")
+        self.btn_delete.setFixedWidth(28)
+        self.btn_delete.setToolTip(tr("Delete selected fragment"))
         self.btn_delete.clicked.connect(self._delete_selected)
         row2.addWidget(self.btn_delete)
 
         row2.addStretch()
 
-        self.btn_bg_toggle = QPushButton(tr("Background"))
-        self.btn_bg_toggle.setToolTip(tr("Cycle background: dark gray → black → white → checkerboard → light table → grid"))
+        self.btn_bg_toggle = QPushButton("🎨")
+        self.btn_bg_toggle.setFixedWidth(28)
+        self.btn_bg_toggle.setToolTip(tr("Cycle background: dark gray / black / white / checkerboard / light table / grid"))
         self.btn_bg_toggle.clicked.connect(self._cycle_bg)
         row2.addWidget(self.btn_bg_toggle)
 
