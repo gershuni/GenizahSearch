@@ -369,7 +369,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Fragment Puzzle — arrange fragments on a visual canvas, save join documents, export composite PNG. Community Publishing — share puzzle joins with researchers worldwide.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()

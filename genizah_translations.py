@@ -2411,8 +2411,8 @@ TRANSLATIONS = {
         "חיפוש ממוקד לפי מאפייני כתב יד (תחום, מחבר, יצירה, תאריך, חומר), תרגומי קטלוג ומטא-נתונים (עברית/אנגלית), חיפוש לפי גבולות שורה לזיהוי צירופים",
     "New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection":
         "חדש: חיפוש ממוקד לפי מאפייני כתב יד, תרגומי קטלוג ומטא-נתונים, חיפוש לפי גבולות שורה לזיהוי צירופים",
-    "Fragment Puzzle — arrange fragments on a visual canvas, save join documents, export composite PNG. Community Publishing — share puzzle joins with researchers worldwide.":
-        "פאזל קטעים — סדרו קטעי כתבי יד על קנבס חזותי, שמרו מסמכי צירוף, ייצאו תמונה מורכבת. פרסום לקהילה — שתפו צירופי פאזל עם חוקרים ברחבי העולם.",
+    "Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.":
+        "פאזל קטעים — צרו תמונת תצרף של כמה קטעי כתבי יד המהווים מסמך אחד. ערכו, שתפו ויצאו.",
     "Focused Search: filter manuscripts by domain, author, work, date, and material before searching":
         "חיפוש ממוקד: סינון כתבי יד לפי תחום, מחבר, יצירה, תאריך וחומר לפני החיפוש",
     "Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation":
@@ -2880,6 +2880,16 @@ TRANSLATIONS = {
     "Failed to load puzzles": "נכשל בטעינת פאזלים",
     "Forked": "הועתק",
     "Puzzle forked as document {}. Open Fragment Puzzle to view.": "הפאזל הועתק כמסמך {}. פתח פאזל קטעים לצפייה.",
+    "New: Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.":
+        "חדש: פאזל קטעים — צרו תמונת תצרף של כמה קטעי כתבי יד המהווים מסמך אחד. ערכו, שתפו ויצאו.",
+    "Fragment Puzzle: visual canvas for arranging manuscript fragments. Background removal, zoom, rotate, crop, folio navigation. Save as join documents with auto-save. Export composite PNG.":
+        "פאזל קטעים: קנבס חזותי לסידור קטעי כתבי יד. הסרת רקע, זום, סיבוב, חיתוך, ניווט דפים. שמירה כמסמכי צירוף עם שמירה אוטומטית. ייצוא תמונה מורכבת.",
+    "Community Publishing: share puzzle joins with the research community. Published joins appear in Discoveries with thumbnails. Fork and open any published join.":
+        "פרסום לקהילה: שתפו צירופי פאזל עם קהילת המחקר. צירופים שהתפרסמו מופיעים במרכז החידושים עם תמונות ממוזערות. העתקה ופתיחה של כל צירוף שהתפרסם.",
+    "Recto/Verso: automatic verso view from recto arrangement with correct verso images.":
+        "רקטו/ורסו: תצוגת ורסו אוטומטית מסידור הרקטו עם תמונות ורסו נכונות.",
+    "Fragment Selector: combobox with all canvas fragments and Browse button to open in browse view.":
+        "בורר קטעים: תיבת בחירה עם כל קטעי הקנבס וכפתור עיון לפתיחה בתצוגת הגלישה.",
     "Select fragment": "בחר קטע",
     "Select a fragment first": "בחר קטע תחילה",
     "Browse this fragment": "עיין בקטע זה",

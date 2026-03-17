@@ -327,7 +327,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection"))
+        self.lbl_msg.setText(tr("New: Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export."))
         self.show()
 
     def on_learn_more(self):
@@ -361,9 +361,10 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
-            f"<li><b>{tr('Focused Search: filter manuscripts by domain, author, work, date, and material before searching')}</b></li>"
-            f"<li><b>{tr('Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation')}</b></li>"
-            f"<li><b>{tr('Line-Boundary Search: find words at start/end of lines or text for join detection. Requires index rebuild.')}</b></li>"
+            f"<li><b>{tr('Fragment Puzzle: visual canvas for arranging manuscript fragments. Background removal, zoom, rotate, crop, folio navigation. Save as join documents with auto-save. Export composite PNG.')}</b></li>"
+            f"<li><b>{tr('Community Publishing: share puzzle joins with the research community. Published joins appear in Discoveries with thumbnails. Fork and open any published join.')}</b></li>"
+            f"<li><b>{tr('Recto/Verso: automatic verso view from recto arrangement with correct verso images.')}</b></li>"
+            f"<li><b>{tr('Fragment Selector: combobox with all canvas fragments and Browse button to open in browse view.')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)
