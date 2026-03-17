@@ -364,64 +364,34 @@ window.puzzleCanvas = {
         };
         htmlImg.onerror = function(err) {
             // Server-side fetch failed (IIIF may block server IP).
-            // Fallback: fetch IIIF image client-side, POST to server for processing.
-            console.warn('Server fetch failed for', key, '— trying client-side IIIF fetch');
+            // Fallback: load IIIF image directly via <img> (bypasses CORS).
+            // No background removal (CORS prevents reading pixels), but image displays.
+            console.warn('Server fetch failed for', key, '— loading IIIF directly');
             var m = meta || {};
             var flId = m.fl_id || '';
-            var digits = flId.replace(/\\D/g, '');
+            var digits = String(flId).replace(/[^0-9]/g, '');
             if (!digits) {
-                console.error('No fl_id digits for client-side fetch:', key);
+                console.error('No fl_id digits for fallback:', key);
                 self._removePlaceholder(key);
                 self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'no-fl-id' });
                 return;
             }
             var iiifSize = (m.size || 800);
             var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-            fetch(iiifUrl)
-                .then(function(resp) {
-                    if (!resp.ok) throw new Error('IIIF fetch failed: ' + resp.status);
-                    return resp.blob();
-                })
-                .then(function(blob) {
-                    // POST raw bytes to server for bg removal + caching
-                    var params = new URLSearchParams({
-                        fl_id: flId,
-                        threshold: String(m.threshold || 30),
-                        size: String(iiifSize),
-                        processed: String(m.processed !== false),
-                        is_cul: String(!!m.is_cul)
-                    });
-                    return fetch('/api/puzzle_process?' + params.toString(), {
-                        method: 'POST',
-                        body: blob,
-                        headers: { 'Content-Type': 'application/octet-stream' }
-                    });
-                })
-                .then(function(resp) {
-                    if (!resp.ok) throw new Error('Process failed: ' + resp.status);
-                    return resp.blob();
-                })
-                .then(function(processedBlob) {
-                    var blobUrl = URL.createObjectURL(processedBlob);
-                    htmlImg.onerror = function() {
-                        console.error('Blob image load failed for', key);
-                        self._removePlaceholder(key);
-                        self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'blob-load-failed' });
-                    };
-                    htmlImg.src = blobUrl;
-                })
-                .catch(function(fetchErr) {
-                    console.error('Client-side IIIF fallback failed for', key, fetchErr);
-                    self._removePlaceholder(key);
-                    var errText = new fabric.Text('Image load failed: ' + key, {
-                        left: x, top: y,
-                        fontSize: 12, fill: '#ff6666',
-                        selectable: false, evented: false
-                    });
-                    self.canvas.add(errText);
-                    self.canvas.requestRenderAll();
-                    self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'client-fetch-failed' });
+            // Remove crossOrigin to avoid CORS block on NLI
+            htmlImg.removeAttribute('crossOrigin');
+            htmlImg.onerror = function() {
+                console.error('Direct IIIF load also failed for', key);
+                self._removePlaceholder(key);
+                var errText = new fabric.Text('Image load failed: ' + key, {
+                    left: x, top: y, fontSize: 12, fill: '#ff6666',
+                    selectable: false, evented: false
                 });
+                self.canvas.add(errText);
+                self.canvas.requestRenderAll();
+                self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'iiif-failed' });
+            };
+            htmlImg.src = iiifUrl;
         };
         htmlImg.src = imageUrl;
     },
@@ -800,27 +770,13 @@ window.puzzleCanvas = {
                 resolve(folio.label);
             };
             htmlImg.onerror = function() {
-                // Server fetch failed — try client-side IIIF fallback
-                var digits = (folio.fl_id || '').replace(/\D/g, '');
+                // Server fetch failed — load IIIF directly (no bg removal)
+                var digits = String(folio.fl_id || '').replace(/[^0-9]/g, '');
                 if (!digits) { console.error('No fl_id for folio fallback'); resolve(''); return; }
                 var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + size + ',/0/default.jpg';
-                fetch(iiifUrl).then(function(r) {
-                    if (!r.ok) throw new Error('IIIF ' + r.status);
-                    return r.blob();
-                }).then(function(blob) {
-                    var params = new URLSearchParams({
-                        fl_id: folio.fl_id, threshold: String(threshold),
-                        size: String(size), processed: String(processed), is_cul: String(isCul)
-                    });
-                    return fetch('/api/puzzle_process?' + params, { method: 'POST', body: blob });
-                }).then(function(r) { return r.blob(); })
-                .then(function(b) {
-                    htmlImg.onerror = function() { resolve(''); };
-                    htmlImg.src = URL.createObjectURL(b);
-                }).catch(function(e) {
-                    console.error('Folio fallback failed:', key, e);
-                    resolve('');
-                });
+                htmlImg.removeAttribute('crossOrigin');
+                htmlImg.onerror = function() { console.error('Direct IIIF folio load failed'); resolve(''); };
+                htmlImg.src = iiifUrl;
             };
             htmlImg.src = url;
         });
@@ -1448,25 +1404,16 @@ window.puzzleCanvas = {
             }
         };
         htmlImg.onerror = function() {
-            // Server fetch failed — try client-side IIIF + server processing
+            // Server fetch failed — load IIIF directly (no bg removal, bypasses CORS)
             var m = newMeta || obj._fragmentMeta || {};
             var flId = m.fl_id || '';
-            var digits = flId.replace(/\\D/g, '');
+            var digits = String(flId).replace(/[^0-9]/g, '');
             if (!digits) { console.error('No fl_id for reload fallback:', key); return; }
             var iiifSize = (m.size || 800);
             var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-            fetch(iiifUrl).then(function(r) { return r.blob(); })
-                .then(function(blob) {
-                    var params = new URLSearchParams({
-                        fl_id: flId, threshold: String(m.threshold || 30),
-                        size: String(iiifSize), processed: String(m.processed !== false),
-                        is_cul: String(!!m.is_cul)
-                    });
-                    return fetch('/api/puzzle_process?' + params, { method: 'POST', body: blob });
-                })
-                .then(function(r) { return r.blob(); })
-                .then(function(b) { htmlImg.onerror = null; htmlImg.src = URL.createObjectURL(b); })
-                .catch(function(e) { console.error('Reload fallback failed:', key, e); });
+            htmlImg.removeAttribute('crossOrigin');
+            htmlImg.onerror = function() { console.error('Direct IIIF reload also failed:', key); };
+            htmlImg.src = iiifUrl;
         };
         htmlImg.src = newUrl;
     },
