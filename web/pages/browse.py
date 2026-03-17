@@ -2792,7 +2792,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                             # Oxford detection for correct image endpoint
                                             frag_library_code = ''
-                                            if state.meta_mgr and frag_sid:
+                                            if getattr(state, 'meta_mgr', None) and frag_sid:
                                                 try:
                                                     frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
                                                 except Exception:
@@ -3252,7 +3252,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 # Oxford detection
                                 frag_library_code = ''
-                                if state.meta_mgr and frag_sid:
+                                if getattr(state, 'meta_mgr', None) and frag_sid:
                                     try:
                                         frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
                                     except Exception:
