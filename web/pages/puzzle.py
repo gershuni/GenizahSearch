@@ -2221,6 +2221,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         doc_state['current_doc_id'] = None
                         doc_state['is_published'] = False
                         details_container.style('display: none;')
+                        try:
+                            app.storage.tab['puzzle_doc_id'] = None
+                        except RuntimeError:
+                            pass
                     dlg.close()
                     await refresh_docs_list()
                     ui.notify(tr('Deleted'), type='info')

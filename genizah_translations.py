@@ -2950,6 +2950,12 @@ TRANSLATIONS = {
     "Loading feed...": "טוען פיד...",
     "Unpublishing...": "מבטל פרסום...",
     "Original (V0.8)": "מקור (V0.8)",
+    "This will make your puzzle join visible to all users.\n\nPublish now?":
+        "פעולה זו תהפוך את צירוף הפאזל שלך לנראה לכל המשתמשים.\n\nלפרסם עכשיו?",
+    "(no original text)": "(אין טקסט מקורי)",
+    "View all joins...": "הצג את כל הצירופים...",
+    "No joined fragments found.": "לא נמצאו קטעים מצורפים.",
+    "Could not resolve fragment identifiers.": "לא ניתן לפענח מזהי קטעים.",
 }
 
 # Hebrew library display names (keyed by library_code)
