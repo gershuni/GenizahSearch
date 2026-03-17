@@ -41,7 +41,7 @@ Background removal is **foundational** — without it, rectangular images overla
 
 ### Community
 
-- [ ] **COMM-01**: Join documents are saved to personal workspace by default
+- [x] **COMM-01**: Join documents are saved to personal workspace by default
 - [x] **COMM-02**: User can publish a join document for community review
 - [x] **COMM-03**: Published joins are browsable by other users
 

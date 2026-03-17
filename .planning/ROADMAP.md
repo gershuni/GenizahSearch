@@ -232,14 +232,14 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 52-01-PLAN.md — Shared publish service + Supabase schema + tests
-- [ ] 52-02-PLAN.md — Web publish UI + Discoveries feed + joins panel community section
-- [ ] 52-03-PLAN.md — Desktop publish + Discoveries feed + JoinsDialog community section
+- [x] 52-02-PLAN.md — Web publish UI + Discoveries feed + joins panel community section
+- [x] 52-03-PLAN.md — Desktop publish + Discoveries feed + JoinsDialog community section
 
 ## Progress
 
-**Total milestones shipped:** 10
-**Total phases completed:** 51 (Phases 1-51)
-**Total plans completed:** ~170
+**Total milestones shipped:** 10 (v7.0.0 completing now)
+**Total phases completed:** 52 (Phases 1-52)
+**Total plans completed:** ~173
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -252,4 +252,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-17 after Phase 52 planning (3 plans created)*
+*Last updated: 2026-03-17 after Phase 52 completion (all 3 plans complete)*
