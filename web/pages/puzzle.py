@@ -2670,19 +2670,30 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 """Select the fragment on the canvas when combo changes."""
                 key = e.value if hasattr(e, 'value') else fragment_select.value
                 if key and key in puzzle_meta:
-                    await ui.run_javascript(f'window.puzzleCanvas.selectByKey("{key}")')
+                    try:
+                        await ui.run_javascript(
+                            f'(function() {{'
+                            f'  var c = window.puzzleCanvas;'
+                            f'  if (!c || !c.canvas) return;'
+                            f'  var obj = c.fragments["{key}"];'
+                            f'  if (obj) {{ c.canvas.setActiveObject(obj); c.canvas.requestRenderAll(); }}'
+                            f'}})()',
+                            timeout=2.0
+                        )
+                    except TimeoutError:
+                        pass
 
             fragment_select.on('update:model-value', _on_fragment_select_change)
 
-            def _browse_selected_fragment():
-                """Navigate to browse page for the selected fragment."""
+            async def _browse_selected_fragment():
+                """Open browse page for the selected fragment in a new tab."""
                 key = fragment_select.value
                 if not key or key not in puzzle_meta:
                     ui.notify(tr('Select a fragment first'), type='warning')
                     return
                 sys_id = puzzle_meta[key].get('sys_id', '')
                 if sys_id:
-                    ui.navigate.to(f'/browse?sys_id={sys_id}')
+                    await ui.run_javascript(f'window.open("/browse?sys_id={sys_id}", "_blank")')
 
             ui.button(icon='open_in_new', on_click=_browse_selected_fragment).props(
                 'dense flat dark round size=sm'
