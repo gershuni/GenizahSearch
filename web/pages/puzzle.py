@@ -2029,6 +2029,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         if not doc_state['current_doc_id']:
             doc_state['is_published'] = False
             try:
+                publish_btn.props('flat')
                 publish_btn.props(remove='color')
                 publish_btn.tooltip(tr('Publish to Community'))
             except Exception:
@@ -2040,10 +2041,12 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             detail = await run.io_bound(get_published_join_detail, get_client(), doc_state['current_doc_id'])
             if detail and detail.get('is_published'):
                 doc_state['is_published'] = True
+                publish_btn.props(remove='flat')
                 publish_btn.props('color=green')
                 publish_btn.tooltip(tr('Published -- click to unpublish'))
             else:
                 doc_state['is_published'] = False
+                publish_btn.props('flat')
                 publish_btn.props(remove='color')
                 publish_btn.tooltip(tr('Publish to Community'))
         except Exception:
@@ -2072,6 +2075,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 client = get_user_client()
                 await run.io_bound(unpublish_join, client, user_id, doc_state['current_doc_id'])
                 doc_state['is_published'] = False
+                publish_btn.props('flat')
                 publish_btn.props(remove='color')
                 publish_btn.tooltip(tr('Publish to Community'))
                 publish_btn.update()
@@ -2109,11 +2113,25 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     client = get_user_client()
                     published_id = await run.io_bound(publish_join, client, user_id, doc, img_svc)
                     doc_state['is_published'] = True
+                    publish_btn.props(remove='flat')
                     publish_btn.props('color=green')
                     publish_btn.tooltip(tr('Published -- click to unpublish'))
                     publish_btn.update()
                     share_url = f'/puzzle?doc={published_id}'
-                    ui.notify(tr('Published successfully! Share link: {}').format(share_url), type='positive', timeout=10000)
+                    # Show share dialog with copyable link
+                    with ui.dialog() as share_dlg, ui.card().classes('w-96 p-4').style(
+                        'background: var(--bg-card); color: var(--text-primary);'
+                    ):
+                        ui.label(tr('Published successfully!')).classes('text-lg font-bold').style('color: var(--text-primary);')
+                        ui.label(tr('Share this link:')).classes('text-sm mt-2').style('color: var(--text-secondary);')
+                        share_input = ui.input(value=share_url).props('readonly outlined dense').classes('w-full mt-1')
+                        with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                            async def _copy_share_link(url=share_url):
+                                await ui.run_javascript(f'navigator.clipboard.writeText(window.location.origin + "{url}")')
+                                ui.notify(tr('Link copied!'), type='positive')
+                            ui.button(tr('Copy Link'), icon='content_copy', on_click=_copy_share_link).props('flat color=primary')
+                            ui.button(tr('Close'), on_click=share_dlg.close).props('flat')
+                    share_dlg.open()
                 except Exception as e:
                     logger.error(f"Publish failed: {e}")
                     ui.notify(tr('Publish failed: {}').format(str(e)), type='negative')
