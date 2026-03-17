@@ -679,12 +679,15 @@ window.puzzleCanvas = {
         var obj = this.fragments[key];
         if (!obj) return folio.label;
 
-        var center = (typeof obj.getCenterPoint === 'function')
-            ? obj.getCenterPoint()
-            : {
+        // Use stashed target center from flipAllPuzzle if available (avoids
+        // reading stale Fabric.js geometry after bulk position changes)
+        var center = obj._flipTargetCenter
+            || (typeof obj.getCenterPoint === 'function' ? obj.getCenterPoint() : {
                 x: (obj.left || 0) + ((obj.width || 0) * (obj.scaleX || 1) / 2),
                 y: (obj.top || 0) + ((obj.height || 0) * (obj.scaleY || 1) / 2)
-            };
+            });
+        // Consume the stashed center so subsequent navigations use live geometry
+        delete obj._flipTargetCenter;
         var pos = {
             centerX: center.x,
             centerY: center.y,
@@ -1095,37 +1098,49 @@ window.puzzleCanvas = {
         if (this.canvas && typeof this.canvas.discardActiveObject === 'function') {
             this.canvas.discardActiveObject();
         }
-        var objects = keys.map(function(k) { return self.fragments[k]; });
 
         // 1. Snapshot visual centers BEFORE any changes
-        var snapshots = objects.map(function(obj) {
+        var snapshots = {};
+        var allCx = [];
+        keys.forEach(function(key) {
+            var obj = self.fragments[key];
+            if (!obj) return;
             var cp = obj.getCenterPoint();
-            return { obj: obj, cx: cp.x, cy: cp.y, origAngle: obj.angle || 0 };
+            snapshots[key] = { cx: cp.x, cy: cp.y, origAngle: obj.angle || 0 };
+            allCx.push(cp.x);
         });
 
-        // 2. Compute mirror axis from visual centers
-        var allCx = snapshots.map(function(s) { return s.cx; });
+        // 2. Compute mirror axis
         var axisX = (Math.min.apply(null, allCx) + Math.max.apply(null, allCx)) / 2;
 
-        // 3. Compute all new positions, THEN apply atomically
-        snapshots.forEach(function(s) {
+        // 3. Compute mirrored positions and new angles
+        keys.forEach(function(key) {
+            var s = snapshots[key];
+            if (!s) return;
             s.mirroredCx = 2 * axisX - s.cx;
             s.newAngle = (360 - s.origAngle) % 360;
         });
 
-        // 4. Apply all changes
-        snapshots.forEach(function(s) {
-            s.obj.set({ angle: s.newAngle });
-            if (typeof s.obj.setPositionByOrigin === 'function') {
+        // 4. Apply mirror + angle to current objects, then navigate to verso.
+        //    Store the target center on the object so _reloadFragment / navigateFolio
+        //    uses it instead of re-reading the (stale) geometry.
+        keys.forEach(function(key) {
+            var obj = self.fragments[key];
+            var s = snapshots[key];
+            if (!obj || !s) return;
+
+            // Apply angle + position
+            obj.set({ angle: s.newAngle });
+            if (typeof obj.setPositionByOrigin === 'function') {
                 var pt = (typeof fabric.Point === 'function')
                     ? new fabric.Point(s.mirroredCx, s.cy)
                     : { x: s.mirroredCx, y: s.cy };
-                s.obj.setPositionByOrigin(pt, 'center', 'center');
-            } else {
-                var w = (s.obj.width || 0) * (s.obj.scaleX || 1);
-                s.obj.set({ left: s.mirroredCx - w / 2 });
+                obj.setPositionByOrigin(pt, 'center', 'center');
             }
-            s.obj.setCoords();
+            obj.setCoords();
+
+            // Stash target center for the async reload to use
+            obj._flipTargetCenter = { x: s.mirroredCx, y: s.cy };
         });
         this.canvas.requestRenderAll();
 
