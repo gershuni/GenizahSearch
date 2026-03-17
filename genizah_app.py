@@ -3365,11 +3365,13 @@ class PuzzleCanvasWindow(QMainWindow):
 
         self.btn_folio_prev = QPushButton("<")
         self.btn_folio_prev.setMaximumWidth(30)
+        self.btn_folio_prev.setToolTip(tr("Previous folio"))
         self.btn_folio_prev.clicked.connect(lambda: self._navigate_folio(-1))
         row2.addWidget(self.btn_folio_prev)
 
         self.btn_folio_next = QPushButton(">")
         self.btn_folio_next.setMaximumWidth(30)
+        self.btn_folio_next.setToolTip(tr("Next folio"))
         self.btn_folio_next.clicked.connect(lambda: self._navigate_folio(1))
         row2.addWidget(self.btn_folio_next)
 
@@ -3470,7 +3472,7 @@ class PuzzleCanvasWindow(QMainWindow):
         # --- Document side panel ---
         self._docs_dock = QDockWidget(tr("Saved Joins"), self)
         self._docs_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
-        self._docs_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self._docs_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
 
         dock_widget = QWidget()
         dock_layout = QVBoxLayout(dock_widget)
