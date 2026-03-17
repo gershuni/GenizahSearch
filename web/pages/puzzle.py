@@ -363,20 +363,65 @@ window.puzzleCanvas = {
             }
         };
         htmlImg.onerror = function(err) {
-            console.error('Failed to load image for', key, imageUrl, err);
-            self._removePlaceholder(key);
-            var errText = new fabric.Text('Image load failed: ' + key, {
-                left: x, top: y,
-                fontSize: 12, fill: '#ff6666',
-                selectable: false, evented: false
-            });
-            self.canvas.add(errText);
-            self.canvas.requestRenderAll();
-            self._emitEvent('puzzle-add-result', {
-                key: key,
-                success: false,
-                error: 'image-load-failed'
-            });
+            // Server-side fetch failed (IIIF may block server IP).
+            // Fallback: fetch IIIF image client-side, POST to server for processing.
+            console.warn('Server fetch failed for', key, '— trying client-side IIIF fetch');
+            var m = meta || {};
+            var flId = m.fl_id || '';
+            var digits = flId.replace(/\\D/g, '');
+            if (!digits) {
+                console.error('No fl_id digits for client-side fetch:', key);
+                self._removePlaceholder(key);
+                self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'no-fl-id' });
+                return;
+            }
+            var iiifSize = (m.size || 800);
+            var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
+            fetch(iiifUrl)
+                .then(function(resp) {
+                    if (!resp.ok) throw new Error('IIIF fetch failed: ' + resp.status);
+                    return resp.blob();
+                })
+                .then(function(blob) {
+                    // POST raw bytes to server for bg removal + caching
+                    var params = new URLSearchParams({
+                        fl_id: flId,
+                        threshold: String(m.threshold || 30),
+                        size: String(iiifSize),
+                        processed: String(m.processed !== false),
+                        is_cul: String(!!m.is_cul)
+                    });
+                    return fetch('/api/puzzle_process?' + params.toString(), {
+                        method: 'POST',
+                        body: blob,
+                        headers: { 'Content-Type': 'application/octet-stream' }
+                    });
+                })
+                .then(function(resp) {
+                    if (!resp.ok) throw new Error('Process failed: ' + resp.status);
+                    return resp.blob();
+                })
+                .then(function(processedBlob) {
+                    var blobUrl = URL.createObjectURL(processedBlob);
+                    htmlImg.onerror = function() {
+                        console.error('Blob image load failed for', key);
+                        self._removePlaceholder(key);
+                        self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'blob-load-failed' });
+                    };
+                    htmlImg.src = blobUrl;
+                })
+                .catch(function(fetchErr) {
+                    console.error('Client-side IIIF fallback failed for', key, fetchErr);
+                    self._removePlaceholder(key);
+                    var errText = new fabric.Text('Image load failed: ' + key, {
+                        left: x, top: y,
+                        fontSize: 12, fill: '#ff6666',
+                        selectable: false, evented: false
+                    });
+                    self.canvas.add(errText);
+                    self.canvas.requestRenderAll();
+                    self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'client-fetch-failed' });
+                });
         };
         htmlImg.src = imageUrl;
     },
@@ -1384,7 +1429,25 @@ window.puzzleCanvas = {
             }
         };
         htmlImg.onerror = function() {
-            console.error('Failed to reload fragment:', key);
+            // Server fetch failed — try client-side IIIF + server processing
+            var m = newMeta || obj._fragmentMeta || {};
+            var flId = m.fl_id || '';
+            var digits = flId.replace(/\\D/g, '');
+            if (!digits) { console.error('No fl_id for reload fallback:', key); return; }
+            var iiifSize = (m.size || 800);
+            var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
+            fetch(iiifUrl).then(function(r) { return r.blob(); })
+                .then(function(blob) {
+                    var params = new URLSearchParams({
+                        fl_id: flId, threshold: String(m.threshold || 30),
+                        size: String(iiifSize), processed: String(m.processed !== false),
+                        is_cul: String(!!m.is_cul)
+                    });
+                    return fetch('/api/puzzle_process?' + params, { method: 'POST', body: blob });
+                })
+                .then(function(r) { return r.blob(); })
+                .then(function(b) { htmlImg.onerror = null; htmlImg.src = URL.createObjectURL(b); })
+                .catch(function(e) { console.error('Reload fallback failed:', key, e); });
         };
         htmlImg.src = newUrl;
     },

@@ -703,7 +703,11 @@ def init_api_routes():
     @app.get('/api/puzzle_image')
     def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800,
                      processed: bool = True, is_cul: bool = False):
-        """Serve processed/original fragment image for puzzle canvas."""
+        """Serve processed/original fragment image for puzzle canvas.
+        Tries server-side IIIF fetch first (works on desktop/local).
+        Falls back to 404 if IIIF blocks the server IP — client should
+        use POST /api/puzzle_process with client-fetched bytes instead.
+        """
         from shared.puzzle_image_service import get_puzzle_image_service
         service = get_puzzle_image_service()
         image_bytes = service.resolve_fragment_image(
@@ -712,13 +716,72 @@ def init_api_routes():
         )
         if image_bytes is None:
             return Response(content="Image not found", status_code=404)
-        # Detect actual content type from bytes (bg removal may fallback to JPEG)
         content_type = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
         return Response(
             content=image_bytes,
             media_type=content_type,
             headers={"Cache-Control": "public, max-age=3600"}
         )
+
+    @app.post('/api/puzzle_process')
+    async def puzzle_process(request: Request):
+        """Process client-fetched image bytes with background removal.
+        Used when server can't fetch IIIF directly (e.g., NLI blocks server IP).
+        Client fetches the IIIF image in the browser, POSTs raw bytes here.
+        Server applies bg removal, caches, and returns processed image.
+        """
+        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.background_removal import remove_background
+
+        fl_id = request.query_params.get('fl_id', '')
+        threshold = float(request.query_params.get('threshold', 30))
+        is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
+        processed = request.query_params.get('processed', 'true').lower() == 'true'
+        size = int(request.query_params.get('size', 800))
+
+        # Check cache first
+        service = get_puzzle_image_service()
+        cache_path = service.get_cache_path(fl_id, size, threshold, processed, is_cul)
+        if cache_path.exists():
+            try:
+                cached = cache_path.read_bytes()
+                content_type = 'image/png' if cached[:4] == b'\x89PNG' else 'image/jpeg'
+                return Response(content=cached, media_type=content_type,
+                                headers={"Cache-Control": "public, max-age=3600"})
+            except Exception:
+                pass
+
+        # Read client-uploaded image bytes
+        raw_bytes = await request.body()
+        if not raw_bytes:
+            return Response(content="No image data", status_code=400)
+
+        if not processed:
+            # Cache original and return
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_bytes(raw_bytes)
+            except OSError:
+                pass
+            return Response(content=raw_bytes, media_type='image/jpeg',
+                            headers={"Cache-Control": "public, max-age=3600"})
+
+        # Apply background removal
+        try:
+            result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
+        except Exception:
+            result_bytes = raw_bytes
+
+        # Cache result
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(result_bytes)
+        except OSError:
+            pass
+
+        content_type = 'image/png' if result_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        return Response(content=result_bytes, media_type=content_type,
+                        headers={"Cache-Control": "public, max-age=3600"})
 
     @app.get('/api/puzzle_folios/{sys_id}')
     def puzzle_folios(sys_id: str):
