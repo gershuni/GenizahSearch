@@ -5530,6 +5530,13 @@ class SearchEngine:
             # Desktop style (inline) - Red/Bold
             return re.sub(r'\*(.*?)\*', r'<span style="color:#ff0000; font-weight:bold;">\1</span>', escaped)
 
+    def close_index(self):
+        """Release Tantivy index and searcher to unlock files (required before rebuild on Windows)."""
+        self.searcher = None
+        self.index = None
+        import gc
+        gc.collect()
+
     def reload_index(self):
         db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
         if os.path.exists(db_path):

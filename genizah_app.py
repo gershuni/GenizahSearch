@@ -28006,11 +28006,15 @@ class GenizahGUI(QMainWindow):
         if not self.indexer: return
         
         if QMessageBox.question(self, tr("Index"), tr("Start indexing?"), QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            # Release existing index to unlock files on Windows (memory-mapped .fast files)
+            if self.searcher:
+                self.searcher.close_index()
+
             self.index_progress.setVisible(True)
             self.index_progress.setRange(0, 1)
             self.index_progress.setValue(0)
             self.index_progress.setFormat(tr("Indexing... %p%"))
-            
+
             self.ithread = IndexerThread(self.meta_mgr)
             self.ithread.progress_signal.connect(self.on_index_progress)
             self.ithread.finished_signal.connect(self.on_index_finished)
