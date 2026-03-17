@@ -3371,21 +3371,8 @@ class PuzzleCanvasWindow(QMainWindow):
         row2.addWidget(QLabel("|"))
 
         # Crop mode
-        self.btn_crop = QPushButton()
+        self.btn_crop = QPushButton("✂")
         self.btn_crop.setFixedWidth(28)
-        # Draw standard crop icon: two overlapping L-shapes
-        _crop_px = QPixmap(16, 16)
-        _crop_px.fill(QColor(0, 0, 0, 0))
-        _crop_p = QPainter(_crop_px)
-        _crop_p.setPen(QPen(QColor(220, 220, 220), 2))
-        # Bottom-left L: vertical line going up, horizontal line going right
-        _crop_p.drawLine(4, 14, 4, 2)    # vertical
-        _crop_p.drawLine(4, 12, 14, 12)  # horizontal
-        # Top-right L: horizontal line going left, vertical line going down
-        _crop_p.drawLine(12, 2, 2, 2)    # horizontal (top)
-        _crop_p.drawLine(12, 14, 12, 2)  # vertical (right)
-        _crop_p.end()
-        self.btn_crop.setIcon(QIcon(_crop_px))
         self.btn_crop.setToolTip(tr("Crop — drag edges to trim"))
         self.btn_crop.setCheckable(True)
         self.btn_crop.toggled.connect(self._toggle_crop_mode)
@@ -3855,6 +3842,18 @@ class PuzzleCanvasWindow(QMainWindow):
         pixmap = QPixmap.fromImage(img)
 
         item = PuzzleFragmentItem(puzzle_frag, pixmap)
+
+        # Apply saved crop offsets if any
+        ct, cb, cl, cr = puzzle_frag.crop_top, puzzle_frag.crop_bottom, puzzle_frag.crop_left, puzzle_frag.crop_right
+        if ct + cb + cl + cr > 0:
+            w, h = pixmap.width(), pixmap.height()
+            cropped = pixmap.copy(cl, ct, max(w - cl - cr, 1), max(h - ct - cb, 1))
+            item._original_pixmap = pixmap.copy()
+            item._crop_offsets = [ct, cb, cl, cr]
+            item.prepareGeometryChange()
+            item.setPixmap(cropped)
+            item.setTransformOriginPoint(item._pixmap_rect().center())
+
         self.canvas_view.scene.addItem(item)
         self._fragment_items[item_key] = item
 
@@ -4598,6 +4597,13 @@ class PuzzleCanvasWindow(QMainWindow):
             pf.scale = item.scale()
             pf.flip_h = item.transform().m11() < 0
             pf.flip_v = item.transform().m22() < 0
+            # Sync crop offsets from canvas item to model
+            offsets = getattr(item, '_crop_offsets', None)
+            if offsets:
+                pf.crop_top = offsets[0]
+                pf.crop_bottom = offsets[1]
+                pf.crop_left = offsets[2]
+                pf.crop_right = offsets[3]
             fragments.append(pf)
         return fragments
 
