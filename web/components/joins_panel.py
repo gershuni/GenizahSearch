@@ -667,6 +667,79 @@ def create_joins_dialog(
                         ui.icon('info', size='sm')
                         ui.label(tr('Login to create joins')).classes('text-sm')
 
+                # ── Community Puzzle Joins section ──
+                if document_id:
+                    try:
+                        client = get_client()
+                        pjf_resp = client.table('published_join_fragments').select(
+                            'join_id, shelfmark'
+                        ).eq('sys_id', document_id).execute()
+                        if pjf_resp.data:
+                            join_ids = list(set(r['join_id'] for r in pjf_resp.data))
+                            pj_resp = client.table('published_joins').select(
+                                'id, user_id, title, shelfmarks, thumbnail_path, created_at'
+                            ).in_('id', join_ids).eq('is_published', True).execute()
+                            pj_rows = pj_resp.data or []
+                            if pj_rows:
+                                # Resolve author names
+                                pj_user_ids = list(set(r['user_id'] for r in pj_rows))
+                                pj_profiles = {}
+                                try:
+                                    pj_profiles_resp = client.table('profiles').select(
+                                        'id, full_name'
+                                    ).in_('id', pj_user_ids).execute()
+                                    pj_profiles = {
+                                        p['id']: p.get('full_name', 'Anonymous')
+                                        for p in (pj_profiles_resp.data or [])
+                                    }
+                                except Exception:
+                                    pass
+
+                                ui.separator().classes('my-3')
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.icon('extension', size='sm').classes('text-cyan-600')
+                                    ui.label(tr('Community Puzzle Joins')).classes(
+                                        'text-subtitle2 font-bold'
+                                    ).style('color: var(--text-primary);')
+
+                                bucket = client.storage.from_('puzzle-images')
+                                for pj in pj_rows:
+                                    pj_thumb_url = ''
+                                    if pj.get('thumbnail_path'):
+                                        pj_thumb_url = bucket.get_public_url(pj['thumbnail_path'])
+                                    pj_title = pj.get('title', '') or 'Untitled'
+                                    pj_author = pj_profiles.get(pj['user_id'], 'Anonymous')
+                                    pj_shelfmarks = pj.get('shelfmarks', [])
+
+                                    def make_pj_click(pj_id=pj['id']):
+                                        def go_to_puzzle():
+                                            dialog.close()
+                                            ui.navigate.to(f'/puzzle?doc={pj_id}')
+                                        return go_to_puzzle
+
+                                    with ui.card().classes(
+                                        'w-full p-2 cursor-pointer hover:bg-cyan-50'
+                                    ).on('click', make_pj_click()):
+                                        with ui.row().classes('items-center gap-2 w-full'):
+                                            if pj_thumb_url:
+                                                ui.image(pj_thumb_url).style(
+                                                    'width: 48px; height: 48px; object-fit: contain; '
+                                                    'border-radius: 4px;'
+                                                )
+                                            else:
+                                                ui.icon('extension', size='lg').classes('text-cyan-400')
+                                            with ui.column().classes('gap-0 flex-1'):
+                                                ui.label(pj_title).classes('text-body2 font-medium')
+                                                if pj_shelfmarks:
+                                                    ui.label(' + '.join(pj_shelfmarks[:3])).classes(
+                                                        'text-caption font-mono'
+                                                    ).style('color: var(--text-secondary);')
+                                                ui.label(pj_author).classes('text-caption').style(
+                                                    'color: var(--text-tertiary);'
+                                                )
+                    except Exception as e:
+                        logger.error("Community Puzzle Joins error: %s", e)
+
         def handle_navigate(target_shelfmark: str):
             """Handle navigation to another fragment."""
             dialog.close()

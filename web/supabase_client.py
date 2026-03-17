@@ -1247,6 +1247,29 @@ def get_feed_items(item_type: str = None, period: str = None,
             except Exception as e:
                 logger.error(f"Error loading joins: {e}")
 
+        # Get published puzzle joins
+        if not item_type or item_type == 'puzzle_join':
+            try:
+                pj_resp = client.table('published_joins').select(
+                    'id, user_id, title, notes, shelfmarks, thumbnail_path, created_at'
+                ).eq('is_published', True).order('created_at', desc=True).limit(limit).execute()
+                for pj in (pj_resp.data or []):
+                    thumb_url = ''
+                    if pj.get('thumbnail_path'):
+                        thumb_url = client.storage.from_('puzzle-images').get_public_url(pj['thumbnail_path'])
+                    items.append({
+                        'id': f"puzzle_join_{pj['id']}",
+                        'item_type': 'puzzle_join',
+                        'title': pj.get('title', ''),
+                        'content_preview': pj.get('notes', '')[:500] if pj.get('notes') else '',
+                        'shelfmarks': pj.get('shelfmarks', []),
+                        'thumbnail_url': thumb_url,
+                        'created_at': pj.get('created_at'),
+                        'author': {'id': pj.get('user_id')},
+                    })
+            except Exception as e:
+                logger.error(f"Error loading published puzzle joins: {e}")
+
         # Sort by created_at descending
         items.sort(key=lambda x: x.get('created_at', '') or '', reverse=True)
 

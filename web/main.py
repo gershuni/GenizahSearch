@@ -812,7 +812,7 @@ def lists_page_route():
         create_lists_page()
 
 @ui.page('/puzzle')
-def puzzle_page_route(add: str = None):
+def puzzle_page_route(add: str = None, doc: str = None):
     set_current_page('/puzzle')
     ui.add_head_html(META_TAGS)
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -823,7 +823,7 @@ def puzzle_page_route(add: str = None):
     content = create_layout()
     with content:
         from web.pages.puzzle import create_puzzle_page
-        create_puzzle_page(initial_add=add)
+        create_puzzle_page(initial_add=add, initial_doc=doc)
 
 @ui.page('/reset-hints')
 def reset_hints_route():

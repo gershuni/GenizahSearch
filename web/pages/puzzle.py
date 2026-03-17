@@ -1677,7 +1677,7 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
     }
 
 
-def create_puzzle_page(initial_add: str = None):
+def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     """Create the Fragment Puzzle page with Fabric.js canvas and toolbar.
 
     Builds the full puzzle UI: shelfmark input for adding fragments, action
@@ -1696,6 +1696,8 @@ def create_puzzle_page(initial_add: str = None):
         initial_add: Optional fragment to auto-add on page load. Format is
             'sys_id,fl_id' or just 'sys_id' (first folio resolved automatically).
             Passed via /puzzle?add=... query parameter from entry points.
+        initial_doc: Optional document ID to load on page init. Passed via
+            /puzzle?doc=... query parameter (used by fork flow and deep links).
     """
     # Add Fabric.js CDN and page-specific styles
     ui.add_head_html(FABRIC_JS_CDN)
@@ -1720,6 +1722,7 @@ def create_puzzle_page(initial_add: str = None):
         'loading': False,             # True while fragment images are loading (guards auto-save)
         'load_pending': 0,            # Number of fragments still loading
         'pending_crops': {},          # Crop state to apply after each fragment loads {key: {cropX, cropY, width, height}}
+        'is_published': False,        # Whether current doc is published to community
     }
 
     from shared.puzzle_service import get_puzzle_service
@@ -1998,6 +2001,7 @@ def create_puzzle_page(initial_add: str = None):
         details_container.style('display: block;')
         joins_dialog.close()
         ui.notify(tr('Loaded: {}').format(doc.title), type='info')
+        await check_publish_state()
 
     async def new_puzzle():
         """Clear canvas and reset to scratch pad state."""
@@ -2013,11 +2017,108 @@ def create_puzzle_page(initial_add: str = None):
         notes_input.value = ''
         fragments_label.text = ''
         details_container.style('display: none;')
+        doc_state['is_published'] = False
         try:
             app.storage.tab['puzzle_fragments'] = {}
             app.storage.tab['puzzle_state'] = None
         except RuntimeError:
             pass
+
+    async def check_publish_state():
+        """Check if current doc is published (using anon client)."""
+        if not doc_state['current_doc_id']:
+            doc_state['is_published'] = False
+            try:
+                publish_btn.props(remove='color')
+                publish_btn.tooltip(tr('Publish to Community'))
+            except Exception:
+                pass
+            return
+        try:
+            from shared.puzzle_publish_service import get_published_join_detail
+            from web.supabase_client import get_client
+            detail = await run.io_bound(get_published_join_detail, get_client(), doc_state['current_doc_id'])
+            if detail and detail.get('is_published'):
+                doc_state['is_published'] = True
+                publish_btn.props('color=green')
+                publish_btn.tooltip(tr('Published -- click to unpublish'))
+            else:
+                doc_state['is_published'] = False
+                publish_btn.props(remove='color')
+                publish_btn.tooltip(tr('Publish to Community'))
+        except Exception:
+            pass
+
+    async def toggle_publish():
+        """Publish or unpublish current join."""
+        from web.auth_state import GlobalAuthState
+        if not GlobalAuthState.is_logged_in():
+            ui.notify(tr('Please log in to publish'), type='warning')
+            return
+        if not puzzle_meta:
+            ui.notify(tr('Add fragments before publishing'), type='warning')
+            return
+        if not doc_state['current_doc_id']:
+            ui.notify(tr('Save the puzzle first'), type='warning')
+            return
+
+        user_id = GlobalAuthState.get_user_id()
+
+        if doc_state['is_published']:
+            # UNPUBLISH flow
+            try:
+                from shared.puzzle_publish_service import unpublish_join
+                from web.supabase_client import get_user_client
+                client = get_user_client()
+                await run.io_bound(unpublish_join, client, user_id, doc_state['current_doc_id'])
+                doc_state['is_published'] = False
+                publish_btn.props(remove='color')
+                publish_btn.tooltip(tr('Publish to Community'))
+                ui.notify(tr('Unpublished'), type='info')
+            except Exception as e:
+                logger.error(f"Unpublish failed: {e}")
+                ui.notify(tr('Unpublish failed: {}').format(str(e)), type='negative')
+            return
+
+        # PUBLISH flow -- confirm dialog
+        with ui.dialog() as dlg, ui.card().classes('w-96 p-4').style(
+            'background: var(--bg-card); color: var(--text-primary);'
+        ):
+            ui.label(tr('Publish to Community')).classes('text-lg font-bold').style('color: var(--text-primary);')
+            ui.label(tr('This will make your puzzle join visible to all users.')).classes('text-sm').style('color: var(--text-secondary);')
+
+            async def do_publish():
+                dlg.close()
+                ui.notify(tr('Publishing...'), type='info')
+                try:
+                    from shared.puzzle_publish_service import publish_join
+                    from shared.puzzle_image_service import get_puzzle_image_service
+                    from web.supabase_client import get_user_client
+
+                    svc = get_puzzle_service(thread_safe=True)
+                    doc = await run.io_bound(svc.load_document, doc_state['current_doc_id'])
+                    if not doc:
+                        ui.notify(tr('Could not load document'), type='negative')
+                        return
+                    doc.fragments = await build_fragments_list()
+                    doc.title = title_input.value or doc.title
+                    doc.notes = notes_input.value or ''
+
+                    img_svc = get_puzzle_image_service()
+                    client = get_user_client()
+                    await run.io_bound(publish_join, client, user_id, doc, img_svc)
+                    doc_state['is_published'] = True
+                    publish_btn.props('color=green')
+                    publish_btn.tooltip(tr('Published -- click to unpublish'))
+                    ui.notify(tr('Published successfully!'), type='positive')
+                except Exception as e:
+                    logger.error(f"Publish failed: {e}")
+                    ui.notify(tr('Publish failed: {}').format(str(e)), type='negative')
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Publish'), on_click=do_publish).props('flat color=primary')
+                ui.button(tr('Cancel'), on_click=dlg.close).props('flat')
+        dlg.open()
 
     async def export_png():
         """Export current canvas as full-resolution PNG."""
@@ -2533,6 +2634,10 @@ def create_puzzle_page(initial_add: str = None):
                 'dense flat dark round size=sm'
             ).tooltip(tr('Export PNG'))
 
+            publish_btn = ui.button(icon='publish', on_click=toggle_publish).props(
+                'dense flat dark round size=sm'
+            ).tooltip(tr('Publish to Community'))
+
             async def _open_joins_dialog():
                 await refresh_docs_list()
                 joins_dialog.open()
@@ -2983,6 +3088,16 @@ def create_puzzle_page(initial_add: str = None):
             }
 
         ui.timer(1.5, auto_add, once=True)
+
+    # ── Handle initial_doc query parameter (load saved document by ID) ──
+    if initial_doc:
+        async def auto_load_doc():
+            """Auto-load a saved document from the initial_doc query parameter."""
+            import asyncio
+            await asyncio.sleep(1.0)
+            await load_document(initial_doc)
+
+        ui.timer(1.5, auto_load_doc, once=True)
 
     # ── Periodic state save ──
     async def save_state():

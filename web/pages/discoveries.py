@@ -165,6 +165,103 @@ def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
     return doc_id or '', ''
 
 
+def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
+    """Show a detail dialog for a published puzzle join."""
+    from web.supabase_client import get_client
+
+    with ui.dialog() as dlg, ui.card().classes('w-[500px] max-h-[80vh] p-0'):
+        # Header
+        with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+            'background: linear-gradient(135deg, #00bcd4 0%, #0097a7 100%);'
+        ):
+            with ui.row().classes('items-center gap-2'):
+                ui.icon('extension').classes('text-white text-xl')
+                ui.label(tr('Puzzle Join')).classes('text-lg font-bold text-white')
+            ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
+
+        detail_container = ui.column().classes('w-full p-4 gap-3')
+        with detail_container:
+            ui.spinner(size='lg').classes('mx-auto my-8')
+
+        async def load_detail():
+            from shared.puzzle_publish_service import get_published_join_detail
+            detail = await run.io_bound(get_published_join_detail, get_client(), join_id)
+            detail_container.clear()
+            with detail_container:
+                if not detail:
+                    ui.label(tr('Could not load join details')).style('color: var(--text-secondary);')
+                    return
+
+                # Thumbnail / full-res image
+                thumb_url = detail.get('thumbnail_url', '')
+                image_url = detail.get('image_url', '')
+                if thumb_url:
+                    ui.image(thumb_url).style(
+                        'max-width: 100%; max-height: 300px; object-fit: contain; '
+                        'border-radius: 8px; border: 1px solid var(--border-color);'
+                    )
+
+                h3(detail.get('title', ''), classes='font-bold text-lg')
+
+                # Author and date
+                author_name = detail.get('author_name', 'Anonymous')
+                created_at = detail.get('created_at', '')
+                with ui.row().classes('items-center gap-2'):
+                    ui.icon('person', size='xs').style('color: var(--text-tertiary);')
+                    ui.label(author_name).classes('text-sm').style('color: var(--text-secondary);')
+                    if created_at:
+                        ui.label(format_date(created_at)).classes('text-xs').style('color: var(--text-tertiary);')
+
+                # Notes
+                notes = detail.get('notes', '')
+                if notes:
+                    create_translatable_content(notes, container_style='color: var(--text-primary);')
+
+                # Shelfmarks
+                shelfmarks = detail.get('shelfmarks', [])
+                if shelfmarks:
+                    ui.separator().classes('my-2')
+                    ui.label(tr('Fragments')).classes('text-xs font-medium').style('color: var(--text-tertiary);')
+                    with ui.row().classes('flex-wrap gap-2'):
+                        for sm in shelfmarks:
+                            ui.badge(sm).props('color=cyan outline').classes('text-xs font-mono')
+
+                # Action buttons
+                with ui.row().classes('w-full items-center gap-2 mt-3'):
+                    if image_url:
+                        ui.link(tr('Download Full Resolution'), image_url, new_tab=True).classes(
+                            'text-sm'
+                        ).style('color: var(--primary-600);')
+
+                    def do_fork(jid=join_id):
+                        dlg.close()
+                        _fork_puzzle_join_and_navigate(jid)
+
+                    ui.button(tr('Open in Puzzle'), icon='extension', on_click=do_fork).props('outlined dense color=cyan')
+
+        ui.timer(0.1, load_detail, once=True)
+    dlg.open()
+
+
+async def _fork_puzzle_join_and_navigate(join_id: str):
+    """Fork a published join and navigate to the puzzle page with it."""
+    try:
+        from shared.puzzle_publish_service import fork_published_join
+        from shared.puzzle_service import get_puzzle_service
+        from web.supabase_client import get_client
+
+        client = get_client()
+        svc = get_puzzle_service(thread_safe=True)
+        new_doc_id = await run.io_bound(fork_published_join, client, join_id, svc)
+        if new_doc_id:
+            ui.navigate.to(f'/puzzle?doc={new_doc_id}')
+        else:
+            ui.notify(tr('Could not fork join'), type='warning')
+    except Exception as e:
+        logger.error(f"Fork puzzle join failed: {e}")
+        ui.notify(tr('Fork failed: {}').format(str(e)), type='negative')
+
+
 def create_discoveries_page():
     """Create the Discoveries Center page."""
 
@@ -196,6 +293,7 @@ def create_discoveries_page():
                         'correction': tr('Corrections'),
                         'comment': tr('Comments'),
                         'join': tr('Joins'),
+                        'puzzle_join': tr('Puzzle Joins'),
                     },
                     value='all',
                     label=tr('Type')
@@ -487,6 +585,7 @@ def create_feed_item(item: dict, on_refresh=None):
         'note': {'icon': 'note', 'color': 'gray', 'label': tr('Note')},
         'comment': {'icon': 'comment', 'color': 'teal', 'label': tr('Comment')},
         'join': {'icon': 'link', 'color': 'green', 'label': tr('Join (noun)')},
+        'puzzle_join': {'icon': 'extension', 'color': 'cyan', 'label': tr('Puzzle Join')},
     }
     style = type_styles.get(item_type, type_styles['discovery'])
 
@@ -738,6 +837,20 @@ def create_feed_item(item: dict, on_refresh=None):
                             ui.badge(f"{num_joins} {tr('joins')}").props('color=teal').classes('text-xs ml-2')
                         if cluster_fragments and len(cluster_fragments) > 2:
                             ui.badge(f"{len(cluster_fragments)} {tr('fragments')}").props('color=blue outline').classes('text-xs')
+                elif item_type == 'puzzle_join':
+                    # Puzzle join: show title with thumbnail
+                    with ui.row().classes('items-center gap-3'):
+                        thumb_url = item.get('thumbnail_url', '')
+                        if thumb_url:
+                            ui.image(thumb_url).style(
+                                'width: 80px; height: 80px; object-fit: contain; border-radius: 4px; '
+                                'border: 1px solid var(--border-color);'
+                            )
+                        with ui.column().classes('gap-1'):
+                            h3(item.get('title', ''), classes='font-bold text-lg')
+                            shelfmarks_list = item.get('shelfmarks', [])
+                            if shelfmarks_list:
+                                ui.label(' + '.join(shelfmarks_list)).classes('text-sm font-mono').style('color: var(--text-secondary);')
                 else:
                     # Changed to H3
                     h3(item.get('title', ''), classes='font-bold text-lg')
@@ -875,6 +988,38 @@ def create_feed_item(item: dict, on_refresh=None):
                                     def view_cluster_browse(did=first_doc_id):
                                         ui.navigate.to(f'/browse?sys_id={did}')
                                     ui.button(tr('View in browser'), icon='open_in_new', on_click=view_cluster_browse).props('outlined dense')
+                        elif item_type == 'puzzle_join':
+                            # Puzzle join detail: notes, fragment list, action buttons
+                            pj_notes = item.get('content_preview', '')
+                            if pj_notes:
+                                create_translatable_content(
+                                    pj_notes,
+                                    container_style='color: var(--text-primary);'
+                                )
+
+                            pj_shelfmarks = item.get('shelfmarks', [])
+                            if pj_shelfmarks:
+                                ui.separator().classes('my-2')
+                                ui.label(tr('Fragments')).classes('text-xs font-medium').style('color: var(--text-tertiary);')
+                                with ui.row().classes('flex-wrap gap-2'):
+                                    for sm in pj_shelfmarks:
+                                        ui.badge(sm).props('color=cyan outline').classes('text-xs font-mono')
+
+                            # Action buttons: View Details / Open in Puzzle
+                            with ui.row().classes('w-full items-center gap-2 mt-3'):
+                                pj_raw_id = item_id.replace('puzzle_join_', '') if item_id.startswith('puzzle_join_') else item_id
+
+                                def open_puzzle_join_detail(jid=pj_raw_id):
+                                    """Open detail dialog for this puzzle join."""
+                                    _show_puzzle_join_detail_dialog(jid, on_refresh)
+
+                                ui.button(tr('View Details'), icon='visibility', on_click=open_puzzle_join_detail).props('outlined dense')
+
+                                def fork_and_open(jid=pj_raw_id):
+                                    """Fork the join and open in puzzle page."""
+                                    _fork_puzzle_join_and_navigate(jid)
+
+                                ui.button(tr('Open in Puzzle'), icon='extension', on_click=fork_and_open).props('outlined dense color=cyan')
                         else:
                             # Full content for non-corrections with translate button
                             create_translatable_content(
