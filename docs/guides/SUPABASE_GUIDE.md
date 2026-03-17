@@ -681,6 +681,135 @@ You're trying to reference a non-existent record. Check that:
 
 ---
 
+## Published Joins (Phase 52)
+
+Community puzzle join publishing allows users to share their fragment arrangements.
+
+### Tables
+
+#### published_joins
+
+```sql
+CREATE TABLE published_joins (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id),
+    local_doc_id TEXT,
+    title TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    join_type TEXT NOT NULL DEFAULT 'physical',
+    fragments_json JSONB NOT NULL,
+    shelfmarks TEXT[] NOT NULL DEFAULT '{}',
+    image_path TEXT,
+    thumbnail_path TEXT,
+    is_published BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Indexes
+CREATE INDEX idx_published_joins_user ON published_joins(user_id);
+CREATE INDEX idx_published_joins_published ON published_joins(is_published, created_at DESC);
+CREATE INDEX idx_published_joins_shelfmarks ON published_joins USING GIN(shelfmarks);
+```
+
+#### published_join_fragments
+
+Fragment index for reverse lookups (find published joins containing a given sys_id).
+
+```sql
+CREATE TABLE published_join_fragments (
+    join_id UUID NOT NULL REFERENCES published_joins(id) ON DELETE CASCADE,
+    sys_id TEXT NOT NULL,
+    shelfmark TEXT NOT NULL
+);
+
+CREATE INDEX idx_pjf_sys_id ON published_join_fragments(sys_id);
+```
+
+### RLS Policies
+
+#### published_joins
+
+```sql
+ALTER TABLE published_joins ENABLE ROW LEVEL SECURITY;
+
+-- SELECT: anyone can read published joins
+CREATE POLICY "Anyone can read published joins"
+ON published_joins FOR SELECT
+USING (is_published = true);
+
+-- SELECT: users can see their own joins (even unpublished)
+CREATE POLICY "Users can read own joins"
+ON published_joins FOR SELECT TO authenticated
+USING (auth.uid() = user_id);
+
+-- INSERT: authenticated users can create joins
+CREATE POLICY "Users can insert own joins"
+ON published_joins FOR INSERT TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+-- UPDATE: users can update their own joins
+CREATE POLICY "Users can update own joins"
+ON published_joins FOR UPDATE TO authenticated
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+
+-- DELETE: users can delete their own joins
+CREATE POLICY "Users can delete own joins"
+ON published_joins FOR DELETE TO authenticated
+USING (auth.uid() = user_id);
+```
+
+#### published_join_fragments
+
+```sql
+ALTER TABLE published_join_fragments ENABLE ROW LEVEL SECURITY;
+
+-- SELECT: anyone can read fragments of published joins
+CREATE POLICY "Anyone can read published join fragments"
+ON published_join_fragments FOR SELECT
+USING (EXISTS (SELECT 1 FROM published_joins pj WHERE pj.id = join_id AND pj.is_published = true));
+
+-- INSERT: users can insert fragments for their own joins
+CREATE POLICY "Users can insert own join fragments"
+ON published_join_fragments FOR INSERT TO authenticated
+WITH CHECK (EXISTS (SELECT 1 FROM published_joins pj WHERE pj.id = join_id AND pj.user_id = auth.uid()));
+
+-- DELETE: users can delete fragments for their own joins
+CREATE POLICY "Users can delete own join fragments"
+ON published_join_fragments FOR DELETE TO authenticated
+USING (EXISTS (SELECT 1 FROM published_joins pj WHERE pj.id = join_id AND pj.user_id = auth.uid()));
+```
+
+### Storage Bucket
+
+**Bucket name:** `puzzle-images` (public read access)
+
+```sql
+-- Storage policies for puzzle-images bucket
+-- Users can upload to their own folder (folder name = auth.uid())
+CREATE POLICY "Users can upload own puzzle images"
+ON storage.objects FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'puzzle-images' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Users can update/overwrite their own images
+CREATE POLICY "Users can update own puzzle images"
+ON storage.objects FOR UPDATE TO authenticated
+USING (bucket_id = 'puzzle-images' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Users can delete their own images
+CREATE POLICY "Users can delete own puzzle images"
+ON storage.objects FOR DELETE TO authenticated
+USING (bucket_id = 'puzzle-images' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Anyone can read puzzle images (public bucket)
+CREATE POLICY "Anyone can read puzzle images"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'puzzle-images');
+```
+
+---
+
 ## Resources
 
 - [Supabase Documentation](https://supabase.com/docs)
