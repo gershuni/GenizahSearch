@@ -2023,6 +2023,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             app.storage.tab['puzzle_state'] = None
         except RuntimeError:
             pass
+        try:
+            _refresh_fragment_select()
+        except NameError:
+            pass  # Not yet created during init
 
     async def check_publish_state():
         """Check if current doc is published (using anon client)."""
@@ -2644,6 +2648,48 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             ui.separator().props('vertical').style('height: 20px')
 
+            # Fragment selector combobox + Browse button
+            fragment_select = ui.select(
+                options={}, value=None
+            ).props('dense dark outlined options-dense').style(
+                'min-width: 180px; max-width: 260px; --q-field-border-color: #666;'
+            ).tooltip(tr('Select fragment'))
+
+            def _refresh_fragment_select():
+                """Rebuild fragment selector options from puzzle_meta."""
+                opts = {}
+                for key, meta in puzzle_meta.items():
+                    sm = meta.get('shelfmark', key.split(',')[0])
+                    folio = meta.get('folio_label', '')
+                    label = f"{sm} / {folio}" if folio else sm
+                    opts[key] = label
+                fragment_select.options = opts
+                fragment_select.update()
+
+            async def _on_fragment_select_change(e):
+                """Select the fragment on the canvas when combo changes."""
+                key = e.value if hasattr(e, 'value') else fragment_select.value
+                if key and key in puzzle_meta:
+                    await ui.run_javascript(f'window.puzzleCanvas.selectByKey("{key}")')
+
+            fragment_select.on('update:model-value', _on_fragment_select_change)
+
+            def _browse_selected_fragment():
+                """Navigate to browse page for the selected fragment."""
+                key = fragment_select.value
+                if not key or key not in puzzle_meta:
+                    ui.notify(tr('Select a fragment first'), type='warning')
+                    return
+                sys_id = puzzle_meta[key].get('sys_id', '')
+                if sys_id:
+                    ui.navigate.to(f'/browse?sys_id={sys_id}')
+
+            ui.button(icon='open_in_new', on_click=_browse_selected_fragment).props(
+                'dense flat dark round size=sm'
+            ).tooltip(tr('Browse this fragment'))
+
+            ui.separator().props('vertical').style('height: 20px')
+
             ui.button(icon='save', on_click=save_join).props(
                 'dense flat dark color=primary round size=sm'
             ).tooltip(tr('Save Puzzle'))
@@ -2805,6 +2851,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         pending_fragment_meta.pop(key, None)
                     app.storage.tab['puzzle_fragments'] = puzzle_meta
                     _prune_saved_state(removed)
+                    _refresh_fragment_select()
                     schedule_auto_save()
             except Exception:
                 pass
@@ -2896,7 +2943,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     except Exception:
                         pass
 
-            # Trigger auto-save after fragment added
+            # Refresh fragment selector and trigger auto-save
+            _refresh_fragment_select()
             schedule_auto_save()
         canvas_wrap.on('puzzle-add-result', on_puzzle_add_result)
 

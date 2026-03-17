@@ -2878,6 +2878,14 @@ TRANSLATIONS = {
     "Failed to load puzzles": "נכשל בטעינת פאזלים",
     "Forked": "הועתק",
     "Puzzle forked as document {}. Open Fragment Puzzle to view.": "הפאזל הועתק כמסמך {}. פתח פאזל קטעים לצפייה.",
+    "Select fragment": "בחר קטע",
+    "Select a fragment first": "בחר קטע תחילה",
+    "Browse this fragment": "עיין בקטע זה",
+    "No puzzles yet": "אין פאזלים עדיין",
+    "Login to see your puzzles": "יש להתחבר כדי לצפות בפאזלים שלך",
+    "Puzzle join hidden": "צירוף הפאזל הוסתר",
+    "Failed to hide: {}": "ההסתרה נכשלה: {}",
+    "Hide (admin)": "הסתר (מנהל)",
 }
 
 # Hebrew library display names (keyed by library_code)

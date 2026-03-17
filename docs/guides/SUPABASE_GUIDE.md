@@ -758,6 +758,12 @@ WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can delete own joins"
 ON published_joins FOR DELETE TO authenticated
 USING (auth.uid() = user_id);
+
+-- UPDATE: admins can update any published join (for soft-delete/hide)
+CREATE POLICY "Admins can update any published join"
+ON published_joins FOR UPDATE TO authenticated
+USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'))
+WITH CHECK (true);
 ```
 
 #### published_join_fragments

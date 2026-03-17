@@ -224,7 +224,11 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
                     ui.label(tr('Fragments')).classes('text-xs font-medium').style('color: var(--text-tertiary);')
                     with ui.row().classes('flex-wrap gap-2'):
                         for sm in shelfmarks:
-                            ui.badge(sm).props('color=cyan outline').classes('text-xs font-mono')
+                            def _browse_detail_sm(s=sm):
+                                dlg.close()
+                                ui.navigate.to(f'/browse?shelfmark={s}')
+                            with ui.element('span').on('click', _browse_detail_sm).style('cursor: pointer;'):
+                                ui.badge(sm).props('color=cyan outline').classes('text-xs font-mono')
 
                 # Action buttons
                 with ui.row().classes('w-full items-center gap-2 mt-3'):
@@ -1011,7 +1015,10 @@ def create_feed_item(item: dict, on_refresh=None):
                                 ui.label(tr('Fragments')).classes('text-xs font-medium').style('color: var(--text-tertiary);')
                                 with ui.row().classes('flex-wrap gap-2'):
                                     for sm in pj_shelfmarks:
-                                        ui.badge(sm).props('color=cyan outline').classes('text-xs font-mono')
+                                        def _browse_sm(s=sm):
+                                            ui.navigate.to(f'/browse?shelfmark={s}')
+                                        with ui.element('span').on('click', _browse_sm).style('cursor: pointer;'):
+                                            ui.badge(sm).props('color=cyan outline').classes('text-xs font-mono')
 
                             # Action buttons: View Details / Open in Puzzle
                             with ui.row().classes('w-full items-center gap-2 mt-3'):
@@ -1028,6 +1035,23 @@ def create_feed_item(item: dict, on_refresh=None):
                                     await _fork_puzzle_join_and_navigate(jid)
 
                                 ui.button(tr('Open in Puzzle'), icon='extension', on_click=fork_and_open).props('outlined dense color=cyan')
+
+                                # Admin hide button for puzzle joins
+                                if is_admin:
+                                    async def do_hide_puzzle_join(jid=pj_raw_id):
+                                        try:
+                                            from web.supabase_client import get_user_client
+                                            client = get_user_client()
+                                            client.table('published_joins').update(
+                                                {'is_published': False}
+                                            ).eq('id', jid).execute()
+                                            ui.notify(tr('Puzzle join hidden'), type='positive')
+                                            if on_refresh:
+                                                on_refresh()
+                                        except Exception as ex:
+                                            ui.notify(tr('Failed to hide: {}').format(str(ex)), type='negative')
+
+                                    ui.button(icon='visibility_off', on_click=do_hide_puzzle_join).props('flat round dense size=sm').tooltip(tr('Hide (admin)'))
                         else:
                             # Full content for non-corrections with translate button
                             create_translatable_content(

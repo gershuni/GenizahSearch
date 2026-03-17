@@ -3320,9 +3320,17 @@ class PuzzleCanvasWindow(QMainWindow):
         # Fragment dropdown — shows shelfmark for each fragment on canvas
         self.combo_fragments = QComboBox()
         self.combo_fragments.setMinimumWidth(200)
+        self.combo_fragments.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.combo_fragments.setPlaceholderText(tr("Fragments on canvas"))
         self.combo_fragments.currentIndexChanged.connect(self._on_fragment_combo_changed)
         row1.addWidget(self.combo_fragments)
+
+        # Browse button — opens the selected fragment in the browse tab
+        btn_browse_frag = QPushButton("📖")
+        btn_browse_frag.setFixedWidth(28)
+        btn_browse_frag.setToolTip(tr("Browse this fragment"))
+        btn_browse_frag.clicked.connect(self._browse_selected_fragment)
+        row1.addWidget(btn_browse_frag)
 
         row1.addWidget(QLabel("|"))
 
@@ -4354,6 +4362,26 @@ class PuzzleCanvasWindow(QMainWindow):
             display = f"{label} / {pf.folio_label}"
             self.combo_fragments.addItem(display, item_key)
         self.combo_fragments.blockSignals(False)
+
+    def _browse_selected_fragment(self):
+        """Open the selected fragment in the browse tab."""
+        index = self.combo_fragments.currentIndex()
+        if index < 0:
+            return
+        item_key = self.combo_fragments.itemData(index)
+        if not item_key or item_key not in self._fragment_items:
+            return
+        pf = self._fragment_items[item_key].puzzle_frag
+        sys_id = pf.sys_id
+        shelfmark = pf.shelfmark
+        # Walk up to GenizahGUI parent
+        parent = self.parent()
+        while parent and not hasattr(parent, 'navigate_to_item'):
+            parent = parent.parent()
+        if parent and hasattr(parent, 'navigate_to_item'):
+            parent.navigate_to_item(sys_id, shelfmark)
+        else:
+            QMessageBox.information(self, tr("Browse"), f"{shelfmark} ({sys_id})")
 
     def _on_fragment_combo_changed(self, index):
         """Select the fragment chosen in the dropdown."""
@@ -15971,11 +15999,19 @@ class GenizahGUI(QMainWindow):
         fragments_info = []
         for idx, frag in enumerate(fragments):
             frag_sid = shelfmark_to_docid.get(frag.upper())
-            # Fallback: use _shelf_to_sys map
+            # Fallback 1: use _shelf_to_sys map
             if not frag_sid and self._shelf_to_sys:
                 norm = self._normalize_shelfmark(frag) if hasattr(self, '_normalize_shelfmark') else None
                 if norm:
                     frag_sid = self._shelf_to_sys.get(norm)
+            # Fallback 2: resolve via meta_mgr
+            if not frag_sid and self.meta_mgr:
+                try:
+                    result = self.meta_mgr.resolve_system_by_shelfmark(frag)
+                    if result:
+                        frag_sid = result.get('sys_id')
+                except Exception:
+                    pass
             if frag_sid:
                 fragments_info.append({
                     'sys_id': frag_sid,
