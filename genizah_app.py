@@ -4474,8 +4474,10 @@ class PuzzleCanvasWindow(QMainWindow):
             title = doc.get('title', '') or 'Untitled'
             updated = doc.get('updated_at', '')[:10]
             shelfmarks = doc.get('shelfmarks_summary', '')
-            # Only show shelfmarks if not already contained in title
-            if shelfmarks and shelfmarks.strip() not in title:
+            # Only show shelfmarks if not already covered by title
+            sm_parts = [s.strip() for s in shelfmarks.split('+')]
+            shelfmarks_in_title = all(p in title for p in sm_parts if p)
+            if shelfmarks and not shelfmarks_in_title:
                 item.setText(f"{title}\n{shelfmarks}\n{updated}")
             else:
                 item.setText(f"{title}\n{updated}")

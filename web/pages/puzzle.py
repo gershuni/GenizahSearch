@@ -1872,8 +1872,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             ui.label(title).classes('text-body2 ellipsis').style(
                                 'color: var(--text-primary); max-width: 160px; font-weight: 500;'
                             )
-                            # Only show shelfmarks if not already contained in title
-                            if shelfmarks and shelfmarks.strip() not in title:
+                            # Only show shelfmarks if not already covered by title
+                            sm_parts = [s.strip() for s in shelfmarks.split('+')]
+                            shelfmarks_in_title = shelfmarks and all(p in title for p in sm_parts if p)
+                            if shelfmarks and not shelfmarks_in_title:
                                 ui.label(shelfmarks).classes('text-caption ellipsis').style(
                                     'color: var(--text-tertiary); max-width: 160px; font-size: 10px; font-family: monospace;'
                                 )
