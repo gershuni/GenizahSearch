@@ -151,7 +151,7 @@ Milestone: v7.0.0 Fragment Puzzle
 Phase: 49 (3 of 6 in milestone) -- IN PROGRESS
 Plan: 1 of 2 complete
 Status: Completed 49-01-PLAN.md (puzzle page + API endpoints)
-Last activity: 2026-03-16 -- Completed 49-01 web puzzle page with Fabric.js canvas, API endpoints, nav integration
+Last activity: 2026-03-17 - Completed quick task 260317-gsb: Fix desktop corrections showing anonymous for all users
 
 Progress: [████░░░░░░] 33% (2 of 6 phases: 47, 48 complete)
 
@@ -225,6 +225,7 @@ Recent decisions affecting current work:
 | Phase 50 P02 | 3min | 1 tasks | 1 files |
 | Phase 50 P03 | 5min | 2 tasks | 2 files |
 | 260317-aru | Fix background removal for CUL blue conservation mat images with border frames | 2026-03-17 | pending | [260317-aru-fix-background-removal-for-cul-blue-cons](./quick/260317-aru-fix-background-removal-for-cul-blue-cons/) |
+| 260317-gsb | Fix desktop corrections showing anonymous for all users | 2026-03-17 | 78ce4c41 | [260317-gsb-fix-desktop-corrections-showing-anonymou](./quick/260317-gsb-fix-desktop-corrections-showing-anonymou/) |
 
 ## Session Continuity
 
