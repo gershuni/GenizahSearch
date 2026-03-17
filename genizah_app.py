@@ -3302,13 +3302,6 @@ class PuzzleCanvasWindow(QMainWindow):
 
         row1.addWidget(QLabel("|"))
 
-        # Selection info
-        self.lbl_selected_info = QLabel(tr("No selection"))
-        self.lbl_selected_info.setMinimumWidth(120)
-        row1.addWidget(self.lbl_selected_info)
-
-        row1.addWidget(QLabel("|"))
-
         btn_save = QPushButton("💾")
         btn_save.setFixedWidth(28)
         btn_save.setToolTip(tr("Save Puzzle"))
@@ -3900,7 +3893,14 @@ class PuzzleCanvasWindow(QMainWindow):
             frag = selected[0]
             pf = frag.puzzle_frag
             label = pf.shelfmark or pf.sys_id
-            self.lbl_selected_info.setText(f"{label} / {pf.folio_label}")
+            # Sync combo to selected fragment
+            combo_text = f"{label} ({pf.folio_label})"
+            for i in range(self.combo_fragments.count()):
+                if self.combo_fragments.itemText(i) == combo_text:
+                    self.combo_fragments.blockSignals(True)
+                    self.combo_fragments.setCurrentIndex(i)
+                    self.combo_fragments.blockSignals(False)
+                    break
 
             # Sync sliders without triggering callbacks
             self.slider_threshold.blockSignals(True)
@@ -3914,9 +3914,11 @@ class PuzzleCanvasWindow(QMainWindow):
             self.slider_scale.blockSignals(False)
             self.lbl_scale_val.setText(f"{int(pf.scale * 100)}%")
         elif len(selected) > 1:
-            self.lbl_selected_info.setText(tr("{} selected").format(len(selected)))
+            pass  # multiple selection — combo stays as-is
         else:
-            self.lbl_selected_info.setText(tr("No selection"))
+            self.combo_fragments.blockSignals(True)
+            self.combo_fragments.setCurrentIndex(-1)
+            self.combo_fragments.blockSignals(False)
 
     # ── Toolbar actions ──
 
