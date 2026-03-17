@@ -4923,7 +4923,14 @@ class PuzzleCanvasWindow(QMainWindow):
                 self._is_published = True
                 self.btn_publish.setToolTip(tr("Published -- click to unpublish"))
                 self.btn_publish.setStyleSheet("background-color: #4caf50; color: white; border-radius: 4px;")
-                QMessageBox.information(self, tr("Published"), tr("Your puzzle join is now visible to the community"))
+                share_url = f"https://genizahsearch.com/puzzle?doc={self._current_doc_id}"
+                QApplication.clipboard().setText(share_url)
+                QMessageBox.information(
+                    self, tr("Published"),
+                    f"{tr('Your puzzle join is now visible to the community')}\n\n"
+                    f"{share_url}\n\n"
+                    f"{tr('Link copied to clipboard')}"
+                )
         else:
             QMessageBox.warning(self, tr("Error"), message)
 

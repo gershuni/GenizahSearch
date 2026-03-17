@@ -1733,15 +1733,23 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
     async def build_fragments_list():
         """Build PuzzleFragment list from current canvas state."""
-        state_json = await ui.run_javascript(
-            'window.puzzleCanvas.getState()', timeout=5.0
-        )
-        state_data = json.loads(state_json) if state_json else {}
+        try:
+            state_json = await ui.run_javascript(
+                'window.puzzleCanvas.getState()', timeout=5.0
+            )
+            state_data = json.loads(state_json) if state_json else {}
+        except TimeoutError:
+            logger.warning("build_fragments_list: getState() JS timed out, using empty state")
+            state_data = {}
         # Get crop state from per-object Fabric.js properties
-        crop_json = await ui.run_javascript(
-            'window.puzzleCanvas.getCropState()', timeout=5.0
-        )
-        crop_data = json.loads(crop_json) if crop_json else {}
+        try:
+            crop_json = await ui.run_javascript(
+                'window.puzzleCanvas.getCropState()', timeout=5.0
+            )
+            crop_data = json.loads(crop_json) if crop_json else {}
+        except TimeoutError:
+            logger.warning("build_fragments_list: getCropState() JS timed out, using empty crop data")
+            crop_data = {}
 
         fragments = []
         for key, meta in puzzle_meta.items():

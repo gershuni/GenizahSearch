@@ -860,6 +860,7 @@ TRANSLATIONS = {
     "Detailed": "מפורט",
     "With Link": "עם קישור",
     "Info copied to clipboard.": "המידע הועתק ללוח.",
+    "Link copied to clipboard": "הקישור הועתק ללוח",
     "Item Details": "פרטי הפריט",
     "Preview": "תצוגה מקדימה",
     "Select an item to preview": "בחר פריט להצגה מקדימה",

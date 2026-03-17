@@ -393,3 +393,68 @@ def test_resolve_author_profiles():
     assert result['u1'] == 'Alice'
     assert result['u2'] == 'Bob'
     assert result['u3'] == 'Anonymous'  # not found = Anonymous
+
+
+# ── Test 10: publish_join fails on null composite ─────────────────
+
+def test_publish_join_fails_on_null_composite():
+    """publish_join() raises ValueError when compose_puzzle_export returns None."""
+    from shared.puzzle_publish_service import publish_join
+
+    client = _mock_client()
+    doc = _make_doc()
+    user_id = 'user-123'
+    image_svc = _make_image_service()
+
+    with patch('shared.puzzle_publish_service.compose_puzzle_export', return_value=None):
+        with pytest.raises(ValueError, match="composite image generation failed"):
+            publish_join(client, user_id, doc, image_svc)
+
+
+# ── Test 11: fork returns None when detail missing ────────────────
+
+def test_fork_returns_none_when_detail_missing():
+    """fork_published_join() returns None when the published join no longer exists."""
+    from shared.puzzle_publish_service import fork_published_join
+
+    client = _mock_client()
+    # published_joins table returns empty data (join was unpublished/deleted)
+    pj_tbl = MagicMock()
+    pj_response = MagicMock()
+    pj_response.data = []
+    for method in ['select', 'eq']:
+        getattr(pj_tbl, method).return_value = pj_tbl
+    pj_tbl.execute.return_value = pj_response
+    client._table_mocks['published_joins'] = pj_tbl
+    client.table.side_effect = lambda name: client._table_mocks.get(name, MagicMock())
+
+    puzzle_service = MagicMock()
+
+    result = fork_published_join(client, 'nonexistent-join', puzzle_service)
+
+    assert result is None
+    # save_document should never be called since the join was not found
+    puzzle_service.save_document.assert_not_called()
+
+
+# ── Test 12: resolve_author_profiles handles query exception ──────
+
+def test_resolve_author_profiles_handles_query_exception():
+    """resolve_author_profiles() returns empty dict (not crash) when the profiles query raises."""
+    from shared.puzzle_publish_service import resolve_author_profiles
+
+    client = _mock_client()
+    # Make the profiles table query raise an exception
+    profiles_tbl = MagicMock()
+    profiles_tbl.select.return_value = profiles_tbl
+    profiles_tbl.in_.return_value = profiles_tbl
+    profiles_tbl.execute.side_effect = Exception("connection timeout")
+    client._table_mocks['profiles'] = profiles_tbl
+    client.table.side_effect = lambda name: client._table_mocks.get(name, MagicMock())
+
+    result = resolve_author_profiles(client, ['u1', 'u2'])
+
+    # Should not crash; returns Anonymous for all requested IDs
+    assert isinstance(result, dict)
+    assert result['u1'] == 'Anonymous'
+    assert result['u2'] == 'Anonymous'

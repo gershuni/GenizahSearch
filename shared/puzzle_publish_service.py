@@ -79,48 +79,57 @@ def publish_join(client, user_id: str, doc: PuzzleDocument, image_service) -> st
     thumbnail_path = f'{user_id}/{doc.id}_thumb.png'
 
     bucket = client.storage.from_(STORAGE_BUCKET)
-    bucket.upload(
-        image_path, png_bytes,
-        file_options={'content-type': 'image/png', 'upsert': 'true'}
-    )
-    bucket.upload(
-        thumbnail_path, thumb_bytes,
-        file_options={'content-type': 'image/png', 'upsert': 'true'}
-    )
 
-    # Extract unique shelfmarks (preserve order)
-    shelfmarks = list(dict.fromkeys(
-        f.shelfmark for f in doc.fragments if f.shelfmark
-    ))
+    try:
+        bucket.upload(
+            image_path, png_bytes,
+            file_options={'content-type': 'image/png', 'upsert': 'true'}
+        )
+        bucket.upload(
+            thumbnail_path, thumb_bytes,
+            file_options={'content-type': 'image/png', 'upsert': 'true'}
+        )
 
-    # Upsert metadata row
-    fragments_json = json.loads(doc.to_json())
-    row_data = {
-        'id': doc.id,
-        'user_id': user_id,
-        'local_doc_id': doc.id,
-        'title': doc.title,
-        'notes': doc.notes,
-        'join_type': doc.join_type,
-        'fragments_json': fragments_json,
-        'shelfmarks': shelfmarks,
-        'image_path': image_path,
-        'thumbnail_path': thumbnail_path,
-        'is_published': True,
-    }
-    client.table('published_joins').upsert(row_data).execute()
+        # Extract unique shelfmarks (preserve order)
+        shelfmarks = list(dict.fromkeys(
+            f.shelfmark for f in doc.fragments if f.shelfmark
+        ))
 
-    # Rebuild fragment index: delete old, insert new
-    client.table('published_join_fragments').delete().eq(
-        'join_id', doc.id
-    ).execute()
+        # Upsert metadata row
+        fragments_json = json.loads(doc.to_json())
+        row_data = {
+            'id': doc.id,
+            'user_id': user_id,
+            'local_doc_id': doc.id,
+            'title': doc.title,
+            'notes': doc.notes,
+            'join_type': doc.join_type,
+            'fragments_json': fragments_json,
+            'shelfmarks': shelfmarks,
+            'image_path': image_path,
+            'thumbnail_path': thumbnail_path,
+            'is_published': True,
+        }
+        client.table('published_joins').upsert(row_data).execute()
 
-    frag_rows = [
-        {'join_id': doc.id, 'sys_id': f.sys_id, 'shelfmark': f.shelfmark}
-        for f in doc.fragments
-    ]
-    if frag_rows:
-        client.table('published_join_fragments').insert(frag_rows).execute()
+        # Rebuild fragment index: delete old, insert new
+        client.table('published_join_fragments').delete().eq(
+            'join_id', doc.id
+        ).execute()
+
+        frag_rows = [
+            {'join_id': doc.id, 'sys_id': f.sys_id, 'shelfmark': f.shelfmark}
+            for f in doc.fragments
+        ]
+        if frag_rows:
+            client.table('published_join_fragments').insert(frag_rows).execute()
+    except Exception:
+        # Clean up any uploaded files to avoid orphans
+        try:
+            bucket.remove([image_path, thumbnail_path])
+        except Exception:
+            pass
+        raise
 
     return doc.id
 
