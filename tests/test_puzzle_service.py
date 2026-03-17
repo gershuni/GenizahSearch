@@ -43,7 +43,7 @@ class TestSchemaCreation:
         c = s.connect(str(tmp_path / "joins.db"))
         ver = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
         c.close()
-        assert ver[0] == '1'
+        assert ver[0] == '2'
 
 
 class TestCRUD:

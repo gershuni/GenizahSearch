@@ -4333,6 +4333,7 @@ class PuzzleCanvasWindow(QMainWindow):
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
             thread.start()
+        self._refresh_fragment_combo()
         self._schedule_auto_save()
 
     def _change_z_order(self, direction):

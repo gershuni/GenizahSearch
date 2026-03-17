@@ -430,8 +430,8 @@ Share your puzzle join reconstructions with the research community and browse jo
 
 **Browsing Published Joins:**
 - The **Discoveries Center** shows published puzzle joins from all users, displayed with thumbnail previews
-- Use the **All Puzzles** tab to browse all community puzzle joins
-- Use the **My Puzzles** tab to see and manage only your own published joins
+- Use the type filter to show only **Puzzle Joins** in the feed
+- Click **View Details** to see full-resolution image, notes, and fragment list
 
 **Opening a Published Join:**
 - Click **Open in Puzzle** on any published join to fork a copy into your local workspace
@@ -918,8 +918,8 @@ def _create_hebrew_content():
 
 **עיון בצירופים שהתפרסמו:**
 - **מרכז התגליות** מציג צירופי פאזל שפורסמו על ידי כל המשתמשים, עם תמונות ממוזערות
-- השתמשו בלשונית **כל הפאזלים** לעיון בכל צירופי הקהילה
-- השתמשו בלשונית **הפאזלים שלי** לצפייה וניהול הצירופים שפרסמתם
+- השתמשו בסינון הסוג כדי להציג רק **צירופי פאזל** בפיד
+- לחצו על **הצג פרטים** לצפייה בתמונה ברזולוציה מלאה, הערות ורשימת קטעים
 
 **פתיחת צירוף מפורסם:**
 - לחצו על **פתח בפאזל** בכל צירוף מפורסם כדי ליצור עותק מקומי בסביבת העבודה שלכם

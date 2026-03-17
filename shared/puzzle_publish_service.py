@@ -58,21 +58,21 @@ def publish_join(client, user_id: str, doc: PuzzleDocument, image_service) -> st
         doc.fragments, image_service, export_size=EXPORT_SIZE
     )
 
-    # Generate thumbnail from composite
-    thumb_bytes = b''
-    png_bytes = b''
-    if composite is not None:
-        # Full-res PNG
-        buf = io.BytesIO()
-        composite.save(buf, format='PNG')
-        png_bytes = buf.getvalue()
+    # Fail fast if composite generation failed (no renderable fragments)
+    if composite is None:
+        raise ValueError("Cannot publish: composite image generation failed (no renderable fragments)")
 
-        # Thumbnail
-        thumb = composite.copy()
-        thumb.thumbnail((THUMBNAIL_SIZE, THUMBNAIL_SIZE), Image.LANCZOS)
-        tbuf = io.BytesIO()
-        thumb.save(tbuf, format='PNG')
-        thumb_bytes = tbuf.getvalue()
+    # Full-res PNG
+    buf = io.BytesIO()
+    composite.save(buf, format='PNG')
+    png_bytes = buf.getvalue()
+
+    # Thumbnail
+    thumb = composite.copy()
+    thumb.thumbnail((THUMBNAIL_SIZE, THUMBNAIL_SIZE), Image.LANCZOS)
+    tbuf = io.BytesIO()
+    thumb.save(tbuf, format='PNG')
+    thumb_bytes = tbuf.getvalue()
 
     # Upload to storage
     image_path = f'{user_id}/{doc.id}.png'

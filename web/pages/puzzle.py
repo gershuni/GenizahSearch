@@ -2619,6 +2619,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             puzzle_meta[key]['fl_id'] = new_fl_id
                             puzzle_meta[key]['folio_label'] = label or ''
                             app.storage.tab['puzzle_fragments'] = puzzle_meta
+                            _refresh_fragment_select()
 
             async def on_folio_next():
                 """Navigate the selected fragment to the next folio page."""
@@ -2653,6 +2654,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             puzzle_meta[key]['fl_id'] = new_fl_id
                             puzzle_meta[key]['folio_label'] = label or ''
                             app.storage.tab['puzzle_fragments'] = puzzle_meta
+                            _refresh_fragment_select()
 
             ui.button('<', on_click=on_folio_prev).props(
                 'dense flat dark round size=sm'
