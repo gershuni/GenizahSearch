@@ -24,8 +24,6 @@ from shared.background_removal import remove_background, DEFAULT_THRESHOLD
 logger = logging.getLogger(__name__)
 
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
-NLI_IIIF_PROXY = "https://genizahsearch.com/iiif-proxy"  # Cloudflare Worker proxy
-PUZZLE_IIIF_MODE = os.environ.get("PUZZLE_IIIF_MODE", "auto")  # auto | direct | proxy
 
 # Size presets (width in pixels)
 SIZE_PRESETS = {
@@ -151,44 +149,33 @@ class PuzzleImageService:
             f.unlink(missing_ok=True)
 
     def _fetch_iiif_image(self, fl_id: str, size: int) -> Optional[bytes]:
-        """Fetch image from NLI IIIF, with Cloudflare proxy fallback.
+        """Fetch image from NLI IIIF (direct).
 
-        PUZZLE_IIIF_MODE controls the fetch strategy:
-          - 'proxy': Only try Cloudflare Worker proxy (recommended for production)
-          - 'direct': Only try direct NLI (desktop/local dev)
-          - 'auto': Try direct first, then proxy fallback
+        Works from desktop/local dev where NLI is reachable. On production
+        servers where NLI blocks datacenter IPs, this returns None and the
+        web client falls back to the localhost helper service.
         """
         digits = re.sub(r"\D", "", str(fl_id))
         if not digits:
             return None
 
-        if PUZZLE_IIIF_MODE == "proxy":
-            base_urls = [NLI_IIIF_PROXY]
-        elif PUZZLE_IIIF_MODE == "direct":
-            base_urls = [NLI_IIIF_BASE]
-        else:  # auto
-            base_urls = [NLI_IIIF_BASE, NLI_IIIF_PROXY]
-
+        url = f"{NLI_IIIF_BASE}/FL{digits}/full/{size},/0/default.jpg"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://www.nli.org.il/',
         }
 
-        for base_url in base_urls:
-            url = f"{base_url}/FL{digits}/full/{size},/0/default.jpg"
-            try:
-                resp = requests.get(url, headers=headers, timeout=30)
-                if resp.status_code == 200 and len(resp.content) > 100:
-                    logger.info(f"IIIF fetch OK for {fl_id} via {base_url}")
-                    return resp.content
-                else:
-                    logger.warning(f"IIIF fetch non-200 or empty for {fl_id} via {base_url}: "
-                                   f"status={resp.status_code}, size={len(resp.content)}")
-            except Exception as e:
-                logger.warning(f"IIIF fetch failed for {fl_id} via {base_url}: {e}")
-                continue
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 200 and len(resp.content) > 100:
+                logger.info(f"IIIF fetch OK for {fl_id}")
+                return resp.content
+            else:
+                logger.warning(f"IIIF fetch non-200 or empty for {fl_id}: "
+                               f"status={resp.status_code}, size={len(resp.content)}")
+        except Exception as e:
+            logger.warning(f"IIIF fetch failed for {fl_id}: {e}")
 
-        logger.error(f"All IIIF sources failed for {fl_id}")
         return None
 
 

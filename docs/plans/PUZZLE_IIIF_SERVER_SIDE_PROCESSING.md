@@ -274,8 +274,11 @@ def iiif_pipe(fl_id: str, size: int = 800):
 ### Phase 1 — TESTED AND RULED OUT
 **Option E**: Tested on 2026-03-17. Server curl with full browser headers returns HTTP 500 (XML error response). NLI blocks by IP range, not by headers. **This option does not work.**
 
-### Phase 2 — NEXT ACTION (Cloudflare Worker)
-**Option F (Cloudflare Worker)**: Set up a Cloudflare Worker that proxies NLI IIIF requests. The Worker runs on Cloudflare's edge network (not AWS), so NLI sees a CDN IP, not the blocked EC2 IP. See the detailed implementation plan below.
+### Phase 2 — TESTED AND RULED OUT
+**Option F (Cloudflare Worker)**: Tested on 2026-03-17. Cloudflare Worker deployed and routed, but NLI returned upstream HTTP 500 from Cloudflare edge IPs as well. NLI blocks datacenter/CDN-class IPs broadly, not just AWS. **This option does not work.** Do not deploy `PUZZLE_IIIF_MODE=proxy`.
+
+### Phase 2a — IMPLEMENTED (Localhost Helper)
+**Localhost helper service**: A small HTTP service running on the user's own machine (`http://127.0.0.1:43111`) that reuses the existing Python puzzle image pipeline. The user's residential/university IP can reach NLI. The web page falls back to this helper when server-side fetch fails. Opt-in via `?local_helper=1` URL param or `localStorage.puzzleLocalHelperEnabled = '1'`. See `scripts/puzzle_local_helper.py`.
 
 ### Phase 3 (Long-term — 2-4 days)
 **Option D (WebAssembly)**: Port bg removal to WASM. Combined with the Cloudflare proxy (for CORS), this eliminates server-side processing entirely. The puzzle becomes fully client-side.
@@ -336,6 +339,13 @@ cache/puzzle/
 ### Overview
 
 Deploy a Cloudflare Worker at `genizahsearch.com/iiif-proxy/` that proxies NLI IIIF image requests. The Worker runs on Cloudflare's global edge network, so NLI sees a Cloudflare IP (not the blocked AWS EC2 IP). The Worker adds CORS headers so both server-side `requests.get()` and browser-side `fetch()` work.
+
+### Next-Agent Guardrails
+
+1. Make the Worker-backed server fetch the normal production path. Do not keep the current browser-upload flow as the main architecture if the Worker restores server-side fetching.
+2. Update all three puzzle image load paths together: `addFragment`, `_reloadFragment`, and `navigateFolio`.
+3. If AWS->NLI is known-broken, avoid paying a failing direct fetch on every image forever. Use an environment flag or short circuit-breaker so production can go straight to the proxy.
+4. Treat `POST /api/puzzle_process` as temporary unless there is a remaining real use case. If kept, harden it before relying on it.
 
 ### Architecture
 
@@ -449,11 +459,12 @@ fetch('https://genizahsearch.com/iiif-proxy/FL990051753360205171/full/800,/0/def
 
 **File: `shared/puzzle_image_service.py`**
 
-Change `_fetch_iiif_image` to use the proxy when the direct fetch fails:
+Change `_fetch_iiif_image` to use the proxy when the direct fetch fails. Prefer making the order configurable so production can skip the known-broken direct fetch after verification:
 
 ```python
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
 NLI_IIIF_PROXY = "https://genizahsearch.com/iiif-proxy"  # Cloudflare Worker
+PUZZLE_IIIF_MODE = os.environ.get("PUZZLE_IIIF_MODE", "auto")  # auto | direct | proxy
 
 def _fetch_iiif_image(self, fl_id: str, size: int) -> Optional[bytes]:
     """Fetch image from NLI IIIF, with Cloudflare proxy fallback."""
@@ -461,8 +472,14 @@ def _fetch_iiif_image(self, fl_id: str, size: int) -> Optional[bytes]:
     if not digits:
         return None
 
-    # Try direct first (works locally / on allowed IPs)
-    for base_url in [NLI_IIIF_BASE, NLI_IIIF_PROXY]:
+    if PUZZLE_IIIF_MODE == "proxy":
+        base_urls = [NLI_IIIF_PROXY]
+    elif PUZZLE_IIIF_MODE == "direct":
+        base_urls = [NLI_IIIF_BASE]
+    else:
+        base_urls = [NLI_IIIF_BASE, NLI_IIIF_PROXY]
+
+    for base_url in base_urls:
         url = f"{base_url}/FL{digits}/full/{size},/0/default.jpg"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -485,13 +502,40 @@ This way:
 - Production: direct NLI returns 500, falls back to proxy → works
 - Desktop app: uses its own fetch (unaffected)
 
-### Step 5: Remove JS Fallback (Optional Cleanup)
+Recommended production setting after validation:
 
-Once the server can fetch via proxy, the `<img>` IIIF fallback in `addFragment`/`_reloadFragment`/`navigateFolio` becomes unnecessary. You can simplify back to server-only loading. But keeping it as a safety net is also fine.
+```bash
+export PUZZLE_IIIF_MODE=proxy
+```
 
-### Step 6: Update Web JS to Use Proxy for Direct Loads (Optional)
+In production, the goal is to skip the known-broken AWS -> NLI fetch entirely and go straight to Cloudflare. Local dev can still use `auto` or `direct`.
 
-If you want bg removal to work even without the server processing step (e.g., for the `fetch()` + POST flow), update the JS fallback to use the proxy URL instead of NLI directly:
+### Step 5: Update All Puzzle Load Paths Together
+
+Once the server can fetch via proxy, the browser should again prefer `/api/puzzle_image` as the normal path. Do not patch only `addFragment` and `_reloadFragment`; `navigateFolio` must be updated in the same pass.
+
+Required touch points:
+
+- `web/pages/puzzle.py` `addFragment`
+- `web/pages/puzzle.py` `_reloadFragment`
+- `web/pages/puzzle.py` `navigateFolio`
+
+The easy regression to miss is folio navigation: initial fragment load can work while prev/next folio still fails in production.
+
+### Step 6: Simplify or Harden `/api/puzzle_process`
+
+If the Worker restores server-side image fetching reliably, the browser `fetch()` -> `POST` raw bytes -> server process flow should no longer be the normal production path.
+
+Two acceptable outcomes:
+
+1. Remove `/api/puzzle_process` from the primary path and keep it only as a temporary fallback/diagnostic tool.
+2. Keep it, but harden it before relying on it:
+   - limit request size
+   - validate content type
+   - avoid caching arbitrary caller-supplied bytes without a provenance check
+   - consider binding the upload to a server-issued token/nonced miss instead of trusting query params alone
+
+If a browser-side fallback is still needed, update the JS fallback to use the proxy URL instead of NLI directly:
 
 ```javascript
 // In addFragment onerror:
@@ -503,7 +547,11 @@ fetch(iiifUrl).then(r => r.blob()).then(blob => {
 });
 ```
 
-This is the best of both worlds: the Worker provides CORS-safe same-origin images, and the server still does bg removal.
+Preferred steady state:
+
+```text
+Browser -> /api/puzzle_image -> server fetches via Worker -> bg removal -> cache -> browser
+```
 
 ### Cost & Limits
 
@@ -514,13 +562,36 @@ This is the best of both worlds: the Worker provides CORS-safe same-origin image
 
 ### Security Considerations
 
+- Validate the size segment too (`400`, `800`, `1200`, `2000`) instead of proxying arbitrary IIIF path variants.
+- If `/api/puzzle_process` remains enabled, it needs separate hardening; the Worker does not fix that endpoint's trust boundary.
+
 - The Worker only proxies paths starting with `FL` followed by digits — not an open proxy
 - Rate limiting can be added via Cloudflare's built-in rate limiting rules
 - The Worker doesn't store or process data — pure pass-through with CORS headers
 
 ### Rollback
 
-If the Worker has issues, simply remove the route in Cloudflare Dashboard. The server falls back to the direct `<img>` loading (current degraded state). No code changes needed for rollback.
+If the Worker has issues:
+
+1. Remove or disable the Cloudflare route
+2. Set `PUZZLE_IIIF_MODE=direct` or revert the server fetch change
+3. Fall back to the current degraded raw-image behavior if necessary
+
+Note: if the code is changed to depend on the Worker path in production, removing the route alone is not a complete rollback.
+
+### Suggested Implementation Order
+
+1. Deploy and verify the Worker with `curl` from the server and `fetch()` from the browser
+2. Update `shared/puzzle_image_service.py` to support proxy mode
+3. Set production to `PUZZLE_IIIF_MODE=proxy`
+4. Update `web/pages/puzzle.py` so `addFragment`, `_reloadFragment`, and `navigateFolio` all use the same image-loading strategy
+5. Verify:
+   - first fragment load
+   - threshold reload
+   - processed/original toggle
+   - prev/next folio navigation
+   - second load hits cache
+6. Remove or harden `/api/puzzle_process`
 
 ---
 

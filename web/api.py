@@ -704,9 +704,9 @@ def init_api_routes():
     def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800,
                      processed: bool = True, is_cul: bool = False):
         """Serve processed/original fragment image for puzzle canvas.
-        Tries server-side IIIF fetch first (works on desktop/local).
-        Falls back to 404 if IIIF blocks the server IP — client should
-        use POST /api/puzzle_process with client-fetched bytes instead.
+        Tries server-side IIIF fetch (works on desktop/local dev).
+        Returns 404 if NLI blocks the server IP — the browser JS then
+        falls back to the localhost helper service for bg removal.
         """
         from shared.puzzle_image_service import get_puzzle_image_service
         service = get_puzzle_image_service()
@@ -726,10 +726,9 @@ def init_api_routes():
     @app.post('/api/puzzle_process')
     async def puzzle_process(request: Request):
         """Process client-fetched image bytes with background removal.
-        This endpoint is a fallback for when server-side fetch via proxy also fails.
-        Primary path is GET /api/puzzle_image which now uses Cloudflare proxy.
-        Client fetches the IIIF image in the browser, POSTs raw bytes here.
-        Server applies bg removal, caches, and returns processed image.
+        Fallback endpoint: client fetches IIIF image in the browser, POSTs
+        raw bytes here for server-side bg removal + caching.
+        Not the primary path — prefer GET /api/puzzle_image or localhost helper.
         """
         import re as _re
         from shared.puzzle_image_service import get_puzzle_image_service

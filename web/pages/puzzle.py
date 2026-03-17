@@ -46,6 +46,9 @@ window.puzzleCanvas = {
     _hideMenuEscapeHandler: null,
     _contextMenuSuppressHandler: null,
     _contextMenuTarget: null,
+    _localHelperBase: 'http://127.0.0.1:43111',
+    _localHelperAvailable: null,
+    _localHelperCheckedAt: 0,
 
     /**
      * Tear down the puzzle canvas, removing all event listeners, fragments,
@@ -144,6 +147,155 @@ window.puzzleCanvas = {
             }
         }, this);
         delete this.fragments[key];
+    },
+
+    _isLocalHelperEnabled: function() {
+        try {
+            var params = new URLSearchParams(window.location.search || '');
+            if (params.get('local_helper') === '1') {
+                return true;
+            }
+            if (window.localStorage) {
+                return window.localStorage.getItem('puzzleLocalHelperEnabled') === '1';
+            }
+        } catch (e) {
+            console.warn('Failed to read local-helper toggle:', e);
+        }
+        return false;
+    },
+
+    _fetchWithTimeout: function(url, options, timeoutMs) {
+        if (typeof AbortController === 'function') {
+            var controller = new AbortController();
+            var timer = window.setTimeout(function() { controller.abort(); }, timeoutMs || 1500);
+            var requestOptions = Object.assign({}, options || {}, { signal: controller.signal });
+            return fetch(url, requestOptions).finally(function() {
+                window.clearTimeout(timer);
+            });
+        }
+
+        return new Promise(function(resolve, reject) {
+            var timeout = window.setTimeout(function() {
+                reject(new Error('timeout'));
+            }, timeoutMs || 1500);
+            fetch(url, options || {}).then(function(resp) {
+                window.clearTimeout(timeout);
+                resolve(resp);
+            }).catch(function(err) {
+                window.clearTimeout(timeout);
+                reject(err);
+            });
+        });
+    },
+
+    _checkLocalHelperAvailable: async function(force) {
+        if (!this._isLocalHelperEnabled()) {
+            return false;
+        }
+
+        var now = Date.now();
+        if (!force && this._localHelperAvailable !== null && (now - this._localHelperCheckedAt) < 10000) {
+            return this._localHelperAvailable;
+        }
+
+        try {
+            var resp = await this._fetchWithTimeout(this._localHelperBase + '/health', {}, 1200);
+            this._localHelperAvailable = !!(resp && resp.ok);
+        } catch (err) {
+            this._localHelperAvailable = false;
+        }
+        this._localHelperCheckedAt = now;
+        return this._localHelperAvailable;
+    },
+
+    _deriveLocalHelperPage: function(key, meta, flIdOverride) {
+        var data = this.folioData[key];
+        if (data && data.folios && data.folios.length) {
+            if (flIdOverride) {
+                var matchIndex = data.folios.findIndex(function(folio) {
+                    return folio && folio.fl_id === flIdOverride;
+                });
+                if (matchIndex >= 0) {
+                    return matchIndex;
+                }
+            }
+            if (typeof data.currentIndex === 'number' && data.currentIndex >= 0) {
+                return data.currentIndex;
+            }
+        }
+
+        var label = meta && meta.folio_label ? String(meta.folio_label) : '';
+        var parsed = label.match(/^(\d+)([rv])$/i);
+        if (!parsed) {
+            return 0;
+        }
+        var number = parseInt(parsed[1], 10);
+        if (!number || number < 1) {
+            return 0;
+        }
+        return ((number - 1) * 2) + (parsed[2].toLowerCase() === 'v' ? 1 : 0);
+    },
+
+    _buildLocalHelperImageUrl: function(key, meta, flIdOverride) {
+        var m = meta || {};
+        var threshold = (m.threshold != null) ? m.threshold : 30;
+        var size = m.size || 800;
+        var processed = (m.processed !== false);
+        var isCul = !!m.is_cul;
+        var flId = flIdOverride || m.fl_id || '';
+        var sysId = m.sys_id || (this.folioData[key] && this.folioData[key].sys_id) || '';
+
+        if (sysId) {
+            var page = this._deriveLocalHelperPage(key, m, flId);
+            return this._localHelperBase + '/puzzle/image_by_sysid'
+                + '?sys_id=' + encodeURIComponent(sysId)
+                + '&page=' + encodeURIComponent(page)
+                + '&threshold=' + encodeURIComponent(threshold)
+                + '&size=' + encodeURIComponent(size)
+                + '&processed=' + encodeURIComponent(processed)
+                + '&is_cul=' + encodeURIComponent(isCul);
+        }
+
+        if (!flId) {
+            return '';
+        }
+
+        return this._localHelperBase + '/puzzle/image'
+            + '?fl_id=' + encodeURIComponent(flId)
+            + '&threshold=' + encodeURIComponent(threshold)
+            + '&size=' + encodeURIComponent(size)
+            + '&processed=' + encodeURIComponent(processed)
+            + '&is_cul=' + encodeURIComponent(isCul);
+    },
+
+    _tryLoadFromLocalHelper: async function(htmlImg, key, meta, onUnavailable, flIdOverride) {
+        if (!this._isLocalHelperEnabled()) {
+            if (typeof onUnavailable === 'function') onUnavailable();
+            return false;
+        }
+
+        var available = await this._checkLocalHelperAvailable(false);
+        if (!available) {
+            if (typeof onUnavailable === 'function') onUnavailable();
+            return false;
+        }
+
+        var localUrl = this._buildLocalHelperImageUrl(key, meta, flIdOverride);
+        if (!localUrl) {
+            if (typeof onUnavailable === 'function') onUnavailable();
+            return false;
+        }
+
+        console.warn('Server fetch failed for', key, '-> trying local helper');
+        var self = this;
+        htmlImg.onerror = function() {
+            console.warn('Local helper failed for', key, '-> continuing fallback');
+            self._localHelperAvailable = false;
+            self._localHelperCheckedAt = Date.now();
+            if (typeof onUnavailable === 'function') onUnavailable();
+        };
+        htmlImg.src = localUrl;
+        return true;
     },
 
     /**
@@ -363,23 +515,21 @@ window.puzzleCanvas = {
             }
         };
         htmlImg.onerror = function(err) {
-            // Server-side fetch failed — try same-origin Cloudflare proxy
-            console.warn('Server fetch failed for', key, '— trying proxy');
+            // Server-side fetch failed — try localhost helper (bg removal on user's machine)
+            console.warn('Server fetch failed for', key, '— trying localhost helper');
             var m = meta || {};
             var flId = m.fl_id || '';
             var digits = String(flId).replace(/[^0-9]/g, '');
-            if (!digits) {
-                console.error('No fl_id digits for fallback:', key);
-                self._removePlaceholder(key);
-                self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'no-fl-id' });
-                return;
-            }
             var iiifSize = (m.size || 800);
-            // Try same-origin Cloudflare proxy (keeps crossOrigin for canvas compatibility)
-            var proxyUrl = '/iiif-proxy/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-            htmlImg.onerror = function() {
-                // Proxy also failed — last resort: direct NLI (no bg removal, no canvas access)
-                console.warn('Proxy failed for', key, '— loading NLI directly');
+            var directFallback = function() {
+                // Localhost helper unavailable — last resort: direct NLI (no bg removal)
+                if (!digits) {
+                    console.error('No fl_id digits for fallback:', key);
+                    self._removePlaceholder(key);
+                    self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'no-fl-id' });
+                    return;
+                }
+                console.warn('Localhost helper unavailable for', key, '— loading NLI directly (no bg removal)');
                 var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
                 htmlImg.removeAttribute('crossOrigin');
                 htmlImg.onerror = function() {
@@ -395,7 +545,7 @@ window.puzzleCanvas = {
                 };
                 htmlImg.src = directUrl;
             };
-            htmlImg.src = proxyUrl;
+            self._tryLoadFromLocalHelper(htmlImg, key, m, directFallback, flId);
         };
         htmlImg.src = imageUrl;
     },
@@ -774,18 +924,27 @@ window.puzzleCanvas = {
                 resolve(folio.label);
             };
             htmlImg.onerror = function() {
-                // Server fetch failed — try same-origin Cloudflare proxy
+                // Server fetch failed — try localhost helper
                 var digits = String(folio.fl_id || '').replace(/[^0-9]/g, '');
-                if (!digits) { console.error('No fl_id for folio fallback'); resolve(''); return; }
-                var proxyUrl = '/iiif-proxy/FL' + digits + '/full/' + size + ',/0/default.jpg';
-                htmlImg.onerror = function() {
-                    // Last resort: direct NLI
+                var localMeta = Object.assign({}, meta, {
+                    sys_id: data.sys_id,
+                    fl_id: folio.fl_id,
+                    folio_label: folio.label || '',
+                    threshold: threshold,
+                    size: size,
+                    processed: processed,
+                    is_cul: isCul
+                });
+                var directFallback = function() {
+                    // Localhost helper unavailable — last resort: direct NLI (no bg removal)
+                    if (!digits) { console.error('No fl_id for folio fallback'); resolve(''); return; }
+                    console.warn('Localhost helper unavailable for folio', key, '— loading NLI directly');
                     var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + size + ',/0/default.jpg';
                     htmlImg.removeAttribute('crossOrigin');
                     htmlImg.onerror = function() { console.error('All folio sources failed'); resolve(''); };
                     htmlImg.src = directUrl;
                 };
-                htmlImg.src = proxyUrl;
+                self._tryLoadFromLocalHelper(htmlImg, key, localMeta, directFallback, folio.fl_id);
             };
             htmlImg.src = url;
         });
@@ -1413,21 +1572,21 @@ window.puzzleCanvas = {
             }
         };
         htmlImg.onerror = function() {
-            // Server fetch failed — try same-origin Cloudflare proxy
+            // Server fetch failed — try localhost helper
             var m = newMeta || obj._fragmentMeta || {};
             var flId = m.fl_id || '';
             var digits = String(flId).replace(/[^0-9]/g, '');
-            if (!digits) { console.error('No fl_id for reload fallback:', key); return; }
             var iiifSize = (m.size || 800);
-            var proxyUrl = '/iiif-proxy/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-            htmlImg.onerror = function() {
-                // Last resort: direct NLI
+            var directFallback = function() {
+                // Localhost helper unavailable — last resort: direct NLI (no bg removal)
+                if (!digits) { console.error('No fl_id for reload fallback:', key); return; }
+                console.warn('Localhost helper unavailable for reload', key, '— loading NLI directly');
                 var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
                 htmlImg.removeAttribute('crossOrigin');
                 htmlImg.onerror = function() { console.error('All reload sources failed:', key); };
                 htmlImg.src = directUrl;
             };
-            htmlImg.src = proxyUrl;
+            self._tryLoadFromLocalHelper(htmlImg, key, m, directFallback, flId);
         };
         htmlImg.src = newUrl;
     },
