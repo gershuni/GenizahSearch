@@ -1870,13 +1870,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             ui.icon('image', size='lg').style('color: var(--text-secondary);')
                         with ui.column().classes('gap-0').style('flex: 1; min-width: 0;'):
                             ui.label(title).classes('text-body2 ellipsis').style(
-                                'color: var(--text-primary); max-width: 160px;'
+                                'color: var(--text-primary); max-width: 160px; font-weight: 500;'
                             )
-                            if shelfmarks:
+                            # Only show shelfmarks if different from title
+                            if shelfmarks and shelfmarks.strip() != title.strip():
                                 ui.label(shelfmarks).classes('text-caption ellipsis').style(
-                                    'color: var(--text-secondary); max-width: 160px;'
+                                    'color: var(--text-tertiary); max-width: 160px; font-size: 10px; font-family: monospace;'
                                 )
-                            ui.label(updated).classes('text-caption').style('color: var(--text-secondary);')
+                            ui.label(updated).classes('text-caption').style('color: var(--text-tertiary); font-size: 10px;')
                     with ui.row().classes('justify-end gap-1'):
                         ui.button(icon='delete', on_click=lambda _, did=doc_id, t=title: confirm_delete(did, t)).props(
                             'dense flat round size=xs color=negative'
@@ -2732,7 +2733,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             async def _open_joins_dialog():
                 await refresh_docs_list()
                 joins_dialog.open()
-            ui.button(icon='menu', on_click=_open_joins_dialog).props(
+            ui.button(icon='folder_open', on_click=_open_joins_dialog).props(
                 'dense flat dark round size=sm'
             ).tooltip(tr('Saved Joins'))
 

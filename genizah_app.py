@@ -4474,7 +4474,11 @@ class PuzzleCanvasWindow(QMainWindow):
             title = doc.get('title', '') or 'Untitled'
             updated = doc.get('updated_at', '')[:10]
             shelfmarks = doc.get('shelfmarks_summary', '')
-            item.setText(f"{title}\n{shelfmarks}\n{updated}")
+            # Only show shelfmarks if different from title
+            if shelfmarks and shelfmarks.strip() != title.strip():
+                item.setText(f"{title}\n{shelfmarks}\n{updated}")
+            else:
+                item.setText(f"{title}\n{updated}")
             item.setData(Qt.ItemDataRole.UserRole, doc['id'])
 
             thumb_b64 = doc.get('thumbnail_b64', '')
