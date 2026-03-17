@@ -363,10 +363,8 @@ window.puzzleCanvas = {
             }
         };
         htmlImg.onerror = function(err) {
-            // Server-side fetch failed (IIIF may block server IP).
-            // Fallback: load IIIF image directly via <img> (bypasses CORS).
-            // No background removal (CORS prevents reading pixels), but image displays.
-            console.warn('Server fetch failed for', key, '— loading IIIF directly');
+            // Server-side fetch failed — try same-origin Cloudflare proxy
+            console.warn('Server fetch failed for', key, '— trying proxy');
             var m = meta || {};
             var flId = m.fl_id || '';
             var digits = String(flId).replace(/[^0-9]/g, '');
@@ -377,21 +375,27 @@ window.puzzleCanvas = {
                 return;
             }
             var iiifSize = (m.size || 800);
-            var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-            // Remove crossOrigin to avoid CORS block on NLI
-            htmlImg.removeAttribute('crossOrigin');
+            // Try same-origin Cloudflare proxy (keeps crossOrigin for canvas compatibility)
+            var proxyUrl = '/iiif-proxy/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
             htmlImg.onerror = function() {
-                console.error('Direct IIIF load also failed for', key);
-                self._removePlaceholder(key);
-                var errText = new fabric.Text('Image load failed: ' + key, {
-                    left: x, top: y, fontSize: 12, fill: '#ff6666',
-                    selectable: false, evented: false
-                });
-                self.canvas.add(errText);
-                self.canvas.requestRenderAll();
-                self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'iiif-failed' });
+                // Proxy also failed — last resort: direct NLI (no bg removal, no canvas access)
+                console.warn('Proxy failed for', key, '— loading NLI directly');
+                var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
+                htmlImg.removeAttribute('crossOrigin');
+                htmlImg.onerror = function() {
+                    console.error('All image sources failed for', key);
+                    self._removePlaceholder(key);
+                    var errText = new fabric.Text('Image load failed: ' + key, {
+                        left: x, top: y, fontSize: 12, fill: '#ff6666',
+                        selectable: false, evented: false
+                    });
+                    self.canvas.add(errText);
+                    self.canvas.requestRenderAll();
+                    self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'iiif-failed' });
+                };
+                htmlImg.src = directUrl;
             };
-            htmlImg.src = iiifUrl;
+            htmlImg.src = proxyUrl;
         };
         htmlImg.src = imageUrl;
     },
@@ -770,13 +774,18 @@ window.puzzleCanvas = {
                 resolve(folio.label);
             };
             htmlImg.onerror = function() {
-                // Server fetch failed — load IIIF directly (no bg removal)
+                // Server fetch failed — try same-origin Cloudflare proxy
                 var digits = String(folio.fl_id || '').replace(/[^0-9]/g, '');
                 if (!digits) { console.error('No fl_id for folio fallback'); resolve(''); return; }
-                var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + size + ',/0/default.jpg';
-                htmlImg.removeAttribute('crossOrigin');
-                htmlImg.onerror = function() { console.error('Direct IIIF folio load failed'); resolve(''); };
-                htmlImg.src = iiifUrl;
+                var proxyUrl = '/iiif-proxy/FL' + digits + '/full/' + size + ',/0/default.jpg';
+                htmlImg.onerror = function() {
+                    // Last resort: direct NLI
+                    var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + size + ',/0/default.jpg';
+                    htmlImg.removeAttribute('crossOrigin');
+                    htmlImg.onerror = function() { console.error('All folio sources failed'); resolve(''); };
+                    htmlImg.src = directUrl;
+                };
+                htmlImg.src = proxyUrl;
             };
             htmlImg.src = url;
         });
@@ -1404,16 +1413,21 @@ window.puzzleCanvas = {
             }
         };
         htmlImg.onerror = function() {
-            // Server fetch failed — load IIIF directly (no bg removal, bypasses CORS)
+            // Server fetch failed — try same-origin Cloudflare proxy
             var m = newMeta || obj._fragmentMeta || {};
             var flId = m.fl_id || '';
             var digits = String(flId).replace(/[^0-9]/g, '');
             if (!digits) { console.error('No fl_id for reload fallback:', key); return; }
             var iiifSize = (m.size || 800);
-            var iiifUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-            htmlImg.removeAttribute('crossOrigin');
-            htmlImg.onerror = function() { console.error('Direct IIIF reload also failed:', key); };
-            htmlImg.src = iiifUrl;
+            var proxyUrl = '/iiif-proxy/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
+            htmlImg.onerror = function() {
+                // Last resort: direct NLI
+                var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
+                htmlImg.removeAttribute('crossOrigin');
+                htmlImg.onerror = function() { console.error('All reload sources failed:', key); };
+                htmlImg.src = directUrl;
+            };
+            htmlImg.src = proxyUrl;
         };
         htmlImg.src = newUrl;
     },
