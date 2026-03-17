@@ -15,6 +15,7 @@ import html
 import logging
 from nicegui import ui, app, run
 from web.translations import tr, is_rtl
+from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState
 from web.supabase_client import (
     get_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
@@ -30,6 +31,21 @@ from web.components.typography import h1, h2, h3
 from web.components.translate_button import detect_language, translate_text
 
 logger = logging.getLogger(__name__)
+
+
+def _filter_puzzle_feed_result(result: dict) -> dict:
+    """Hide puzzle-join feed items while the puzzle feature is disabled."""
+    if WEB_PUZZLE_ENABLED or not isinstance(result, dict):
+        return result
+    items = result.get('items', [])
+    filtered = [
+        item for item in items
+        if item.get('item_type') != 'puzzle_join' and item.get('type') != 'puzzle_join'
+    ]
+    updated = dict(result)
+    updated['items'] = filtered
+    updated['total'] = len(filtered)
+    return updated
 
 
 def create_translatable_content(content: str, container_style: str = ''):
@@ -237,11 +253,12 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
                             'text-sm'
                         ).style('color: var(--primary-600);')
 
-                    async def do_fork(jid=join_id):
-                        dlg.close()
-                        await _fork_puzzle_join_and_navigate(jid)
+                    if WEB_PUZZLE_ENABLED:
+                        async def do_fork(jid=join_id):
+                            dlg.close()
+                            await _fork_puzzle_join_and_navigate(jid)
 
-                    ui.button(tr('Open in Puzzle'), icon='extension', on_click=do_fork).props('outlined dense color=cyan')
+                        ui.button(tr('Open in Puzzle'), icon='extension', on_click=do_fork).props('outlined dense color=cyan')
 
         ui.timer(0.1, load_detail, once=True)
     dlg.open()
@@ -297,11 +314,13 @@ def create_discoveries_page():
                         'correction': tr('Corrections'),
                         'comment': tr('Comments'),
                         'join': tr('Joins'),
-                        'puzzle_join': tr('Puzzle Joins'),
                     },
                     value='all',
                     label=tr('Type')
                 ).props('outlined dense').classes('min-w-32')
+                if WEB_PUZZLE_ENABLED:
+                    type_filter.options['puzzle_join'] = tr('Puzzle Joins')
+                    type_filter.update()
 
                 # Period filter
                 period_filter = ui.select(
@@ -394,7 +413,9 @@ def create_discoveries_page():
             is_admin = current_user and current_user.get('role') == 'admin'
 
             def _fetch_feed():
-                return get_feed_items(limit=50, offset=0, include_hidden=is_admin)
+                return _filter_puzzle_feed_result(
+                    get_feed_items(limit=50, offset=0, include_hidden=is_admin)
+                )
 
             # Run stats and feed fetches in parallel off the UI thread
             stats, feed_result = await asyncio.gather(
@@ -424,8 +445,11 @@ def _render_stat_cards(stats: dict):
         {'icon': 'help_outline', 'value': stats.get('open_questions', 0), 'label': tr('Open Questions'), 'color': 'purple'},
         {'icon': 'people', 'value': stats.get('active_contributors', 0), 'label': tr('Active Contributors'), 'color': 'teal'},
         {'icon': 'link', 'value': stats.get('user_joins', 0), 'label': tr('User Joins'), 'color': 'green'},
-        {'icon': 'extension', 'value': stats.get('published_puzzles', 0), 'label': tr('Published Puzzles'), 'color': 'cyan'},
     ]
+    if WEB_PUZZLE_ENABLED:
+        stat_cards.append(
+            {'icon': 'extension', 'value': stats.get('published_puzzles', 0), 'label': tr('Published Puzzles'), 'color': 'cyan'}
+        )
     for card in stat_cards:
         with ui.card().classes('p-3 min-w-28').style('flex: 1 1 calc(14.28% - 12px);'):
             with ui.column().classes('items-center gap-1'):
@@ -526,13 +550,14 @@ def load_stats(container):
                 'label': tr('User Joins'),
                 'color': 'green'
             },
-            {
+        ]
+        if WEB_PUZZLE_ENABLED:
+            stat_cards.append({
                 'icon': 'extension',
                 'value': stats.get('published_puzzles', 0),
                 'label': tr('Published Puzzles'),
                 'color': 'cyan'
-            },
-        ]
+            })
 
         for card in stat_cards:
             with ui.card().classes('p-3 min-w-28').style('flex: 1 1 calc(14.28% - 12px);'):
@@ -548,13 +573,13 @@ def load_feed(item_type: Optional[str], period: Optional[str], on_refresh=None):
     current_user = GlobalAuthState.get_user()
     is_admin = current_user and current_user.get('role') == 'admin'
 
-    result = get_feed_items(
+    result = _filter_puzzle_feed_result(get_feed_items(
         item_type=item_type,
         period=period,
         limit=50,
         offset=0,
         include_hidden=is_admin
-    )
+    ))
 
     if "error" in result:
         with ui.column().classes('w-full items-center py-8'):
@@ -1030,11 +1055,12 @@ def create_feed_item(item: dict, on_refresh=None):
 
                                 ui.button(tr('View Details'), icon='visibility', on_click=open_puzzle_join_detail).props('outlined dense')
 
-                                async def fork_and_open(jid=pj_raw_id):
-                                    """Fork the join and open in puzzle page."""
-                                    await _fork_puzzle_join_and_navigate(jid)
+                                if WEB_PUZZLE_ENABLED:
+                                    async def fork_and_open(jid=pj_raw_id):
+                                        """Fork the join and open in puzzle page."""
+                                        await _fork_puzzle_join_and_navigate(jid)
 
-                                ui.button(tr('Open in Puzzle'), icon='extension', on_click=fork_and_open).props('outlined dense color=cyan')
+                                    ui.button(tr('Open in Puzzle'), icon='extension', on_click=fork_and_open).props('outlined dense color=cyan')
 
                                 # Admin hide button for puzzle joins
                                 if is_admin:

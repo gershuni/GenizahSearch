@@ -149,10 +149,13 @@ GENIZAH_PORT=8081
 NICEGUI_RELOAD=false
 NICEGUI_SHOW=false
 ENVIRONMENT=production
+WEB_PUZZLE_ENABLED=false
 
 # Optional - PostHog analytics
 POSTHOG_API_KEY=phc_xxxxx
 ```
+
+`WEB_PUZZLE_ENABLED` is an emergency kill switch for the web puzzle UI and route. Leave it set to `false` until the puzzle image pipeline is considered production-ready again.
 
 ### Systemd Service (`/etc/systemd/system/genizah-web.service`)
 
@@ -257,6 +260,28 @@ git fetch origin
 git reset --hard origin/master-main
 source venv/bin/activate
 pip install -r requirements.txt
+sudo systemctl restart genizah-web
+```
+
+### Toggle the Puzzle Feature
+
+To keep the puzzle hidden in production:
+
+```bash
+sudo systemctl edit genizah-web
+```
+
+Add or update:
+
+```ini
+[Service]
+Environment=WEB_PUZZLE_ENABLED=false
+```
+
+Then reload and restart:
+
+```bash
+sudo systemctl daemon-reload
 sudo systemctl restart genizah-web
 ```
 

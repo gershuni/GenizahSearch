@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
 from web.translations import tr, set_language, get_language
+from web.feature_flags import WEB_PUZZLE_ENABLED
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager, Config
 
 # App configuration
@@ -361,7 +362,7 @@ def create_layout():
     content_col.props('id=main-content')
 
     # === "What's New" Banner (dismissible, compact single-line) ===
-    if app.storage.user.get('whats_new_dismissed') != WHATS_NEW_VERSION:
+    if WEB_PUZZLE_ENABLED and app.storage.user.get('whats_new_dismissed') != WHATS_NEW_VERSION:
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
             with ui.element('div').classes('w-full mx-auto max-w-5xl px-4 py-2 flex items-center gap-3 mt-2').style(
@@ -403,8 +404,9 @@ def create_layout():
                     ('/catalog-browse', 'category', tr('Browse by Identification'), None),
                     ('/discoveries', 'lightbulb', tr('Community'), None),
                     ('/lists', 'star', tr('My Lists'), None),
-                    ('/puzzle', 'extension', tr('Fragment Puzzle'), None),
                 ]
+                if WEB_PUZZLE_ENABLED:
+                    nav_items.append(('/puzzle', 'extension', tr('Fragment Puzzle'), None))
 
                 for path, icon, label, badge in nav_items:
                     is_active = current_page == path
@@ -822,6 +824,29 @@ def puzzle_page_route(add: str = None, doc: str = None):
 
     content = create_layout()
     with content:
+        if not WEB_PUZZLE_ENABLED:
+            is_hebrew = get_language() == 'he'
+            with ui.column().classes('w-full max-w-3xl mx-auto p-6'):
+                with ui.card().classes('w-full p-8'):
+                    ui.icon('construction').classes('text-4xl text-amber-600 mb-3')
+                    ui.label('פאזל הקטעים אינו זמין כרגע' if is_hebrew else 'Fragment Puzzle is temporarily unavailable').classes(
+                        'text-2xl font-bold mb-2'
+                    )
+                    ui.label(
+                        'הפיצ׳ר הוסתר זמנית עד לייצוב תשתית התמונות והעיבוד.'
+                        if is_hebrew else
+                        'The feature is temporarily hidden while the image-processing path is being stabilized.'
+                    ).classes('text-base').style('color: var(--text-secondary);')
+                    with ui.row().classes('gap-2 mt-4'):
+                        ui.button(
+                            'חזרה לעיון בכתב יד' if is_hebrew else 'Go to Browse',
+                            on_click=lambda: ui.navigate.to('/browse'),
+                        ).props('color=primary')
+                        ui.button(
+                            'עמוד הבית' if is_hebrew else 'Home',
+                            on_click=lambda: ui.navigate.to('/'),
+                        ).props('flat')
+            return
         from web.pages.puzzle import create_puzzle_page
         create_puzzle_page(initial_add=add, initial_doc=doc)
 

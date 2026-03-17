@@ -18,6 +18,7 @@ import logging
 from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl, get_language
+from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.components.typography import h1, h2, h3
 from web.components.project_tree import create_project_tree
 from web.auth_state import GlobalAuthState
@@ -513,11 +514,12 @@ def create_lists_page():
                                     on_click=lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
                                 ).props('flat round dense').tooltip(tr('Browse'))
 
-                                # Add to Puzzle button (Phase 49)
-                                ui.button(
-                                    icon='extension',
-                                    on_click=lambda sid=sys_id: ui.navigate.to(f'/puzzle?add={sid}')
-                                ).props('flat round dense').tooltip(tr('Add to Puzzle'))
+                                if WEB_PUZZLE_ENABLED:
+                                    # Add to Puzzle button (Phase 49)
+                                    ui.button(
+                                        icon='extension',
+                                        on_click=lambda sid=sys_id: ui.navigate.to(f'/puzzle?add={sid}')
+                                    ).props('flat round dense').tooltip(tr('Add to Puzzle'))
 
                                 # Edit button
                                 ui.button(

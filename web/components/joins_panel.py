@@ -10,6 +10,7 @@ import asyncio
 import logging
 from nicegui import ui
 from web.translations import tr, is_rtl
+from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState
 from web.supabase_client import get_fragment_joins, create_fragment_join, get_client
 from web.state import state
@@ -668,7 +669,7 @@ def create_joins_dialog(
                         ui.label(tr('Login to create joins')).classes('text-sm')
 
                 # ── Community Puzzle Joins section ──
-                if document_id:
+                if WEB_PUZZLE_ENABLED and document_id:
                     try:
                         client = get_client()
                         pjf_resp = client.table('published_join_fragments').select(

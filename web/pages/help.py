@@ -8,6 +8,7 @@ Based on the desktop Help.html but adapted for the web application.
 
 from nicegui import ui
 from web.translations import get_language
+from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.components.typography import h1, h2, h3
 
 
@@ -50,14 +51,17 @@ def _create_english_content():
                 ('parallels', 'Parallels Search'),
                 ('pgp', 'Princeton Geniza Project (PGP) Data'),
                 ('reading-desk', 'Reading Desk'),
-                ('puzzle', 'Fragment Puzzle'),
-                ('community-publish', 'Community Publishing'),
                 ('browse', 'Browse Manuscript'),
                 ('catalog-browse', 'Browse by Identification'),
                 ('lists', 'Lists'),
                 ('export', 'Exporting Data'),
             ]
+            if WEB_PUZZLE_ENABLED:
+                toc_items.insert(8, ('puzzle', 'Fragment Puzzle'))
+                toc_items.insert(9, ('community-publish', 'Community Publishing'))
             for anchor, title in toc_items:
+                if not WEB_PUZZLE_ENABLED and anchor in {'puzzle', 'community-publish'}:
+                    continue
                 ui.link(f'• {title}', f'#help-{anchor}').classes('text-primary hover:underline')
 
     # === Introduction ===
@@ -365,7 +369,7 @@ The Reading Desk is useful for any researcher who wants to view multiple shelfma
         ''').style('color: var(--text-secondary);')
 
     # === Fragment Puzzle ===
-    with ui.card().classes('w-full p-6'):
+    with ui.card().classes('w-full p-6').set_visibility(WEB_PUZZLE_ENABLED):
         ui.element('a').props(f'name="help-puzzle"')
         with ui.row().classes('items-center gap-3 mb-4'):
             ui.icon('extension').classes('text-2xl text-primary')
@@ -410,7 +414,7 @@ A visual canvas for arranging manuscript fragment images side by side to reconst
         ''').style('color: var(--text-secondary);')
 
     # === Community Publishing ===
-    with ui.card().classes('w-full p-6'):
+    with ui.card().classes('w-full p-6').set_visibility(WEB_PUZZLE_ENABLED):
         ui.element('a').props(f'name="help-community-publish"')
         with ui.row().classes('items-center gap-3 mb-4'):
             ui.icon('publish').classes('text-2xl text-primary')
@@ -556,14 +560,17 @@ def _create_hebrew_content():
                 ('parallels', 'חיפוש מקבילות'),
                 ('pgp', 'מידע מפרויקט הגניזה של פרינסטון (PGP)'),
                 ('reading-desk', 'שולחן קריאה (Reading Desk)'),
-                ('puzzle', 'פאזל קטעים'),
-                ('community-publish', 'פרסום לקהילה'),
                 ('browse', 'עיון בכתב יד'),
                 ('catalog-browse', 'עיון לפי זיהוי'),
                 ('lists', 'רשימות'),
                 ('export', 'ייצוא נתונים'),
             ]
+            if WEB_PUZZLE_ENABLED:
+                toc_items.insert(8, ('puzzle', 'פאזל קטעים'))
+                toc_items.insert(9, ('community-publish', 'פרסום לקהילה'))
             for anchor, title in toc_items:
+                if not WEB_PUZZLE_ENABLED and anchor in {'puzzle', 'community-publish'}:
+                    continue
                 ui.link(f'• {title}', f'#help-{anchor}').classes('text-primary hover:underline').style('direction: rtl;')
 
     # === Introduction ===

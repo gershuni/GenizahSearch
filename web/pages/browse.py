@@ -32,6 +32,7 @@ from web.services import (
 )
 from web.translations import tr, is_rtl, get_language
 from web.auth_state import GlobalAuthState
+from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
 from web.document_service import get_document_for_fragment, get_section_for_page, get_sources_for_document, get_all_sources_for_fragment
@@ -2180,16 +2181,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             on_click=add_manuscript_to_list
                         ).props(f'flat round dense aria-label="{tr("Add to List")}"').style('color: #ffffff !important;').tooltip(tr('In List') if star_icon == 'star' else tr('Add to List'))
 
-                        # Add to Puzzle button (Phase 49)
-                        def add_to_puzzle():
-                            sid = state.sys_id
-                            fl = state.current_page.fl_id if state.current_page else None
-                            param = f'{sid},{fl}' if fl else str(sid)
-                            ui.navigate.to(f'/puzzle?add={param}')
-                        ui.button(
-                            icon='extension',
-                            on_click=add_to_puzzle
-                        ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Puzzle'))
+                        if WEB_PUZZLE_ENABLED:
+                            # Add to Puzzle button (Phase 49)
+                            def add_to_puzzle():
+                                sid = state.sys_id
+                                fl = state.current_page.fl_id if state.current_page else None
+                                param = f'{sid},{fl}' if fl else str(sid)
+                                ui.navigate.to(f'/puzzle?add={param}')
+                            ui.button(
+                                icon='extension',
+                                on_click=add_to_puzzle
+                            ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Puzzle'))
 
                     # Next Shelfmark Button
                     ui.button(
