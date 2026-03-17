@@ -3,14 +3,30 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: not_started
-stopped_at: Completed 52-01-PLAN.md (all tasks done, Supabase schema applied)
-last_updated: "2026-03-17T10:35:58.439Z"
-last_activity: "2026-03-17 - Completed quick task 260317-gsb: Fix desktop corrections showing anonymous for all users"
+stopped_at: Completed 52-02-PLAN.md (web community publishing UI)
+last_updated: "2026-03-17T11:07:06.184Z"
+last_activity: 2026-03-17 - Completed 52-03 desktop community publishing
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 15
+  percent: 100
+---
+
+---
+gsd_state_version: 1.0
+milestone: v5.6
+milestone_name: milestone
+status: not_started
+stopped_at: Completed 52-01-PLAN.md (all tasks done, Supabase schema applied)
+last_updated: "2026-03-17T11:06:45.271Z"
+last_activity: "2026-03-17 - Completed quick task 260317-gsb: Fix desktop corrections showing anonymous for all users"
+progress:
+  [██████████] 100%
+  completed_phases: 5
+  total_plans: 15
+  completed_plans: 15
   percent: 87
 ---
 
@@ -159,17 +175,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 49 - Web Canvas
+**Current focus:** Phase 52 - Community + Integration (COMPLETE)
 
 ## Current Position
 
 Milestone: v7.0.0 Fragment Puzzle
-Phase: 49 (3 of 6 in milestone) -- IN PROGRESS
-Plan: 1 of 2 complete
-Status: Completed 49-01-PLAN.md (puzzle page + API endpoints)
-Last activity: 2026-03-17 - Completed quick task 260317-gsb: Fix desktop corrections showing anonymous for all users
+Phase: 52 (6 of 6 in milestone) -- COMPLETE
+Plan: 3 of 3 complete
+Status: Completed 52-03-PLAN.md (desktop community publishing)
+Last activity: 2026-03-17 - Completed 52-03 desktop community publishing
 
-Progress: [████░░░░░░] 33% (2 of 6 phases: 47, 48 complete)
+Progress: [██████████] 100% (6 of 6 phases: 47, 48, 49, 50, 51, 52 complete)
 
 ## Performance Metrics
 
@@ -208,7 +224,10 @@ Recent decisions affecting current work:
 - [Phase 50]: Event-driven auto-save via scene.changed with dual-timer debounce; loading guard prevents partial-state overwrites
 - [Phase 50]: getCropState reads per-object Fabric.js properties, not transient _cropOffsets; crop restore in on_puzzle_add_result callback
 - [Phase 52]: Client-parameter pattern: publish service functions accept Supabase client as first arg for web+desktop reuse
-- [Phase 52]: Client-parameter pattern: publish service functions accept Supabase client as first arg for web+desktop reuse
+- [Phase 52]: Publish button green color prop for state; check_publish_state on document load; fork creates local copy before /puzzle?doc= nav
+- [Phase 52-03]: PuzzlePublishThread QThread worker prevents UI freeze during desktop publish
+- [Phase 52-03]: get_feed() merges puzzle_join FeedItems into standard feed pipeline for filter support
+- [Phase 52-03]: community_container widget pattern with clear-on-refresh prevents duplication in JoinsDialog
 
 ### Pending Todos
 
@@ -249,6 +268,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-17T10:35:58.436Z
-Stopped at: Completed 52-01-PLAN.md (all tasks done, Supabase schema applied)
+Last session: 2026-03-17T11:09:00.000Z
+Stopped at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
 Resume file: None

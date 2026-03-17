@@ -142,7 +142,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 - [x] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images (completed 2026-03-16)
 - [x] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export (completed 2026-03-16)
 - [x] **Phase 51: Recto/Verso** - Auto-generated verso view from recto arrangement with correct verso images (already implemented during Phases 48-49, completed 2026-03-17)
-- [ ] **Phase 52: Community + Integration** - Personal workspace, publish for review, browse published joins, entry points from browse/search
+- [x] **Phase 52: Community + Integration** - Personal workspace, publish for review, browse published joins, entry points from browse/search (completed 2026-03-17)
 
 ## Phase Details
 
@@ -248,7 +248,7 @@ Plans:
 | 49. Web Canvas | 2/2 | Complete    | 2026-03-16 |
 | 50. Join Documents | 3/3 | Complete    | 2026-03-16 |
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
-| 52. Community + Integration | 1/3 | In Progress|  |
+| 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 
 ---
 *Roadmap created: 2026-02-09*
