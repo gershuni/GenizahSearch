@@ -3960,14 +3960,19 @@ class PuzzleCanvasWindow(QMainWindow):
             frag = selected[0]
             pf = frag.puzzle_frag
             label = pf.shelfmark or pf.sys_id
-            # Sync combo to selected fragment
-            combo_text = f"{label} ({pf.folio_label})"
-            for i in range(self.combo_fragments.count()):
-                if self.combo_fragments.itemText(i) == combo_text:
-                    self.combo_fragments.blockSignals(True)
-                    self.combo_fragments.setCurrentIndex(i)
-                    self.combo_fragments.blockSignals(False)
+            # Sync combo to selected fragment — find item_key for this graphics item
+            item_key = None
+            for k, v in self._fragment_items.items():
+                if v is frag:
+                    item_key = k
                     break
+            if item_key:
+                for i in range(self.combo_fragments.count()):
+                    if self.combo_fragments.itemData(i) == item_key:
+                        self.combo_fragments.blockSignals(True)
+                        self.combo_fragments.setCurrentIndex(i)
+                        self.combo_fragments.blockSignals(False)
+                        break
 
             # Sync sliders without triggering callbacks
             self.slider_threshold.blockSignals(True)
@@ -4372,16 +4377,13 @@ class PuzzleCanvasWindow(QMainWindow):
         if not item_key or item_key not in self._fragment_items:
             return
         pf = self._fragment_items[item_key].puzzle_frag
-        sys_id = pf.sys_id
         shelfmark = pf.shelfmark
         # Walk up to GenizahGUI parent
         parent = self.parent()
-        while parent and not hasattr(parent, 'navigate_to_item'):
+        while parent and not hasattr(parent, '_browse_document_by_shelfmark'):
             parent = parent.parent()
-        if parent and hasattr(parent, 'navigate_to_item'):
-            parent.navigate_to_item(sys_id, shelfmark)
-        else:
-            QMessageBox.information(self, tr("Browse"), f"{shelfmark} ({sys_id})")
+        if parent and hasattr(parent, '_browse_document_by_shelfmark'):
+            parent._browse_document_by_shelfmark(shelfmark)
 
     def _on_fragment_combo_changed(self, index):
         """Select the fragment chosen in the dropdown."""

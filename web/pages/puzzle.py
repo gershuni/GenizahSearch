@@ -2685,7 +2685,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             fragment_select.on('update:model-value', _on_fragment_select_change)
 
-            async def _browse_selected_fragment():
+            def _browse_selected_fragment():
                 """Open browse page for the selected fragment in a new tab."""
                 key = fragment_select.value
                 if not key or key not in puzzle_meta:
@@ -2693,7 +2693,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     return
                 sys_id = puzzle_meta[key].get('sys_id', '')
                 if sys_id:
-                    await ui.run_javascript(f'window.open("/browse?sys_id={sys_id}", "_blank")')
+                    ui.run_javascript(f'window.open("/browse?sys_id={sys_id}", "_blank")')
 
             ui.button(icon='open_in_new', on_click=_browse_selected_fragment).props(
                 'dense flat dark round size=sm'
@@ -2985,6 +2985,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 return
             if not payload.get('hasSelection'):
                 _sync_control_values(folio_label='')
+                try:
+                    fragment_select.value = None
+                    fragment_select.update()
+                except NameError:
+                    pass
                 return
             _sync_control_values(
                 processed=payload.get('processed', True),
@@ -2993,6 +2998,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 rotation=payload.get('rotation', 0),
                 folio_label=payload.get('folioLabel', '')
             )
+            # Sync fragment selector combobox
+            sel_key = payload.get('key')
+            if sel_key:
+                try:
+                    fragment_select.set_value(sel_key)
+                except (NameError, Exception):
+                    pass
         canvas_wrap.on('puzzle-selection', on_puzzle_selection)
 
     # ── Initialize canvas after DOM is ready ──
