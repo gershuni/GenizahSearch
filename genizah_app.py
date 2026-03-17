@@ -20227,6 +20227,18 @@ class GenizahGUI(QMainWindow):
         self.my_joins_list.customContextMenuRequested.connect(lambda pos: self._joins_context_menu(pos, self.my_joins_list))
         joins_tabs.addTab(self.my_joins_list, tr("My Joins"))
 
+        # All Puzzles list
+        self.all_puzzles_list = QListWidget()
+        self.all_puzzles_list.setAlternatingRowColors(True)
+        self.all_puzzles_list.itemDoubleClicked.connect(self._on_puzzle_clicked)
+        joins_tabs.addTab(self.all_puzzles_list, tr("All Puzzles"))
+
+        # My Puzzles list
+        self.my_puzzles_list = QListWidget()
+        self.my_puzzles_list.setAlternatingRowColors(True)
+        self.my_puzzles_list.itemDoubleClicked.connect(self._on_puzzle_clicked)
+        joins_tabs.addTab(self.my_puzzles_list, tr("My Puzzles"))
+
         joins_layout.addWidget(joins_tabs)
 
         btn_browse_joins = QPushButton(tr("Browse Joins..."))
@@ -20901,6 +20913,28 @@ class GenizahGUI(QMainWindow):
             item = QListWidgetItem(f"ℹ️ {tr('Offline - no cached data available')}")
             self.all_joins_list.addItem(item)
 
+        # Published Puzzles
+        self.all_puzzles_list.clear()
+        self.my_puzzles_list.clear()
+        if not skip_api_calls:
+            try:
+                puzzles = self.corrections_client.get_published_puzzle_joins(limit=50)
+                self._populate_puzzles_list(puzzles, self.all_puzzles_list)
+                # Filter for my puzzles
+                if self.corrections_client.is_logged_in() and self.corrections_client.current_user:
+                    my_uuid = self.corrections_client.current_user._uuid
+                    if my_uuid:
+                        my_puzzles = [p for p in puzzles if p.get('user_id') == my_uuid]
+                        self._populate_puzzles_list(my_puzzles, self.my_puzzles_list)
+                    else:
+                        item = QListWidgetItem(f"ℹ️ {tr('Login to see your puzzles')}")
+                        self.my_puzzles_list.addItem(item)
+                else:
+                    item = QListWidgetItem(f"ℹ️ {tr('Login to see your puzzles')}")
+                    self.my_puzzles_list.addItem(item)
+            except Exception as e:
+                logger.debug("Error fetching published puzzles: %s", e)
+
         logger.debug("Joins panel refresh completed")
 
     def _populate_joins_list(self, joins_data, target_list, show_author=False):
@@ -20935,6 +20969,43 @@ class GenizahGUI(QMainWindow):
             item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, join)
             target_list.addItem(item)
+
+    def _populate_puzzles_list(self, puzzles_data, target_list):
+        """Populate puzzle list from published joins data."""
+        if not puzzles_data:
+            item = QListWidgetItem(f"ℹ️ {tr('No puzzles yet')}")
+            target_list.addItem(item)
+            return
+
+        for pz in puzzles_data:
+            title = pz.get('title', '') or tr('Untitled')
+            shelfmarks = pz.get('shelfmarks', [])
+            author = pz.get('author_name', '')
+            sm_text = ', '.join(shelfmarks[:3])
+            if len(shelfmarks) > 3:
+                sm_text += f' +{len(shelfmarks) - 3}'
+            display_text = f"🧩 {title}"
+            if sm_text:
+                display_text += f"\n   {sm_text}"
+            if author:
+                display_text += f"\n   by {author}"
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, pz)
+            target_list.addItem(item)
+
+    def _on_puzzle_clicked(self, item):
+        """Handle double-click on a published puzzle — fork and open."""
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data or not data.get('id'):
+            return
+        join_id = data['id']
+        new_doc_id = self.corrections_client.fork_puzzle_join(join_id)
+        if not new_doc_id:
+            QMessageBox.warning(self, tr("Error"), tr("Could not fork join"))
+            return
+        self._open_puzzle_window()
+        if self._puzzle_window:
+            QTimer.singleShot(200, lambda: self._puzzle_window._load_document(new_doc_id))
 
     def _joins_context_menu(self, pos, list_widget):
         """Show context menu for joins list."""

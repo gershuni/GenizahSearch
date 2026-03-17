@@ -5265,9 +5265,9 @@ class JoinsFeedDialog(QDialog):
             puzzles = self.client.get_published_puzzle_joins(limit=100)
 
             if is_my and self.client.is_logged_in():
-                my_user_id = self.client.current_user.id if self.client.current_user else None
-                if my_user_id:
-                    puzzles = [p for p in puzzles if p.get('user_id') == my_user_id]
+                my_uuid = self.client.current_user._uuid if self.client.current_user else None
+                if my_uuid:
+                    puzzles = [p for p in puzzles if p.get('user_id') == my_uuid]
             elif is_my:
                 if status_label:
                     status_label.setText(tr("Login required to view your puzzles"))
