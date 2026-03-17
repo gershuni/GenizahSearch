@@ -3965,6 +3965,15 @@ class PuzzleCanvasWindow(QMainWindow):
             item.setRotation(new_rot)
             item.puzzle_frag.rotation = new_rot
 
+    @staticmethod
+    def _is_cul_fragment(pf) -> bool:
+        """Check if a PuzzleFragment is from CUL (has blue conservation mat)."""
+        if pf.shelfmark:
+            s = pf.shelfmark.upper()
+            if s.startswith(('T-S', 'OR.', 'ADD.')):
+                return True
+        return False
+
     def _flip_recto_verso(self):
         """Flip selected fragment(s) to show recto/verso — navigates to next/prev folio."""
         selected = self.canvas_view.get_selected_fragments()
@@ -4000,7 +4009,7 @@ class PuzzleCanvasWindow(QMainWindow):
             pf.folio_label = new_label
             self._pending_fragments[new_key] = pf
             thr = pf.bg_removal_threshold
-            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0))
+            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0), is_cul=self._is_cul_fragment(pf))
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
@@ -4044,7 +4053,7 @@ class PuzzleCanvasWindow(QMainWindow):
             pf.folio_label = new_label
             self._pending_fragments[new_key] = pf
             thr = pf.bg_removal_threshold
-            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0))
+            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0), is_cul=self._is_cul_fragment(pf))
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
@@ -4171,7 +4180,8 @@ class PuzzleCanvasWindow(QMainWindow):
             item_key = (pf.sys_id, pf.folio_label)
             self._pending_fragments[item_key] = pf
             thread = PuzzleImageLoaderThread(
-                pf.fl_id, threshold=float(value), processed=processed
+                pf.fl_id, threshold=float(value), processed=processed,
+                is_cul=self._is_cul_fragment(pf)
             )
             thread.image_ready.connect(partial(self._on_image_loaded, item_key))
             thread.load_failed.connect(self._on_image_failed)
@@ -4260,7 +4270,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self._pending_fragments[new_key] = pf
 
             # Fetch new image
-            thread = PuzzleImageLoaderThread(new_fl_id, threshold=pf.bg_removal_threshold)
+            thread = PuzzleImageLoaderThread(new_fl_id, threshold=pf.bg_removal_threshold, is_cul=self._is_cul_fragment(pf))
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
@@ -4452,7 +4462,8 @@ class PuzzleCanvasWindow(QMainWindow):
                 frag.fl_id,
                 threshold=frag.bg_removal_threshold,
                 size=800,
-                processed=frag.processed
+                processed=frag.processed,
+                is_cul=self._is_cul_fragment(frag)
             )
             thread.image_ready.connect(partial(self._on_image_loaded, item_key))
             thread.load_failed.connect(self._on_image_failed)
