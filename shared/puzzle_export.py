@@ -23,9 +23,9 @@ import base64
 import io
 import logging
 import math
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from shared.puzzle_model import PuzzleFragment
 
@@ -49,6 +49,129 @@ def auto_suggest_title(fragments: List[PuzzleFragment]) -> str:
         if f.shelfmark and f.shelfmark not in seen:
             seen.append(f.shelfmark)
     return ' + '.join(seen) if seen else 'Untitled Join'
+
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont:
+    """Load Arial (supports Hebrew + Latin) with fallback to default."""
+    try:
+        return ImageFont.truetype('arial.ttf', size)
+    except Exception:
+        try:
+            return ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', size)
+        except Exception:
+            return ImageFont.load_default()
+
+
+def _measure_text(font: ImageFont.ImageFont, text: str) -> Tuple[int, int]:
+    """Return (width, height) of text rendered with given font."""
+    bb = font.getbbox(text)
+    return bb[2] - bb[0], bb[3] - bb[1]
+
+
+def _wrap_shelfmarks(shelfmarks: str, font: ImageFont.ImageFont, max_width: int) -> List[str]:
+    """Split shelfmarks into multiple lines if too wide, breaking at ' + '."""
+    w, _ = _measure_text(font, shelfmarks)
+    if w <= max_width:
+        return [shelfmarks]
+    parts = shelfmarks.split(' + ')
+    lines = []
+    current = parts[0]
+    for part in parts[1:]:
+        candidate = current + ' + ' + part
+        cw, _ = _measure_text(font, candidate)
+        if cw <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = part
+    lines.append(current)
+    return lines
+
+
+def add_metadata_banner(composite: Image.Image,
+                        fragments: List[PuzzleFragment],
+                        app_variant: str = 'desktop') -> Image.Image:
+    """Add a metadata banner below the composite image.
+
+    Three-row layout:
+      Row 1: Shelfmarks (wraps if needed)
+      Row 2: Created by Genizah Search Pro / Dicta Genizah Search
+      Row 3: www.GenizahSearch.com
+
+    Args:
+        composite: The RGBA composite image from compose_puzzle_export().
+        fragments: List of fragments (for shelfmark extraction).
+        app_variant: 'desktop' or 'web' — controls app name in attribution.
+
+    Returns:
+        New RGBA image with the banner appended below.
+    """
+    total_w = composite.width
+    padding = 14
+    line_gap = 5
+
+    # Scale font sizes proportionally to image width
+    # Base: 18px shelfmark / 14px attr / 12px url at 800px width
+    scale = max(0.6, total_w / 800.0)
+    font_shelfmark = _load_font(int(18 * scale))
+    font_attr = _load_font(int(14 * scale))
+    font_url = _load_font(int(12 * scale))
+    padding = int(padding * scale)
+    line_gap = int(line_gap * scale)
+
+    # Colors
+    banner_color = (240, 240, 240, 255)  # light gray
+    text_color = (80, 80, 80, 255)
+    url_color = (120, 120, 120, 255)
+    sep_color = (210, 210, 210, 255)
+
+    # Build text content
+    shelfmarks = auto_suggest_title(fragments)
+    max_text_w = total_w - padding * 2
+    shelf_lines = _wrap_shelfmarks(shelfmarks, font_shelfmark, max_text_w)
+
+    app_name = 'Dicta Genizah Search' if app_variant == 'web' else 'Genizah Search Pro'
+    attr_line = f"Created by {app_name}"
+    url_line = "www.GenizahSearch.com"
+
+    # Measure all lines
+    shelf_sizes = [_measure_text(font_shelfmark, sl) for sl in shelf_lines]
+    aw, ah = _measure_text(font_attr, attr_line)
+    uw, uh = _measure_text(font_url, url_line)
+
+    banner_h = padding
+    for _, sh in shelf_sizes:
+        banner_h += sh + line_gap
+    banner_h += ah + line_gap + uh + padding
+
+    # Create result image
+    total_h = composite.height + banner_h
+    result = Image.new('RGBA', (total_w, total_h), (255, 255, 255, 255))
+    result.alpha_composite(composite, dest=(0, 0))
+
+    draw = ImageDraw.Draw(result)
+    banner_top = composite.height
+
+    # Banner background + separator line
+    draw.rectangle([0, banner_top, total_w, total_h], fill=banner_color)
+    draw.line([(0, banner_top), (total_w, banner_top)], fill=sep_color, width=1)
+
+    # Draw lines centered
+    y = banner_top + padding
+    for i, sl in enumerate(shelf_lines):
+        sw = shelf_sizes[i][0]
+        x = (total_w - sw) // 2
+        draw.text((x, y), sl, fill=text_color, font=font_shelfmark)
+        y += shelf_sizes[i][1] + line_gap
+
+    x = (total_w - aw) // 2
+    draw.text((x, y), attr_line, fill=text_color, font=font_attr)
+    y += ah + line_gap
+
+    x = (total_w - uw) // 2
+    draw.text((x, y), url_line, fill=url_color, font=font_url)
+
+    return result
 
 
 def compose_puzzle_export(fragments: List[PuzzleFragment],

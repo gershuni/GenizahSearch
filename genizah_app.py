@@ -3174,7 +3174,7 @@ class PuzzleExportThread(QThread):
 
     def run(self):
         try:
-            from shared.puzzle_export import compose_puzzle_export
+            from shared.puzzle_export import compose_puzzle_export, add_metadata_banner
             from shared.puzzle_image_service import get_puzzle_image_service
 
             img_svc = get_puzzle_image_service()
@@ -3191,6 +3191,8 @@ class PuzzleExportThread(QThread):
             if result is None:
                 self.error_signal.emit("Export failed")
                 return
+            # Add metadata banner
+            result = add_metadata_banner(result, self.fragments, app_variant='desktop')
             total = max(1, len(self.fragments))
             self.progress_signal.emit(total, total, "Saving PNG")
             if self.isInterruptionRequested():
@@ -4706,8 +4708,18 @@ class PuzzleCanvasWindow(QMainWindow):
         export_size = dict(resolution_items).get(selected_label, 2000)
 
         suggested_name = auto_suggest_title(fragments).replace(' ', '_').replace('+', '_') + '.png'
+
+        # Default save folder: Documents\GenizahSearchPro\Puzzle Images\
+        default_folder = self.app._get_default_save_folder()
+        puzzle_folder = os.path.join(os.path.dirname(default_folder), "Puzzle Images")
+        try:
+            os.makedirs(puzzle_folder, exist_ok=True)
+        except Exception:
+            puzzle_folder = default_folder
+        default_path = os.path.join(puzzle_folder, suggested_name)
+
         path, _ = QFileDialog.getSaveFileName(
-            self, tr("Export Composite Image"), suggested_name,
+            self, tr("Export Composite Image"), default_path,
             "PNG Images (*.png)"
         )
         if not path:

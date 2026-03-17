@@ -2124,7 +2124,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         dlg.open()
 
     async def export_png():
-        """Export current canvas as full-resolution PNG."""
+        """Export current canvas as full-resolution PNG with metadata banner."""
         if not puzzle_meta:
             ui.notify(tr('Add fragments before exporting'), type='warning')
             return
@@ -2132,13 +2132,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         ui.notify(tr('Generating export...'), type='info')
 
         def _do_export():
-            from shared.puzzle_export import compose_puzzle_export
+            from shared.puzzle_export import compose_puzzle_export, add_metadata_banner
             from shared.puzzle_image_service import get_puzzle_image_service
             import io
             img_svc = get_puzzle_image_service()
             result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
             if result is None:
                 return None
+            result = add_metadata_banner(result, fragments, app_variant='web')
             buf = io.BytesIO()
             result.save(buf, 'PNG')
             return buf.getvalue()
