@@ -3,11 +3,27 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: not_started
+stopped_at: Completed 52-01-PLAN.md (Task 1 done, Task 2 human-action pending)
+last_updated: "2026-03-17T10:23:18.009Z"
+last_activity: "2026-03-17 - Completed quick task 260317-gsb: Fix desktop corrections showing anonymous for all users"
+progress:
+  total_phases: 6
+  completed_phases: 4
+  total_plans: 15
+  completed_plans: 13
+  percent: 87
+---
+
+---
+gsd_state_version: 1.0
+milestone: v5.6
+milestone_name: milestone
+status: not_started
 stopped_at: Phase 52 context gathered
 last_updated: "2026-03-17T08:27:17.757Z"
 last_activity: 2026-03-16 -- Completed 49-01 web puzzle page with Fabric.js canvas, API endpoints, nav integration
 progress:
-  total_phases: 6
+  [█████████░] 87%
   completed_phases: 4
   total_plans: 12
   completed_plans: 12
@@ -191,6 +207,7 @@ Recent decisions affecting current work:
 - [Phase 50]: PIL.rotate angle negated to match clockwise-positive convention (Fabric.js + PyQt)
 - [Phase 50]: Event-driven auto-save via scene.changed with dual-timer debounce; loading guard prevents partial-state overwrites
 - [Phase 50]: getCropState reads per-object Fabric.js properties, not transient _cropOffsets; crop restore in on_puzzle_add_result callback
+- [Phase 52]: Client-parameter pattern: publish service functions accept Supabase client as first arg for web+desktop reuse
 
 ### Pending Todos
 
@@ -226,9 +243,10 @@ Recent decisions affecting current work:
 | Phase 50 P03 | 5min | 2 tasks | 2 files |
 | 260317-aru | Fix background removal for CUL blue conservation mat images with border frames | 2026-03-17 | pending | [260317-aru-fix-background-removal-for-cul-blue-cons](./quick/260317-aru-fix-background-removal-for-cul-blue-cons/) |
 | 260317-gsb | Fix desktop corrections showing anonymous for all users | 2026-03-17 | 78ce4c41 | [260317-gsb-fix-desktop-corrections-showing-anonymou](./quick/260317-gsb-fix-desktop-corrections-showing-anonymou/) |
+| Phase 52 P01 | 3min | 1 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-03-17T08:27:17.753Z
-Stopped at: Phase 52 context gathered
-Resume file: .planning/phases/52-community-integration/52-CONTEXT.md
+Last session: 2026-03-17T10:23:18.006Z
+Stopped at: Completed 52-01-PLAN.md (Task 1 done, Task 2 human-action pending)
+Resume file: None

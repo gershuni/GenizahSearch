@@ -42,8 +42,8 @@ Background removal is **foundational** — without it, rectangular images overla
 ### Community
 
 - [ ] **COMM-01**: Join documents are saved to personal workspace by default
-- [ ] **COMM-02**: User can publish a join document for community review
-- [ ] **COMM-03**: Published joins are browsable by other users
+- [x] **COMM-02**: User can publish a join document for community review
+- [x] **COMM-03**: Published joins are browsable by other users
 
 ### Platform
 
@@ -123,8 +123,8 @@ Explicitly excluded. Documented to prevent scope creep.
 | RVRS-02 | Phase 51 | Pending |
 | CANV-02 | Phase 52 | Pending |
 | COMM-01 | Phase 52 | Pending |
-| COMM-02 | Phase 52 | Pending |
-| COMM-03 | Phase 52 | Pending |
+| COMM-02 | Phase 52 | Complete |
+| COMM-03 | Phase 52 | Complete |
 
 **Coverage:**
 - v7.0.0 requirements: 23 total

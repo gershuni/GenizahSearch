@@ -248,7 +248,7 @@ Plans:
 | 49. Web Canvas | 2/2 | Complete    | 2026-03-16 |
 | 50. Join Documents | 3/3 | Complete    | 2026-03-16 |
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
-| 52. Community + Integration | 0/3 | Not started | - |
+| 52. Community + Integration | 1/3 | In Progress|  |
 
 ---
 *Roadmap created: 2026-02-09*
