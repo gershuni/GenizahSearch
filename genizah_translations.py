@@ -2831,11 +2831,13 @@ TRANSLATIONS = {
     "Delete selected fragment": "מחק קטע נבחר",
     "Crop — drag edges to trim": "חיתוך — גרור קצוות לחיתוך",
     "Cycle background: dark gray / black / white / checkerboard / light table / grid": "החלף רקע: אפור כהה / שחור / לבן / משבצות / שולחן אור / רשת",
-    "Previous folio": "דף קודם",
-    "Next folio": "דף הבא",
+    "Previous page": "עמוד קודם",
+    "Next page": "עמוד הבא",
     "Save current puzzle as a join document": "שמור פאזל נוכחי כמסמך צירוף",
     "Clear canvas and start a new puzzle": "נקה קנבס והתחל פאזל חדש",
     "Export composite image at full resolution": "ייצוא תמונה מורכבת ברזולוציה מלאה",
+    "Notes:": "הערות:",
+    "Optional notes about this join...": "הערות אופציונליות על צירוף זה...",
 }
 
 # Hebrew library display names (keyed by library_code)

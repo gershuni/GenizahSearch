@@ -3365,13 +3365,13 @@ class PuzzleCanvasWindow(QMainWindow):
 
         self.btn_folio_prev = QPushButton("<")
         self.btn_folio_prev.setMaximumWidth(30)
-        self.btn_folio_prev.setToolTip(tr("Previous folio"))
+        self.btn_folio_prev.setToolTip(tr("Previous page"))
         self.btn_folio_prev.clicked.connect(lambda: self._navigate_folio(-1))
         row2.addWidget(self.btn_folio_prev)
 
         self.btn_folio_next = QPushButton(">")
         self.btn_folio_next.setMaximumWidth(30)
-        self.btn_folio_next.setToolTip(tr("Next folio"))
+        self.btn_folio_next.setToolTip(tr("Next page"))
         self.btn_folio_next.clicked.connect(lambda: self._navigate_folio(1))
         row2.addWidget(self.btn_folio_next)
 
@@ -4467,13 +4467,35 @@ class PuzzleCanvasWindow(QMainWindow):
 
         if self._current_doc_id is None:
             suggested = auto_suggest_title(fragments)
-            title, ok = QInputDialog.getText(
-                self, tr("Save Join"), tr("Title:"),
-                QLineEdit.EchoMode.Normal, suggested
-            )
-            if not ok or not title.strip():
+            # Custom save dialog with title + notes
+            dlg = QDialog(self)
+            dlg.setWindowTitle(tr("Save Join Document"))
+            dlg.setMinimumWidth(350)
+            layout = QVBoxLayout(dlg)
+            layout.addWidget(QLabel(tr("Title:")))
+            title_edit = QLineEdit(suggested)
+            layout.addWidget(title_edit)
+            layout.addWidget(QLabel(tr("Notes:")))
+            notes_edit = QTextEdit()
+            notes_edit.setMaximumHeight(80)
+            notes_edit.setPlaceholderText(tr("Optional notes about this join..."))
+            layout.addWidget(notes_edit)
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            btn_save = QPushButton(tr("Save"))
+            btn_save.setDefault(True)
+            btn_save.clicked.connect(dlg.accept)
+            btn_cancel = QPushButton(tr("Cancel"))
+            btn_cancel.clicked.connect(dlg.reject)
+            btn_row.addWidget(btn_cancel)
+            btn_row.addWidget(btn_save)
+            layout.addLayout(btn_row)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
                 return
-            doc = PuzzleDocument(title=title.strip(), fragments=fragments)
+            title = title_edit.text().strip()
+            if not title:
+                return
+            doc = PuzzleDocument(title=title, notes=notes_edit.toPlainText(), fragments=fragments)
         else:
             svc = get_puzzle_service()
             doc = svc.load_document(self._current_doc_id)
