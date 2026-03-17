@@ -98,7 +98,10 @@ class PuzzleImageService:
 
         # Return cached if exists
         if cache_path.exists():
-            return cache_path.read_bytes()
+            try:
+                return cache_path.read_bytes()
+            except (FileNotFoundError, OSError):
+                pass  # TOCTOU race or read error — treat as cache miss
 
         # Fetch from IIIF
         raw_bytes = self._fetch_iiif_image(fl_id, size)
@@ -107,7 +110,10 @@ class PuzzleImageService:
 
         if not processed:
             # Cache and return original
-            cache_path.write_bytes(raw_bytes)
+            try:
+                cache_path.write_bytes(raw_bytes)
+            except OSError as e:
+                logger.warning(f"Failed to cache image for {fl_id}: {e}")
             return raw_bytes
 
         # Apply background removal
@@ -118,7 +124,10 @@ class PuzzleImageService:
             return raw_bytes  # fallback to original on error
 
         # Cache processed result
-        cache_path.write_bytes(result_bytes)
+        try:
+            cache_path.write_bytes(result_bytes)
+        except OSError as e:
+            logger.warning(f"Failed to cache processed image for {fl_id}: {e}")
         return result_bytes
 
     def invalidate_cache(self, fl_id: str, threshold: Optional[float] = None):

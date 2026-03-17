@@ -204,7 +204,7 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
                 h3(detail.get('title', ''), classes='font-bold text-lg')
 
                 # Author and date
-                author_name = detail.get('author_name', 'Anonymous')
+                author_name = detail.get('author_name') or tr('Anonymous')
                 created_at = detail.get('created_at', '')
                 with ui.row().classes('items-center gap-2'):
                     ui.icon('person', size='xs').style('color: var(--text-tertiary);')

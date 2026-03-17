@@ -3596,7 +3596,7 @@ class JoinsDialog(QDialog):
 
             return fjms_shelfmarks, fjms_joins, fjms_details
         except Exception as e:
-            print(f"Error getting FJMS joins: {e}")
+            logger.error(f"Error getting FJMS joins: {e}")
             return [], [], []
 
     def _merge_fjms_joins_into_display(self, existing_fragments_upper):
@@ -3819,7 +3819,7 @@ class JoinsDialog(QDialog):
 
             return pgp_fragment_shelfmarks, pgp_joins, pgp_fragment_details
         except Exception as e:
-            print(f"Error getting PGP joins: {e}")
+            logger.error(f"Error getting PGP joins: {e}")
             return [], [], []
 
     def load_joins(self, force_fresh: bool = False):
@@ -4783,7 +4783,7 @@ class JoinsDialog(QDialog):
             try:
                 QTimer.singleShot(50, lambda: self._safe_navigate(callback, shelfmark))
             except Exception as e:
-                print(f"[ERROR] Navigation failed: {e}", flush=True)
+                logger.error(f"Navigation failed: {e}")
         else:
             QMessageBox.information(
                 self, tr("Navigate"),
@@ -4795,9 +4795,7 @@ class JoinsDialog(QDialog):
         try:
             callback(shelfmark)
         except Exception as e:
-            print(f"[ERROR] Navigation callback failed: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Navigation callback failed: {e}", exc_info=True)
 
 
 # =============================================================================
@@ -4962,7 +4960,7 @@ class JoinsFeedDialog(QDialog):
             else:
                 self.load_puzzles(idx == 3)
         except Exception as e:
-            print(f"[ERROR] Failed to load joins: {e}", flush=True)
+            logger.error(f"Failed to load joins: {e}")
 
     def on_tab_changed(self, index):
         """Load data when tab changes"""
@@ -5087,7 +5085,7 @@ class JoinsFeedDialog(QDialog):
             table.resizeColumnsToContents()
 
         except Exception as e:
-            print(f"[ERROR] Failed to load joins: {e}", flush=True)
+            logger.error(f"Failed to load joins: {e}")
             if status_label:
                 status_label.setText(tr("Failed to load joins"))
 
@@ -5292,7 +5290,7 @@ class JoinsFeedDialog(QDialog):
             table.resizeColumnsToContents()
 
         except Exception as e:
-            print(f"[ERROR] Failed to load puzzles: {e}", flush=True)
+            logger.error(f"Failed to load puzzles: {e}")
             if status_label:
                 status_label.setText(tr("Failed to load puzzles"))
 

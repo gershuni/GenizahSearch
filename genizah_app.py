@@ -3467,7 +3467,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self.lbl_threshold_val = QLabel("30")
         self.lbl_threshold_val.setMinimumWidth(28)
         self.slider_threshold.valueChanged.connect(
-            lambda v: self.lbl_threshold_val.setText("OFF" if v == 0 else str(v))
+            lambda v: self.lbl_threshold_val.setText(tr("OFF") if v == 0 else str(v))
         )
         self.slider_threshold.sliderReleased.connect(self._on_threshold_changed)
         row3.addWidget(self.slider_threshold)
@@ -3980,7 +3980,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self.slider_threshold.setValue(int(pf.bg_removal_threshold))
             self.slider_threshold.blockSignals(False)
             tv = int(pf.bg_removal_threshold)
-            self.lbl_threshold_val.setText("OFF" if tv == 0 else str(tv))
+            self.lbl_threshold_val.setText(tr("OFF") if tv == 0 else str(tv))
 
             self.slider_scale.blockSignals(True)
             self.slider_scale.setValue(int(pf.scale * 100))
@@ -20707,7 +20707,7 @@ class GenizahGUI(QMainWindow):
             if title_preview:
                 display_text += f" - {title_preview}"
             if show_author:
-                display_text += f"\n   by {author}"
+                display_text += f"\n   {tr('by {}').format(author)}"
             display_text += f"\n   {text}"
 
             item = QListWidgetItem(display_text)
@@ -21020,7 +21020,7 @@ class GenizahGUI(QMainWindow):
             if rel_display:
                 display_text += f"\n   {rel_display}"
             if show_author and author:
-                display_text += f"\n   by {author}"
+                display_text += f"\n   {tr('by {}').format(author)}"
 
             item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, join)
@@ -21044,7 +21044,7 @@ class GenizahGUI(QMainWindow):
             if sm_text:
                 display_text += f"\n   {sm_text}"
             if author:
-                display_text += f"\n   by {author}"
+                display_text += f"\n   {tr('by {}').format(author)}"
             item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, pz)
             target_list.addItem(item)
