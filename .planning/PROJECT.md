@@ -8,28 +8,20 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.0.0 Fragment Puzzle
+## Current Milestone: (planning next)
 
-**Goal:** Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal, DPI calibration, and join document creation.
+No active milestone. Use `/gsd:new-milestone` to start the next cycle.
 
-**Target features:**
-- Canvas-based fragment assembly with drag, rotate, flip, resize per piece
-- Automatic background removal (color-based segmentation of solid library backgrounds)
-- DPI-calibrated auto-sizing using IIIF image metadata
-- Recto + verso views (auto-generated and independently editable)
-- Save as join document (composite image + structured metadata: fragment IDs, join type, notes)
-- Personal workspace by default, publishable for community review
-- Both web (NiceGUI) and desktop (PyQt6)
+## Current State (after v7.0.0 shipped)
 
-## Current State (after v6.5.0 shipped)
-
-**Shipped:** v6.5.0 Search UX & Filtered Search (2026-03-14, git tag v6.5.0)
-- Search UX overhaul: elapsed timer, ETA, partial results on cancel, chunk count, min-chunks filter, 3-state printed filter, CreationType badge (both apps)
-- Session persistence: full state + exclusion restore on reopen, search/composition history dropdowns (both apps)
-- Quick UX wins: desktop notifications, sleep prevention, Hebrew library names (81 codes), copy context menu
-- Bidirectional filtered search: pre-search filtering by domain/author/work/date/material across all modes including parallels, browse-to-search navigation
-- Dicta translation: ~580K translations across all scholarly data with translation toggle and per-record display
-- Translation QA: 10-heuristic QC module, 12,827 data fixes applied
+**Shipped:** v7.0.0 Fragment Puzzle & Community Publishing (2026-03-17)
+- Fragment Puzzle: visual canvas for arranging manuscript fragments with background removal, zoom/rotate/crop, folio navigation, layer ordering, multiple background modes (both apps)
+- Join document persistence in local joins.db with auto-save, composite PNG export with metadata banner, thumbnail previews
+- Community publishing: publish/unpublish/fork puzzle joins via Supabase, Discoveries Center integration, All/My Puzzles tabs, clickable shelfmark badges, admin soft-delete, auto-unpublish on local delete
+- Recto/verso auto-generation from recto arrangement
+- Fragment selector combobox with Browse button (both apps)
+- Bilingual help sections for all new features
+- 50+ Hebrew translations
 
 **Architecture:**
 - Web: NiceGUI -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI + libraries_translations.db) + Supabase (community features only)
@@ -42,6 +34,11 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Shared: shared/translation_service.py (Dicta translations from pgp.db, fjms_enrichment.db, libraries_translations.db)
 - Shared: shared/dicta_client.py (Dicta Translate API client with few-shot scholarly prompts)
 - Shared: shared/translation_qc.py (translation QC heuristics)
+- Shared: shared/puzzle_service.py (joins.db CRUD for puzzle documents)
+- Shared: shared/puzzle_publish_service.py (Supabase publish/unpublish/fork/list)
+- Shared: shared/puzzle_export.py (composite PNG export with metadata banner)
+- Shared: shared/puzzle_image_service.py (IIIF fetch + HSV background removal + disk cache)
+- Shared: shared/background_removal.py (HSV-based parchment isolation engine)
 
 **Data:**
 - pgp.db: 35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments, 34,954 translations (v1.0.0)
@@ -127,14 +124,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Bidirectional filtered search: pre-search filtering by domain/author/work/date/material across all modes (both apps) -- v6.5.0
 - Dicta translation: ~580K translations for multilingual access with translation toggle (both apps) -- v6.5.0
 
+- Fragment puzzle canvas: visual assembly tool for physical joins with drag, rotate, flip, resize (both apps) -- v7.0.0
+- Background removal: HSV-based segmentation with two-pass detection for colored mats -- v7.0.0
+- Join document creation: composite image + metadata saved to local joins.db, publishable for community review -- v7.0.0
+- Recto/verso support: auto-generated verso from recto arrangement with correct verso images -- v7.0.0
+- Community publishing: publish/fork/browse puzzle joins via Supabase with RLS -- v7.0.0
+
 ### Active
 
-- Fragment puzzle canvas: visual assembly tool for physical joins with drag, rotate, flip, resize
-- Background removal: automatic segmentation of fragments from solid-color library backgrounds
-- DPI calibration: auto-sizing fragments to real-world scale using IIIF metadata
-- Join document creation: composite image + metadata saved to personal workspace, publishable for community
-- Recto/verso support: auto-generated verso from recto arrangement, both editable
-- Both apps: NiceGUI web + PyQt6 desktop
+(None — planning next milestone)
 
 ### Out of Scope
 
@@ -186,6 +184,11 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | SQLite sidecar pattern (3 sidecars) | Read-only reference data, both apps, offline capable | Good |
 | pgp.db as separate sidecar (not extending existing) | Distinct domain boundary, different update cycle | Good |
 | Tags as TEXT JSON with json_each() | Simple start, 115ms acceptable for 2695 tags | Good |
+| joins.db SQLite sidecar for puzzle docs | Local-first, offline capable, consistent with pgp.db/fjms pattern | Good |
+| HSV background removal (not AI/ML) | Deterministic, fast, no model dependency, handles solid-color backgrounds well | Good |
+| Fabric.js for web canvas | Rich 2D manipulation, active community, MIT license | Good |
+| Client-parameter injection for publish service | Same service code for web (anon client) and desktop (auth client) | Good |
+| Supabase puzzle-images storage bucket | Public read, user-scoped write, thumbnail + full-res PNG | Good |
 | Post-search domain filtering (not pre-search) | Users see all results first, then narrow by domain | Good |
 | Separate nli_crossref.db sidecar | Different provenance and update cycles from FJMS | Good |
 | FGP ≠ FL (crossref FGPImageNumberId not usable for IIIF) | Friedberg photo numbers are different numbering system | Lesson Learned |

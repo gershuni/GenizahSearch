@@ -1,4 +1,13 @@
 # Project Milestones: GenizahSearch
+## v7.0 Fragment Puzzle (Shipped: 2026-03-17)
+
+**Phases completed:** 5 phases, 15 plans, 0 tasks
+
+**Key accomplishments:**
+- (none recorded)
+
+---
+
 ## v6.5.0 Search UX & Filtered Search (Shipped: 2026-03-14)
 
 **Delivered:** Overhauled the daily search experience based on power user feedback — composition progress display with ETA, partial results on cancel, session persistence (restoring state including 5K+ exclusions), bidirectional filtered search by scholarly categories, and ~580K Dicta translations for multilingual access across all scholarly data.
