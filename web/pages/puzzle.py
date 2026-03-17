@@ -152,16 +152,23 @@ window.puzzleCanvas = {
     _isLocalHelperEnabled: function() {
         try {
             var params = new URLSearchParams(window.location.search || '');
-            if (params.get('local_helper') === '1') {
-                return true;
+            var paramValue = params.get('local_helper');
+            if (paramValue === '0') {
+                return false;
             }
             if (window.localStorage) {
-                return window.localStorage.getItem('puzzleLocalHelperEnabled') === '1';
+                var stored = window.localStorage.getItem('puzzleLocalHelperEnabled');
+                if (stored === '0') {
+                    return false;
+                }
+                if (stored === '1') {
+                    return true;
+                }
             }
         } catch (e) {
             console.warn('Failed to read local-helper toggle:', e);
         }
-        return false;
+        return true;
     },
 
     _deriveLocalHelperPage: function(key, meta, flIdOverride) {

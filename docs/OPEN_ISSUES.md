@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-17 (v7.0.0 ship: index rebuild WinError 5 fixed, publish rollback, state persistence, translations)
+> **Last Updated:** 2026-03-17 (verified production localhost-helper fallback for web puzzle background removal and folio navigation)
 > **Status:** Active working document
 
 ---
@@ -46,8 +46,8 @@ Move to "Completed Issues" section at bottom with date
 
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
-| P1 Critical Bugs | 0 | 4 | 4 |
-| P2 Medium Bugs | 6 | 14 | 20 |
+| P1 Critical Bugs | 1 | 4 | 5 |
+| P2 Medium Bugs | 6 | 16 | 22 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **13** | **50** | **63** |
+| **Total** | **14** | **52** | **66** |
 
 ---
 
@@ -65,6 +65,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Puzzle process endpoint allows unauthenticated cache poisoning / arbitrary uploads** | `web/api.py:726-780`, `shared/puzzle_image_service.py:68-131` | ❌ Open | New `POST /api/puzzle_process` trusts caller-supplied `fl_id` + raw body, then writes the bytes into the shared disk cache before any provenance check. Any unauthenticated client can pre-populate or overwrite cached puzzle images for arbitrary fragment IDs and thresholds, and can also push large arbitrary bodies into server memory/disk. Fix path: require a signed/derived cache key or verify the uploaded bytes against a server-generated nonce tied to a prior `/api/puzzle_image` miss; also add request size/type validation and avoid caching untrusted bytes verbatim. |
 | **Desktop Path Traversal** | `filter_text_dialog.py:16-23,58` | ג… Fixed (2026-02-03) | Already fixed - uses `_sanitize_cache_filename()` whitelist approach |
 
 | **Desktop FJMS catalog HTML injection** | `genizah_app.py:6712-6716,6879-6883,6921-6932` | ג… Fixed (2026-03-10) | Added `html.escape()` to all three catalog toggle sections (RunningTitle, FreeDesc, FullText) |
@@ -75,6 +76,8 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
+| **Desktop EXE puzzle image loading fails with `No module named numpy`** | `build_app.bat`, `GenizahSearchPro.spec` | ✅ Fixed (2026-03-17) | The desktop build explicitly added `numpy` as a hidden import for puzzle background removal, but then also excluded `numpy` from the PyInstaller bundle. Running from source worked because the venv had NumPy installed; the packaged EXE failed only when puzzle image processing first imported `shared.background_removal`. Fixed by removing the contradictory `numpy` exclusion from both build entry points. |
+| **Puzzle folio navigation still fails on production after initial client-side fallback** | `web/pages/puzzle.py:717-806`, `web/pages/puzzle.py:2685-2741` | ✅ Fixed (2026-03-17) | `navigateFolio()` now shares the same localhost-helper fallback chain as initial add and reload. Production was verified live: when `/api/puzzle_image` fails due to blocked server-side IIIF fetch, the browser falls back to the user's local helper and preserves correct `fl_id`/`folio_label` updates instead of saving mismatched metadata. |
 | **Desktop rebuild index can fail with WinError 5 on Tantivy `.fast` files** | `genizah_core.py`, `genizah_app.py`, `gui_threads.py` | ✅ Fixed (2026-03-17) | Added `SearchEngine.close_index()` to release Tantivy index/searcher + gc.collect() before rebuild. Called in `run_indexing()` before `IndexerThread` starts. `reload_index()` reopens after rebuild completes. |
 | **Puzzle state persistence/sync is incomplete across reloads and delete cleanup** | `web/pages/puzzle.py`, `shared/session_persistence.py`, `genizah_app.py` | ✅ Fixed (2026-03-17) | Verified that web now persists/restores `puzzle_doc_id`, refreshes the fragment selector on `puzzle-fragment-meta`, and clears `app.storage.tab['puzzle_doc_id']` when deleting the active local document. Targeted tests for the puzzle publish/service stack passed. Desktop restart persistence remains a separate UAT question, but the specific web reload/delete issue is fixed. |
 | **Publishing can create broken community joins when export/render fails** | `shared/puzzle_publish_service.py`, `shared/puzzle_export.py`, `shared/puzzle_image_service.py` | ✅ Fixed (2026-03-17) | `publish_join()` now fails fast with `ValueError` when `compose_puzzle_export()` returns `None`, before any storage upload or Supabase upsert. Test coverage was added in `tests/test_puzzle_publish.py::test_publish_join_fails_on_null_composite`. |
@@ -224,6 +227,9 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-17 | Verified the localhost-helper web puzzle path against `genizahsearch.com` and switched it from opt-in to default-on fallback. The browser now tries the user's local helper after `/api/puzzle_image` fails, across initial add, reload/toggle, and folio navigation. Also removed the fragile preflight `/health` fetch gate because it could block the helper attempt from the live HTTPS site even when image loading itself worked. | Codex |
+| 2026-03-17 | Reviewed commit `d6395f17` (`fix: client-side IIIF fallback when server can't fetch images`). Found 2 follow-up issues: (1) new `POST /api/puzzle_process` accepts arbitrary unauthenticated bytes and writes them into the shared puzzle-image cache keyed only by caller-supplied query params, enabling cache poisoning / upload abuse; (2) folio navigation still uses `/api/puzzle_image` without the new client-side fallback, so prev/next folio remains broken on production and can persist mismatched `fl_id`/`folio_label` metadata after a failed load. | Codex |
+| 2026-03-17 | Fixed desktop packaging regression for puzzle image processing: both `build_app.bat` and `GenizahSearchPro.spec` listed `numpy` as required, but also excluded it from the PyInstaller bundle. That contradiction produced `No module named numpy` only in the packaged EXE when the puzzle imported `shared.background_removal`. Removed the `numpy` exclusion from both build paths. | Codex |
 | 2026-03-17 | Investigated a desktop user report that "Build / Rebuild Index" fails with `[WinError 5] Access is denied` on `tantivy_db\\*.fast`. Static trace points to a Windows self-lock: startup opens the existing Tantivy index in `SearchEngine.reload_index()`, and the rebuild path later calls `shutil.rmtree()` on that same directory without first releasing the live searcher/index handles. Added this as a new open P2 issue with the likely fix path. | Codex |
 | 2026-03-17 | Verified the final follow-up fixes from the release review: deleting the active web puzzle document now clears `puzzle_doc_id`, and the remaining puzzle/community translation gaps were filled (`This will make your puzzle join visible to all users.\n\nPublish now?`, `(no original text)`, `View all joins...`, `No joined fragments found.`, `Could not resolve fragment identifiers.`). Targeted regression tests passed for `tests/test_puzzle_publish.py` and `tests/test_puzzle_service.py` (23/23). | Codex |
 | 2026-03-17 | Verified the user-reported follow-up fixes. Confirmed that web puzzle reload now persists/restores `puzzle_doc_id`, the five named translation keys were added, and the stale schema-version test now expects `2`. Also narrowed the earlier help-surface concern: `web/pages/help.py` and `Help.html` are app-specific and each now matches its own UI. Found one remaining regression in the new persistence path: deleting the active puzzle doc does not clear `puzzle_doc_id`, so reload can restore a deleted doc id. Static audit also still found additional untranslated puzzle/community strings beyond the five named fixes. | Codex |

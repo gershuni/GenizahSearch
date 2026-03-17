@@ -1,5 +1,47 @@
 # Puzzle Image Processing on Production Server
 
+## Status Update (2026-03-17)
+
+This document is now partly historical. The chosen production path is no longer a server-side proxy.
+
+### Adopted Solution
+
+- `GET /api/puzzle_image` remains the first attempt.
+- If server-side IIIF fetch fails on production, the web puzzle now falls back to a **localhost helper** running on the user's machine at `http://127.0.0.1:43111`.
+- The helper reuses the existing Python puzzle pipeline in `shared/puzzle_image_service.py`, so background removal happens on the user's own machine, where NLI access works.
+- If the helper is not running, the page falls back again to direct NLI `<img>` loading, which is degraded but still functional.
+
+### Verified Production Behavior
+
+- AWS server-side direct fetch was tested and ruled out.
+- Cloudflare Worker proxy was tested and ruled out.
+- The localhost-helper path was tested successfully against the live site `https://genizahsearch.com`.
+- The helper path now handles all three puzzle load paths:
+  - initial add
+  - fragment reload / processed toggle
+  - folio navigation
+
+### Current Fallback Order
+
+1. `/api/puzzle_image`
+2. `http://127.0.0.1:43111/...`
+3. direct NLI `<img>` load
+
+### Operational Notes
+
+- The localhost helper is now the primary web background-removal path on production.
+- It is enabled by default.
+- To disable it for debugging, use `?local_helper=0` or set `localStorage.puzzleLocalHelperEnabled = '0'`.
+- To force-enable it after a manual opt-out, set `localStorage.puzzleLocalHelperEnabled = '1'`.
+
+### Files
+
+- `web/pages/puzzle.py` — browser fallback chain and localhost helper integration
+- `scripts/puzzle_local_helper.py` — localhost HTTP helper
+- `shared/puzzle_image_service.py` — shared image fetch / cache / background-removal orchestration
+
+---
+
 ## Problem Statement
 
 The Fragment Puzzle requires **server-side image processing** (background removal via HSV segmentation in Python/NumPy/Pillow). On the production server (AWS EC2), the NLI IIIF image API blocks requests from the server IP, so the server cannot fetch manuscript images to process them.
@@ -277,8 +319,8 @@ def iiif_pipe(fl_id: str, size: int = 800):
 ### Phase 2 — TESTED AND RULED OUT
 **Option F (Cloudflare Worker)**: Tested on 2026-03-17. Cloudflare Worker deployed and routed, but NLI returned upstream HTTP 500 from Cloudflare edge IPs as well. NLI blocks datacenter/CDN-class IPs broadly, not just AWS. **This option does not work.** Do not deploy `PUZZLE_IIIF_MODE=proxy`.
 
-### Phase 2a — IMPLEMENTED (Localhost Helper)
-**Localhost helper service**: A small HTTP service running on the user's own machine (`http://127.0.0.1:43111`) that reuses the existing Python puzzle image pipeline. The user's residential/university IP can reach NLI. The web page falls back to this helper when server-side fetch fails. Opt-in via `?local_helper=1` URL param or `localStorage.puzzleLocalHelperEnabled = '1'`. See `scripts/puzzle_local_helper.py`.
+### Phase 2a — IMPLEMENTED AND VERIFIED (Localhost Helper)
+**Localhost helper service**: A small HTTP service running on the user's own machine (`http://127.0.0.1:43111`) that reuses the existing Python puzzle image pipeline. The user's residential/university IP can reach NLI. The web page falls back to this helper when server-side fetch fails. This path is now enabled by default and was verified against the live site. Opt-out only via `?local_helper=0` or `localStorage.puzzleLocalHelperEnabled = '0'`. See `scripts/puzzle_local_helper.py`.
 
 ### Phase 3 (Long-term — 2-4 days)
 **Option D (WebAssembly)**: Port bg removal to WASM. Combined with the Cloudflare proxy (for CORS), this eliminates server-side processing entirely. The puzzle becomes fully client-side.
