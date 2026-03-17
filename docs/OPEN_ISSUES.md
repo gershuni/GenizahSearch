@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-17 (Puzzle export fixes: web positioning, processed-image fidelity, desktop threading)
+> **Last Updated:** 2026-03-17 (Phase 52 community integration: pre-existing bug fixes for browse meta_mgr, desktop stats, reading desk joined view, auto-unpublish on delete)
 > **Status:** Active working document
 
 ---
@@ -103,6 +103,10 @@ Move to "Completed Issues" section at bottom with date
 | **Pre-search domain filter: bilingual, "Other" ambiguous, missing 3rd level** | `search.py`, `parallels.py`, `genizah_app.py`, `fjms_service.py` | ג… Fixed (2026-03-03) | Dropdown showed bilingual labels (should be current lang only), "Other" had no parent disambiguation, sub-sub-domains missing. Chips also lost qualified names. Fixed all 3 issues + recursive checkbox propagation + qualified-name SQL filtering |
 | **CSRF protection missing** | API endpoints | ג Deferred | Low risk - NiceGUI uses WebSocket |
 | **Session restore is not pixel-perfect** | genizah_app.py | ❌ Open | v6.5.1 added restore for browse tabs, catalog filters, composition results, and active tab. But composition restores flat (grouping/appendix lost), catalog sidebar doesn't highlight the selected author/work in the list widget, and browse-by-shelfmark skips full resolution (loads directly by sys_id). Could be improved to persist grouping state or re-run grouping more reliably. |
+| **BrowseState.meta_mgr AttributeError in joined view** | `web/pages/browse.py:3255` | ✅ Fixed (2026-03-17) | `state.meta_mgr` accessed without guard in Oxford detection code path. Fixed with `getattr(state, 'meta_mgr', None)`. |
+| **Desktop discovery stats all zeros** | `supabase_corrections_client.py` | ✅ Fixed (2026-03-17) | `get_discovery_stats()` only queried discoveries table type column, returning keys that didn't match UI stat_labels. Now queries corrections, profiles, fragment_joins tables. |
+| **Reading Desk from joined view: "Could not resolve fragment identifiers"** | `genizah_app.py:15956` | ✅ Fixed (2026-03-17) | Added `meta_mgr.resolve_system_by_shelfmark()` as third fallback in `_browse_open_joins_in_reading_desk`. |
+| **Deleting local puzzle join leaves orphaned Supabase published join** | `web/pages/puzzle.py`, `genizah_app.py` | ✅ Fixed (2026-03-17) | Auto-calls `unpublish_join` before deleting local document. |
 
 ---
 
