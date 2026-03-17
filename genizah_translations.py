@@ -2411,6 +2411,8 @@ TRANSLATIONS = {
         "חיפוש ממוקד לפי מאפייני כתב יד (תחום, מחבר, יצירה, תאריך, חומר), תרגומי קטלוג ומטא-נתונים (עברית/אנגלית), חיפוש לפי גבולות שורה לזיהוי צירופים",
     "New: Focused search by manuscript properties, catalog & metadata translations, line-boundary search for join detection":
         "חדש: חיפוש ממוקד לפי מאפייני כתב יד, תרגומי קטלוג ומטא-נתונים, חיפוש לפי גבולות שורה לזיהוי צירופים",
+    "Fragment Puzzle — arrange fragments on a visual canvas, save join documents, export composite PNG. Community Publishing — share puzzle joins with researchers worldwide.":
+        "פאזל קטעים — סדרו קטעי כתבי יד על קנבס חזותי, שמרו מסמכי צירוף, ייצאו תמונה מורכבת. פרסום לקהילה — שתפו צירופי פאזל עם חוקרים ברחבי העולם.",
     "Focused Search: filter manuscripts by domain, author, work, date, and material before searching":
         "חיפוש ממוקד: סינון כתבי יד לפי תחום, מחבר, יצירה, תאריך וחומר לפני החיפוש",
     "Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation":

@@ -4,39 +4,54 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [7.0.0-alpha] - Phase 50: Join Documents - 2026-03-17
+## [7.0.0] - Fragment Puzzle & Community Publishing - 2026-03-17
 
-### New Features
+### New Features — Fragment Puzzle (Phases 47-51)
 
-- **Save/Load puzzle arrangements**: Researchers can save their fragment puzzle arrangements as persistent "join documents" to a local `joins.db` SQLite sidecar. Documents include title, notes, and all fragment positions/transforms. Auto-save fires after canvas changes (both apps)
-- **Composite PNG export**: Export the assembled puzzle as a full-resolution RGBA PNG with transparent background. Desktop offers draft (1000px) / standard (2000px) / full (3000px) resolution choices with progress dialog. Web downloads directly
-- **Thumbnail previews**: Saved documents show auto-generated composite thumbnails in the document list
+- **Fragment Puzzle canvas**: Visual workspace for arranging manuscript fragments side-by-side to reconstruct physical joins. HSV-based automatic background removal, zoom/rotate/crop controls, folio navigation (prev/next page), multiple background modes (dark gray/black/white/checkerboard/light table/grid) (both apps)
+- **Save/Load puzzle arrangements**: Persistent "join documents" in local `joins.db` SQLite sidecar. Documents include title, notes, and all fragment positions/transforms. Auto-save after canvas changes (both apps)
+- **Composite PNG export**: Full-resolution RGBA PNG with transparent background and metadata banner. Desktop offers draft (1000px) / standard (2000px) / full (3000px) resolution choices with progress dialog. Web downloads directly
+- **Recto/Verso**: Automatic verso view generation from recto arrangement with correct verso images (both apps)
 - **Bring Forward / Send Backward**: Layer ordering controls for overlapping fragments — toolbar buttons and desktop context menu (both apps)
-- **Saved Joins panel** (desktop): Non-closable QDockWidget side panel listing all saved documents with thumbnails, details editing (title, notes), delete, and rename
-- **Saved Joins dialog** (web): Modal dialog accessible from toolbar, listing documents with load/delete/metadata editing
+- **Fragment selector combobox**: Dropdown showing all fragments on canvas, syncs with canvas selection. Browse button opens selected fragment in browse view (both apps)
+- **Add from Lists / Known Joins**: Quick-add fragments from personal lists or from known FJMS/PGP joins for the current manuscript (both apps)
+- **Saved Joins panel** (desktop): Side panel with thumbnails, details editing, delete, rename
+- **Saved Joins dialog** (web): Modal dialog with load/delete/metadata editing
+
+### New Features — Community Publishing (Phase 52)
+
+- **Publish puzzle joins**: Share fragment arrangements with the research community. Publish button turns green when published, share dialog with copyable deep link (`/puzzle?doc={id}`) (both apps)
+- **Discoveries Center integration**: Published puzzle joins appear in the community feed with composite thumbnails, author names, and shelfmark badges. "Published Puzzles" stat card in stats row
+- **Fork & Open**: "Open in Puzzle" creates a local copy of any published join and opens it in the puzzle canvas (both apps)
+- **Community Puzzle Joins panel**: When browsing a manuscript, see all published puzzle joins containing that fragment (both apps)
+- **All Puzzles / My Puzzles tabs**: Browse and manage published puzzle joins in the community Joins section (both apps)
+- **Clickable shelfmark badges**: Shelfmark badges on published joins navigate to the browse page for that manuscript
+- **Admin soft-delete**: Admins can hide published puzzle joins from the community feed
+- **Auto-unpublish on delete**: Deleting a local join automatically removes it from the community
 
 ### Improvements
 
-- **Desktop toolbar compacted**: Text buttons (Save Join, New, Export PNG, Flip, Crop, Delete, Background) replaced with emoji icon buttons (28px) with translated tooltips
-- **Save dialog with notes**: New document save dialog includes both title and notes fields (was title-only)
-- **Fragment dropdown syncs selection**: Clicking a fragment on canvas syncs the toolbar dropdown; removed duplicate "No selection" label
-- **Theme-aware web dialogs**: Save, delete, and document list dialogs use CSS variables for light/dark mode compatibility
-- **Hebrew translations**: 25+ new strings for all puzzle document management UI
+- **Desktop toolbar compacted**: Text buttons replaced with emoji icon buttons (28px) with translated tooltips
+- **Save dialog with notes**: Title and notes fields (was title-only)
+- **Theme-aware web dialogs**: CSS variables for light/dark mode compatibility
+- **Stats cards layout**: 7 stat cards fit in one responsive row on Discoveries page
+- **Saved joins list dedup**: Hides shelfmarks line when it duplicates the title (handles reversed order, fork prefixes)
+- **Help Center updated**: New Fragment Puzzle and Community Publishing sections in both web and desktop help (bilingual)
+- **Hebrew translations**: 50+ new strings for all puzzle and community features
 
 ### Bug Fixes
 
-- **Web puzzle page crash**: `ui.left_drawer` cannot be nested inside a column — replaced with `ui.dialog` modal
-- **Export position accuracy**: Fixed per-fragment `coord_scale` drift when source images have different widths — now uses single global scale factor. Fixed center computation using unscaled canvas dimensions instead of scaled
-- **Export bg-removal fidelity**: Export now reuses the same 800px processed image shown on canvas instead of re-running background removal at export resolution (which could produce different results)
-- **Desktop export UI freeze**: Export moved to background thread with cancelable progress dialog
-- **Desktop "No fragments" label**: Fragment list label now updates after images finish loading, not before
-- **Translations in wrong dict**: Puzzle management translations were accidentally placed in `LIBRARY_CODES_HE` instead of `TRANSLATIONS` — moved to correct location
-- **CUL blue conservation mat**: Background removal now uses two-pass detection — samples edge midpoints for secondary colored backgrounds (blue/green mats) inside outer border frames, removing both layers. Previously only corner-sampled border was removed, leaving colored mat opaque
-
-### Known Issues
-
-- **Web export positions still slightly off**: Fabric.js left/top to PyQt pos() coordinate conversion needs further empirical verification
-- ~~**CUL blue conservation mat**~~: Fixed — two-pass detection now removes both outer border frames and inner colored mats
+- **Web puzzle page crash**: `ui.left_drawer` replaced with `ui.dialog` modal
+- **Export position accuracy**: Fixed per-fragment `coord_scale` drift — uses single global scale factor
+- **Export bg-removal fidelity**: Reuses same 800px processed image shown on canvas
+- **Desktop export UI freeze**: Export moved to background thread with progress dialog
+- **CUL blue conservation mat**: Two-pass background detection for colored conservation mats
+- **Web publish button invisible**: Removed `flat` prop when published so green background shows
+- **Fork button RuntimeWarning**: Async fork coroutine was not being awaited
+- **Desktop discovery stats all zeros**: `get_discovery_stats()` now queries all relevant tables
+- **BrowseState.meta_mgr AttributeError**: Guarded with `getattr` in joined view Oxford detection
+- **Reading Desk from joined view**: Added `meta_mgr.resolve_system_by_shelfmark()` as fallback for fragment resolution
+- **Desktop corrections showing anonymous**: Added profile batch-fetch to `get_my_corrections` and `get_all_corrections`
 
 ---
 

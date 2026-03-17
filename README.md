@@ -1,4 +1,4 @@
-# Genizah Search Pro 6.5.3
+# Genizah Search Pro 7.0.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,23 +8,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 6.5.3?
+## What's New in Version 7.0.0?
+
+### v7.0.0: Fragment Puzzle & Community Publishing
+
+A major new feature for collaborative Genizah research — the Fragment Puzzle lets you visually arrange manuscript fragments to reconstruct physical joins, and Community Publishing lets you share your discoveries with researchers worldwide.
+
+* **Fragment Puzzle:** Visual canvas for arranging manuscript fragments side-by-side. Automatic background removal, zoom/rotate/crop, folio navigation, layer ordering, multiple background modes. Save as join documents with auto-save, export as composite PNG with metadata banner. Recto/verso support (both apps)
+* **Community Publishing:** Share your puzzle join arrangements with the research community. Published joins appear in the Discoveries Center with thumbnails and deep links. Other researchers can fork and open any published join. All Puzzles / My Puzzles browsing tabs. Admin moderation. Auto-unpublish when deleting local joins (both apps)
+* **Fragment selector:** Combobox showing all fragments on canvas with Browse button to open in browse view (both apps)
+* **Help Center updated:** New bilingual (English/Hebrew) documentation for Fragment Puzzle and Community Publishing features
+
+### Previous Releases
 
 ### v6.5.3: Image Viewer — Copy & Save
 * **Right-click image menu:** Copy or save manuscript images directly from the viewer with rotation preserved (desktop)
 
-### v6.5.2: UI Polish
-* **Desktop compact buttons:** ResultDialog action/community/image toolbar buttons converted to icon+short text format with full-text tooltips
-* **Web language toggle:** Moved language switch from sidebar footer to header bar for better visibility
-
-### v6.5.1: Bug Fixes & Session Restore
-* **Session restore improvements:** Browse tabs (Shelfmark with text+images, Identification with all filters), composition search results, and active tab now persist across restarts (desktop)
-* **Composition search navigation:** Fixed missing next/prev in ResultDialog for filtered and appendix results (desktop)
-* **Web parallels stability:** Fixed parent_slot crash when navigating away from composition search page
-
 ### v6.5.0: Search UX & Filtered Search
-
-Focused search, ~924K multilingual catalog translations, line-boundary search, and cumulative UX improvements.
 
 * **Focused Search:** Filter manuscripts by domain, author, work, date range, and material type before searching — across all search modes (both apps)
 * **Dicta Translation:** ~924K machine translations for catalog data, titles, and scholarly descriptions (Hebrew↔English) via Dicta Translation API, with translation QA and user reporting

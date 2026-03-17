@@ -104,6 +104,8 @@
         <li><a href="#catalog-browse">Browse by Identification</a></li>
         <li><a href="#pgp">Princeton Geniza Project (PGP) Data</a></li>
         <li><a href="#reading-desk">Reading Desk</a></li>
+        <li><a href="#puzzle">Fragment Puzzle</a></li>
+        <li><a href="#community-publish">Community Publishing</a></li>
         <li><a href="#lab">Lab Mode</a></li>
         <li><a href="#settings">Settings & About</a></li>
         <li><a href="#export">Exporting Data</a></li>
@@ -362,6 +364,89 @@
     </div>
 
     <div class="section">
+    <h2 id="puzzle">Fragment Puzzle</h2>
+    <p>A visual canvas for arranging manuscript fragment images side by side to reconstruct physical joins between Genizah fragments.</p>
+
+    <h3>Adding Fragments</h3>
+    <ul>
+        <li>Type a shelfmark in the input box and press Enter or click the add button</li>
+        <li>From a personal list: open the <b>Lists</b> dropdown and select fragments to add</li>
+        <li>From known joins: when PGP or FJMS joins are available for a fragment, click the joins button to load all related fragments at once</li>
+    </ul>
+
+    <h3>Canvas Controls</h3>
+    <ul>
+        <li><b>Zoom:</b> Scroll to zoom in/out on the canvas; double-click to reset view</li>
+        <li><b>Rotate:</b> Select a fragment and use the rotate controls (or keyboard arrows) to fine-tune the angle</li>
+        <li><b>Background removal:</b> Adjust the threshold slider to remove parchment/paper background from fragment images, isolating the text</li>
+        <li><b>Background modes:</b> Cycle through canvas backgrounds (dark, black, white, checkerboard, parchment, grid) to find the best contrast</li>
+        <li><b>Crop:</b> Trim away empty margins from a fragment image</li>
+        <li><b>Flip:</b> Mirror a fragment horizontally or vertically</li>
+        <li><b>Folio navigation:</b> Use Previous/Next page controls to switch between recto and verso, or navigate to other folios of the same manuscript</li>
+    </ul>
+
+    <h3>Layer Controls</h3>
+    <ul>
+        <li><b>Bring Forward / Send Backward:</b> When fragments overlap, use these controls to change the stacking order so you can position fragments on top of or behind each other</li>
+    </ul>
+
+    <h3>Fragment Selector</h3>
+    <p>Use the combobox above the canvas to select a loaded fragment. The <b>Browse</b> button opens that fragment in the Browse Manuscript tab.</p>
+
+    <h3>Saving &amp; Loading</h3>
+    <ul>
+        <li>Click the <b>Save</b> button to save the current arrangement as a join document with a title and optional notes</li>
+        <li>After the first save, changes are auto-saved as you move, rotate, or resize fragments</li>
+        <li>Click the <b>Open</b> button to browse your saved joins; each entry shows a thumbnail preview</li>
+        <li>Select a saved join to load it back onto the canvas</li>
+    </ul>
+
+    <h3>Export</h3>
+    <ul>
+        <li>Click the <b>Export</b> button to generate a composite PNG image of all fragments as arranged on the canvas</li>
+        <li>Choose from multiple resolution levels: <b>Draft</b>, <b>Standard</b>, or <b>Full</b> resolution</li>
+        <li>The exported image includes a metadata banner listing all fragment shelfmarks</li>
+    </ul>
+
+    <h3>Recto / Verso</h3>
+    <p>The <b>Flip Puzzle</b> button mirrors the entire canvas arrangement and navigates each fragment to its verso (or recto), so you can examine the reverse side of a reconstructed join.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="community-publish">Community Publishing</h2>
+    <p>Share your puzzle join reconstructions with the research community and browse joins published by other scholars.</p>
+
+    <h3>Publishing a Join</h3>
+    <ul>
+        <li>After saving a puzzle join, click the <b>Publish</b> button in the toolbar</li>
+        <li>When published, the button turns green and a share link dialog appears with a <b>Copy</b> button so you can send the link to colleagues</li>
+        <li>Your arrangement is uploaded as a composite image along with metadata (title, notes, fragment list)</li>
+    </ul>
+
+    <h3>Unpublishing</h3>
+    <ul>
+        <li>Click the green Publish button again to remove your join from the community feed</li>
+        <li>Deleting a local join document also automatically removes it from the community if it was published</li>
+    </ul>
+
+    <h3>Browsing Published Joins</h3>
+    <ul>
+        <li>The <b>Discoveries Center</b> shows published puzzle joins from all users, displayed with thumbnail previews</li>
+        <li>Use the <b>All Puzzles</b> tab to browse all community puzzle joins</li>
+        <li>Use the <b>My Puzzles</b> tab to see and manage only your own published joins</li>
+    </ul>
+
+    <h3>Opening a Published Join</h3>
+    <ul>
+        <li>Click <b>Open in Puzzle</b> on any published join to fork a copy into your local workspace</li>
+        <li>This creates an independent copy you can modify without affecting the original publication</li>
+    </ul>
+
+    <h3>Community Puzzle Joins Panel</h3>
+    <p>When browsing a manuscript, a panel shows any published joins that contain that fragment. This helps you discover existing reconstructions relevant to the manuscript you are studying.</p>
+    </div>
+
+    <div class="section">
     <h2 id="lab">Lab Mode</h2>
     <p>The "Lab Mode" button activates an experimental and more advanced search engine.</p>
     <ul>
@@ -453,6 +538,8 @@
         <li><a href="#catalog-browse">עיון לפי זיהוי</a></li>
         <li><a href="#pgp">מידע מפרויקט הגניזה של פרינסטון (PGP)</a></li>
         <li><a href="#reading-desk">שולחן קריאה (Reading Desk)</a></li>
+        <li><a href="#puzzle">פאזל קטעים</a></li>
+        <li><a href="#community-publish">פרסום לקהילה</a></li>
         <li><a href="#lab">מצב מעבדה</a></li>
         <li><a href="#settings">הגדרות ואודות</a></li>
         <li><a href="#export">ייצוא נתונים</a></li>
@@ -705,6 +792,89 @@
         <li>כל קטע מוצג עם תמונת המקור, בורר גרסאות (כולל תעתוקי PGP אם קיימים), ומידע מורחב</li>
         <li>לסיום לחצו <b>יציאה משולחן הקריאה</b></li>
     </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="puzzle">פאזל קטעים</h2>
+    <p>קנבס חזותי לסידור תמונות קטעי כתבי יד זה לצד זה, לשחזור צירופים פיזיים בין קטעי גניזה.</p>
+
+    <h3>הוספת קטעים</h3>
+    <ul>
+        <li>הקלידו מספר מדף בתיבת הקלט ולחצו Enter או על כפתור ההוספה</li>
+        <li>מרשימה אישית: פתחו את תפריט <b>הרשימות</b> ובחרו קטעים להוספה</li>
+        <li>מצירופים ידועים: כשקיימים צירופי PGP או פרידברג לקטע מסוים, לחצו על כפתור הצירופים כדי לטעון את כל הקטעים הקשורים בבת אחת</li>
+    </ul>
+
+    <h3>פקדי הקנבס</h3>
+    <ul>
+        <li><b>זום:</b> גלילה להגדלה/הקטנה; לחיצה כפולה לאיפוס התצוגה</li>
+        <li><b>סיבוב:</b> בחרו קטע והשתמשו בפקדי הסיבוב (או בחצי המקלדת) לכוונון עדין של הזווית</li>
+        <li><b>הסרת רקע:</b> כוונו את מחוון הסף להסרת רקע הקלף/נייר מתמונות הקטעים, לבידוד הטקסט</li>
+        <li><b>מצבי רקע:</b> מעבר בין רקעי קנבס (כהה, שחור, לבן, משובץ, קלף, רשת) למציאת הניגודיות האופטימלית</li>
+        <li><b>חיתוך:</b> חיתוך שוליים ריקים מתמונת קטע</li>
+        <li><b>היפוך:</b> שיקוף קטע אופקית או אנכית</li>
+        <li><b>ניווט בדפים:</b> השתמשו בפקדי עמוד קודם/הבא למעבר בין רקטו וורסו, או לניווט לדפים אחרים של אותו כתב יד</li>
+    </ul>
+
+    <h3>שכבות</h3>
+    <ul>
+        <li><b>הבא קדימה / שלח אחורה:</b> כשקטעים חופפים, השתמשו בפקדים אלה לשינוי סדר השכבות כדי למקם קטעים מעל או מתחת לאחרים</li>
+    </ul>
+
+    <h3>בורר קטעים</h3>
+    <p>השתמשו בתיבת הבחירה מעל הקנבס לבחירת קטע טעון. כפתור <b>עיון</b> פותח את הקטע בלשונית עיון בכתב יד.</p>
+
+    <h3>שמירה וטעינה</h3>
+    <ul>
+        <li>לחצו על כפתור <b>שמירה</b> לשמירת הסידור הנוכחי כמסמך צירוף עם כותרת והערות</li>
+        <li>לאחר השמירה הראשונה, שינויים נשמרים אוטומטית בכל הזזה, סיבוב או שינוי גודל</li>
+        <li>לחצו על כפתור <b>פתיחה</b> לעיון בצירופים שמורים; כל רשומה מציגה תמונה ממוזערת</li>
+        <li>בחרו צירוף שמור כדי לטעון אותו חזרה לקנבס</li>
+    </ul>
+
+    <h3>ייצוא</h3>
+    <ul>
+        <li>לחצו על כפתור <b>ייצוא</b> ליצירת תמונת PNG מורכבת של כל הקטעים כפי שסודרו על הקנבס</li>
+        <li>בחרו מבין מספר רמות רזולוציה: <b>טיוטה</b>, <b>רגילה</b> או <b>רזולוציה מלאה</b></li>
+        <li>התמונה המיוצאת כוללת באנר מטא-נתונים עם רשימת מספרי המדף של כל הקטעים</li>
+    </ul>
+
+    <h3>רקטו / ורסו</h3>
+    <p>כפתור <b>הפיכת הפאזל</b> משקף את כל סידור הקנבס ומנווט כל קטע לצד ורסו (או רקטו), כדי שתוכלו לבחון את הצד ההפוך של צירוף משוחזר.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="community-publish">פרסום לקהילה</h2>
+    <p>שתפו את שחזורי הצירופים שלכם עם קהילת החוקרים ועיינו בצירופים שפורסמו על ידי חוקרים אחרים.</p>
+
+    <h3>פרסום צירוף</h3>
+    <ul>
+        <li>לאחר שמירת צירוף בפאזל, לחצו על כפתור <b>פרסום</b> בסרגל הכלים</li>
+        <li>לאחר הפרסום, הכפתור הופך לירוק ומופיע דיאלוג שיתוף קישור עם כפתור <b>העתקה</b> לשליחה לעמיתים</li>
+        <li>הסידור שלכם מועלה כתמונה מורכבת יחד עם מטא-נתונים (כותרת, הערות, רשימת קטעים)</li>
+    </ul>
+
+    <h3>ביטול פרסום</h3>
+    <ul>
+        <li>לחצו שוב על כפתור הפרסום הירוק כדי להסיר את הצירוף מהקהילה</li>
+        <li>מחיקת מסמך צירוף מקומי מסירה אותו אוטומטית גם מהקהילה אם היה מפורסם</li>
+    </ul>
+
+    <h3>עיון בצירופים מפורסמים</h3>
+    <ul>
+        <li><b>מרכז התגליות</b> מציג צירופי פאזל שפורסמו על ידי כל המשתמשים, עם תמונות ממוזערות</li>
+        <li>השתמשו בלשונית <b>כל הפאזלים</b> לעיון בכל צירופי הקהילה</li>
+        <li>השתמשו בלשונית <b>הפאזלים שלי</b> לצפייה וניהול הצירופים שפרסמתם</li>
+    </ul>
+
+    <h3>פתיחת צירוף מפורסם</h3>
+    <ul>
+        <li>לחצו על <b>פתח בפאזל</b> בכל צירוף מפורסם כדי ליצור עותק מקומי בסביבת העבודה שלכם</li>
+        <li>נוצר עותק עצמאי שתוכלו לערוך מבלי להשפיע על הפרסום המקורי</li>
+    </ul>
+
+    <h3>פאנל צירופי קהילה</h3>
+    <p>בעת עיון בכתב יד, מוצג פאנל עם צירופים מפורסמים הכוללים את הקטע הנוכחי. זה מסייע לגלות שחזורים קיימים הרלוונטיים לכתב היד שאתם חוקרים.</p>
     </div>
 
     <div class="section">

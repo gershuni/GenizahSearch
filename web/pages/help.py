@@ -50,6 +50,8 @@ def _create_english_content():
                 ('parallels', 'Parallels Search'),
                 ('pgp', 'Princeton Geniza Project (PGP) Data'),
                 ('reading-desk', 'Reading Desk'),
+                ('puzzle', 'Fragment Puzzle'),
+                ('community-publish', 'Community Publishing'),
                 ('browse', 'Browse Manuscript'),
                 ('catalog-browse', 'Browse by Identification'),
                 ('lists', 'Lists'),
@@ -362,6 +364,84 @@ The Reading Desk is useful for any researcher who wants to view multiple shelfma
 - Click **Exit Reading Desk** when done
         ''').style('color: var(--text-secondary);')
 
+    # === Fragment Puzzle ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-puzzle"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('extension').classes('text-2xl text-primary')
+            h2('Fragment Puzzle', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+A visual canvas for arranging manuscript fragment images side by side to reconstruct physical joins between Genizah fragments.
+
+**Adding Fragments:**
+- Type a shelfmark in the input box and press Enter or click the add button
+- From a personal list: open the **Lists** dropdown and select fragments to add
+- From known joins: when PGP or FJMS joins are available for a fragment, click the joins button to load all related fragments at once
+
+**Canvas Controls:**
+- **Zoom:** Scroll to zoom in/out on the canvas; double-click to reset view
+- **Rotate:** Select a fragment and use the rotate controls (or keyboard arrows) to fine-tune the angle
+- **Background removal:** Adjust the threshold slider to remove parchment/paper background from fragment images, isolating the text
+- **Background modes:** Cycle through canvas backgrounds (dark, black, white, checkerboard, parchment, grid) to find the best contrast for your fragments
+- **Crop:** Trim away empty margins from a fragment image
+- **Flip:** Mirror a fragment horizontally or vertically
+- **Folio navigation:** Use Previous/Next page controls to switch between recto and verso, or navigate to other folios of the same manuscript
+
+**Layer Controls:**
+- **Bring Forward / Send Backward:** When fragments overlap, use these controls to change the stacking order so you can position fragments on top of or behind each other
+
+**Fragment Selector:**
+- Use the combobox above the canvas to select a loaded fragment; the **Browse** button opens that fragment in the Browse Manuscript page
+
+**Saving & Loading:**
+- Click the **Save** button (💾) to save the current arrangement as a join document with a title and optional notes
+- After the first save, changes are auto-saved as you move, rotate, or resize fragments
+- Click the **Open** button (📂) to browse your saved joins; each entry shows a thumbnail preview
+- Select a saved join to load it back onto the canvas
+
+**Export:**
+- Click the **Export** button (🖼️) to generate a composite PNG image of all fragments as arranged on the canvas
+- Choose from multiple resolution levels (draft, standard, or full resolution)
+- The exported image includes a metadata banner listing all fragment shelfmarks
+
+**Recto/Verso:**
+- The Flip Puzzle button mirrors the entire canvas arrangement and navigates each fragment to its verso (or recto), so you can examine the reverse side of a reconstructed join
+        ''').style('color: var(--text-secondary);')
+
+    # === Community Publishing ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-community-publish"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('publish').classes('text-2xl text-primary')
+            h2('Community Publishing', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+Share your puzzle join reconstructions with the research community and browse joins published by other scholars.
+
+**Publishing a Join:**
+- After saving a puzzle join, click the **Publish** button (📤) in the toolbar
+- When published, the button turns green and a share link dialog appears with a **Copy** button so you can send the link to colleagues
+- Your arrangement is uploaded as a composite image along with metadata (title, notes, fragment list)
+
+**Unpublishing:**
+- Click the green Publish button again to remove your join from the community feed
+- Deleting a local join document also automatically removes it from the community if it was published
+
+**Browsing Published Joins:**
+- The **Discoveries Center** shows published puzzle joins from all users, displayed with thumbnail previews
+- Use the **All Puzzles** tab to browse all community puzzle joins
+- Use the **My Puzzles** tab to see and manage only your own published joins
+
+**Opening a Published Join:**
+- Click **Open in Puzzle** on any published join to fork a copy into your local workspace
+- This creates an independent copy you can modify without affecting the original publication
+
+**Community Puzzle Joins Panel:**
+- When browsing a manuscript, a panel shows any published joins that contain that fragment
+- This helps you discover existing reconstructions relevant to the manuscript you are studying
+        ''').style('color: var(--text-secondary);')
+
     # === Browse Manuscript ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-browse"')
@@ -476,6 +556,8 @@ def _create_hebrew_content():
                 ('parallels', 'חיפוש מקבילות'),
                 ('pgp', 'מידע מפרויקט הגניזה של פרינסטון (PGP)'),
                 ('reading-desk', 'שולחן קריאה (Reading Desk)'),
+                ('puzzle', 'פאזל קטעים'),
+                ('community-publish', 'פרסום לקהילה'),
                 ('browse', 'עיון בכתב יד'),
                 ('catalog-browse', 'עיון לפי זיהוי'),
                 ('lists', 'רשימות'),
@@ -768,6 +850,84 @@ def _create_hebrew_content():
 - הוסיפו כתבי יד נוספים מתוצאות חיפוש או מעיון בכתבי יד אחרים
 - כל קטע מוצג עם תמונת המקור, בורר גרסאות (כולל תעתוקי PGP אם קיימים), ומידע מורחב
 - לסיום לחצו **יציאה משולחן הקריאה**
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Fragment Puzzle ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-puzzle"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('extension').classes('text-2xl text-primary')
+            h2('פאזל קטעים', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+קנבס חזותי לסידור תמונות קטעי כתבי יד זה לצד זה, לשחזור צירופים פיזיים בין קטעי גניזה.
+
+**הוספת קטעים:**
+- הקלידו מספר מדף בתיבת הקלט ולחצו Enter או על כפתור ההוספה
+- מרשימה אישית: פתחו את תפריט **הרשימות** ובחרו קטעים להוספה
+- מצירופים ידועים: כשקיימים צירופי PGP או פרידברג לקטע מסוים, לחצו על כפתור הצירופים כדי לטעון את כל הקטעים הקשורים בבת אחת
+
+**פקדי הקנבס:**
+- **זום:** גלילה להגדלה/הקטנה; לחיצה כפולה לאיפוס התצוגה
+- **סיבוב:** בחרו קטע והשתמשו בפקדי הסיבוב (או בחצי המקלדת) לכוונון עדין של הזווית
+- **הסרת רקע:** כוונו את מחוון הסף להסרת רקע הקלף/נייר מתמונות הקטעים, לבידוד הטקסט
+- **מצבי רקע:** מעבר בין רקעי קנבס (כהה, שחור, לבן, משובץ, קלף, רשת) למציאת הניגודיות האופטימלית
+- **חיתוך:** חיתוך שוליים ריקים מתמונת קטע
+- **היפוך:** שיקוף קטע אופקית או אנכית
+- **ניווט בדפים:** השתמשו בפקדי עמוד קודם/הבא למעבר בין רקטו וורסו, או לניווט לדפים אחרים של אותו כתב יד
+
+**שכבות:**
+- **הבא קדימה / שלח אחורה:** כשקטעים חופפים, השתמשו בפקדים אלה לשינוי סדר השכבות כדי למקם קטעים מעל או מתחת לאחרים
+
+**בורר קטעים:**
+- השתמשו בתיבת הבחירה מעל הקנבס לבחירת קטע טעון; כפתור **עיון** פותח את הקטע בעמוד עיון בכתב יד
+
+**שמירה וטעינה:**
+- לחצו על כפתור **שמירה** (💾) לשמירת הסידור הנוכחי כמסמך צירוף עם כותרת והערות
+- לאחר השמירה הראשונה, שינויים נשמרים אוטומטית בכל הזזה, סיבוב או שינוי גודל
+- לחצו על כפתור **פתיחה** (📂) לעיון בצירופים שמורים; כל רשומה מציגה תמונה ממוזערת
+- בחרו צירוף שמור כדי לטעון אותו חזרה לקנבס
+
+**ייצוא:**
+- לחצו על כפתור **ייצוא** (🖼️) ליצירת תמונת PNG מורכבת של כל הקטעים כפי שסודרו על הקנבס
+- בחרו מבין מספר רמות רזולוציה (טיוטה, רגילה או רזולוציה מלאה)
+- התמונה המיוצאת כוללת באנר מטא-נתונים עם רשימת מספרי המדף של כל הקטעים
+
+**רקטו/ורסו:**
+- כפתור הפיכת הפאזל משקף את כל סידור הקנבס ומנווט כל קטע לצד ורסו (או רקטו), כדי שתוכלו לבחון את הצד ההפוך של צירוף משוחזר
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Community Publishing ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-community-publish"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('publish').classes('text-2xl text-primary')
+            h2('פרסום לקהילה', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+שתפו את שחזורי הצירופים שלכם עם קהילת החוקרים ועיינו בצירופים שפורסמו על ידי חוקרים אחרים.
+
+**פרסום צירוף:**
+- לאחר שמירת צירוף בפאזל, לחצו על כפתור **פרסום** (📤) בסרגל הכלים
+- לאחר הפרסום, הכפתור הופך לירוק ומופיע דיאלוג שיתוף קישור עם כפתור **העתקה** לשליחה לעמיתים
+- הסידור שלכם מועלה כתמונה מורכבת יחד עם מטא-נתונים (כותרת, הערות, רשימת קטעים)
+
+**ביטול פרסום:**
+- לחצו שוב על כפתור הפרסום הירוק כדי להסיר את הצירוף מהקהילה
+- מחיקת מסמך צירוף מקומי מסירה אותו אוטומטית גם מהקהילה אם היה מפורסם
+
+**עיון בצירופים מפורסמים:**
+- **מרכז התגליות** מציג צירופי פאזל שפורסמו על ידי כל המשתמשים, עם תמונות ממוזערות
+- השתמשו בלשונית **כל הפאזלים** לעיון בכל צירופי הקהילה
+- השתמשו בלשונית **הפאזלים שלי** לצפייה וניהול הצירופים שפרסמתם
+
+**פתיחת צירוף מפורסם:**
+- לחצו על **פתח בפאזל** בכל צירוף מפורסם כדי ליצור עותק מקומי בסביבת העבודה שלכם
+- נוצר עותק עצמאי שתוכלו לערוך מבלי להשפיע על הפרסום המקורי
+
+**פאנל צירופי קהילה:**
+- בעת עיון בכתב יד, מוצג פאנל עם צירופים מפורסמים הכוללים את הקטע הנוכחי
+- זה מסייע לגלות שחזורים קיימים הרלוונטיים לכתב היד שאתם חוקרים
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Browse Manuscript ===
