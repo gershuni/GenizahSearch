@@ -4961,10 +4961,20 @@ class PuzzleCanvasWindow(QMainWindow):
             return
         from shared.puzzle_service import get_puzzle_service
         svc = get_puzzle_service()
+        # Auto-unpublish from Supabase if published
+        try:
+            parent = self.parent()
+            while parent and not hasattr(parent, 'corrections_client'):
+                parent = parent.parent()
+            if parent and parent.corrections_client and parent.corrections_client.is_logged_in():
+                parent.corrections_client.unpublish_puzzle_join(doc_id)
+        except Exception:
+            pass  # Not published or not logged in — fine
         svc.delete_document(doc_id)
         if self._current_doc_id == doc_id:
             self._current_doc_id = None
             self._has_unsaved_changes = False
+            self._is_published = False
             self._details_group.setVisible(False)
             self.setWindowTitle(tr("Fragment Puzzle"))
         self._refresh_docs_list()

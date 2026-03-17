@@ -2185,9 +2185,21 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             with ui.row().classes('w-full justify-end gap-2'):
                 async def do_delete():
                     svc = get_puzzle_service(thread_safe=True)
+                    # Auto-unpublish from Supabase if published
+                    try:
+                        from shared.puzzle_publish_service import unpublish_join
+                        from web.supabase_client import get_user_client
+                        from web.auth_state import GlobalAuthState
+                        if GlobalAuthState.is_logged_in():
+                            client = get_user_client()
+                            user_id = GlobalAuthState.get_user_id()
+                            await run.io_bound(unpublish_join, client, user_id, doc_id)
+                    except Exception:
+                        pass  # Not published or not logged in — fine
                     await run.io_bound(svc.delete_document, doc_id)
                     if doc_state['current_doc_id'] == doc_id:
                         doc_state['current_doc_id'] = None
+                        doc_state['is_published'] = False
                         details_container.style('display: none;')
                     dlg.close()
                     await refresh_docs_list()
