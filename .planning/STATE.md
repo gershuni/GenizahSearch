@@ -198,7 +198,7 @@ Milestone: v7.0.0 Fragment Puzzle
 Phase: 52 (6 of 6 in milestone) -- COMPLETE
 Plan: 3 of 3 complete
 Status: Completed 52-03-PLAN.md (desktop community publishing)
-Last activity: 2026-03-17 - Completed 52-03 desktop community publishing
+Last activity: 2026-03-17 - Completed quick task 260317-tt9: Fix puzzle IIIF server-side processing
 
 Progress: [██████████] 100% (6 of 6 phases: 47, 48, 49, 50, 51, 52 complete)
 
@@ -280,6 +280,7 @@ Recent decisions affecting current work:
 | 260317-gsb | Fix desktop corrections showing anonymous for all users | 2026-03-17 | 78ce4c41 | [260317-gsb-fix-desktop-corrections-showing-anonymou](./quick/260317-gsb-fix-desktop-corrections-showing-anonymou/) |
 | Phase 52 P01 | 3min | 1 tasks | 3 files |
 | Phase 52 P01 | 3min | 2 tasks | 3 files |
+| 260317-tt9 | Fix puzzle IIIF server-side processing so puzzle works on server | 2026-03-17 | 1b90fc2f | [260317-tt9-fix-puzzle-iiif-server-side-processing-s](./quick/260317-tt9-fix-puzzle-iiif-server-side-processing-s/) |
 
 ## Session Continuity
 
