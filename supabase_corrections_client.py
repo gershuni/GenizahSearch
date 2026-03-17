@@ -890,7 +890,29 @@ class SupabaseCorrectionsClient:
             offset = (page - 1) * page_size
             response = query.order('created_at', desc=True).range(offset, offset + page_size - 1).execute()
 
-            corrections = [self._parse_correction(c) for c in response.data or []]
+            corrections_data = response.data or []
+
+            # Batch-fetch profile data for correction authors
+            if corrections_data:
+                user_ids = list(set(c.get('author_id') for c in corrections_data if c.get('author_id')))
+                if user_ids:
+                    try:
+                        profiles_response = client.table('profiles').select(
+                            'id, full_name, username'
+                        ).in_('id', user_ids).execute()
+                        profiles_map = {p['id']: p for p in (profiles_response.data or [])}
+                        for c in corrections_data:
+                            aid = c.get('author_id')
+                            if aid and aid in profiles_map:
+                                c['profiles'] = profiles_map[aid]
+                            else:
+                                c['profiles'] = {}
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch profiles for corrections: {e}")
+                        for c in corrections_data:
+                            c['profiles'] = {}
+
+            corrections = [self._parse_correction(c) for c in corrections_data]
             total = response.count or len(corrections)
             return corrections, total
 
@@ -928,7 +950,29 @@ class SupabaseCorrectionsClient:
             offset = (page - 1) * page_size
             response = query.order('created_at', desc=True).range(offset, offset + page_size - 1).execute()
 
-            corrections = [self._parse_correction(c) for c in response.data or []]
+            corrections_data = response.data or []
+
+            # Batch-fetch profile data for correction authors
+            if corrections_data:
+                user_ids = list(set(c.get('author_id') for c in corrections_data if c.get('author_id')))
+                if user_ids:
+                    try:
+                        profiles_response = client.table('profiles').select(
+                            'id, full_name, username'
+                        ).in_('id', user_ids).execute()
+                        profiles_map = {p['id']: p for p in (profiles_response.data or [])}
+                        for c in corrections_data:
+                            aid = c.get('author_id')
+                            if aid and aid in profiles_map:
+                                c['profiles'] = profiles_map[aid]
+                            else:
+                                c['profiles'] = {}
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch profiles for corrections: {e}")
+                        for c in corrections_data:
+                            c['profiles'] = {}
+
+            corrections = [self._parse_correction(c) for c in corrections_data]
             total = response.count or len(corrections)
             return corrections, total
 
