@@ -5,7 +5,7 @@ milestone_name: milestone
 status: not_started
 stopped_at: Completed 50-03-PLAN.md
 last_updated: "2026-03-16T18:23:22.382Z"
-last_activity: 2026-03-16 -- Completed 49-01 web puzzle page with Fabric.js canvas, API endpoints, nav integration
+last_activity: 2026-03-17 - Completed quick task 260317-aru: Fix background removal for CUL blue conservation mat
 progress:
   total_phases: 6
   completed_phases: 4
@@ -209,6 +209,7 @@ Recent decisions affecting current work:
 | Phase 50 P01 | 3min | 2 tasks | 3 files |
 | Phase 50 P02 | 3min | 1 tasks | 1 files |
 | Phase 50 P03 | 5min | 2 tasks | 2 files |
+| 260317-aru | Fix background removal for CUL blue conservation mat images with border frames | 2026-03-17 | pending | [260317-aru-fix-background-removal-for-cul-blue-cons](./quick/260317-aru-fix-background-removal-for-cul-blue-cons/) |
 
 ## Session Continuity
 
