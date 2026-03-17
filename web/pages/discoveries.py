@@ -275,7 +275,7 @@ def create_discoveries_page():
                 ui.label(tr('Community discoveries, questions, and contributions')).style('color: var(--text-secondary);')
 
         # === Statistics Cards ===
-        stats_row = ui.row().classes('w-full gap-4')
+        stats_row = ui.row().classes('w-full gap-3 flex-wrap')
         # Show loading spinner (replaced asynchronously below)
         with stats_row:
             with ui.column().classes('w-full items-center py-4'):
@@ -423,10 +423,10 @@ def _render_stat_cards(stats: dict):
         {'icon': 'extension', 'value': stats.get('published_puzzles', 0), 'label': tr('Published Puzzles'), 'color': 'cyan'},
     ]
     for card in stat_cards:
-        with ui.card().classes('flex-1 p-4 min-w-36'):
-            with ui.column().classes('items-center gap-2'):
-                ui.icon(card['icon']).classes(f'text-3xl text-{card["color"]}-500')
-                h3(str(card['value']), classes='text-2xl font-bold')
+        with ui.card().classes('p-3 min-w-28').style('flex: 1 1 calc(14.28% - 12px);'):
+            with ui.column().classes('items-center gap-1'):
+                ui.icon(card['icon']).classes(f'text-2xl text-{card["color"]}-500')
+                h3(str(card['value']), classes='text-xl font-bold')
                 ui.label(card['label']).classes('text-xs text-center').style('color: var(--text-secondary);')
 
 
@@ -531,11 +531,10 @@ def load_stats(container):
         ]
 
         for card in stat_cards:
-            with ui.card().classes('flex-1 p-4 min-w-36'):
-                with ui.column().classes('items-center gap-2'):
-                    ui.icon(card['icon']).classes(f'text-3xl text-{card["color"]}-500')
-                    # Changed to H3
-                    h3(str(card['value']), classes='text-2xl font-bold')
+            with ui.card().classes('p-3 min-w-28').style('flex: 1 1 calc(14.28% - 12px);'):
+                with ui.column().classes('items-center gap-1'):
+                    ui.icon(card['icon']).classes(f'text-2xl text-{card["color"]}-500')
+                    h3(str(card['value']), classes='text-xl font-bold')
                     ui.label(card['label']).classes('text-xs text-center').style('color: var(--text-secondary);')
 
 
