@@ -2810,8 +2810,9 @@ TRANSLATIONS = {
 
     # --- Puzzle Document Management ---
     "Saved Joins": "צירופים שמורים",
-    "Save Join": "שמור צירוף",
-    "Save Join Document": "שמור מסמך צירוף",
+    "Save Puzzle": "שמור פאזל",
+    "Save Puzzle Document": "שמור מסמך פאזל",
+    "Rename": "שנה שם",
     "No saved joins": "אין צירופים שמורים",
     "No fragments": "אין קטעים",
     "Fragments:": "קטעים:",

@@ -3311,7 +3311,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
         btn_save = QPushButton("💾")
         btn_save.setFixedWidth(28)
-        btn_save.setToolTip(tr("Save Join"))
+        btn_save.setToolTip(tr("Save Puzzle"))
         btn_save.clicked.connect(self._on_save_join)
         row1.addWidget(btn_save)
 
@@ -4469,7 +4469,7 @@ class PuzzleCanvasWindow(QMainWindow):
             suggested = auto_suggest_title(fragments)
             # Custom save dialog with title + notes
             dlg = QDialog(self)
-            dlg.setWindowTitle(tr("Save Join Document"))
+            dlg.setWindowTitle(tr("Save Puzzle Document"))
             dlg.setMinimumWidth(350)
             layout = QVBoxLayout(dlg)
             layout.addWidget(QLabel(tr("Title:")))

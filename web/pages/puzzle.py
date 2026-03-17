@@ -1857,7 +1857,7 @@ def create_puzzle_page(initial_add: str = None):
         with ui.dialog() as dlg, ui.card().classes('w-96 p-4').style(
             'background: var(--bg-card); color: var(--text-primary);'
         ):
-            ui.label(tr('Save Join Document')).classes('text-lg font-bold').style('color: var(--text-primary);')
+            ui.label(tr('Save Puzzle Document')).classes('text-lg font-bold').style('color: var(--text-primary);')
             save_title = ui.input(
                 label=tr('Title'), value=doc_state.get('current_doc_id') and title_input.value or suggested_title
             ).props('outlined dense').classes('w-full')
@@ -2474,7 +2474,7 @@ def create_puzzle_page(initial_add: str = None):
 
             ui.button(icon='save', on_click=save_join).props(
                 'dense flat dark color=primary round size=sm'
-            ).tooltip(tr('Save Join'))
+            ).tooltip(tr('Save Puzzle'))
 
             ui.button(icon='note_add', on_click=new_puzzle).props(
                 'dense flat dark round size=sm'
