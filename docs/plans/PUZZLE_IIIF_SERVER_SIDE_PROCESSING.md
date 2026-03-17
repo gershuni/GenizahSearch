@@ -271,11 +271,11 @@ def iiif_pipe(fl_id: str, size: int = 800):
 
 ## Recommended Approach
 
-### Phase 1 (Immediate — 5 minutes)
-**Option E**: SSH to server, test curl with browser-like headers. If NLI responds, the fix is adding those headers to `_fetch_iiif_image()`. This is what the code already tries (line 157-159 of `puzzle_image_service.py`) but the headers may need updating.
+### Phase 1 — TESTED AND RULED OUT
+**Option E**: Tested on 2026-03-17. Server curl with full browser headers returns HTTP 500 (XML error response). NLI blocks by IP range, not by headers. **This option does not work.**
 
-### Phase 2 (If Option E fails — 1-2 hours)
-**Option F (Cloudflare Worker)**: Set up a Cloudflare Worker at `genizahsearch.com/iiif-proxy/` that proxies NLI IIIF requests. The Worker runs on Cloudflare's edge (not AWS), so NLI sees a CDN IP. Update `puzzle_image_service.py` to use this proxy URL when running on the server. Also enables client-side CORS fetch for future Option D.
+### Phase 2 — NEXT ACTION (Cloudflare Worker)
+**Option F (Cloudflare Worker)**: Set up a Cloudflare Worker that proxies NLI IIIF requests. The Worker runs on Cloudflare's edge network (not AWS), so NLI sees a CDN IP, not the blocked EC2 IP. See the detailed implementation plan below.
 
 ### Phase 3 (Long-term — 2-4 days)
 **Option D (WebAssembly)**: Port bg removal to WASM. Combined with the Cloudflare proxy (for CORS), this eliminates server-side processing entirely. The puzzle becomes fully client-side.
@@ -326,6 +326,201 @@ cache/puzzle/
 | Cambridge IIIF | Various CUDL endpoints (also may block server) |
 | Cache dir | /home/ubuntu/GenizahSearch/cache/puzzle/ (auto-created) |
 | Dependencies | numpy 2.4.3, Pillow 12.1.1 (installed in venv) |
+
+---
+
+---
+
+## Cloudflare Worker Implementation Plan (Option F)
+
+### Overview
+
+Deploy a Cloudflare Worker at `genizahsearch.com/iiif-proxy/` that proxies NLI IIIF image requests. The Worker runs on Cloudflare's global edge network, so NLI sees a Cloudflare IP (not the blocked AWS EC2 IP). The Worker adds CORS headers so both server-side `requests.get()` and browser-side `fetch()` work.
+
+### Architecture
+
+```
+Current (broken):
+  EC2 Server → NLI IIIF → 500 (blocked)
+
+With Worker:
+  EC2 Server → genizahsearch.com/iiif-proxy/FL{id}/... → Cloudflare Edge → NLI IIIF → 200 ✓
+  Browser → genizahsearch.com/iiif-proxy/FL{id}/... → Cloudflare Edge → NLI IIIF → 200 ✓ (with CORS)
+```
+
+### Step 1: Create the Worker
+
+In the Cloudflare Dashboard:
+1. Go to **Workers & Pages** → **Create application** → **Create Worker**
+2. Name it `iiif-proxy`
+3. Replace the default code with:
+
+```javascript
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // Only handle /iiif-proxy/ paths
+    const path = url.pathname;
+    if (!path.startsWith('/iiif-proxy/')) {
+      return new Response('Not found', { status: 404 });
+    }
+
+    // Extract the IIIF path after /iiif-proxy/
+    // e.g., /iiif-proxy/FL990051753360205171/full/800,/0/default.jpg
+    const iiifPath = path.replace('/iiif-proxy/', '');
+    if (!iiifPath || !iiifPath.startsWith('FL')) {
+      return new Response('Invalid IIIF path', { status: 400 });
+    }
+
+    // Validate: only allow FL{digits} pattern to prevent open proxy abuse
+    const flMatch = iiifPath.match(/^FL(\d+)\//);
+    if (!flMatch) {
+      return new Response('Invalid FL ID format', { status: 400 });
+    }
+
+    // Build the upstream NLI IIIF URL
+    const upstreamUrl = `https://iiif.nli.org.il/IIIFv21/${iiifPath}`;
+
+    try {
+      const upstreamResp = await fetch(upstreamUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://www.nli.org.il/',
+          'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        },
+        cf: {
+          // Cache on Cloudflare edge for 24 hours
+          cacheTtl: 86400,
+          cacheEverything: true,
+        },
+      });
+
+      if (!upstreamResp.ok) {
+        return new Response(`Upstream error: ${upstreamResp.status}`, {
+          status: upstreamResp.status,
+        });
+      }
+
+      // Return with CORS headers so both server and browser can use it
+      const response = new Response(upstreamResp.body, {
+        status: upstreamResp.status,
+        headers: {
+          'Content-Type': upstreamResp.headers.get('Content-Type') || 'image/jpeg',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=86400',
+          'X-Proxy': 'genizah-iiif-proxy',
+        },
+      });
+
+      return response;
+    } catch (err) {
+      return new Response(`Proxy error: ${err.message}`, { status: 502 });
+    }
+  },
+};
+```
+
+4. Click **Deploy**
+
+### Step 2: Route the Worker to the Domain
+
+1. In the Worker settings, go to **Triggers** → **Routes**
+2. Add route: `genizahsearch.com/iiif-proxy/*`
+3. Select the `iiif-proxy` Worker
+4. Save
+
+### Step 3: Test the Worker
+
+```bash
+# From the server (should now return 200 + JPEG)
+curl -s -o /tmp/proxy_test.jpg -w "%{http_code}" \
+  "https://genizahsearch.com/iiif-proxy/FL990051753360205171/full/800,/0/default.jpg"
+echo ""
+file /tmp/proxy_test.jpg
+
+# From browser console (should work with CORS)
+fetch('https://genizahsearch.com/iiif-proxy/FL990051753360205171/full/800,/0/default.jpg')
+  .then(r => r.blob())
+  .then(b => console.log('Got', b.size, 'bytes'))
+```
+
+### Step 4: Update Server Code
+
+**File: `shared/puzzle_image_service.py`**
+
+Change `_fetch_iiif_image` to use the proxy when the direct fetch fails:
+
+```python
+NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
+NLI_IIIF_PROXY = "https://genizahsearch.com/iiif-proxy"  # Cloudflare Worker
+
+def _fetch_iiif_image(self, fl_id: str, size: int) -> Optional[bytes]:
+    """Fetch image from NLI IIIF, with Cloudflare proxy fallback."""
+    digits = re.sub(r"\D", "", str(fl_id))
+    if not digits:
+        return None
+
+    # Try direct first (works locally / on allowed IPs)
+    for base_url in [NLI_IIIF_BASE, NLI_IIIF_PROXY]:
+        url = f"{base_url}/FL{digits}/full/{size},/0/default.jpg"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.nli.org.il/',
+        }
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 200 and len(resp.content) > 100:
+                return resp.content
+        except Exception as e:
+            logger.warning(f"IIIF fetch failed for {fl_id} via {base_url}: {e}")
+            continue
+
+    logger.error(f"All IIIF sources failed for {fl_id}")
+    return None
+```
+
+This way:
+- Local dev: direct NLI works, proxy is never tried
+- Production: direct NLI returns 500, falls back to proxy → works
+- Desktop app: uses its own fetch (unaffected)
+
+### Step 5: Remove JS Fallback (Optional Cleanup)
+
+Once the server can fetch via proxy, the `<img>` IIIF fallback in `addFragment`/`_reloadFragment`/`navigateFolio` becomes unnecessary. You can simplify back to server-only loading. But keeping it as a safety net is also fine.
+
+### Step 6: Update Web JS to Use Proxy for Direct Loads (Optional)
+
+If you want bg removal to work even without the server processing step (e.g., for the `fetch()` + POST flow), update the JS fallback to use the proxy URL instead of NLI directly:
+
+```javascript
+// In addFragment onerror:
+var iiifUrl = '/iiif-proxy/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
+// This is same-origin, so fetch() works with CORS
+fetch(iiifUrl).then(r => r.blob()).then(blob => {
+    // POST to /api/puzzle_process for bg removal
+    ...
+});
+```
+
+This is the best of both worlds: the Worker provides CORS-safe same-origin images, and the server still does bg removal.
+
+### Cost & Limits
+
+- **Cloudflare Workers free tier**: 100,000 requests/day — more than enough for puzzle usage
+- **No additional infrastructure** — runs on existing Cloudflare account
+- **Edge caching**: `cacheTtl: 86400` means Cloudflare caches images at the edge for 24h, reducing NLI load
+- **Latency**: Cloudflare edge is typically faster than direct EC2→NLI due to global distribution
+
+### Security Considerations
+
+- The Worker only proxies paths starting with `FL` followed by digits — not an open proxy
+- Rate limiting can be added via Cloudflare's built-in rate limiting rules
+- The Worker doesn't store or process data — pure pass-through with CORS headers
+
+### Rollback
+
+If the Worker has issues, simply remove the route in Cloudflare Dashboard. The server falls back to the direct `<img>` loading (current degraded state). No code changes needed for rollback.
 
 ---
 
