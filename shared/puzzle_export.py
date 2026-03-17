@@ -94,10 +94,12 @@ def compose_puzzle_export(fragments: List[PuzzleFragment],
         # For processed fragments, reuse the same canvas-sized processed image that the
         # researcher already approved visually. This keeps export output faithful to the
         # on-canvas appearance instead of re-running background removal at a new size.
+        frag_is_cul = bool(frag.shelfmark and frag.shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
         img_bytes = image_service.resolve_fragment_image(
             frag.fl_id, size=display_size,
             threshold=frag.bg_removal_threshold,
-            processed=frag.processed
+            processed=frag.processed,
+            is_cul=frag_is_cul
         )
         if img_bytes is None:
             logger.warning("compose_puzzle_export: no image for fl_id=%s, skipping", frag.fl_id)

@@ -3371,8 +3371,21 @@ class PuzzleCanvasWindow(QMainWindow):
         row2.addWidget(QLabel("|"))
 
         # Crop mode
-        self.btn_crop = QPushButton("✂")
+        self.btn_crop = QPushButton()
         self.btn_crop.setFixedWidth(28)
+        # Draw standard crop icon: two overlapping L-shapes
+        _crop_px = QPixmap(16, 16)
+        _crop_px.fill(QColor(0, 0, 0, 0))
+        _crop_p = QPainter(_crop_px)
+        _crop_p.setPen(QPen(QColor(220, 220, 220), 2))
+        # Bottom-left L: vertical line going up, horizontal line going right
+        _crop_p.drawLine(4, 14, 4, 2)    # vertical
+        _crop_p.drawLine(4, 12, 14, 12)  # horizontal
+        # Top-right L: horizontal line going left, vertical line going down
+        _crop_p.drawLine(12, 2, 2, 2)    # horizontal (top)
+        _crop_p.drawLine(12, 14, 12, 2)  # vertical (right)
+        _crop_p.end()
+        self.btn_crop.setIcon(QIcon(_crop_px))
         self.btn_crop.setToolTip(tr("Crop — drag edges to trim"))
         self.btn_crop.setCheckable(True)
         self.btn_crop.toggled.connect(self._toggle_crop_mode)
