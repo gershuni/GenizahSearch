@@ -31,11 +31,12 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **Desktop export UI freeze**: Export moved to background thread with cancelable progress dialog
 - **Desktop "No fragments" label**: Fragment list label now updates after images finish loading, not before
 - **Translations in wrong dict**: Puzzle management translations were accidentally placed in `LIBRARY_CODES_HE` instead of `TRANSLATIONS` — moved to correct location
+- **CUL blue conservation mat**: Background removal now uses two-pass detection — samples edge midpoints for secondary colored backgrounds (blue/green mats) inside outer border frames, removing both layers. Previously only corner-sampled border was removed, leaving colored mat opaque
 
 ### Known Issues
 
 - **Web export positions still slightly off**: Fabric.js left/top to PyQt pos() coordinate conversion needs further empirical verification
-- **CUL blue conservation mat**: Background removal algorithm samples corners for bg color; CUL images with blue mats can have inverted removal (keeps blue, removes parchment)
+- ~~**CUL blue conservation mat**~~: Fixed — two-pass detection now removes both outer border frames and inner colored mats
 
 ---
 

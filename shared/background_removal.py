@@ -46,6 +46,33 @@ def detect_background_color(hsv_array: np.ndarray) -> np.ndarray:
 
 
 HIGH_SATURATION_THRESHOLD = 100  # S > 100 = colored background (blue, green, etc.)
+SECONDARY_BG_MIN_HUE_DISTANCE = 20  # Min circular hue distance to consider colors "different"
+
+
+def detect_edge_midpoint_color(hsv_array: np.ndarray) -> np.ndarray:
+    """Sample inset edge midpoints to detect inner mat color.
+
+    Samples 4 patches inset ~20% from each edge at the midpoint of that edge.
+    This avoids thin outer borders/frames and catches the inner background
+    (e.g., blue conservation mat on CUL images).
+
+    Returns median HSV as numpy array of shape (3,).
+    """
+    h, w = hsv_array.shape[:2]
+    s = min(CORNER_SAMPLE_SIZE, h // 4, w // 4)
+    mid_h, mid_w = h // 2, w // 2
+    # Inset 20% from each edge to skip border frames
+    inset_y = max(s, h // 5)
+    inset_x = max(s, w // 5)
+
+    edges = [
+        hsv_array[inset_y:inset_y+s, mid_w-s:mid_w+s],       # top side, inset
+        hsv_array[h-inset_y-s:h-inset_y, mid_w-s:mid_w+s],   # bottom side, inset
+        hsv_array[mid_h-s:mid_h+s, inset_x:inset_x+s],       # left side, inset
+        hsv_array[mid_h-s:mid_h+s, w-inset_x-s:w-inset_x],   # right side, inset
+    ]
+    all_pixels = np.concatenate([e.reshape(-1, 3) for e in edges], axis=0)
+    return np.median(all_pixels, axis=0)
 
 
 def _circular_hue_distance(h_array, h_bg):
@@ -55,7 +82,8 @@ def _circular_hue_distance(h_array, h_bg):
 
 
 def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
-                threshold: float) -> Image.Image:
+                threshold: float,
+                force_euclidean: bool = False) -> Image.Image:
     """Create binary foreground mask. Foreground=255, background=0.
 
     Three modes based on background saturation:
@@ -71,11 +99,17 @@ def create_mask(hsv_array: np.ndarray, bg_color: np.ndarray,
 
     3. Medium saturation (30-100): mixed. Use standard HSV Euclidean.
 
+    If force_euclidean=True, always uses HSV Euclidean regardless of saturation.
+    Used in two-pass mode where V-only would conflate border with parchment.
+
     All apply morphological cleanup: MinFilter(3) erode then MaxFilter(5) dilate.
     """
     bg_saturation = bg_color[1]  # S channel, 0-255 scale
 
-    if bg_saturation < LOW_SATURATION_THRESHOLD:
+    if force_euclidean:
+        # Full HSV Euclidean -- used in two-pass mode for primary (border) mask
+        diff = np.sqrt(np.sum((hsv_array.astype(float) - bg_color) ** 2, axis=2))
+    elif bg_saturation < LOW_SATURATION_THRESHOLD:
         # Low saturation: hue is meaningless, use Value channel only
         diff = np.abs(hsv_array[:, :, 2].astype(float) - float(bg_color[2]))
     elif bg_saturation > HIGH_SATURATION_THRESHOLD:
@@ -119,6 +153,26 @@ def remove_background(image_bytes: bytes,
 
     bg_color = detect_background_color(hsv_array)
     mask = create_mask(hsv_array, bg_color, threshold)
+
+    # Two-pass: check for secondary background (e.g., blue mat inside gray border)
+    edge_color = detect_edge_midpoint_color(hsv_array)
+    if edge_color[1] > HIGH_SATURATION_THRESHOLD:
+        # Edge midpoints found a high-saturation color -- check it differs from corners
+        corner_hue_dist = _circular_hue_distance(
+            np.array([edge_color[0]]), bg_color[0]
+        )[0]
+        if corner_hue_dist > SECONDARY_BG_MIN_HUE_DISTANCE:
+            # Secondary background detected (different hue, high saturation)
+            # Recompute primary mask with full HSV Euclidean -- V-only is too
+            # imprecise when border and parchment have similar brightness
+            primary_mask = create_mask(hsv_array, bg_color, threshold,
+                                       force_euclidean=True)
+            secondary_mask = create_mask(hsv_array, edge_color, threshold)
+            # Combine: foreground only if different from BOTH backgrounds
+            mask_array_combined = np.minimum(
+                np.array(primary_mask), np.array(secondary_mask)
+            )
+            mask = Image.fromarray(mask_array_combined, mode='L')
 
     # Safety check
     mask_array = np.array(mask)

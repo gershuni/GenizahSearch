@@ -12,6 +12,7 @@ from PIL import Image
 from shared.background_removal import (
     remove_background,
     detect_background_color,
+    detect_edge_midpoint_color,
     create_mask,
     DEFAULT_THRESHOLD,
     MIN_FOREGROUND_RATIO,
@@ -227,3 +228,115 @@ class TestDetectBackgroundColor:
         assert bg_color.shape == (3,)
         # Saturation should be high (it's a pure blue)
         assert bg_color[1] > 200
+
+
+def make_two_layer_image(outer_color, inner_color, fg_color,
+                         size=300, inner_margin=40, fg_size=60) -> bytes:
+    """Create test image with outer border, inner mat, and centered foreground.
+
+    Layout: outer_color fills entire image, inner_color fills a rectangle
+    inset by inner_margin, fg_color is a centered square of fg_size.
+    This simulates CUL images: gray border → blue mat → parchment.
+    """
+    img = Image.new('RGB', (size, size), outer_color)
+    # Draw inner mat
+    for x in range(inner_margin, size - inner_margin):
+        for y in range(inner_margin, size - inner_margin):
+            img.putpixel((x, y), inner_color)
+    # Draw centered foreground
+    x0 = (size - fg_size) // 2
+    y0 = (size - fg_size) // 2
+    for x in range(x0, x0 + fg_size):
+        for y in range(y0, y0 + fg_size):
+            img.putpixel((x, y), fg_color)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+class TestTwoLayerBackground:
+    """Tests for two-pass background removal (border frame + colored mat)."""
+
+    def test_gray_border_blue_mat_both_removed(self):
+        """Gray border + blue mat: both should become transparent, parchment stays opaque."""
+        img_bytes = make_two_layer_image(
+            outer_color=(180, 180, 180),  # gray border
+            inner_color=(0, 0, 255),       # blue mat
+            fg_color=(220, 200, 170),      # parchment-like
+        )
+        result = remove_background(img_bytes)
+        result_img = open_result(result)
+
+        assert result_img.mode == 'RGBA'
+        # Corner (gray border) should be transparent
+        assert result_img.getpixel((5, 5))[3] == 0
+        # Inner mat area (blue) should also be transparent
+        assert result_img.getpixel((50, 150))[3] == 0
+        # Center (parchment) should be opaque
+        assert result_img.getpixel((150, 150))[3] == 255
+
+    def test_white_border_green_mat_both_removed(self):
+        """White border + green mat: both removed, foreground kept."""
+        img_bytes = make_two_layer_image(
+            outer_color=(240, 240, 240),  # white border
+            inner_color=(0, 128, 0),       # green mat
+            fg_color=(200, 180, 150),      # parchment-like
+        )
+        result = remove_background(img_bytes)
+        result_img = open_result(result)
+
+        # Corner (white) should be transparent
+        assert result_img.getpixel((5, 5))[3] == 0
+        # Green mat should be transparent
+        assert result_img.getpixel((50, 150))[3] == 0
+        # Center (parchment) should be opaque
+        assert result_img.getpixel((150, 150))[3] == 255
+
+    def test_single_layer_blue_unchanged(self):
+        """Single blue background (no border): behavior unchanged from before."""
+        img_bytes = make_test_image((0, 0, 255), (255, 255, 255))
+        result = remove_background(img_bytes)
+        result_img = open_result(result)
+
+        # Blue corners transparent, white center opaque (same as before)
+        assert result_img.getpixel((5, 5))[3] == 0
+        assert result_img.getpixel((100, 100))[3] == 255
+
+    def test_single_layer_gray_unchanged(self):
+        """Single gray background (no border): behavior unchanged from before."""
+        img_bytes = make_test_image((128, 128, 128), (255, 255, 255))
+        result = remove_background(img_bytes)
+        result_img = open_result(result)
+
+        assert result_img.getpixel((5, 5))[3] == 0
+        assert result_img.getpixel((100, 100))[3] == 255
+
+    def test_detect_edge_midpoint_color_two_layer(self):
+        """Edge midpoints should detect inner mat color, not outer border."""
+        img = Image.new('RGB', (300, 300), (180, 180, 180))  # gray border
+        # Blue inner mat
+        for x in range(40, 260):
+            for y in range(40, 260):
+                img.putpixel((x, y), (0, 0, 255))
+        # Small white center
+        for x in range(120, 180):
+            for y in range(120, 180):
+                img.putpixel((x, y), (255, 255, 255))
+
+        hsv_array = np.array(img.convert('HSV'))
+        edge_color = detect_edge_midpoint_color(hsv_array)
+
+        # Edge midpoints should detect the blue mat (high saturation)
+        assert edge_color.shape == (3,)
+        assert edge_color[1] > 200  # high saturation = blue
+
+    def test_same_color_edges_no_second_pass(self):
+        """When edge midpoints match corners (same single bg), no second pass triggered."""
+        # Uniform blue background with white center — edges and corners both blue
+        img_bytes = make_test_image((0, 0, 255), (255, 255, 255), size=200, fg_size=80)
+        result = remove_background(img_bytes)
+        result_img = open_result(result)
+
+        # Should work exactly as single-pass: blue removed, white kept
+        assert result_img.getpixel((5, 5))[3] == 0
+        assert result_img.getpixel((100, 100))[3] == 255
