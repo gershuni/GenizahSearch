@@ -1864,7 +1864,31 @@ def _resolve_folios(sys_id: str) -> list:
     import re as _re
     import requests as _requests
 
-    # Try NLI IIIF manifest first (existing logic)
+    # Check enrich_metadata to detect external provider. Manchester/Oxford/JTS have
+    # NLI FL IDs that are catalog stubs (return 503) — prefer images_ext for those.
+    # Cambridge external_provider = CUL at CUDL; NLI FL IDs are real images — use NLI.
+    meta_data = None
+    try:
+        if state.meta_mgr:
+            meta_data = state.meta_mgr.enrich_metadata(sys_id)
+            images_ext = (meta_data or {}).get('images_ext', [])
+            external_provider = (meta_data or {}).get('external_provider', '')
+            if images_ext and external_provider and external_provider != 'cambridge':
+                result = []
+                for i, img in enumerate(images_ext):
+                    label = img.get('label', '') or str(i + 1)
+                    result.append({
+                        'fl_id': '',
+                        'label': label,
+                        'image_url': img.get('url', ''),
+                        'page_index': i,
+                        'external_provider': external_provider,
+                    })
+                return result
+    except Exception as e:
+        logger.warning(f"_resolve_folios enrich_metadata for {sys_id}: {e}")
+
+    # NLI path: try IIIF manifest for NLI-hosted manuscripts
     try:
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{sys_id}-1/manifest"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -1890,26 +1914,16 @@ def _resolve_folios(sys_id: str) -> list:
     except Exception as e:
         logger.error(f"NLI manifest fetch failed for {sys_id}: {e}")
 
-    # Fallback: enrich_metadata images_ext (Manchester, Oxford, JTS, Cambridge)
-    try:
-        if state.meta_mgr:
-            meta_data = state.meta_mgr.enrich_metadata(sys_id)
-            images_ext = (meta_data or {}).get('images_ext', [])
-            external_provider = (meta_data or {}).get('external_provider', '')
-            if images_ext:
-                result = []
-                for i, img in enumerate(images_ext):
-                    label = img.get('label', '') or str(i + 1)
-                    result.append({
-                        'fl_id': '',
-                        'label': label,
-                        'image_url': img.get('url', ''),
-                        'page_index': i,
-                        'external_provider': external_provider,
-                    })
-                return result
-    except Exception as e:
-        logger.warning(f"_resolve_folios ext fallback for {sys_id}: {e}")
+    # Last fallback: images_ext without external_provider (shouldn't normally happen)
+    if meta_data:
+        images_ext = meta_data.get('images_ext', [])
+        if images_ext:
+            return [
+                {'fl_id': '', 'label': img.get('label', '') or str(i + 1),
+                 'image_url': img.get('url', ''), 'page_index': i,
+                 'external_provider': meta_data.get('external_provider', '')}
+                for i, img in enumerate(images_ext)
+            ]
 
     return []
 

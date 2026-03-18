@@ -954,11 +954,16 @@ class PuzzleMetaLoaderThread(QThread):
             # enrich_metadata fetches NLI MARC + IIIF manifest, populating images_nli with fl_ids
             data = self.meta_mgr.enrich_metadata(self.sys_id)
             images_nli = data.get('images_nli', []) if data else []
-            if images_nli:
+            images_ext = data.get('images_ext', []) if data else []
+            external_provider = (data or {}).get('external_provider', '')
+            # Manchester/Oxford/JTS external_provider: NLI FL IDs are catalog stubs (503).
+            # Cambridge external_provider: NLI FL IDs are real CUL images — use NLI.
+            use_ext = (images_ext and external_provider
+                       and external_provider != 'cambridge')
+            if images_nli and not use_ext:
                 self.meta_ready.emit(self.sys_id, self.shelfmark, images_nli)
                 return
-            # Fallback: external library images (Manchester, Oxford, JTS, Cambridge)
-            images_ext = data.get('images_ext', []) if data else []
+            # External library images (Manchester, Oxford, JTS, Cambridge)
             if images_ext:
                 external_provider = (data or {}).get('external_provider', '')
                 folio_list = []

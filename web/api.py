@@ -1053,10 +1053,35 @@ def init_api_routes():
 
         For NLI-hosted manuscripts: uses IIIF manifest FL IDs.
         For external libraries (Manchester, Oxford, JTS, Cambridge): uses enrich_metadata images_ext.
+
+        Manchester/Oxford/JTS NLI FL IDs are catalog stubs (return 503) — prefer images_ext.
+        Cambridge external_provider = CUL at CUDL; NLI FL IDs are real images — use NLI.
         """
+        # Check enrich_metadata for external provider
+        ext_data = None
+        if state.meta_mgr:
+            try:
+                ext_data = state.meta_mgr.enrich_metadata(sys_id)
+                images_ext = (ext_data or {}).get('images_ext', [])
+                external_provider = (ext_data or {}).get('external_provider', '')
+                if images_ext and external_provider and external_provider != 'cambridge':
+                    result = []
+                    for i, img in enumerate(images_ext):
+                        label = img.get('label', '') or str(i + 1)
+                        result.append({
+                            'fl_id': '',
+                            'label': label,
+                            'image_url': img.get('url', ''),
+                            'page_index': i,
+                            'external_provider': external_provider,
+                        })
+                    return result
+            except Exception as e:
+                logger.warning(f"puzzle_folios enrich_metadata failed for {sys_id}: {e}")
+
+        # NLI path: use IIIF manifest FL IDs
         fl_ids = fetch_fl_ids_from_nli(sys_id)
         if fl_ids:
-            # Build folio list with labels (1r, 1v, 2r, 2v, ...) or simple indices
             result = []
             for i, fid in enumerate(fl_ids):
                 leaf = (i // 2) + 1
@@ -1064,27 +1089,16 @@ def init_api_routes():
                 result.append({'fl_id': fid, 'label': f'{leaf}{side}'})
             return result
 
-        # Fallback: enrich_metadata images_ext (Manchester, Oxford, JTS, Cambridge)
-        if not state.meta_mgr:
-            return []
-        try:
-            data = state.meta_mgr.enrich_metadata(sys_id)
-            images_ext = (data or {}).get('images_ext', [])
-            external_provider = (data or {}).get('external_provider', '')
+        # Last fallback: images_ext without external_provider
+        if ext_data:
+            images_ext = ext_data.get('images_ext', [])
             if images_ext:
-                result = []
-                for i, img in enumerate(images_ext):
-                    label = img.get('label', '') or str(i + 1)
-                    result.append({
-                        'fl_id': '',
-                        'label': label,
-                        'image_url': img.get('url', ''),
-                        'page_index': i,
-                        'external_provider': external_provider,
-                    })
-                return result
-        except Exception as e:
-            logger.warning(f"puzzle_folios ext fallback failed for {sys_id}: {e}")
+                return [
+                    {'fl_id': '', 'label': img.get('label', '') or str(i + 1),
+                     'image_url': img.get('url', ''), 'page_index': i,
+                     'external_provider': ext_data.get('external_provider', '')}
+                    for i, img in enumerate(images_ext)
+                ]
         return []
 
     # === Puzzle Document CRUD + Export (Phase 50) ===
