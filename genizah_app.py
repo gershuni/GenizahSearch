@@ -3922,9 +3922,6 @@ class PuzzleCanvasWindow(QMainWindow):
         # Update fragment dropdown
         self._refresh_fragment_combo()
 
-        # Auto-fit view to show all fragments
-        self._fit_all_fragments()
-
         # Decrement loading counter and clear guard when all fragments are loaded
         if self._loading_document:
             self._load_pending_count -= 1
@@ -3932,7 +3929,11 @@ class PuzzleCanvasWindow(QMainWindow):
                 self._loading_document = False
                 self._load_pending_count = 0
                 self._update_fragments_label()
+                self._fit_all_fragments()
                 logger.info("Document load complete: all fragments loaded")
+        else:
+            # Single fragment add: scroll to show it without shrinking existing fragments
+            self.canvas_view.ensureVisible(item.sceneBoundingRect(), 50, 50)
 
     def _fit_all_fragments(self):
         """Fit view to show all fragments with some padding."""
