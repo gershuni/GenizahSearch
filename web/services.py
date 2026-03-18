@@ -29,25 +29,49 @@ from genizah_core import (
 )
 from web.state import state
 
-# Library-specific attribution text for image credit lines.
+# Library-specific attribution: (english, hebrew) tuples.
 # None = attribution comes from IIIF manifest (don't override).
-# Missing key = NLI default (manuscript digitized by NLI, no other source).
+# Missing key = NLI default.
+_NLI_EN = 'National Library of Israel'
+_NLI_HE = '\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea'
+
 ATTRIBUTION_BY_LIBRARY = {
     'CUL': None,        # Cambridge IIIF manifest provides attribution
     'JTS': None,        # JTS/Princeton Figgy manifest provides attribution
-    'Manchester': 'The University of Manchester Library \u00b7 CC BY-NC-SA 4.0',
-    'Oxford': 'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0',
-    'BL': 'British Library \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'RNL': 'National Library of Russia \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'AIU': 'Alliance Isra\u00e9lite Universelle \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'Mosseri': 'Mosseri Collection \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'Gaster': 'Gaster Collection \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'Halper': 'Halper Collection \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'Westminster': 'Westminster College \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'Freer': 'Freer Gallery of Art \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
-    'HUC': 'Hebrew Union College \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'Manchester': ('The University of Manchester Library \u00b7 CC BY-NC-SA 4.0',
+                   'The University of Manchester Library \u00b7 CC BY-NC-SA 4.0'),
+    'Oxford': ('Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0',
+               'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0'),
+    'BL': (f'British Library \u00b7 image: {_NLI_EN}',
+           f'\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05d1\u05e8\u05d9\u05d8\u05d9\u05ea \u00b7 image: {_NLI_HE}'),
+    'RNL': (f'National Library of Russia \u00b7 image: {_NLI_EN}',
+            f'\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea \u05e9\u05dc \u05e8\u05d5\u05e1\u05d9\u05d4 \u00b7 image: {_NLI_HE}'),
+    'AIU': (f'Alliance Isra\u00e9lite Universelle \u00b7 image: {_NLI_EN}',
+            f'\u05d0\u05dc\u05d9\u05d0\u05e0\u05e1 \u05d9\u05e9\u05e8\u05d0\u05dc\u05d9\u05ea \u05d0\u05d5\u05e0\u05d9\u05d1\u05e8\u05e1\u05dc\u05d9\u05ea \u00b7 image: {_NLI_HE}'),
+    'Mosseri': (f'Mosseri Collection \u00b7 image: {_NLI_EN}',
+                f'\u05d0\u05d5\u05e1\u05e3 \u05de\u05d5\u05e1\u05e8\u05d9 \u00b7 image: {_NLI_HE}'),
+    'Gaster': (f'Gaster Collection \u00b7 image: {_NLI_EN}',
+               f'\u05d0\u05d5\u05e1\u05e3 \u05d2\u05e1\u05d8\u05e8 \u00b7 image: {_NLI_HE}'),
+    'Halper': (f'Halper Collection \u00b7 image: {_NLI_EN}',
+               f'\u05d0\u05d5\u05e1\u05e3 \u05d4\u05dc\u05e4\u05e8 \u00b7 image: {_NLI_HE}'),
+    'Westminster': (f'Westminster College \u00b7 image: {_NLI_EN}',
+                    f'\u05de\u05db\u05dc\u05dc\u05ea \u05d5\u05e1\u05d8\u05de\u05d9\u05e0\u05e1\u05d8\u05e8 \u00b7 image: {_NLI_HE}'),
+    'Freer': (f'Freer Gallery of Art \u00b7 image: {_NLI_EN}',
+              f'Freer Gallery of Art \u00b7 image: {_NLI_HE}'),
+    'HUC': (f'Hebrew Union College \u00b7 image: {_NLI_EN}',
+            f'\u05d4\u05d9\u05d1\u05e8\u05d5 \u05d9\u05d5\u05e0\u05d9\u05d5\u05df \u05e7\u05d5\u05dc\u05d2\u05f3 \u00b7 image: {_NLI_HE}'),
 }
 from web.translations import get_language
+
+
+def _get_library_attribution(library_code: str) -> Optional[str]:
+    """Get language-aware attribution for a library code, or None to keep IIIF manifest."""
+    entry = ATTRIBUTION_BY_LIBRARY.get(library_code)
+    if entry is None:
+        return None  # None in dict = keep IIIF manifest; missing key handled by caller
+    if isinstance(entry, tuple):
+        return entry[1] if get_language() == 'he' else entry[0]
+    return entry
 
 # ============================================================================
 # Data Classes
@@ -298,7 +322,7 @@ class GenizahService:
 
             # 2. Library-specific override (hardcoded text, or keep IIIF manifest)
             if library_code in ATTRIBUTION_BY_LIBRARY:
-                lib_attr = ATTRIBUTION_BY_LIBRARY[library_code]
+                lib_attr = _get_library_attribution(library_code)
                 if lib_attr is not None:  # None = keep IIIF manifest attribution
                     attribution = lib_attr
             elif is_oxford:
@@ -306,7 +330,7 @@ class GenizahService:
 
             # 3. Default: NLI
             if not attribution:
-                attribution = '\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea / National Library of Israel'
+                attribution = _NLI_HE if get_language() == 'he' else _NLI_EN
 
             # Logic for External Links (Oxford/Cambridge)
             external_url = None
@@ -490,7 +514,7 @@ class GenizahService:
 
             # 2. Library-specific override (hardcoded text, or keep IIIF manifest)
             if library_code in ATTRIBUTION_BY_LIBRARY:
-                lib_attr = ATTRIBUTION_BY_LIBRARY[library_code]
+                lib_attr = _get_library_attribution(library_code)
                 if lib_attr is not None:  # None = keep IIIF manifest attribution
                     attribution = lib_attr
             elif is_oxford:
@@ -498,7 +522,7 @@ class GenizahService:
 
             # 3. Default: NLI
             if not attribution:
-                attribution = '\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea / National Library of Israel'
+                attribution = _NLI_HE if get_language() == 'he' else _NLI_EN
 
             # Logic for External Links (Oxford/Cambridge) - Duplicate logic for by_fl
             external_url = None
