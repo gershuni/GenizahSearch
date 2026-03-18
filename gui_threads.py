@@ -956,16 +956,28 @@ class PuzzleMetaLoaderThread(QThread):
             images_nli = data.get('images_nli', []) if data else []
             images_ext = data.get('images_ext', []) if data else []
             external_provider = (data or {}).get('external_provider', '')
-            # Manchester/Oxford/JTS external_provider: NLI FL IDs are catalog stubs (503).
+
+            # Manchester external_provider: NLI FL IDs are catalog stubs (503) — use images_ext.
             # Cambridge external_provider: NLI FL IDs are real CUL images — use NLI.
             use_ext = (images_ext and external_provider
                        and external_provider != 'cambridge')
+
+            # Oxford special case: enrich_metadata may not set external_provider='oxford'
+            # because get_part_for_folio can fail. Try shelfmark-based Oxford part lookup
+            # (same logic as /api/oxford_image) which constructs the full image URL.
+            lib_code = self.meta_mgr.get_library_for_id(self.sys_id) or ''
+            if lib_code == 'Oxford' and not images_ext:
+                oxford_images = self._resolve_oxford_images()
+                if oxford_images:
+                    images_ext = oxford_images
+                    external_provider = 'oxford'
+                    use_ext = True
+
             if images_nli and not use_ext:
                 self.meta_ready.emit(self.sys_id, self.shelfmark, images_nli)
                 return
             # External library images (Manchester, Oxford, JTS, Cambridge)
             if images_ext:
-                external_provider = (data or {}).get('external_provider', '')
                 folio_list = []
                 for i, img in enumerate(images_ext):
                     label = img.get('label', '') or str(i + 1)
@@ -987,3 +999,40 @@ class PuzzleMetaLoaderThread(QThread):
                 self.meta_failed.emit(self.sys_id, "No images found for this manuscript")
         except Exception as e:
             self.meta_failed.emit(self.sys_id, str(e))
+
+    def _resolve_oxford_images(self):
+        """Try to resolve Oxford part images via shelfmark-based lookup.
+
+        Replicates the fallback logic from /api/oxford_image: when
+        get_part_for_folio fails (no sys_id mapping), try parsing
+        the shelfmark to find the Oxford part and its images.
+        """
+        try:
+            codico = getattr(self.meta_mgr, 'codico_mgr', None)
+            if not codico or not getattr(codico, '_loaded', False):
+                return []
+
+            # Try sys_id first
+            part_id = codico.get_part_for_folio(self.sys_id)
+
+            # Fallback: parse shelfmark
+            if not part_id and self.shelfmark:
+                part_id, is_part = codico.parse_part_identifier(self.shelfmark)
+                if not is_part:
+                    part_id = None
+
+            if not part_id:
+                return []
+
+            images = codico.get_part_images(part_id)
+            if not images:
+                return []
+
+            # Convert to images_ext format
+            return [{
+                'label': img.get('label', ''),
+                'url': img.get('full_url', ''),
+                'folio_num': img.get('folio_num')
+            } for img in images]
+        except Exception:
+            return []
