@@ -1773,6 +1773,28 @@ window.puzzleCanvas = {
         this._reloadFragment(target._fragmentKey, url, newMeta);
     }
 };
+
+// Auto-initialize canvas after Fabric.js CDN loads.
+// This is independent of Python init_canvas — ensures the canvas works even if
+// the NiceGUI async context is lost (slot stack empty error).
+(function tryAutoInit(attempts) {
+    if (typeof fabric !== "undefined") {
+        // Wait for the canvas DOM element to appear (NiceGUI renders it slightly after scripts)
+        var el = document.getElementById("puzzleCanvas");
+        if (el) {
+            if (!window.puzzleCanvas.canvas) {
+                console.log("Auto-initializing puzzle canvas (Fabric.js ready)");
+                window.puzzleCanvas.init("puzzleCanvas");
+            }
+        } else if (attempts < 50) {
+            setTimeout(function() { tryAutoInit(attempts + 1); }, 200);
+        }
+    } else if (attempts < 50) {
+        setTimeout(function() { tryAutoInit(attempts + 1); }, 200);
+    } else {
+        console.error("Fabric.js failed to load after 10s");
+    }
+})(0);
 </script>
 '''
 

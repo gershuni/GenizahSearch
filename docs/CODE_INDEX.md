@@ -837,3 +837,38 @@ Notes/comments display component for manuscripts.
 - **Function** `create_reply_item` - Display a reply item (nested)
 - **Function** `create_notes_button` - Button that opens notes dialog
 
+---
+
+## Scripts
+
+### scripts/pgp_transcriptions_export.py
+
+Export PGP transcriptions with shelfmark normalization and GenizahSearch linkage.
+
+- **Function** `normalize_shelfmark` - Normalize shelfmarks for matching (handles 20+ formats)
+- **Function** `load_genizahsearch_shelfmarks` - Load libraries.csv + FIST supplement
+- **Function** `load_pgp_documents` - Load PGP documents.csv (pgpid → shelfmark)
+- **Function** `extract_transcriptions` - Filter footnotes.csv for Edition/Digital content
+- **Function** `match_to_genizahsearch` - Match shelfmarks including multi-fragment
+- **Function** `export_transcriptions` - Main export function
+
+**Output:** `pgp_data/transcriptions_linked.csv`, `pgp_data/transcriptions_unmatched.csv`
+
+### scripts/fist_shelfmarks_export.py
+
+Export FIST shelfmarks for libraries not in libraries.csv.
+
+- Exports from 18 libraries (RNL, BL, JTS, Bodleian, Manchester, etc.)
+- Creates `pgp_data/fist_shelfmarks_supplement.csv` (130,947 records)
+
+---
+
+## Data Files (pgp_data/)
+
+| File | Records | Description |
+|------|---------|-------------|
+| transcriptions_linked.csv | 9,364 | PGP transcriptions linked to sys_id |
+| transcriptions_unmatched.csv | 339 | Unmatched records (external collections) |
+| fist_shelfmarks_supplement.csv | 130,947 | FIST shelfmarks for matching |
+| MATCHING_SUMMARY.md | - | Detailed matching documentation |
+
