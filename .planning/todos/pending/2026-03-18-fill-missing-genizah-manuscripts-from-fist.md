@@ -115,39 +115,70 @@ For the 215,191 overlapping records:
 
 **csv_bank limitation**: `_load_csv_bank()` stores only the shortest pipe-separated variant, missing 12,617 records that would match on longer variants.
 
+### 5. libraries.csv Column Structure
+
+Only 4 of 8 columns matter. Columns 4-6 are always empty vestigial columns.
+
+| Index | Column | Required? | Source for new rows |
+|-------|--------|-----------|-------------------|
+| 0 | system_number | YES | FIST `dbo_InventoryAlma.AlmaId` (18-digit, ends `05171`) |
+| 1 | oxford_part_id | NO | Empty (Oxford-only, 5.4% of existing rows) |
+| 2 | call_numbers | YES | FIST `dbo_Inventory.Shelfmark` (single variant) |
+| 3 | library_code | YES | Mapped from FIST `LibraryId` via CODE_Library/CODE_Collection |
+| 4-6 | *(empty)* | NO | Always empty |
+| 7 | titles_non_placeholder | Optional | FJMS catalog titles where available (very few: 47 Hebrew, 149 English) |
+
+Example new row: `990053030350205171,,ENA NS 77.379,JTS,,,,`
+
+### 6. Tantivy Index: No Changes Needed
+
+The Tantivy index is built exclusively from `Transcriptions.txt` — it only indexes records with actual transcription text. Metadata-only records are **not** in the index and don't need to be.
+
+**What already works without Tantivy changes:**
+- **Catalog browse** (domain/author/work facets) — reads csv_bank + FJMS enrichment, not Tantivy
+- **Image viewer** — keyed by AlmaId via nli_crossref.db, independent of Tantivy
+- **FJMS enrichment** (catalog dialog, bibliography, joins) — keyed by AlmaId, independent
+
+**One code change needed:** `execute_search()` at line ~6409 has `if not text: continue` for metadata search results, which skips records with no transcription text. This guard needs adjustment so metadata-only records appear in title/shelfmark search results (without transcription preview).
+
+**No index rebuild required** for the 38K additions — only `csv_bank` (loaded from libraries.csv at startup) needs the new rows.
+
 ---
 
-## Proposed Solution (Updated)
+## Proposed Solution (Final)
 
-### Phase 1: libraries.csv Generation (the main deliverable)
-1. Export 38,673 FIST-only records with: AlmaId → system_number, Shelfmark → call_numbers, CollectionId → library_code (using mapping above)
-2. Extract Hebrew titles from FJMS catalog (GenizahTitleOrgTitle for 8,632 records, TitleHeb for 44)
-3. Generate pipe-separated shelfmark variants where FIST format differs from convention
-4. Append to libraries.csv
-5. Skip the 6,145 "Undefined Shelfmarks"
+### Phase 1: CSV Generation Script
+1. Script reads FIST.db `dbo_Inventory` + `dbo_InventoryAlma` for the 38,673 gap AlmaIds
+2. Maps CollectionId → library_code via FIST CODE_Library/CODE_Collection (53 direct mappings + 12 new codes)
+3. Extracts shelfmarks from `dbo_Inventory.Shelfmark`
+4. Optionally populates title column from FJMS catalog (GenizahTitleOrgTitle for 8,632 records)
+5. Appends to libraries.csv (format: `AlmaId,,Shelfmark,library_code,,,,Title`)
+6. Skips 6,145 "Undefined Shelfmarks" (no AlmaId)
 
-### Phase 2: Shelfmark Normalization Fixes
-1. Add `Yevr.` → `EVR` alias to normalize_shelfmark() (fixes 15,594 existing records too)
-2. Add `Halper` → `Genizah` alias (534 records)
-3. Consider loading all CSV pipe variants in csv_bank (recovers 12,617 matches)
-4. Strip leading zeros in shelfmark comparison
+### Phase 2: Code Adjustments
+1. Add 12 new library codes to `LIBRARY_CODES` dict in genizah_core.py
+2. Fix `execute_search()` metadata guard — allow metadata-only results in title/shelfmark search
+3. Optional: add `Yevr.` → `EVR` alias to normalize_shelfmark() (bonus: fixes 15,594 existing matches)
+4. Optional: add `Halper` → `Genizah` alias (534 records)
 
-### Phase 3: Tantivy Index & Browse Integration
-1. Rebuild index with 255K+ records (metadata-only for the 38K additions)
-2. Add `has_transcription` flag or similar to distinguish text-searchable vs metadata-only
-3. Browse facets (domain/author/work) should auto-expand — test capacity
-4. Image viewer and FJMS enrichment already keyed by AlmaId — should work with no code changes
+### Phase 3: Validation & Testing
+1. Verify new records appear in catalog browse with correct domains/facets
+2. Verify images load for sample gap records across all major libraries
+3. Verify FJMS catalog dialog works for gap records
+4. Test shelfmark search returns gap records
+5. Test text search (Responsa) correctly excludes metadata-only records
+6. Performance test: app startup time with 255K csv_bank entries
 
-### Key Considerations
-- **No transcription text**: Gap records appear in browse/metadata search only, not text search
-- **Incremental shipping**: Phase 1 alone makes 38K manuscripts browsable with images + enrichment
-- **Performance**: Tantivy index grows ~18%, browse facet counts increase — test load times
-- **12 new library codes** needed for small collections (79 records total)
-- **14,423 bare records** (images only) still valuable for browse-by-shelfmark and image viewing
+### Key Properties
+- **No Tantivy index rebuild** — gap records are browse/metadata-only
+- **No transcription text** — records don't appear in text search (correct behavior)
+- **100% image coverage** — every gap record has NLI images
+- **62.7% enrichment** — most have catalog/domain/bibliography already
+- **Incremental**: Phase 1 alone (CSV generation) makes records browsable
+- **Side benefit**: Shelfmark normalization fixes improve 15K+ existing record matches
 
-## Estimated Scale
-- **38,673 new manuscript records** to add to libraries.csv
-- **100% image coverage** — all have NLI images ready
-- **62.7% enrichment coverage** — most have catalog/domain/bibliography data
-- **Phase 2 normalization** also fixes 15,594+ existing shelfmark matches as a side benefit
-- Main engineering: CSV generation script + normalize_shelfmark updates + index rebuild
+## Estimated Effort
+- CSV generation script: ~2 hours (SQL export + formatting)
+- Code adjustments: ~1 hour (LIBRARY_CODES + metadata guard + optional normalization)
+- Validation: ~1 hour
+- **Total: ~1 session**
