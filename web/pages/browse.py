@@ -4172,18 +4172,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ):
                                     ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
                                     credit_text = page.attribution
-                                    # Make it a link for Oxford
+                                    # Route credit link based on image source
                                     if page.is_oxford:
-                                        with ui.link(target='https://digital.bodleian.ox.ac.uk/', new_tab=True).style('text-decoration: none;'):
-                                            ui.label(credit_text).classes('text-xs').style(
-                                                'color: #aaa; font-style: italic;'
-                                            )
+                                        credit_link = 'https://digital.bodleian.ox.ac.uk/'
+                                    elif page.external_provider == 'manchester':
+                                        credit_link = 'https://luna.manchester.ac.uk/'
+                                    elif page.is_cambridge:
+                                        credit_link = 'https://cudl.lib.cam.ac.uk/'
+                                    elif page.external_provider == 'jts':
+                                        credit_link = 'https://dpul.princeton.edu/cairo_geniza'
+                                    elif page.library_code == 'BL':
+                                        credit_link = 'https://searcharchives.bl.uk/'
                                     else:
-                                        # NLI - link to ktiv
-                                        with ui.link(target=f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}', new_tab=True).style('text-decoration: none;'):
-                                            ui.label(credit_text).classes('text-xs').style(
-                                                'color: #aaa; font-style: italic;'
-                                            )
+                                        credit_link = f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}'
+                                    with ui.link(target=credit_link, new_tab=True).style('text-decoration: none;'):
+                                        ui.label(credit_text).classes('text-xs').style(
+                                            'color: #aaa; font-style: italic;'
+                                        )
 
                     # === RIGHT PANEL: Transcription ===
                     text_panel_flex = 'flex: 1 1 auto; min-width: 0;' if has_image else 'flex: 1 1 100%; min-width: 0;'

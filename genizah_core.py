@@ -3302,6 +3302,7 @@ class MetadataManager:
             if manchester_canvases:
                 images_ext = manchester_canvases
                 current_meta['external_provider'] = 'manchester'
+                current_meta['attribution'] = 'The University of Manchester Library \u00b7 CC BY-NC-SA 4.0'
                 # Set a synthetic ext_link to prevent JTS/other fallback from running,
                 # but skip fetch_external_iiif_data since we already have canvas entries
                 ext_link = '__manchester_direct__'

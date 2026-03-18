@@ -28,6 +28,25 @@ from genizah_core import (
     get_library_display,
 )
 from web.state import state
+
+# Library-specific attribution text for image credit lines.
+# None = attribution comes from IIIF manifest (don't override).
+# Missing key = NLI default (manuscript digitized by NLI, no other source).
+ATTRIBUTION_BY_LIBRARY = {
+    'CUL': None,        # Cambridge IIIF manifest provides attribution
+    'JTS': None,        # JTS/Princeton Figgy manifest provides attribution
+    'Manchester': 'The University of Manchester Library \u00b7 CC BY-NC-SA 4.0',
+    'Oxford': 'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0',
+    'BL': 'British Library \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'RNL': 'National Library of Russia \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'AIU': 'Alliance Isra\u00e9lite Universelle \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'Mosseri': 'Mosseri Collection \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'Gaster': 'Gaster Collection \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'Halper': 'Halper Collection \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'Westminster': 'Westminster College \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'Freer': 'Freer Gallery of Art \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+    'HUC': 'Hebrew Union College \u00b7 image: \u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea',
+}
 from web.translations import get_language
 
 # ============================================================================
@@ -271,17 +290,23 @@ class GenizahService:
             # Determine attribution and source classification
             attribution = ''
             is_oxford = is_oxford_manuscript(shelfmark, library_code)
-            if is_oxford:
-                attribution = 'From the collections of the Bodleian Libraries, Oxford'
-            else:
-                # Try to get from NLI metadata cache
-                if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
-                    cached_meta = state.meta_mgr.nli_cache.get(actual_sys_id, {})
-                    attribution = cached_meta.get('attribution', '')
-                
-                # Default attribution for NLI
-                if not attribution:
-                    attribution = 'הספרייה הלאומית / National Library of Israel'
+
+            # 1. Try IIIF manifest attribution from cache
+            if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                cached_meta = state.meta_mgr.nli_cache.get(actual_sys_id, {})
+                attribution = cached_meta.get('attribution', '')
+
+            # 2. Library-specific override (hardcoded text, or keep IIIF manifest)
+            if library_code in ATTRIBUTION_BY_LIBRARY:
+                lib_attr = ATTRIBUTION_BY_LIBRARY[library_code]
+                if lib_attr is not None:  # None = keep IIIF manifest attribution
+                    attribution = lib_attr
+            elif is_oxford:
+                attribution = 'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0'
+
+            # 3. Default: NLI
+            if not attribution:
+                attribution = '\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea / National Library of Israel'
 
             # Logic for External Links (Oxford/Cambridge)
             external_url = None
@@ -457,17 +482,23 @@ class GenizahService:
             # Determine attribution and source classification
             attribution = ''
             is_oxford = is_oxford_manuscript(shelfmark, library_code)
-            if is_oxford:
-                attribution = 'From the collections of the Bodleian Libraries, Oxford'
-            else:
-                # Try to get from NLI metadata cache
-                if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
-                    cached_meta = state.meta_mgr.nli_cache.get(actual_sys_id, {})
-                    attribution = cached_meta.get('attribution', '')
-                
-                # Default attribution for NLI
-                if not attribution:
-                    attribution = 'הספרייה הלאומית / National Library of Israel'
+
+            # 1. Try IIIF manifest attribution from cache
+            if actual_sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                cached_meta = state.meta_mgr.nli_cache.get(actual_sys_id, {})
+                attribution = cached_meta.get('attribution', '')
+
+            # 2. Library-specific override (hardcoded text, or keep IIIF manifest)
+            if library_code in ATTRIBUTION_BY_LIBRARY:
+                lib_attr = ATTRIBUTION_BY_LIBRARY[library_code]
+                if lib_attr is not None:  # None = keep IIIF manifest attribution
+                    attribution = lib_attr
+            elif is_oxford:
+                attribution = 'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0'
+
+            # 3. Default: NLI
+            if not attribution:
+                attribution = '\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05dc\u05d0\u05d5\u05de\u05d9\u05ea / National Library of Israel'
 
             # Logic for External Links (Oxford/Cambridge) - Duplicate logic for by_fl
             external_url = None
