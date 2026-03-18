@@ -13,13 +13,22 @@ Replaces the FastAPI backend for data operations.
 
 import logging
 import os
-from typing import Optional, Dict, List, Any
+import threading
+import time
+from typing import Optional, Dict, List, Any, Tuple
 from urllib.parse import urlencode
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
 from shared.supabase_provider import get_url, get_anon_key
 
 logger = logging.getLogger(__name__)
+
+# Per-user session lock to prevent concurrent token refresh (race condition fix)
+_session_locks: Dict[int, threading.Lock] = {}
+_locks_guard = threading.Lock()
+# Cached authenticated clients: storage_id -> (client, expiry_timestamp)
+_client_cache: Dict[int, Tuple[Client, float]] = {}
+_CLIENT_CACHE_TTL = 50  # seconds (Supabase access tokens last 60s)
 
 # ============================================================================
 # CONFIGURATION
@@ -54,39 +63,59 @@ def get_client() -> Client:
 def get_user_client() -> Client:
     """Get a per-user Supabase client authenticated with the current user's session tokens.
 
-    This creates a NEW client for each call, authenticated as the specific user,
-    ensuring that RLS policies see the correct auth.uid(). This is critical for
-    multi-user scenarios where multiple users are logged in on the same NiceGUI server.
+    Uses a per-session lock + short-lived cache to prevent the race condition where
+    concurrent requests all try to consume the same one-time-use refresh token.
+    The first request refreshes and caches; subsequent requests reuse the cached client.
 
-    After set_session, updates stored tokens in case they were refreshed.
     Falls back to the singleton client if no user session tokens are available.
     """
     try:
         from nicegui import app as _app
-        auth_session = _app.storage.user.get('auth_session', {})
-        access_token = auth_session.get('access_token')
-        refresh_token = auth_session.get('refresh_token')
+        storage = _app.storage.user
+        storage_id = id(storage)
 
-        if access_token and refresh_token:
-            try:
-                user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-                resp = user_client.auth.set_session(access_token, refresh_token)
-                # Update stored tokens — set_session may have refreshed them
-                if resp and resp.session:
-                    _app.storage.user['auth_session'] = {
-                        'access_token': resp.session.access_token,
-                        'refresh_token': resp.session.refresh_token,
-                    }
-                return user_client
-            except Exception as e:
-                logger.error(f"[get_user_client] set_session failed: {e}")
-                # Try re-login via singleton as last resort
+        # Fast path: return cached client if still valid
+        now = time.time()
+        cached = _client_cache.get(storage_id)
+        if cached and cached[1] > now:
+            return cached[0]
+
+        # Get or create a lock for this user session
+        with _locks_guard:
+            if storage_id not in _session_locks:
+                _session_locks[storage_id] = threading.Lock()
+            lock = _session_locks[storage_id]
+
+        with lock:
+            # Re-check cache after acquiring lock (another thread may have refreshed)
+            cached = _client_cache.get(storage_id)
+            if cached and cached[1] > now:
+                return cached[0]
+
+            # Read tokens (may have been updated by a prior request that held the lock)
+            auth_session = storage.get('auth_session', {})
+            access_token = auth_session.get('access_token')
+            refresh_token = auth_session.get('refresh_token')
+
+            if access_token and refresh_token:
+                try:
+                    user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+                    resp = user_client.auth.set_session(access_token, refresh_token)
+                    # Update stored tokens — set_session may have refreshed them
+                    if resp and resp.session:
+                        storage['auth_session'] = {
+                            'access_token': resp.session.access_token,
+                            'refresh_token': resp.session.refresh_token,
+                        }
+                    _client_cache[storage_id] = (user_client, now + _CLIENT_CACHE_TTL)
+                    return user_client
+                except Exception as e:
+                    logger.error(f"[get_user_client] set_session failed: {e}")
+                    _client_cache.pop(storage_id, None)
+                    return get_client()
+            else:
+                logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
                 return get_client()
-        else:
-            # No tokens stored — user may have logged in before token storage was deployed.
-            # Try to use the singleton, which may still hold their session from sign_in.
-            logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
-            return get_client()
     except Exception as e:
         logger.error(f"[get_user_client] Error creating per-user client: {e}")
         return get_client()
@@ -169,6 +198,14 @@ def sign_in(email: str, password: str) -> Dict:
 def sign_out() -> Dict:
     """Sign out the current user."""
     try:
+        # Clear cached authenticated client for this session
+        try:
+            from nicegui import app as _app
+            storage_id = id(_app.storage.user)
+            _client_cache.pop(storage_id, None)
+            _session_locks.pop(storage_id, None)
+        except Exception:
+            pass
         client = get_client()
         client.auth.sign_out()
         return {'success': True}
