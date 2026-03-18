@@ -2186,7 +2186,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             def add_to_puzzle():
                                 sid = state.sys_id
                                 fl = state.current_page.fl_id if state.current_page else None
-                                param = f'{sid},{fl}' if fl else str(sid)
+                                if fl:
+                                    param = f'{sid},{fl}'
+                                elif state.current_page and state.active_source != 'nli':
+                                    # External library — pass page index (0-based from p_num)
+                                    page_idx = max(0, state.current_page.p_num - 1) if state.current_page.p_num else 0
+                                    param = f'{sid},page:{page_idx}'
+                                else:
+                                    param = str(sid)
                                 ui.navigate.to(f'/puzzle?add={param}')
                             ui.button(
                                 icon='extension',

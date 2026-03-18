@@ -164,7 +164,10 @@ class PuzzleService:
               'bg_removal_threshold': f.bg_removal_threshold,
               'crop_top': f.crop_top, 'crop_bottom': f.crop_bottom,
               'crop_left': f.crop_left, 'crop_right': f.crop_right,
-              'processed': f.processed}
+              'processed': f.processed,
+              'image_url': getattr(f, 'image_url', ''),
+              'external_provider': getattr(f, 'external_provider', ''),
+              'page_index': getattr(f, 'page_index', -1)}
              for f in doc.fragments],
             ensure_ascii=False
         )

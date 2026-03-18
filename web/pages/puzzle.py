@@ -2171,6 +2171,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 crop_left=c_left,
                 crop_right=c_right,
                 processed=meta.get('processed', True),
+                image_url=meta.get('image_url', ''),
+                external_provider=meta.get('external_provider', ''),
+                page_index=meta.get('page_index', -1),
             )
             fragments.append(frag)
         return fragments

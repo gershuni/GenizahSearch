@@ -21223,7 +21223,10 @@ class GenizahGUI(QMainWindow):
                 images = self._puzzle_window._folio_lists[sys_id]
                 first = images[0]
                 self._puzzle_window.add_fragment(
-                    sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', '')
+                    sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''),
+                    image_url=first.get('image_url', ''),
+                    external_provider=first.get('external_provider', ''),
+                    page_index=first.get('page_index', -1)
                 )
             else:
                 thread = PuzzleMetaLoaderThread(self.meta_mgr, sys_id, shelfmark)
