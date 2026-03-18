@@ -587,6 +587,179 @@ def test_get_manchester_manifest_url_not_found(service):
     assert service.get_manchester_manifest_url("unknown_source") is None
 
 
+# ── Manchester canvases tests ─────────────────────────────────────
+
+
+def test_get_manchester_canvases_two_images_recto_verso(test_db):
+    """sys_id with 2 crossref images (S1 recto, S2 verso) that both have luna_ids
+    returns 2 canvas entries with distinct IIIF URLs and folio labels '1r' and '1v'."""
+    conn = sqlite3.connect(test_db)
+    conn.row_factory = sqlite3.Row
+    # Insert Manchester nli_images rows with ImageSourceNames matching manchester_luna fixture
+    conn.executemany(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 756", "INV_M1", "", "", "", "M001", "", "",
+             "FGP_M1", "1111", "Gaster_756__L1F0B0S1", "rylands_jrl1379735", "", "", "",
+             "1", "", "Paper", "10x15", ""),
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 756", "INV_M1", "", "", "", "M001", "", "",
+             "FGP_M2", "1112", "Gaster_756__L1F0B0S2", "rylands_jrl1400001", "", "", "",
+             "1", "", "Paper", "10x15", ""),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    svc = NliCrossrefService(db_path=test_db)
+    canvases = svc.get_manchester_canvases("M001")
+    svc.close()
+
+    assert len(canvases) == 2
+    # First canvas = recto (S1)
+    assert canvases[0]['label'] == '1r'
+    assert canvases[0]['url'] == 'https://luna.manchester.ac.uk/luna/servlet/iiif/UoMUoML~95~2~95~268773~95~268800'
+    assert canvases[0]['folio_num'] == 1
+    # Second canvas = verso (S2)
+    assert canvases[1]['label'] == '1v'
+    assert canvases[1]['url'] == 'https://luna.manchester.ac.uk/luna/servlet/iiif/UoMUoML~95~2~95~300000~95~300001'
+    assert canvases[1]['folio_num'] == 1
+    # URLs must be distinct
+    assert canvases[0]['url'] != canvases[1]['url']
+
+
+def test_get_manchester_canvases_multi_leaf(test_db):
+    """sys_id with 3 crossref images (multi-leaf) returns 3 canvases in ImageName sort order."""
+    conn = sqlite3.connect(test_db)
+    conn.row_factory = sqlite3.Row
+    # Add a third luna_id for the third image
+    conn.execute(
+        "INSERT INTO manchester_luna (image_source_name, luna_id, jrl_filename) VALUES (?, ?, ?)",
+        ("rylands_jrl1500001", "UoMUoML~95~2~95~400000~95~400001", "rylands_jrl1500001"),
+    )
+    conn.executemany(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 800", "INV_M2", "", "", "", "M002", "", "",
+             "FGP_M3", "2001", "Gaster_800__L1F0B0S1", "rylands_jrl1379735", "", "", "",
+             "2", "", "Paper", "10x15", ""),
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 800", "INV_M2", "", "", "", "M002", "", "",
+             "FGP_M4", "2002", "Gaster_800__L1F0B0S2", "rylands_jrl1400001", "", "", "",
+             "2", "", "Paper", "10x15", ""),
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 800", "INV_M2", "", "", "", "M002", "", "",
+             "FGP_M5", "2003", "Gaster_800__L2F0B0S1", "rylands_jrl1500001", "", "", "",
+             "2", "", "Paper", "10x15", ""),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    svc = NliCrossrefService(db_path=test_db)
+    canvases = svc.get_manchester_canvases("M002")
+    svc.close()
+
+    assert len(canvases) == 3
+    # Verify sorted by ImageName order: L1S1, L1S2, L2S1
+    assert canvases[0]['label'] == '1r'
+    assert canvases[1]['label'] == '1v'
+    assert canvases[2]['label'] == '2r'
+    assert canvases[2]['folio_num'] == 2
+
+
+def test_get_manchester_canvases_no_luna_id(test_db):
+    """sys_id with 1 image whose luna_id is NOT in manchester_luna returns empty list."""
+    conn = sqlite3.connect(test_db)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+         "Gaster 900", "INV_M3", "", "", "", "M003", "", "",
+         "FGP_M6", "3001", "Gaster_900__L1F0B0S1", "rylands_unknown_source", "", "", "",
+         "1", "", "Paper", "10x15", ""),
+    )
+    conn.commit()
+    conn.close()
+
+    svc = NliCrossrefService(db_path=test_db)
+    canvases = svc.get_manchester_canvases("M003")
+    svc.close()
+
+    assert canvases == []
+
+
+def test_get_manchester_canvases_no_images(service):
+    """sys_id with no crossref images returns empty list."""
+    canvases = service.get_manchester_canvases("NONEXISTENT_ID")
+    assert canvases == []
+
+
+def test_get_manchester_canvases_url_format(test_db):
+    """Canvas URL format is correct IIIF image base (no /manifest suffix)."""
+    conn = sqlite3.connect(test_db)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+         "Gaster 950", "INV_M5", "", "", "", "M005", "", "",
+         "FGP_M10", "5001", "Gaster_950__L1F0B0S1", "rylands_jrl1379735", "", "", "",
+         "1", "", "Paper", "10x15", ""),
+    )
+    conn.commit()
+    conn.close()
+
+    svc = NliCrossrefService(db_path=test_db)
+    canvases = svc.get_manchester_canvases("M005")
+    svc.close()
+
+    assert len(canvases) == 1
+    url = canvases[0]['url']
+    assert url.startswith('https://luna.manchester.ac.uk/luna/servlet/iiif/')
+    assert not url.endswith('/manifest')
+    assert 'UoMUoML~95~2~95~268773~95~268800' in url
+
+
+def test_get_manchester_canvases_folio_num(test_db):
+    """folio_num is correctly derived from the label (1 for '1r', 1 for '1v', 2 for '2r')."""
+    conn = sqlite3.connect(test_db)
+    conn.row_factory = sqlite3.Row
+    # Add third luna_id if not already present
+    conn.execute(
+        "INSERT OR IGNORE INTO manchester_luna (image_source_name, luna_id, jrl_filename) VALUES (?, ?, ?)",
+        ("rylands_jrl1500001", "UoMUoML~95~2~95~400000~95~400001", "rylands_jrl1500001"),
+    )
+    conn.executemany(
+        "INSERT INTO nli_images VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 960", "INV_M6", "", "", "", "M006", "", "",
+             "FGP_M11", "6001", "Gaster_960__L1F0B0S1", "rylands_jrl1379735", "", "", "",
+             "2", "", "Paper", "10x15", ""),
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 960", "INV_M6", "", "", "", "M006", "", "",
+             "FGP_M12", "6002", "Gaster_960__L1F0B0S2", "rylands_jrl1400001", "", "", "",
+             "2", "", "Paper", "10x15", ""),
+            ("Manchester", "Manchester", "Manchester", "מנצ'סטר", "Rylands",
+             "Gaster 960", "INV_M6", "", "", "", "M006", "", "",
+             "FGP_M13", "6003", "Gaster_960__L2F0B0S1", "rylands_jrl1500001", "", "", "",
+             "2", "", "Paper", "10x15", ""),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    svc = NliCrossrefService(db_path=test_db)
+    canvases = svc.get_manchester_canvases("M006")
+    svc.close()
+
+    assert canvases[0]['folio_num'] == 1  # '1r' -> 1
+    assert canvases[1]['folio_num'] == 1  # '1v' -> 1
+    assert canvases[2]['folio_num'] == 2  # '2r' -> 2
+
+
 # ── JTS/Princeton DPUL tests ─────────────────────────────────────
 
 
