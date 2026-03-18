@@ -193,7 +193,7 @@ window.puzzleCanvas = {
         }
 
         var label = meta && meta.folio_label ? String(meta.folio_label) : '';
-        var parsed = label.match(/^(\d+)([rv])$/i);
+        var parsed = label.match(/^(\\d+)([rv])$/i);
         if (!parsed) {
             return 0;
         }

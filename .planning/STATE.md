@@ -5,7 +5,7 @@ milestone_name: milestone
 status: not_started
 stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
 last_updated: "2026-03-17T15:14:25.436Z"
-last_activity: 2026-03-17 - Completed 52-03 desktop community publishing
+last_activity: 2026-03-18 - Completed quick task 260318-kk1: Fix puzzle image loading for non-NLI libraries
 progress:
   total_phases: 6
   completed_phases: 5
@@ -20,7 +20,7 @@ milestone_name: milestone
 status: not_started
 stopped_at: Completed 52-02-PLAN.md (web community publishing UI)
 last_updated: "2026-03-17T11:07:06.184Z"
-last_activity: 2026-03-17 - Completed 52-03 desktop community publishing
+last_activity: 2026-03-18 - Completed quick task 260318-kk1: Fix puzzle image loading for non-NLI libraries
 progress:
   total_phases: 6
   completed_phases: 5
