@@ -20,6 +20,10 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - New `POST /api/puzzle_upload_derivative` endpoint with same protections
 - Extension validates URL origin (only `iiif.nli.org.il`) and message origin (only `genizahsearch.com`)
 
+### Bug Fixes
+- **Manchester LUNA recto/verso**: Both recto and verso showed the same (recto) image because each Manchester page has its own luna_id but only the first was fetched. New `get_manchester_canvases()` resolves ALL crossref images directly to individual IIIF canvas entries, bypassing the single-manifest approach (both apps)
+- **Library attribution credit lines**: All non-Oxford manuscripts showed NLI default attribution. Now each library gets proper credit: Manchester (CC BY-NC-SA 4.0), Oxford (CC BY-NC 4.0), Cambridge/JTS (from IIIF manifest), and NLI-digitized collections (BL, RNL, AIU, Gaster, Mosseri, etc.) acknowledge both holding institution and NLI digitization. Web credit footer links to correct library website (both apps)
+
 ### Infrastructure
 - Nginx: removed stale `location /api/` block that proxied to dead port 8000 (old FastAPI)
 - `WEB_PUZZLE_ENABLED=true` set on production via `.env` for staged rollout

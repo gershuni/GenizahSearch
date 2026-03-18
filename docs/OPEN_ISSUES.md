@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-18 (browser extension implemented for web puzzle image acquisition; HMAC token security fix; staged rollout on production)
+> **Last Updated:** 2026-03-18 (Manchester recto/verso fix; browser extension for web puzzle; HMAC token security fix; staged rollout on production)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 5 | 5 |
-| P2 Medium Bugs | 5 | 18 | 23 |
+| P2 Medium Bugs | 5 | 19 | 24 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **13** | **54** | **67** |
+| **Total** | **13** | **55** | **68** |
 
 ---
 
@@ -84,6 +84,7 @@ Move to "Completed Issues" section at bottom with date
 | **Publishing can create broken community joins when export/render fails** | `shared/puzzle_publish_service.py`, `shared/puzzle_export.py`, `shared/puzzle_image_service.py` | ✅ Fixed (2026-03-17) | `publish_join()` now fails fast with `ValueError` when `compose_puzzle_export()` returns `None`, before any storage upload or Supabase upsert. Test coverage was added in `tests/test_puzzle_publish.py::test_publish_join_fails_on_null_composite`. |
 | **Puzzle browsing help/parity drift across web and desktop** | `web/pages/discoveries.py`, `web/pages/help.py`, `corrections_ui.py`, `genizah_app.py`, `Help.html` | ✅ Fixed (2026-03-17) | No code change was needed: `web/pages/help.py` is the web help surface and now matches the web feed/filter model, while `Help.html` is desktop-only and correctly documents the desktop `All Puzzles` / `My Puzzles` tabs. The earlier review issue came from treating the two help surfaces as if they were shared. |
 | **v7 puzzle/community rollout still has remaining Hebrew translation gaps** | `web/pages/discoveries.py`, `genizah_app.py`, `corrections_ui.py`, `genizah_translations.py` | ✅ Fixed (2026-03-17) | Verified the previously missing active puzzle/community strings now exist in `genizah_translations.py`, including the desktop publish-confirm prompt with embedded newlines, `(no original text)`, `View all joins...`, `No joined fragments found.`, and `Could not resolve fragment identifiers.` |
+| **Manchester LUNA recto/verso shows same image for both sides** | `genizah_core.py`, `shared/nli_crossref_service.py` | ✅ Fixed (2026-03-18) | Each Manchester page (recto/verso) has a separate luna_id with its own 1-canvas IIIF manifest, but code only fetched the first image's luna_id. Added `get_manchester_canvases()` which resolves ALL crossref images to individual canvas entries with distinct IIIF URLs. Example: Ms. B 2091 (sys_id 990002081410205171) now correctly shows 2 pages. |
 | **Puzzle background removal still misses some CUL blue conservation mats** | `shared/background_removal.py`, `shared/puzzle_image_service.py` | ❌ Open | Current algorithm learns the background color from the four image corners. That works for most scans, but some Cambridge images have parchment touching the corners while the bright blue conservation mat dominates the center/background. In those cases the detector learns the parchment instead of the mat, so removal keeps the blue and can even attack the fragment. Likely fix path is smarter background sampling or multiple candidate backgrounds rather than more threshold tuning. |
 | **Web puzzle canvas v49 is not app-ready: fragment-meta race, dead threshold slider, delete not persisted, and processed-image response can advertise the wrong MIME type** | `web/pages/puzzle.py`, `web/api.py`, `shared/puzzle_image_service.py` | ✅ Fixed (2026-03-16) | Fixed in multiple passes on 2026-03-16. The final root cause for “images are not loading” was that `ui.html('<canvas id="puzzleCanvas"></canvas>')` rendered as an empty `<div>` in NiceGUI, so Fabric never found a canvas element and every add was queued forever. Replaced it with a real `ui.element('canvas').props('id=puzzleCanvas')`, then verified in a live headless browser that Fabric initializes, `/api/puzzle_image` loads, and the fragment is present on the canvas. Earlier same-day fixes also added JS→Python add-result/meta events, persisted delete handling, selection sync, processed/original toggle reloads, threshold reprocessing wiring, and MIME-safe API responses. |
 | **Puzzle export mismatched web positions, reprocessed processed images, and froze the desktop UI** | `web/pages/puzzle.py`, `shared/puzzle_export.py`, `genizah_app.py` | ✅ Fixed (2026-03-17) | Fixed 3 Phase-50 export bugs together. Web save/export now serializes Fabric objects from `getCenterPoint()` plus unscaled cropped size and restores persisted docs via center placement instead of brittle `left/top` math, bringing it in line with the desktop/QGraphics model. Shared export now reuses the same 800px processed image the canvas shows for bg-removed fragments, so exported output matches the on-canvas appearance instead of re-running background removal at 3000px. Desktop export now runs in `PuzzleExportThread` with cancelable progress UI and resolution choices (draft 1000px / standard 2000px / full 3000px) instead of blocking the main thread for ~20s. Follow-up same-day web fixes also corrected `build_fragments_list()` regressions, center-preserving folio swaps/reloads, session restore viewport fitting, and duplicate fragment creation during `Flip Puzzle`. |
@@ -228,6 +229,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-18 | Fixed Manchester LUNA recto/verso bug: each page has its own luna_id but code only fetched the first. Added `get_manchester_canvases()` to `NliCrossrefService` which resolves ALL crossref images to individual IIIF canvas entries. Confirmed with Ms. B 2091 (sys_id 990002081410205171): recto and verso now show distinct images. 6 new tests. | Claude |
 | 2026-03-17 | Verified the localhost-helper web puzzle path against `genizahsearch.com` and switched it from opt-in to default-on fallback. The browser now tries the user's local helper after `/api/puzzle_image` fails, across initial add, reload/toggle, and folio navigation. Also removed the fragile preflight `/health` fetch gate because it could block the helper attempt from the live HTTPS site even when image loading itself worked. | Codex |
 | 2026-03-17 | Reviewed commit `d6395f17` (`fix: client-side IIIF fallback when server can't fetch images`). Found 2 follow-up issues: (1) new `POST /api/puzzle_process` accepts arbitrary unauthenticated bytes and writes them into the shared puzzle-image cache keyed only by caller-supplied query params, enabling cache poisoning / upload abuse; (2) folio navigation still uses `/api/puzzle_image` without the new client-side fallback, so prev/next folio remains broken on production and can persist mismatched `fl_id`/`folio_label` metadata after a failed load. | Codex |
 | 2026-03-17 | Fixed desktop packaging regression for puzzle image processing: both `build_app.bat` and `GenizahSearchPro.spec` listed `numpy` as required, but also excluded it from the PyInstaller bundle. That contradiction produced `No module named numpy` only in the packaged EXE when the puzzle imported `shared.background_removal`. Removed the `numpy` exclusion from both build paths. | Codex |
