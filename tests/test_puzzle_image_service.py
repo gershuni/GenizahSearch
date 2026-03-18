@@ -176,3 +176,96 @@ class TestInvalidateCache:
         assert not p2.exists()
         assert not p3.exists()
         assert not p4.exists()
+
+
+class TestImageUrlParameter:
+    """Tests for resolve_fragment_image with image_url parameter (non-NLI libraries)."""
+
+    def test_resolve_fragment_image_with_image_url(self, tmp_path, monkeypatch):
+        """resolve_fragment_image with image_url fetches from direct URL instead of NLI."""
+        from shared.puzzle_image_service import PuzzleImageService, reset_puzzle_image_service
+        reset_puzzle_image_service()
+        svc = PuzzleImageService(cache_dir=tmp_path)
+
+        # Mock requests.get to return fake image bytes
+        class FakeResp:
+            status_code = 200
+            content = b'\x89PNG\r\n\x1a\n' + b'\x00' * 200
+        def mock_get(url, headers=None, timeout=None):
+            return FakeResp()
+        monkeypatch.setattr('shared.puzzle_image_service.requests.get', mock_get)
+
+        result = svc.resolve_fragment_image(
+            fl_id='', size=800, threshold=30.0, processed=False,
+            image_url='https://luna.manchester.ac.uk/luna/servlet/iiif/test123'
+        )
+        assert result is not None
+        assert len(result) > 100
+
+    def test_resolve_fragment_image_image_url_cached(self, tmp_path, monkeypatch):
+        """image_url fetch result is cached to disk; second call uses cache."""
+        from shared.puzzle_image_service import PuzzleImageService, reset_puzzle_image_service
+        reset_puzzle_image_service()
+        svc = PuzzleImageService(cache_dir=tmp_path)
+
+        call_count = [0]
+        class FakeResp:
+            status_code = 200
+            content = b'\xff\xd8\xff' + b'\x00' * 200
+        def mock_get(url, headers=None, timeout=None):
+            call_count[0] += 1
+            return FakeResp()
+        monkeypatch.setattr('shared.puzzle_image_service.requests.get', mock_get)
+
+        image_url = 'https://luna.manchester.ac.uk/luna/servlet/iiif/test456'
+        result1 = svc.resolve_fragment_image(fl_id='', size=800, processed=False, image_url=image_url)
+        result2 = svc.resolve_fragment_image(fl_id='', size=800, processed=False, image_url=image_url)
+        assert result1 == result2
+        assert call_count[0] == 1  # Second call should use disk cache
+
+    def test_resolve_fragment_image_no_fl_id_no_url_returns_none(self, tmp_path):
+        """resolve_fragment_image with both fl_id and image_url empty returns None."""
+        from shared.puzzle_image_service import PuzzleImageService, reset_puzzle_image_service
+        reset_puzzle_image_service()
+        svc = PuzzleImageService(cache_dir=tmp_path)
+        result = svc.resolve_fragment_image(fl_id='', size=800, image_url='')
+        assert result is None
+
+    def test_fetch_direct_url_builds_iiif_url(self, tmp_path, monkeypatch):
+        """_fetch_direct_url appends /full/{size},/0/default.jpg to canvas base URL."""
+        from shared.puzzle_image_service import PuzzleImageService, reset_puzzle_image_service
+        reset_puzzle_image_service()
+        svc = PuzzleImageService(cache_dir=tmp_path)
+
+        fetched_urls = []
+        class FakeResp:
+            status_code = 200
+            content = b'\x89PNG\r\n\x1a\n' + b'\x00' * 200
+        def mock_get(url, headers=None, timeout=None):
+            fetched_urls.append(url)
+            return FakeResp()
+        monkeypatch.setattr('shared.puzzle_image_service.requests.get', mock_get)
+
+        canvas_url = 'https://luna.manchester.ac.uk/luna/servlet/iiif/UoMimg~1~1~123'
+        svc._fetch_direct_url(canvas_url, 800)
+        assert len(fetched_urls) == 1
+        assert fetched_urls[0] == f"{canvas_url}/full/800,/0/default.jpg"
+
+    def test_fetch_direct_url_uses_full_url_as_is(self, tmp_path, monkeypatch):
+        """_fetch_direct_url uses URL as-is when it already contains /full/."""
+        from shared.puzzle_image_service import PuzzleImageService, reset_puzzle_image_service
+        reset_puzzle_image_service()
+        svc = PuzzleImageService(cache_dir=tmp_path)
+
+        fetched_urls = []
+        class FakeResp:
+            status_code = 200
+            content = b'\x89PNG\r\n\x1a\n' + b'\x00' * 200
+        def mock_get(url, headers=None, timeout=None):
+            fetched_urls.append(url)
+            return FakeResp()
+        monkeypatch.setattr('shared.puzzle_image_service.requests.get', mock_get)
+
+        full_url = 'https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_f_21_21a.jpg'
+        svc._fetch_direct_url(full_url, 800)
+        assert fetched_urls[0] == full_url  # Used as-is

@@ -108,3 +108,59 @@ class TestPuzzleDocument:
             doc = PuzzleDocument(join_type=jt)
             restored = PuzzleDocument.from_json(doc.to_json())
             assert restored.join_type == jt
+
+
+class TestExternalFragmentFields:
+    """Tests for external library image fields (image_url, external_provider, page_index)."""
+
+    def test_fragment_external_fields_defaults(self):
+        """New external fields have correct defaults."""
+        frag = PuzzleFragment(sys_id="S1", folio_label="1r", fl_id="FL100")
+        assert frag.image_url == ''
+        assert frag.external_provider == ''
+        assert frag.page_index == -1
+
+    def test_fragment_external_fields_roundtrip(self):
+        """External fragment fields survive JSON roundtrip."""
+        frag = PuzzleFragment(
+            sys_id="S1", folio_label="1r", fl_id="",
+            image_url="https://luna.manchester.ac.uk/luna/servlet/iiif/abc",
+            external_provider="manchester",
+            page_index=3
+        )
+        doc = PuzzleDocument(fragments=[frag])
+        restored = PuzzleDocument.from_json(doc.to_json())
+        rf = restored.fragments[0]
+        assert rf.fl_id == ""
+        assert rf.image_url == "https://luna.manchester.ac.uk/luna/servlet/iiif/abc"
+        assert rf.external_provider == "manchester"
+        assert rf.page_index == 3
+
+    def test_backward_compat_old_json_without_new_fields(self):
+        """Old JSON without image_url/external_provider/page_index loads with defaults."""
+        import json
+        old_data = {
+            "id": "test-old", "title": "Old Doc", "notes": "", "join_type": "physical",
+            "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00",
+            "fragments": [
+                {"sys_id": "S1", "folio_label": "1r", "fl_id": "FL100",
+                 "shelfmark": "T-S 12.1", "x": 0, "y": 0, "rotation": 0, "scale": 1,
+                 "flip_h": False, "flip_v": False, "bg_removal_threshold": 30.0,
+                 "crop_top": 0, "crop_bottom": 0, "crop_left": 0, "crop_right": 0,
+                 "processed": True}
+            ]
+        }
+        doc = PuzzleDocument.from_json(json.dumps(old_data))
+        frag = doc.fragments[0]
+        assert frag.fl_id == "FL100"
+        assert frag.image_url == ''
+        assert frag.external_provider == ''
+        assert frag.page_index == -1
+
+    def test_nli_fragment_external_fields_are_empty_by_default(self):
+        """NLI fragments (with fl_id) have empty external fields by default."""
+        frag = PuzzleFragment(sys_id="S1", folio_label="2r", fl_id="FL7734473",
+                              shelfmark="T-S 12.1")
+        assert frag.image_url == ''
+        assert frag.external_provider == ''
+        assert frag.page_index == -1

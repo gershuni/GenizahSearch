@@ -205,3 +205,56 @@ def test_auto_suggest_title_no_shelfmarks():
     """auto_suggest_title returns 'Untitled Join' when no shelfmarks present."""
     frags = [_make_fragment(shelfmark=''), _make_fragment(shelfmark='')]
     assert auto_suggest_title(frags) == 'Untitled Join'
+
+
+# ── Test 11: external fragment (image_url) export ────────────────────
+
+def test_export_external_fragment_rendered():
+    """compose_puzzle_export handles external fragments with image_url.
+
+    Previously, external fragments (fl_id='') were silently skipped because
+    resolve_fragment_image didn't accept image_url. After the fix, the mock
+    receives image_url= keyword arg and returns bytes, so the fragment renders.
+    """
+    from shared.puzzle_model import PuzzleFragment
+
+    ext_frag = PuzzleFragment(
+        sys_id="M1", folio_label="A", fl_id="",
+        shelfmark="Rylands 123",
+        image_url="https://luna.manchester.ac.uk/iiif/test",
+        external_provider="manchester", page_index=0,
+        x=0, y=0, scale=1.0, processed=False
+    )
+
+    def mock_resolve(fl_id, size=800, threshold=30.0, processed=True, is_cul=False, image_url=''):
+        # Ensure image_url is passed through correctly
+        assert image_url == "https://luna.manchester.ac.uk/iiif/test"
+        return _png_bytes()
+
+    svc = MagicMock()
+    svc.resolve_fragment_image.side_effect = mock_resolve
+
+    result = compose_puzzle_export([ext_frag], svc, export_size=200)
+    assert result is not None  # Previously would have been None (fragment skipped)
+
+
+def test_export_external_fragment_image_url_passed_to_service():
+    """resolve_fragment_image is called with the fragment's image_url."""
+    from shared.puzzle_model import PuzzleFragment
+
+    ext_frag = PuzzleFragment(
+        sys_id="M2", folio_label="B", fl_id="",
+        image_url="https://luna.manchester.ac.uk/iiif/canvas_xyz",
+        external_provider="manchester", page_index=1,
+        x=50, y=50, scale=1.0, processed=False
+    )
+    svc = _make_image_service(_png_bytes())
+    compose_puzzle_export([ext_frag], svc, export_size=200)
+
+    # Check the call was made with image_url keyword arg
+    call_kwargs = svc.resolve_fragment_image.call_args
+    assert call_kwargs is not None
+    kwargs = call_kwargs[1] if call_kwargs[1] else {}
+    args = call_kwargs[0] if call_kwargs[0] else ()
+    # image_url should be in kwargs
+    assert kwargs.get('image_url') == "https://luna.manchester.ac.uk/iiif/canvas_xyz"

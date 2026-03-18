@@ -222,3 +222,81 @@ class TestFragmentIndex:
 
         result = svc.list_documents_for_fragment(sys_id="S1")
         assert doc.id in result
+
+
+class TestExternalFragmentPersistence:
+    """Tests for saving/loading external library fragments."""
+
+    def test_save_load_external_fragment(self, tmp_path):
+        """External fragment (image_url, no fl_id) survives save/load roundtrip."""
+        svc = PuzzleService(db_path=str(tmp_path / "joins.db"))
+        frag = PuzzleFragment(
+            sys_id="M123", folio_label="A", fl_id="",
+            shelfmark="Rylands Genizah A 123",
+            image_url="https://luna.manchester.ac.uk/luna/servlet/iiif/UoMimg~1~1~12345",
+            external_provider="manchester",
+            page_index=0
+        )
+        doc = PuzzleDocument(title="External Test", fragments=[frag])
+        doc_id = svc.save_document(doc)
+        assert doc_id is not None
+
+        loaded = svc.load_document(doc_id)
+        assert loaded is not None
+        assert len(loaded.fragments) == 1
+        lf = loaded.fragments[0]
+        assert lf.fl_id == ""
+        assert lf.image_url == "https://luna.manchester.ac.uk/luna/servlet/iiif/UoMimg~1~1~12345"
+        assert lf.external_provider == "manchester"
+        assert lf.page_index == 0
+
+    def test_save_load_mixed_nli_external(self, tmp_path):
+        """Mixed NLI + external puzzle document survives save/load roundtrip."""
+        svc = PuzzleService(db_path=str(tmp_path / "joins.db"))
+        nli_frag = PuzzleFragment(sys_id="N1", folio_label="1r", fl_id="FL999",
+                                   shelfmark="T-S 12.1")
+        ext_frag = PuzzleFragment(sys_id="M1", folio_label="B", fl_id="",
+                                   shelfmark="Rylands 456",
+                                   image_url="https://luna.manchester.ac.uk/iiif/test",
+                                   external_provider="manchester", page_index=1)
+        doc = PuzzleDocument(title="Mixed", fragments=[nli_frag, ext_frag])
+        doc_id = svc.save_document(doc)
+        loaded = svc.load_document(doc_id)
+        assert len(loaded.fragments) == 2
+        assert loaded.fragments[0].fl_id == "FL999"
+        assert loaded.fragments[0].image_url == ""
+        assert loaded.fragments[1].fl_id == ""
+        assert loaded.fragments[1].image_url == "https://luna.manchester.ac.uk/iiif/test"
+
+    def test_load_old_doc_without_external_fields(self, tmp_path):
+        """Old documents without external fields load with correct defaults."""
+        import sqlite3, json
+        db_path = str(tmp_path / "joins.db")
+        svc = PuzzleService(db_path=db_path)
+
+        # Insert old-format row directly into DB (no image_url/external_provider/page_index)
+        old_fragments = json.dumps([
+            {"sys_id": "S1", "folio_label": "1r", "fl_id": "FL100",
+             "shelfmark": "T-S 12.1", "x": 0, "y": 0, "rotation": 0, "scale": 1,
+             "flip_h": False, "flip_v": False, "bg_removal_threshold": 30.0,
+             "crop_top": 0, "crop_bottom": 0, "crop_left": 0, "crop_right": 0,
+             "processed": True}
+        ])
+        import uuid
+        doc_id = str(uuid.uuid4())
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO join_documents (id, title, notes, join_type, fragments_json, created_at, updated_at) "
+            "VALUES (?, 'Old', '', 'physical', ?, datetime('now'), datetime('now'))",
+            (doc_id, old_fragments)
+        )
+        conn.commit()
+        conn.close()
+
+        loaded = svc.load_document(doc_id)
+        assert loaded is not None
+        frag = loaded.fragments[0]
+        assert frag.fl_id == "FL100"
+        assert frag.image_url == ''
+        assert frag.external_provider == ''
+        assert frag.page_index == -1
