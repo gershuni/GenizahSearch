@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "GenizahSearch Image Helper",
+  "version": "1.0.0",
+  "description": "Fetches manuscript images for the GenizahSearch Fragment Puzzle",
+  "host_permissions": [
+    "https://iiif.nli.org.il/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://genizahsearch.com/*",
+        "*://localhost:*",
+        "*://127.0.0.1:*"
+      ],
+      "js": ["content_script.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

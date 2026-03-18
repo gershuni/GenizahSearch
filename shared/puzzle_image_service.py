@@ -23,6 +23,11 @@ from shared.background_removal import remove_background, DEFAULT_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
+# Processing algorithm version. Included in cache keys for processed images
+# so that cache entries are automatically invalidated when the background
+# removal algorithm changes.
+PROCESSING_VERSION = 'v3'
+
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
 
 # Size presets (width in pixels)
@@ -72,9 +77,10 @@ class PuzzleImageService:
         """Deterministic cache path for a specific (fl_id, size, threshold) combination."""
         safe_id = _safe_filename(fl_id)
         if processed:
-            # Include threshold in filename (rounded to 1 decimal to avoid float noise)
+            # Include threshold and processing version in filename
+            # (rounded to 1 decimal to avoid float noise)
             suffix = '_cul' if is_cul else ''
-            return self._cache_dir / f"{safe_id}_{size}_{threshold:.1f}{suffix}.png"
+            return self._cache_dir / f"{safe_id}_{size}_{threshold:.1f}{suffix}_{PROCESSING_VERSION}.png"
         else:
             return self._cache_dir / f"{safe_id}_{size}_original.jpg"
 
@@ -129,6 +135,36 @@ class PuzzleImageService:
         except OSError as e:
             logger.warning(f"Failed to cache processed image for {fl_id}: {e}")
         return result_bytes
+
+    def save_derivative_to_cache(self, fl_id: str, size: int, threshold: float,
+                                 is_cul: bool, png_bytes: bytes) -> bool:
+        """Save externally-processed image bytes to the cache.
+
+        Used when the browser extension or desktop app provides already-processed
+        image data that should be persisted to the server cache.
+
+        Args:
+            fl_id: NLI FL ID for the fragment.
+            size: Image width in pixels.
+            threshold: Background removal threshold used.
+            is_cul: Whether CUL blue mat removal was applied.
+            png_bytes: Processed PNG image bytes.
+
+        Returns:
+            True if saved successfully, False otherwise.
+        """
+        if not png_bytes or png_bytes[:4] != b'\x89PNG':
+            logger.warning(f"save_derivative_to_cache: invalid PNG header for {fl_id}")
+            return False
+        cache_path = self.get_cache_path(fl_id, size, threshold, True, is_cul)
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(png_bytes)
+            logger.info(f"Saved derivative to cache: {cache_path.name} ({len(png_bytes)} bytes)")
+            return True
+        except OSError as e:
+            logger.warning(f"Failed to save derivative for {fl_id}: {e}")
+            return False
 
     def invalidate_cache(self, fl_id: str, threshold: Optional[float] = None):
         """Clear cached images for a specific fl_id.
@@ -221,3 +257,11 @@ def get_cache_path(fl_id: str, size: int = 800,
 def invalidate_cache(fl_id: str, threshold: Optional[float] = None):
     """Module-level convenience for invalidate_cache."""
     get_puzzle_image_service().invalidate_cache(fl_id, threshold)
+
+
+def save_derivative_to_cache(fl_id: str, size: int, threshold: float,
+                              is_cul: bool, png_bytes: bytes) -> bool:
+    """Module-level convenience for save_derivative_to_cache."""
+    return get_puzzle_image_service().save_derivative_to_cache(
+        fl_id, size, threshold, is_cul, png_bytes
+    )
