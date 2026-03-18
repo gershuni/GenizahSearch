@@ -17,6 +17,8 @@ pyinstaller --noconfirm --noconsole --onedir --clean ^
  --icon "icon.ico" ^
  --version-file "version_info.txt" ^
  --hidden-import "tantivy" ^
+ --hidden-import "numpy" ^
+ --hidden-import "PIL" ^
  --collect-all "tantivy" ^
  --add-data "icon.ico;." ^
  --add-data "Help.html;." ^
@@ -34,7 +36,6 @@ pyinstaller --noconfirm --noconsole --onedir --clean ^
  --exclude-module "matplotlib" ^
  --exclude-module "scipy" ^
  --exclude-module "pandas" ^
- --exclude-module "numpy" ^
  --exclude-module "notebook" ^
  --exclude-module "ipython" ^
  --exclude-module "jedi" ^
