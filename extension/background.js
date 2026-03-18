@@ -2,10 +2,16 @@
  * GenizahSearch Image Helper - Background Service Worker
  *
  * Fetches NLI IIIF images on behalf of the page via the user's own IP.
- * Datacenter IPs are blocked by NLI, but residential/university IPs work fine.
+ * Production servers cannot fetch these images because NLI blocks
+ * datacenter IP ranges. This extension uses the user's residential or
+ * institutional IP, which NLI accepts.
+ *
+ * Security: Only fetches from iiif.nli.org.il — all other URLs are rejected.
  */
 
 const api = typeof browser !== 'undefined' ? browser : chrome;
+
+const ALLOWED_HOST = 'iiif.nli.org.il';
 
 api.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (msg.type !== 'fetch-image' || !msg.url) {
@@ -13,12 +19,19 @@ api.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         return false;
     }
 
-    fetch(msg.url, {
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://www.nli.org.il/'
+    // Validate URL — only allow NLI IIIF requests
+    try {
+        var parsed = new URL(msg.url);
+        if (parsed.hostname !== ALLOWED_HOST) {
+            sendResponse({ ok: false, error: 'URL not allowed: ' + parsed.hostname });
+            return false;
         }
-    })
+    } catch (e) {
+        sendResponse({ ok: false, error: 'Invalid URL' });
+        return false;
+    }
+
+    fetch(msg.url)
         .then(function (response) {
             if (!response.ok) {
                 throw new Error('HTTP ' + response.status);
@@ -26,8 +39,8 @@ api.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
             return response.arrayBuffer();
         })
         .then(function (ab) {
-            // ArrayBuffer cannot be cloned in message passing, send as plain array
-            sendResponse({ ok: true, data: Array.from(new Uint8Array(ab)) });
+            // MV3 structured clone supports Uint8Array directly — no Array conversion needed
+            sendResponse({ ok: true, data: new Uint8Array(ab) });
         })
         .catch(function (e) {
             sendResponse({ ok: false, error: e.message || 'Fetch failed' });
