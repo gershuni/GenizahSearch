@@ -3296,19 +3296,16 @@ class MetadataManager:
                     current_meta['external_provider'] = 'cambridge'
                     LOGGER.info(f"Using local Cambridge manifest for {system_id} from crossref sidecar")
 
-        # 2a-manchester: if no external link yet, try Manchester LUNA manifest via crossref sidecar
+        # 2a-manchester: build canvas entries directly from ALL crossref images (each has its own luna_id)
         if not ext_link and crossref_svc and crossref_svc.is_available():
-            crossref_images_for_lib = crossref_svc.get_images(system_id)
-            if crossref_images_for_lib:
-                first_img = crossref_images_for_lib[0]
-                img_source = (first_img.get('image_source_name', '') or '').lower()
-                if img_source:
-                    manchester_manifest = crossref_svc.get_manchester_manifest_url(img_source)
-                    if manchester_manifest:
-                        ext_link = manchester_manifest
-                        current_meta['external_url'] = ext_link
-                        current_meta['external_provider'] = 'manchester'
-                        LOGGER.info(f"Using Manchester LUNA manifest for {system_id}")
+            manchester_canvases = crossref_svc.get_manchester_canvases(system_id)
+            if manchester_canvases:
+                images_ext = manchester_canvases
+                current_meta['external_provider'] = 'manchester'
+                # Set a synthetic ext_link to prevent JTS/other fallback from running,
+                # but skip fetch_external_iiif_data since we already have canvas entries
+                ext_link = '__manchester_direct__'
+                LOGGER.info(f"Using {len(manchester_canvases)} Manchester LUNA canvases for {system_id}")
 
         # 2a-jts: if no external link yet, try JTS Figgy manifest via crossref sidecar
         if not ext_link and crossref_svc and crossref_svc.is_available():
@@ -3321,8 +3318,8 @@ class MetadataManager:
                     current_meta['external_provider'] = 'jts'
                     LOGGER.info(f"Using JTS Figgy manifest for {system_id}")
 
-        # 2a. Fetch External IIIF (Cambridge / Manchester / JTS)
-        if ext_link:
+        # 2a. Fetch External IIIF (Cambridge / JTS — Manchester already resolved above)
+        if ext_link and ext_link != '__manchester_direct__':
             ext_data = self.fetch_external_iiif_data(ext_link)
             if ext_data.get('canvases'):
                 images_ext = ext_data['canvases'] # Format: [{'label': '...', 'url': '...'}]
