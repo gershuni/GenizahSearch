@@ -1,7 +1,7 @@
 # Web Puzzle Technical Specification
 
-> Status: active handoff/spec document
-> Last updated: 2026-03-18
+> Status: active — browser extension implemented, Chrome Web Store submission pending
+> Last updated: 2026-03-18 (extension solution implemented)
 > Audience: AI agents and developers working on the web puzzle system
 
 ---
@@ -377,19 +377,21 @@ Typical web flow when the puzzle is enabled:
 5. Loaded image becomes a Fabric object.
 6. Python receives metadata events and updates server-side state.
 
-### 5.2 Current browser image fallback chain
+### 5.2 Current browser image fallback chain (updated 2026-03-18)
 
-When the puzzle code is enabled, the image fallback chain is:
+All image paths now use a single unified `_loadImageWithFallbacks()` function. The fallback chain is:
 
-1. `GET /api/puzzle_image`
-2. localhost helper (`http://127.0.0.1:43111/...`)
-3. direct NLI display path
+1. `GET /api/puzzle_image` — checks server disk cache first; returns upload token on miss
+2. **Browser extension** — if installed, fetches from NLI via user's IP, sends raw bytes to `POST /api/puzzle_process` with HMAC token for server-side bg removal + caching
+3. localhost helper (`http://127.0.0.1:43111/...`) — for power users running desktop helper
+4. direct NLI display path — degraded display-only fallback (no bg removal)
 
 Interpretation:
 
-- step 1 works in local development and some non-production setups
-- step 2 works only for users running a helper locally
-- step 3 is degraded display-only fallback
+- step 1 serves cached images instantly (populated by extension or desktop users)
+- step 2 is the primary acquisition path for production — uses user's residential/institutional IP which NLI accepts
+- step 3 is legacy fallback for users running the helper locally
+- step 4 is degraded display-only for users without extension or helper
 
 ### 5.3 Folio navigation
 
@@ -660,26 +662,27 @@ Assessment:
 
 ---
 
-## 8. Recommended Strategy
+## 8. Recommended Strategy (updated 2026-03-18)
 
-### Short-term recommendation
+### Implemented solution: Browser extension + server derivative cache
 
-Keep the web puzzle hidden until one of these is productized:
+As of 2026-03-18, a **browser extension** approach was implemented and deployed:
 
-1. packaged localhost helper
-2. desktop bridge for installed users
-3. owned/same-origin image storage path
+1. **GenizahSearch Image Helper** Chrome extension fetches NLI images via user's own IP
+2. Server processes images (bg removal) and caches to disk (~150GB available)
+3. Cached images serve all future users instantly without the extension
+4. HMAC upload tokens prevent cache poisoning
+5. `WEB_PUZZLE_ENABLED=true` set on production for staged rollout
 
-If a quick restoration is needed, **packaged localhost helper** is the most realistic near-term route because the technical core already works.
+Key files: `extension/`, `web/puzzle_tokens.py`, `web/api.py`, `web/pages/puzzle.py`
 
 ### Long-term recommendation
 
-Move toward **serving images we control**:
+The server derivative cache grows organically from extension + desktop users. Over time, most fragments will be cached and accessible without the extension. Future options to accelerate cache growth:
 
-- same-origin derivative cache
-- or owned storage for puzzle-sized images
-
-That is the cleanest architecture for a true website feature.
+- Batch-seed cache from allowed network (home/university machine)
+- Desktop app cache contribution (upload processed images to server)
+- Owned image storage for puzzle-sized derivatives
 
 ### Why not rely on more proxy experiments
 

@@ -46,9 +46,16 @@ Desktop App (PyQt6) ────────────┘
 - `shared/puzzle_model.py` - PuzzleDocument/PuzzleFragment dataclasses
 - `shared/puzzle_service.py` - SQLite CRUD for joins.db sidecar
 - `shared/puzzle_export.py` - Composite PNG export, thumbnail generation
-- `shared/puzzle_image_service.py` - IIIF image fetch + background removal
+- `shared/puzzle_image_service.py` - IIIF image fetch + background removal + cache versioning
 - `shared/background_removal.py` - HSV-based background removal engine
-- `web/pages/puzzle.py` - Web puzzle page (Fabric.js canvas + UI)
+- `web/pages/puzzle.py` - Web puzzle page (Fabric.js canvas + unified image loader)
+- `web/puzzle_tokens.py` - HMAC upload token generation/verification
+
+### Browser Extension (GenizahSearch Image Helper)
+- `extension/manifest.json` - Chrome MV3 manifest with NLI host permissions
+- `extension/background.js` - Service worker fetching NLI images as binary
+- `extension/content_script.js` - Page↔background bridge + extension detection
+- `extension/icons/` - Extension icons (16/48/128px)
 
 ### Desktop
 - `supabase_corrections_client.py` - Desktop Supabase client
@@ -131,6 +138,8 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
 POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
+WEB_PUZZLE_ENABLED=true (enables web puzzle page - requires browser extension for bg removal)
+PUZZLE_UPLOAD_SECRET=xxx (optional - HMAC secret for puzzle upload tokens; auto-generated if unset)
 ```
 
 ## Testing
@@ -222,6 +231,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- March 2026: v7.0.1 Web Puzzle Browser Extension -- GenizahSearch Image Helper Chrome extension for NLI image acquisition, unified _loadImageWithFallbacks() fallback chain (server cache → extension → localhost helper → direct NLI), HMAC upload tokens, server derivative cache with processing version, extension install banner, privacy policy page, nginx /api/ proxy fix
 - March 2026: v7.0.0 Fragment Puzzle & Community Publishing -- visual canvas for arranging fragments (background removal, zoom/rotate/crop, folio nav, layer ordering), save/load join documents to joins.db, composite PNG export with metadata banner, recto/verso support, community publishing (publish/unpublish/fork/browse), Discoveries Center integration, All/My Puzzles tabs, fragment selector combobox+browse, clickable shelfmark badges, admin soft-delete, auto-unpublish on delete, 90+ Hebrew translations, bilingual help sections, Windows index rebuild fix (both apps)
 - March 2026: v6.5.3 Image viewer copy & save -- right-click context menu on manuscript images with Copy Image and Save Image As (desktop)
 - March 2026: v6.5.2 UI polish -- desktop ResultDialog icon+text compact buttons, web language toggle moved to header

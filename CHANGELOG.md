@@ -4,6 +4,28 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.0.1] - Web Puzzle Browser Extension - 2026-03-18
+
+### New Features
+- **GenizahSearch Image Helper extension**: Chrome/Firefox extension fetches NLI manuscript images via user's browser, bypassing datacenter IP blocks. Submitted to Chrome Web Store
+- **Server derivative cache**: Processed images cached on server disk; once cached, available to all users without extension
+- **Unified image loader**: Single `_loadImageWithFallbacks()` function replaces 4 separate fallback chains (add/reload/folio/restore)
+- **HMAC upload tokens**: Secure cache writes — server issues signed tokens on cache miss, uploads require valid token
+- **Extension install banner**: Bilingual dismissible banner when extension not detected; green "Extension active" indicator when present
+- **Cache key versioning**: `PROCESSING_VERSION` in cache keys for automatic invalidation when bg removal algorithm changes
+- **Privacy policy page**: `/privacy-extension` route for Chrome Web Store listing requirement
+
+### Security
+- `POST /api/puzzle_process` hardened with token verification, 10MB size limit, content-type validation, rate limiting (60/min/IP)
+- New `POST /api/puzzle_upload_derivative` endpoint with same protections
+- Extension validates URL origin (only `iiif.nli.org.il`) and message origin (only `genizahsearch.com`)
+
+### Infrastructure
+- Nginx: removed stale `location /api/` block that proxied to dead port 8000 (old FastAPI)
+- `WEB_PUZZLE_ENABLED=true` set on production via `.env` for staged rollout
+
+---
+
 ## [7.0.0] - Fragment Puzzle & Community Publishing - 2026-03-17
 
 ### New Features — Fragment Puzzle (Phases 47-51)
