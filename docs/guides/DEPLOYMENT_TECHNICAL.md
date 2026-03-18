@@ -764,6 +764,7 @@ sudo journalctl -u genizah-web -f
 - `MemoryError` - Clean sessions, restart service
 - `Connection refused` to Supabase - Check Supabase status
 - Repeated `502 Bad Gateway` in nginx - Service crashed, restart needed
+- `502` only on `/api/` routes - Check nginx has NO separate `location /api/` block (was removed March 2026; the old block proxied to port 8000 which no longer exists)
 
 ### Backup
 
