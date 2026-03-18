@@ -163,6 +163,62 @@ def normalize_shelfmark(shelfmark: str) -> str:
     return cleaned
 
 
+# ── Mosseri CUDL label construction ─────────────────────────────
+
+# Valid Mosseri CUDL series (Roman numeral collections digitized at Cambridge)
+_MOSSERI_CUDL_SERIES = {"I", "IA", "II", "III", "IIIA", "IV", "V", "VI", "VII", "VIII", "IX", "X"}
+
+# Regex to extract series, number, optional sub-fragment, and optional letter suffix
+# from Mosseri shelfmark variants like "Ms. VI 108", "Moss. III 145.3C",
+# or "Mosseri, Jacques Ms. VII 173.3"
+_MOSSERI_CUDL_RE = re.compile(
+    r'(?:Mosseri.*?)?(?:Ms\.?|Moss\.?)\s*([IVXL]+[a-z]?)\s*,?\s*(\d+)(?:\.(\d+))?([A-Z])?$',
+    re.IGNORECASE,
+)
+
+
+def construct_mosseri_cudl_label(shelfmark: str) -> str | None:
+    """
+    Convert a Mosseri shelfmark variant to a CUDL manifest label.
+
+    Returns the CUDL label (e.g., 'MS-MOSSERI-VI-00108') or None if the
+    shelfmark is not a recognized Mosseri Roman-numeral-series pattern.
+
+    Examples:
+        'Ms. VI 108'            -> 'MS-MOSSERI-VI-00108'
+        'Moss. VI,129.3'        -> 'MS-MOSSERI-VI-00129-00003'
+        'Ms. III 27O'           -> 'MS-MOSSERI-III-00027-O'
+        'Ms. III 145.3C'        -> 'MS-MOSSERI-III-00145-00003-C'
+        'Ms. IIIa 15'           -> 'MS-MOSSERI-IIIA-00015'
+        'T-S 12.123'            -> None  (not Mosseri)
+        'Ms. L 241'             -> None  (2nd-series, not Roman numeral)
+    """
+    if not shelfmark:
+        return None
+
+    m = _MOSSERI_CUDL_RE.search(shelfmark)
+    if not m:
+        return None
+
+    series = m.group(1).upper()
+    if series not in _MOSSERI_CUDL_SERIES:
+        return None
+
+    number = m.group(2).zfill(5)
+
+    parts = [f"MS-MOSSERI-{series}-{number}"]
+
+    sub = m.group(3)
+    if sub:
+        parts.append(sub.zfill(5))
+
+    letter = m.group(4)
+    if letter:
+        parts.append(letter.upper())
+
+    return "-".join(parts)
+
+
 def encode_word_shmidman(word: str, freq_map=None) -> str:
     """Encode a single word by selecting its two rarest Hebrew characters."""
     if freq_map is None:
