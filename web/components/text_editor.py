@@ -19,6 +19,7 @@ from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction
 from typing import Optional, Callable
 from datetime import datetime
+import asyncio
 import json
 
 
@@ -450,8 +451,15 @@ def create_edit_text_dialog(
                         save_local_edit(document_id, page_number, text, original_text, notes)
                         ui.notify(tr('Auto-saved'), type='info', position='bottom-right', timeout=1500)
 
-            # Start auto-save timer - runs every AUTO_SAVE_INTERVAL seconds
-            ui.timer(AUTO_SAVE_INTERVAL, do_auto_save)
+            # Start auto-save loop (asyncio to avoid parent_slot error)
+            async def _auto_save_loop():
+                while True:
+                    await asyncio.sleep(AUTO_SAVE_INTERVAL)
+                    try:
+                        do_auto_save()
+                    except Exception:
+                        break
+            asyncio.ensure_future(_auto_save_loop())
 
         # ============================================
         # Keyboard shortcuts dialog

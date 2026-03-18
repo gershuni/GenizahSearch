@@ -752,7 +752,13 @@ def create_joins_dialog(
                 ui.navigate.to(f'/browse?shelfmark={quote(target_shelfmark, safe="")}')
 
         # Load content
-        ui.timer(0.1, load_content, once=True)
+        async def _deferred_load():
+            await asyncio.sleep(0.1)
+            try:
+                await load_content()
+            except Exception:
+                pass
+        asyncio.ensure_future(_deferred_load())
 
     dialog.open()
     return dialog
@@ -1059,5 +1065,11 @@ def create_joins_indicator(
                 ui.icon('link_off', size='sm').classes('text-gray-400')
                 ui.tooltip(tr('No joins'))
 
-    ui.timer(0.1, load_and_display, once=True)
+    async def _deferred_load_display():
+        await asyncio.sleep(0.1)
+        try:
+            await load_and_display()
+        except Exception:
+            pass
+    asyncio.ensure_future(_deferred_load_display())
     return container

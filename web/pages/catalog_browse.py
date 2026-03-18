@@ -19,6 +19,7 @@ from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
 from shared.fjms_service import get_fjms_service
 
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1283,4 +1284,10 @@ def create_catalog_browse_page(
         await fetch_works()
         await refresh_results()
 
-    ui.timer(0.1, initial_load, once=True)
+    async def _deferred_initial_load():
+        await asyncio.sleep(0.1)
+        try:
+            await initial_load()
+        except Exception:
+            pass
+    asyncio.ensure_future(_deferred_initial_load())

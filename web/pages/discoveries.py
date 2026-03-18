@@ -260,7 +260,13 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
 
                         ui.button(tr('Open in Puzzle'), icon='extension', on_click=do_fork).props('outlined dense color=cyan')
 
-        ui.timer(0.1, load_detail, once=True)
+        async def _deferred_load_detail():
+            await asyncio.sleep(0.1)
+            try:
+                await load_detail()
+            except Exception:
+                pass
+        asyncio.ensure_future(_deferred_load_detail())
     dlg.open()
 
 
@@ -433,7 +439,13 @@ def create_discoveries_page():
             with feed_container:
                 _render_feed_result(feed_result, on_refresh=refresh_feed)
 
-        ui.timer(0.1, initial_load, once=True)
+        async def _deferred_initial_load():
+            await asyncio.sleep(0.1)
+            try:
+                await initial_load()
+            except Exception:
+                pass
+        asyncio.ensure_future(_deferred_initial_load())
 
 
 def _render_stat_cards(stats: dict):
@@ -1256,7 +1268,13 @@ def create_feed_item(item: dict, on_refresh=None):
                                         ui.label(tr('Login to reply')).classes('text-xs').style('color: var(--text-tertiary);')
 
                             # Load responses when expansion opens
-                            ui.timer(0.1, do_load_responses, once=True)
+                            async def _deferred_responses():
+                                await asyncio.sleep(0.1)
+                                try:
+                                    await do_load_responses()
+                                except Exception:
+                                    pass
+                            asyncio.ensure_future(_deferred_responses())
 
                 # Footer - collapsed view info
                 with ui.row().classes('w-full items-center justify-between mt-2'):

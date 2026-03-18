@@ -10,6 +10,7 @@ with an intuitive, accessible interface.
 Run with: python -m web.main (from project root)
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -284,16 +285,23 @@ def create_layout():
                         else:
                             # Elements deleted, deactivate timer
                             if connection_state['timer']:
-                                connection_state['timer'].deactivate()
+                                connection_state['timer'].cancel()
                     except Exception:
-                        # If update itself fails, deactivate timer to prevent further errors
+                        # If update itself fails, cancel task to prevent further errors
                         if connection_state['timer']:
-                            connection_state['timer'].deactivate()
+                            connection_state['timer'].cancel()
 
                 # Run heartbeat every 10 seconds to monitor connection health
-                # First check after 2 seconds, then continuous
-                ui.timer(2.0, update_status, once=True)
-                connection_state['timer'] = ui.timer(10.0, update_status)
+                # Use asyncio to avoid parent_slot RuntimeError on navigation
+                async def _connection_heartbeat_loop():
+                    await asyncio.sleep(2.0)
+                    while True:
+                        try:
+                            await update_status()
+                        except Exception:
+                            break
+                        await asyncio.sleep(10.0)
+                connection_state['timer'] = asyncio.ensure_future(_connection_heartbeat_loop())
 
             # Auth Buttons (Login/Register or User Menu)
             with ui.row().classes('auth-buttons'):
@@ -353,8 +361,14 @@ def create_layout():
         except Exception:
             pass  # Silently ignore if JavaScript fails
 
-    # Use a short timer to run after page is fully loaded
-    ui.timer(0.5, close_drawer_on_mobile, once=True)
+    # Run after page is fully loaded (asyncio to avoid parent_slot error)
+    async def _deferred_close_drawer():
+        await asyncio.sleep(0.5)
+        try:
+            await close_drawer_on_mobile()
+        except Exception:
+            pass
+    asyncio.ensure_future(_deferred_close_drawer())
 
     # Content Area
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')

@@ -9,6 +9,8 @@ A professional research dashboard providing:
 - Quick search capabilities
 """
 
+import asyncio
+
 from nicegui import ui, app
 from web.state import state
 from web.translations import tr, is_rtl
@@ -60,7 +62,13 @@ def create_page():
                                 if state.is_ready():
                                     val_label.text = str(value_fn())
 
-                            ui.timer(0.1, refresh, once=True)
+                            async def _deferred_refresh():
+                                await asyncio.sleep(0.1)
+                                try:
+                                    refresh()
+                                except Exception:
+                                    pass
+                            asyncio.ensure_future(_deferred_refresh())
 
                     def get_doc_count():
                         if state.searcher and state.searcher.searcher:
@@ -331,7 +339,13 @@ def create_page():
                         with ui.column().classes('w-full items-center py-8'):
                             ui.spinner(size='lg')
 
-            ui.timer(0.3, load_recent, once=True)
+            async def _deferred_load_recent():
+                await asyncio.sleep(0.3)
+                try:
+                    await load_recent()
+                except Exception:
+                    pass
+            asyncio.ensure_future(_deferred_load_recent())
 
         # === System Status Section ===
         with ui.expansion(tr('System Status'), icon='info').classes('w-full mt-4'):
@@ -347,7 +361,13 @@ def create_page():
                             if state.is_ready():
                                 val.text = str(value_fn())
 
-                        ui.timer(0.5, refresh, once=True)
+                        async def _deferred_status_refresh():
+                            await asyncio.sleep(0.5)
+                            try:
+                                refresh()
+                            except Exception:
+                                pass
+                        asyncio.ensure_future(_deferred_status_refresh())
 
                 status_item(
                     tr('Indexed Pages'),

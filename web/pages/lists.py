@@ -597,7 +597,13 @@ def create_lists_page():
                                         btn_container.clear()
                                         with container:
                                             ui.spinner(size='sm').classes('mx-auto')
-                                        ui.timer(0.1, lambda: create_snippet_ui(container, sid, fid, expanded), once=True)
+                                        async def _deferred_snippet(c=container, s=sid, f=fid, e=expanded):
+                                            await asyncio.sleep(0.1)
+                                            try:
+                                                create_snippet_ui(c, s, f, e)
+                                            except Exception:
+                                                pass
+                                        asyncio.ensure_future(_deferred_snippet())
                                     return handler
 
                                 ui.button(

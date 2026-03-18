@@ -5,6 +5,8 @@ My Edits & Comments Page - Dicta Genizah Search
 User corrections and comments system: view, edit, and manage your contributions.
 """
 
+import asyncio
+
 from nicegui import ui, app
 from web.translations import tr
 from web.auth_state import GlobalAuthState, create_login_dialog, do_logout
@@ -175,7 +177,13 @@ async def create_corrections_page():
                             create_edit_card(corr, delete_correction)
 
             # Load data after brief delay to show spinner
-            ui.timer(0.1, load_edits, once=True)
+            async def _deferred_load_edits():
+                await asyncio.sleep(0.1)
+                try:
+                    await load_edits()
+                except Exception:
+                    pass
+            asyncio.ensure_future(_deferred_load_edits())
 
         def create_edit_card(corr: dict, delete_callback):
             """Create a card for a single edit/correction."""
@@ -412,7 +420,13 @@ async def create_corrections_page():
                             create_comment_card(comment)
 
             # Load data after brief delay to show spinner
-            ui.timer(0.1, load_comments, once=True)
+            async def _deferred_load_comments():
+                await asyncio.sleep(0.1)
+                try:
+                    await load_comments()
+                except Exception:
+                    pass
+            asyncio.ensure_future(_deferred_load_comments())
 
         def create_comment_card(comment: dict):
             """Create a card for a single comment."""
