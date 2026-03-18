@@ -507,6 +507,42 @@ class NliCrossrefService:
             return f"https://luna.manchester.ac.uk/luna/servlet/iiif/m/{luna_id}/manifest"
         return None
 
+    def get_manchester_canvases(self, sys_id: str) -> list[dict]:
+        """
+        Build canvas entries for ALL Manchester crossref images (each has its own luna_id).
+
+        Instead of fetching a single IIIF manifest (which only contains 1 canvas per luna_id),
+        this resolves each crossref image directly to its IIIF image service URL.
+
+        Args:
+            sys_id: The Alma/system ID for the manuscript.
+
+        Returns:
+            List of canvas dicts: {'label': str, 'url': str, 'folio_num': int|None}
+            Only includes images whose luna_id was found. Preserves ImageName sort order.
+        """
+        images = self.get_images(sys_id)
+        if not images:
+            return []
+        canvases = []
+        for img in images:
+            img_source = (img.get('image_source_name', '') or '').lower()
+            if not img_source:
+                continue
+            luna_id = self.get_manchester_luna_id(img_source)
+            if not luna_id:
+                continue
+            label = parse_folio_label(img.get('image_name', ''))
+            url = f"https://luna.manchester.ac.uk/luna/servlet/iiif/{luna_id}"
+            # Extract leading integer from label for folio_num
+            folio_num = None
+            if label:
+                m = re.match(r'(\d+)', label)
+                if m:
+                    folio_num = int(m.group(1))
+            canvases.append({'label': label, 'url': url, 'folio_num': folio_num})
+        return canvases
+
     # ── JTS/Princeton DPUL (Phase 34: IMG-05) ────────────────────────
 
     def get_jts_manifest_url(self, shelfmark: str) -> Optional[str]:
