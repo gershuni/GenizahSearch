@@ -61,7 +61,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.selected_indices = set()  # For bulk operations
             self.is_panel_collapsed = False  # For collapsible search panel
             self.last_scroll_top = 0  # For scroll-based auto-collapse
-            self.update_timer = None  # Track timer to prevent duplicates
+            self.update_timer = None  # Track progress update asyncio Task to prevent duplicates
             self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions
             self.displayed_results = []  # Currently rendered subset (may be filtered)
             self.builder_negated_words: list = []  # Words negated via Query Builder
@@ -97,6 +97,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.search_generation: int = 0  # Monotonic counter to discard stale background enrichment
 
     search_state = SearchUIState()
+
+    # Helper: deferred async callback without ui.timer (avoids parent_slot RuntimeError on navigation)
+    async def _after_delay(delay, coro_func, *args):
+        """Schedule an async callback after a delay, without creating a NiceGUI timer element."""
+        await asyncio.sleep(delay)
+        try:
+            await coro_func(*args)
+        except Exception:
+            pass  # Silently ignore if page was navigated away
 
     # Restore domain exclusions from storage
     _de = app.storage.user.get('domain_exclusions')
@@ -612,7 +621,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 opts[en_tag] = display
                         tag_select.options = opts
                         tag_select.update()
-                    ui.timer(0.1, load_pgp_tags, once=True)
+                    asyncio.ensure_future(_after_delay(0.1, load_pgp_tags))
 
                     # Mode Selector - includes variant levels when not using slider
                     with ui.column().classes('gap-1'):
@@ -1719,7 +1728,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             pass  # JS still executes, timeout is just about awaiting response
 
     # Set up scroll handlers after a short delay
-    ui.timer(1.0, setup_scroll_collapse, once=True)
+    asyncio.ensure_future(_after_delay(1.0, setup_scroll_collapse))
 
     # === Helper Functions ===
 
@@ -2047,14 +2056,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.status = tr('Cancelling...')
 
     def update_progress_ui():
+        """Update progress bar, elapsed time, and button states.
+
+        Returns True to keep the async loop running, False to stop it
+        (e.g. when the client/elements have been deleted due to navigation).
+        """
         try:
             # Check if client still exists
             _ = progress_bar.client
         except (RuntimeError, Exception):
-            # Client deleted, deactivate the timer
-            if search_state.update_timer:
-                search_state.update_timer.deactivate()
-            return
+            # Client deleted — stop the loop
+            return False
 
         try:
             if search_state.is_running:
@@ -2089,11 +2101,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     progress_bar.classes(add='opacity-0')
         except Exception:
             pass  # Client may have been deleted
+        return True
 
-    # Cancel any existing timer first to prevent duplicates
+    # Use asyncio loop for progress updates instead of ui.timer to avoid
+    # "parent slot of the element has been deleted" RuntimeError on navigation
     if search_state.update_timer:
-        search_state.update_timer.deactivate()
-    search_state.update_timer = ui.timer(0.5, update_progress_ui)
+        search_state.update_timer.cancel()
+
+    async def _progress_update_loop():
+        while True:
+            if not update_progress_ui():
+                break
+            await asyncio.sleep(0.5)
+
+    search_state.update_timer = asyncio.ensure_future(_progress_update_loop())
 
     def open_query_builder():
         """Open the tabular query builder dialog for composing Responsa queries visually."""
@@ -4265,7 +4286,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 render_content(result)
 
-            ui.timer(0, fetch_and_render, once=True)
+            asyncio.ensure_future(fetch_and_render())
 
         async def load_page(direction: int = 0, p_num: int = None):
             """Load a specific page within the current manuscript."""
@@ -4570,7 +4591,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             if total_pages > 1:
                                 prev_pg_btn = ui.button(
                                     icon='chevron_right' if is_rtl() else 'chevron_left',
-                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=-1), once=True)
+                                    on_click=lambda: asyncio.ensure_future(load_page(direction=-1))
                                 ).props('flat round size=sm').tooltip(tr('Previous Page'))
                                 prev_pg_btn.set_enabled(current_p_num > 1)
 
@@ -4578,7 +4599,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                                 next_pg_btn = ui.button(
                                     icon='chevron_left' if is_rtl() else 'chevron_right',
-                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=1), once=True)
+                                    on_click=lambda: asyncio.ensure_future(load_page(direction=1))
                                 ).props('flat round size=sm').tooltip(tr('Next Page'))
                                 next_pg_btn.set_enabled(current_p_num < total_pages)
                             else:
@@ -5138,7 +5159,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 ui.separator().props('vertical').classes('h-4 mx-1')
                                                 prev_page_btn = ui.button(
                                                     icon='chevron_right' if is_rtl() else 'chevron_left',
-                                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=-1), once=True)
+                                                    on_click=lambda: asyncio.ensure_future(load_page(direction=-1))
                                                 ).props('flat round size=xs').tooltip(tr('Previous Page'))
                                                 prev_page_btn.set_enabled(current_p_num > 1)
 
@@ -5149,14 +5170,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                     try:
                                                         p = int(page_input.value) if page_input.value else 1
                                                         p = max(1, min(total_pages, p))
-                                                        ui.timer(0, lambda: load_page(p_num=p), once=True)
+                                                        asyncio.ensure_future(load_page(p_num=p))
                                                     except (ValueError, TypeError):
                                                         pass
                                                 page_input.on('keydown.enter', lambda: go_to_page())
 
                                                 next_page_btn = ui.button(
                                                     icon='chevron_left' if is_rtl() else 'chevron_right',
-                                                    on_click=lambda: ui.timer(0, lambda: load_page(direction=1), once=True)
+                                                    on_click=lambda: asyncio.ensure_future(load_page(direction=1))
                                                 ).props('flat round size=xs').tooltip(tr('Next Page'))
                                                 next_page_btn.set_enabled(current_p_num < total_pages)
 
@@ -5747,11 +5768,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         truncated = (desc[:150] + '...') if len(desc) > 150 else desc
                                         ui.label(truncated).classes('text-sm').style('color: var(--text-secondary); line-height: 1.4; font-size: 0.75rem;')
 
-        ui.timer(0.1, load_tag_results, once=True)
+        asyncio.ensure_future(_after_delay(0.1, load_tag_results))
 
     # Initialize with restored results or initial query
     elif initial_query:
-        ui.timer(0.5, execute_search, once=True)
+        asyncio.ensure_future(_after_delay(0.5, execute_search))
     elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
         render_results(search_state.results, page=0)
@@ -5772,7 +5793,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         work_select.update()
         _update_chip_bar()
 
-    ui.timer(0.1, _deferred_filter_init, once=True)
+    asyncio.ensure_future(_after_delay(0.1, _deferred_filter_init))
 
     async def _deferred_transcription_restore():
         """Restore transcription indicators for saved results asynchronously."""
@@ -5788,4 +5809,4 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 )
                 render_results(search_state.results, page=search_state.current_page)
 
-    ui.timer(0.2, _deferred_transcription_restore, once=True)
+    asyncio.ensure_future(_after_delay(0.2, _deferred_transcription_restore))
