@@ -53,9 +53,11 @@ Desktop App (PyQt6) ────────────┘
 
 ### Browser Extension (GenizahSearch Image Helper)
 - `extension/manifest.json` - Chrome MV3 manifest with NLI host permissions
+- `extension/manifest.firefox.json` - Firefox MV3 manifest (gecko settings, background.scripts)
 - `extension/background.js` - Service worker fetching NLI images as binary
 - `extension/content_script.js` - Page↔background bridge + extension detection
 - `extension/icons/` - Extension icons (16/48/128px)
+- `extension/build.py` - Builds Chrome and Firefox ZIP packages into extension/dist/
 
 ### Desktop
 - `supabase_corrections_client.py` - Desktop Supabase client
@@ -231,7 +233,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
-- March 2026: v7.0.1 Web Puzzle Browser Extension -- GenizahSearch Image Helper Chrome extension for NLI image acquisition, unified _loadImageWithFallbacks() fallback chain (server cache → extension → localhost helper → direct NLI), HMAC upload tokens, server derivative cache with processing version, extension install banner, privacy policy page, nginx /api/ proxy fix
+- March 2026: v7.0.1 Web Puzzle Browser Extension -- GenizahSearch Image Helper Chrome/Firefox extension for NLI image acquisition, unified _loadImageWithFallbacks() fallback chain (server cache → extension → localhost helper → direct NLI), HMAC upload tokens, server derivative cache with processing version, extension install banner, privacy policy page, nginx /api/ proxy fix, Firefox AMO submission
 - March 2026: v7.0.0 Fragment Puzzle & Community Publishing -- visual canvas for arranging fragments (background removal, zoom/rotate/crop, folio nav, layer ordering), save/load join documents to joins.db, composite PNG export with metadata banner, recto/verso support, community publishing (publish/unpublish/fork/browse), Discoveries Center integration, All/My Puzzles tabs, fragment selector combobox+browse, clickable shelfmark badges, admin soft-delete, auto-unpublish on delete, 90+ Hebrew translations, bilingual help sections, Windows index rebuild fix (both apps)
 - March 2026: v6.5.3 Image viewer copy & save -- right-click context menu on manuscript images with Copy Image and Save Image As (desktop)
 - March 2026: v6.5.2 UI polish -- desktop ResultDialog icon+text compact buttons, web language toggle moved to header

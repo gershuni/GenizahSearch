@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-18 (Manchester recto/verso fix; browser extension for web puzzle; HMAC token security fix; staged rollout on production)
+> **Last Updated:** 2026-03-18 (Firefox AMO submission; Manchester recto/verso fix; browser extension for web puzzle; HMAC token security fix; staged rollout on production)
 > **Status:** Active working document
 
 ---

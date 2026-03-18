@@ -7,7 +7,7 @@ All notable changes to Genizah Search Pro will be documented in this file.
 ## [7.0.1] - Web Puzzle Browser Extension - 2026-03-18
 
 ### New Features
-- **GenizahSearch Image Helper extension**: Chrome/Firefox extension fetches NLI manuscript images via user's browser, bypassing datacenter IP blocks. Submitted to Chrome Web Store
+- **GenizahSearch Image Helper extension**: Chrome/Firefox extension fetches NLI manuscript images via user's browser, bypassing datacenter IP blocks. Submitted to Chrome Web Store and Firefox AMO
 - **Server derivative cache**: Processed images cached on server disk; once cached, available to all users without extension
 - **Unified image loader**: Single `_loadImageWithFallbacks()` function replaces 4 separate fallback chains (add/reload/folio/restore)
 - **HMAC upload tokens**: Secure cache writes — server issues signed tokens on cache miss, uploads require valid token

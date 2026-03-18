@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "GenizahSearch Image Helper",
+  "version": "1.0.0",
+  "description": "Fetches manuscript images for the GenizahSearch Fragment Puzzle, enabling background removal and image processing.",
+  "homepage_url": "https://genizahsearch.com",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "host_permissions": [
+    "https://iiif.nli.org.il/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://genizahsearch.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content_script.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "image-helper@genizahsearch.com",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  }
+}

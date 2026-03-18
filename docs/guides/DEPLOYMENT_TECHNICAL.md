@@ -236,38 +236,45 @@ Server /api/puzzle_process ──► background removal ──► disk cache
 | File | Purpose |
 |------|---------|
 | `extension/manifest.json` | Chrome MV3 manifest, NLI host permissions |
+| `extension/manifest.firefox.json` | Firefox MV3 manifest (gecko settings, `background.scripts`) |
 | `extension/background.js` | Service worker, fetches NLI images as binary |
 | `extension/content_script.js` | Page↔background bridge, extension detection |
 | `extension/icons/` | Store icons (16/48/128px) |
 | `extension/store/` | Chrome Web Store listing assets |
+| `extension/build.py` | Builds Chrome and Firefox ZIP packages into `extension/dist/` |
 
-### Chrome Web Store
+### Store Listings
 
-- **Status**: Submitted 2026-03-18, pending review
-- **Store URL**: (pending approval)
+| Store | Status | URL |
+|-------|--------|-----|
+| Chrome Web Store | Submitted 2026-03-18, pending review | (pending approval) |
+| Firefox AMO | Submitted 2026-03-18, pending review | (pending approval) |
+
 - **Privacy policy**: `https://genizahsearch.com/privacy-extension`
-- **Update process**: Bump version in `extension/manifest.json`, rebuild ZIP, upload to Chrome Developer Dashboard
+- **Update process**: Bump version in both manifests, run `python extension/build.py`, upload ZIPs to respective developer dashboards
 
-### Building the Extension ZIP
+### Building the Extension ZIPs
 
 ```bash
-python -c "
-import zipfile, os
-with zipfile.ZipFile('genizah-extension.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
-    for f in ['manifest.json', 'background.js', 'content_script.js',
-              'icons/icon16.png', 'icons/icon48.png', 'icons/icon128.png']:
-        zf.write(os.path.join('extension', f), f)
-"
+python extension/build.py
+# Outputs:
+#   extension/dist/genizah-extension-chrome-v{version}.zip
+#   extension/dist/genizah-extension-firefox-v{version}.zip
 ```
 
 ### Development Testing
 
-Load the extension unpacked for local testing:
+**Chrome:**
 1. Chrome → `chrome://extensions` → Developer mode → Load unpacked
 2. Select the `extension/` directory
 3. Set `WEB_PUZZLE_ENABLED=true` in `.env`
 4. Start the web app: `python -m web.main`
 5. Visit `localhost:8081/puzzle` — green "Extension active" indicator should appear
+
+**Firefox:**
+1. Firefox → `about:debugging#/runtime/this-firefox` → Load Temporary Add-on
+2. Select `extension/manifest.firefox.json`
+3. Same steps 3-5 as Chrome above
 
 ### Security
 

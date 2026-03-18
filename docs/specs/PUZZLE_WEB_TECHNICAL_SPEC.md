@@ -1,7 +1,7 @@
 # Web Puzzle Technical Specification
 
-> Status: active — browser extension implemented, Chrome Web Store submission pending
-> Last updated: 2026-03-18 (extension solution implemented)
+> Status: active — browser extension implemented, submitted to Chrome Web Store and Firefox AMO
+> Last updated: 2026-03-18 (extension solution implemented, Firefox AMO submission added)
 > Audience: AI agents and developers working on the web puzzle system
 
 ---
@@ -668,7 +668,7 @@ Assessment:
 
 As of 2026-03-18, a **browser extension** approach was implemented and deployed:
 
-1. **GenizahSearch Image Helper** Chrome extension fetches NLI images via user's own IP
+1. **GenizahSearch Image Helper** Chrome/Firefox extension fetches NLI images via user's own IP
 2. Server processes images (bg removal) and caches to disk (~150GB available)
 3. Cached images serve all future users instantly without the extension
 4. HMAC upload tokens prevent cache poisoning
