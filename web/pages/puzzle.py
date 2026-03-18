@@ -13,7 +13,7 @@ import logging
 import json
 
 from nicegui import ui, app, run
-from web.translations import tr
+from web.translations import tr, get_language
 from web.state import state
 
 logger = logging.getLogger(__name__)
@@ -272,10 +272,7 @@ window.puzzleCanvas = {
     },
 
     _hasExtension: function() {
-        if (this._extensionDetected === null) {
-            this._extensionDetected = !!document.querySelector('meta[name="genizah-extension"]');
-        }
-        return this._extensionDetected;
+        return !!document.querySelector('meta[name="genizah-extension"]');
     },
 
     _fetchViaExtension: function(nliUrl) {
@@ -402,19 +399,33 @@ window.puzzleCanvas = {
     },
 
     _updateExtensionBanner: function() {
-        var banner = document.getElementById('puzzleExtBanner');
-        var indicator = document.getElementById('puzzleExtIndicator');
-        if (!banner || !indicator) return;
+        var container = document.getElementById('extBannerContainer');
+        if (!container) return;
+        container.innerHTML = '';
         if (this._hasExtension()) {
-            banner.style.display = 'none';
-            indicator.style.display = 'inline-flex';
-        } else {
-            indicator.style.display = 'none';
-            if (localStorage.getItem('puzzleBannerDismissed') === '1') {
-                banner.style.display = 'none';
-            } else {
-                banner.style.display = 'flex';
-            }
+            var ind = document.createElement('div');
+            ind.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:2px 8px; font-size:11px; color:#2e7d32;';
+            var dot = document.createElement('span');
+            dot.style.cssText = 'width:8px; height:8px; border-radius:50%; background:#4caf50; display:inline-block;';
+            ind.appendChild(dot);
+            ind.appendChild(document.createTextNode(this._bannerTexts ? this._bannerTexts.indicator : 'Extension active'));
+            container.appendChild(ind);
+        } else if (localStorage.getItem('puzzleBannerDismissed') !== '1') {
+            var div = document.createElement('div');
+            div.style.cssText = 'display:flex; align-items:center; gap:8px; padding:8px 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:4px; font-size:13px; color:#664d03;';
+            var span = document.createElement('span');
+            span.style.flex = '1';
+            span.textContent = this._bannerTexts ? this._bannerTexts.banner : 'For the best puzzle experience, install the GenizahSearch Image Helper extension.';
+            var btn = document.createElement('button');
+            btn.style.cssText = 'background:none; border:none; cursor:pointer; font-size:18px; color:#664d03; padding:0 4px;';
+            btn.innerHTML = '&#x2715;';
+            btn.addEventListener('click', function() {
+                localStorage.setItem('puzzleBannerDismissed', '1');
+                div.remove();
+            });
+            div.appendChild(span);
+            div.appendChild(btn);
+            container.appendChild(div);
         }
     },
 
@@ -3114,23 +3125,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             threshold_slider.on('change', lambda: on_threshold_change())
 
         # ── Extension banner + indicator ──
-        is_he = state.language == 'he'
-        banner_text = 'לחוויית פאזל מיטבית, התקינו את תוסף GenizahSearch Image Helper.' if is_he else 'For the best puzzle experience, install the GenizahSearch Image Helper extension.'
+        # Extension banner/indicator — injected via JS into main DOM (not shadow DOM)
+        is_he = get_language() == 'he'
+        banner_text = 'לחוויית פאזל מיטבית, ובמיוחד להסרת רקע, התקינו את תוסף GenizahSearch Image Helper.' if is_he else 'For the best puzzle experience, especially the crucial background removal, install the GenizahSearch Image Helper extension.'
         indicator_text = 'תוסף פעיל' if is_he else 'Extension active'
-        banner_html = f'''
-        <div id="puzzleExtBanner" style="display:none; align-items:center; gap:8px; padding:8px 16px;
-             background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:4px; font-size:13px; color:#664d03;">
-            <span style="flex:1;">{banner_text}</span>
-            <button onclick="localStorage.setItem('puzzleBannerDismissed','1'); this.parentElement.style.display='none';"
-                    style="background:none; border:none; cursor:pointer; font-size:18px; color:#664d03; padding:0 4px;">&#x2715;</button>
-        </div>
-        <div id="puzzleExtIndicator" style="display:none; align-items:center; gap:4px; padding:2px 8px;
-             font-size:11px; color:#2e7d32;">
-            <span style="width:8px; height:8px; border-radius:50%; background:#4caf50; display:inline-block;"></span>
-            {indicator_text}
-        </div>
-        '''
-        ui.html(banner_html)
+
+        # ── Extension banner container (empty div, populated by JS) ──
+        ext_banner_container = ui.element('div').props('id=extBannerContainer')
 
         # ── Canvas area ──
         with ui.element('div').classes('puzzle-canvas-wrap') as canvas_wrap:
@@ -3348,6 +3349,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             (function tryInit(attempts) {
                 if (typeof fabric !== "undefined") {
                     console.log("Fabric.js loaded:", fabric.version);
+                    window.puzzleCanvas._bannerTexts = {banner: "''' + banner_text.replace('"', '\\"') + '''", indicator: "''' + indicator_text.replace('"', '\\"') + '''"};
                     window.puzzleCanvas.init("puzzleCanvas");
                     if (window.puzzleCanvas.canvas) {
                         console.log("Canvas size:", window.puzzleCanvas.canvas.getWidth(), "x", window.puzzleCanvas.canvas.getHeight());

@@ -10,8 +10,8 @@
     {
       "matches": [
         "*://genizahsearch.com/*",
-        "*://localhost:*",
-        "*://127.0.0.1:*"
+        "http://localhost/*",
+        "http://127.0.0.1/*"
       ],
       "js": ["content_script.js"],
       "run_at": "document_start"

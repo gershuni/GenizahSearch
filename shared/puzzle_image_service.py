@@ -74,13 +74,20 @@ class PuzzleImageService:
                        threshold: float = DEFAULT_THRESHOLD,
                        processed: bool = True,
                        is_cul: bool = False) -> Path:
-        """Deterministic cache path for a specific (fl_id, size, threshold) combination."""
+        """Deterministic cache path for a specific (fl_id, size, threshold) combination.
+        Falls back to legacy (unversioned) path if it exists, for backward compat."""
         safe_id = _safe_filename(fl_id)
         if processed:
-            # Include threshold and processing version in filename
-            # (rounded to 1 decimal to avoid float noise)
             suffix = '_cul' if is_cul else ''
-            return self._cache_dir / f"{safe_id}_{size}_{threshold:.1f}{suffix}_{PROCESSING_VERSION}.png"
+            versioned = self._cache_dir / f"{safe_id}_{size}_{threshold:.1f}{suffix}_{PROCESSING_VERSION}.png"
+            if versioned.exists():
+                return versioned
+            # Fall back to legacy path (no version suffix) if it exists
+            legacy = self._cache_dir / f"{safe_id}_{size}_{threshold:.1f}{suffix}.png"
+            if legacy.exists():
+                return legacy
+            # New files use versioned path
+            return versioned
         else:
             return self._cache_dir / f"{safe_id}_{size}_original.jpg"
 
