@@ -958,11 +958,12 @@ class PuzzleMetaLoaderThread(QThread):
             external_provider = (data or {}).get('external_provider', '')
 
             # Manchester external_provider: NLI FL IDs are catalog stubs (503) — use images_ext.
-            # Cambridge external_provider: NLI FL IDs are real CUL images — use NLI.
+            # Cambridge external_provider for CUL T-S: NLI FL IDs are real images — use NLI.
+            # Cambridge external_provider for Mosseri/etc.: NLI FL IDs are stubs — use images_ext.
             # Oxford: enrich_metadata populates images_ext but may leave external_provider empty.
             lib_code = self.meta_mgr.get_library_for_id(self.sys_id) or ''
             use_ext = (images_ext and external_provider
-                       and external_provider != 'cambridge')
+                       and (external_provider != 'cambridge' or lib_code != 'CUL'))
             # Oxford: use images_ext even without external_provider set
             if not use_ext and images_ext and lib_code == 'Oxford':
                 external_provider = 'oxford'

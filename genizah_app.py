@@ -3596,7 +3596,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
         from shared.puzzle_model import PuzzleFragment
         # Per-library bg removal settings:
-        # - CUL: high threshold (115) for blue scanning backgrounds
+        # - CUL + CUDL private collections (Mosseri etc.): high threshold (115) for blue mats
         # - Oxford: skip bg removal — dark ink on similar-colored parchment
         # - Others: default threshold (30)
         threshold = 30.0
@@ -3604,7 +3604,7 @@ class PuzzleCanvasWindow(QMainWindow):
         lib_code = ''
         if hasattr(self.app, 'meta_mgr') and self.app.meta_mgr:
             lib_code = self.app.meta_mgr.get_library_for_id(sys_id) or ''
-        if lib_code == 'CUL':
+        if lib_code == 'CUL' or external_provider == 'cambridge':
             threshold = 115.0
         elif lib_code == 'Oxford':
             skip_bg = True
@@ -3638,7 +3638,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
         # Start image loader thread
         thr = puzzle_frag.bg_removal_threshold
-        is_cul = (lib_code == 'CUL') or (shelfmark and shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
+        is_cul = (lib_code == 'CUL') or (external_provider == 'cambridge') or (shelfmark and shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
         do_processed = (thr > 0) and not skip_bg
         thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=do_processed, is_cul=is_cul,
                                          image_url=image_url)
@@ -4043,7 +4043,9 @@ class PuzzleCanvasWindow(QMainWindow):
 
     @staticmethod
     def _is_cul_fragment(pf) -> bool:
-        """Check if a PuzzleFragment is from CUL (has blue conservation mat)."""
+        """Check if a PuzzleFragment is from CUL/CUDL (has blue conservation mat)."""
+        if getattr(pf, 'external_provider', '') == 'cambridge':
+            return True
         if pf.shelfmark:
             s = pf.shelfmark.upper()
             if s.startswith(('T-S', 'OR.', 'ADD.')):
