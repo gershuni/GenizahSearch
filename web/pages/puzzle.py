@@ -1948,7 +1948,14 @@ def _resolve_folios(sys_id: str) -> list:
                                            'folio_num': img.get('folio_num')} for img in part_images]
                             external_provider = 'oxford'
 
-            if images_ext and external_provider and external_provider != 'cambridge':
+            # For Cambridge: CUL T-S records have real NLI images — skip images_ext
+            # and let them fall through to the NLI path below. But Mosseri/Gaster/etc.
+            # private collections at CUDL have NLI stubs (503) — use images_ext.
+            use_images_ext = (
+                images_ext and external_provider
+                and (external_provider != 'cambridge' or lib_code != 'CUL')
+            )
+            if use_images_ext:
                 result = []
                 for i, img in enumerate(images_ext):
                     label = img.get('label', '') or str(i + 1)
@@ -2106,10 +2113,13 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
     elif external_provider:
         # External library path — skip bg removal for Oxford (ink/parchment too similar)
         ext_processed = external_provider != 'oxford'
-        url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={threshold}&size=800&processed={'true' if ext_processed else 'false'}"
+        # Cambridge CUDL images (Mosseri etc.) have blue conservation mats like CUL T-S
+        ext_is_cul = external_provider == 'cambridge'
+        ext_threshold = 150.0 if ext_is_cul else threshold
+        url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={ext_threshold}&size=800&processed={'true' if ext_processed else 'false'}"
         meta = {
-            'fl_id': '', 'image_url': image_url, 'threshold': 30.0, 'size': 800,
-            'processed': True, 'sys_id': sys_id, 'is_cul': False,
+            'fl_id': '', 'image_url': image_url, 'threshold': ext_threshold, 'size': 800,
+            'processed': True, 'sys_id': sys_id, 'is_cul': ext_is_cul,
             'external_provider': external_provider, 'page_index': page_index
         }
     else:
@@ -3745,10 +3755,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             else:
                 # External library path
                 pg = page_index if page_index >= 0 else 0
-                url = f"/api/puzzle_ext_image?sys_id={add_sys_id}&page={pg}&provider={external_provider}&threshold={threshold}&size=800&processed=true"
+                # Cambridge CUDL images (Mosseri etc.) have blue mats like CUL T-S
+                ext_is_cul = external_provider == 'cambridge'
+                ext_threshold = 150.0 if ext_is_cul else threshold
+                url = f"/api/puzzle_ext_image?sys_id={add_sys_id}&page={pg}&provider={external_provider}&threshold={ext_threshold}&size=800&processed=true"
                 js_meta = json.dumps({
-                    'fl_id': '', 'image_url': image_url, 'threshold': 30.0, 'size': 800,
-                    'processed': True, 'sys_id': add_sys_id, 'is_cul': False,
+                    'fl_id': '', 'image_url': image_url, 'threshold': ext_threshold, 'size': 800,
+                    'processed': True, 'sys_id': add_sys_id, 'is_cul': ext_is_cul,
                     'external_provider': external_provider, 'page_index': pg
                 })
 
