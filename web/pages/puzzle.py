@@ -3454,7 +3454,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         # Saved documents list is refreshed on-demand when dialog opens
 
-    ui.timer(0.5, init_canvas, once=True)
+    async def _after_delay(delay, coro_func, *args):
+        await asyncio.sleep(delay)
+        try:
+            await coro_func(*args)
+        except Exception:
+            pass
+
+    asyncio.ensure_future(_after_delay(0.5, init_canvas))
 
     # ── Handle initial_add query parameter ──
     if initial_add:
@@ -3527,7 +3534,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 'size': 800,
             }
 
-        ui.timer(1.5, auto_add, once=True)
+        asyncio.ensure_future(_after_delay(1.5, auto_add))
 
     # ── Handle initial_doc query parameter (load saved document by ID) ──
     if initial_doc:
@@ -3537,7 +3544,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             await asyncio.sleep(1.0)
             await load_document(initial_doc)
 
-        ui.timer(1.5, auto_load_doc, once=True)
+        asyncio.ensure_future(_after_delay(1.5, auto_load_doc))
 
     # ── Periodic state save ──
     async def save_state():
@@ -3552,7 +3559,15 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         except Exception:
             pass  # Page may not be active or JS not ready
 
-    ui.timer(30, save_state)
+    async def _periodic_save_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await save_state()
+            except Exception:
+                break  # Page navigated away
+
+    asyncio.ensure_future(_periodic_save_loop())
 
 
 def _get_port():
