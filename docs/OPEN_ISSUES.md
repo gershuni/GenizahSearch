@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-17 (verified production localhost-helper fallback for web puzzle background removal and folio navigation)
+> **Last Updated:** 2026-03-18 (added puzzle web technical handoff/spec and documented that the public web puzzle remains hidden behind a feature flag)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 1 | 4 | 5 |
-| P2 Medium Bugs | 6 | 16 | 22 |
+| P2 Medium Bugs | 7 | 16 | 23 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **14** | **52** | **66** |
+| **Total** | **15** | **52** | **67** |
 
 ---
 
@@ -76,6 +76,7 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
+| **Web puzzle is still not production-ready for ordinary users; feature is hidden behind `WEB_PUZZLE_ENABLED=false`** | `web/main.py`, `web/pages/puzzle.py`, `scripts/puzzle_local_helper.py`, `shared/puzzle_image_service.py` | ❌ Open | The localhost-helper fallback was technically verified, but it does not solve the general web product problem because the website cannot launch local software on users' machines. Server-side and Cloudflare proxy fetches from NLI were both rejected, so the route/UI is now intentionally hidden behind a feature flag. A general-user image acquisition strategy is still required before public re-enable. See `docs/specs/PUZZLE_WEB_TECHNICAL_SPEC.md`. |
 | **Desktop EXE puzzle image loading fails with `No module named numpy`** | `build_app.bat`, `GenizahSearchPro.spec` | ✅ Fixed (2026-03-17) | The desktop build explicitly added `numpy` as a hidden import for puzzle background removal, but then also excluded `numpy` from the PyInstaller bundle. Running from source worked because the venv had NumPy installed; the packaged EXE failed only when puzzle image processing first imported `shared.background_removal`. Fixed by removing the contradictory `numpy` exclusion from both build entry points. |
 | **Puzzle folio navigation still fails on production after initial client-side fallback** | `web/pages/puzzle.py:717-806`, `web/pages/puzzle.py:2685-2741` | ✅ Fixed (2026-03-17) | `navigateFolio()` now shares the same localhost-helper fallback chain as initial add and reload. Production was verified live: when `/api/puzzle_image` fails due to blocked server-side IIIF fetch, the browser falls back to the user's local helper and preserves correct `fl_id`/`folio_label` updates instead of saving mismatched metadata. |
 | **Desktop rebuild index can fail with WinError 5 on Tantivy `.fast` files** | `genizah_core.py`, `genizah_app.py`, `gui_threads.py` | ✅ Fixed (2026-03-17) | Added `SearchEngine.close_index()` to release Tantivy index/searcher + gc.collect() before rebuild. Called in `run_indexing()` before `IndexerThread` starts. `reload_index()` reopens after rebuild completes. |

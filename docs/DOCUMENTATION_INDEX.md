@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-03-15
+> Last updated: 2026-03-18
 
 This directory contains all project documentation, organized by category.
 
@@ -126,6 +126,7 @@ Detailed specifications for complex features:
 |------|-------------|
 | [JOINS_TECHNICAL_SPEC.md](specs/JOINS_TECHNICAL_SPEC.md) | Fragment joins system architecture |
 | [JOINS_SIMPLIFIED_SPEC.md](specs/JOINS_SIMPLIFIED_SPEC.md) | Simplified joins for first release |
+| [PUZZLE_WEB_TECHNICAL_SPEC.md](specs/PUZZLE_WEB_TECHNICAL_SPEC.md) | Web puzzle architecture, blockers, and solution paths |
 
 > Note: Completed specs (BOUNDARY_SEARCH_SPEC.md, USER_CORRECTIONS_SPEC.md, SEARCHABLE_CORRECTIONS_SPEC.md) moved to archive.
 
