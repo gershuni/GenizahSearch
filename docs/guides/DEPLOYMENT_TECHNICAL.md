@@ -214,6 +214,84 @@ server {
 
 ---
 
+## Browser Extension (GenizahSearch Image Helper)
+
+The web puzzle requires a browser extension to fetch manuscript images from NLI, because NLI blocks requests from datacenter IPs (including AWS and Cloudflare). The extension fetches images through the user's own browser (residential/institutional IP), then sends them to the server for background removal and caching.
+
+### Architecture
+
+```
+User's Browser (extension) ──fetch──► iiif.nli.org.il
+         │                                (user's IP, accepted by NLI)
+         │ raw image bytes
+         ▼
+Server /api/puzzle_process ──► background removal ──► disk cache
+         │                                              │
+         └─── processed PNG ◄──────────────────────────┘
+                                  (future loads served from cache)
+```
+
+### Extension Files
+
+| File | Purpose |
+|------|---------|
+| `extension/manifest.json` | Chrome MV3 manifest, NLI host permissions |
+| `extension/background.js` | Service worker, fetches NLI images as binary |
+| `extension/content_script.js` | Page↔background bridge, extension detection |
+| `extension/icons/` | Store icons (16/48/128px) |
+| `extension/store/` | Chrome Web Store listing assets |
+
+### Chrome Web Store
+
+- **Status**: Submitted 2026-03-18, pending review
+- **Store URL**: (pending approval)
+- **Privacy policy**: `https://genizahsearch.com/privacy-extension`
+- **Update process**: Bump version in `extension/manifest.json`, rebuild ZIP, upload to Chrome Developer Dashboard
+
+### Building the Extension ZIP
+
+```bash
+python -c "
+import zipfile, os
+with zipfile.ZipFile('genizah-extension.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+    for f in ['manifest.json', 'background.js', 'content_script.js',
+              'icons/icon16.png', 'icons/icon48.png', 'icons/icon128.png']:
+        zf.write(os.path.join('extension', f), f)
+"
+```
+
+### Development Testing
+
+Load the extension unpacked for local testing:
+1. Chrome → `chrome://extensions` → Developer mode → Load unpacked
+2. Select the `extension/` directory
+3. Set `WEB_PUZZLE_ENABLED=true` in `.env`
+4. Start the web app: `python -m web.main`
+5. Visit `localhost:8081/puzzle` — green "Extension active" indicator should appear
+
+### Security
+
+- **HMAC upload tokens**: Server issues signed tokens on cache miss (`X-Puzzle-Upload-Token` header). Uploads to `/api/puzzle_process` and `/api/puzzle_upload_derivative` require valid tokens (5-min expiry, fl_id-bound).
+- **URL validation**: Extension only fetches from `iiif.nli.org.il`
+- **Origin validation**: Content script only responds to messages from `genizahsearch.com` and `localhost`
+- **Rate limiting**: 60 requests/min/IP on upload endpoints
+- **`PUZZLE_UPLOAD_SECRET`**: Set in `.env` for stable tokens across restarts. Auto-generated if unset (tokens invalidated on restart).
+
+### Server Cache
+
+Processed puzzle images are cached on the server disk at:
+```
+/home/ubuntu/.local/share/GenizahSearchPro/cache/puzzle/
+```
+
+Cache key format: `{fl_id}_{size}_{threshold}[_cul]_{PROCESSING_VERSION}.png`
+
+Once cached, images serve all users instantly without the extension. The cache grows from:
+- Extension users (via `/api/puzzle_process`)
+- Desktop users (future: via `/api/puzzle_upload_derivative`)
+
+---
+
 ## Service Management
 
 ### Systemd Commands

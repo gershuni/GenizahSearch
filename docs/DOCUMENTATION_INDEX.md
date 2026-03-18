@@ -12,6 +12,7 @@ This directory contains all project documentation, organized by category.
 |------------|-----------|
 | **See open bugs & issues** | [OPEN_ISSUES.md](OPEN_ISSUES.md) |
 | Deploy the website | [guides/DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md) |
+| Manage browser extension | [guides/DEPLOYMENT_TECHNICAL.md#browser-extension](guides/DEPLOYMENT_TECHNICAL.md#browser-extension-genizahsearch-image-helper) |
 | Manage the website (non-technical) | [guides/WEBSITE_ADMIN_GUIDE.md](guides/WEBSITE_ADMIN_GUIDE.md) |
 | Find a specific file | [FILE_INDEX.md](FILE_INDEX.md) |
 | Understand the code structure | [CODE_INDEX.md](CODE_INDEX.md) |
@@ -55,7 +56,8 @@ docs/
 │
 ├── specs/                    # Technical specifications
 │   ├── JOINS_TECHNICAL_SPEC.md
-│   └── JOINS_SIMPLIFIED_SPEC.md
+│   ├── JOINS_SIMPLIFIED_SPEC.md
+│   └── PUZZLE_WEB_TECHNICAL_SPEC.md  # Web puzzle architecture + browser extension
 │
 └── archive/                  # Archived/historical documents
     ├── PRE_LAUNCH_CHECKLIST.md   # v5.4 testing (archived 2026-03-13)

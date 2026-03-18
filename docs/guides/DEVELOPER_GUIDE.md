@@ -51,7 +51,8 @@ SUPABASE_ANON_KEY=your-anon-key
 
 # Optional
 GENIZAH_PORT=8081
-WEB_PUZZLE_ENABLED=false  # emergency kill switch for the web puzzle UI/routes
+WEB_PUZZLE_ENABLED=true   # enables web puzzle page (set false to hide)
+PUZZLE_UPLOAD_SECRET=xxx  # HMAC secret for puzzle upload tokens (auto-generated if unset)
 ```
 
 > **Note:** You can get Supabase credentials from the project admin, or set up your own Supabase project for development.
