@@ -850,6 +850,36 @@ def puzzle_page_route(add: str = None, doc: str = None):
         from web.pages.puzzle import create_puzzle_page
         create_puzzle_page(initial_add=add, initial_doc=doc)
 
+@ui.page('/privacy-extension')
+def privacy_extension_route():
+    """Privacy policy for the GenizahSearch Image Helper browser extension."""
+    ui.add_head_html('<title>GenizahSearch Image Helper - Privacy Policy</title>')
+    with ui.column().classes('w-full max-w-3xl mx-auto p-8'):
+        ui.label('GenizahSearch Image Helper — Privacy Policy').classes('text-2xl font-bold mb-4')
+        ui.label('Last updated: March 18, 2026').classes('text-sm text-gray-500 mb-6')
+        for title, text in [
+            ('What this extension does',
+             'The GenizahSearch Image Helper fetches manuscript fragment images from the National Library of Israel (NLI) '
+             'IIIF image service (iiif.nli.org.il) through your browser. These images are sent to genizahsearch.com for '
+             'background removal processing, enabling the Fragment Puzzle feature.'),
+            ('Data collection',
+             'This extension does NOT collect, store, or transmit any personal data. It does not track browsing history, '
+             'keystrokes, location, or any other user information.'),
+            ('What data is transmitted',
+             'Only manuscript image data fetched from iiif.nli.org.il is transmitted to genizahsearch.com for processing. '
+             'No personal information is included in these requests.'),
+            ('Third parties',
+             'No data is sold, shared, or transferred to any third party. Image data is sent only to genizahsearch.com '
+             '(operated by Dicta, the Israel Center for Text Analysis) for processing.'),
+            ('Permissions',
+             'The extension requires access to iiif.nli.org.il to fetch manuscript images, and to genizahsearch.com '
+             'to communicate with the web application. No other sites are accessed.'),
+            ('Contact',
+             'For questions about this privacy policy, contact us at genizahsearch.com.'),
+        ]:
+            ui.label(title).classes('text-lg font-semibold mt-4 mb-1')
+            ui.label(text).classes('text-sm leading-relaxed')
+
 @ui.page('/reset-hints')
 def reset_hints_route():
     """Hidden utility route to reset all feature discovery hints."""
