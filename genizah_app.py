@@ -3579,7 +3579,8 @@ class PuzzleCanvasWindow(QMainWindow):
 
     # ── Public API ──
 
-    def add_fragment(self, sys_id, shelfmark, folio_label, fl_id):
+    def add_fragment(self, sys_id, shelfmark, folio_label, fl_id,
+                     image_url='', external_provider='', page_index=-1):
         """Add a fragment to the puzzle canvas. Starts async image load."""
         item_key = (sys_id, folio_label)
 
@@ -3613,6 +3614,9 @@ class PuzzleCanvasWindow(QMainWindow):
             x=self._next_x,
             y=50.0,
             bg_removal_threshold=threshold,
+            image_url=image_url,
+            external_provider=external_provider,
+            page_index=page_index,
         )
         self._pending_fragments[item_key] = puzzle_frag
 
@@ -3626,7 +3630,8 @@ class PuzzleCanvasWindow(QMainWindow):
         # Start image loader thread
         thr = puzzle_frag.bg_removal_threshold
         is_cul = (lib_code == 'CUL') or (shelfmark and shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
-        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=(thr > 0), is_cul=is_cul)
+        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=(thr > 0), is_cul=is_cul,
+                                         image_url=image_url)
         thread.image_ready.connect(partial(self._on_image_loaded, item_key))
         thread.load_failed.connect(self._on_image_failed)
         self._loader_threads.append(thread)
@@ -3830,7 +3835,10 @@ class PuzzleCanvasWindow(QMainWindow):
             return
         self._folio_lists[sys_id] = images_nli
         first = images_nli[0]
-        self.add_fragment(sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''))
+        self.add_fragment(sys_id, shelfmark, first.get('label', '1r'), first.get('fl_id', ''),
+                          image_url=first.get('image_url', ''),
+                          external_provider=first.get('external_provider', ''),
+                          page_index=first.get('page_index', -1))
         self.statusBar().showMessage(
             tr("Added {} ({} folios)").format(shelfmark, len(images_nli)), 3000
         )
@@ -4044,10 +4052,16 @@ class PuzzleCanvasWindow(QMainWindow):
             if not folio_list or len(folio_list) < 2:
                 self.statusBar().showMessage(tr("No folio list available"), 2000)
                 continue
-            # Find current index
+            # Find current index — match by fl_id (NLI) or by page_index/label (non-NLI)
             current_idx = 0
             for i, entry in enumerate(folio_list):
-                if entry.get('fl_id') == pf.fl_id:
+                if pf.fl_id and entry.get('fl_id') == pf.fl_id:
+                    current_idx = i
+                    break
+                elif not pf.fl_id and pf.page_index >= 0 and entry.get('page_index') == pf.page_index:
+                    current_idx = i
+                    break
+                elif not pf.fl_id and entry.get('label') == pf.folio_label:
                     current_idx = i
                     break
             # Recto (odd index 0,2,4..) -> verso (1,3,5..), verso -> recto
@@ -4064,10 +4078,15 @@ class PuzzleCanvasWindow(QMainWindow):
             new_key = (pf.sys_id, new_label)
             self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
             pf.fl_id = new_entry.get('fl_id', '')
+            pf.image_url = new_entry.get('image_url', '')
+            pf.external_provider = new_entry.get('external_provider', pf.external_provider)
+            pf.page_index = new_entry.get('page_index', -1)
             pf.folio_label = new_label
             self._pending_fragments[new_key] = pf
             thr = pf.bg_removal_threshold
-            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0), is_cul=self._is_cul_fragment(pf))
+            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0),
+                                             is_cul=self._is_cul_fragment(pf),
+                                             image_url=pf.image_url)
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
@@ -4095,7 +4114,13 @@ class PuzzleCanvasWindow(QMainWindow):
                 continue
             current_idx = 0
             for i, entry in enumerate(folio_list):
-                if entry.get('fl_id') == pf.fl_id:
+                if pf.fl_id and entry.get('fl_id') == pf.fl_id:
+                    current_idx = i
+                    break
+                elif not pf.fl_id and pf.page_index >= 0 and entry.get('page_index') == pf.page_index:
+                    current_idx = i
+                    break
+                elif not pf.fl_id and entry.get('label') == pf.folio_label:
                     current_idx = i
                     break
             new_idx = current_idx + 1 if current_idx % 2 == 0 else current_idx - 1
@@ -4108,10 +4133,15 @@ class PuzzleCanvasWindow(QMainWindow):
             new_key = (pf.sys_id, new_label)
             self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
             pf.fl_id = new_entry.get('fl_id', '')
+            pf.image_url = new_entry.get('image_url', '')
+            pf.external_provider = new_entry.get('external_provider', pf.external_provider)
+            pf.page_index = new_entry.get('page_index', -1)
             pf.folio_label = new_label
             self._pending_fragments[new_key] = pf
             thr = pf.bg_removal_threshold
-            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0), is_cul=self._is_cul_fragment(pf))
+            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0),
+                                             is_cul=self._is_cul_fragment(pf),
+                                             image_url=pf.image_url)
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
@@ -4545,7 +4575,8 @@ class PuzzleCanvasWindow(QMainWindow):
                 threshold=frag.bg_removal_threshold,
                 size=800,
                 processed=frag.processed,
-                is_cul=self._is_cul_fragment(frag)
+                is_cul=self._is_cul_fragment(frag),
+                image_url=getattr(frag, 'image_url', '')
             )
             thread.image_ready.connect(partial(self._on_image_loaded, item_key))
             thread.load_failed.connect(self._on_image_failed)

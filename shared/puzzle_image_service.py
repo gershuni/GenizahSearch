@@ -94,20 +94,28 @@ class PuzzleImageService:
     def resolve_fragment_image(self, fl_id: str, size: int = 800,
                                 threshold: float = DEFAULT_THRESHOLD,
                                 processed: bool = True,
-                                is_cul: bool = False) -> Optional[bytes]:
+                                is_cul: bool = False,
+                                image_url: str = '') -> Optional[bytes]:
         """Fetch IIIF image, apply background removal, cache result.
 
         Args:
-            fl_id: NLI FL ID for the fragment image
+            fl_id: NLI FL ID for the fragment image (empty for non-NLI)
             size: Image width in pixels (default 800)
             threshold: Background removal threshold (default 30.0)
             processed: If True, apply background removal. If False, return original.
             is_cul: If True, also remove CUL blue conservation mat.
+            image_url: Direct IIIF canvas URL for non-NLI libraries. When non-empty,
+                       fetched directly instead of constructing NLI URL from fl_id.
 
         Returns:
             Image bytes (RGBA PNG if processed, JPEG if original), or None on failure.
         """
-        cache_path = self.get_cache_path(fl_id, size, threshold, processed, is_cul)
+        # Determine cache key — use fl_id for NLI, safe filename of URL for external
+        cache_id = fl_id if fl_id else _safe_filename(image_url[:120])
+        if not cache_id:
+            return None
+
+        cache_path = self.get_cache_path(cache_id, size, threshold, processed, is_cul)
 
         # Return cached if exists
         if cache_path.exists():
@@ -116,8 +124,11 @@ class PuzzleImageService:
             except (FileNotFoundError, OSError):
                 pass  # TOCTOU race or read error — treat as cache miss
 
-        # Fetch from IIIF
-        raw_bytes = self._fetch_iiif_image(fl_id, size)
+        # Fetch image
+        if image_url:
+            raw_bytes = self._fetch_direct_url(image_url, size)
+        else:
+            raw_bytes = self._fetch_iiif_image(fl_id, size)
         if raw_bytes is None:
             return None
 
@@ -126,22 +137,47 @@ class PuzzleImageService:
             try:
                 cache_path.write_bytes(raw_bytes)
             except OSError as e:
-                logger.warning(f"Failed to cache image for {fl_id}: {e}")
+                logger.warning(f"Failed to cache image for {cache_id}: {e}")
             return raw_bytes
 
         # Apply background removal
         try:
             result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
         except Exception as e:
-            logger.error(f"Background removal failed for {fl_id}: {e}")
+            logger.error(f"Background removal failed for {cache_id}: {e}")
             return raw_bytes  # fallback to original on error
 
         # Cache processed result
         try:
             cache_path.write_bytes(result_bytes)
         except OSError as e:
-            logger.warning(f"Failed to cache processed image for {fl_id}: {e}")
+            logger.warning(f"Failed to cache processed image for {cache_id}: {e}")
         return result_bytes
+
+    def _fetch_direct_url(self, image_url: str, size: int) -> Optional[bytes]:
+        """Fetch image from a direct IIIF canvas URL (non-NLI libraries).
+
+        Constructs the full IIIF Image API URL if the given URL is a canvas base URL,
+        or uses it directly if it already contains '/full/'.
+        """
+        if '/full/' in image_url:
+            url = image_url  # Already a complete image URL
+        else:
+            url = f"{image_url}/full/{size},/0/default.jpg"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 200 and len(resp.content) > 100:
+                logger.info(f"Direct IIIF fetch OK for {image_url[:80]}")
+                return resp.content
+            else:
+                logger.warning(f"Direct IIIF fetch non-200 for {image_url[:80]}: status={resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Direct IIIF fetch failed for {image_url[:80]}: {e}")
+        return None
 
     def save_derivative_to_cache(self, fl_id: str, size: int, threshold: float,
                                  is_cul: bool, png_bytes: bytes) -> bool:
@@ -246,10 +282,11 @@ def reset_puzzle_image_service():
 def resolve_fragment_image(fl_id: str, size: int = 800,
                             threshold: float = DEFAULT_THRESHOLD,
                             processed: bool = True,
-                            is_cul: bool = False) -> Optional[bytes]:
+                            is_cul: bool = False,
+                            image_url: str = '') -> Optional[bytes]:
     """Module-level convenience for resolve_fragment_image."""
     return get_puzzle_image_service().resolve_fragment_image(
-        fl_id, size, threshold, processed, is_cul
+        fl_id, size, threshold, processed, is_cul, image_url=image_url
     )
 
 

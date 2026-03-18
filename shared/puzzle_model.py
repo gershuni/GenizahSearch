@@ -34,6 +34,10 @@ class PuzzleFragment:
     crop_right: int = 0
     # Whether background removal has been applied
     processed: bool = True
+    # External library image fields (non-NLI sources: Manchester, Oxford, JTS, Cambridge)
+    image_url: str = ''          # Direct IIIF canvas URL (empty for NLI)
+    external_provider: str = ''  # 'cambridge', 'manchester', 'oxford', 'jts', or ''
+    page_index: int = -1         # 0-based page index into images_ext (-1 = use fl_id)
 
 
 @dataclass

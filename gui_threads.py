@@ -907,13 +907,14 @@ class PuzzleImageLoaderThread(QThread):
     load_failed = pyqtSignal(str, str)     # (fl_id, error_message)
 
     def __init__(self, fl_id: str, threshold: float = 30.0, size: int = 800,
-                 processed: bool = True, is_cul: bool = False):
+                 processed: bool = True, is_cul: bool = False, image_url: str = ''):
         super().__init__()
         self.fl_id = fl_id
         self.threshold = threshold
         self.size = size
         self.processed = processed
         self.is_cul = is_cul
+        self.image_url = image_url
 
     def run(self):
         try:
@@ -921,14 +922,15 @@ class PuzzleImageLoaderThread(QThread):
             result = resolve_fragment_image(
                 self.fl_id, size=self.size,
                 threshold=self.threshold, processed=self.processed,
-                is_cul=self.is_cul
+                is_cul=self.is_cul, image_url=self.image_url
             )
+            emit_id = self.fl_id or self.image_url
             if result:
-                self.image_ready.emit(self.fl_id, result)
+                self.image_ready.emit(emit_id, result)
             else:
-                self.load_failed.emit(self.fl_id, "Image not available")
+                self.load_failed.emit(emit_id, "Image not available")
         except Exception as e:
-            self.load_failed.emit(self.fl_id, str(e))
+            self.load_failed.emit(self.fl_id or self.image_url, str(e))
 
 
 class PuzzleMetaLoaderThread(QThread):
@@ -952,13 +954,29 @@ class PuzzleMetaLoaderThread(QThread):
             # enrich_metadata fetches NLI MARC + IIIF manifest, populating images_nli with fl_ids
             data = self.meta_mgr.enrich_metadata(self.sys_id)
             images_nli = data.get('images_nli', []) if data else []
-            if not images_nli:
-                # Fallback: try fetch_nli_data directly
-                nli_data = self.meta_mgr.fetch_nli_data(self.sys_id)
-                if nli_data and nli_data.get('fl_ids'):
-                    # Convert fl_ids list to images_nli format
-                    images_nli = [{'fl_id': fid, 'label': f'FL{fid}', 'url': ''} for fid in nli_data['fl_ids']]
             if images_nli:
+                self.meta_ready.emit(self.sys_id, self.shelfmark, images_nli)
+                return
+            # Fallback: external library images (Manchester, Oxford, JTS, Cambridge)
+            images_ext = data.get('images_ext', []) if data else []
+            if images_ext:
+                external_provider = (data or {}).get('external_provider', '')
+                folio_list = []
+                for i, img in enumerate(images_ext):
+                    label = img.get('label', '') or str(i + 1)
+                    folio_list.append({
+                        'fl_id': '',
+                        'label': label,
+                        'image_url': img.get('url', ''),
+                        'page_index': i,
+                        'external_provider': external_provider,
+                    })
+                self.meta_ready.emit(self.sys_id, self.shelfmark, folio_list)
+                return
+            # Last resort: NLI fetch_nli_data directly
+            nli_data = self.meta_mgr.fetch_nli_data(self.sys_id)
+            if nli_data and nli_data.get('fl_ids'):
+                images_nli = [{'fl_id': fid, 'label': f'FL{fid}', 'url': ''} for fid in nli_data['fl_ids']]
                 self.meta_ready.emit(self.sys_id, self.shelfmark, images_nli)
             else:
                 self.meta_failed.emit(self.sys_id, "No images found for this manuscript")
