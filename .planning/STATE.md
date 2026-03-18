@@ -284,7 +284,7 @@ Recent decisions affecting current work:
 | 260317-vgh | Remove dead CF Worker proxy, stabilize localhost helper as primary fallback | 2026-03-17 | 4e4d9b94 | [260317-vgh-remove-dead-cf-worker-proxy-stabilize-lo](./quick/260317-vgh-remove-dead-cf-worker-proxy-stabilize-lo/) |
 | 260318-jf1 | Fix Manchester image fetch: recto shown for both sides -> distinct multi-page canvases | 2026-03-18 | 500ff460 | [260318-jf1-fix-manchester-image-fetch-recto-shown-f](./quick/260318-jf1-fix-manchester-image-fetch-recto-shown-f/) |
 | 260318-jyz | Fix library attribution credit lines per source library | 2026-03-18 | b4486a4e | [260318-jyz-fix-library-attribution-credit-lines-per](./quick/260318-jyz-fix-library-attribution-credit-lines-per/) |
-| 260318-kk1 | Fix puzzle image loading for non-NLI libraries (Manchester, Oxford, JTS, Cambridge) | 2026-03-18 | 4e6bb2e3 | [260318-kk1-fix-puzzle-image-loading-for-non-nli-lib](./quick/260318-kk1-fix-puzzle-image-loading-for-non-nli-lib/) |
+| 260318-kk1 | Fix puzzle image loading for non-NLI libraries (Manchester, Oxford, JTS, Cambridge) | 2026-03-18 | 7bf99391 | [260318-kk1-fix-puzzle-image-loading-for-non-nli-lib](./quick/260318-kk1-fix-puzzle-image-loading-for-non-nli-lib/) |
 
 ## Session Continuity
 
