@@ -330,6 +330,33 @@ window.puzzleCanvas = {
             + '&threshold=' + threshold + '&size=' + size
             + '&processed=' + processed + '&is_cul=' + isCul;
 
+        // 0. External library images — use /api/puzzle_ext_image (fetch + BG removal + cache)
+        if (meta && meta.external_provider && meta.sys_id) {
+            var provider = meta.external_provider;
+            var pageIdx = (meta.page_index != null) ? meta.page_index : 0;
+            var extUrl = '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id)
+                + '&page=' + pageIdx + '&provider=' + encodeURIComponent(provider)
+                + '&threshold=' + threshold + '&size=' + size
+                + '&processed=' + processed;
+            try {
+                var extResp = await fetch(extUrl);
+                if (extResp.ok) {
+                    var extBlob = await extResp.blob();
+                    return { url: URL.createObjectURL(extBlob), degraded: false, fromProxy: true };
+                }
+            } catch (e) {
+                console.warn('External puzzle image fetch failed:', e);
+            }
+            // Fallback: try direct image_url without BG removal
+            if (meta.image_url) {
+                var directUrl = (meta.image_url.indexOf('/full/') !== -1)
+                    ? meta.image_url
+                    : meta.image_url + '/full/' + size + ',/0/default.jpg';
+                return { url: directUrl, degraded: true, direct: true };
+            }
+            return { url: '', degraded: true, error: true };
+        }
+
         // 1. Try server cache
         try {
             var resp = await fetch(apiUrl);
@@ -928,9 +955,19 @@ window.puzzleCanvas = {
             this.folioData[key] = { sys_id: sys_id, folios: folios, currentIndex: 0 };
             // Find current folio index based on fragment meta
             var frag = this.fragments[key];
-            if (frag && frag._fragmentMeta && frag._fragmentMeta.fl_id) {
+            if (frag && frag._fragmentMeta) {
                 var currentFlId = frag._fragmentMeta.fl_id;
-                var idx = folios.findIndex(function(f) { return f.fl_id === currentFlId; });
+                var idx = -1;
+                if (currentFlId) {
+                    idx = folios.findIndex(function(f) { return f.fl_id === currentFlId; });
+                }
+                if (idx < 0) {
+                    // Match by label for non-NLI fragments
+                    var currentLabel = frag._fragmentMeta.folio_label || key.split(',')[1] || '';
+                    if (currentLabel) {
+                        idx = folios.findIndex(function(f) { return f.label === currentLabel; });
+                    }
+                }
                 if (idx >= 0) this.folioData[key].currentIndex = idx;
             }
         } catch(e) {
@@ -981,14 +1018,20 @@ window.puzzleCanvas = {
         var processed = meta.processed !== false;
         var isCul = meta.is_cul || false;
         var folioMeta = Object.assign({}, meta, {
-            fl_id: folio.fl_id,
+            fl_id: folio.fl_id || '',
             threshold: threshold,
             size: size,
             processed: processed,
             is_cul: isCul
         });
+        // Propagate external provider fields from folio data
+        if (folio.external_provider) {
+            folioMeta.external_provider = folio.external_provider;
+            folioMeta.page_index = folio.page_index;
+            folioMeta.image_url = folio.image_url || '';
+        }
 
-        var result = await self._loadImageWithFallbacks(folio.fl_id, folioMeta, key);
+        var result = await self._loadImageWithFallbacks(folio.fl_id || '', folioMeta, key);
         return new Promise(function(resolve) {
             var htmlImg = new Image();
             htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
@@ -1805,48 +1848,70 @@ PUZZLE_STYLES = '''
 
 
 def _resolve_folios(sys_id: str) -> list:
-    """Resolve folio FL IDs from NLI IIIF manifest for a manuscript.
+    """Resolve folio list from NLI IIIF manifest, or images_ext for non-NLI libraries.
 
-    Fetches the IIIF v2.1 manifest for the given sys_id, extracts FL IDs
-    from each canvas's image service URL, and assigns recto/verso labels
-    based on page index parity (even=recto, odd=verso).
+    Tries NLI IIIF manifest first. Falls back to enrich_metadata images_ext for
+    external libraries (Manchester, Oxford, JTS, Cambridge).
 
     Args:
         sys_id: NLI system number (e.g. '990001234560205171').
 
     Returns:
-        List of dicts with 'fl_id' (str) and 'label' (str, e.g. '1r', '1v').
-        Empty list if manifest fetch fails or contains no FL IDs.
+        List of dicts with 'fl_id', 'label', and optionally 'image_url',
+        'page_index', 'external_provider' for non-NLI folios.
+        Empty list if resolution fails.
     """
     import re as _re
     import requests as _requests
+
+    # Try NLI IIIF manifest first (existing logic)
     try:
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{sys_id}-1/manifest"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         resp = _requests.get(url, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        fl_ids = []
-        if 'sequences' in data and data['sequences']:
-            for canvas in data['sequences'][0].get('canvases', []):
-                images = canvas.get('images', [])
-                if images:
-                    resource = images[0].get('resource', {})
-                    service = resource.get('service', {})
-                    service_id = service.get('@id', '')
-                    m = _re.search(r'/FL(\d+)', service_id)
-                    if m:
-                        fl_ids.append(m.group(1))
-        if not fl_ids:
-            return []
-        return [
-            {'fl_id': fid, 'label': f'{(i // 2) + 1}{"r" if i % 2 == 0 else "v"}'}
-            for i, fid in enumerate(fl_ids)
-        ]
+        if resp.status_code == 200:
+            data = resp.json()
+            fl_ids = []
+            if 'sequences' in data and data['sequences']:
+                for canvas in data['sequences'][0].get('canvases', []):
+                    images = canvas.get('images', [])
+                    if images:
+                        resource = images[0].get('resource', {})
+                        service = resource.get('service', {})
+                        service_id = service.get('@id', '')
+                        m = _re.search(r'/FL(\d+)', service_id)
+                        if m:
+                            fl_ids.append(m.group(1))
+            if fl_ids:
+                return [
+                    {'fl_id': fid, 'label': f'{(i // 2) + 1}{"r" if i % 2 == 0 else "v"}'}
+                    for i, fid in enumerate(fl_ids)
+                ]
     except Exception as e:
-        logger.error(f"Failed to resolve folios for {sys_id}: {e}")
-        return []
+        logger.error(f"NLI manifest fetch failed for {sys_id}: {e}")
+
+    # Fallback: enrich_metadata images_ext (Manchester, Oxford, JTS, Cambridge)
+    try:
+        if state.meta_mgr:
+            meta_data = state.meta_mgr.enrich_metadata(sys_id)
+            images_ext = (meta_data or {}).get('images_ext', [])
+            external_provider = (meta_data or {}).get('external_provider', '')
+            if images_ext:
+                result = []
+                for i, img in enumerate(images_ext):
+                    label = img.get('label', '') or str(i + 1)
+                    result.append({
+                        'fl_id': '',
+                        'label': label,
+                        'image_url': img.get('url', ''),
+                        'page_index': i,
+                        'external_provider': external_provider,
+                    })
+                return result
+    except Exception as e:
+        logger.warning(f"_resolve_folios ext fallback for {sys_id}: {e}")
+
+    return []
 
 
 def _invalidate_and_refetch(fl_id: str, new_threshold: float):
@@ -1917,29 +1982,44 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
     first = folios[0]
     fl_id = first.get('fl_id', '')
     folio_label = first.get('label', '1r')
+    image_url = first.get('image_url', '')
+    external_provider = first.get('external_provider', '')
+    page_index = first.get('page_index', 0)
     key = f"{sys_id},{folio_label}"
 
-    # CUL/T-S threshold matching desktop defaults (115 for blue backgrounds)
     threshold = 30.0
     is_cul = False
-    if state.meta_mgr:
-        lib_code = state.meta_mgr.get_library_for_id(sys_id) or ''
-        if lib_code == 'CUL':
-            is_cul = True
-    if not is_cul and shelfmark:
-        s = shelfmark.upper()
-        if s.startswith(('T-S', 'OR.', 'ADD.')):
-            is_cul = True
-    if is_cul:
-        threshold = 150.0
-    url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true&is_cul={'true' if is_cul else 'false'}"
+    if fl_id:
+        # NLI path — CUL detection
+        if state.meta_mgr:
+            lib_code = state.meta_mgr.get_library_for_id(sys_id) or ''
+            if lib_code == 'CUL':
+                is_cul = True
+        if not is_cul and shelfmark:
+            s = shelfmark.upper()
+            if s.startswith(('T-S', 'OR.', 'ADD.')):
+                is_cul = True
+        if is_cul:
+            threshold = 150.0
+        url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true&is_cul={'true' if is_cul else 'false'}"
+        meta = {
+            'fl_id': fl_id, 'threshold': threshold,
+            'size': 800, 'processed': True,
+            'sys_id': sys_id, 'is_cul': is_cul
+        }
+    elif external_provider:
+        # External library path — use puzzle_ext_image endpoint (fetch + BG removal + cache)
+        url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={threshold}&size=800&processed=true"
+        meta = {
+            'fl_id': '', 'image_url': image_url, 'threshold': 30.0, 'size': 800,
+            'processed': True, 'sys_id': sys_id, 'is_cul': False,
+            'external_provider': external_provider, 'page_index': page_index
+        }
+    else:
+        ui.notify(tr('No images found'), type='warning')
+        return
 
     frag_offset = len(puzzle_meta) * 50
-    meta = {
-        'fl_id': fl_id, 'threshold': threshold,
-        'size': 800, 'processed': True,
-        'sys_id': sys_id, 'is_cul': is_cul
-    }
     meta_json = json.dumps(meta)
     ui.run_javascript(
         f'window.puzzleCanvas.addFragment("{key}", "{url}", '
@@ -1951,9 +2031,12 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
         'shelfmark': shelfmark,
         'folio_label': folio_label,
         'fl_id': fl_id,
-        'threshold': threshold,
-        'processed': True,
+        'threshold': meta.get('threshold', 30.0),
+        'processed': meta.get('processed', True),
         'size': 800,
+        'image_url': image_url,
+        'external_provider': external_provider,
+        'page_index': page_index,
     }
 
 
@@ -2259,12 +2342,37 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             frag_is_cul = bool(frag.shelfmark and frag.shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
             if not frag_is_cul and state.meta_mgr:
                 frag_is_cul = (state.meta_mgr.get_library_for_id(frag.sys_id) or '') == 'CUL'
-            url = f"/api/puzzle_image?fl_id={frag.fl_id}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}&is_cul={'true' if frag_is_cul else 'false'}"
-            js_meta = json.dumps({
-                'fl_id': frag.fl_id, 'threshold': threshold,
-                'size': 800, 'processed': processed, 'sys_id': frag.sys_id,
-                'is_cul': frag_is_cul
-            })
+            ext_provider = getattr(frag, 'external_provider', '')
+            frag_page_idx = getattr(frag, 'page_index', -1)
+            frag_image_url = getattr(frag, 'image_url', '')
+
+            if frag.fl_id:
+                # NLI path
+                url = f"/api/puzzle_image?fl_id={frag.fl_id}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}&is_cul={'true' if frag_is_cul else 'false'}"
+                js_meta = json.dumps({
+                    'fl_id': frag.fl_id, 'threshold': threshold,
+                    'size': 800, 'processed': processed, 'sys_id': frag.sys_id,
+                    'is_cul': frag_is_cul
+                })
+            elif ext_provider:
+                # External library path — use puzzle_ext_image endpoint
+                page_idx = frag_page_idx if frag_page_idx >= 0 else 0
+                url = f"/api/puzzle_ext_image?sys_id={frag.sys_id}&page={page_idx}&provider={ext_provider}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}"
+                js_meta = json.dumps({
+                    'fl_id': '', 'threshold': 30.0, 'size': 800,
+                    'processed': True, 'sys_id': frag.sys_id, 'is_cul': False,
+                    'external_provider': ext_provider, 'page_index': page_idx,
+                    'image_url': frag_image_url
+                })
+            else:
+                # Unknown — try puzzle_image anyway (may fail gracefully)
+                url = f"/api/puzzle_image?fl_id={frag.fl_id}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}&is_cul={'true' if frag_is_cul else 'false'}"
+                js_meta = json.dumps({
+                    'fl_id': frag.fl_id, 'threshold': threshold,
+                    'size': 800, 'processed': processed, 'sys_id': frag.sys_id,
+                    'is_cul': frag_is_cul
+                })
+
             ui.run_javascript(
                 f'window.puzzleCanvas.addFragment("{key}", "{url}", '
                 f'{frag.x}, {frag.y}, {frag.rotation}, {frag.scale}, '
@@ -2286,6 +2394,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 'sys_id': frag.sys_id, 'shelfmark': frag.shelfmark,
                 'folio_label': frag.folio_label, 'fl_id': frag.fl_id,
                 'threshold': threshold, 'processed': processed, 'size': 800,
+                'image_url': frag_image_url, 'external_provider': ext_provider,
+                'page_index': frag_page_idx,
             }
 
         # If doc has zero fragments, clear loading guard immediately
@@ -3468,6 +3578,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         parts = initial_add.split(',', 1)
         add_sys_id = parts[0].strip()
         add_fl_id = parts[1].strip() if len(parts) > 1 else ''
+        add_page_index = -1
+        if add_fl_id.startswith('page:'):
+            try:
+                add_page_index = int(add_fl_id[5:])
+            except ValueError:
+                add_page_index = 0
+            add_fl_id = ''
 
         async def auto_add():
             """Auto-add a fragment from the initial_add query parameter after canvas init."""
@@ -3476,14 +3593,26 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             fl_id = add_fl_id
             folio_label = '1r'
+            image_url = ''
+            external_provider = ''
+            page_index = add_page_index
 
             if not fl_id:
                 folios = await run.io_bound(_resolve_folios, add_sys_id)
                 if folios:
-                    fl_id = folios[0].get('fl_id', '')
-                    folio_label = folios[0].get('label', '1r')
+                    # Use specified page_index if provided, otherwise first folio
+                    if page_index >= 0 and page_index < len(folios):
+                        first = folios[page_index]
+                    else:
+                        first = folios[0]
+                    fl_id = first.get('fl_id', '')
+                    folio_label = first.get('label', '1r')
+                    image_url = first.get('image_url', '')
+                    external_provider = first.get('external_provider', '')
+                    if page_index < 0:
+                        page_index = first.get('page_index', 0)
 
-            if not fl_id:
+            if not fl_id and not external_provider:
                 ui.notify(tr('No images found for this manuscript'), type='warning')
                 return
 
@@ -3491,29 +3620,39 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             # CUL/T-S threshold matching desktop defaults
             threshold = 30.0
             is_cul = False
-            if state.meta_mgr:
-                lib_code = state.meta_mgr.get_library_for_id(add_sys_id) or ''
-                if lib_code == 'CUL':
-                    is_cul = True
-            if not is_cul:
-                sm = ''
-                if state.meta_mgr:
-                    sm, _ = state.meta_mgr.get_meta_for_id(add_sys_id)
-                if sm:
-                    s = sm.upper()
-                    if s.startswith(('T-S', 'OR.', 'ADD.')):
-                        is_cul = True
-            if is_cul:
-                threshold = 150.0
 
-            url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true&is_cul={'true' if is_cul else 'false'}"
+            if fl_id:
+                if state.meta_mgr:
+                    lib_code = state.meta_mgr.get_library_for_id(add_sys_id) or ''
+                    if lib_code == 'CUL':
+                        is_cul = True
+                if not is_cul:
+                    sm = ''
+                    if state.meta_mgr:
+                        sm, _ = state.meta_mgr.get_meta_for_id(add_sys_id)
+                    if sm:
+                        s = sm.upper()
+                        if s.startswith(('T-S', 'OR.', 'ADD.')):
+                            is_cul = True
+                if is_cul:
+                    threshold = 150.0
+                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true&is_cul={'true' if is_cul else 'false'}"
+                js_meta = json.dumps({
+                    'fl_id': fl_id, 'threshold': threshold,
+                    'size': 800, 'processed': True,
+                    'sys_id': add_sys_id, 'is_cul': is_cul
+                })
+            else:
+                # External library path
+                pg = page_index if page_index >= 0 else 0
+                url = f"/api/puzzle_ext_image?sys_id={add_sys_id}&page={pg}&provider={external_provider}&threshold={threshold}&size=800&processed=true"
+                js_meta = json.dumps({
+                    'fl_id': '', 'image_url': image_url, 'threshold': 30.0, 'size': 800,
+                    'processed': True, 'sys_id': add_sys_id, 'is_cul': False,
+                    'external_provider': external_provider, 'page_index': pg
+                })
 
             frag_offset = len(puzzle_meta) * 50
-            js_meta = json.dumps({
-                'fl_id': fl_id, 'threshold': threshold,
-                'size': 800, 'processed': True,
-                'sys_id': add_sys_id, 'is_cul': is_cul
-            })
             ui.run_javascript(
                 f'window.puzzleCanvas.addFragment("{key}", "{url}", '
                 f'{100 + frag_offset}, {100 + frag_offset}, 0, 1.0, false, false, {js_meta})'
@@ -3532,6 +3671,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 'threshold': threshold,
                 'processed': True,
                 'size': 800,
+                'image_url': image_url,
+                'external_provider': external_provider,
+                'page_index': page_index if page_index >= 0 else 0,
             }
 
         asyncio.ensure_future(_after_delay(1.5, auto_add))

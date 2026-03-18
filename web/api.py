@@ -915,23 +915,129 @@ def init_api_routes():
         else:
             return Response(content="Cache write failed", status_code=500)
 
+    def _fetch_provider_image(provider: str, sys_id: str, page: int):
+        """Fetch raw image bytes from a library-specific IIIF source.
+
+        Delegates to the existing per-provider proxy endpoint functions.
+        Returns the Response object from the proxy, or a 404 Response if provider unknown.
+        """
+        if provider == 'cambridge':
+            return cambridge_image(sys_id=sys_id, page=page)
+        elif provider == 'manchester':
+            return manchester_image(sys_id=sys_id, page=page)
+        elif provider == 'jts':
+            return jts_image(sys_id=sys_id, page=page)
+        elif provider == 'oxford':
+            return oxford_image(sys_id=sys_id, page=page)
+        else:
+            return Response(content=f"Unknown provider: {provider}", status_code=400)
+
+    @app.get('/api/puzzle_ext_image')
+    def puzzle_ext_image(sys_id: str, page: int = 0, provider: str = '',
+                         threshold: float = 30.0, size: int = 800,
+                         processed: bool = True):
+        """Serve processed external library image for puzzle canvas.
+
+        Fetches raw image from the library-specific proxy (cambridge_image,
+        manchester_image, jts_image, oxford_image), applies BG removal server-side,
+        caches the processed result, and returns processed PNG.
+
+        No HMAC token needed (same-origin only). BG removal uses the same HSV
+        pipeline as NLI images (default threshold=30.0 for external libraries).
+        """
+        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.background_removal import remove_background
+
+        if not provider or not sys_id:
+            return Response(content="Missing provider or sys_id", status_code=400)
+
+        valid_providers = ('cambridge', 'manchester', 'jts', 'oxford')
+        if provider not in valid_providers:
+            return Response(content=f"Unknown provider: {provider}", status_code=400)
+
+        # Cache key: includes provider to avoid collisions between libraries sharing sys_ids
+        cache_id = f"{provider}_{sys_id}_page{page}"
+        service = get_puzzle_image_service()
+        cache_path = service.get_cache_path(cache_id, size, threshold, processed, is_cul=False)
+
+        # Return cached if exists
+        if cache_path.exists():
+            try:
+                cached = cache_path.read_bytes()
+                content_type = 'image/png' if cached[:4] == b'\x89PNG' else 'image/jpeg'
+                return Response(content=cached, media_type=content_type,
+                                headers={"Cache-Control": "public, max-age=3600"})
+            except (FileNotFoundError, OSError):
+                pass
+
+        # Delegate to existing provider-specific proxy to fetch raw image bytes
+        proxy_resp = _fetch_provider_image(provider, sys_id, page)
+        if proxy_resp.status_code != 200:
+            return proxy_resp  # Pass through error
+
+        raw_bytes = proxy_resp.body
+        if not raw_bytes or len(raw_bytes) < 100:
+            return Response(content="Empty image from proxy", status_code=502)
+
+        # Apply BG removal if requested
+        if processed:
+            try:
+                result_bytes = remove_background(raw_bytes, threshold=threshold)
+            except Exception:
+                result_bytes = raw_bytes  # fallback to original
+        else:
+            result_bytes = raw_bytes
+
+        # Cache result
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(result_bytes)
+        except OSError:
+            pass
+
+        content_type = 'image/png' if result_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        return Response(content=result_bytes, media_type=content_type,
+                        headers={"Cache-Control": "public, max-age=3600"})
+
     @app.get('/api/puzzle_folios/{sys_id}')
     def puzzle_folios(sys_id: str):
         """Get ordered folio list for a manuscript (for prev/next navigation).
 
-        Uses the same FL ID resolution as the NLI image viewer: IIIF manifest
-        fetch -> ordered FL ID list. Returns folio labels based on page index.
+        For NLI-hosted manuscripts: uses IIIF manifest FL IDs.
+        For external libraries (Manchester, Oxford, JTS, Cambridge): uses enrich_metadata images_ext.
         """
         fl_ids = fetch_fl_ids_from_nli(sys_id)
-        if not fl_ids:
+        if fl_ids:
+            # Build folio list with labels (1r, 1v, 2r, 2v, ...) or simple indices
+            result = []
+            for i, fid in enumerate(fl_ids):
+                leaf = (i // 2) + 1
+                side = 'r' if i % 2 == 0 else 'v'
+                result.append({'fl_id': fid, 'label': f'{leaf}{side}'})
+            return result
+
+        # Fallback: enrich_metadata images_ext (Manchester, Oxford, JTS, Cambridge)
+        if not state.meta_mgr:
             return []
-        # Build folio list with labels (1r, 1v, 2r, 2v, ...) or simple indices
-        result = []
-        for i, fid in enumerate(fl_ids):
-            leaf = (i // 2) + 1
-            side = 'r' if i % 2 == 0 else 'v'
-            result.append({'fl_id': fid, 'label': f'{leaf}{side}'})
-        return result
+        try:
+            data = state.meta_mgr.enrich_metadata(sys_id)
+            images_ext = (data or {}).get('images_ext', [])
+            external_provider = (data or {}).get('external_provider', '')
+            if images_ext:
+                result = []
+                for i, img in enumerate(images_ext):
+                    label = img.get('label', '') or str(i + 1)
+                    result.append({
+                        'fl_id': '',
+                        'label': label,
+                        'image_url': img.get('url', ''),
+                        'page_index': i,
+                        'external_provider': external_provider,
+                    })
+                return result
+        except Exception as e:
+            logger.warning(f"puzzle_folios ext fallback failed for {sys_id}: {e}")
+        return []
 
     # === Puzzle Document CRUD + Export (Phase 50) ===
 
