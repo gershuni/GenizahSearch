@@ -1005,10 +1005,11 @@ class PuzzleMetaLoaderThread(QThread):
     def _resolve_oxford_images(self):
         """Try to resolve Oxford part images via shelfmark-based lookup.
 
-        Replicates the fallback logic from /api/oxford_image: when
-        get_part_for_folio fails (no sys_id mapping), try parsing
-        the shelfmark to find the Oxford part and its images.
+        Replicates the logic from /api/oxford_image: find the Oxford part,
+        extract folio number from shelfmark (e.g., "d.41/10" → folio 10),
+        and filter images to only those matching the folio.
         """
+        import re as _re
         try:
             codico = getattr(self.meta_mgr, 'codico_mgr', None)
             if not codico or not getattr(codico, '_loaded', False):
@@ -1029,6 +1030,19 @@ class PuzzleMetaLoaderThread(QThread):
             images = codico.get_part_images(part_id)
             if not images:
                 return []
+
+            # Extract folio number from shelfmark (e.g., "MS heb. d.41/10" → 10)
+            # and filter images to only those matching this folio — same logic
+            # as /api/oxford_image's _extract_folio_number
+            folio_num = 0
+            if self.shelfmark:
+                m = _re.search(r'/(\d+)', self.shelfmark)
+                if m:
+                    folio_num = int(m.group(1))
+            if folio_num > 0:
+                folio_images = [img for img in images if img.get('folio_num') == folio_num]
+                if folio_images:
+                    images = folio_images
 
             # Convert to images_ext format
             return [{

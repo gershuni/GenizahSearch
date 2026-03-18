@@ -1935,6 +1935,15 @@ def _resolve_folios(sys_id: str) -> list:
                     if part_id:
                         part_images = codico.get_part_images(part_id)
                         if part_images:
+                            # Filter to matching folio (e.g., "d.41/10" → folio 10)
+                            import re as _re_ox
+                            shelfmark_ox = shelfmark if shelfmark else (state.meta_mgr.get_meta_for_id(sys_id) or ('',))[0]
+                            folio_match = _re_ox.search(r'/(\d+)', shelfmark_ox) if shelfmark_ox else None
+                            if folio_match:
+                                folio_num = int(folio_match.group(1))
+                                folio_filtered = [img for img in part_images if img.get('folio_num') == folio_num]
+                                if folio_filtered:
+                                    part_images = folio_filtered
                             images_ext = [{'label': img.get('label', ''), 'url': img.get('full_url', ''),
                                            'folio_num': img.get('folio_num')} for img in part_images]
                             external_provider = 'oxford'
