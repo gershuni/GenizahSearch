@@ -959,13 +959,15 @@ class PuzzleMetaLoaderThread(QThread):
 
             # Manchester external_provider: NLI FL IDs are catalog stubs (503) — use images_ext.
             # Cambridge external_provider: NLI FL IDs are real CUL images — use NLI.
+            # Oxford: enrich_metadata populates images_ext but may leave external_provider empty.
+            lib_code = self.meta_mgr.get_library_for_id(self.sys_id) or ''
             use_ext = (images_ext and external_provider
                        and external_provider != 'cambridge')
-
-            # Oxford special case: enrich_metadata may not set external_provider='oxford'
-            # because get_part_for_folio can fail. Try shelfmark-based Oxford part lookup
-            # (same logic as /api/oxford_image) which constructs the full image URL.
-            lib_code = self.meta_mgr.get_library_for_id(self.sys_id) or ''
+            # Oxford: use images_ext even without external_provider set
+            if not use_ext and images_ext and lib_code == 'Oxford':
+                external_provider = 'oxford'
+                use_ext = True
+            # Oxford fallback: if no images_ext, try shelfmark-based part lookup
             if lib_code == 'Oxford' and not images_ext:
                 oxford_images = self._resolve_oxford_images()
                 if oxford_images:

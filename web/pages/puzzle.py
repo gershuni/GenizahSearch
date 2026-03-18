@@ -1917,9 +1917,11 @@ def _resolve_folios(sys_id: str) -> list:
             images_ext = (meta_data or {}).get('images_ext', [])
             external_provider = (meta_data or {}).get('external_provider', '')
 
-            # Oxford special case: enrich_metadata may not set external_provider='oxford'
-            # because get_part_for_folio can fail. Try shelfmark-based Oxford part lookup.
+            # Oxford: enrich_metadata populates images_ext but may leave external_provider empty
             lib_code = state.meta_mgr.get_library_for_id(sys_id) or ''
+            if lib_code == 'Oxford' and images_ext and not external_provider:
+                external_provider = 'oxford'
+            # Oxford fallback: if no images_ext, try shelfmark-based part lookup
             if lib_code == 'Oxford' and not images_ext:
                 codico = getattr(state.meta_mgr, 'codico_mgr', None)
                 if codico and getattr(codico, '_loaded', False):

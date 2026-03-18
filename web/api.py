@@ -1064,6 +1064,11 @@ def init_api_routes():
                 ext_data = state.meta_mgr.enrich_metadata(sys_id)
                 images_ext = (ext_data or {}).get('images_ext', [])
                 external_provider = (ext_data or {}).get('external_provider', '')
+                # Oxford: enrich_metadata populates images_ext but may leave external_provider empty
+                if not external_provider and images_ext:
+                    lib_code = state.meta_mgr.get_library_for_id(sys_id) or ''
+                    if lib_code == 'Oxford':
+                        external_provider = 'oxford'
                 if images_ext and external_provider and external_provider != 'cambridge':
                     result = []
                     for i, img in enumerate(images_ext):
