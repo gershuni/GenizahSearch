@@ -4,8 +4,8 @@ milestone: v5.6
 milestone_name: milestone
 status: not_started
 stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
-last_updated: "2026-03-17T15:14:25.436Z"
-last_activity: 2026-03-18 - Completed quick task 260318-kk1: Fix puzzle image loading for non-NLI libraries
+last_updated: "2026-03-18T19:49:02Z"
+last_activity: 2026-03-18 - Completed quick task 260318-tkj: Add CUDL as image source for Mosseri collection
 progress:
   total_phases: 6
   completed_phases: 5
@@ -198,7 +198,7 @@ Milestone: v7.0.0 Fragment Puzzle
 Phase: 52 (6 of 6 in milestone) -- COMPLETE
 Plan: 3 of 3 complete
 Status: Completed 52-03-PLAN.md (desktop community publishing)
-Last activity: 2026-03-18 - Completed quick task 260318-jyz: Fix library attribution credit lines
+Last activity: 2026-03-18 - Completed quick task 260318-tkj: Add CUDL as image source for Mosseri collection
 
 Progress: [██████████] 100% (6 of 6 phases: 47, 48, 49, 50, 51, 52 complete)
 
@@ -285,9 +285,10 @@ Recent decisions affecting current work:
 | 260318-jf1 | Fix Manchester image fetch: recto shown for both sides -> distinct multi-page canvases | 2026-03-18 | 500ff460 | [260318-jf1-fix-manchester-image-fetch-recto-shown-f](./quick/260318-jf1-fix-manchester-image-fetch-recto-shown-f/) |
 | 260318-jyz | Fix library attribution credit lines per source library | 2026-03-18 | b4486a4e | [260318-jyz-fix-library-attribution-credit-lines-per](./quick/260318-jyz-fix-library-attribution-credit-lines-per/) |
 | 260318-kk1 | Fix puzzle image loading for non-NLI libraries (Manchester, Oxford, JTS, Cambridge) | 2026-03-18 | 7bf99391 | [260318-kk1-fix-puzzle-image-loading-for-non-nli-lib](./quick/260318-kk1-fix-puzzle-image-loading-for-non-nli-lib/) |
+| 260318-tkj | Add CUDL as image source for Mosseri collection (3,141/3,194 records) | 2026-03-18 | 398e44f7 | [260318-tkj-add-cudl-cambridge-digital-library-as-an](./quick/260318-tkj-add-cudl-cambridge-digital-library-as-an/) |
 
 ## Session Continuity
 
-Last session: 2026-03-18T15:00:00.000Z
-Stopped at: Completed quick task 260318-kk1 (fix puzzle image loading for non-NLI libraries)
+Last session: 2026-03-18T19:49:02Z
+Stopped at: Completed quick task 260318-tkj (add CUDL as image source for Mosseri collection)
 Resume file: None
