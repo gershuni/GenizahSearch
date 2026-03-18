@@ -2046,27 +2046,35 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
 
     threshold = 30.0
     is_cul = False
+    skip_bg = False
     if fl_id:
-        # NLI path — CUL detection
+        # NLI path — per-library settings
+        lib_code = ''
         if state.meta_mgr:
             lib_code = state.meta_mgr.get_library_for_id(sys_id) or ''
             if lib_code == 'CUL':
                 is_cul = True
-        if not is_cul and shelfmark:
+            elif lib_code == 'Oxford':
+                skip_bg = True
+        if not is_cul and not skip_bg and shelfmark:
             s = shelfmark.upper()
             if s.startswith(('T-S', 'OR.', 'ADD.')):
                 is_cul = True
+            elif s.startswith(('MS HEB.', 'MS. HEB.')):
+                skip_bg = True
         if is_cul:
             threshold = 150.0
-        url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed=true&is_cul={'true' if is_cul else 'false'}"
+        do_processed = not skip_bg
+        url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed={'true' if do_processed else 'false'}&is_cul={'true' if is_cul else 'false'}"
         meta = {
             'fl_id': fl_id, 'threshold': threshold,
-            'size': 800, 'processed': True,
+            'size': 800, 'processed': do_processed,
             'sys_id': sys_id, 'is_cul': is_cul
         }
     elif external_provider:
-        # External library path — use puzzle_ext_image endpoint (fetch + BG removal + cache)
-        url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={threshold}&size=800&processed=true"
+        # External library path — skip bg removal for Oxford (ink/parchment too similar)
+        ext_processed = external_provider != 'oxford'
+        url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={threshold}&size=800&processed={'true' if ext_processed else 'false'}"
         meta = {
             'fl_id': '', 'image_url': image_url, 'threshold': 30.0, 'size': 800,
             'processed': True, 'sys_id': sys_id, 'is_cul': False,

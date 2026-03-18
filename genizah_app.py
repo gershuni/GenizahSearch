@@ -3595,17 +3595,25 @@ class PuzzleCanvasWindow(QMainWindow):
             return
 
         from shared.puzzle_model import PuzzleFragment
-        # CUL images have blue scanning backgrounds requiring higher threshold
+        # Per-library bg removal settings:
+        # - CUL: high threshold (115) for blue scanning backgrounds
+        # - Oxford: skip bg removal — dark ink on similar-colored parchment
+        # - Others: default threshold (30)
         threshold = 30.0
+        skip_bg = False
         lib_code = ''
         if hasattr(self.app, 'meta_mgr') and self.app.meta_mgr:
             lib_code = self.app.meta_mgr.get_library_for_id(sys_id) or ''
         if lib_code == 'CUL':
             threshold = 115.0
+        elif lib_code == 'Oxford':
+            skip_bg = True
         elif shelfmark:
             s = shelfmark.upper()
             if s.startswith(('T-S', 'OR.', 'ADD.')):
                 threshold = 115.0
+            elif s.startswith(('MS HEB.', 'MS. HEB.')):
+                skip_bg = True
         puzzle_frag = PuzzleFragment(
             sys_id=sys_id,
             folio_label=folio_label,
@@ -3614,6 +3622,7 @@ class PuzzleCanvasWindow(QMainWindow):
             x=self._next_x,
             y=50.0,
             bg_removal_threshold=threshold,
+            processed=not skip_bg,
             image_url=image_url,
             external_provider=external_provider,
             page_index=page_index,
@@ -3630,7 +3639,8 @@ class PuzzleCanvasWindow(QMainWindow):
         # Start image loader thread
         thr = puzzle_frag.bg_removal_threshold
         is_cul = (lib_code == 'CUL') or (shelfmark and shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
-        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=(thr > 0), is_cul=is_cul,
+        do_processed = (thr > 0) and not skip_bg
+        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=do_processed, is_cul=is_cul,
                                          image_url=image_url)
         thread.image_ready.connect(partial(self._on_image_loaded, item_key))
         thread.load_failed.connect(self._on_image_failed)

@@ -252,7 +252,7 @@ class PuzzleImageService:
         url = f"{NLI_IIIF_BASE}/FL{digits}/full/{size},/0/default.jpg"
         try:
             resp = requests.get(url, headers=headers, timeout=30)
-            if resp.status_code == 200 and len(resp.content) > 5000:
+            if resp.status_code == 200 and len(resp.content) > 100:
                 logger.info(f"IIIF fetch OK for {fl_id}")
                 return resp.content
             else:
