@@ -13,6 +13,7 @@
 - ✅ **v6.1.0 Catalog Browse & Navigation** -- Phase 41 (shipped 2026-02-27)
 - ✅ **v6.5.0 Search UX & Filtered Search** -- Phases 42-46 (shipped 2026-03-14)
 - **v7.0.0 Fragment Puzzle** -- Phases 47-52 (planned)
+- **v7.1.0 FIST Gap Fill** -- Phase 53 (planned)
 
 ## Phases
 
@@ -144,6 +145,13 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 - [x] **Phase 51: Recto/Verso** - Auto-generated verso view from recto arrangement with correct verso images (already implemented during Phases 48-49, completed 2026-03-17)
 - [x] **Phase 52: Community + Integration** - Personal workspace, publish for review, browse published joins, entry points from browse/search (completed 2026-03-17)
 
+### v7.1.0 FIST Gap Fill (Planned)
+
+**Milestone Goal:** Add 38,673 Genizah manuscripts from FIST.db that are missing from libraries.csv, making them browsable with images and FJMS enrichment. Data-only phase — no Tantivy index rebuild needed.
+
+**v7.1.0 FIST Gap Fill (Phase 53):**
+- [ ] **Phase 53: Fill Missing Genizah Manuscripts from FIST** - CSV generation, library code mapping, metadata search guard fix
+
 ## Phase Details
 
 ### Phase 47: Foundation + Background Removal
@@ -235,6 +243,19 @@ Plans:
 - [x] 52-02-PLAN.md — Web publish UI + Discoveries feed + joins panel community section
 - [x] 52-03-PLAN.md — Desktop publish + Discoveries feed + JoinsDialog community section
 
+### Phase 53: Fill Missing Genizah Manuscripts from FIST
+**Goal**: All 38,673 Genizah manuscripts in FIST.db that are missing from libraries.csv become browsable in GenizahSearch with images, FJMS enrichment, and metadata search — without requiring Tantivy index changes
+**Depends on**: Nothing (standalone data phase)
+**Requirements**: TBD
+**Success Criteria** (what must be TRUE):
+  1. libraries.csv grows from 216,942 to ~255,615 records with correctly formatted rows for all FIST-only manuscripts
+  2. New records appear in catalog browse with correct library codes, domain facets, and FJMS enrichment
+  3. NLI images load correctly for new records (100% have images in nli_crossref.db)
+  4. Shelfmark/title metadata search returns new records (execute_search metadata guard adjusted)
+  5. Text search (Responsa, word search) correctly excludes metadata-only records (no transcription text)
+  6. 12 new library codes registered in LIBRARY_CODES for small FIST-only collections
+**Plans**: TBD
+
 ## Progress
 
 **Total milestones shipped:** 10 (v7.0.0 completing now)
@@ -249,6 +270,7 @@ Plans:
 | 50. Join Documents | 3/3 | Complete    | 2026-03-16 |
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
+| 53. Fill Missing Genizah MSS from FIST | 0/0 | Planning   | — |
 
 ---
 *Roadmap created: 2026-02-09*
