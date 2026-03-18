@@ -415,7 +415,28 @@ window.puzzleCanvas = {
             }
         }
 
-        // 4. Degraded: display-only from NLI (no bg removal, tainted canvas)
+        // 4. Try Oxford/library-specific proxy as last server-side fallback
+        // Some Oxford manuscripts have NLI FL IDs that return 503 but images
+        // are available from Oxford directly via /api/oxford_image
+        if (meta && meta.sys_id) {
+            var proxyFallbacks = [
+                '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id) + '&page=0&provider=oxford&threshold=' + threshold + '&size=' + size + '&processed=' + processed,
+                '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id) + '&page=0&provider=cambridge&threshold=' + threshold + '&size=' + size + '&processed=' + processed
+            ];
+            for (var fi = 0; fi < proxyFallbacks.length; fi++) {
+                try {
+                    var fbResp = await fetch(proxyFallbacks[fi]);
+                    if (fbResp.ok) {
+                        var fbBlob = await fbResp.blob();
+                        if (fbBlob.size > 2000) {
+                            return { url: URL.createObjectURL(fbBlob), degraded: false, fromProxy: true };
+                        }
+                    }
+                } catch (e) { /* try next */ }
+            }
+        }
+
+        // 5. Degraded: display-only from NLI (no bg removal, tainted canvas)
         var digits2 = String(flId).replace(/[^0-9]/g, '');
         if (digits2) {
             var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits2 + '/full/' + size + ',/0/default.jpg';
