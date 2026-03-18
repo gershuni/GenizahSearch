@@ -49,6 +49,11 @@ window.puzzleCanvas = {
     _localHelperBase: 'http://127.0.0.1:43111',
     _localHelperAvailable: null,
     _localHelperCheckedAt: 0,
+    _extensionDetected: null,
+    _extensionPendingRequests: {},
+    _extensionRequestCounter: 0,
+    _extensionListenerAttached: false,
+    _extensionBannerDismissed: false,
 
     /**
      * Tear down the puzzle canvas, removing all event listeners, fragments,
@@ -266,6 +271,153 @@ window.puzzleCanvas = {
         return true;
     },
 
+    _hasExtension: function() {
+        if (this._extensionDetected === null) {
+            this._extensionDetected = !!document.querySelector('meta[name="genizah-extension"]');
+        }
+        return this._extensionDetected;
+    },
+
+    _fetchViaExtension: function(nliUrl) {
+        var self = this;
+        return new Promise(function(resolve) {
+            var requestId = 'ext_' + (++self._extensionRequestCounter);
+            var timer = setTimeout(function() {
+                delete self._extensionPendingRequests[requestId];
+                resolve(null);
+            }, 15000);
+            self._extensionPendingRequests[requestId] = { resolve: resolve, timer: timer };
+            window.postMessage({
+                type: 'genizah-fetch-image',
+                url: nliUrl,
+                requestId: requestId
+            }, '*');
+        });
+    },
+
+    _setupExtensionListener: function() {
+        var self = this;
+        if (this._extensionListenerAttached) return;
+        this._extensionListenerAttached = true;
+        window.addEventListener('message', function(event) {
+            if (!event.data || event.data.type !== 'genizah-image-result') return;
+            var pending = self._extensionPendingRequests[event.data.requestId];
+            if (!pending) return;
+            clearTimeout(pending.timer);
+            delete self._extensionPendingRequests[event.data.requestId];
+            if (event.data.error || !event.data.blobUrl) {
+                pending.resolve(null);
+            } else {
+                fetch(event.data.blobUrl).then(function(resp) {
+                    return resp.blob();
+                }).then(function(blob) {
+                    pending.resolve(blob);
+                }).catch(function() {
+                    pending.resolve(null);
+                });
+            }
+        });
+    },
+
+    /**
+     * THE unified image loader. All image paths MUST call this.
+     * Fallback chain: server cache -> extension -> localhost helper -> direct NLI (degraded)
+     * Returns Promise<{url: string, degraded: boolean}>
+     */
+    _loadImageWithFallbacks: async function(flId, meta, key) {
+        var threshold = (meta && meta.threshold != null) ? meta.threshold : 30;
+        var size = (meta && meta.size) || 800;
+        var processed = (meta && meta.processed !== false);
+        var isCul = !!(meta && meta.is_cul);
+        var apiUrl = '/api/puzzle_image?fl_id=' + encodeURIComponent(flId)
+            + '&threshold=' + threshold + '&size=' + size
+            + '&processed=' + processed + '&is_cul=' + isCul;
+
+        // 1. Try server cache
+        try {
+            var resp = await fetch(apiUrl);
+            if (resp.ok) {
+                var blob = await resp.blob();
+                return { url: URL.createObjectURL(blob), degraded: false, fromCache: true };
+            }
+            var uploadToken = resp.headers.get('X-Puzzle-Upload-Token') || '';
+        } catch (e) {
+            var uploadToken = '';
+        }
+
+        // 2. Try extension (if installed)
+        if (this._hasExtension() && flId) {
+            var digits = String(flId).replace(/[^0-9]/g, '');
+            if (digits) {
+                var nliUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + size + ',/0/default.jpg';
+                var blob = await this._fetchViaExtension(nliUrl);
+                if (blob) {
+                    try {
+                        var processResp = await fetch('/api/puzzle_process?fl_id=' + encodeURIComponent(flId)
+                            + '&threshold=' + threshold + '&size=' + size
+                            + '&processed=' + processed + '&is_cul=' + isCul, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': blob.type || 'image/jpeg',
+                                'X-Puzzle-Upload-Token': uploadToken
+                            },
+                            body: blob
+                        });
+                        if (processResp.ok) {
+                            var resultBlob = await processResp.blob();
+                            return { url: URL.createObjectURL(resultBlob), degraded: false, fromExtension: true };
+                        }
+                    } catch (e) {
+                        console.warn('Extension process upload failed:', e);
+                    }
+                    return { url: URL.createObjectURL(blob), degraded: true, fromExtension: true };
+                }
+            }
+        }
+
+        // 3. Try localhost helper
+        if (this._isLocalHelperEnabled()) {
+            var helperUrl = this._buildLocalHelperImageUrl(key, meta, flId);
+            if (helperUrl) {
+                try {
+                    var helperResp = await fetch(helperUrl);
+                    if (helperResp.ok) {
+                        var helperBlob = await helperResp.blob();
+                        return { url: URL.createObjectURL(helperBlob), degraded: false, fromHelper: true };
+                    }
+                } catch (e) {
+                    console.warn('Localhost helper failed:', e);
+                }
+            }
+        }
+
+        // 4. Degraded: display-only from NLI (no bg removal, tainted canvas)
+        var digits2 = String(flId).replace(/[^0-9]/g, '');
+        if (digits2) {
+            var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits2 + '/full/' + size + ',/0/default.jpg';
+            return { url: directUrl, degraded: true, direct: true };
+        }
+
+        return { url: '', degraded: true, error: true };
+    },
+
+    _updateExtensionBanner: function() {
+        var banner = document.getElementById('puzzleExtBanner');
+        var indicator = document.getElementById('puzzleExtIndicator');
+        if (!banner || !indicator) return;
+        if (this._hasExtension()) {
+            banner.style.display = 'none';
+            indicator.style.display = 'inline-flex';
+        } else {
+            indicator.style.display = 'none';
+            if (localStorage.getItem('puzzleBannerDismissed') === '1') {
+                banner.style.display = 'none';
+            } else {
+                banner.style.display = 'flex';
+            }
+        }
+    },
+
     /**
      * Initialize the Fabric.js canvas on the given DOM element.
      * Sets up wheel zoom, pan, keyboard shortcuts, context menu, selection
@@ -287,6 +439,8 @@ window.puzzleCanvas = {
             window.removeEventListener('resize', this._resizeHandler);
             this._resizeHandler = null;
         }
+
+        this._setupExtensionListener();
 
         var container = el.parentElement;
         var w = container.clientWidth || 1200;
@@ -337,6 +491,10 @@ window.puzzleCanvas = {
         window.addEventListener('resize', this._resizeHandler);
 
         console.log('Puzzle canvas initialized:', w, 'x', h);
+
+        // Update extension banner visibility
+        var self2 = this;
+        setTimeout(function() { self2._updateExtensionBanner(); }, 500);
 
         // Process any fragments queued before init
         if (this._pendingAdds.length > 0) {
@@ -394,128 +552,99 @@ window.puzzleCanvas = {
         this.canvas.requestRenderAll();
 
         console.log('Loading fragment image:', key, imageUrl);
-        var htmlImg = new Image();
-        htmlImg.crossOrigin = 'anonymous';
-        htmlImg.decoding = 'async';
-        htmlImg.onload = function() {
-            console.log('Image loaded:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
-            try {
-                self._removePlaceholder(key);
-                // Auto-fit: if using default scale (1.0), shrink large images to ~60% of canvas
-                var effectiveScale = scale || 1.0;
-                if (effectiveScale === 1.0 && self.canvas && !posOrigin && !centerOrigin) {
-                    var cw = self.canvas.getWidth();
-                    var ch = self.canvas.getHeight();
-                    var maxW = cw * 0.6;
-                    var maxH = ch * 0.6;
-                    if (htmlImg.naturalWidth > maxW || htmlImg.naturalHeight > maxH) {
-                        effectiveScale = Math.min(maxW / htmlImg.naturalWidth, maxH / htmlImg.naturalHeight);
+        var m = meta || {};
+        var flId = m.fl_id || '';
+        self._loadImageWithFallbacks(flId, m, key).then(function(result) {
+            var htmlImg = new Image();
+            htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
+            if (result.direct) htmlImg.removeAttribute('crossOrigin');
+            htmlImg.decoding = 'async';
+            htmlImg.onload = function() {
+                console.log('Image loaded:', key, htmlImg.naturalWidth, 'x', htmlImg.naturalHeight);
+                try {
+                    self._removePlaceholder(key);
+                    var effectiveScale = scale || 1.0;
+                    if (effectiveScale === 1.0 && self.canvas && !posOrigin && !centerOrigin) {
+                        var cw = self.canvas.getWidth();
+                        var ch = self.canvas.getHeight();
+                        var maxW = cw * 0.6;
+                        var maxH = ch * 0.6;
+                        if (htmlImg.naturalWidth > maxW || htmlImg.naturalHeight > maxH) {
+                            effectiveScale = Math.min(maxW / htmlImg.naturalWidth, maxH / htmlImg.naturalHeight);
+                        }
                     }
-                }
-                var img = self._buildFragmentImage(htmlImg, {
-                    left: x, top: y,
-                    angle: rotation || 0,
-                    scaleX: effectiveScale,
-                    scaleY: effectiveScale,
-                    flipX: !!flipH,
-                    flipY: !!flipV,
-                    hasControls: true,
-                    hasBorders: true,
-                    cornerSize: 12,
-                    transparentCorners: false,
-                    lockUniScaling: true,
-                    perPixelTargetFind: true,
-                    _fragmentKey: key,
-                    _imageUrl: imageUrl,
-                    _fragmentMeta: meta ? Object.assign({}, meta) : null
-                });
-                if (posOrigin && typeof img.setPositionByOrigin === 'function') {
-                    // Persisted puzzle docs store x/y in the desktop model:
-                    // the translation component whose visual center is x + width/2, y + height/2.
-                    // Using center placement here is more reliable than reverse-engineering Fabric's
-                    // left/top semantics under scaling/cropping.
-                    var centerX = x + (img.width || htmlImg.naturalWidth || 0) / 2;
-                    var centerY = y + (img.height || htmlImg.naturalHeight || 0) / 2;
-                    var pt = (typeof fabric.Point === 'function')
-                        ? new fabric.Point(centerX, centerY)
-                        : { x: centerX, y: centerY };
-                    img.setPositionByOrigin(pt, 'center', 'center');
-                    img.setCoords();
-                } else if (centerOrigin && typeof img.setPositionByOrigin === 'function') {
-                    var centerPt = (typeof fabric.Point === 'function')
-                        ? new fabric.Point(x, y)
-                        : { x: x, y: y };
-                    img.setPositionByOrigin(centerPt, 'center', 'center');
-                    img.setCoords();
-                }
+                    var img = self._buildFragmentImage(htmlImg, {
+                        left: x, top: y,
+                        angle: rotation || 0,
+                        scaleX: effectiveScale,
+                        scaleY: effectiveScale,
+                        flipX: !!flipH,
+                        flipY: !!flipV,
+                        hasControls: true,
+                        hasBorders: true,
+                        cornerSize: 12,
+                        transparentCorners: false,
+                        lockUniScaling: true,
+                        perPixelTargetFind: true,
+                        _fragmentKey: key,
+                        _imageUrl: result.url,
+                        _fragmentMeta: meta ? Object.assign({}, meta) : null
+                    });
+                    if (posOrigin && typeof img.setPositionByOrigin === 'function') {
+                        var centerX = x + (img.width || htmlImg.naturalWidth || 0) / 2;
+                        var centerY = y + (img.height || htmlImg.naturalHeight || 0) / 2;
+                        var pt = (typeof fabric.Point === 'function')
+                            ? new fabric.Point(centerX, centerY)
+                            : { x: centerX, y: centerY };
+                        img.setPositionByOrigin(pt, 'center', 'center');
+                        img.setCoords();
+                    } else if (centerOrigin && typeof img.setPositionByOrigin === 'function') {
+                        var centerPt = (typeof fabric.Point === 'function')
+                            ? new fabric.Point(x, y)
+                            : { x: x, y: y };
+                        img.setPositionByOrigin(centerPt, 'center', 'center');
+                        img.setCoords();
+                    }
 
-                self.canvas.add(img);
-                self.fragments[key] = img;
-                self.canvas.setActiveObject(img);
-                self.canvas.requestRenderAll();
-                self._syncSelection();
+                    self.canvas.add(img);
+                    self.fragments[key] = img;
+                    self.canvas.setActiveObject(img);
+                    self.canvas.requestRenderAll();
+                    self._syncSelection();
 
-                // Auto-load folios if meta has sys_id
-                if (meta && meta.sys_id) {
-                    self.loadFolios(key, meta.sys_id);
-                }
+                    if (meta && meta.sys_id) {
+                        self.loadFolios(key, meta.sys_id);
+                    }
 
-                self._emitEvent('puzzle-add-result', {
-                    key: key,
-                    success: true,
-                    meta: img._fragmentMeta || null
-                });
-            } catch (err) {
-                console.error('Failed to construct fabric image for', key, err);
-                self._removePlaceholder(key);
-                var constructErr = new fabric.Text('Render failed: ' + key, {
-                    left: x, top: y,
-                    fontSize: 12, fill: '#ff6666',
-                    selectable: false, evented: false
-                });
-                self.canvas.add(constructErr);
-                self.canvas.requestRenderAll();
-                self._emitEvent('puzzle-add-result', {
-                    key: key,
-                    success: false,
-                    error: String(err)
-                });
-            }
-        };
-        htmlImg.onerror = function(err) {
-            // Server-side fetch failed — try localhost helper (bg removal on user's machine)
-            console.warn('Server fetch failed for', key, '— trying localhost helper');
-            var m = meta || {};
-            var flId = m.fl_id || '';
-            var digits = String(flId).replace(/[^0-9]/g, '');
-            var iiifSize = (m.size || 800);
-            var directFallback = function() {
-                // Localhost helper unavailable — last resort: direct NLI (no bg removal)
-                if (!digits) {
-                    console.error('No fl_id digits for fallback:', key);
+                    self._emitEvent('puzzle-add-result', {
+                        key: key,
+                        success: true,
+                        meta: img._fragmentMeta || null
+                    });
+                } catch (err) {
+                    console.error('Failed to construct fabric image for', key, err);
                     self._removePlaceholder(key);
-                    self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'no-fl-id' });
-                    return;
-                }
-                console.warn('Localhost helper unavailable for', key, '— loading NLI directly (no bg removal)');
-                var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-                htmlImg.removeAttribute('crossOrigin');
-                htmlImg.onerror = function() {
-                    console.error('All image sources failed for', key);
-                    self._removePlaceholder(key);
-                    var errText = new fabric.Text('Image load failed: ' + key, {
-                        left: x, top: y, fontSize: 12, fill: '#ff6666',
+                    var constructErr = new fabric.Text('Render failed: ' + key, {
+                        left: x, top: y,
+                        fontSize: 12, fill: '#ff6666',
                         selectable: false, evented: false
                     });
-                    self.canvas.add(errText);
+                    self.canvas.add(constructErr);
                     self.canvas.requestRenderAll();
-                    self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'iiif-failed' });
-                };
-                htmlImg.src = directUrl;
+                    self._emitEvent('puzzle-add-result', {
+                        key: key,
+                        success: false,
+                        error: String(err)
+                    });
+                }
             };
-            self._tryLoadFromLocalHelper(htmlImg, key, m, directFallback, flId);
-        };
-        htmlImg.src = imageUrl;
+            htmlImg.onerror = function() {
+                console.error('All image sources failed for', key);
+                self._removePlaceholder(key);
+                self._emitEvent('puzzle-add-result', { key: key, success: false, error: 'all-failed' });
+            };
+            htmlImg.src = result.url;
+        });
     },
 
     /**
@@ -840,15 +969,19 @@ window.puzzleCanvas = {
         var size = meta.size || 800;
         var processed = meta.processed !== false;
         var isCul = meta.is_cul || false;
-        var url = '/api/puzzle_image?fl_id=' + folio.fl_id +
-                  '&threshold=' + threshold +
-                  '&size=' + size +
-                  '&processed=' + processed +
-                  '&is_cul=' + isCul;
+        var folioMeta = Object.assign({}, meta, {
+            fl_id: folio.fl_id,
+            threshold: threshold,
+            size: size,
+            processed: processed,
+            is_cul: isCul
+        });
 
+        var result = await self._loadImageWithFallbacks(folio.fl_id, folioMeta, key);
         return new Promise(function(resolve) {
             var htmlImg = new Image();
-            htmlImg.crossOrigin = 'anonymous';
+            htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
+            if (result.direct) htmlImg.removeAttribute('crossOrigin');
             htmlImg.decoding = 'async';
             htmlImg.onload = function() {
                 try {
@@ -860,13 +993,8 @@ window.puzzleCanvas = {
                         hasControls: true, hasBorders: true,
                         cornerSize: 12, transparentCorners: false,
                         perPixelTargetFind: true, _fragmentKey: key,
-                        _imageUrl: url,
-                        _fragmentMeta: Object.assign({}, meta, {
-                            fl_id: folio.fl_id,
-                            threshold: threshold,
-                            size: size,
-                            processed: processed
-                        })
+                        _imageUrl: result.url,
+                        _fragmentMeta: folioMeta
                     }));
                     if (typeof img.setPositionByOrigin === 'function') {
                         var pt = (typeof fabric.Point === 'function')
@@ -892,29 +1020,10 @@ window.puzzleCanvas = {
                 resolve(folio.label);
             };
             htmlImg.onerror = function() {
-                // Server fetch failed — try localhost helper
-                var digits = String(folio.fl_id || '').replace(/[^0-9]/g, '');
-                var localMeta = Object.assign({}, meta, {
-                    sys_id: data.sys_id,
-                    fl_id: folio.fl_id,
-                    folio_label: folio.label || '',
-                    threshold: threshold,
-                    size: size,
-                    processed: processed,
-                    is_cul: isCul
-                });
-                var directFallback = function() {
-                    // Localhost helper unavailable — last resort: direct NLI (no bg removal)
-                    if (!digits) { console.error('No fl_id for folio fallback'); resolve(''); return; }
-                    console.warn('Localhost helper unavailable for folio', key, '— loading NLI directly');
-                    var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + size + ',/0/default.jpg';
-                    htmlImg.removeAttribute('crossOrigin');
-                    htmlImg.onerror = function() { console.error('All folio sources failed'); resolve(''); };
-                    htmlImg.src = directUrl;
-                };
-                self._tryLoadFromLocalHelper(htmlImg, key, localMeta, directFallback, folio.fl_id);
+                console.error('Folio nav failed:', key);
+                resolve(folio.label);
             };
-            htmlImg.src = url;
+            htmlImg.src = result.url;
         });
     },
 
@@ -1504,59 +1613,49 @@ window.puzzleCanvas = {
             scaleX: obj.scaleX, scaleY: obj.scaleY,
             flipX: obj.flipX, flipY: obj.flipY
         };
-        var htmlImg = new Image();
-        htmlImg.crossOrigin = 'anonymous';
-        htmlImg.decoding = 'async';
-        htmlImg.onload = function() {
-            try {
-                if (self.canvas && typeof self.canvas.discardActiveObject === 'function') {
-                    self.canvas.discardActiveObject();
+        var m = newMeta || obj._fragmentMeta || {};
+        self._loadImageWithFallbacks(m.fl_id, m, key).then(function(result) {
+            var htmlImg = new Image();
+            htmlImg.crossOrigin = result.direct ? undefined : 'anonymous';
+            if (result.direct) htmlImg.removeAttribute('crossOrigin');
+            htmlImg.decoding = 'async';
+            htmlImg.onload = function() {
+                try {
+                    if (self.canvas && typeof self.canvas.discardActiveObject === 'function') {
+                        self.canvas.discardActiveObject();
+                    }
+                    self._removeFragmentsByKey(key);
+                    var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
+                        hasControls: true, hasBorders: true,
+                        cornerSize: 12, transparentCorners: false,
+                        perPixelTargetFind: true, _fragmentKey: key,
+                        _imageUrl: result.url, _fragmentMeta: m
+                    }));
+                    if (typeof img.setPositionByOrigin === 'function') {
+                        var pt = (typeof fabric.Point === 'function')
+                            ? new fabric.Point(pos.centerX, pos.centerY)
+                            : { x: pos.centerX, y: pos.centerY };
+                        img.setPositionByOrigin(pt, 'center', 'center');
+                        img.setCoords();
+                    }
+                    self.canvas.add(img);
+                    self.fragments[key] = img;
+                    self.canvas.setActiveObject(img);
+                    self.canvas.requestRenderAll();
+                    self._syncSelection();
+                    self._emitEvent('puzzle-fragment-meta', {
+                        key: key,
+                        meta: img._fragmentMeta || null
+                    });
+                } catch (err) {
+                    console.error('Failed to rebuild fragment:', key, err);
                 }
-                self._removeFragmentsByKey(key);
-                var img = self._buildFragmentImage(htmlImg, Object.assign({}, pos, {
-                    hasControls: true, hasBorders: true,
-                    cornerSize: 12, transparentCorners: false,
-                    perPixelTargetFind: true, _fragmentKey: key,
-                    _imageUrl: newUrl, _fragmentMeta: newMeta || obj._fragmentMeta
-                }));
-                if (typeof img.setPositionByOrigin === 'function') {
-                    var pt = (typeof fabric.Point === 'function')
-                        ? new fabric.Point(pos.centerX, pos.centerY)
-                        : { x: pos.centerX, y: pos.centerY };
-                    img.setPositionByOrigin(pt, 'center', 'center');
-                    img.setCoords();
-                }
-                self.canvas.add(img);
-                self.fragments[key] = img;
-                self.canvas.setActiveObject(img);
-                self.canvas.requestRenderAll();
-                self._syncSelection();
-                self._emitEvent('puzzle-fragment-meta', {
-                    key: key,
-                    meta: img._fragmentMeta || null
-                });
-            } catch (err) {
-                console.error('Failed to rebuild fragment:', key, err);
-            }
-        };
-        htmlImg.onerror = function() {
-            // Server fetch failed — try localhost helper
-            var m = newMeta || obj._fragmentMeta || {};
-            var flId = m.fl_id || '';
-            var digits = String(flId).replace(/[^0-9]/g, '');
-            var iiifSize = (m.size || 800);
-            var directFallback = function() {
-                // Localhost helper unavailable — last resort: direct NLI (no bg removal)
-                if (!digits) { console.error('No fl_id for reload fallback:', key); return; }
-                console.warn('Localhost helper unavailable for reload', key, '— loading NLI directly');
-                var directUrl = 'https://iiif.nli.org.il/IIIFv21/FL' + digits + '/full/' + iiifSize + ',/0/default.jpg';
-                htmlImg.removeAttribute('crossOrigin');
-                htmlImg.onerror = function() { console.error('All reload sources failed:', key); };
-                htmlImg.src = directUrl;
             };
-            self._tryLoadFromLocalHelper(htmlImg, key, m, directFallback, flId);
-        };
-        htmlImg.src = newUrl;
+            htmlImg.onerror = function() {
+                console.error('Reload failed:', key);
+            };
+            htmlImg.src = result.url;
+        });
     },
 
     /**
@@ -3013,6 +3112,25 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 app.storage.tab['puzzle_fragments'] = puzzle_meta
 
             threshold_slider.on('change', lambda: on_threshold_change())
+
+        # ── Extension banner + indicator ──
+        is_he = state.language == 'he'
+        banner_text = 'לחוויית פאזל מיטבית, התקינו את תוסף GenizahSearch Image Helper.' if is_he else 'For the best puzzle experience, install the GenizahSearch Image Helper extension.'
+        indicator_text = 'תוסף פעיל' if is_he else 'Extension active'
+        banner_html = f'''
+        <div id="puzzleExtBanner" style="display:none; align-items:center; gap:8px; padding:8px 16px;
+             background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:4px; font-size:13px; color:#664d03;">
+            <span style="flex:1;">{banner_text}</span>
+            <button onclick="localStorage.setItem('puzzleBannerDismissed','1'); this.parentElement.style.display='none';"
+                    style="background:none; border:none; cursor:pointer; font-size:18px; color:#664d03; padding:0 4px;">&#x2715;</button>
+        </div>
+        <div id="puzzleExtIndicator" style="display:none; align-items:center; gap:4px; padding:2px 8px;
+             font-size:11px; color:#2e7d32;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#4caf50; display:inline-block;"></span>
+            {indicator_text}
+        </div>
+        '''
+        ui.html(banner_html)
 
         # ── Canvas area ──
         with ui.element('div').classes('puzzle-canvas-wrap') as canvas_wrap:
