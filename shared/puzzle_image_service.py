@@ -228,49 +228,36 @@ class PuzzleImageService:
             f.unlink(missing_ok=True)
 
     def _fetch_iiif_image(self, fl_id: str, size: int) -> Optional[bytes]:
-        """Fetch image from NLI: IIIF first, then Rosetta thumbnail fallback.
-
-        Fallback chain matches the browse page (/api/nli_image):
-        1. NLI IIIF (full resolution) — works for most CUL/RNL/JTS FL IDs
-        2. Rosetta thumbnail — works for Mosseri and other collections where
-           IIIF returns 503 but Rosetta has lower-res scans
+        """Fetch image from NLI IIIF (direct).
 
         Works from desktop/local dev where NLI is reachable. On production
         servers where NLI blocks datacenter IPs, this returns None and the
         web client falls back to the localhost helper service.
+
+        NOTE: Does NOT include Rosetta thumbnail fallback. Rosetta returns tiny
+        low-quality thumbnails that look bad in the puzzle. Better to return None
+        and let the caller's fallback chain (extension, helper, proxy) handle it.
         """
         digits = re.sub(r"\D", "", str(fl_id))
         if not digits:
             return None
 
+        url = f"{NLI_IIIF_BASE}/FL{digits}/full/{size},/0/default.jpg"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://www.nli.org.il/',
         }
 
-        # 1. Try IIIF (full resolution)
-        url = f"{NLI_IIIF_BASE}/FL{digits}/full/{size},/0/default.jpg"
         try:
             resp = requests.get(url, headers=headers, timeout=30)
             if resp.status_code == 200 and len(resp.content) > 100:
                 logger.info(f"IIIF fetch OK for {fl_id}")
                 return resp.content
             else:
-                logger.info(f"IIIF failed for FL{digits}. Trying Rosetta fallback...")
+                logger.warning(f"IIIF fetch non-200 or empty for {fl_id}: "
+                               f"status={resp.status_code}, size={len(resp.content)}")
         except Exception as e:
-            logger.info(f"IIIF failed for FL{digits}: {e}. Trying Rosetta fallback...")
-
-        # 2. Rosetta thumbnail fallback (lower quality but available for more collections)
-        rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
-        try:
-            resp = requests.get(rosetta_url, headers=headers, timeout=15)
-            if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
-                # Filter out "no image" placeholder (~1615 bytes)
-                if len(resp.content) > 2000:
-                    logger.info(f"Rosetta thumbnail OK for FL{digits} ({len(resp.content)} bytes)")
-                    return resp.content
-        except Exception as e:
-            logger.warning(f"Rosetta fallback failed for FL{digits}: {e}")
+            logger.warning(f"IIIF fetch failed for {fl_id}: {e}")
 
         return None
 
