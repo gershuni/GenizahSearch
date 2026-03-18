@@ -2900,11 +2900,17 @@ class MetadataManager:
                     if len(row) > 7:
                         title = row[7].strip()
 
+                    # Store all call_number variants for Mosseri (needed for CUDL label construction)
+                    call_numbers_raw = None
+                    if library_code == 'Mosseri':
+                        call_numbers_raw = [s.strip() for s in raw_shelves if s.strip()]
+
                     self.csv_bank[sys_id] = {
                         'shelfmark': shelf,
                         'title': title,
                         'oxford_part_id': oxford_part_id,
                         'library_code': library_code,
+                        'call_numbers_raw': call_numbers_raw,
                     }
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
@@ -3351,6 +3357,23 @@ class MetadataManager:
                     current_meta['external_url'] = ext_link
                     current_meta['external_provider'] = 'cambridge'
                     LOGGER.info(f"Using local Cambridge manifest for {system_id} from crossref sidecar")
+
+        # 2a-mosseri: if crossref didn't find Cambridge manifest and this is Mosseri, try CUDL label construction
+        if not ext_link and crossref_svc and crossref_svc.is_available():
+            lib_code = current_meta.get('lib_code') or self.csv_bank.get(system_id, {}).get('library_code', '')
+            if lib_code == 'Mosseri':
+                # Try all call_number variants for best CUDL match
+                variants = self.csv_bank.get(system_id, {}).get('call_numbers_raw') or [current_meta.get('shelfmark', '')]
+                for variant in variants:
+                    label = construct_mosseri_cudl_label(variant)
+                    if label:
+                        cam_url = crossref_svc.get_cambridge_manifest_by_label(label)
+                        if cam_url:
+                            ext_link = cam_url
+                            current_meta['external_url'] = ext_link
+                            current_meta['external_provider'] = 'cambridge'
+                            LOGGER.info(f"Using Mosseri CUDL manifest for {system_id}: {label}")
+                            break
 
         # 2a-manchester: build canvas entries directly from ALL crossref images (each has its own luna_id)
         if not ext_link and crossref_svc and crossref_svc.is_available():
