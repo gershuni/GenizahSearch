@@ -4160,14 +4160,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Content row: image + text
                 _expand_row = ui.row().classes('gap-4 flex-wrap w-full')
                 with _expand_row:
-                    # Left: manuscript image thumbnail
+                    # Left: manuscript image thumbnail (click opens Quick View)
                     if _img_url:
-                        ui.html(
-                            f'<img src="{_img_url}" '
-                            f'onerror="this.style.display=\'none\'" '
-                            f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" />',
-                            sanitize=False
-                        )
+                        with ui.element('div').classes('cursor-pointer').on(
+                            'click', lambda idx=index, r=result: open_advanced_dialog(idx, r)
+                        ):
+                            ui.html(
+                                f'<img src="{_img_url}" '
+                                f'onerror="this.style.display=\'none\'" '
+                                f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" />',
+                                sanitize=False
+                            )
 
                     # Right: full text container (populated immediately or lazy-loaded)
                     _text_col = ui.column().classes('flex-1 min-w-[200px] gap-2')
