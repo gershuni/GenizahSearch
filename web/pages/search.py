@@ -104,8 +104,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         await asyncio.sleep(delay)
         try:
             await coro_func(*args)
-        except Exception:
-            pass  # Silently ignore if page was navigated away
+        except RuntimeError:
+            pass  # Silently ignore if page was navigated away (deleted elements)
+        except Exception as e:
+            logger.error("_after_delay error in %s: %s", coro_func.__name__, e, exc_info=True)
 
     # Restore domain exclusions from storage
     _de = app.storage.user.get('domain_exclusions')
@@ -1484,7 +1486,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ui.label().classes('absolute-center text-xs text-white').bind_text_from(
                     progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
                 )
-            status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
+            status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary); display: none;')
 
         # === Main Content Area (full-width, no splitter) ===
         # Accordion expansion state
@@ -2092,11 +2094,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     elapsed_str = f"{int(elapsed // 3600)}:{int((elapsed % 3600) // 60):02d}:{int(elapsed % 60):02d}"
                 else:
                     elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
-                base_status = search_state.status or ""
-                if base_status and base_status != tr("Starting..."):
-                    status_label.text = f"{elapsed_str} \u2014 {base_status}"
-                else:
-                    status_label.text = elapsed_str
+                # Show elapsed time in results_count during search (will be overwritten on completion)
+                results_count.text = f"{tr('Searching...')} · {elapsed_str}"
                 # Swap buttons: hide search, show stop (using style to avoid performance issues)
                 search_btn.style('display: none;')
                 stop_btn.style('display: inline-flex;')
@@ -2106,10 +2105,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 stop_btn.style('display: none;')
                 if search_state.progress >= 1.0:
                     progress_bar.value = 1.0
-                    # Show summary with elapsed time (set in execute_search completion)
-                    # Only override if status_label doesn't already have a completion summary
-                    if not status_label.text or status_label.text == tr("Starting..."):
-                        status_label.text = tr("Done. Found {} results.").format(len(search_state.results))
                     progress_bar.classes(add='opacity-0')
                 else:
                     progress_bar.classes(add='opacity-0')
