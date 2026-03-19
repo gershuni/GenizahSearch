@@ -14,11 +14,18 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **Thumbnail images**: New `width` parameter on `/api/nli_image_by_sysid/` endpoint — accordion requests 300px thumbnails instead of 2000px full images
 - **Lazy text loading**: On session restore, full text loads on first accordion expand via `get_browse_page()`
 - **Clickable thumbnails**: Clicking the accordion image opens Quick View dialog
+- **Progressive image loading**: All web image viewers (browse standard/fullscreen, Quick View normal/fullscreen) now show a spinner → 400px thumbnail → 2000px full resolution. CSS `.img-loading-container` spinner + JS `progressiveLoad()` upgrade chain. Desktop already had this pattern.
 
 ### Bug Fixes
 - **Homepage search stuck**: `_after_delay()` deferred tasks ran in a separate asyncio task without NiceGUI slot context, causing silent `RuntimeError`. Fixed by capturing `ui.context.client` at page creation
 - **Status duplication**: Merged "Search completed in X — N Results" into results header ("588 Results · 0:18"), eliminated duplicate timer-based status messages
 - **Browse rotation slider**: Removed JS string handler passed to `.on('update:model-value')` where NiceGUI expects a Python callable — Python `on_change` already handles rotation
+
+### Technical
+- Web: `progressiveLoad()` JS function in VIEWER_STYLES — loads `?width=400` thumbnail, preloads full via hidden `Image()`, swaps `src` on completion
+- CSS: `.img-loading-container` animated spinner, `.img-loaded` hides it
+- NiceGUI: `_page_client = ui.context.client` captured at page creation, entered with `with _page_client:` in deferred async tasks
+- API: `/api/nli_image_by_sysid/` accepts `width` param (100-2000, default 2000), IIIF requests use `full/{width},/0/default.jpg`
 
 ---
 
