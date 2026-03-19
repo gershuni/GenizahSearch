@@ -4214,8 +4214,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ls['loaded'] = True
                         p_num = int(r.get('display', {}).get('img', '1'))
                         try:
+                            from web.services import get_service
                             page_data = await run.io_bound(
-                                lambda: state.meta_mgr.get_page_data(sid, p_num) if state.meta_mgr else None
+                                lambda: get_service().get_browse_page(sid, p_num=p_num)
                             )
                             if page_data and page_data.text:
                                 r['full_text'] = page_data.text
