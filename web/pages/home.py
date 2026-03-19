@@ -10,6 +10,7 @@ A professional research dashboard providing:
 """
 
 import asyncio
+from urllib.parse import quote
 
 from nicegui import ui, app
 from web.state import state
@@ -80,6 +81,24 @@ def create_page():
 
                     mini_stat('library_books', get_doc_count, tr('Pages'))
                     mini_stat('star', get_list_count, tr('Lists'))
+
+            # Hero search bar — the visual centerpiece
+            with ui.row().classes('w-full justify-center mt-3'):
+                with ui.row().classes('items-center gap-2').style(
+                    'max-width: 600px; width: 100%;'
+                ):
+                    hero_search = ui.input(
+                        placeholder=tr('Search the Genizah...')
+                    ).classes('flex-grow').props('outlined rounded dense').style(
+                        'font-size: 1.1rem;'
+                    ).on(
+                        'keydown.enter',
+                        lambda: ui.navigate.to(f'/search?q={quote(hero_search.value or "")}')
+                    )
+                    ui.button(
+                        icon='search',
+                        on_click=lambda: ui.navigate.to(f'/search?q={quote(hero_search.value or "")}')
+                    ).props('round color=primary').style('width: 44px; height: 44px;')
 
         # === About the Genizah Banner ===
         with ui.card().classes('w-full p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all mt-2').props(
