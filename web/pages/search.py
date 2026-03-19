@@ -4070,6 +4070,51 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 f'color: var(--text-tertiary); direction: {_dir}; word-wrap: break-word;'
                             )
 
+            # Action buttons row (on the card, always visible)
+            with ui.row().classes('gap-1 mt-1'):
+                # Browse
+                if sys_id:
+                    _card_fl_id = None
+                    if 'raw_header' in result and state.meta_mgr:
+                        try:
+                            _card_fl_id = state.meta_mgr.parse_full_id_components(result['raw_header']).get('fl_id')
+                        except Exception:
+                            pass
+                    _card_browse_url = f'/browse?sys_id={sys_id}'
+                    if _card_fl_id:
+                        _card_browse_url += f'&fl_id={_card_fl_id}'
+                    with ui.link(target=_card_browse_url).classes('no-underline'):
+                        ui.button(icon='menu_book').props('flat round dense size=sm color=green').tooltip(tr('Browse Full Manuscript'))
+
+                # Quick View (was Advanced View)
+                ui.button(
+                    icon='open_in_full',
+                    on_click=lambda idx=index, r=result: open_advanced_dialog(idx, r)
+                ).props('flat round dense size=sm').tooltip(tr('Quick View'))
+
+                # Add to List
+                def make_star_handler(r):
+                    def handler():
+                        show_add_to_list_dialog_local(r)
+                    return handler
+                result_sys_id = result.get('display', {}).get('id')
+                result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
+                ui.button(
+                    icon='star' if result_in_list else 'star_border',
+                    on_click=make_star_handler(result)
+                ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
+
+                # Catalog Records
+                if sys_id:
+                    cat_count = search_state.catalog_source_counts.get(sys_id, 0)
+                    from web.components.catalog_dialog import show_catalog_dialog
+                    cat_btn = ui.button(
+                        icon='description',
+                        on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
+                    ).props('flat round dense size=sm').tooltip(f'{tr("Catalog Records")} ({cat_count})')
+                    if cat_count == 0:
+                        cat_btn.disable()
+
             # Snippet
             if snippet:
                 snippet_html = SearchEngine.format_snippet(snippet)
@@ -4078,46 +4123,45 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ):
                     ui.html(snippet_html, sanitize=False)
 
-            # === Inline accordion expansion (replaces splitter viewer + mobile expansion) ===
+            # === Inline accordion expansion (image + full text only) ===
             expand_container = ui.column().classes('w-full result-inline-expand').style('display: none;')
             search_state.expansion_refs[index] = expand_container
 
+            # Build thumbnail URL eagerly (browser preloads in background)
+            _img_url = None
+            if sys_id:
+                page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
+                _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300"
+                is_oxford = False
+                try:
+                    from web.pages.browse import is_oxford_manuscript
+                    is_oxford = is_oxford_manuscript(display.get('shelfmark', ''), display.get('library_code', ''))
+                except Exception:
+                    pass
+                if is_oxford:
+                    try:
+                        from web.pages.browse import get_oxford_direct_image_url
+                        _ox_url = get_oxford_direct_image_url(display.get('shelfmark', ''), page_idx)
+                        if _ox_url:
+                            _img_url = _ox_url
+                        else:
+                            _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+                    except Exception:
+                        _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+
             with expand_container:
                 with ui.row().classes('gap-4 flex-wrap'):
-                    # Left: manuscript image thumbnail (same URL pattern as Advanced View)
-                    _has_image = False
-                    if sys_id:
-                        page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
-                        _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300"
-                        _safe_sys_id = str(sys_id).replace("'", "")
-                        is_oxford = False
-                        try:
-                            from web.pages.browse import is_oxford_manuscript
-                            is_oxford = is_oxford_manuscript(display.get('shelfmark', ''), display.get('library_code', ''))
-                        except Exception:
-                            pass
-                        if is_oxford:
-                            try:
-                                from web.pages.browse import get_oxford_direct_image_url
-                                _ox_url = get_oxford_direct_image_url(display.get('shelfmark', ''), page_idx)
-                                if _ox_url:
-                                    _img_url = _ox_url
-                                else:
-                                    _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
-                            except Exception:
-                                _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+                    # Left: manuscript image thumbnail
+                    if _img_url:
                         ui.html(
                             f'<img src="{_img_url}" '
                             f'onerror="this.style.display=\'none\'" '
-                            f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" '
-                            f'loading="lazy" />',
+                            f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" />',
                             sanitize=False
                         )
-                        _has_image = True
 
-                    # Right: full text (highlighted, line-broken) + action buttons
+                    # Right: full text (highlighted, line-broken)
                     with ui.column().classes('flex-1 min-w-[200px] gap-2'):
-                        # Show full text with highlighting instead of repeating snippet
                         full_text = result.get('full_text', '')
                         highlight_pattern = result.get('highlight_pattern', '')
                         if full_text:
@@ -4143,77 +4187,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ):
                                     ui.html(_exp_text_html, sanitize=False)
                         elif snippet:
-                            # Fallback: if no full text, show snippet
                             _exp_snippet_html = SearchEngine.format_snippet(snippet)
                             with ui.element('div').classes('p-3 rounded-lg text-sm').style(
                                 'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
                             ):
                                 ui.html(_exp_snippet_html, sanitize=False)
-
-                        # Action buttons row
-                        with ui.row().classes('gap-2 flex-wrap items-center'):
-                            # Browse
-                            if sys_id:
-                                _card_fl_id = None
-                                if 'raw_header' in result and state.meta_mgr:
-                                    try:
-                                        _card_fl_id = state.meta_mgr.parse_full_id_components(result['raw_header']).get('fl_id')
-                                    except Exception:
-                                        pass
-                                _card_browse_url = f'/browse?sys_id={sys_id}'
-                                if _card_fl_id:
-                                    _card_browse_url += f'&fl_id={_card_fl_id}'
-                                with ui.link(target=_card_browse_url).classes('no-underline'):
-                                    ui.button(icon='menu_book').props('flat round dense size=sm color=green').tooltip(tr('Browse Full Manuscript'))
-
-                            # Advanced View
-                            ui.button(
-                                icon='open_in_full',
-                                on_click=lambda idx=index, r=result: open_advanced_dialog(idx, r)
-                            ).props('flat round dense size=sm').tooltip(tr('Advanced View'))
-
-                            # Find Parallels
-                            full_text = result.get('full_text', '')
-                            text_for_parallels = full_text or snippet.replace('*', '')
-                            if text_for_parallels.strip():
-                                ui.button(
-                                    icon='compare_arrows',
-                                    on_click=lambda t=text_for_parallels: ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
-                                ).props('flat round dense size=sm').tooltip(tr('Find Parallels'))
-
-                            # Add to List
-                            def make_star_handler(r):
-                                def handler():
-                                    show_add_to_list_dialog_local(r)
-                                return handler
-                            result_sys_id = result.get('display', {}).get('id')
-                            result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
-                            ui.button(
-                                icon='star' if result_in_list else 'star_border',
-                                on_click=make_star_handler(result)
-                            ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
-
-                            # Exclude (non-composition only)
-                            if result_sys_id and not result.get('is_composition'):
-                                def _exclude_word_result(sid=result_sys_id):
-                                    search_state.word_search_excluded_ids.add(sid)
-                                    _persist('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
-                                    _apply_word_search_exclusions_and_render()
-                                ui.button(
-                                    icon='remove_circle_outline',
-                                    on_click=_exclude_word_result,
-                                ).props('flat round dense size=sm').style('color: var(--text-muted);').tooltip(tr('Exclude from results'))
-
-                            # Catalog Records
-                            if sys_id:
-                                cat_count = search_state.catalog_source_counts.get(sys_id, 0)
-                                from web.components.catalog_dialog import show_catalog_dialog
-                                cat_btn = ui.button(
-                                    icon='description',
-                                    on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
-                                ).props('flat round dense size=sm').tooltip(f'{tr("Catalog Records")} ({cat_count})')
-                                if cat_count == 0:
-                                    cat_btn.disable()
 
     def open_advanced_dialog(index, result):
         """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.

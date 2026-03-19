@@ -1605,6 +1605,7 @@ TRANSLATIONS = {
     "Favorites only": "מועדפים בלבד",
     "Full text not available": "טקסט מלא לא זמין",
     "Advanced View": "תצוגה מתקדמת",
+    "Quick View": "מבט מהיר",
     "Match Context": "הקשר התאמה",
     "View in Browse": "צפה בדפדוף",
     "Copy Text": "העתק טקסט",
