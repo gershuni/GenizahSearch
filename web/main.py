@@ -298,8 +298,10 @@ def create_layout():
                     while True:
                         try:
                             await update_status()
+                        except RuntimeError:
+                            break  # Element deleted — stop loop
                         except Exception:
-                            break
+                            pass  # Transient failure — keep retrying
                         await asyncio.sleep(10.0)
                 connection_state['timer'] = asyncio.ensure_future(_connection_heartbeat_loop())
 
