@@ -99,11 +99,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     search_state = SearchUIState()
 
     # Helper: deferred async callback without ui.timer (avoids parent_slot RuntimeError on navigation)
+    # Capture NiceGUI client for deferred async tasks (slot context)
+    _page_client = ui.context.client
+
     async def _after_delay(delay, coro_func, *args):
-        """Schedule an async callback after a delay, without creating a NiceGUI timer element."""
+        """Schedule an async callback after a delay, with NiceGUI client context."""
         await asyncio.sleep(delay)
         try:
-            await coro_func(*args)
+            with _page_client:
+                await coro_func(*args)
+        except RuntimeError as e:
+            if 'slot stack' not in str(e) and 'deleted' not in str(e):
+                logger.error("_after_delay error in %s: %s", coro_func.__name__, e)
         except Exception as e:
             logger.error("_after_delay error in %s: %s", coro_func.__name__, e, exc_info=True)
 
