@@ -963,11 +963,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.is_loading = True
         state.error = None
         state.zoom_level = 1.0  # Reset zoom on page change
-        # Reset image adjustments on page change
-        for key in ('brightness', 'contrast'):
-            if slider_refs.get(key): slider_refs[key].value = 0
-        if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
-        ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
+        # Reset image adjustments on page change (must use content_container context for async tasks)
+        with content_container:
+            for key in ('brightness', 'contrast'):
+                if slider_refs.get(key): slider_refs[key].value = 0
+            if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
+            ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
         update_content()  # Show loading spinner
 
         # === Phase A: Fast page fetch ===
