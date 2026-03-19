@@ -274,7 +274,7 @@ Plans:
 | 50. Join Documents | 3/3 | Complete    | 2026-03-16 |
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
-| 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete   | 2026-03-19 |
+| 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
 
 ---
 *Roadmap created: 2026-02-09*
