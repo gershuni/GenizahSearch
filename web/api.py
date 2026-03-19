@@ -224,12 +224,14 @@ def init_api_routes():
     _image_cache = {}
 
     @app.get('/api/nli_image_by_sysid/{sys_id}')
-    def nli_image_by_sysid(sys_id: str, page: int = 0):
+    def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch NLI image by System ID. Dynamically gets FL IDs from NLI MARC API.
         """
         import time as _time
-        cache_key = (sys_id, page)
+        # Clamp width to reasonable range
+        width = max(100, min(width, 2000))
+        cache_key = (sys_id, page, width)
 
         # Check image cache first
         if cache_key in _image_cache:
@@ -254,10 +256,11 @@ def init_api_routes():
         # If page index specified, try that specific FL ID first
         if 0 <= page < len(fl_ids):
             fl_id = fl_ids[page]
-            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/2000,/0/default.jpg"
+            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
             try:
                 resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
-                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
+                min_size = 1000 if width < 500 else 5000  # Thumbnails are smaller
+                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > min_size:
                     content_type = resp.headers.get('Content-Type', 'image/jpeg')
                     # Cache the image
                     _image_cache[cache_key] = (resp.content, content_type, _time.time())
@@ -271,10 +274,11 @@ def init_api_routes():
 
         # Fallback: try each FL ID until one works
         for fl_id in fl_ids:
-            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/2000,/0/default.jpg"
+            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
             try:
                 resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
-                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > 5000:
+                min_size = 1000 if width < 500 else 5000
+                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > min_size:
                     content_type = resp.headers.get('Content-Type', 'image/jpeg')
                     _image_cache[cache_key] = (resp.content, content_type, _time.time())
                     return Response(

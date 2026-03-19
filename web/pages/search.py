@@ -4088,7 +4088,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _has_image = False
                     if sys_id:
                         page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
-                        _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}"
+                        _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300"
                         _safe_sys_id = str(sys_id).replace("'", "")
                         is_oxford = False
                         try:
@@ -4108,7 +4108,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
                         ui.html(
                             f'<img src="{_img_url}" '
-                            f'onerror="advHandleImageError(this, \'{_safe_sys_id}\', {page_idx}, {"true" if is_oxford else "false"})" '
+                            f'onerror="this.style.display=\'none\'" '
                             f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" '
                             f'loading="lazy" />',
                             sanitize=False
