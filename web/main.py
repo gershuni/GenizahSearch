@@ -1179,25 +1179,30 @@ async def auth_callback_route(code: str = None):
 
 async def initialize_engine():
     """Heavy initialization running in a separate thread via run.io_bound."""
-    logger.info("Starting background initialization...")
+    print("[init] Starting background initialization...")
 
     def _init_sync():
         try:
             # 1. Metadata
+            print("[init] 1/6 MetadataManager...", flush=True)
             state.meta_mgr = MetadataManager()
+            print("[init] 2/6 ListsManager...", flush=True)
             state.lists_mgr = ListsManager(state.meta_mgr)
 
             # Initialize user lists manager (auth-aware wrapper)
             state.init_user_lists_mgr()
 
             # 2. Lab Settings & Engine
+            print("[init] 3/6 LabEngine...", flush=True)
             state.lab_engine = LabEngine(state.meta_mgr, None)
 
             # 3. Variants (depends on Lab Settings)
             state.var_mgr = VariantManager(settings=state.lab_engine.settings)
 
             # 4. Search Engine & Indexer
+            print("[init] 4/6 SearchEngine...", flush=True)
             state.searcher = SearchEngine(state.meta_mgr, state.var_mgr)
+            print("[init] 5/6 Indexer...", flush=True)
             state.indexer = Indexer(state.meta_mgr)
 
             # 5. Start background loading
@@ -1210,12 +1215,14 @@ async def initialize_engine():
                 if fjms.is_available():
                     fjms.pre_warm_caches()
             except Exception as e:
-                logger.error(f"FJMS cache pre-warm failed (non-fatal): {e}")
+                print(f"[init] FJMS cache pre-warm failed (non-fatal): {e}")
 
-            logger.info("Engine initialization complete.")
+            print("[init] Engine initialization complete.")
             return True
         except Exception as e:
-            logger.exception(f"Engine init failed: {e}")
+            print(f"[init] Engine init FAILED: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             return False
 
     await run.io_bound(_init_sync)
