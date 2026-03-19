@@ -5298,23 +5298,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 with ui.row().classes('w-full items-center gap-2 px-3 py-1').style(
                                     'background: #1a1a1a; border-top: 1px solid #333;'
                                 ):
-                                    ui.label(tr('Brightness')).classes('text-white text-xs')
+                                    ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
                                     adv_state.brightness_sl = ui.slider(
                                         min=-100, max=100, step=1, value=0,
                                         on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setBrightness({e.value})')
                                     ).props('dark dense').classes('w-24')
-                                    ui.label(tr('Contrast')).classes('text-white text-xs')
+                                    ui.icon('contrast').classes('text-white text-sm').tooltip(tr('Contrast'))
                                     adv_state.contrast_sl = ui.slider(
                                         min=-100, max=100, step=1, value=0,
                                         on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setContrast({e.value})')
                                     ).props('dark dense').classes('w-24')
-                                    ui.label(tr('Gamma')).classes('text-white text-xs')
+                                    ui.icon('timeline').classes('text-white text-sm').tooltip(tr('Gamma'))
                                     adv_state.gamma_sl = ui.slider(
                                         min=20, max=300, step=1, value=100,
                                         on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setGamma({e.value / 100})')
                                     ).props('dark dense').classes('w-24')
                                     ui.button(
-                                        icon='invert_colors',
+                                        icon='tonality',
                                         on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.toggleInvert()')
                                     ).props('flat round size=sm text-color=white').tooltip(tr('Invert'))
                                     def _adv_reset_adj():
@@ -5323,7 +5323,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         if hasattr(adv_state, 'gamma_sl'): adv_state.gamma_sl.value = 100
                                         ui.run_javascript('if(window.advViewer) window.advViewer.resetAdjustments()')
                                     ui.button(
-                                        icon='tune',
+                                        icon='restart_alt',
                                         on_click=_adv_reset_adj
                                     ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
 

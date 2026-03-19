@@ -3389,23 +3389,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     with ui.row().classes('items-center gap-1 px-2 py-1').style(
                                         'background: #1a1a1a; margin: 0 4px; border-top: 1px solid #333;'
                                     ):
-                                        ui.label(tr('Brightness')).style('color: white; font-size: 0.65rem;')
+                                        ui.icon('brightness_6').style('color: white; font-size: 0.85rem;').tooltip(tr('Brightness'))
                                         _rd_b_sl = ui.slider(
                                             min=-100, max=100, step=1, value=0,
                                             on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetBrightness('{vid}', {e.value})")
                                         ).props('dark dense').classes('w-16')
-                                        ui.label(tr('Contrast')).style('color: white; font-size: 0.65rem;')
+                                        ui.icon('contrast').style('color: white; font-size: 0.85rem;').tooltip(tr('Contrast'))
                                         _rd_c_sl = ui.slider(
                                             min=-100, max=100, step=1, value=0,
                                             on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetContrast('{vid}', {e.value})")
                                         ).props('dark dense').classes('w-16')
-                                        ui.label(tr('Gamma')).style('color: white; font-size: 0.65rem;')
+                                        ui.icon('timeline').style('color: white; font-size: 0.85rem;').tooltip(tr('Gamma'))
                                         _rd_g_sl = ui.slider(
                                             min=20, max=300, step=1, value=100,
                                             on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetGamma('{vid}', {e.value / 100})")
                                         ).props('dark dense').classes('w-16')
                                         ui.button(
-                                            icon='invert_colors',
+                                            icon='tonality',
                                             on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdToggleInvert('{vid}')")
                                         ).props('flat round size=xs text-color=white').tooltip(tr('Invert'))
                                         # Store refs for reset
@@ -3414,7 +3414,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             b_sl.value = 0; c_sl.value = 0; g_sl.value = 100
                                             ui.run_javascript(f"window.rdResetAdjustments('{vid}')")
                                         ui.button(
-                                            icon='tune',
+                                            icon='restart_alt',
                                             on_click=_rd_reset
                                         ).props('flat round size=xs text-color=white').tooltip(tr('Reset Image'))
 
@@ -4301,23 +4301,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             with ui.row().classes('w-full items-center gap-2 px-3 py-1').style(
                                 'background: #1a1a1a; border-top: 1px solid #333;'
                             ):
-                                ui.label(tr('Brightness')).classes('text-white text-xs')
+                                ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
                                 slider_refs['brightness'] = ui.slider(
                                     min=-100, max=100, step=1, value=0,
                                     on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setBrightness({e.value})')
                                 ).props('dark dense').classes('w-24')
-                                ui.label(tr('Contrast')).classes('text-white text-xs')
+                                ui.icon('contrast').classes('text-white text-sm').tooltip(tr('Contrast'))
                                 slider_refs['contrast'] = ui.slider(
                                     min=-100, max=100, step=1, value=0,
                                     on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setContrast({e.value})')
                                 ).props('dark dense').classes('w-24')
-                                ui.label(tr('Gamma')).classes('text-white text-xs')
+                                ui.icon('timeline').classes('text-white text-sm').tooltip(tr('Gamma'))
                                 slider_refs['gamma'] = ui.slider(
                                     min=20, max=300, step=1, value=100,
                                     on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setGamma({e.value / 100})')
                                 ).props('dark dense').classes('w-24')
                                 ui.button(
-                                    icon='invert_colors',
+                                    icon='tonality',
                                     on_click=lambda: ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.toggleInvert()')
                                 ).props('flat round size=sm text-color=white').tooltip(tr('Invert'))
                                 def _reset_image_adj():
@@ -4326,7 +4326,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
                                     ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
                                 ui.button(
-                                    icon='tune',
+                                    icon='restart_alt',
                                     on_click=_reset_image_adj
                                 ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
 
@@ -4559,23 +4559,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 with ui.element('div').classes('fullscreen-image-toolbar').style(
                                     'border-top: 1px solid #444; padding: 2px 8px;'
                                 ):
-                                    ui.label(tr('Brightness')).style('color: #ccc; font-size: 0.7rem;')
+                                    ui.icon('brightness_6').style('color: #ccc; font-size: 1rem;').tooltip(tr('Brightness'))
                                     slider_refs['fs_brightness'] = ui.slider(
                                         min=-100, max=100, step=1, value=0,
                                         on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setBrightness({e.value})')
                                     ).props('dark dense').classes('w-20')
-                                    ui.label(tr('Contrast')).style('color: #ccc; font-size: 0.7rem;')
+                                    ui.icon('contrast').style('color: #ccc; font-size: 1rem;').tooltip(tr('Contrast'))
                                     slider_refs['fs_contrast'] = ui.slider(
                                         min=-100, max=100, step=1, value=0,
                                         on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setContrast({e.value})')
                                     ).props('dark dense').classes('w-20')
-                                    ui.label(tr('Gamma')).style('color: #ccc; font-size: 0.7rem;')
+                                    ui.icon('timeline').style('color: #ccc; font-size: 1rem;').tooltip(tr('Gamma'))
                                     slider_refs['fs_gamma'] = ui.slider(
                                         min=20, max=300, step=1, value=100,
                                         on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setGamma({e.value / 100})')
                                     ).props('dark dense').classes('w-20')
                                     ui.button(
-                                        icon='invert_colors',
+                                        icon='tonality',
                                         on_click=lambda: ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.toggleInvert()')
                                     ).props('flat round size=sm').tooltip(tr('Invert'))
                                     def _fs_reset_adj():
@@ -4584,7 +4584,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if slider_refs.get('fs_gamma'): slider_refs['fs_gamma'].value = 100
                                         ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.resetAdjustments()')
                                     ui.button(
-                                        icon='tune',
+                                        icon='restart_alt',
                                         on_click=_fs_reset_adj
                                     ).props('flat round size=sm').tooltip(tr('Reset Image'))
 

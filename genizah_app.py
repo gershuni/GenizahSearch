@@ -1805,8 +1805,9 @@ class ManuscriptViewerWidget(QWidget):
         adj_bar = QHBoxLayout()
         adj_bar.setContentsMargins(5, 2, 5, 2)
 
-        lbl_b = QLabel(tr("Brightness"))
-        lbl_b.setStyleSheet("font-size: 10px; color: #888;")
+        lbl_b = QLabel("\u2600")  # Sun symbol for brightness
+        lbl_b.setStyleSheet("font-size: 14px; color: #888;")
+        lbl_b.setToolTip(tr("Brightness"))
         adj_bar.addWidget(lbl_b)
         self.slider_brightness = QSlider(Qt.Orientation.Horizontal)
         self.slider_brightness.setRange(-100, 100)
@@ -1815,8 +1816,9 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_brightness.setToolTip(tr("Brightness"))
         adj_bar.addWidget(self.slider_brightness)
 
-        lbl_c = QLabel(tr("Contrast"))
-        lbl_c.setStyleSheet("font-size: 10px; color: #888;")
+        lbl_c = QLabel("\u25d0")  # Half-filled circle for contrast
+        lbl_c.setStyleSheet("font-size: 14px; color: #888;")
+        lbl_c.setToolTip(tr("Contrast"))
         adj_bar.addWidget(lbl_c)
         self.slider_contrast = QSlider(Qt.Orientation.Horizontal)
         self.slider_contrast.setRange(-100, 100)
@@ -1825,8 +1827,9 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_contrast.setToolTip(tr("Contrast"))
         adj_bar.addWidget(self.slider_contrast)
 
-        lbl_g = QLabel(tr("Gamma"))
-        lbl_g.setStyleSheet("font-size: 10px; color: #888;")
+        lbl_g = QLabel("\u03b3")  # Greek gamma letter
+        lbl_g.setStyleSheet("font-size: 14px; color: #888; font-style: italic;")
+        lbl_g.setToolTip(tr("Gamma"))
         adj_bar.addWidget(lbl_g)
         self.slider_gamma = QSlider(Qt.Orientation.Horizontal)
         self.slider_gamma.setRange(20, 300)
@@ -1835,14 +1838,14 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_gamma.setToolTip(tr("Gamma"))
         adj_bar.addWidget(self.slider_gamma)
 
-        self.btn_invert = QPushButton(tr("Invert"))
+        self.btn_invert = QPushButton("\u25d1")  # Circle with right half black — invert
         self.btn_invert.setCheckable(True)
-        self.btn_invert.setFixedWidth(50)
+        self.btn_invert.setFixedWidth(30)
         self.btn_invert.setToolTip(tr("Invert"))
         adj_bar.addWidget(self.btn_invert)
 
-        btn_reset_adj = QPushButton(tr("Reset Image"))
-        btn_reset_adj.setFixedWidth(80)
+        btn_reset_adj = QPushButton("\u21ba")  # Circular arrow — reset
+        btn_reset_adj.setFixedWidth(30)
         btn_reset_adj.setToolTip(tr("Reset Image"))
         adj_bar.addWidget(btn_reset_adj)
 
