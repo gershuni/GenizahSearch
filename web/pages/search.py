@@ -4092,20 +4092,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if svc.is_available() and sys_id:
                             images = svc.get_images(sys_id)
                             if images:
+                                # Pick image by hit page index (images ordered by ImageName)
                                 hit_page = int(display.get('img', '1')) if display.get('img') else 1
-                                img_entry = None
-                                for img in images:
-                                    if img.get('page_num') == hit_page:
-                                        img_entry = img
-                                        break
-                                if not img_entry:
-                                    img_entry = images[0]
+                                img_idx = max(0, min(hit_page - 1, len(images) - 1))
+                                img_entry = images[img_idx]
                                 fgp_id = img_entry.get('fgp_image_number_id')
                                 if fgp_id:
-                                    # Browser fetches directly from NLI IIIF (server is blocked, but browser is not)
-                                    thumb_url = f"https://iiif.nli.org.il/IIIFv21/FL{fgp_id}/full/200,/0/default.jpg"
-                                    ui.image(thumb_url).classes('rounded').style(
-                                        'width: 200px; max-height: 250px; object-fit: contain;'
+                                    # Browser fetches directly from NLI IIIF (browser is not blocked, server is)
+                                    # onerror falls back to server proxy which resolves FL IDs from local sidecar
+                                    _iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fgp_id}/full/200,/0/default.jpg"
+                                    _fallback_url = f"/api/nli_image_by_sysid/{sys_id}?page=0"
+                                    ui.html(
+                                        f'<img src="{_iiif_url}" '
+                                        f'onerror="this.onerror=null; this.src=\'{_fallback_url}\';" '
+                                        f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" '
+                                        f'loading="lazy" />',
+                                        sanitize=False
                                     )
                                     _has_image = True
                     except Exception:

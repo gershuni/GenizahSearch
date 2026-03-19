@@ -114,11 +114,7 @@ def create_page():
                     def _navigate_search():
                         val = hero_search.value or ''
                         if val.strip():
-                            # Fire-and-forget: page navigates away so JS response never returns
-                            ui.run_javascript(
-                                'window.location.href = "/search?q=" + encodeURIComponent(document.querySelector(".hero-search-input input").value)',
-                                respond=False,
-                            )
+                            ui.navigate.to(f'/search?q={val}')
 
                     hero_search = ui.input(
                         placeholder=tr('Search manuscripts...')
