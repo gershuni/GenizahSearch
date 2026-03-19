@@ -3363,9 +3363,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             else:
                 total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
 
-            status_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {len(results)} {tr('Results')}"
+            results_count.text = f"{len(results)} {tr('Results')} · {total_elapsed_str} ({tr('partial')})"
+            status_label.text = ''
             ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
-            results_count.text = f"{len(results)} {tr('Results')} ({tr('partial')})"
 
             # Fast title-only translation fetch for partial results (~1ms SQLite)
             _partial_sids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
@@ -3447,13 +3447,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             else:
                 _filter_suffix = f" ({tr('filtered')}: {search_state.filter_manuscript_count:,} {tr('manuscripts')})"
 
-        # Status line
-        status_label.text = f"{tr('Search completed in')} {total_elapsed_str} \u2014 {len(results)} {tr('Results')}{_filter_suffix}"
+        # Merged status: results count + time + filter info in one label
         expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
         if expanded_count > 0:
-            results_count.text = f"{len(results)} {tr('Results')} ({tr('searching')} {expanded_count} {tr('expanded terms')})"
+            results_count.text = f"{len(results)} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}"
         else:
-            results_count.text = f"{len(results)} {tr('Results')}"
+            results_count.text = f"{len(results)} {tr('Results')} · {total_elapsed_str}{_filter_suffix}"
+        status_label.text = ''
 
         # Responsa explosion guard warning
         if results and results[0].get('responsa_warning'):
@@ -4102,6 +4102,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     img_entry = images[0]
                                 fgp_id = img_entry.get('fgp_image_number_id')
                                 if fgp_id:
+                                    # Browser fetches directly from NLI IIIF (server is blocked, but browser is not)
                                     thumb_url = f"https://iiif.nli.org.il/IIIFv21/FL{fgp_id}/full/200,/0/default.jpg"
                                     ui.image(thumb_url).classes('rounded').style(
                                         'width: 200px; max-height: 250px; object-fit: contain;'

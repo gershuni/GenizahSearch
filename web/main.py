@@ -497,9 +497,11 @@ def create_layout():
             ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium citation-link').style('direction: ltr; text-decoration: none;')
             ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
 
-        # Compact citation (shown after auto-collapse)
-        with ui.row().classes('w-full items-center justify-center gap-2 py-1 px-4 citation-compact'):
-            ui.label('Cite: MiDRASH (Stoekl Ben Ezra et al., 2025)').classes('text-xs opacity-80').style('direction: ltr;')
+        # Compact citation (shown after auto-collapse — full text, truncated with ellipsis on narrow screens)
+        with ui.row().classes('w-full items-center justify-center gap-2 py-1 px-4 citation-compact').style('flex-wrap: nowrap;'):
+            ui.label(full_citation).classes('text-xs opacity-80').style(
+                'direction: ltr; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;'
+            )
             ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy full citation'))
             ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
 

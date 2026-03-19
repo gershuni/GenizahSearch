@@ -111,14 +111,18 @@ def create_page():
                 with ui.row().classes('items-center gap-2').style(
                     'max-width: 600px; width: 100%;'
                 ):
-                    def _navigate_search():
+                    async def _navigate_search():
                         val = hero_search.value or ''
                         if val.strip():
-                            ui.navigate.to(f'/search?q={val}')
+                            # Use JavaScript encodeURIComponent for proper URL encoding
+                            # and window.location.href for full page reload
+                            await ui.run_javascript(
+                                f'window.location.href = "/search?q=" + encodeURIComponent(document.querySelector(".hero-search-input input").value)'
+                            )
 
                     hero_search = ui.input(
                         placeholder=tr('Search manuscripts...')
-                    ).classes('flex-grow').props('outlined rounded dense').style(
+                    ).classes('flex-grow hero-search-input').props('outlined rounded dense').style(
                         'font-size: 1.1rem;'
                     ).on('keydown.enter', lambda: _navigate_search())
                     ui.button(
