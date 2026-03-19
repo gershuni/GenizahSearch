@@ -1423,6 +1423,13 @@ class ZoomableScrollArea(QGraphicsView):
         self._rotation = 0
         self._auto_fit_enabled = False
 
+        # Image adjustment state
+        self._brightness = 0      # -100..+100
+        self._contrast = 0        # -100..+100
+        self._gamma = 1.0         # 0.2..3.0
+        self._invert = False
+        self._adj_timer = None     # debounce timer for filter updates
+
         # Right-click context menu for copy/save
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_image_context_menu)
@@ -1458,19 +1465,26 @@ class ZoomableScrollArea(QGraphicsView):
             pix.save(path)
 
     def _get_rotated_pixmap(self):
-        """Return the current pixmap with rotation applied."""
+        """Return the current pixmap with adjustments and rotation applied (for export)."""
         if not self._pixmap or self._pixmap.isNull():
             return None
+        # Apply image adjustments first
+        adjusted = self._apply_adjustments_to_pixmap(self._pixmap)
         if self._rotation == 0:
-            return self._pixmap
+            return adjusted
         transform = QTransform()
         transform.rotate(self._rotation)
-        return self._pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+        return adjusted.transformed(transform, Qt.TransformationMode.SmoothTransformation)
 
     def set_image(self, pixmap):
         self._pixmap = pixmap
         self._rotation = 0
         self._auto_fit_enabled = bool(pixmap)
+        # Reset adjustments on new image (without triggering display update since we handle it below)
+        self._brightness = 0
+        self._contrast = 0
+        self._gamma = 1.0
+        self._invert = False
 
         # Guard against destroyed graphics items (async callback after widget close)
         if sip.isdeleted(self._msg_item) or sip.isdeleted(self._pixmap_item):
@@ -1575,6 +1589,121 @@ class ZoomableScrollArea(QGraphicsView):
         self.scale(0.95, 0.95)
         return True
 
+    def set_adjustments(self, brightness=None, contrast=None, gamma=None, invert=None):
+        """Update image adjustment values and schedule a filter update."""
+        if brightness is not None: self._brightness = brightness
+        if contrast is not None: self._contrast = contrast
+        if gamma is not None: self._gamma = gamma
+        if invert is not None: self._invert = invert
+        self._schedule_filter_update()
+
+    def _schedule_filter_update(self):
+        """Debounce filter updates to 100ms for performance on large images."""
+        if self._adj_timer is not None:
+            try:
+                self._adj_timer.stop()
+            except RuntimeError:
+                pass
+        self._adj_timer = QTimer()
+        self._adj_timer.setSingleShot(True)
+        self._adj_timer.timeout.connect(self._apply_display_filters)
+        self._adj_timer.start(80)
+
+    def _build_lut(self):
+        """Build a 256-entry lookup table for brightness/contrast/gamma/invert."""
+        lut = bytearray(256)
+        brightness_offset = self._brightness * 2.55
+        contrast_factor = 1.0 + self._contrast / 100.0
+        gamma_exp = 1.0 / self._gamma if self._gamma > 0 else 1.0
+        for i in range(256):
+            # Contrast around midpoint
+            val = (i - 128) * contrast_factor + 128 + brightness_offset
+            val = max(0.0, min(255.0, val))
+            # Gamma
+            if gamma_exp != 1.0:
+                val = 255.0 * ((val / 255.0) ** gamma_exp)
+            # Invert
+            if self._invert:
+                val = 255.0 - val
+            lut[i] = int(max(0, min(255, round(val))))
+        return lut
+
+    def _apply_display_filters(self):
+        """Apply brightness/contrast/gamma/invert to display via LUT on pixels."""
+        if not self._pixmap or self._pixmap.isNull():
+            return
+        if sip.isdeleted(self._pixmap_item):
+            return
+
+        # If all defaults, show original
+        if self._brightness == 0 and self._contrast == 0 and self._gamma == 1.0 and not self._invert:
+            self._pixmap_item.setPixmap(self._pixmap)
+            return
+
+        lut = self._build_lut()
+        img = self._pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        w, h = img.width(), img.height()
+
+        # Use bits() for fast pixel access
+        ptr = img.bits()
+        if ptr is None:
+            return
+        ptr.setsize(h * img.bytesPerLine())
+        data = bytearray(ptr)
+
+        bpl = img.bytesPerLine()
+        for y in range(h):
+            offset = y * bpl
+            for x in range(w):
+                idx = offset + x * 4
+                # ARGB32: B, G, R, A (little-endian on Windows)
+                data[idx] = lut[data[idx]]         # B
+                data[idx + 1] = lut[data[idx + 1]] # G
+                data[idx + 2] = lut[data[idx + 2]] # R
+                # Alpha (idx+3) unchanged
+
+        result_img = QImage(bytes(data), w, h, bpl, QImage.Format.Format_ARGB32).copy()
+        self._pixmap_item.setPixmap(QPixmap.fromImage(result_img))
+
+    def _apply_adjustments_to_pixmap(self, pixmap):
+        """Apply current adjustments to a pixmap and return the result. Used for export."""
+        if self._brightness == 0 and self._contrast == 0 and self._gamma == 1.0 and not self._invert:
+            return pixmap
+
+        lut = self._build_lut()
+        img = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        w, h = img.width(), img.height()
+
+        ptr = img.bits()
+        if ptr is None:
+            return pixmap
+        ptr.setsize(h * img.bytesPerLine())
+        data = bytearray(ptr)
+
+        bpl = img.bytesPerLine()
+        for y in range(h):
+            offset = y * bpl
+            for x in range(w):
+                idx = offset + x * 4
+                data[idx] = lut[data[idx]]
+                data[idx + 1] = lut[data[idx + 1]]
+                data[idx + 2] = lut[data[idx + 2]]
+
+        result_img = QImage(bytes(data), w, h, bpl, QImage.Format.Format_ARGB32).copy()
+        return QPixmap.fromImage(result_img)
+
+    def reset_adjustments(self):
+        """Reset all image adjustments to defaults."""
+        self._brightness = 0
+        self._contrast = 0
+        self._gamma = 1.0
+        self._invert = False
+        if not self._pixmap or self._pixmap.isNull():
+            return
+        if sip.isdeleted(self._pixmap_item):
+            return
+        self._pixmap_item.setPixmap(self._pixmap)
+
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
     _thumbnail_ready = pyqtSignal(QPixmap, int)  # pixmap, page_index
@@ -1663,6 +1792,74 @@ class ManuscriptViewerWidget(QWidget):
         top_bar.addWidget(btn_zoom_in)
 
         layout.addLayout(top_bar)
+
+        # Image adjustment controls bar
+        adj_bar = QHBoxLayout()
+        adj_bar.setContentsMargins(5, 2, 5, 2)
+
+        lbl_b = QLabel(tr("Brightness"))
+        lbl_b.setStyleSheet("font-size: 10px; color: #888;")
+        adj_bar.addWidget(lbl_b)
+        self.slider_brightness = QSlider(Qt.Orientation.Horizontal)
+        self.slider_brightness.setRange(-100, 100)
+        self.slider_brightness.setValue(0)
+        self.slider_brightness.setFixedWidth(100)
+        self.slider_brightness.setToolTip(tr("Brightness"))
+        adj_bar.addWidget(self.slider_brightness)
+
+        lbl_c = QLabel(tr("Contrast"))
+        lbl_c.setStyleSheet("font-size: 10px; color: #888;")
+        adj_bar.addWidget(lbl_c)
+        self.slider_contrast = QSlider(Qt.Orientation.Horizontal)
+        self.slider_contrast.setRange(-100, 100)
+        self.slider_contrast.setValue(0)
+        self.slider_contrast.setFixedWidth(100)
+        self.slider_contrast.setToolTip(tr("Contrast"))
+        adj_bar.addWidget(self.slider_contrast)
+
+        lbl_g = QLabel(tr("Gamma"))
+        lbl_g.setStyleSheet("font-size: 10px; color: #888;")
+        adj_bar.addWidget(lbl_g)
+        self.slider_gamma = QSlider(Qt.Orientation.Horizontal)
+        self.slider_gamma.setRange(20, 300)
+        self.slider_gamma.setValue(100)
+        self.slider_gamma.setFixedWidth(100)
+        self.slider_gamma.setToolTip(tr("Gamma"))
+        adj_bar.addWidget(self.slider_gamma)
+
+        self.btn_invert = QPushButton(tr("Invert"))
+        self.btn_invert.setCheckable(True)
+        self.btn_invert.setFixedWidth(50)
+        self.btn_invert.setToolTip(tr("Invert"))
+        adj_bar.addWidget(self.btn_invert)
+
+        btn_reset_adj = QPushButton(tr("Reset Image"))
+        btn_reset_adj.setFixedWidth(80)
+        btn_reset_adj.setToolTip(tr("Reset Image"))
+        adj_bar.addWidget(btn_reset_adj)
+
+        adj_bar.addStretch()
+
+        # Connect adjustment controls
+        self.slider_brightness.valueChanged.connect(
+            lambda val: self.scroll_area.set_adjustments(brightness=val))
+        self.slider_contrast.valueChanged.connect(
+            lambda val: self.scroll_area.set_adjustments(contrast=val))
+        self.slider_gamma.valueChanged.connect(
+            lambda val: self.scroll_area.set_adjustments(gamma=val / 100.0))
+        self.btn_invert.toggled.connect(
+            lambda checked: self.scroll_area.set_adjustments(invert=checked))
+
+        def _reset_adjustments():
+            self.slider_brightness.setValue(0)
+            self.slider_contrast.setValue(0)
+            self.slider_gamma.setValue(100)
+            self.btn_invert.setChecked(False)
+            self.scroll_area.reset_adjustments()
+
+        btn_reset_adj.clicked.connect(_reset_adjustments)
+
+        layout.addLayout(adj_bar)
 
         # Attribution
         self.lbl_attribution = QLabel("")
@@ -1959,6 +2156,11 @@ class ManuscriptViewerWidget(QWidget):
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
         self.slider_rotation.setValue(0)
+        # Reset adjustment controls on new image
+        self.slider_brightness.setValue(0)
+        self.slider_contrast.setValue(0)
+        self.slider_gamma.setValue(100)
+        self.btn_invert.setChecked(False)
 
     def open_external(self):
         if self.external_url:
