@@ -133,14 +133,11 @@ def test_library_codes_complete():
 
 def test_metadata_only_result_structure():
     """Metadata search for a record with no Tantivy text returns metadata_only=True result."""
-    # Create a mock meta_mgr
+    # Create a mock meta_mgr -- get_meta_for_id returns (shelfmark, title) tuple
     meta_mgr = MagicMock()
     meta_mgr.search_by_meta.return_value = ["999999999"]
-    meta_mgr.get_meta_for_id.return_value = {
-        'shelfmark': 'T-S Test 1.1',
-        'title': 'Test Title',
-        'library_code': 'CUL',
-    }
+    meta_mgr.get_meta_for_id.return_value = ('T-S Test 1.1', 'Test Title')
+    meta_mgr.get_library_for_id.return_value = 'CUL'
 
     # Create SearchEngine with mocked dependencies
     with patch.object(SearchEngine, '__init__', lambda self, *a, **kw: None):

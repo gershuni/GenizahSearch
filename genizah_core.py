@@ -6397,37 +6397,64 @@ class SearchEngine:
 
         return deduped
 
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None):
-        if not self.searcher: return []
-        _line_constraints = {}  # Per-line position constraints (L3:word syntax)
-
-        # Strip combining diacritical marks and geresh/gershayim from query
-        # Skip for Regex mode -- user controls the pattern directly
+    def _execute_metadata_search(self, query_str, mode, progress_callback=None, restrict_sys_ids=None):
+        """Search by title or shelfmark via csv_bank. Returns results even for metadata-only records."""
         if mode != 'Regex':
             query_str = strip_search_diacritics(query_str)
 
-        # --- Metadata Search Modes ---
-        if mode in ['Title', 'Shelfmark']:
-            field_map = {'Title': 'title', 'Shelfmark': 'shelfmark'}
-            target_field = field_map.get(mode)
+        field_map = {'Title': 'title', 'Shelfmark': 'shelfmark'}
+        target_field = field_map.get(mode)
 
-            sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
-            if restrict_sys_ids is not None:
-                sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
-            results = []
-            total_ids = len(sys_ids)
+        sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
+        if restrict_sys_ids is not None:
+            sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
+        results = []
+        total_ids = len(sys_ids)
 
-            for i, sid in enumerate(sys_ids):
-                if progress_callback and i % 5 == 0: progress_callback(i, total_ids)
+        for i, sid in enumerate(sys_ids):
+            if progress_callback and i % 5 == 0:
+                progress_callback(i, total_ids)
 
+            # Try to get transcription text from Tantivy
+            text, head, src, uid = '', '', '', ''
+            if self.searcher:
                 text, head, src, uid = self._get_best_text_for_id(sid)
-                if not text: continue
 
+            metadata_only = not text
+
+            if metadata_only:
+                # Build display from csv_bank metadata (no Tantivy needed)
+                meta_info = self.meta_mgr.get_meta_for_id(sid)
+                if isinstance(meta_info, tuple):
+                    # get_meta_for_id returns (shelfmark, title) tuple
+                    shelfmark, title = meta_info
+                    meta_info = {'shelfmark': shelfmark, 'title': title}
+                display = {
+                    'shelfmark': meta_info.get('shelfmark', f'ID: {sid}'),
+                    'title': meta_info.get('title', ''),
+                    'img': '',
+                    'source': '',
+                    'id': sid,
+                    'library_code': meta_info.get('library_code', '') if isinstance(meta_info, dict) else '',
+                }
+                # For tuple returns, get library_code from csv_bank directly
+                if isinstance(meta_info, dict) and not display['library_code']:
+                    display['library_code'] = self.meta_mgr.get_library_for_id(sid)
+                elif not display['library_code']:
+                    display['library_code'] = self.meta_mgr.get_library_for_id(sid)
+                results.append({
+                    'display': display,
+                    'snippet': '',
+                    'full_text': '',
+                    'uid': '',
+                    'raw_header': '',
+                    'raw_file_hl': '',
+                    'highlight_pattern': None,
+                    'metadata_only': True,
+                })
+            else:
                 meta = self.meta_mgr.get_display_data(head, src or "V0.8")
-
-                # Limit snippet length for display
                 snippet = text[:300] + "..." if len(text) > 300 else text
-
                 results.append({
                     'display': meta,
                     'snippet': snippet,
@@ -6435,12 +6462,25 @@ class SearchEngine:
                     'uid': uid,
                     'raw_header': head,
                     'raw_file_hl': text,
-                    'highlight_pattern': None
+                    'highlight_pattern': None,
+                    'metadata_only': False,
                 })
 
-            # Sort results by shelfmark using natural sort (like desktop app)
-            results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
-            return results
+        results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
+        return results
+
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None):
+        # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
+        if mode in ['Title', 'Shelfmark']:
+            return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
+
+        if not self.searcher: return []
+        _line_constraints = {}  # Per-line position constraints (L3:word syntax)
+
+        # Strip combining diacritical marks and geresh/gershayim from query
+        # Skip for Regex mode -- user controls the pattern directly
+        if mode != 'Regex':
+            query_str = strip_search_diacritics(query_str)
 
         # --- Responsa Pipeline ---
         responsa_warning = None
