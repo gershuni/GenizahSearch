@@ -1209,6 +1209,7 @@ async def initialize_engine():
             state.meta_mgr.start_background_loading()
 
             # 6. Pre-warm FJMS caches (hierarchy, authors, works) so first page load is instant
+            print("[init] 6/6 FJMS pre-warm...", flush=True)
             try:
                 from shared.fjms_service import get_fjms_service
                 fjms = get_fjms_service(thread_safe=True)
