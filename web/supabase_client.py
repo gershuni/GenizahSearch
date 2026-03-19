@@ -60,6 +60,18 @@ def get_client() -> Client:
     return _client
 
 
+def reset_client():
+    """Reset the singleton client (e.g., after JWT expiry)."""
+    global _client
+    _client = None
+
+
+def _is_jwt_expired(error) -> bool:
+    """Check if a Supabase error is a JWT expiry."""
+    msg = str(error)
+    return 'JWT expired' in msg or 'PGRST303' in msg
+
+
 def get_user_client() -> Client:
     """Get a per-user Supabase client authenticated with the current user's session tokens.
 
@@ -431,6 +443,14 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
             except Exception as e2:
                 logger.error(f"Error getting lists (fallback): {e2}")
                 return []
+        if _is_jwt_expired(e):
+            logger.warning("JWT expired in get_user_lists, resetting client and retrying")
+            reset_client()
+            try:
+                return get_user_lists(user_id=user_id, include_deleted=include_deleted)
+            except Exception as e2:
+                logger.error(f"Error getting lists (retry): {e2}")
+                return []
         logger.error(f"Error getting lists: {e}")
         return []
 
@@ -663,6 +683,15 @@ def get_projects(user_id: str) -> List[Dict]:
         response = client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute()
         return response.data or []
     except Exception as e:
+        if _is_jwt_expired(e):
+            logger.warning("JWT expired in get_projects, resetting client and retrying")
+            reset_client()
+            try:
+                client = get_client()
+                return client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute().data or []
+            except Exception as e2:
+                logger.error(f"Error getting projects (retry): {e2}")
+                return []
         logger.error(f"Error getting projects: {e}")
         return []
 
@@ -806,6 +835,22 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
         response = query.order('created_at', desc=True).execute()
         return response.data or []
     except Exception as e:
+        if _is_jwt_expired(e):
+            logger.warning("JWT expired in get_comments, resetting client and retrying")
+            reset_client()
+            try:
+                client = get_client()
+                query = client.table('comments').select('*')
+                if sys_id:
+                    query = query.eq('sys_id', sys_id)
+                if author_id:
+                    query = query.eq('author_id', author_id)
+                if is_public is not None:
+                    query = query.eq('is_public', is_public)
+                return query.order('created_at', desc=True).execute().data or []
+            except Exception as e2:
+                logger.error(f"Error getting comments (retry): {e2}")
+                return []
         logger.error(f"Error getting comments: {e}")
         return []
 
@@ -951,6 +996,14 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
             row['created_by_username'] = profiles_map.get(row.get('user_id'), '')
         return rows
     except Exception as e:
+        if _is_jwt_expired(e):
+            logger.warning("JWT expired in get_fragment_joins, resetting client and retrying")
+            reset_client()
+            try:
+                return get_fragment_joins(user_id=user_id, fragment_sys_id=fragment_sys_id, status=status)
+            except Exception as e2:
+                logger.error(f"Error getting joins (retry): {e2}")
+                return []
         logger.error(f"Error getting joins: {e}")
         return []
 

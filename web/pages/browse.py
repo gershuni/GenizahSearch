@@ -1987,6 +1987,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     def update_content():
         """Update the content display."""
+        try:
+            _ = content_container.client
+        except (RuntimeError, AttributeError):
+            return  # Client/session gone (user navigated away)
         content_container.clear()
 
         with content_container:
