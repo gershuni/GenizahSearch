@@ -4,6 +4,24 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.2.1] - Search UX Overhaul - 2026-03-19
+
+### New Features
+- **Hero search bar**: Prominent search input on home page below "What is the Cairo Genizah?" card, with Hebrew translation ("חיפוש בכתבי יד...")
+- **Inline accordion results**: Replaced the 35/65 splitter layout with full-width results. Clicking a result expands an inline accordion showing manuscript thumbnail image + highlighted full text with original line breaks
+- **Result card action buttons**: Browse, Quick View (renamed from Advanced View / מבט מהיר), Add to List, and Catalog Records buttons directly on each result card
+- **Citation footer auto-collapse**: Full citation shows for 10 seconds, then collapses to a compact single line with copy button
+- **Thumbnail images**: New `width` parameter on `/api/nli_image_by_sysid/` endpoint — accordion requests 300px thumbnails instead of 2000px full images
+- **Lazy text loading**: On session restore, full text loads on first accordion expand via `get_browse_page()`
+- **Clickable thumbnails**: Clicking the accordion image opens Quick View dialog
+
+### Bug Fixes
+- **Homepage search stuck**: `_after_delay()` deferred tasks ran in a separate asyncio task without NiceGUI slot context, causing silent `RuntimeError`. Fixed by capturing `ui.context.client` at page creation
+- **Status duplication**: Merged "Search completed in X — N Results" into results header ("588 Results · 0:18"), eliminated duplicate timer-based status messages
+- **Browse rotation slider**: Removed JS string handler passed to `.on('update:model-value')` where NiceGUI expects a Python callable — Python `on_change` already handles rotation
+
+---
+
 ## [7.2.0] - Image Adjustment Controls - 2026-03-19
 
 ### New Features

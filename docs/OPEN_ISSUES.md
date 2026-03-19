@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-18 (Firefox AMO submission; Manchester recto/verso fix; browser extension for web puzzle; HMAC token security fix; staged rollout on production; desktop puzzle auto-fit investigation)
+> **Last Updated:** 2026-03-19 (search UX overhaul complete; browse rotation slider JS handler fixed)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 5 | 5 |
-| P2 Medium Bugs | 5 | 20 | 25 |
+| P2 Medium Bugs | 7 | 20 | 27 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **13** | **56** | **69** |
+| **Total** | **15** | **56** | **71** |
 
 ---
 
@@ -87,6 +87,9 @@ Move to "Completed Issues" section at bottom with date
 | **Manchester LUNA recto/verso shows same image for both sides** | `genizah_core.py`, `shared/nli_crossref_service.py` | ✅ Fixed (2026-03-18) | Each Manchester page (recto/verso) has a separate luna_id with its own 1-canvas IIIF manifest, but code only fetched the first image's luna_id. Added `get_manchester_canvases()` which resolves ALL crossref images to individual canvas entries with distinct IIIF URLs. Example: Ms. B 2091 (sys_id 990002081410205171) now correctly shows 2 pages. |
 | **Mosseri collection missing CUDL high-res images — only NLI Rosetta thumbnails shown** | `genizah_core.py`, `shared/nli_crossref_service.py` | ✅ Fixed (2026-03-18) | Added `construct_mosseri_cudl_label()` that converts Mosseri shelfmark variants to CUDL labels (MS-MOSSERI-{SERIES}-{NUM}), wired as fallback in `enrich_metadata` after crossref normalized-shelfmark lookup fails. Iterates all call_number variants per record (stored in csv_bank for Mosseri). Covers 98.3% of 3,194 Mosseri records (3,141/3,194). |
 | **Desktop puzzle auto-fit makes new fragments look like tiny thumbnails and resets expected zoom** | `genizah_app.py:3925-3949`, `genizah_app.py:3129-3148` | ✅ Fixed (2026-03-18) | `_fit_all_fragments()` called `fitInView()` after every newly loaded fragment, zooming the whole `QGraphicsView` out as the scene widened. Fix: auto-fit now only runs when a saved document finishes loading all fragments (last fragment triggers fit). Individual fragment adds use `ensureVisible()` instead. User can still Ctrl+0 to fit all manually. |
+| **Home-page hero search did not navigate (respond=False unsupported)** | `web/pages/home.py` | ✅ Fixed (2026-03-19) | Reverted to `ui.navigate.to()`. The deferred task slot context bug was the real root cause — fixed by capturing `ui.context.client` at page creation and entering it in `_after_delay`. |
+| **Search accordion thumbnails did not load** | `web/pages/search.py`, `web/api.py` | ✅ Fixed (2026-03-19) | Removed direct NLI IIIF URL approach. Now uses same `/api/nli_image_by_sysid/{sys_id}?page={idx}&width=300` server proxy pattern as Advanced View, with `advHandleImageError` JS fallback. Added `width` param to API for 300px thumbnails. |
+| **Browse rotation slider TypeError: JS string passed as Python handler** | `web/pages/browse.py:4289-4292` | ✅ Fixed (2026-03-19) | `.on('update:model-value', 'if(window.manuscriptViewer)...')` passed a JS string where NiceGUI expects a callable. Removed — the Python `on_change=handle_rotation_slider` already handles rotation updates. |
 | **Puzzle background removal still misses some CUL blue conservation mats** | `shared/background_removal.py`, `shared/puzzle_image_service.py` | ❌ Open | Current algorithm learns the background color from the four image corners. That works for most scans, but some Cambridge images have parchment touching the corners while the bright blue conservation mat dominates the center/background. In those cases the detector learns the parchment instead of the mat, so removal keeps the blue and can even attack the fragment. Likely fix path is smarter background sampling or multiple candidate backgrounds rather than more threshold tuning. |
 | **Web puzzle canvas v49 is not app-ready: fragment-meta race, dead threshold slider, delete not persisted, and processed-image response can advertise the wrong MIME type** | `web/pages/puzzle.py`, `web/api.py`, `shared/puzzle_image_service.py` | ✅ Fixed (2026-03-16) | Fixed in multiple passes on 2026-03-16. The final root cause for “images are not loading” was that `ui.html('<canvas id="puzzleCanvas"></canvas>')` rendered as an empty `<div>` in NiceGUI, so Fabric never found a canvas element and every add was queued forever. Replaced it with a real `ui.element('canvas').props('id=puzzleCanvas')`, then verified in a live headless browser that Fabric initializes, `/api/puzzle_image` loads, and the fragment is present on the canvas. Earlier same-day fixes also added JS→Python add-result/meta events, persisted delete handling, selection sync, processed/original toggle reloads, threshold reprocessing wiring, and MIME-safe API responses. |
 | **Puzzle export mismatched web positions, reprocessed processed images, and froze the desktop UI** | `web/pages/puzzle.py`, `shared/puzzle_export.py`, `genizah_app.py` | ✅ Fixed (2026-03-17) | Fixed 3 Phase-50 export bugs together. Web save/export now serializes Fabric objects from `getCenterPoint()` plus unscaled cropped size and restores persisted docs via center placement instead of brittle `left/top` math, bringing it in line with the desktop/QGraphics model. Shared export now reuses the same 800px processed image the canvas shows for bg-removed fragments, so exported output matches the on-canvas appearance instead of re-running background removal at 3000px. Desktop export now runs in `PuzzleExportThread` with cancelable progress UI and resolution choices (draft 1000px / standard 2000px / full 3000px) instead of blocking the main thread for ~20s. Follow-up same-day web fixes also corrected `build_fragments_list()` regressions, center-preserving folio swaps/reloads, session restore viewport fitting, and duplicate fragment creation during `Flip Puzzle`. |
