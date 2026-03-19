@@ -4,6 +4,29 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.1.0] - FIST Gap Fill & Expanded Catalog - 2026-03-19
+
+### New Features
+- **38,673 new manuscript records**: FIST.db gap records merged into libraries.csv (216,942 → 255,615 records, +17.8%). Manuscripts from 52 libraries now browsable, searchable by shelfmark/title, and enrichable via FJMS catalog data and NLI images
+- **7 new library codes**: Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman — with Hebrew translations
+- **Metadata-only search**: Title and shelfmark search now returns records without transcription text. Results carry a `metadata_only` flag; page navigation hidden for text-less records
+- **Metadata-only browse**: Browse page shows metadata, NLI images, FJMS enrichment, and external links for records without Tantivy text (instead of "No text available" error)
+- **Shelfmark normalization**: Yevr→EVR (Russian National Library) and Halper→Genizah (CAJS) aliases with Halpern guard
+
+### Bug Fixes
+- **Mosseri CUDL images**: Mosseri collection images now load via Cambridge Digital Library fallback path (both apps)
+- **Puzzle auto-fit**: Canvas auto-fits view only on document load, not when adding individual fragments
+- **Server heartbeat**: Status heartbeat survives transient failures; removed JS ping in favor of server-state-only checks
+- **Server init ordering**: Engine marked ready before FJMS pre-warm to prevent premature "loading" state
+- **JWT auto-retry**: Browse guards against deleted Supabase client; automatic retry on JWT expiry
+
+### Data
+- Generation script: `scripts/generate_fist_gap_csv.py` (repeatable with `--dry-run` and `--validate-only`)
+- Stats report: `docs/FIST_GAP_FILL_STATS.md`
+- Gap manifest: `fist_gap_manifest.txt` (38,673 AlmaIds for validation)
+
+---
+
 ## [7.0.1] - Web Puzzle Browser Extension - 2026-03-18
 
 ### New Features

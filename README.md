@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.0.0
+# Genizah Search Pro 7.1.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,18 +8,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.0.0?
+## What's New in Version 7.1.0?
+
+### v7.1.0: FIST Gap Fill & Expanded Catalog
+
+GenizahSearch now covers **255,615 manuscript records** — 38,673 new records added from the Friedberg Genizah Project database (FIST.db), an 18% expansion across 52 libraries including 7 newly registered collections.
+
+* **38,673 new manuscripts:** Records from JTS (13,520), Cambridge (12,641), Mosseri (4,862), British Library (2,982), Manchester (1,741), and 47 more libraries — all browsable, searchable by title/shelfmark, with NLI images and FJMS catalog enrichment
+* **Metadata-only search:** Title and shelfmark search now returns records even without transcription text. Browse page shows metadata, images, and scholarly data instead of an error
+* **7 new library codes:** Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman — with Hebrew translations
+* **Shelfmark normalization:** Yevr→EVR and Halper→Genizah aliases for cross-collection search compatibility
+
+### Previous Releases
 
 ### v7.0.0: Fragment Puzzle & Community Publishing
 
-A major new feature for collaborative Genizah research — the Fragment Puzzle lets you visually arrange manuscript fragments to reconstruct physical joins, and Community Publishing lets you share your discoveries with researchers worldwide.
-
-* **Fragment Puzzle:** Visual canvas for arranging manuscript fragments side-by-side. Automatic background removal, zoom/rotate/crop, folio navigation, layer ordering, multiple background modes. Save as join documents with auto-save, export as composite PNG with metadata banner. Recto/verso support (both apps)
-* **Community Publishing:** Share your puzzle join arrangements with the research community. Published joins appear in the Discoveries Center with thumbnails and deep links. Other researchers can fork and open any published join. All Puzzles / My Puzzles browsing tabs. Admin moderation. Auto-unpublish when deleting local joins (both apps)
-* **Fragment selector:** Combobox showing all fragments on canvas with Browse button to open in browse view (both apps)
-* **Help Center updated:** New bilingual (English/Hebrew) documentation for Fragment Puzzle and Community Publishing features
-
-### Previous Releases
+* **Fragment Puzzle:** Visual canvas for arranging manuscript fragments side-by-side. Background removal, zoom/rotate/crop, folio navigation, export as composite PNG (both apps)
+* **Community Publishing:** Share puzzle joins with the research community via Discoveries Center (both apps)
 
 ### v6.5.3: Image Viewer — Copy & Save
 * **Right-click image menu:** Copy or save manuscript images directly from the viewer with rotation preserved (desktop)
