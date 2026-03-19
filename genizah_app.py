@@ -27629,6 +27629,10 @@ class GenizahGUI(QMainWindow):
         full_header = pd.get('full_header', '')
         _, _, shelf, title = self._get_meta_for_header(full_header)
 
+        # Metadata-only fallback: header was empty, use sys_id for metadata lookup
+        if (not shelf or shelf == 'Unknown') and self.current_browse_sid:
+            shelf, title = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+
         # Create display versions: full name for info label, short code for input field
         display_shelf = shelf  # For info label (full library name)
         input_shelf = shelf    # For input field (short library code)

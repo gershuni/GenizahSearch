@@ -437,6 +437,16 @@ class GenizahService:
             except Exception as crossref_err:
                 logger.error("NLI crossref enrichment error: %s", crossref_err)
 
+            # Metadata-only fallback: derive fl_id from crossref folio images
+            if not fl_id and folio_images:
+                first_fl = folio_images[0].get('fl_id')
+                if first_fl:
+                    fl_id = first_fl
+                    thumb_url = get_thumbnail_url(fl_id)
+                    image_url = get_full_image_url(fl_id)
+                    if folio_images:
+                        folio_label = folio_images[0].get('folio_label', '')
+
             # External images from nli_cache (populated by enrich_metadata)
             # images_ext may come from Cambridge, Manchester LUNA, or JTS Figgy
             cambridge_images = []
@@ -479,6 +489,114 @@ class GenizahService:
             )
         except Exception as e:
             logger.error("Browse page error: %s", e)
+            return None
+
+    def get_metadata_only_browse_page(self, sys_id: str) -> Optional[BrowsePage]:
+        """Build a BrowsePage from csv_bank metadata for records with no Tantivy text.
+
+        Returns None if sys_id is not in csv_bank.
+        """
+        if not self.is_ready or not sys_id:
+            return None
+        try:
+            shelfmark, title = state.meta_mgr.get_meta_for_id(sys_id)
+            if shelfmark == 'Unknown':
+                return None  # Not in csv_bank
+
+            library_code = state.meta_mgr.get_library_for_id(sys_id)
+            library_name = get_library_display(library_code, short=False, lang=get_language()) if library_code else ''
+
+            # NLI crossref: folio images, source indicators, physical metadata, library viewer
+            folio_images = []
+            image_source_info = {}
+            physical_metadata = None
+            library_viewer_url = None
+            fl_id = None
+            thumb_url = None
+            image_url = None
+            attribution = ''
+            is_oxford = is_oxford_manuscript(shelfmark, library_code)
+            is_cambridge = False
+            external_url = None
+
+            try:
+                from shared.nli_crossref_service import get_nli_crossref_service
+                crossref_svc = get_nli_crossref_service(thread_safe=True)
+                if crossref_svc.is_available():
+                    from genizah_core import normalize_shelfmark
+                    norm_shelf = normalize_shelfmark(shelfmark) if shelfmark else None
+
+                    image_source_info = crossref_svc.get_image_sources(
+                        sys_id, normalized_shelfmark=norm_shelf
+                    )
+                    if image_source_info.get('cambridge'):
+                        is_cambridge = True
+
+                    folio_images = crossref_svc.get_folio_images(sys_id)
+                    if folio_images:
+                        first = folio_images[0]
+                        fl_id = first.get('fl_id')
+
+                    physical_metadata = crossref_svc.get_physical_metadata(sys_id)
+                    library_viewer_url = crossref_svc.get_library_viewer_url(sys_id)
+            except Exception as crossref_err:
+                logger.error("NLI crossref error (metadata-only): %s", crossref_err)
+
+            if fl_id:
+                thumb_url = get_thumbnail_url(fl_id)
+                image_url = get_full_image_url(fl_id)
+
+            # Attribution
+            if sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                cached_meta = state.meta_mgr.nli_cache.get(sys_id, {})
+                attribution = cached_meta.get('attribution', '')
+            if library_code in ATTRIBUTION_BY_LIBRARY:
+                lib_attr = _get_library_attribution(library_code)
+                if lib_attr is not None:
+                    attribution = lib_attr
+            elif is_oxford:
+                attribution = 'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0'
+            if not attribution:
+                attribution = _NLI_HE if get_language() == 'he' else _NLI_EN
+
+            # External images from nli_cache
+            cambridge_images = []
+            external_provider = ''
+            if sys_id and hasattr(state.meta_mgr, 'nli_cache'):
+                cached = state.meta_mgr.nli_cache.get(sys_id, {})
+                cambridge_images = cached.get('images_ext', [])
+                external_provider = cached.get('external_provider', '')
+
+            return BrowsePage(
+                uid='',
+                p_num=0,
+                text='',
+                full_header='',
+                total_pages=len(folio_images) if folio_images else 0,
+                current_idx=1 if folio_images else 0,
+                sys_id=sys_id,
+                fl_id=fl_id,
+                shelfmark=shelfmark or '',
+                title=title or '',
+                thumb_url=thumb_url,
+                image_url=image_url,
+                internal_index=0,
+                attribution=attribution,
+                is_oxford=is_oxford,
+                is_cambridge=is_cambridge,
+                external_url=external_url,
+                library_code=library_code,
+                library_name=library_name,
+                folio_label=folio_images[0].get('folio_label', '') if folio_images else '',
+                image_source_info=image_source_info,
+                folio_images=folio_images,
+                cambridge_images=cambridge_images,
+                external_provider=external_provider,
+                physical_metadata=physical_metadata,
+                library_viewer_url=library_viewer_url,
+            )
+        except Exception as e:
+            logger.error("Metadata-only browse page error: %s", e)
             return None
 
     def get_browse_page_by_fl(self, fl_id: str, sys_id: Optional[str] = None) -> Optional[BrowsePage]:

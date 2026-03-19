@@ -985,10 +985,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     except Exception as track_err:
                         logger.error(f"Failed to track recent item: {track_err}")
             else:
-                if fl_id:
-                    state.error = tr('No text available') + f" (fl_id: {fl_id})"
+                # No Tantivy page — try metadata-only fallback from csv_bank
+                _fallback_sys = state.sys_id
+                def _fetch_metadata_only():
+                    return service.get_metadata_only_browse_page(_fallback_sys)
+                meta_page = await run.io_bound(_fetch_metadata_only)
+                if my_gen != _load_generation['value']:
+                    return
+                if meta_page:
+                    state.sys_id = meta_page.sys_id
+                    state.current_page = meta_page
+                    state.page_input_value = 0
+                    state.error = None
                 else:
-                    state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
+                    if fl_id:
+                        state.error = tr('No text available') + f" (fl_id: {fl_id})"
+                    else:
+                        state.error = tr('No text available') + f" (sys_id: {state.sys_id})"
 
         except Exception as e:
             if my_gen != _load_generation['value']:

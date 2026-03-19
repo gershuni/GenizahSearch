@@ -7364,17 +7364,39 @@ class SearchEngine:
                 })
         return full_content
         
+    def _get_metadata_only_browse_page(self, sys_id):
+        """Build a minimal browse result from csv_bank for records with no Tantivy text."""
+        if not hasattr(self, 'meta_mgr') or not self.meta_mgr:
+            return None
+        shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
+        if shelfmark == 'Unknown':
+            return None
+        return {
+            'uid': '',
+            'p_num': 0,
+            'full_header': '',
+            'text': '',
+            'total_pages': 0,
+            'current_idx': 0,
+            'internal_index': 0,
+            'sys_id': sys_id,
+            'metadata_only': True,
+        }
+
     def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None, allow_cross=False):
         browse_map = self._load_browse_map()
-        if not browse_map: return None
+        if not browse_map:
+            return self._get_metadata_only_browse_page(sys_id)
 
         # Prepare ordered list for cross-manuscript navigation
         if allow_cross and (not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids):
             self._ordered_sys_ids = list(browse_map.keys())
 
-        if sys_id not in browse_map: return None
+        if sys_id not in browse_map:
+            return self._get_metadata_only_browse_page(sys_id)
         pages = browse_map[sys_id]
-        if not pages: return None
+        if not pages:
+            return self._get_metadata_only_browse_page(sys_id)
         
         target_idx = -1
 
