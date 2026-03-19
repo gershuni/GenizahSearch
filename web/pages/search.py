@@ -5314,7 +5314,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setGamma({e.value / 100})')
                                     ).props('dark dense').classes('w-24')
                                     ui.button(
-                                        icon='tonality',
+                                        icon='exposure',
                                         on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.toggleInvert()')
                                     ).props('flat round size=sm text-color=white').tooltip(tr('Invert Colors'))
                                     def _adv_reset_adj():

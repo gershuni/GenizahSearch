@@ -3405,7 +3405,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetGamma('{vid}', {e.value / 100})")
                                         ).props('dark dense').classes('w-16')
                                         ui.button(
-                                            icon='tonality',
+                                            icon='exposure',
                                             on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdToggleInvert('{vid}')")
                                         ).props('flat round size=xs text-color=white').tooltip(tr('Invert Colors'))
                                         # Store refs for reset
@@ -4317,7 +4317,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setGamma({e.value / 100})')
                                 ).props('dark dense').classes('w-24')
                                 ui.button(
-                                    icon='tonality',
+                                    icon='exposure',
                                     on_click=lambda: ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.toggleInvert()')
                                 ).props('flat round size=sm text-color=white').tooltip(tr('Invert Colors'))
                                 def _reset_image_adj():
@@ -4575,7 +4575,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setGamma({e.value / 100})')
                                     ).props('dark dense').classes('w-20')
                                     ui.button(
-                                        icon='tonality',
+                                        icon='exposure',
                                         on_click=lambda: ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.toggleInvert()')
                                     ).props('flat round size=sm').tooltip(tr('Invert Colors'))
                                     def _fs_reset_adj():
