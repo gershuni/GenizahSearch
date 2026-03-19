@@ -304,6 +304,7 @@ Recent decisions affecting current work:
 | 260318-kk1 | Fix puzzle image loading for non-NLI libraries (Manchester, Oxford, JTS, Cambridge) | 2026-03-18 | 7bf99391 | [260318-kk1-fix-puzzle-image-loading-for-non-nli-lib](./quick/260318-kk1-fix-puzzle-image-loading-for-non-nli-lib/) |
 | 260318-tkj | Add CUDL as image source for Mosseri collection (3,141/3,194 records) | 2026-03-18 | 398e44f7 | [260318-tkj-add-cudl-cambridge-digital-library-as-an](./quick/260318-tkj-add-cudl-cambridge-digital-library-as-an/) |
 | Phase 53 P02 | 45 | 2 tasks | 3 files |
+| 260319-dt1 | Add image adjustment controls (brightness, contrast, gamma, invert) to all viewers | 2026-03-19 | a4764fd7 | [260319-dt1-add-image-controls-brightness-contrast-g](./quick/260319-dt1-add-image-controls-brightness-contrast-g/) |
 
 ## Session Continuity
 

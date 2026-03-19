@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.1.0
+# Genizah Search Pro 7.2.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,18 +8,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.1.0?
+## What's New in Version 7.2.0?
+
+### v7.2.0: Image Adjustment Controls
+
+All image viewers now include **brightness, contrast, gamma, and invert** controls for reading difficult manuscripts — across web browse, search advanced view, reading desk, and the desktop app.
+
+* **Brightness / Contrast / Gamma sliders:** Real-time CSS filters (web) and LUT-based pixel processing (desktop) for adjusting faded, stained, or dark manuscript images
+* **Invert Colors toggle:** Instantly invert image colors for reading dark ink on dark parchment or photographic negatives
+* **Desktop export:** Copy Image and Save Image As export the adjusted image with all filters applied
+* **Compact icon toolbar:** Icons with translated tooltips (Hebrew/English) — no text clutter
+
+### Previous Releases
 
 ### v7.1.0: FIST Gap Fill & Expanded Catalog
 
-GenizahSearch now covers **255,615 manuscript records** — 38,673 new records added from the Friedberg Genizah Project database (FIST.db), an 18% expansion across 52 libraries including 7 newly registered collections.
-
-* **38,673 new manuscripts:** Records from JTS (13,520), Cambridge (12,641), Mosseri (4,862), British Library (2,982), Manchester (1,741), and 47 more libraries — all browsable, searchable by title/shelfmark, with NLI images and FJMS catalog enrichment
-* **Metadata-only search:** Title and shelfmark search now returns records even without transcription text. Browse page shows metadata, images, and scholarly data instead of an error
-* **7 new library codes:** Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman — with Hebrew translations
-* **Shelfmark normalization:** Yevr→EVR and Halper→Genizah aliases for cross-collection search compatibility
-
-### Previous Releases
+* **255,615 manuscript records** — 38,673 new records from FIST.db (+18%), 7 new library codes, metadata-only search/browse, shelfmark normalization
 
 ### v7.0.0: Fragment Puzzle & Community Publishing
 

@@ -2975,6 +2975,7 @@ TRANSLATIONS = {
     "Gamma": "גמא",
     "Invert Colors": "הפוך צבעים",
     "Reset Image": "איפוס תמונה",
+    "Image adjustment controls — brightness, contrast, gamma & invert on all image viewers. Better reading of difficult manuscripts.": "בקרות התאמת תמונה — בהירות, ניגודיות, גמא והיפוך צבעים בכל מציגי התמונות. קריאה טובה יותר של כתבי יד קשים.",
 }
 
 # Hebrew library display names (keyed by library_code)

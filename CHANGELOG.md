@@ -4,6 +4,25 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.2.0] - Image Adjustment Controls - 2026-03-19
+
+### New Features
+- **Image adjustment controls**: Brightness, contrast, gamma sliders and invert toggle on all image viewers — web browse (standard, fullscreen, reading desk), web search advanced view, and desktop ManuscriptViewerWidget
+- **Desktop export with adjustments**: Right-click Copy Image and Save Image As export the adjusted (filtered) image, not the raw original
+- **Icon-based toolbar**: Compact icon labels (sun, half-circle, curve, ±, reset arrow) with translated tooltips replacing text labels
+
+### Bug Fixes
+- **Browse page crash**: Fixed `RuntimeError: slot stack empty` — async `load_page()` called `ui.run_javascript()` outside NiceGUI slot context, killing the entire page render
+- **Desktop image race condition**: Stale debounce timer from previous image could fire after new image loaded, reverting the display. Fixed by cancelling timer in `set_image()`
+- **Desktop thumbnail race**: Stale thumbnail callback overwrote new image when switching manuscripts with same page index. Fixed with `_load_generation` counter
+
+### Technical
+- Web: CSS `filter` property for brightness/contrast/invert (native) + SVG `feComponentTransfer` for gamma. Per-viewer SVG filter IDs for reading desk multi-image isolation
+- Desktop: QImage LUT-based pixel processing with 80ms QTimer debounce. 256-entry lookup table applied via `bits()` direct byte access
+- Hebrew translations: בהירות, ניגודיות, גמא, הפוך צבעים, איפוס תמונה
+
+---
+
 ## [7.1.0] - FIST Gap Fill & Expanded Catalog - 2026-03-19
 
 ### New Features
