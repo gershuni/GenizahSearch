@@ -2,7 +2,21 @@
 gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
-status: not_started
+status: executing
+stopped_at: Completed quick task 260318-tkj (add CUDL as image source for Mosseri collection)
+last_updated: "2026-03-19T03:07:58.330Z"
+progress:
+  total_phases: 7
+  completed_phases: 5
+  total_plans: 17
+  completed_plans: 15
+---
+
+---
+gsd_state_version: 1.0
+milestone: v5.6
+milestone_name: milestone
+status: Executing Phase 53
 stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
 last_updated: "2026-03-18T19:49:02Z"
 last_activity: 2026-03-18 - Completed quick task 260318-tkj: Add CUDL as image source for Mosseri collection
@@ -190,25 +204,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 52 - Community + Integration (COMPLETE)
+**Current focus:** Phase 53 — fill-missing-genizah-manuscripts-from-fist
 
 ## Current Position
 
-Milestone: v7.0.0 Fragment Puzzle
-Phase: 52 (6 of 6 in milestone) -- COMPLETE
-Plan: 3 of 3 complete
-Status: Completed 52-03-PLAN.md (desktop community publishing)
-Last activity: 2026-03-18 - Completed quick task 260318-tkj: Add CUDL as image source for Mosseri collection
-
-Progress: [██████████] 100% (6 of 6 phases: 47, 48, 49, 50, 51, 52 complete)
+Phase: 53 (fill-missing-genizah-manuscripts-from-fist) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: ~161 (across 10 milestones)
 - Average duration: ~12 min (historical)
 
 **Recent Trend:**
+
 - v6.5.0: 26 plans, 5 phases, 15 days
 - v6.0.0: 21 plans, 6 phases, 6 days
 - Trend: Stable
@@ -220,6 +231,7 @@ Progress: [██████████] 100% (6 of 6 phases: 47, 48, 49, 50, 
 See PROJECT.md Key Decisions table for full history.
 
 Recent decisions affecting current work:
+
 - [v7.0.0]: Fabric.js (web) + QGraphicsScene (desktop), shared PuzzleDocument model only -- no shared canvas abstraction
 - [v7.0.0]: Pillow + NumPy for background removal (no OpenCV, no ML models)
 - [v7.0.0]: Desktop-first build order -- QGraphicsScene validates data model before Fabric.js/NiceGUI
@@ -243,6 +255,9 @@ Recent decisions affecting current work:
 - [Phase 52-03]: PuzzlePublishThread QThread worker prevents UI freeze during desktop publish
 - [Phase 52-03]: get_feed() merges puzzle_join FeedItems into standard feed pipeline for filter support
 - [Phase 52-03]: community_container widget pattern with clear-on-refresh prevents duplication in JoinsDialog
+- [Phase 53-01]: 38,673 FIST gap records merged into libraries.csv (216,942->255,615), 7 new library codes, Yevr/Halper shelfmark aliases
+- [Phase 53-01]: FIST AlmaId is integer, CSV system_number is string -- CAST(AlmaId AS TEXT) required for matching
+- [Phase 53-01]: LibraryId 230 (Vernadsky) mapped to 'Harkavy' code (shelfmarks are Harkavi-prefixed)
 
 ### Pending Todos
 
@@ -289,6 +304,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-18T19:49:02Z
-Stopped at: Completed quick task 260318-tkj (add CUDL as image source for Mosseri collection)
+Last session: 2026-03-19T03:16:07Z
+Stopped at: Completed 53-01-PLAN.md (CSV gap fill + library codes)
 Resume file: None
