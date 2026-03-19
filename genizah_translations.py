@@ -2973,7 +2973,7 @@ TRANSLATIONS = {
     "Brightness": "בהירות",
     "Contrast": "ניגודיות",
     "Gamma": "גמא",
-    "Invert": "היפוך",
+    "Invert Colors": "הפוך צבעים",
     "Reset Image": "איפוס תמונה",
 }
 

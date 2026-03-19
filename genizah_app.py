@@ -1841,7 +1841,7 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_invert = QPushButton("\u25d1")  # Circle with right half black — invert
         self.btn_invert.setCheckable(True)
         self.btn_invert.setFixedWidth(30)
-        self.btn_invert.setToolTip(tr("Invert"))
+        self.btn_invert.setToolTip(tr("Invert Colors"))
         adj_bar.addWidget(self.btn_invert)
 
         btn_reset_adj = QPushButton("\u21ba")  # Circular arrow — reset

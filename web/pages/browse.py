@@ -3407,7 +3407,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         ui.button(
                                             icon='tonality',
                                             on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdToggleInvert('{vid}')")
-                                        ).props('flat round size=xs text-color=white').tooltip(tr('Invert'))
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Invert Colors'))
                                         # Store refs for reset
                                         _rd_b_ref, _rd_c_ref, _rd_g_ref = _rd_b_sl, _rd_c_sl, _rd_g_sl
                                         def _rd_reset(vid=viewer_id, b_sl=_rd_b_ref, c_sl=_rd_c_ref, g_sl=_rd_g_ref):
@@ -4319,7 +4319,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.button(
                                     icon='tonality',
                                     on_click=lambda: ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.toggleInvert()')
-                                ).props('flat round size=sm text-color=white').tooltip(tr('Invert'))
+                                ).props('flat round size=sm text-color=white').tooltip(tr('Invert Colors'))
                                 def _reset_image_adj():
                                     if slider_refs.get('brightness'): slider_refs['brightness'].value = 0
                                     if slider_refs.get('contrast'): slider_refs['contrast'].value = 0
@@ -4577,7 +4577,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(
                                         icon='tonality',
                                         on_click=lambda: ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.toggleInvert()')
-                                    ).props('flat round size=sm').tooltip(tr('Invert'))
+                                    ).props('flat round size=sm').tooltip(tr('Invert Colors'))
                                     def _fs_reset_adj():
                                         if slider_refs.get('fs_brightness'): slider_refs['fs_brightness'].value = 0
                                         if slider_refs.get('fs_contrast'): slider_refs['fs_contrast'].value = 0

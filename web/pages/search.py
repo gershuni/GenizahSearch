@@ -5316,7 +5316,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.button(
                                         icon='tonality',
                                         on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.toggleInvert()')
-                                    ).props('flat round size=sm text-color=white').tooltip(tr('Invert'))
+                                    ).props('flat round size=sm text-color=white').tooltip(tr('Invert Colors'))
                                     def _adv_reset_adj():
                                         if hasattr(adv_state, 'brightness_sl'): adv_state.brightness_sl.value = 0
                                         if hasattr(adv_state, 'contrast_sl'): adv_state.contrast_sl.value = 0
