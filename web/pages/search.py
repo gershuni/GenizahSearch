@@ -3728,6 +3728,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if ref and not ref.is_deleted:
                 ref.style('display: block')
             search_state.expanded_index = index
+            # Trigger lazy text loading if registered for this card
+            lazy_loaders = getattr(search_state, '_lazy_loaders', {})
+            if index in lazy_loaders:
+                asyncio.ensure_future(lazy_loaders[index]())
 
     def render_results(results, page=None, scroll_to_top=False, reset_expansion=True):
         results_container.clear()
@@ -4150,7 +4154,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
 
             with expand_container:
-                with ui.row().classes('gap-4 flex-wrap'):
+                # Content row: image + text
+                _expand_row = ui.row().classes('gap-4 flex-wrap w-full')
+                with _expand_row:
                     # Left: manuscript image thumbnail
                     if _img_url:
                         ui.html(
@@ -4160,33 +4166,75 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             sanitize=False
                         )
 
-                    # Right: full text (highlighted, line-broken) — only if available
-                    # On session restore full_text is empty; don't repeat snippet (already on card)
-                    full_text = result.get('full_text', '')
-                    highlight_pattern = result.get('highlight_pattern', '')
-                    if full_text:
-                        with ui.column().classes('flex-1 min-w-[200px] gap-2'):
-                            def _highlight_text(text, pattern):
-                                escaped = html.escape(text)
-                                if pattern:
-                                    try:
-                                        flags = re.IGNORECASE
-                                        if '\\n' in pattern or pattern.startswith('^'):
-                                            flags |= re.MULTILINE
-                                        return re.sub(
-                                            f'({pattern})',
-                                            r'<span class="highlight-match">\1</span>',
-                                            escaped, flags=flags
-                                        )
-                                    except re.error:
-                                        return escaped
-                                return escaped
-                            _exp_text_html = _highlight_text(full_text, highlight_pattern)
+                    # Right: full text container (populated immediately or lazy-loaded)
+                    _text_col = ui.column().classes('flex-1 min-w-[200px] gap-2')
+
+                def _render_full_text(text_col, text, pattern):
+                    """Render highlighted full text into the given column."""
+                    text_col.clear()
+                    with text_col:
+                        if text:
+                            escaped = html.escape(text)
+                            if pattern:
+                                try:
+                                    flags = re.IGNORECASE
+                                    if '\\n' in pattern or pattern.startswith('^'):
+                                        flags |= re.MULTILINE
+                                    escaped = re.sub(
+                                        f'({pattern})',
+                                        r'<span class="highlight-match">\1</span>',
+                                        escaped, flags=flags
+                                    )
+                                except re.error:
+                                    pass
                             with ui.scroll_area().classes('w-full').style('max-height: 250px;'):
                                 with ui.element('div').classes('p-3 rounded-lg text-sm whitespace-pre-wrap').style(
                                     'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 0.95rem;'
                                 ):
-                                    ui.html(_exp_text_html, sanitize=False)
+                                    ui.html(escaped, sanitize=False)
+                        else:
+                            ui.label(tr('Full text not available')).style('color: var(--text-muted);')
+
+                # Populate text: immediately if available, lazy-load if not
+                full_text = result.get('full_text', '')
+                highlight_pattern = result.get('highlight_pattern', '')
+                if full_text:
+                    _render_full_text(_text_col, full_text, highlight_pattern)
+                elif sys_id:
+                    # Lazy-load: fetch full text when accordion first expands
+                    _lazy_state = {'loaded': False}
+                    _orig_toggle = None
+
+                    async def _lazy_load_text(idx=index, r=result, tc=_text_col, hp=highlight_pattern, sid=sys_id, ls=_lazy_state):
+                        if ls['loaded']:
+                            return
+                        ls['loaded'] = True
+                        p_num = int(r.get('display', {}).get('img', '1'))
+                        try:
+                            page_data = await run.io_bound(
+                                lambda: state.meta_mgr.get_page_data(sid, p_num) if state.meta_mgr else None
+                            )
+                            if page_data and page_data.text:
+                                r['full_text'] = page_data.text
+                                _render_full_text(tc, page_data.text, hp)
+                        except Exception:
+                            pass
+
+                    # Hook into toggle: load text on first expand
+                    _orig_toggle_fn = toggle_expansion
+
+                    def _make_lazy_toggle(idx, load_fn, orig_fn):
+                        def _toggle(i):
+                            orig_fn(i)
+                            if search_state.expanded_index == idx:
+                                asyncio.ensure_future(load_fn())
+                        return _toggle
+
+                    # Patch the click handler for this card to also trigger lazy load
+                    # We do this by wrapping the card's click — find the content column and re-bind
+                    # Simpler: just trigger lazy load whenever this card expands
+                    search_state._lazy_loaders = getattr(search_state, '_lazy_loaders', {})
+                    search_state._lazy_loaders[index] = _lazy_load_text
 
     def open_advanced_dialog(index, result):
         """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
