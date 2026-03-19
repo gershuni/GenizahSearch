@@ -1829,8 +1829,8 @@ TRANSLATIONS = {
     "Scale": "קנה מידה",
     "Rotation": "סיבוב",
     "Threshold": "סף",
-    "Enter shelfmark...": "...הכנס סימן מדף",
-    "Shelfmark not found": "סימן מדף לא נמצא",
+    "Enter shelfmark...": "...הכנס מספר מדף",
+    "Shelfmark not found": "מספר מדף לא נמצא",
     "No images found": "לא נמצאו תמונות",
     "Loading fragment...": "...טוען קטע",
     "Manage lists": "ניהול רשימות",
@@ -2105,7 +2105,7 @@ TRANSLATIONS = {
     "Lists not available": "רשימות לא זמינות",
     "No lists found": "לא נמצאו רשימות",
     "Select a list": "בחר רשימה",
-    "Add shelfmark reference": "הוסף הפניה לסימן מדף",
+    "Add shelfmark reference": "הוסף הפניה למספר מדף",
     "No items in this list": "אין פריטים ברשימה זו",
     "Delete this comment?": "למחוק הערה זו?",
     "Delete this correction?": "למחוק תיקון זה?",
@@ -2414,6 +2414,16 @@ TRANSLATIONS = {
         "חדש: חיפוש ממוקד לפי מאפייני כתב יד, תרגומי קטלוג ומטא-נתונים, חיפוש לפי גבולות שורה לזיהוי צירופים",
     "Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.":
         "פאזל קטעים — צרו תמונת תצרף של כמה קטעי כתבי יד המהווים מסמך אחד. ערכו, שתפו ויצאו.",
+    "38,673 new Genizah manuscripts added — images and metadata for fragments without transcriptions. 255K+ records across 52 libraries.":
+        "נוספו 38,673 כתבי יד חדשים מהגניזה — תמונות ומטא-נתונים לקטעים ללא תעתיקים. 255K+ רשומות מ-52 ספריות.",
+    "38,673 new Genizah manuscripts added — images and metadata for fragments without transcriptions. 255,615 records across 52 libraries.":
+        "נוספו 38,673 כתבי יד חדשים מהגניזה — תמונות ומטא-נתונים לקטעים ללא תעתיקים. 255,615 רשומות מ-52 ספריות.",
+    "7 new library collections: Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman.":
+        "7 אוספי ספריות חדשים: שלמה הלברשטם, ריינך, הוותיקן, הארכיון המרכזי, קהילת מיינץ, קורווין, מהלמן.",
+    "Search by shelfmark or title now finds manuscripts even without transcription text — with images and scholarly catalog data.":
+        "חיפוש לפי מספר מדף או כותרת מוצא כעת כתבי יד גם ללא תעתיקים — עם תמונות ונתוני קטלוג.",
+    "Shelfmark normalization: Yevr/Halper aliases for cross-collection search compatibility.":
+        "נרמול סימני מדף: כינויי Yevr/Halper לתאימות חיפוש בין אוספים.",
     "Focused Search: filter manuscripts by domain, author, work, date, and material before searching":
         "חיפוש ממוקד: סינון כתבי יד לפי תחום, מחבר, יצירה, תאריך וחומר לפני החיפוש",
     "Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation":
@@ -2883,6 +2893,8 @@ TRANSLATIONS = {
     "Puzzle forked as document {}. Open Fragment Puzzle to view.": "הפאזל הועתק כמסמך {}. פתח פאזל קטעים לצפייה.",
     "New: Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.":
         "חדש: פאזל קטעים — צרו תמונת תצרף של כמה קטעי כתבי יד המהווים מסמך אחד. ערכו, שתפו ויצאו.",
+    "New: 38,673 Genizah manuscripts added — images and metadata for fragments without transcriptions. 255K+ records across 52 libraries.":
+        "חדש: נוספו 38,673 כתבי יד מהגניזה — תמונות ומטא-נתונים לקטעים ללא תעתיקים. 255K+ רשומות מ-52 ספריות.",
     "Fragment Puzzle: visual canvas for arranging manuscript fragments. Background removal, zoom, rotate, crop, folio navigation. Save as join documents with auto-save. Export composite PNG.":
         "פאזל קטעים: קנבס חזותי לסידור קטעי כתבי יד. הסרת רקע, זום, סיבוב, חיתוך, ניווט דפים. שמירה כמסמכי צירוף עם שמירה אוטומטית. ייצוא תמונה מורכבת.",
     "Community Publishing: share puzzle joins with the research community. Published joins appear in Discoveries with thumbnails. Fork and open any published join.":

@@ -327,7 +327,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export."))
+        self.lbl_msg.setText(tr("New: 38,673 Genizah manuscripts added — images and metadata for fragments without transcriptions. 255K+ records across 52 libraries."))
         self.show()
 
     def on_learn_more(self):
@@ -361,10 +361,10 @@ class WhatsNewDialog(QDialog):
 
         features_html = (
             "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
-            f"<li><b>{tr('Fragment Puzzle: visual canvas for arranging manuscript fragments. Background removal, zoom, rotate, crop, folio navigation. Save as join documents with auto-save. Export composite PNG.')}</b></li>"
-            f"<li><b>{tr('Community Publishing: share puzzle joins with the research community. Published joins appear in Discoveries with thumbnails. Fork and open any published join.')}</b></li>"
-            f"<li><b>{tr('Recto/Verso: automatic verso view from recto arrangement with correct verso images.')}</b></li>"
-            f"<li><b>{tr('Fragment Selector: combobox with all canvas fragments and Browse button to open in browse view.')}</b></li>"
+            f"<li><b>{tr('38,673 new Genizah manuscripts added — images and metadata for fragments without transcriptions. 255,615 records across 52 libraries.')}</b></li>"
+            f"<li><b>{tr('7 new library collections: Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman.')}</b></li>"
+            f"<li><b>{tr('Search by shelfmark or title now finds manuscripts even without transcription text — with images and scholarly catalog data.')}</b></li>"
+            f"<li><b>{tr('Shelfmark normalization: Yevr/Halper aliases for cross-collection search compatibility.')}</b></li>"
             "</ul>"
         )
         features_label = QLabel(features_html)

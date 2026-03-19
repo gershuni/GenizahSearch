@@ -352,7 +352,7 @@ def create_layout():
     content_col.props('id=main-content')
 
     # === "What's New" Banner (dismissible, compact single-line) ===
-    if WEB_PUZZLE_ENABLED and app.storage.user.get('whats_new_dismissed') != WHATS_NEW_VERSION:
+    if app.storage.user.get('whats_new_dismissed') != WHATS_NEW_VERSION:
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
             with ui.element('div').classes('w-full mx-auto max-w-5xl px-4 py-2 flex items-center gap-3 mt-2').style(
@@ -360,7 +360,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Fragment Puzzle — create composite images of manuscript fragments that form a single document. Edit, share, and export.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('38,673 new Genizah manuscripts added — images and metadata for fragments without transcriptions. 255K+ records across 52 libraries.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()
