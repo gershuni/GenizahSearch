@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.2.0
+# Genizah Search Pro 7.2.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,18 +8,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.2.0?
+## What's New in Version 7.2.1?
+
+### v7.2.1: Search UX Overhaul & Progressive Images
+
+Search is now **faster to reach and easier to scan** — a hero search bar on the home page, full-width results with inline preview, and progressive image loading across all viewers.
+
+* **Hero search bar:** Prominent search input on the home page — type and go, no clicking through menus
+* **Inline accordion results:** Full-width result cards replace the old splitter layout. Click a result to expand an inline preview with manuscript image + highlighted full text
+* **Progressive image loading:** All web viewers show a spinner → fast thumbnail (400px) → full resolution (2000px). Manuscript images appear in ~1s instead of ~10s
+* **Action buttons on cards:** Browse, Quick View (מבט מהיר), Add to List, and Catalog Records buttons directly on each result
+* **Citation auto-collapse:** Full citation footer collapses to a compact line after 10 seconds
+
+### Previous Releases
 
 ### v7.2.0: Image Adjustment Controls
 
-All image viewers now include **brightness, contrast, gamma, and invert** controls for reading difficult manuscripts — across web browse, search advanced view, reading desk, and the desktop app.
-
-* **Brightness / Contrast / Gamma sliders:** Real-time CSS filters (web) and LUT-based pixel processing (desktop) for adjusting faded, stained, or dark manuscript images
-* **Invert Colors toggle:** Instantly invert image colors for reading dark ink on dark parchment or photographic negatives
-* **Desktop export:** Copy Image and Save Image As export the adjusted image with all filters applied
-* **Compact icon toolbar:** Icons with translated tooltips (Hebrew/English) — no text clutter
-
-### Previous Releases
+* **Brightness / Contrast / Gamma / Invert controls** on all image viewers — web browse, search, reading desk, and desktop app
 
 ### v7.1.0: FIST Gap Fill & Expanded Catalog
 
