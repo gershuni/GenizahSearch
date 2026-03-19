@@ -4084,34 +4084,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             with expand_container:
                 with ui.row().classes('gap-4 flex-wrap'):
-                    # Left: manuscript image thumbnail
+                    # Left: manuscript image thumbnail (same URL pattern as Advanced View)
                     _has_image = False
-                    try:
-                        from shared.nli_crossref_service import get_nli_crossref_service
-                        svc = get_nli_crossref_service(thread_safe=True)
-                        if svc.is_available() and sys_id:
-                            images = svc.get_images(sys_id)
-                            if images:
-                                # Pick image by hit page index (images ordered by ImageName)
-                                hit_page = int(display.get('img', '1')) if display.get('img') else 1
-                                img_idx = max(0, min(hit_page - 1, len(images) - 1))
-                                img_entry = images[img_idx]
-                                fgp_id = img_entry.get('fgp_image_number_id')
-                                if fgp_id:
-                                    # Browser fetches directly from NLI IIIF (browser is not blocked, server is)
-                                    # onerror falls back to server proxy which resolves FL IDs from local sidecar
-                                    _iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fgp_id}/full/200,/0/default.jpg"
-                                    _fallback_url = f"/api/nli_image_by_sysid/{sys_id}?page=0"
-                                    ui.html(
-                                        f'<img src="{_iiif_url}" '
-                                        f'onerror="this.onerror=null; this.src=\'{_fallback_url}\';" '
-                                        f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" '
-                                        f'loading="lazy" />',
-                                        sanitize=False
-                                    )
-                                    _has_image = True
-                    except Exception:
-                        pass
+                    if sys_id:
+                        page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
+                        _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}"
+                        _safe_sys_id = str(sys_id).replace("'", "")
+                        is_oxford = False
+                        try:
+                            from web.pages.browse import is_oxford_manuscript
+                            is_oxford = is_oxford_manuscript(display.get('shelfmark', ''), display.get('library_code', ''))
+                        except Exception:
+                            pass
+                        if is_oxford:
+                            try:
+                                from web.pages.browse import get_oxford_direct_image_url
+                                _ox_url = get_oxford_direct_image_url(display.get('shelfmark', ''), page_idx)
+                                if _ox_url:
+                                    _img_url = _ox_url
+                                else:
+                                    _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+                            except Exception:
+                                _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+                        ui.html(
+                            f'<img src="{_img_url}" '
+                            f'onerror="advHandleImageError(this, \'{_safe_sys_id}\', {page_idx}, {"true" if is_oxford else "false"})" '
+                            f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" '
+                            f'loading="lazy" />',
+                            sanitize=False
+                        )
+                        _has_image = True
 
                     # Right: full text (highlighted, line-broken) + action buttons
                     with ui.column().classes('flex-1 min-w-[200px] gap-2'):
