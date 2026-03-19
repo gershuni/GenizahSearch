@@ -2968,6 +2968,13 @@ TRANSLATIONS = {
     "View all joins...": "הצג את כל הצירופים...",
     "No joined fragments found.": "לא נמצאו קטעים מצורפים.",
     "Could not resolve fragment identifiers.": "לא ניתן לפענח מזהי קטעים.",
+
+    # --- Image Adjustment Controls ---
+    "Brightness": "בהירות",
+    "Contrast": "ניגודיות",
+    "Gamma": "גמא",
+    "Invert": "היפוך",
+    "Reset Image": "איפוס תמונה",
 }
 
 # Hebrew library display names (keyed by library_code)

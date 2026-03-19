@@ -356,7 +356,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     window.advViewer = {
         el: null, container: null,
-        state: { scale: 1, rotation: 0, x: 0, y: 0, isDragging: false, startX: 0, startY: 0 },
+        state: { scale: 1, rotation: 0, x: 0, y: 0, isDragging: false, startX: 0, startY: 0, brightness: 0, contrast: 0, gamma: 1.0, invert: false },
         init: function() {
             this.el = document.querySelector('.adv-zoomable-image');
             this.container = document.querySelector('.adv-image-container');
@@ -398,15 +398,39 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         applyTransform: function() {
             if (!this.el) { this.el = document.querySelector('.adv-zoomable-image'); if (!this.el) return; }
             this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
+            this._applyFilters();
         },
+        _applyFilters: function() {
+            if (!this.el) return;
+            const s = this.state;
+            const b = 1 + s.brightness / 100;
+            const c = 1 + s.contrast / 100;
+            const inv = s.invert ? 1 : 0;
+            let f = 'brightness(' + b + ') contrast(' + c + ') invert(' + inv + ')';
+            if (s.gamma !== 1.0) {
+                const svgFilter = document.getElementById('gamma-adv');
+                if (svgFilter) {
+                    const exp = 1.0 / s.gamma;
+                    svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
+                }
+                f += ' url(#gamma-adv)';
+            }
+            this.el.style.filter = f;
+        },
+        setBrightness: function(val) { this.state.brightness = val; this._applyFilters(); },
+        setContrast: function(val) { this.state.contrast = val; this._applyFilters(); },
+        setGamma: function(val) { this.state.gamma = val; this._applyFilters(); },
+        toggleInvert: function() { this.state.invert = !this.state.invert; this._applyFilters(); },
+        resetAdjustments: function() { this.state.brightness = 0; this.state.contrast = 0; this.state.gamma = 1.0; this.state.invert = false; this._applyFilters(); },
         zoomIn: function() { this.state.scale = Math.min(4, this.state.scale + 0.25); this.applyTransform(); this.updateLabel(); },
         zoomOut: function() { this.state.scale = Math.max(0.25, this.state.scale - 0.25); this.applyTransform(); this.updateLabel(); },
         rotateLeft: function() { this.state.rotation = (this.state.rotation - 90) % 360; this.applyTransform(); },
         rotateRight: function() { this.state.rotation = (this.state.rotation + 90) % 360; this.applyTransform(); },
-        reset: function() { this.state.x = 0; this.state.y = 0; this.state.rotation = 0; this.state.scale = 1; this.applyTransform(); this.updateLabel(); },
+        reset: function() { this.state.x = 0; this.state.y = 0; this.state.rotation = 0; this.state.scale = 1; this.resetAdjustments(); this.applyTransform(); this.updateLabel(); },
         updateLabel: function() { const l = document.querySelector('.adv-zoom-label'); if (l) l.textContent = Math.round(this.state.scale * 100) + '%'; }
     };
     </script>
+    <svg style="position:absolute;width:0;height:0"><filter id="gamma-adv"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
     <style>
     .adv-image-container { position: relative; background: #1a1a1a; border-radius: 8px; overflow: hidden; min-height: 400px; display: flex; align-items: center; justify-content: center; }
     .adv-zoomable-image { max-width: 100%; max-height: 100%; object-fit: contain; cursor: grab; transform-origin: center center; transition: transform 0.1s ease-out; }
@@ -5269,6 +5293,39 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props('flat round size=sm text-color=white').tooltip(tr('Rotate Right'))
                                         ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                         ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props('flat round size=sm text-color=white').tooltip(tr('Reset View'))
+
+                                # Image adjustment controls
+                                with ui.row().classes('w-full items-center gap-2 px-3 py-1').style(
+                                    'background: #1a1a1a; border-top: 1px solid #333;'
+                                ):
+                                    ui.label(tr('Brightness')).classes('text-white text-xs')
+                                    adv_state.brightness_sl = ui.slider(
+                                        min=-100, max=100, step=1, value=0,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setBrightness({e.value})')
+                                    ).props('dark dense').classes('w-24')
+                                    ui.label(tr('Contrast')).classes('text-white text-xs')
+                                    adv_state.contrast_sl = ui.slider(
+                                        min=-100, max=100, step=1, value=0,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setContrast({e.value})')
+                                    ).props('dark dense').classes('w-24')
+                                    ui.label(tr('Gamma')).classes('text-white text-xs')
+                                    adv_state.gamma_sl = ui.slider(
+                                        min=20, max=300, step=1, value=100,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.advViewer) window.advViewer.setGamma({e.value / 100})')
+                                    ).props('dark dense').classes('w-24')
+                                    ui.button(
+                                        icon='invert_colors',
+                                        on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.toggleInvert()')
+                                    ).props('flat round size=sm text-color=white').tooltip(tr('Invert'))
+                                    def _adv_reset_adj():
+                                        if hasattr(adv_state, 'brightness_sl'): adv_state.brightness_sl.value = 0
+                                        if hasattr(adv_state, 'contrast_sl'): adv_state.contrast_sl.value = 0
+                                        if hasattr(adv_state, 'gamma_sl'): adv_state.gamma_sl.value = 100
+                                        ui.run_javascript('if(window.advViewer) window.advViewer.resetAdjustments()')
+                                    ui.button(
+                                        icon='tune',
+                                        on_click=_adv_reset_adj
+                                    ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
 
                                 # Image display
                                 safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')

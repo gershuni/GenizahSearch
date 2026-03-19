@@ -566,7 +566,11 @@ async function handleImageError(img, sysId, pageIdx, isOxford = false) {
             y: 0,
             isDragging: false,
             startX: 0,
-            startY: 0
+            startY: 0,
+            brightness: 0,
+            contrast: 0,
+            gamma: 1.0,
+            invert: false
         },
 
         init: function() {
@@ -659,13 +663,44 @@ async function handleImageError(img, sysId, pageIdx, isOxford = false) {
             }
             // Translate is applied first (screen coordinates), then rotate/scale
             this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
+            this._applyFilters();
         },
-        
+
+        _applyFilters: function() {
+            if (!this.el) return;
+            const s = this.state;
+            const b = 1 + s.brightness / 100;
+            const c = 1 + s.contrast / 100;
+            const inv = s.invert ? 1 : 0;
+            let f = `brightness(${b}) contrast(${c}) invert(${inv})`;
+            if (s.gamma !== 1.0) {
+                // Update SVG gamma filter exponent
+                const svgFilter = document.getElementById('gamma-main');
+                if (svgFilter) {
+                    const exp = 1.0 / s.gamma;
+                    svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
+                }
+                f += ' url(#gamma-main)';
+            }
+            this.el.style.filter = f;
+        },
+
+        setBrightness: function(val) { this.state.brightness = val; this._applyFilters(); },
+        setContrast: function(val) { this.state.contrast = val; this._applyFilters(); },
+        setGamma: function(val) { this.state.gamma = val; this._applyFilters(); },
+        toggleInvert: function() { this.state.invert = !this.state.invert; this._applyFilters(); },
+        resetAdjustments: function() {
+            this.state.brightness = 0; this.state.contrast = 0;
+            this.state.gamma = 1.0; this.state.invert = false;
+            this._applyFilters();
+        },
+
         reset: function() {
             this.state.x = 0;
             this.state.y = 0;
             this.state.rotation = 0;
             this.state.scale = 1;
+            this.resetAdjustments();
             this.applyTransform();
         }
     };
@@ -675,6 +710,8 @@ async function handleImageError(img, sysId, pageIdx, isOxford = false) {
         setTimeout(() => window.manuscriptViewer.init(), 500);
     });
 </script>
+<svg style="position:absolute;width:0;height:0"><filter id="gamma-main"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
+<svg style="position:absolute;width:0;height:0"><filter id="gamma-fs"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
 '''
 
 
@@ -926,6 +963,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.is_loading = True
         state.error = None
         state.zoom_level = 1.0  # Reset zoom on page change
+        # Reset image adjustments on page change
+        for key in ('brightness', 'contrast'):
+            if slider_refs.get(key): slider_refs[key].value = 0
+        if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
+        ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
         update_content()  # Show loading spinner
 
         # === Phase A: Fast page fetch ===
@@ -1659,11 +1701,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.rotation = 0  # Also reset rotation
         if slider_refs.get('rotate'):
             slider_refs['rotate'].value = 0
+        # Reset image adjustments
+        for key in ('brightness', 'contrast'):
+            if slider_refs.get(key): slider_refs[key].value = 0
+            if slider_refs.get(f'fs_{key}'): slider_refs[f'fs_{key}'].value = 0
+        if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
+        if slider_refs.get('fs_gamma'): slider_refs['fs_gamma'].value = 100
         ui.run_javascript('''
             if(window.manuscriptViewer) window.manuscriptViewer.reset();
             if(window.fsEditViewer) {
-                window.fsEditViewer.state = { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0 };
+                window.fsEditViewer.state = { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0, brightness: 0, contrast: 0, gamma: 1.0, invert: false };
                 window.fsEditViewer.applyTransform();
+                window.fsEditViewer._applyFilters();
             }
         ''')
         update_image_transform()
@@ -3335,6 +3384,39 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdResetView('{vid}')")
                                         ).props('flat round size=xs text-color=white').tooltip(tr('Reset View'))
 
+                                    # Per-image adjustment controls
+                                    with ui.row().classes('items-center gap-1 px-2 py-1').style(
+                                        'background: #1a1a1a; margin: 0 4px; border-top: 1px solid #333;'
+                                    ):
+                                        ui.label(tr('Brightness')).style('color: white; font-size: 0.65rem;')
+                                        _rd_b_sl = ui.slider(
+                                            min=-100, max=100, step=1, value=0,
+                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetBrightness('{vid}', {e.value})")
+                                        ).props('dark dense').classes('w-16')
+                                        ui.label(tr('Contrast')).style('color: white; font-size: 0.65rem;')
+                                        _rd_c_sl = ui.slider(
+                                            min=-100, max=100, step=1, value=0,
+                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetContrast('{vid}', {e.value})")
+                                        ).props('dark dense').classes('w-16')
+                                        ui.label(tr('Gamma')).style('color: white; font-size: 0.65rem;')
+                                        _rd_g_sl = ui.slider(
+                                            min=20, max=300, step=1, value=100,
+                                            on_change=lambda e, vid=viewer_id: ui.run_javascript(f"window.rdSetGamma('{vid}', {e.value / 100})")
+                                        ).props('dark dense').classes('w-16')
+                                        ui.button(
+                                            icon='invert_colors',
+                                            on_click=lambda vid=viewer_id: ui.run_javascript(f"window.rdToggleInvert('{vid}')")
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Invert'))
+                                        # Store refs for reset
+                                        _rd_b_ref, _rd_c_ref, _rd_g_ref = _rd_b_sl, _rd_c_sl, _rd_g_sl
+                                        def _rd_reset(vid=viewer_id, b_sl=_rd_b_ref, c_sl=_rd_c_ref, g_sl=_rd_g_ref):
+                                            b_sl.value = 0; c_sl.value = 0; g_sl.value = 100
+                                            ui.run_javascript(f"window.rdResetAdjustments('{vid}')")
+                                        ui.button(
+                                            icon='tune',
+                                            on_click=_rd_reset
+                                        ).props('flat round size=xs text-color=white').tooltip(tr('Reset Image'))
+
                                     # Image display area with zoom/drag support
                                     safe_sid = frag_sid.replace("'", "\\'")
                                     is_ox_js = 'true' if frag_is_oxford else 'false'
@@ -3566,9 +3648,51 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 ui.run_javascript('''
                     window.rdViewers = window.rdViewers || {};
 
+                    function rdInitState(viewerId) {
+                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false, brightness: 0, contrast: 0, gamma: 1.0, invert: false};
+                        return window.rdViewers[viewerId];
+                    }
+
+                    function rdApplyFilters(viewerId) {
+                        const s = window.rdViewers[viewerId];
+                        if (!s) return;
+                        const img = document.getElementById(viewerId);
+                        if (!img) return;
+                        const b = 1 + s.brightness / 100;
+                        const c = 1 + s.contrast / 100;
+                        const inv = s.invert ? 1 : 0;
+                        let f = 'brightness(' + b + ') contrast(' + c + ') invert(' + inv + ')';
+                        if (s.gamma !== 1.0) {
+                            const filterId = 'gamma-' + viewerId;
+                            let svgFilter = document.getElementById(filterId);
+                            if (!svgFilter) {
+                                const svgNS = 'http://www.w3.org/2000/svg';
+                                const svg = document.createElementNS(svgNS, 'svg');
+                                svg.style.cssText = 'position:absolute;width:0;height:0';
+                                const filter = document.createElementNS(svgNS, 'filter');
+                                filter.setAttribute('id', filterId);
+                                const ct = document.createElementNS(svgNS, 'feComponentTransfer');
+                                ['R','G','B'].forEach(ch => {
+                                    const fn = document.createElementNS(svgNS, 'feFunc' + ch);
+                                    fn.setAttribute('type', 'gamma');
+                                    fn.setAttribute('amplitude', '1');
+                                    fn.setAttribute('exponent', '1.0');
+                                    ct.appendChild(fn);
+                                });
+                                filter.appendChild(ct);
+                                svg.appendChild(filter);
+                                document.body.appendChild(svg);
+                                svgFilter = filter;
+                            }
+                            const exp = 1.0 / s.gamma;
+                            svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
+                            f += ' url(#' + filterId + ')';
+                        }
+                        img.style.filter = f;
+                    }
+
                     window.rdZoom = function(viewerId, delta) {
-                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false};
-                        const state = window.rdViewers[viewerId];
+                        const state = rdInitState(viewerId);
                         state.scale = Math.max(0.25, Math.min(4, state.scale + delta));
                         const img = document.getElementById(viewerId);
                         if (img) img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
@@ -3577,8 +3701,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     };
 
                     window.rdRotate = function(viewerId, degrees) {
-                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false};
-                        const state = window.rdViewers[viewerId];
+                        const state = rdInitState(viewerId);
                         state.rotation = (state.rotation + degrees + 360) % 360;
                         const img = document.getElementById(viewerId);
                         if (img) img.style.transform = `translate(${state.x}px, ${state.y}px) rotate(${state.rotation}deg) scale(${state.scale})`;
@@ -3588,10 +3711,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if (!window.rdViewers[viewerId]) return;
                         const state = window.rdViewers[viewerId];
                         state.scale = 1; state.rotation = 0; state.x = 0; state.y = 0;
+                        state.brightness = 0; state.contrast = 0; state.gamma = 1.0; state.invert = false;
                         const img = document.getElementById(viewerId);
-                        if (img) img.style.transform = 'translate(0px, 0px) rotate(0deg) scale(1)';
+                        if (img) { img.style.transform = 'translate(0px, 0px) rotate(0deg) scale(1)'; img.style.filter = ''; }
                         const label = document.getElementById(viewerId + '-zoom-label');
                         if (label) label.textContent = '100%';
+                    };
+
+                    window.rdSetBrightness = function(viewerId, val) { rdInitState(viewerId).brightness = val; rdApplyFilters(viewerId); };
+                    window.rdSetContrast = function(viewerId, val) { rdInitState(viewerId).contrast = val; rdApplyFilters(viewerId); };
+                    window.rdSetGamma = function(viewerId, val) { rdInitState(viewerId).gamma = val; rdApplyFilters(viewerId); };
+                    window.rdToggleInvert = function(viewerId) { const s = rdInitState(viewerId); s.invert = !s.invert; rdApplyFilters(viewerId); };
+                    window.rdResetAdjustments = function(viewerId) {
+                        const s = rdInitState(viewerId);
+                        s.brightness = 0; s.contrast = 0; s.gamma = 1.0; s.invert = false;
+                        rdApplyFilters(viewerId);
                     };
 
                     // Initialize drag support for all rd-zoomable images
@@ -3599,8 +3733,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         const img = document.getElementById(viewerId);
                         if (!img || img.dataset.rdDragInit) return;
                         img.dataset.rdDragInit = 'true';
-                        if (!window.rdViewers[viewerId]) window.rdViewers[viewerId] = {scale: 1, rotation: 0, x: 0, y: 0, isDragging: false};
-                        const state = window.rdViewers[viewerId];
+                        const state = rdInitState(viewerId);
                         img.style.cursor = 'grab';
                         img.ondragstart = (e) => e.preventDefault();
 
@@ -4163,6 +4296,38 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(tr('Fullscreen Image'))
 
+                            # Image adjustment controls row
+                            with ui.row().classes('w-full items-center gap-2 px-3 py-1').style(
+                                'background: #1a1a1a; border-top: 1px solid #333;'
+                            ):
+                                ui.label(tr('Brightness')).classes('text-white text-xs')
+                                slider_refs['brightness'] = ui.slider(
+                                    min=-100, max=100, step=1, value=0,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setBrightness({e.value})')
+                                ).props('dark dense').classes('w-24')
+                                ui.label(tr('Contrast')).classes('text-white text-xs')
+                                slider_refs['contrast'] = ui.slider(
+                                    min=-100, max=100, step=1, value=0,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setContrast({e.value})')
+                                ).props('dark dense').classes('w-24')
+                                ui.label(tr('Gamma')).classes('text-white text-xs')
+                                slider_refs['gamma'] = ui.slider(
+                                    min=20, max=300, step=1, value=100,
+                                    on_change=lambda e: ui.run_javascript(f'if(window.manuscriptViewer) window.manuscriptViewer.setGamma({e.value / 100})')
+                                ).props('dark dense').classes('w-24')
+                                ui.button(
+                                    icon='invert_colors',
+                                    on_click=lambda: ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.toggleInvert()')
+                                ).props('flat round size=sm text-color=white').tooltip(tr('Invert'))
+                                def _reset_image_adj():
+                                    if slider_refs.get('brightness'): slider_refs['brightness'].value = 0
+                                    if slider_refs.get('contrast'): slider_refs['contrast'].value = 0
+                                    if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
+                                    ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
+                                ui.button(
+                                    icon='tune',
+                                    on_click=_reset_image_adj
+                                ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
 
                             # Image display area - using div instead of scroll_area for drag support
                             with ui.element('div').classes('image-container w-full').style(
@@ -4389,6 +4554,39 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='rotate_right', on_click=rotate_right).props('flat round dense size=sm').tooltip(tr('Rotate right'))
                                     ui.button(icon='restart_alt', on_click=zoom_reset).props('flat round dense size=sm').tooltip(tr('Reset view'))
 
+                                # Fullscreen image adjustment controls
+                                with ui.element('div').classes('fullscreen-image-toolbar').style(
+                                    'border-top: 1px solid #444; padding: 2px 8px;'
+                                ):
+                                    ui.label(tr('Brightness')).style('color: #ccc; font-size: 0.7rem;')
+                                    slider_refs['fs_brightness'] = ui.slider(
+                                        min=-100, max=100, step=1, value=0,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setBrightness({e.value})')
+                                    ).props('dark dense').classes('w-20')
+                                    ui.label(tr('Contrast')).style('color: #ccc; font-size: 0.7rem;')
+                                    slider_refs['fs_contrast'] = ui.slider(
+                                        min=-100, max=100, step=1, value=0,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setContrast({e.value})')
+                                    ).props('dark dense').classes('w-20')
+                                    ui.label(tr('Gamma')).style('color: #ccc; font-size: 0.7rem;')
+                                    slider_refs['fs_gamma'] = ui.slider(
+                                        min=20, max=300, step=1, value=100,
+                                        on_change=lambda e: ui.run_javascript(f'if(window.fsEditViewer) window.fsEditViewer.setGamma({e.value / 100})')
+                                    ).props('dark dense').classes('w-20')
+                                    ui.button(
+                                        icon='invert_colors',
+                                        on_click=lambda: ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.toggleInvert()')
+                                    ).props('flat round size=sm').tooltip(tr('Invert'))
+                                    def _fs_reset_adj():
+                                        if slider_refs.get('fs_brightness'): slider_refs['fs_brightness'].value = 0
+                                        if slider_refs.get('fs_contrast'): slider_refs['fs_contrast'].value = 0
+                                        if slider_refs.get('fs_gamma'): slider_refs['fs_gamma'].value = 100
+                                        ui.run_javascript('if(window.fsEditViewer) window.fsEditViewer.resetAdjustments()')
+                                    ui.button(
+                                        icon='tune',
+                                        on_click=_fs_reset_adj
+                                    ).props('flat round size=sm').tooltip(tr('Reset Image'))
+
                                 # Image display area
                                 with ui.element('div').classes('fullscreen-edit-image').props('id="fs-image-panel"'):
                                     if has_image and img_url:
@@ -4464,10 +4662,38 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         // Create dedicated viewer state for fullscreen
                                         const fsViewer = {
                                             el: fsImage,
-                                            state: { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0 },
+                                            state: { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0, brightness: 0, contrast: 0, gamma: 1.0, invert: false },
 
                                             applyTransform: function() {
                                                 this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
+                                                this._applyFilters();
+                                            },
+
+                                            _applyFilters: function() {
+                                                const s = this.state;
+                                                const b = 1 + s.brightness / 100;
+                                                const c = 1 + s.contrast / 100;
+                                                const inv = s.invert ? 1 : 0;
+                                                let f = 'brightness(' + b + ') contrast(' + c + ') invert(' + inv + ')';
+                                                if (s.gamma !== 1.0) {
+                                                    const svgFilter = document.getElementById('gamma-fs');
+                                                    if (svgFilter) {
+                                                        const exp = 1.0 / s.gamma;
+                                                        svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
+                                                    }
+                                                    f += ' url(#gamma-fs)';
+                                                }
+                                                this.el.style.filter = f;
+                                            },
+
+                                            setBrightness: function(val) { this.state.brightness = val; this._applyFilters(); },
+                                            setContrast: function(val) { this.state.contrast = val; this._applyFilters(); },
+                                            setGamma: function(val) { this.state.gamma = val; this._applyFilters(); },
+                                            toggleInvert: function() { this.state.invert = !this.state.invert; this._applyFilters(); },
+                                            resetAdjustments: function() {
+                                                this.state.brightness = 0; this.state.contrast = 0;
+                                                this.state.gamma = 1.0; this.state.invert = false;
+                                                this._applyFilters();
                                             },
 
                                             onWheel: function(e) {
