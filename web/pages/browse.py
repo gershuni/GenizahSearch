@@ -45,6 +45,39 @@ from web.components.joins_panel import fetch_connected_fragments
 
 VIEWER_STYLES = '''
 <script>
+// Progressive image loading: show spinner → thumbnail (400px) → full (2000px)
+function progressiveLoad(img) {
+    var container = img.closest('.img-loading-container');
+    var fullSrc = img.getAttribute('data-full-src');
+    // Mark loaded on first successful paint
+    img.addEventListener('load', function onThumbLoad() {
+        if (container) container.classList.add('img-loaded');
+        img.removeEventListener('load', onThumbLoad);
+        // Upgrade to full resolution if available
+        if (fullSrc && img.src !== fullSrc) {
+            var full = new Image();
+            full.onload = function() {
+                img.src = fullSrc;
+            };
+            full.src = fullSrc;
+        }
+    });
+    // Also mark loaded on error (hide spinner)
+    img.addEventListener('error', function onErr() {
+        if (container) container.classList.add('img-loaded');
+        img.removeEventListener('error', onErr);
+    });
+}
+// Auto-init all progressive images on page
+function initProgressiveImages() {
+    document.querySelectorAll('img[data-full-src]').forEach(function(img) {
+        if (!img.dataset.progressiveInit) {
+            img.dataset.progressiveInit = 'true';
+            progressiveLoad(img);
+        }
+    });
+}
+
 // NLI IIIF base URL for direct browser access
 const NLI_IIIF_BASE = 'https://iiif.nli.org.il/IIIFv21';
 
@@ -4331,26 +4364,32 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             with ui.element('div').classes('image-container w-full').style(
                                 'background: #1a1a1a; height: calc(60vh - 100px); overflow: hidden; position: relative;'
                             ):
-                                with ui.element('div').style(
+                                with ui.element('div').classes('img-loading-container').style(
                                     'display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;'
                                 ):
                                     safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
                                     safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
 
                                     is_oxford_js = 'true' if is_oxford else 'false'
+                                    # Progressive loading: thumbnail first, then full resolution
+                                    _thumb_url = safe_img_url
+                                    _full_url = safe_img_url
+                                    if '/api/nli_image_by_sysid/' in safe_img_url:
+                                        _sep = '&' if '?' in safe_img_url else '?'
+                                        _thumb_url = f"{safe_img_url}{_sep}width=400"
                                     img_html = f'''
                                     <img
-                                        src="{safe_img_url}"
+                                        src="{_thumb_url}"
+                                        data-full-src="{_full_url}"
                                         class="zoomable-image"
                                         style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
-                                        loading="lazy"
                                         draggable="false"
                                         onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
                                         onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"
                                     />
                                     '''
                                     ui.html(img_html, sanitize=False)
-                                    ui.run_javascript('if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 100);') 
+                                    ui.run_javascript('if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 100); initProgressiveImages();')
 
                             # === Image Credit/Attribution Footer ===
                             if page.attribution:
@@ -4586,13 +4625,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ).props('flat round size=sm').tooltip(tr('Reset Image'))
 
                                 # Image display area
-                                with ui.element('div').classes('fullscreen-edit-image').props('id="fs-image-panel"'):
+                                with ui.element('div').classes('fullscreen-edit-image img-loading-container').props('id="fs-image-panel"'):
                                     if has_image and img_url:
                                         safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
                                         safe_sys_id = (page.sys_id or '').replace("'", "\\'").replace('"', '\\"')
                                         is_oxford_js = 'true' if is_oxford else 'false'
-                                        img_html = f'<img src="{safe_img_url}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" loading="lazy" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js})" />'
+                                        _fs_thumb = safe_img_url
+                                        _fs_full = safe_img_url
+                                        if '/api/nli_image_by_sysid/' in safe_img_url:
+                                            _sep = '&' if '?' in safe_img_url else '?'
+                                            _fs_thumb = f"{safe_img_url}{_sep}width=400"
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js})" />'
                                         ui.html(img_html, sanitize=False)
+                                        ui.run_javascript('initProgressiveImages();')
                                     else:
                                         with ui.column().classes('items-center justify-center h-full'):
                                             ui.icon('image_not_supported', size='4rem').style('color: #666;')

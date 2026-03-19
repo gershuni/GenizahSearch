@@ -518,6 +518,32 @@ body {
     transition: opacity 0.3s ease;
 }
 
+/* Progressive image loading spinner */
+.img-loading-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100px;
+}
+.img-loading-container::before {
+    content: '';
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border-light, #e0e0e0);
+    border-top-color: var(--primary-600, #2563eb);
+    border-radius: 50%;
+    animation: img-spin 0.8s linear infinite;
+    z-index: 0;
+}
+.img-loading-container.img-loaded::before {
+    display: none;
+}
+@keyframes img-spin {
+    to { transform: rotate(360deg); }
+}
+
 /* Hide Hebrew label on mobile */
 @media (max-width: 768px) {
     .citation-hebrew-label {

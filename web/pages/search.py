@@ -4786,10 +4786,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
                                 is_oxford_js = 'true' if is_oxford else 'false'
 
-                                with ui.element('div').classes('adv-image-container w-full').style('height: calc(100% - 48px);'):
-                                    img_html = f'''<img src="{safe_img_url}" class="adv-zoomable-image" style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;" loading="lazy" draggable="false" onload="if(window.advViewer) window.advViewer.init()" onerror="advHandleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"/>'''
+                                _adv_thumb = safe_img_url
+                                _adv_full = safe_img_url
+                                if '/api/nli_image_by_sysid/' in safe_img_url:
+                                    _sep = '&' if '?' in safe_img_url else '?'
+                                    _adv_thumb = f"{safe_img_url}{_sep}width=400"
+                                with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: calc(100% - 48px);'):
+                                    img_html = f'''<img src="{_adv_thumb}" data-full-src="{_adv_full}" class="adv-zoomable-image" style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;" draggable="false" onload="if(window.advViewer) window.advViewer.init()" onerror="advHandleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"/>'''
                                     ui.html(img_html, sanitize=False)
-                                    ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); }, 200);')
+                                    ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
                     return  # Exit early for fullscreen mode
 
@@ -5438,20 +5443,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 safe_sys_id = (sys_id or '').replace("'", "\\'").replace('"', '\\"')
                                 is_oxford_js = 'true' if is_oxford else 'false'
 
-                                with ui.element('div').classes('adv-image-container w-full').style('height: 70vh;'):
+                                _adv2_thumb = safe_img_url
+                                _adv2_full = safe_img_url
+                                if '/api/nli_image_by_sysid/' in safe_img_url:
+                                    _sep = '&' if '?' in safe_img_url else '?'
+                                    _adv2_thumb = f"{safe_img_url}{_sep}width=400"
+                                with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: 70vh;'):
                                     img_html = f'''
                                     <img
-                                        src="{safe_img_url}"
+                                        src="{_adv2_thumb}"
+                                        data-full-src="{_adv2_full}"
                                         class="adv-zoomable-image"
                                         style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;"
-                                        loading="lazy"
                                         draggable="false"
                                         onload="if(window.advViewer) window.advViewer.init()"
                                         onerror="advHandleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"
                                     />
                                     '''
                                     ui.html(img_html, sanitize=False)
-                                    ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); }, 200);')
+                                    ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
                                 # Attribution footer
                                 attribution = ''
