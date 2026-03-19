@@ -3731,7 +3731,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Trigger lazy text loading if registered for this card
             lazy_loaders = getattr(search_state, '_lazy_loaders', {})
             if index in lazy_loaders:
-                asyncio.ensure_future(lazy_loaders[index]())
+                async def _run_lazy(fn=lazy_loaders[index]):
+                    with _page_client:
+                        await fn()
+                asyncio.ensure_future(_run_lazy())
 
     def render_results(results, page=None, scroll_to_top=False, reset_expansion=True):
         results_container.clear()
