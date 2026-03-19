@@ -150,7 +150,7 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 **Milestone Goal:** Add 38,673 Genizah manuscripts from FIST.db that are missing from libraries.csv, making them browsable with images and FJMS enrichment. Data-only phase — no Tantivy index rebuild needed.
 
 **v7.1.0 FIST Gap Fill (Phase 53):**
-- [ ] **Phase 53: Fill Missing Genizah Manuscripts from FIST** - CSV generation, library code mapping, metadata search guard fix
+- [x] **Phase 53: Fill Missing Genizah Manuscripts from FIST** - CSV generation, library code mapping, metadata search guard fix (completed 2026-03-19)
 
 ## Phase Details
 
@@ -274,7 +274,7 @@ Plans:
 | 50. Join Documents | 3/3 | Complete    | 2026-03-16 |
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
-| 53. Fill Missing Genizah MSS from FIST | 1/2 | In Progress|  |
+| 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete   | 2026-03-19 |
 
 ---
 *Roadmap created: 2026-02-09*

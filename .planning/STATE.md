@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v5.6
 milestone_name: milestone
 status: executing
-stopped_at: Completed quick task 260318-tkj (add CUDL as image source for Mosseri collection)
-last_updated: "2026-03-19T03:07:58.330Z"
+stopped_at: Completed 53-02-PLAN.md (Phase 53 plan 02 complete - metadata search guard fix)
+last_updated: "2026-03-19T07:03:55.792Z"
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 17
-  completed_plans: 15
+  completed_plans: 17
 ---
 
 ---
@@ -208,8 +208,8 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 
 ## Current Position
 
-Phase: 53 (fill-missing-genizah-manuscripts-from-fist) — EXECUTING
-Plan: 2 of 2
+Phase: 53 (fill-missing-genizah-manuscripts-from-fist) — COMPLETE
+Plan: 2 of 2 (all complete)
 
 ## Performance Metrics
 
@@ -258,6 +258,8 @@ Recent decisions affecting current work:
 - [Phase 53-01]: 38,673 FIST gap records merged into libraries.csv (216,942->255,615), 7 new library codes, Yevr/Halper shelfmark aliases
 - [Phase 53-01]: FIST AlmaId is integer, CSV system_number is string -- CAST(AlmaId AS TEXT) required for matching
 - [Phase 53-01]: LibraryId 230 (Vernadsky) mapped to 'Harkavy' code (shelfmarks are Harkavi-prefixed)
+- [Phase Phase 53-02]: Metadata search extracted into _execute_metadata_search helper, moved above Tantivy guard; uses meta_mgr.get_meta_for_id(sid) for display dict (not self.csv_bank which doesn't exist on SearchEngine)
+- [Phase Phase 53-02]: metadata_only flag on all metadata search results: True for records without Tantivy text (FIST-only), False for records with text; browse page hides page nav for metadata_only=True results
 
 ### Pending Todos
 
@@ -301,9 +303,10 @@ Recent decisions affecting current work:
 | 260318-jyz | Fix library attribution credit lines per source library | 2026-03-18 | b4486a4e | [260318-jyz-fix-library-attribution-credit-lines-per](./quick/260318-jyz-fix-library-attribution-credit-lines-per/) |
 | 260318-kk1 | Fix puzzle image loading for non-NLI libraries (Manchester, Oxford, JTS, Cambridge) | 2026-03-18 | 7bf99391 | [260318-kk1-fix-puzzle-image-loading-for-non-nli-lib](./quick/260318-kk1-fix-puzzle-image-loading-for-non-nli-lib/) |
 | 260318-tkj | Add CUDL as image source for Mosseri collection (3,141/3,194 records) | 2026-03-18 | 398e44f7 | [260318-tkj-add-cudl-cambridge-digital-library-as-an](./quick/260318-tkj-add-cudl-cambridge-digital-library-as-an/) |
+| Phase 53 P02 | 45 | 2 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-03-19T03:16:07Z
-Stopped at: Completed 53-01-PLAN.md (CSV gap fill + library codes)
+Last session: 2026-03-19T07:03:55.780Z
+Stopped at: Completed 53-02-PLAN.md (Phase 53 plan 02 complete - metadata search guard fix)
 Resume file: None
