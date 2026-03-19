@@ -111,13 +111,13 @@ def create_page():
                 with ui.row().classes('items-center gap-2').style(
                     'max-width: 600px; width: 100%;'
                 ):
-                    async def _navigate_search():
+                    def _navigate_search():
                         val = hero_search.value or ''
                         if val.strip():
-                            # Use JavaScript encodeURIComponent for proper URL encoding
-                            # and window.location.href for full page reload
-                            await ui.run_javascript(
-                                f'window.location.href = "/search?q=" + encodeURIComponent(document.querySelector(".hero-search-input input").value)'
+                            # Fire-and-forget: page navigates away so JS response never returns
+                            ui.run_javascript(
+                                'window.location.href = "/search?q=" + encodeURIComponent(document.querySelector(".hero-search-input input").value)',
+                                respond=False,
                             )
 
                     hero_search = ui.input(
