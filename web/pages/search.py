@@ -4100,9 +4100,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         break
                                 if not img_entry:
                                     img_entry = images[0]
-                                img_source = img_entry.get('image_source_name')
-                                if img_source:
-                                    thumb_url = f"https://iiif.nli.org.il/IIIFv21/{img_source}/full/200,/0/default.jpg"
+                                fgp_id = img_entry.get('fgp_image_number_id')
+                                if fgp_id:
+                                    thumb_url = f"https://iiif.nli.org.il/IIIFv21/FL{fgp_id}/full/200,/0/default.jpg"
                                     ui.image(thumb_url).classes('rounded').style(
                                         'width: 200px; max-height: 250px; object-fit: contain;'
                                     )
@@ -4110,10 +4110,35 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     except Exception:
                         pass
 
-                    # Right: formatted snippet + action buttons
+                    # Right: full text (highlighted, line-broken) + action buttons
                     with ui.column().classes('flex-1 min-w-[200px] gap-2'):
-                        # Larger formatted snippet
-                        if snippet:
+                        # Show full text with highlighting instead of repeating snippet
+                        full_text = result.get('full_text', '')
+                        highlight_pattern = result.get('highlight_pattern', '')
+                        if full_text:
+                            def _highlight_text(text, pattern):
+                                escaped = html.escape(text)
+                                if pattern:
+                                    try:
+                                        flags = re.IGNORECASE
+                                        if '\\n' in pattern or pattern.startswith('^'):
+                                            flags |= re.MULTILINE
+                                        return re.sub(
+                                            f'({pattern})',
+                                            r'<span class="highlight-match">\1</span>',
+                                            escaped, flags=flags
+                                        )
+                                    except re.error:
+                                        return escaped
+                                return escaped
+                            _exp_text_html = _highlight_text(full_text, highlight_pattern)
+                            with ui.scroll_area().classes('w-full').style('max-height: 250px;'):
+                                with ui.element('div').classes('p-3 rounded-lg text-sm whitespace-pre-wrap').style(
+                                    'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 0.95rem;'
+                                ):
+                                    ui.html(_exp_text_html, sanitize=False)
+                        elif snippet:
+                            # Fallback: if no full text, show snippet
                             _exp_snippet_html = SearchEngine.format_snippet(snippet)
                             with ui.element('div').classes('p-3 rounded-lg text-sm').style(
                                 'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'

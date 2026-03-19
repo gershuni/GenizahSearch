@@ -1547,6 +1547,7 @@ TRANSLATIONS = {
     "Navigate through manuscript pages": "נווט בין דפי כתב היד",
     "Enter search terms": "הזן מילות חיפוש",
     "Enter Hebrew text to search": "הזן טקסט עברי לחיפוש",
+    "Search manuscripts...": "חיפוש בכתבי יד...",
     "Search mode": "מצב חיפוש",
     "results found": "תוצאות נמצאו",
     "Searching...": "מחפש...",

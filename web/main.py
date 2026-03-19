@@ -234,10 +234,9 @@ def create_layout():
 
     def render_header_center():
         """Render center section: Quick search"""
-        from urllib.parse import quote as _url_quote
         with ui.row().classes('hidden md:flex items-center') as section:
             quick_search = ui.input(placeholder=tr('Quick search...')).classes('w-80').props('dark dense outlined rounded')
-            quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={_url_quote(quick_search.value or "")}'))
+            quick_search.on('keydown.enter', lambda: ui.navigate.to(f'/search?q={quick_search.value or ""}'))
         return section
 
     def render_header_right():

@@ -10,7 +10,6 @@ A professional research dashboard providing:
 """
 
 import asyncio
-from urllib.parse import quote
 
 from nicegui import ui, app
 from web.state import state
@@ -82,24 +81,6 @@ def create_page():
                     mini_stat('library_books', get_doc_count, tr('Pages'))
                     mini_stat('star', get_list_count, tr('Lists'))
 
-            # Hero search bar — the visual centerpiece
-            with ui.row().classes('w-full justify-center mt-3'):
-                with ui.row().classes('items-center gap-2').style(
-                    'max-width: 600px; width: 100%;'
-                ):
-                    hero_search = ui.input(
-                        placeholder=tr('Search the Genizah...')
-                    ).classes('flex-grow').props('outlined rounded dense').style(
-                        'font-size: 1.1rem;'
-                    ).on(
-                        'keydown.enter',
-                        lambda: ui.navigate.to(f'/search?q={quote(hero_search.value or "")}')
-                    )
-                    ui.button(
-                        icon='search',
-                        on_click=lambda: ui.navigate.to(f'/search?q={quote(hero_search.value or "")}')
-                    ).props('round color=primary').style('width: 44px; height: 44px;')
-
         # === About the Genizah Banner ===
         with ui.card().classes('w-full p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all mt-2').props(
             'role=button tabindex=0'
@@ -121,6 +102,29 @@ def create_page():
                         'text-sm'
                     ).style('color: var(--text-secondary);')
                 ui.icon('arrow_back' if is_rtl() else 'arrow_forward').classes('text-2xl').style('color: var(--primary-600);')
+
+        # === Hero Search Bar (below About card) ===
+        with ui.element('div').classes('w-full px-6 py-4 mt-2').style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
+        ):
+            with ui.row().classes('w-full justify-center'):
+                with ui.row().classes('items-center gap-2').style(
+                    'max-width: 600px; width: 100%;'
+                ):
+                    def _navigate_search():
+                        val = hero_search.value or ''
+                        if val.strip():
+                            ui.navigate.to(f'/search?q={val}')
+
+                    hero_search = ui.input(
+                        placeholder=tr('Search manuscripts...')
+                    ).classes('flex-grow').props('outlined rounded dense').style(
+                        'font-size: 1.1rem;'
+                    ).on('keydown.enter', lambda: _navigate_search())
+                    ui.button(
+                        icon='search',
+                        on_click=lambda: _navigate_search()
+                    ).props('round color=primary').style('width: 44px; height: 44px;')
 
         # === Main Action Cards Grid ===
         # Changed to H2
