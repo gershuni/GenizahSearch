@@ -1486,140 +1486,133 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 )
             status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary);')
 
-        # === Main Content Area (Splitter) ===
-        with ui.splitter(value=35).classes('w-full flex-grow search-splitter') as splitter:
+        # === Main Content Area (full-width, no splitter) ===
+        # Accordion expansion state
+        search_state.expanded_index = None
+        search_state.expansion_refs = {}
 
-            # === LEFT: Results List ===
-            with splitter.before:
-                results_header = ui.row().classes('w-full px-4 py-3 items-center justify-between').style(
-                    'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
-                )
-                with results_header:
-                    with ui.row().classes('items-center gap-3'):
-                        # Select all checkbox
-                        select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
-                        results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
-                        # Selection counter (initially hidden)
-                        selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
-                        # Helper: toggle CSS visibility (reserves layout space, prevents CLS)
-                        def _set_btn_visible(btn, visible):
-                            btn.style(f'visibility: {"visible" if visible else "hidden"};')
+        with ui.column().classes('w-full flex-grow'):
 
-                        # Domain filter button (hidden until search with domain data)
-                        domain_filter_btn = ui.button(
-                            tr('Filter by domains'), icon='category',
-                            on_click=lambda: _open_domain_filter_dialog()
-                        ).classes('text-sm').props('outline dense no-caps')
-                        _set_btn_visible(domain_filter_btn, False)
+            results_header = ui.row().classes('w-full px-4 py-3 items-center justify-between').style(
+                'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+            )
+            with results_header:
+                with ui.row().classes('items-center gap-3'):
+                    # Select all checkbox
+                    select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
+                    results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
+                    # Selection counter (initially hidden)
+                    selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
+                    # Helper: toggle CSS visibility (reserves layout space, prevents CLS)
+                    def _set_btn_visible(btn, visible):
+                        btn.style(f'visibility: {"visible" if visible else "hidden"};')
 
-                        # Restore visibility if stored exclusions exist (persistence across navigation)
-                        if search_state.domain_exclusions:
-                            _set_btn_visible(domain_filter_btn, True)
-                            n_excl = len(search_state.domain_exclusions)
-                            domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
-                            domain_filter_btn.props('outline dense no-caps color=red')
+                    # Domain filter button (hidden until search with domain data)
+                    domain_filter_btn = ui.button(
+                        tr('Filter by domains'), icon='category',
+                        on_click=lambda: _open_domain_filter_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    _set_btn_visible(domain_filter_btn, False)
 
-                        # Printed filter toggle (hidden until search has printed data)
-                        def _toggle_printed_filter():
-                            states = ['all', 'hide_printed', 'only_printed']
-                            current_idx = states.index(search_state.printed_filter)
-                            search_state.printed_filter = states[(current_idx + 1) % 3]
-                            _persist('search_printed_filter', search_state.printed_filter)
-                            _update_printed_filter_btn()
-                            # Re-apply domain exclusions + printed filter and re-render
-                            if search_state.domain_exclusions and search_state.has_domain_data:
-                                _apply_domain_exclusions()
-                            elif search_state.results:
-                                _apply_printed_filter_and_render(search_state.results)
+                    # Restore visibility if stored exclusions exist (persistence across navigation)
+                    if search_state.domain_exclusions:
+                        _set_btn_visible(domain_filter_btn, True)
+                        n_excl = len(search_state.domain_exclusions)
+                        domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
+                        domain_filter_btn.props('outline dense no-caps color=red')
 
-                        def _update_printed_filter_btn():
-                            if search_state.printed_filter == 'all':
-                                printed_filter_btn.text = tr('Filter Printed')
-                                printed_filter_btn.props(remove='color')
-                                printed_filter_btn.props('outline dense no-caps')
-                            elif search_state.printed_filter == 'hide_printed':
-                                printed_filter_btn.text = tr('Hiding printed')
-                                printed_filter_btn.props(remove='color')
-                                printed_filter_btn.props('outline dense no-caps color=red')
-                            elif search_state.printed_filter == 'only_printed':
-                                printed_filter_btn.text = tr('Only printed')
-                                printed_filter_btn.props(remove='color')
-                                printed_filter_btn.props('outline dense no-caps color=deep-orange')
+                    # Printed filter toggle (hidden until search has printed data)
+                    def _toggle_printed_filter():
+                        states = ['all', 'hide_printed', 'only_printed']
+                        current_idx = states.index(search_state.printed_filter)
+                        search_state.printed_filter = states[(current_idx + 1) % 3]
+                        _persist('search_printed_filter', search_state.printed_filter)
+                        _update_printed_filter_btn()
+                        # Re-apply domain exclusions + printed filter and re-render
+                        if search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
 
-                        printed_filter_btn = ui.button(
-                            tr('Filter Printed'), icon='local_printshop',
-                            on_click=lambda: _toggle_printed_filter()
-                        ).classes('text-sm').props('outline dense no-caps')
-                        _set_btn_visible(printed_filter_btn, False)
+                    def _update_printed_filter_btn():
+                        if search_state.printed_filter == 'all':
+                            printed_filter_btn.text = tr('Filter Printed')
+                            printed_filter_btn.props(remove='color')
+                            printed_filter_btn.props('outline dense no-caps')
+                        elif search_state.printed_filter == 'hide_printed':
+                            printed_filter_btn.text = tr('Hiding printed')
+                            printed_filter_btn.props(remove='color')
+                            printed_filter_btn.props('outline dense no-caps color=red')
+                        elif search_state.printed_filter == 'only_printed':
+                            printed_filter_btn.text = tr('Only printed')
+                            printed_filter_btn.props(remove='color')
+                            printed_filter_btn.props('outline dense no-caps color=deep-orange')
 
-                    with ui.row().classes('gap-2'):
-                        # Bulk actions (initially hidden)
-                        bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
-                        with bulk_actions_row:
-                            ui.button(icon='playlist_add', on_click=lambda: bulk_add_to_list()).props(
-                                'flat round dense size=sm'
-                            ).tooltip(tr('Add Selected to List'))
-                            ui.button(icon='content_copy', on_click=lambda: bulk_copy_text()).props(
-                                'flat round dense size=sm'
-                            ).tooltip(tr('Copy Selected Text'))
+                    printed_filter_btn = ui.button(
+                        tr('Filter Printed'), icon='local_printshop',
+                        on_click=lambda: _toggle_printed_filter()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    _set_btn_visible(printed_filter_btn, False)
 
-                        # Filter toggle button
-                        filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
+                with ui.row().classes('gap-2'):
+                    # Bulk actions (initially hidden)
+                    bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
+                    with bulk_actions_row:
+                        ui.button(icon='playlist_add', on_click=lambda: bulk_add_to_list()).props(
                             'flat round dense size=sm'
-                        ).tooltip(tr('Toggle Filters'))
-
-                        ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props(
+                        ).tooltip(tr('Add Selected to List'))
+                        ui.button(icon='content_copy', on_click=lambda: bulk_copy_text()).props(
                             'flat round dense size=sm'
-                        ).tooltip(tr('Export Word'))
-                        ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
-                            'flat round dense size=sm'
-                        ).tooltip(tr('Export Excel'))
+                        ).tooltip(tr('Copy Selected Text'))
 
-                # Filters Panel (initially hidden)
-                filters_visible = {'value': False}
-                filters_panel = ui.column().classes('w-full px-4 py-3 gap-3').style(
-                    'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
-                )
-                filters_panel.set_visibility(False)
-                with filters_panel:
-                    with ui.row().classes('w-full gap-2 items-center'):
-                        ui.icon('filter_list').classes('text-sm').style('color: var(--text-muted);')
-                        # Changed to H4 semantic heading
-                        h4(tr('Filter Results'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                    # Filter toggle button
+                    filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
+                        'flat round dense size=sm'
+                    ).tooltip(tr('Toggle Filters'))
 
-                    with ui.grid(columns=3).classes('w-full gap-2'):
-                        filter_shelfmark = ui.input(
-                            placeholder=tr('Filter by shelfmark')
-                        ).classes('w-full').props('outlined dense clearable')
+                    ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props(
+                        'flat round dense size=sm'
+                    ).tooltip(tr('Export Word'))
+                    ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
+                        'flat round dense size=sm'
+                    ).tooltip(tr('Export Excel'))
 
-                        filter_title = ui.input(
-                            placeholder=tr('Filter by title')
-                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
+            # Filters Panel (initially hidden)
+            filters_visible = {'value': False}
+            filters_panel = ui.column().classes('w-full px-4 py-3 gap-3').style(
+                'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
+            )
+            filters_panel.set_visibility(False)
+            with filters_panel:
+                with ui.row().classes('w-full gap-2 items-center'):
+                    ui.icon('filter_list').classes('text-sm').style('color: var(--text-muted);')
+                    # Changed to H4 semantic heading
+                    h4(tr('Filter Results'), classes='text-sm font-medium', style='color: var(--text-secondary);')
 
-                        filter_snippet = ui.input(
-                            placeholder=tr('Filter by text')
-                        ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
+                with ui.grid(columns=3).classes('w-full gap-2'):
+                    filter_shelfmark = ui.input(
+                        placeholder=tr('Filter by shelfmark')
+                    ).classes('w-full').props('outlined dense clearable')
 
-                    with ui.row().classes('gap-2'):
-                        ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
-                            'flat dense color=green size=sm'
-                        )
-                        ui.button(tr('Clear Filters'), icon='clear', on_click=lambda: clear_filters()).props(
-                            'flat dense size=sm'
-                        )
+                    filter_title = ui.input(
+                        placeholder=tr('Filter by title')
+                    ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
-                results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
-                    'background: var(--bg-secondary); min-height: 300px;'
-                )
+                    filter_snippet = ui.input(
+                        placeholder=tr('Filter by text')
+                    ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
-            # === RIGHT: Result Viewer ===
-            with splitter.after:
-                viewer_container = ui.column().classes('w-full h-full p-6').style('background: var(--bg-primary);')
-                with viewer_container:
-                    # Placeholder
-                    with ui.column().classes('w-full h-full items-center justify-center'):
-                        ui.icon('menu_book').classes('text-6xl').style('color: var(--text-muted);')
-                        ui.label(tr('Select a result to view')).classes('mt-4').style('color: var(--text-muted);')
+                with ui.row().classes('gap-2'):
+                    ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
+                        'flat dense color=green size=sm'
+                    )
+                    ui.button(tr('Clear Filters'), icon='clear', on_click=lambda: clear_filters()).props(
+                        'flat dense size=sm'
+                    )
+
+            results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
+                'background: var(--bg-secondary); min-height: 300px;'
+            )
 
     # === Panel Toggle Functions ===
 
@@ -1688,10 +1681,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     // Fallback: the element itself might be scrollable
                     return scrollAreaEl;
                 }}
-                // Fallback to old method
-                const splitter = document.querySelector('.search-splitter');
-                if (!splitter) return null;
-                return splitter.querySelector('.q-scrollarea__container');
+                return null;
             }};
 
             let attempts = 0;
@@ -2878,7 +2868,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             filtered.append(r)
         return filtered
 
-    def _apply_printed_filter_and_render(results_list):
+    def _apply_printed_filter_and_render(results_list, reset_expansion=True):
         """Apply printed filter to results and re-render (used when no domain exclusions active)."""
         filtered = _apply_printed_filter(results_list)
         total = len(search_state.results)
@@ -2888,7 +2878,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({filter_label})"
         else:
             results_count.text = f"{total} {tr('Results')}"
-        render_results(filtered, page=0)
+        render_results(filtered, page=0, reset_expansion=reset_expansion)
 
     def _apply_word_search_exclusions_and_render():
         """Apply word search per-result exclusions and re-render."""
@@ -2932,7 +2922,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({n_excl} {tr('excluded')})"
             render_results(filtered, page=0)
 
-    def _apply_domain_exclusions():
+    def _apply_domain_exclusions(reset_expansion=True):
         """Filter displayed results based on domain exclusions without re-searching."""
         if not search_state.domain_exclusions:
             # No exclusions -- show all results
@@ -2995,7 +2985,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.result_domains = {sid: doms for sid, doms in search_state.all_result_domains.items() if sid in set(result_sys_ids)}
 
         # Re-render with filtered results (resets to page 0)
-        render_results(filtered, page=0)
+        render_results(filtered, page=0, reset_expansion=reset_expansion)
 
     # --- Search History UI Helpers ---
     def _refresh_history_menu():
@@ -3623,7 +3613,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
             _update_domain_filter_btn()
 
-        def _render_with_filters():
+        def _render_with_filters(reset_expansion=True):
             """Re-render applying exclusions and filters."""
             display_results = results
             if search_state.word_search_excluded_ids:
@@ -3641,13 +3631,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.word_search_excluded_results = []
 
             if search_state.domain_exclusions and search_state.has_domain_data:
-                _apply_domain_exclusions()
+                _apply_domain_exclusions(reset_expansion=reset_expansion)
             elif search_state.printed_filter != 'all' and search_state.printed_ids:
                 search_state.domain_excluded_results = []
-                _apply_printed_filter_and_render(display_results)
+                _apply_printed_filter_and_render(display_results, reset_expansion=reset_expansion)
             else:
                 search_state.domain_excluded_results = []
-                render_results(display_results, page=0)
+                render_results(display_results, page=0, reset_expansion=reset_expansion)
 
         # --- STAGE 1: Enrich visible page (first PAGE_SIZE sys_ids) ---
         _t_stage1 = time.perf_counter()
@@ -3681,7 +3671,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Re-check generation after hierarchy await (P1 fix: close race window)
                 if search_state.search_generation == this_generation:
                     _apply_enrichment_to_ui()
-                    _render_with_filters()
+                    _render_with_filters(reset_expansion=False)
 
         _t_stage1_done = time.perf_counter()
         logger.info("Search perf: visible_enrichment_ms=%.0f (ids=%d)", (_t_stage1_done - _t_stage1) * 1000, len(visible_ids))
@@ -3715,13 +3705,43 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # (P2 fix: apply filters/exclusions to newly discovered domains/printed IDs)
             if search_state.search_generation == this_generation:
                 _apply_enrichment_to_ui()
-                _render_with_filters()
+                _render_with_filters(reset_expansion=False)
             _t_stage2_done = time.perf_counter()
             logger.info("Search perf: background_enrichment_ms=%.0f (ids=%d)", (_t_stage2_done - _t_stage2) * 1000, len(remaining_ids))
 
-    def render_results(results, page=None, scroll_to_top=False):
+    def toggle_expansion(index):
+        """Toggle inline accordion expansion for a result card."""
+        if search_state.expanded_index == index:
+            # Collapse current
+            ref = search_state.expansion_refs.get(index)
+            if ref and not ref.is_deleted:
+                ref.style('display: none')
+            search_state.expanded_index = None
+        else:
+            # Collapse old if any
+            if search_state.expanded_index is not None:
+                old_ref = search_state.expansion_refs.get(search_state.expanded_index)
+                if old_ref and not old_ref.is_deleted:
+                    old_ref.style('display: none')
+            # Expand new
+            ref = search_state.expansion_refs.get(index)
+            if ref and not ref.is_deleted:
+                ref.style('display: block')
+            search_state.expanded_index = index
+
+    def render_results(results, page=None, scroll_to_top=False, reset_expansion=True):
         results_container.clear()
         search_state.displayed_results = results  # Track full filtered set for Advanced View navigation
+
+        # Handle expansion state
+        _was_expanded = None
+        if reset_expansion:
+            search_state.expanded_index = None
+            search_state.expansion_refs = {}
+        else:
+            _was_expanded = search_state.expanded_index
+            search_state.expansion_refs = {}
+            search_state.expanded_index = None
 
         # Use provided page or keep stored page
         if page is not None:
@@ -3772,6 +3792,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 for i, res in enumerate(page_results):
                     create_result_card(start + i, res)
 
+            # Re-expand previously open card after enrichment rerender
+            if not reset_expansion and _was_expanded is not None and _was_expanded in search_state.expansion_refs:
+                toggle_expansion(_was_expanded)
+
             # Pagination controls at bottom (always reserve space to prevent CLS)
             if total_pages > 1:
                 with ui.row().classes('w-full justify-center items-center px-4 pb-2'):
@@ -3803,7 +3827,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         excl_title = excl_display.get('title', '')
                         with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                             'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
-                        ).on('click', lambda r=excl_result: load_in_viewer(r)):
+                        ).on('click', lambda r=excl_result: open_advanced_dialog(None, r)):
                             ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
                                 'color: var(--text-secondary); max-width: 200px;'
                             )
@@ -3849,7 +3873,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'flat round dense size=xs'
                             ).style('color: var(--text-muted);').tooltip(tr('Restore'))
                             with ui.row().classes('items-center gap-2 flex-grow min-w-0 cursor-pointer').on(
-                                'click', lambda r=excl_result: load_in_viewer(r)
+                                'click', lambda r=excl_result: open_advanced_dialog(None, r)
                             ):
                                 ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
                                     'color: var(--text-secondary); max-width: 200px;'
@@ -3882,6 +3906,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         title = display.get('title', '')
         snippet = result.get('snippet', '')
         library_code = display.get('library_code', '')
+        sys_id = display.get('id')
 
         # Truncate title for display
         title_short = (title[:60] + '...') if title and len(title) > 60 else title
@@ -3904,8 +3929,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         on_change=toggle_card_selection
                     ).props('dense')
 
-                # Main content (clickable)
-                with ui.column().classes('flex-grow min-w-0 gap-1').on('click', lambda r=result: load_in_viewer(r)):
+                # Main content (clickable — toggles inline accordion)
+                with ui.column().classes('flex-grow min-w-0 gap-1').on('click', lambda idx=index: toggle_expansion(idx)):
                     with ui.row().classes('items-center gap-2 flex-wrap'):
                         ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: var(--bg-tertiary); color: var(--text-muted);'
@@ -3918,7 +3943,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'background: var(--primary-100); color: var(--primary-700);'
                             ).tooltip(full_name)
                         # PGP transcription indicator
-                        sys_id = display.get('id')
                         if sys_id and sys_id in search_state.transcription_sys_ids:
                             ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                 'background: var(--success-100); color: var(--success-700); font-weight: 600;'
@@ -3927,14 +3951,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if sys_id and search_state.result_domains:
                             domains_for_result = search_state.result_domains.get(sys_id, [])
                             if domains_for_result:
-                                primary_domain = domains_for_result[0]  # Most specific (child)
+                                primary_domain = domains_for_result[0]
                                 domain_text = _domain_display_name(primary_domain)
                                 if len(domains_for_result) > 1:
                                     extra = len(domains_for_result) - 1
                                     tooltip_text = ', '.join(_domain_display_name(d) for d in domains_for_result)
                                     with ui.row().classes('items-center gap-0'):
                                         ui.label(domain_text).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
-                                            'background: #f3e8ff; color: #7c3aed;'  # Purple tones for FJMS
+                                            'background: #f3e8ff; color: #7c3aed;'
                                         )
                                         ui.label(f'+{extra}').classes('text-xs px-1 py-0.5 rounded shrink-0 cursor-help').style(
                                             'background: #ede9fe; color: #7c3aed;'
@@ -3958,7 +3982,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         _show_trans = app.storage.user.get('show_translations', False)
                     except Exception:
                         pass
-                    # Resolve translated title — always language-aware (not gated behind toggle)
                     _title_info = search_state.title_translations.get(sys_id) if sys_id else None
                     if _title_info:
                         _lang = get_language()
@@ -3967,7 +3990,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         _en_he = _title_info.get('english_title_he') or ''
                         if _lang == 'he':
                             if _he.strip():
-                                # If Hebrew is short and EN→HE subtitle exists, append it
                                 if _en_he.strip() and len(_he) < 15:
                                     _resolved_title = f"{_he} — {_en_he}"
                                 else:
@@ -3980,11 +4002,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     else:
                         _resolved_title = title
                         _resolved_short = title_short
-                    # PGP description translation — only when toggle ON and UI is Hebrew
                     _trans_info = search_state.translation_data.get(sys_id) if sys_id and _show_trans else None
                     _ui_lang = get_language()
                     if _trans_info and _trans_info.get('description_he') and _ui_lang == 'he':
-                        # Show translated description with click-to-toggle original
                         _desc_he = _trans_info['description_he']
                         _desc_short = (_desc_he[:80] + '...') if len(_desc_he) > 80 else _desc_he
                         _orig = _resolved_short if _resolved_short else ''
@@ -4022,8 +4042,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             )
                     elif _resolved_short:
                         _dir = 'ltr' if (_title_info and get_language() != 'he' and _title_info.get('english_title')) else 'rtl'
-                        # Show title with toggle to original bilingual title
-                        _orig_title = title  # Original bilingual from libraries.csv
+                        _orig_title = title
                         _orig_short = (title[:60] + '...') if title and len(title) > 60 else (title or '')
                         if _title_info and _orig_short and _orig_short != _resolved_short:
                             _tt_st = {'showing_original': False}
@@ -4050,62 +4069,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             ui.label(_resolved_short).classes('text-xs').style(
                                 f'color: var(--text-tertiary); direction: {_dir}; word-wrap: break-word;'
                             )
-                    # Catalog Records button
-                    if sys_id:
-                        cat_count = search_state.catalog_source_counts.get(sys_id, 0)
-                        from web.components.catalog_dialog import show_catalog_dialog
-                        cat_btn = ui.button(
-                            f'{tr("Catalog Records")} ({cat_count})',
-                            icon='description',
-                            on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
-                        ).props('outline dense size=sm no-caps').classes('text-xs')
-                        if cat_count == 0:
-                            cat_btn.disable()
-
-                # Actions
-                with ui.row().classes('gap-1'):
-                    # Browse manuscript button (most important action)
-                    if sys_id:
-                        _card_fl_id = None
-                        if 'raw_header' in result and state.meta_mgr:
-                            try:
-                                _card_fl_id = state.meta_mgr.parse_full_id_components(result['raw_header']).get('fl_id')
-                            except Exception:
-                                pass
-                        _card_browse_url = f'/browse?sys_id={sys_id}'
-                        if _card_fl_id:
-                            _card_browse_url += f'&fl_id={_card_fl_id}'
-                        with ui.link(target=_card_browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
-                            ui.button(icon='menu_book').props('flat round dense size=sm color=green')
-
-                    ui.button(
-                        icon='open_in_full',
-                        on_click=lambda idx=index, r=result: open_advanced_dialog(idx, r)
-                    ).props('flat round dense size=sm').tooltip(tr('Advanced View'))
-
-                    def make_star_handler(r):
-                        def handler():
-                            show_add_to_list_dialog_local(r)
-                        return handler
-                    # Check if item is in any list
-                    result_sys_id = result.get('display', {}).get('id')
-                    result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
-                    ui.button(
-                        icon='star' if result_in_list else 'star_border',
-                        on_click=make_star_handler(result)
-                    ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
-
-                    # Word search per-result exclude button (non-composition modes only)
-                    if result_sys_id and not result.get('is_composition'):
-                        def _exclude_word_result(sid=result_sys_id):
-                            search_state.word_search_excluded_ids.add(sid)
-                            _persist('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
-                            # Re-apply exclusions and re-render
-                            _apply_word_search_exclusions_and_render()
-                        ui.button(
-                            icon='remove_circle_outline',
-                            on_click=_exclude_word_result,
-                        ).props('flat round dense size=sm').style('color: var(--text-muted);').tooltip(tr('Exclude from results'))
 
             # Snippet
             if snippet:
@@ -4115,62 +4078,137 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ):
                     ui.html(snippet_html, sanitize=False)
 
-            # Mobile expansion (hidden on desktop via CSS)
-            with ui.expansion(tr('View Full Text')).classes('w-full mt-2 result-mobile-expand').props('dense') as mobile_expand:
-                mobile_content = ui.column().classes('w-full gap-3')
+            # === Inline accordion expansion (replaces splitter viewer + mobile expansion) ===
+            expand_container = ui.column().classes('w-full result-inline-expand').style('display: none;')
+            search_state.expansion_refs[index] = expand_container
 
-                async def load_mobile_content():
-                    """Load full text content for mobile view."""
-                    mobile_content.clear()
-                    with mobile_content:
-                        full_text = result.get('full_text', '')
-                        if not full_text:
-                            # Try to load full text
-                            sys_id = display.get('id', '')
-                            page_num = int(display.get('img', '1'))
-                            if sys_id and state.meta_mgr:
-                                try:
-                                    page_data = await run.io_bound(
-                                        state.meta_mgr.get_page_data, sys_id, page_num
+            with expand_container:
+                with ui.row().classes('gap-4 flex-wrap'):
+                    # Left: manuscript image thumbnail
+                    _has_image = False
+                    try:
+                        from shared.nli_crossref_service import get_nli_crossref_service
+                        svc = get_nli_crossref_service(thread_safe=True)
+                        if svc.is_available() and sys_id:
+                            images = svc.get_images(sys_id)
+                            if images:
+                                hit_page = int(display.get('img', '1')) if display.get('img') else 1
+                                img_entry = None
+                                for img in images:
+                                    if img.get('page_num') == hit_page:
+                                        img_entry = img
+                                        break
+                                if not img_entry:
+                                    img_entry = images[0]
+                                img_source = img_entry.get('image_source_name')
+                                if img_source:
+                                    thumb_url = f"https://iiif.nli.org.il/IIIFv21/{img_source}/full/200,/0/default.jpg"
+                                    ui.image(thumb_url).classes('rounded').style(
+                                        'width: 200px; max-height: 250px; object-fit: contain;'
                                     )
-                                    if page_data:
-                                        full_text = page_data.text or ''
-                                        result['full_text'] = full_text
-                                except Exception:
-                                    pass
+                                    _has_image = True
+                    except Exception:
+                        pass
 
-                        if full_text:
-                            ui.label(full_text).classes('text-sm whitespace-pre-wrap').style(
-                                'direction: rtl; text-align: right; line-height: 2; color: var(--text-primary);'
-                            )
-                        else:
-                            ui.label(tr('Full text not available')).style('color: var(--text-muted);')
+                    # Right: formatted snippet + action buttons
+                    with ui.column().classes('flex-1 min-w-[200px] gap-2'):
+                        # Larger formatted snippet
+                        if snippet:
+                            _exp_snippet_html = SearchEngine.format_snippet(snippet)
+                            with ui.element('div').classes('p-3 rounded-lg text-sm').style(
+                                'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
+                            ):
+                                ui.html(_exp_snippet_html, sanitize=False)
 
-                        # Actions row
-                        with ui.row().classes('w-full gap-2 mt-3'):
-                            # Use ui.link for full page reload (not SPA navigation)
-                            # This ensures browse page is fully recreated with fresh PGP data
-                            browse_url = f'/browse?sys_id={display.get("id", "")}&page={display.get("img", "1")}'
-                            with ui.link(target=browse_url).classes('no-underline'):
-                                ui.button(tr('Open in Viewer'), icon='open_in_new').props('flat dense')
+                        # Action buttons row
+                        with ui.row().classes('gap-2 flex-wrap items-center'):
+                            # Browse
+                            if sys_id:
+                                _card_fl_id = None
+                                if 'raw_header' in result and state.meta_mgr:
+                                    try:
+                                        _card_fl_id = state.meta_mgr.parse_full_id_components(result['raw_header']).get('fl_id')
+                                    except Exception:
+                                        pass
+                                _card_browse_url = f'/browse?sys_id={sys_id}'
+                                if _card_fl_id:
+                                    _card_browse_url += f'&fl_id={_card_fl_id}'
+                                with ui.link(target=_card_browse_url).classes('no-underline'):
+                                    ui.button(icon='menu_book').props('flat round dense size=sm color=green').tooltip(tr('Browse Full Manuscript'))
 
-                mobile_expand.on('show', load_mobile_content)
+                            # Advanced View
+                            ui.button(
+                                icon='open_in_full',
+                                on_click=lambda idx=index, r=result: open_advanced_dialog(idx, r)
+                            ).props('flat round dense size=sm').tooltip(tr('Advanced View'))
+
+                            # Find Parallels
+                            full_text = result.get('full_text', '')
+                            text_for_parallels = full_text or snippet.replace('*', '')
+                            if text_for_parallels.strip():
+                                ui.button(
+                                    icon='compare_arrows',
+                                    on_click=lambda t=text_for_parallels: ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
+                                ).props('flat round dense size=sm').tooltip(tr('Find Parallels'))
+
+                            # Add to List
+                            def make_star_handler(r):
+                                def handler():
+                                    show_add_to_list_dialog_local(r)
+                                return handler
+                            result_sys_id = result.get('display', {}).get('id')
+                            result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
+                            ui.button(
+                                icon='star' if result_in_list else 'star_border',
+                                on_click=make_star_handler(result)
+                            ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
+
+                            # Exclude (non-composition only)
+                            if result_sys_id and not result.get('is_composition'):
+                                def _exclude_word_result(sid=result_sys_id):
+                                    search_state.word_search_excluded_ids.add(sid)
+                                    _persist('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
+                                    _apply_word_search_exclusions_and_render()
+                                ui.button(
+                                    icon='remove_circle_outline',
+                                    on_click=_exclude_word_result,
+                                ).props('flat round dense size=sm').style('color: var(--text-muted);').tooltip(tr('Exclude from results'))
+
+                            # Catalog Records
+                            if sys_id:
+                                cat_count = search_state.catalog_source_counts.get(sys_id, 0)
+                                from web.components.catalog_dialog import show_catalog_dialog
+                                cat_btn = ui.button(
+                                    icon='description',
+                                    on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
+                                ).props('flat round dense size=sm').tooltip(f'{tr("Catalog Records")} ({cat_count})')
+                                if cat_count == 0:
+                                    cat_btn.disable()
 
     def open_advanced_dialog(index, result):
-        """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer."""
+        """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
+
+        When index is None, operates in standalone mode: wraps the single result in a list,
+        uses index=0, and disables navigation. This is used for excluded results and tag search.
+        """
+        standalone = (index is None)
         # PostHog: track result clicks
         from web.analytics import posthog_capture
         display = result.get('display', {}) if isinstance(result, dict) else {}
         posthog_capture('result_opened', {
             'shelfmark': display.get('shelfmark', '')[:80],
             'sys_id': display.get('id', ''),
-            'result_index': index,
+            'result_index': index if not standalone else 0,
         })
 
         service = get_service()
         adv_state = AdvancedViewState()
-        adv_state.current_result_idx = index
-        adv_state.results = search_state.displayed_results
+        if standalone:
+            adv_state.current_result_idx = 0
+            adv_state.results = [result]
+        else:
+            adv_state.current_result_idx = index
+            adv_state.results = search_state.displayed_results
 
         with ui.dialog().props('maximized') as dialog:
             with ui.card().classes('w-full h-full flex flex-col').style('background: var(--bg-secondary);'):
@@ -4182,9 +4220,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # Left: Close and result counter
                     with ui.row().classes('items-center gap-2'):
                         ui.button(icon='close', on_click=dialog.close).props('flat round color=white size=sm')
-                        adv_state.result_label = ui.label(
-                            f"{tr('Result')} {index + 1} / {len(adv_state.results)}"
-                        ).classes('text-sm font-medium')
+                        if standalone:
+                            _sm = display.get('shelfmark', 'Unknown')
+                            adv_state.result_label = ui.label(_sm).classes('text-sm font-medium')
+                        else:
+                            adv_state.result_label = ui.label(
+                                f"{tr('Result')} {index + 1} / {len(adv_state.results)}"
+                            ).classes('text-sm font-medium')
 
                     # Center: Score badge (will be updated in-place)
                     adv_state.score_badge = ui.element('div').classes('flex items-center gap-2')
@@ -4200,6 +4242,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             icon='chevron_left' if is_rtl() else 'chevron_right',
                             on_click=lambda: navigate_result(1)
                         ).props('flat round color=white size=sm').tooltip(tr('Next'))
+
+                        if standalone:
+                            adv_state.prev_btn.set_enabled(False)
+                            adv_state.next_btn.set_enabled(False)
 
                         ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-400')
 
@@ -5411,212 +5457,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             ui.notify(tr('No text to copy'), type='warning')
 
-    def load_in_viewer(result):
-        search_state.selected_result = result
-        viewer_container.clear()
-
-        display = result.get('display', {})
-        shelfmark = display.get('shelfmark', 'Unknown')
-        title = display.get('title', '')
-        sys_id = display.get('id', '')
-        snippet = result.get('snippet', '')
-        full_text = result.get('full_text', '')
-        library_code = display.get('library_code', '')
-        highlight_pattern = result.get('highlight_pattern', '')
-
-        # Initialize page index from display.img if not already set
-        try:
-            search_state.current_page_idx = int(display.get('img', '1'))
-        except (ValueError, TypeError):
-            search_state.current_page_idx = 1
-
-        # Extract FL ID early for browse URL
-        fl_id = None
-        if 'raw_header' in result and state.meta_mgr:
-            try:
-                parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
-                fl_id = parsed.get('fl_id')
-            except Exception:
-                pass
-
-        with viewer_container:
-            # Header
-            with ui.column().classes('w-full gap-2 mb-4'):
-                # Row 1: Shelfmark + action buttons
-                with ui.row().classes('w-full items-start justify-between gap-2'):
-                    # Left: Shelfmark with Library Name
-                    with ui.column().classes('min-w-0 flex-shrink gap-1'):
-                        display_shelfmark = shelfmark
-                        if library_code:
-                            from genizah_core import get_library_display
-                            library_name = get_library_display(library_code, short=False, lang=get_language())
-                            if library_name:
-                                display_shelfmark = f"{library_name}, {shelfmark}"
-                        h2(display_shelfmark, classes='text-lg font-bold', style='color: var(--primary-700);')
-                        if title:
-                            # Resolve title by language
-                            _ev_title = title
-                            if sys_id and search_state.title_translations:
-                                _ev_tt = search_state.title_translations.get(sys_id)
-                                if _ev_tt:
-                                    _ev_lang = get_language()
-                                    _ev_title = (_ev_tt.get('english_title') or _ev_tt.get('hebrew_title') or title) if _ev_lang != 'he' else (_ev_tt.get('hebrew_title') or _ev_tt.get('english_title') or title)
-                            _ev_dir = 'ltr' if get_language() != 'he' else 'rtl'
-                            ui.label(_ev_title).classes('text-sm').style(f'color: var(--text-secondary); direction: {_ev_dir};')
-
-                    # Right: Action buttons (always visible)
-                    with ui.row().classes('items-center gap-1 shrink-0'):
-                        if sys_id:
-                            browse_url = f'/browse?sys_id={sys_id}'
-                            if fl_id:
-                                browse_url += f'&fl_id={fl_id}'
-                            with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
-                                ui.button(icon='menu_book').props('flat round size=sm color=green')
-
-                        text_for_parallels = full_text or snippet.replace('*', '')
-                        if text_for_parallels.strip():
-                            ui.button(
-                                icon='compare_arrows',
-                                on_click=lambda t=text_for_parallels: ui.navigate.to(f'/parallels?text={quote(t[:2000])}')
-                            ).props('flat round size=sm').tooltip(tr('Find Parallels'))
-
-                        ui.button(
-                            icon='open_in_full',
-                            on_click=lambda idx=0, r=result: open_advanced_dialog(idx, r)
-                        ).props('flat round size=sm').tooltip(tr('Advanced View'))
-
-                # Metadata badges
-                with ui.row().classes('gap-2 flex-wrap'):
-                    if display.get('source'):
-                        ui.badge(display['source']).props('outline')
-                    if display.get('img'):
-                        ui.badge(f"{tr('Page')} {display['img']}").props('outline')
-
-            # Content tabs
-            with ui.tabs().classes('w-full') as tabs:
-                tab_snippet = ui.tab('snippet', label=tr('Match'))
-                tab_full = ui.tab('full', label=tr('Full Text'))
-                tab_info = ui.tab('info', label=tr('Metadata'))
-
-            with ui.tab_panels(tabs, value='snippet').classes('w-full flex-grow'):
-                # Match tab
-                with ui.tab_panel('snippet'):
-                    if snippet:
-                        snippet_html = SearchEngine.format_snippet(snippet)
-                        with ui.element('div').classes('p-4 rounded-lg').style(
-                            'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 1.1rem;'
-                        ):
-                            ui.html(snippet_html, sanitize=False)
-
-                # Full Text tab with navigation arrows
-                with ui.tab_panel('full'):
-                    # Navigation bar for browsing pages
-                    if sys_id:
-                        with ui.row().classes('w-full items-center justify-center gap-4 mb-4 p-2 rounded').style(
-                            'background: var(--bg-tertiary);'
-                        ):
-                            ui.button(icon='chevron_right' if is_rtl() else 'chevron_left', on_click=browse_prev).props('flat round').tooltip(tr('Previous'))
-                            page_label = ui.label(f"{tr('Page')} {search_state.current_page_idx}").style('color: var(--text-secondary);')
-                            ui.button(icon='chevron_left' if is_rtl() else 'chevron_right', on_click=browse_next).props('flat round').tooltip(tr('Next'))
-
-                    if full_text:
-                        # Apply highlighting to full text using the highlight pattern
-                        def highlight_full_text(text, pattern):
-                            if not text:
-                                return ""
-                            escaped = html.escape(text)
-                            if pattern:
-                                try:
-                                    flags = re.IGNORECASE
-                                    if '\\n' in pattern or pattern.startswith('^') or '^\\'  in pattern:
-                                        flags |= re.MULTILINE
-                                    highlighted = re.sub(
-                                        f'({pattern})',
-                                        r'<span class="highlight-match">\1</span>',
-                                        escaped,
-                                        flags=flags
-                                    )
-                                    return highlighted
-                                except re.error:
-                                    return escaped
-                            return escaped
-
-                        full_text_html = highlight_full_text(full_text, highlight_pattern)
-                        with ui.scroll_area().classes('w-full h-64'):
-                            with ui.element('div').classes('whitespace-pre-wrap').style(
-                                'direction: rtl; text-align: right; line-height: 2; font-size: 1rem; color: var(--text-primary);'
-                            ):
-                                ui.html(full_text_html, sanitize=False)
-                    else:
-                        ui.label(tr('Full text not available')).style('color: var(--text-muted);')
-
-                # Info tab
-                with ui.tab_panel('info'):
-                    with ui.column().classes('w-full gap-4'):
-                        # Get library full name
-                        library_name = ''
-                        if library_code:
-                            from genizah_core import get_library_display
-                            library_name = get_library_display(library_code, short=False, lang=get_language())
-
-                        info_items = [
-                            (tr('Library'), library_name or tr('Not available')),
-                            (tr('Shelfmark'), shelfmark),
-                            (tr('Title'), title or tr('Not available')),
-                            (tr('System ID'), sys_id or tr('Not available')),
-                            (tr('Source'), display.get('source', tr('Not available'))),
-                            (tr('Page'), display.get('img', tr('Not available'))),
-                        ]
-                        for label, value in info_items:
-                            with ui.row().classes('w-full items-start gap-4'):
-                                ui.label(label).classes('font-bold w-32').style('color: var(--text-secondary);')
-                                ui.label(value).style('color: var(--text-primary); direction: rtl;')
-
-
-    async def browse_prev():
-        """Navigate to previous page in current manuscript (within viewer)."""
-        if search_state.selected_result:
-            display = search_state.selected_result.get('display', {})
-            sys_id = display.get('id')
-            current_page = search_state.current_page_idx
-
-            if sys_id and current_page > 1:
-                from web.services import get_service
-                service = get_service()
-
-                def load_prev():
-                    return service.get_browse_page(sys_id, p_num=current_page, direction=-1)
-
-                page_data = await run.io_bound(load_prev)
-                if page_data:
-                    search_state.current_page_idx = page_data.p_num
-                    # Update the selected result with new page info
-                    search_state.selected_result['full_text'] = page_data.text or ''
-                    search_state.selected_result['display']['img'] = str(page_data.p_num)
-                    load_in_viewer(search_state.selected_result)
-
-    async def browse_next():
-        """Navigate to next page in current manuscript (within viewer)."""
-        if search_state.selected_result:
-            display = search_state.selected_result.get('display', {})
-            sys_id = display.get('id')
-            current_page = search_state.current_page_idx
-
-            if sys_id:
-                from web.services import get_service
-                service = get_service()
-
-                def load_next():
-                    return service.get_browse_page(sys_id, p_num=current_page, direction=1)
-
-                page_data = await run.io_bound(load_next)
-                if page_data:
-                    search_state.current_page_idx = page_data.p_num
-                    # Update the selected result with new page info
-                    search_state.selected_result['full_text'] = page_data.text or ''
-                    search_state.selected_result['display']['img'] = str(page_data.p_num)
-                    load_in_viewer(search_state.selected_result)
-
     def show_add_to_list_dialog_local(result):
         from web.components import show_add_to_list_dialog as show_dialog
         display = result.get('display', {})
@@ -5655,90 +5495,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         query_column.set_visibility(False)
         tag_column.set_visibility(True)
         tag_select.value = initial_tag
-        async def load_tag_in_viewer(result):
-            """Load a tag search result into the viewer pane with page text."""
-            sys_id = result.get('sys_id', '')
-            shelfmark = result.get('shelfmark', 'Unknown')
-            doc_type = result.get('document_type', '')
-            description = (result.get('description', '') or '').strip()
-            pgpid = result.get('pgpid')
-
-            # Look up library info
-            library_name = ''
-            library_code = ''
-            if sys_id and hasattr(state, 'meta_mgr') and state.meta_mgr:
-                library_code = state.meta_mgr.get_library_for_id(sys_id)
-                if library_code:
-                    from genizah_core import get_library_display
-                    library_name = get_library_display(library_code, short=False, lang=get_language())
-
-            # Fetch first page text
-            from web.services import get_service
-            service = get_service()
-            page_data = await run.io_bound(lambda: service.get_browse_page(sys_id, p_num=1))
-            page_text = page_data.text if page_data else ''
-
-            viewer_container.clear()
-            with viewer_container:
-                with ui.column().classes('w-full gap-2 mb-4'):
-                    # Row 1: Shelfmark + action buttons
-                    with ui.row().classes('w-full items-start justify-between gap-2'):
-                        with ui.column().classes('min-w-0 flex-shrink gap-1'):
-                            display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
-                            h2(display_shelfmark, classes='text-lg font-bold', style='color: var(--primary-700);')
-
-                        with ui.row().classes('items-center gap-1 shrink-0'):
-                            if sys_id:
-                                with ui.link(target=f'/browse?sys_id={sys_id}').classes('no-underline').tooltip(tr('Browse Full Manuscript')):
-                                    ui.button(icon='menu_book').props('flat round size=sm color=green')
-
-                    # Metadata badges
-                    with ui.row().classes('gap-2 flex-wrap'):
-                        if doc_type:
-                            ui.badge(doc_type).props('outline')
-                        ui.badge('PGP', color='green').props('outline')
-
-                # Content tabs
-                with ui.tabs().classes('w-full') as tabs:
-                    tab_text = ui.tab('text', label=tr('Full Text'))
-                    tab_info = ui.tab('info', label=tr('Metadata'))
-
-                with ui.tab_panels(tabs, value='text').classes('w-full flex-grow'):
-                    # Text tab
-                    with ui.tab_panel('text'):
-                        if page_text:
-                            with ui.scroll_area().classes('w-full h-64'):
-                                with ui.element('div').classes('whitespace-pre-wrap').style(
-                                    'direction: rtl; text-align: right; line-height: 2; font-size: 1rem; color: var(--text-primary);'
-                                ):
-                                    ui.html(html.escape(page_text).replace('\n', '<br>'), sanitize=False)
-                        else:
-                            ui.label(tr('Full text not available')).style('color: var(--text-muted);')
-
-                    # Info tab
-                    with ui.tab_panel('info'):
-                        with ui.column().classes('w-full gap-4'):
-                            if description:
-                                with ui.column().classes('gap-1'):
-                                    ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary); line-height: 1.6;')
-
-                            info_items = [
-                                (tr('Library'), library_name or tr('Not available')),
-                                (tr('Shelfmark'), shelfmark),
-                                (tr('System ID'), sys_id or tr('Not available')),
-                            ]
-                            if pgpid:
-                                info_items.append(('PGP ID', str(pgpid)))
-
-                            for label, value in info_items:
-                                with ui.row().classes('w-full items-start gap-4'):
-                                    ui.label(label).classes('font-bold w-32').style('color: var(--text-secondary);')
-                                    ui.label(value).style('color: var(--text-primary);')
-
-                            if pgpid:
-                                pgp_url = f'https://geniza.princeton.edu/documents/{pgpid}'
-                                ui.link(tr('View on PGP'), pgp_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+        def _tag_to_result(tag_result):
+            """Convert a tag search result dict to the shape expected by open_advanced_dialog."""
+            return {
+                'display': {
+                    'id': tag_result.get('sys_id', ''),
+                    'shelfmark': tag_result.get('shelfmark', 'Unknown'),
+                    'library_code': '',
+                    'title': tag_result.get('description', ''),
+                    'source': 'PGP',
+                },
+                'snippet': '',
+                'full_text': '',
+            }
 
 
         async def load_tag_results():
@@ -5797,7 +5566,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             with ui.row().classes('w-full items-start justify-between'):
                                 with ui.column().classes('flex-grow min-w-0 gap-1').on(
                                     'click',
-                                    lambda r=result: load_tag_in_viewer(r)
+                                    lambda r=result: open_advanced_dialog(None, _tag_to_result(r))
                                 ):
                                     with ui.row().classes('items-center gap-2 flex-wrap'):
                                         ui.label(f"#{i + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(

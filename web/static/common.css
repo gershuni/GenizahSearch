@@ -939,17 +939,27 @@ body {
 
 /* Search page */
 @media (max-width: 768px) {
-    /* Hide viewer panel on mobile - results expand inline instead */
-    .search-splitter .q-splitter__after { display: none !important; }
-    .search-splitter .q-splitter__separator { display: none !important; }
-    .search-splitter .q-splitter__before { width: 100% !important; flex: 1 !important; }
     .filters-grid { grid-template-columns: 1fr !important; }
-    /* Show mobile expansion in result cards */
-    .result-mobile-expand { display: block !important; }
 }
-@media (min-width: 769px) {
-    /* Hide mobile expansion on desktop */
-    .result-mobile-expand { display: none !important; }
+
+/* Inline accordion expansion for search results */
+.result-inline-expand {
+    animation: expand-in 0.2s ease-out;
+    border-top: 1px solid var(--border-light);
+    margin-top: 8px;
+    padding-top: 12px;
+}
+@keyframes expand-in {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 500px; }
+}
+/* On mobile, the side-by-side expansion layout stacks vertically via flex-wrap. */
+@media (max-width: 640px) {
+    .result-inline-expand img {
+        width: 100% !important;
+        max-width: 300px;
+        max-height: 200px;
+    }
 }
 
 /* Collapsible Search Panel */
