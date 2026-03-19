@@ -4220,8 +4220,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             if page_data and page_data.text:
                                 r['full_text'] = page_data.text
                                 _render_full_text(tc, page_data.text, hp)
-                        except Exception:
-                            pass
+                            else:
+                                logger.warning("Lazy load: no page data for sys_id=%s p_num=%d", sid, p_num)
+                        except Exception as e:
+                            logger.error("Lazy load error for sys_id=%s: %s", sid, e, exc_info=True)
 
                     # Hook into toggle: load text on first expand
                     _orig_toggle_fn = toggle_expansion
