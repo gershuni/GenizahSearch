@@ -253,43 +253,31 @@ def create_layout():
                 async def update_status():
                     """Heartbeat function that monitors both server readiness and WebSocket connection."""
                     try:
-                        # Check if elements still exist (user might have navigated away)
                         if not status_dot.is_deleted and not status_text.is_deleted:
                             connection_state['check_count'] += 1
-
-                            # Check if server-side state is ready
                             server_ready = state.is_ready()
 
-                            # Perform a lightweight JavaScript ping to verify WebSocket connection
-                            # This also tests the round-trip to catch connection issues
                             try:
                                 ping_result = await ui.run_javascript('Date.now()', timeout=5.0)
                                 ws_connected = ping_result is not None
-                            except Exception:
+                            except Exception as js_err:
                                 ws_connected = False
+                                if connection_state['check_count'] <= 3:
+                                    print(f"[heartbeat] JS ping failed (#{connection_state['check_count']}): {js_err}", flush=True)
+
+                            if connection_state['check_count'] <= 3:
+                                print(f"[heartbeat] #{connection_state['check_count']}: ready={server_ready}, ws={ws_connected}", flush=True)
 
                             if server_ready and ws_connected:
-                                # All good - show green, steady (remove pulse animation)
                                 status_dot.classes('bg-green-400', remove='bg-yellow-400 animate-pulse')
                                 status_text.text = tr('Ready')
                                 connection_state['was_connected'] = True
                             else:
-                                # Loading or reconnecting - yellow with subtle pulse animation
-                                # Don't show alarming text, just visual indicator
                                 status_dot.classes('bg-yellow-400 animate-pulse', remove='bg-green-400')
-                                # Keep showing "Ready" after initial connection to avoid alarming users
-                                # The yellow pulsing dot is sufficient visual feedback
                                 if not connection_state['was_connected']:
                                     status_text.text = tr('Loading...')
-                                # else: keep current text (Ready) - don't change to alarming message
-                        else:
-                            # Elements deleted, deactivate timer
-                            if connection_state['timer']:
-                                connection_state['timer'].cancel()
-                    except Exception:
-                        # If update itself fails, cancel task to prevent further errors
-                        if connection_state['timer']:
-                            connection_state['timer'].cancel()
+                    except Exception as e:
+                        print(f"[heartbeat] OUTER exception: {e}", flush=True)
 
                 # Run heartbeat every 10 seconds to monitor connection health
                 # Use asyncio to avoid parent_slot RuntimeError on navigation
