@@ -4160,11 +4160,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             sanitize=False
                         )
 
-                    # Right: full text (highlighted, line-broken)
-                    with ui.column().classes('flex-1 min-w-[200px] gap-2'):
-                        full_text = result.get('full_text', '')
-                        highlight_pattern = result.get('highlight_pattern', '')
-                        if full_text:
+                    # Right: full text (highlighted, line-broken) — only if available
+                    # On session restore full_text is empty; don't repeat snippet (already on card)
+                    full_text = result.get('full_text', '')
+                    highlight_pattern = result.get('highlight_pattern', '')
+                    if full_text:
+                        with ui.column().classes('flex-1 min-w-[200px] gap-2'):
                             def _highlight_text(text, pattern):
                                 escaped = html.escape(text)
                                 if pattern:
@@ -4186,12 +4187,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 0.95rem;'
                                 ):
                                     ui.html(_exp_text_html, sanitize=False)
-                        elif snippet:
-                            _exp_snippet_html = SearchEngine.format_snippet(snippet)
-                            with ui.element('div').classes('p-3 rounded-lg text-sm').style(
-                                'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
-                            ):
-                                ui.html(_exp_snippet_html, sanitize=False)
 
     def open_advanced_dialog(index, result):
         """Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
