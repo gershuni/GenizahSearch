@@ -487,22 +487,45 @@ def create_layout():
                 # Creator Credit
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
 
-    # Global Footer with Citation Note (dismissible)
+    # Global Footer with Citation Note (dismissible, auto-collapse to compact line)
     full_citation = 'Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473'
     footer = ui.footer().classes('citation-footer')
     with footer:
-        with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap'):
-            # Copy button
+        # Full citation (shown initially)
+        with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap citation-full'):
             ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
-            # Hebrew label (hidden on mobile) - comes before citation for correct RTL order
             ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80 citation-hebrew-label')
-            # Citation link (English, LTR)
             ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium citation-link').style('direction: ltr; text-decoration: none;')
-            # Close button
             ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
 
-    # Check if footer was dismissed and hide it
-    ui.run_javascript('if(localStorage.getItem("citation_footer_dismissed") === "true") { document.querySelector(".citation-footer").style.display = "none"; }')
+        # Compact citation (shown after auto-collapse)
+        with ui.row().classes('w-full items-center justify-center gap-2 py-1 px-4 citation-compact'):
+            ui.label('Cite: MiDRASH (Stoekl Ben Ezra et al., 2025)').classes('text-xs opacity-80').style('direction: ltr;')
+            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy full citation'))
+            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
+
+    # Dismiss check + auto-collapse after 10 seconds
+    ui.run_javascript('''
+        (function() {
+            if (localStorage.getItem("citation_footer_dismissed") === "true") {
+                document.querySelector(".citation-footer").style.display = "none";
+                return;
+            }
+            setTimeout(function() {
+                var full = document.querySelector(".citation-full");
+                var compact = document.querySelector(".citation-compact");
+                if (full && compact) {
+                    full.style.opacity = "0";
+                    setTimeout(function() {
+                        full.style.display = "none";
+                        compact.style.display = "flex";
+                        compact.style.opacity = "0";
+                        setTimeout(function() { compact.style.opacity = "1"; }, 50);
+                    }, 300);
+                }
+            }, 10000);
+        })();
+    ''')
 
     # One-time citation reminder dialog (per machine, via localStorage)
     _show_citation_reminder(get_language())
