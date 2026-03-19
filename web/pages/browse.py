@@ -4286,10 +4286,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     slider_refs['rotate'] = ui.slider(
                                         min=0, max=360, step=1, value=state.rotation,
                                         on_change=handle_rotation_slider
-                                    ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-32 mx-2').style('transition: none;').on(
-                                        'update:model-value', 
-                                        'if(window.manuscriptViewer) window.manuscriptViewer.update(window.manuscriptViewer.state.scale, $event)'
-                                    )
+                                    ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-32 mx-2').style('transition: none;')
                                     
                                     ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
