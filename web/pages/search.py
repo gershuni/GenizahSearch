@@ -104,8 +104,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         await asyncio.sleep(delay)
         try:
             await coro_func(*args)
-        except RuntimeError:
-            pass  # Silently ignore if page was navigated away (deleted elements)
         except Exception as e:
             logger.error("_after_delay error in %s: %s", coro_func.__name__, e, exc_info=True)
 
