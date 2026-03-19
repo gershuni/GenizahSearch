@@ -1480,6 +1480,13 @@ class ZoomableScrollArea(QGraphicsView):
         self._pixmap = pixmap
         self._rotation = 0
         self._auto_fit_enabled = bool(pixmap)
+        # Cancel any pending filter debounce timer from the previous image
+        if self._adj_timer is not None:
+            try:
+                self._adj_timer.stop()
+            except RuntimeError:
+                pass
+            self._adj_timer = None
         # Reset adjustments on new image (without triggering display update since we handle it below)
         self._brightness = 0
         self._contrast = 0
@@ -1706,7 +1713,7 @@ class ZoomableScrollArea(QGraphicsView):
 
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
-    _thumbnail_ready = pyqtSignal(QPixmap, int)  # pixmap, page_index
+    _thumbnail_ready = pyqtSignal(QPixmap, int, int)  # pixmap, page_index, load_generation
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1714,6 +1721,7 @@ class ManuscriptViewerWidget(QWidget):
         self.images_ext = []
         self.active_list = []
         self.current_idx = 0
+        self._load_generation = 0  # increments on each set_page/load_images to reject stale callbacks
         self.loader_thread = None
         self.preload_worker = None
         self.external_provider = None
@@ -2077,16 +2085,17 @@ class ManuscriptViewerWidget(QWidget):
             self.preload_worker.cancel()
             self.preload_worker.wait(1000)
 
-    def _on_thumbnail_ready(self, pix, page_idx):
-        """Handle thumbnail loaded signal - only display if still on same page."""
+    def _on_thumbnail_ready(self, pix, page_idx, generation):
+        """Handle thumbnail loaded signal - only display if still on same page and same load generation."""
         if self._closing:
             return
-        if self.current_idx == page_idx and pix and not pix.isNull():
+        if self._load_generation == generation and self.current_idx == page_idx and pix and not pix.isNull():
             self.scroll_area.set_image(pix)
 
     def _load_thumbnail_async(self, thumb_url):
         """Load thumbnail asynchronously for quick display while full image loads."""
         current_idx = self.current_idx  # Capture current state
+        generation = self._load_generation  # Capture generation to reject stale callbacks
         signal = self._thumbnail_ready  # Capture signal reference for thread
         closing_ref = lambda: self._closing  # Capture closing flag check
 
@@ -2102,7 +2111,7 @@ class ManuscriptViewerWidget(QWidget):
                         image = QImage()
                         if image.loadFromData(data):
                             pix = QPixmap.fromImage(image)
-                            signal.emit(pix, current_idx)
+                            signal.emit(pix, current_idx, generation)
             except Exception:
                 pass  # Thumbnail load failed, full image will replace it
 
@@ -2120,6 +2129,7 @@ class ManuscriptViewerWidget(QWidget):
         if index >= len(self.active_list): index = len(self.active_list) - 1
 
         self.current_idx = index
+        self._load_generation += 1  # Invalidate any in-flight thumbnail callbacks
         img_data = self.active_list[index]
         base_url = img_data['url']
 
