@@ -3041,4 +3041,12 @@ LIBRARY_CODES_HE = {
     'Goldsmith': 'מוזיאון גולדסמית',
     'SOS': 'החברה האורתודוקסית הנפרדת',
     'MotB': 'מוזיאון התנ״ך',
+    # Phase 53: New codes for FIST gap records
+    'Solomon': 'אוסף שלמה הלברשטם',
+    'Reinach': 'אוסף ריינך',
+    'Vatican': 'ספריית הוותיקן',
+    'Mehlman': 'אוסף מהלמן',
+    'CentralArch': 'הארכיון המרכזי לתולדות העם היהודי',
+    'JCMainz': 'הקהילה היהודית של מיינץ',
+    'Corwin': 'אוסף קורווין',
 }

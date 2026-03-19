@@ -160,6 +160,13 @@ def normalize_shelfmark(shelfmark: str) -> str:
     if cleaned.startswith("ms"):
         cleaned = cleaned[2:]
 
+    # Normalize RNL "Yevr." prefix to "EVR" (FIST uses Yevr., CSV uses EVR)
+    if cleaned.startswith("yevr"):
+        cleaned = "evr" + cleaned[4:]
+    # Normalize CAJS "Halper" to "Genizah" (FIST uses Halper, CSV uses Genizah prefix)
+    if cleaned.startswith("halper") and not cleaned.startswith("halpern"):
+        cleaned = "genizah" + cleaned[6:]
+
     return cleaned
 
 
@@ -1671,6 +1678,14 @@ LIBRARY_CODES = {
     'Goldsmith': 'Goldsmith Museum',
     'SOS': 'Separated Orthodox Society',
     'MotB': 'Museum of the Bible',
+    # Phase 53: New codes for FIST gap records
+    'Solomon': 'Solomon Halberstam Collection',
+    'Reinach': 'Reinach Collection',
+    'Vatican': 'Vatican Library',
+    'Mehlman': 'Mehlman Collection',
+    'CentralArch': 'Central Archives for the History of the Jewish People',
+    'JCMainz': 'Jewish Community of Mainz',
+    'Corwin': 'Corwin Collection',
 }
 
 def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
