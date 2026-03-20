@@ -463,7 +463,16 @@ window.puzzleCanvas = {
             div.style.cssText = 'display:flex; align-items:center; gap:8px; padding:8px 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:4px; font-size:13px; color:#664d03;';
             var span = document.createElement('span');
             span.style.flex = '1';
-            span.textContent = this._bannerTexts ? this._bannerTexts.banner : 'For the best puzzle experience, install the GenizahSearch Image Helper extension.';
+            var bannerMsg = this._bannerTexts ? this._bannerTexts.banner : 'For the best puzzle experience, install the GenizahSearch Image Helper extension.';
+            span.textContent = bannerMsg;
+            var link = document.createElement('a');
+            link.href = 'https://chromewebstore.google.com/detail/ngohnlbbdifmccjdnjhcpmilpdpjmkmc';
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:4px 12px; background:#1a73e8; color:#fff; border-radius:4px; text-decoration:none; font-size:12px; font-weight:500; white-space:nowrap;';
+            link.textContent = this._bannerTexts ? this._bannerTexts.install : 'Install Extension';
+            div.appendChild(span);
+            div.appendChild(link);
             var btn = document.createElement('button');
             btn.style.cssText = 'background:none; border:none; cursor:pointer; font-size:18px; color:#664d03; padding:0 4px;';
             btn.innerHTML = '&#x2715;';
@@ -471,7 +480,6 @@ window.puzzleCanvas = {
                 localStorage.setItem('puzzleBannerDismissed', '1');
                 div.remove();
             });
-            div.appendChild(span);
             div.appendChild(btn);
             container.appendChild(div);
         }
@@ -3349,6 +3357,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         is_he = get_language() == 'he'
         banner_text = 'לחוויית פאזל מיטבית, ובמיוחד להסרת רקע, התקינו את תוסף GenizahSearch Image Helper.' if is_he else 'For the best puzzle experience, especially the crucial background removal, install the GenizahSearch Image Helper extension.'
         indicator_text = 'תוסף פעיל' if is_he else 'Extension active'
+        install_text = 'התקינו את התוסף' if is_he else 'Install Extension'
 
         # ── Extension banner container (empty div, populated by JS) ──
         ext_banner_container = ui.element('div').props('id=extBannerContainer')
@@ -3569,7 +3578,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             (function tryInit(attempts) {
                 if (typeof fabric !== "undefined") {
                     console.log("Fabric.js loaded:", fabric.version);
-                    window.puzzleCanvas._bannerTexts = {banner: "''' + banner_text.replace('"', '\\"') + '''", indicator: "''' + indicator_text.replace('"', '\\"') + '''"};
+                    window.puzzleCanvas._bannerTexts = {banner: ''' + json.dumps(banner_text) + ''', indicator: ''' + json.dumps(indicator_text) + ''', install: ''' + json.dumps(install_text) + '''};
                     window.puzzleCanvas.init("puzzleCanvas");
                     if (window.puzzleCanvas.canvas) {
                         console.log("Canvas size:", window.puzzleCanvas.canvas.getWidth(), "x", window.puzzleCanvas.canvas.getHeight());

@@ -12,4 +12,4 @@ def _env_enabled(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-WEB_PUZZLE_ENABLED = _env_enabled("WEB_PUZZLE_ENABLED", False)
+WEB_PUZZLE_ENABLED = _env_enabled("WEB_PUZZLE_ENABLED", True)

@@ -247,7 +247,7 @@ Server /api/puzzle_process ──► background removal ──► disk cache
 
 | Store | Status | URL |
 |-------|--------|-----|
-| Chrome Web Store | Submitted 2026-03-18, pending review | (pending approval) |
+| Chrome Web Store | Live | https://chromewebstore.google.com/detail/ngohnlbbdifmccjdnjhcpmilpdpjmkmc |
 | Firefox AMO | Submitted 2026-03-18, pending review | (pending approval) |
 
 - **Privacy policy**: `https://genizahsearch.com/privacy-extension`
