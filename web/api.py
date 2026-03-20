@@ -7,8 +7,10 @@ from starlette.requests import Request
 from web.state import state
 from web.export_service import get_export_service, encode_filename_for_header
 import requests
+import requests.adapters
 import re
 import os
+import threading
 from genizah_core import Config
 from urllib.parse import urlparse
 
@@ -19,7 +21,19 @@ logger = logging.getLogger(__name__)
 
 # Cache TTL values (configurable via environment variables)
 NLI_CACHE_TTL = int(os.environ.get('NLI_CACHE_TTL', '300'))  # 5 minutes default
+NLI_FAIL_CACHE_TTL = 60  # negative-cache failures for 60s to avoid hammering NLI
 IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes default
+
+# Concurrency cap for NLI IIIF fetches (prevents burst-flooding the upstream)
+_nli_semaphore = threading.Semaphore(4)
+
+# Persistent session for NLI requests (connection reuse via keep-alive)
+_nli_session = requests.Session()
+_nli_session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+})
+_nli_adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=8)
+_nli_session.mount('https://iiif.nli.org.il', _nli_adapter)
 
 # Allowed domains for image proxy (prevents SSRF attacks)
 ALLOWED_IMAGE_DOMAINS = [
@@ -94,33 +108,64 @@ def init_api_routes():
     else:
         logger.info("NLI crossref sidecar not available (will use network manifest fetch)")
 
+    # Sentinel for negative cache entries (distinguishes "cached empty" from "not cached")
+    _NLI_FAIL_SENTINEL = object()
+
     def fetch_fl_ids_from_nli(system_id: str, _cache={}, _cache_time={}) -> list:
         """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached.
 
         Resolution order:
-        1. In-memory cache (fastest)
+        1. In-memory cache — includes negative entries to avoid retrying failures (fastest)
         2. Local SQLite sidecar via NliCrossrefService (no network, ~815K pre-resolved records)
         3. NLI IIIF manifest network fetch (all pages)
         4. NLI MARC API fallback (typically 1 FL ID)
         """
         import time as _time
 
-        # Check cache first
+        # Check cache first (both positive and negative entries)
         if system_id in _cache:
             cache_age = _time.time() - _cache_time.get(system_id, 0)
-            if cache_age < NLI_CACHE_TTL:
-                return _cache[system_id]
+            cached_val = _cache[system_id]
+            if cached_val is _NLI_FAIL_SENTINEL:
+                # Negative cache: return empty if still within cooldown
+                if cache_age < NLI_FAIL_CACHE_TTL:
+                    return []
+                # Cooldown expired — fall through to retry
+            elif cache_age < NLI_CACHE_TTL:
+                return cached_val
 
         # NOTE: Crossref FGPImageNumberId != IIIF FL number. Cannot use sidecar for image URLs.
         # Always use IIIF manifest for canonical FL IDs.
 
+        # Acquire semaphore to cap concurrent NLI requests
+        acquired = _nli_semaphore.acquire(timeout=20)
+        if not acquired:
+            logger.warning(f"NLI semaphore timeout for {system_id} — too many concurrent fetches")
+            return []
+        try:
+            return _fetch_fl_ids_network(system_id, _cache, _cache_time)
+        finally:
+            _nli_semaphore.release()
+
+    def _fetch_fl_ids_network(system_id: str, _cache, _cache_time) -> list:
+        """Network fetch for FL IDs (called under semaphore)."""
+        import time as _time
+
+        # Re-check cache after acquiring semaphore (another thread may have resolved it
+        # or stored a negative entry while we were waiting)
+        if system_id in _cache:
+            cached_val = _cache[system_id]
+            cache_age = _time.time() - _cache_time.get(system_id, 0)
+            if cached_val is _NLI_FAIL_SENTINEL:
+                if cache_age < NLI_FAIL_CACHE_TTL:
+                    return []
+            elif cache_age < NLI_CACHE_TTL:
+                return cached_val
+
         # Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        }
         try:
-            resp = requests.get(url, headers=headers, timeout=15, verify=True)
+            resp = _nli_session.get(url, timeout=15, verify=True)
             if resp.status_code == 200:
                 data = resp.json()
                 fl_ids = []
@@ -139,7 +184,6 @@ def init_api_routes():
                                 fl_ids.append(fl_match.group(1))
 
                 if fl_ids:
-                    # Cache successful result
                     _cache[system_id] = fl_ids
                     _cache_time[system_id] = _time.time()
                     logger.info(f"Resolved {len(fl_ids)} FL IDs for {system_id} from network IIIF manifest")
@@ -150,7 +194,7 @@ def init_api_routes():
         # Fallback to MARC API (only has 1 FL ID typically)
         try:
             marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-            resp = requests.get(marc_url, headers=headers, timeout=10, verify=True)
+            resp = _nli_session.get(marc_url, timeout=10, verify=True)
             if resp.status_code == 200:
                 fl_ids = re.findall(r'FL(\d+)', resp.text)
                 seen = set()
@@ -163,10 +207,13 @@ def init_api_routes():
                     _cache[system_id] = unique_fl_ids
                     _cache_time[system_id] = _time.time()
                     logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
-                return unique_fl_ids
+                    return unique_fl_ids
         except Exception as e:
             logger.error(f"MARC fallback also failed for {system_id}: {e}")
 
+        # Both attempts failed — negative-cache to avoid immediate retry
+        _cache[system_id] = _NLI_FAIL_SENTINEL
+        _cache_time[system_id] = _time.time()
         return []
 
     @app.get('/api/fl_ids/{sys_id}')

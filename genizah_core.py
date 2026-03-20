@@ -6272,8 +6272,8 @@ class SearchEngine:
 
         t_query_str = " AND ".join(tantivy_parts)
         pattern_str = regex.pattern
-        LOGGER.info(f"[DEBUG] Line-break search, Tantivy: {t_query_str[:500]}")
-        LOGGER.info(f"[DEBUG] Line-break regex: {pattern_str[:500]}")
+        LOGGER.debug(f"Line-break search, Tantivy: {t_query_str[:500]}")
+        LOGGER.debug(f"Line-break regex: {pattern_str[:500]}")
 
         if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
             sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
@@ -6288,7 +6288,7 @@ class SearchEngine:
 
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
-        LOGGER.info(f"[DEBUG] Line-break Tantivy returned {total_hits} hits")
+        LOGGER.debug(f"Line-break Tantivy returned {total_hits} hits")
 
         restrict_uids = None
         if restrict_sys_ids is not None:
@@ -6383,7 +6383,7 @@ class SearchEngine:
         except InterruptedError:
             was_interrupted = True
 
-        LOGGER.info(f"[DEBUG] Line-break search: {len(results)} results, filtered: {regex_filtered}, interrupted: {was_interrupted}")
+        LOGGER.debug(f"Line-break search: {len(results)} results, filtered: {regex_filtered}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
 
         if exclude_words and deduped:
@@ -6689,10 +6689,9 @@ class SearchEngine:
                 regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
 
-        # DEBUG: Log query and regex
-        LOGGER.info(f"[DEBUG] Mode: {mode}, Query: {query_str[:200]}")
-        LOGGER.info(f"[DEBUG] Tantivy query: {t_query_str[:500]}")
-        LOGGER.info(f"[DEBUG] Regex pattern: {regex.pattern[:500]}")
+        LOGGER.debug(f"Mode: {mode}, Query: {query_str[:200]}")
+        LOGGER.debug(f"Tantivy query: {t_query_str[:500]}")
+        LOGGER.debug(f"Regex pattern: {regex.pattern[:500]}")
 
         # Save pattern string for passing to results
         pattern_str = regex.pattern
@@ -6725,7 +6724,7 @@ class SearchEngine:
 
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
-        LOGGER.info(f"[DEBUG] Tantivy returned {total_hits} hits")
+        LOGGER.debug(f"Tantivy returned {total_hits} hits")
         results = []
         regex_filtered_count = 0
         was_interrupted = False
@@ -6815,9 +6814,9 @@ class SearchEngine:
                     LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         except InterruptedError:
             was_interrupted = True
-            LOGGER.info(f"[DEBUG] Search interrupted at hit {i}/{total_hits}, found {len(results)} results so far")
+            LOGGER.debug(f"Search interrupted at hit {i}/{total_hits}, found {len(results)} results so far")
 
-        LOGGER.info(f"[DEBUG] Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
+        LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
 
         # --- Apply Exclusion Filter (NOT Filter) ---
@@ -6839,7 +6838,7 @@ class SearchEngine:
                     filtered.append(r)
             deduped = filtered
 
-        LOGGER.info(f"[DEBUG] Results after dedup & filtering: {len(deduped)}")
+        LOGGER.debug(f"Results after dedup & filtering: {len(deduped)}")
 
         # --- Attach Responsa explosion guard warning to first result ---
         if responsa_warning and deduped:

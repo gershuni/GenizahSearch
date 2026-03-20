@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-19 (search UX overhaul complete; browse rotation slider JS handler fixed)
+> **Last Updated:** 2026-03-20 (production log review: auth refresh-loop, NLI timeout retry storm, and production search debug logging identified)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 5 | 5 |
-| P2 Medium Bugs | 7 | 20 | 27 |
+| P2 Medium Bugs | 10 | 20 | 30 |
 | P3 Low Priority | 1 | 3 | 4 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **15** | **56** | **71** |
+| **Total** | **18** | **56** | **74** |
 
 ---
 
@@ -76,6 +76,9 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
+| **Web auth can get stuck retrying an already-used refresh token** | `web/supabase_client.py`, `web/auth_state.py` | ❌ Open | `get_user_client()` logs and falls back to the anonymous client when Supabase returns `Invalid Refresh Token: Already Used`, but it leaves `auth_session` and cached auth UI state in NiceGUI storage. Subsequent requests keep retrying the same dead token and spam logs while the UI may still look signed in. Fix path: treat this as terminal auth failure, clear stored auth state, and prompt re-login. |
+| **NLI manifest failures are retried immediately and can hammer iiif.nli.org.il during thumbnail bursts** | `web/api.py` | ❌ Open | `fetch_fl_ids_from_nli()` does blocking 15s manifest fetches with success-only caching. When NLI is slow or rate-limits, the same `sys_id`s are retried on every request with no failure TTL/backoff and no concurrency cap, producing synchronized timeout bursts in production logs. Fix path: add a short negative cache/cooldown and optionally a small concurrency limit plus connection reuse. |
+| **Search logs expose raw queries and regex internals at INFO in production** | `genizah_core.py` | ❌ Open | `search_text_tantivy()` and the line-break search path emit `[DEBUG]` messages via `LOGGER.info`, including raw user query text, generated Tantivy query strings, regex patterns, and hit counts. This bloats production logs and captures user searches unnecessarily. Fix path: gate these logs behind a debug flag or DEBUG level and default them off in production. |
 | **Web puzzle image acquisition solved via browser extension; staged rollout in progress** | `extension/`, `web/pages/puzzle.py`, `web/api.py`, `web/puzzle_tokens.py` | ✅ Fixed (2026-03-18) | Browser extension ("GenizahSearch Image Helper") fetches NLI images via user's own IP, sends to server for bg removal + disk caching. Unified `_loadImageWithFallbacks()` fallback chain: server cache → extension → localhost helper → direct NLI. Extension submitted to Chrome Web Store. `WEB_PUZZLE_ENABLED=true` set on production for staged testing. Feature flag kept for rollback. |
 | **Desktop EXE puzzle image loading fails with `No module named numpy`** | `build_app.bat`, `GenizahSearchPro.spec` | ✅ Fixed (2026-03-17) | The desktop build explicitly added `numpy` as a hidden import for puzzle background removal, but then also excluded `numpy` from the PyInstaller bundle. Running from source worked because the venv had NumPy installed; the packaged EXE failed only when puzzle image processing first imported `shared.background_removal`. Fixed by removing the contradictory `numpy` exclusion from both build entry points. |
 | **Puzzle folio navigation still fails on production after initial client-side fallback** | `web/pages/puzzle.py:717-806`, `web/pages/puzzle.py:2685-2741` | ✅ Fixed (2026-03-17) | `navigateFolio()` now shares the same localhost-helper fallback chain as initial add and reload. Production was verified live: when `/api/puzzle_image` fails due to blocked server-side IIIF fetch, the browser falls back to the user's local helper and preserves correct `fl_id`/`folio_label` updates instead of saving mismatched metadata. |
@@ -234,6 +237,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-20 | Reviewed production server logs and added 3 open issues: (1) `get_user_client()` leaves stale auth state after `Invalid Refresh Token: Already Used`, causing repeated retries and log spam; (2) `fetch_fl_ids_from_nli()` retries slow NLI IIIF manifest fetches immediately with no negative cache/backoff, causing timeout bursts; (3) search code still logs raw queries and regex internals at INFO with `[DEBUG]` labels in production. | Codex |
 | 2026-03-18 | Fixed Manchester LUNA recto/verso bug: each page has its own luna_id but code only fetched the first. Added `get_manchester_canvases()` to `NliCrossrefService` which resolves ALL crossref images to individual IIIF canvas entries. Confirmed with Ms. B 2091 (sys_id 990002081410205171): recto and verso now show distinct images. 6 new tests. | Claude |
 | 2026-03-18 | Investigated the handoff claim that NLI Vienna/Rainer images became "tiny" in the desktop puzzle after the Mosseri CUDL session. Static trace confirmed the Mosseri/Cambridge changes do not affect non-Cambridge records, and `tests/test_mosseri_cudl.py` still passes (17/17). Added a new open P2 issue for the more likely root cause: desktop puzzle `_fit_all_fragments()` always calls `fitInView()` after each new fragment, so perfectly normal 800px images can appear thumbnail-sized due to view zoom rather than bad source data. | Codex |
 | 2026-03-17 | Verified the localhost-helper web puzzle path against `genizahsearch.com` and switched it from opt-in to default-on fallback. The browser now tries the user's local helper after `/api/puzzle_image` fails, across initial add, reload/toggle, and folio navigation. Also removed the fragile preflight `/health` fetch gate because it could block the helper attempt from the live HTTPS site even when image loading itself worked. | Codex |

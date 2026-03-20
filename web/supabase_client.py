@@ -72,6 +72,20 @@ def _is_jwt_expired(error) -> bool:
     return 'JWT expired' in msg or 'PGRST303' in msg
 
 
+def _clear_stale_auth(storage):
+    """Clear stale auth tokens from user storage to break the retry loop.
+
+    When a refresh token is already consumed (e.g., concurrent tab usage),
+    continuing to retry with the same token produces an infinite error loop.
+    Clearing the tokens forces the UI to show the user as logged out so they
+    can re-authenticate with fresh credentials.
+    """
+    storage.pop('auth_session', None)
+    storage.pop('auth_user', None)
+    storage.pop('auth_profile', None)
+    logger.warning("[get_user_client] Cleared stale auth — user must re-login")
+
+
 def get_user_client() -> Client:
     """Get a per-user Supabase client authenticated with the current user's session tokens.
 
@@ -124,6 +138,11 @@ def get_user_client() -> Client:
                 except Exception as e:
                     logger.error(f"[get_user_client] set_session failed: {e}")
                     _client_cache.pop(storage_id, None)
+                    # Clear auth only for terminal token errors (consumed/expired/invalid);
+                    # transient network or Supabase outages should NOT log the user out.
+                    err_msg = str(e).lower()
+                    if 'refresh token' in err_msg or 'invalid' in err_msg or 'expired' in err_msg:
+                        _clear_stale_auth(storage)
                     return get_client()
             else:
                 logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
