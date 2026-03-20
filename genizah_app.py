@@ -1711,6 +1711,169 @@ class ZoomableScrollArea(QGraphicsView):
             return
         self._pixmap_item.setPixmap(self._pixmap)
 
+class FullscreenImageWindow(QMainWindow):
+    """Borderless fullscreen window for manuscript image viewing.
+    Supports zoom/pan, image adjustments, page navigation (left/right arrows), Escape to close."""
+
+    page_changed = pyqtSignal(int)  # emitted with delta (-1 or +1) when user navigates
+
+    def __init__(self, pixmap, parent_viewer=None):
+        super().__init__(None)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._parent_viewer = parent_viewer  # ManuscriptViewerWidget to sync page nav
+
+        # Dark background
+        self.setStyleSheet("background: #111;")
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Top overlay bar with controls
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(10, 8, 10, 8)
+
+        # Page info label
+        self._lbl_page = QLabel("")
+        self._lbl_page.setStyleSheet("color: #aaa; font-size: 13px;")
+        top_bar.addWidget(self._lbl_page)
+
+        top_bar.addStretch()
+
+        # Image adjustment controls (compact)
+        lbl_b = QLabel("\u2600")
+        lbl_b.setStyleSheet("color: #888; font-size: 14px;")
+        lbl_b.setToolTip(tr("Brightness"))
+        top_bar.addWidget(lbl_b)
+        self._sl_brightness = QSlider(Qt.Orientation.Horizontal)
+        self._sl_brightness.setRange(-100, 100)
+        self._sl_brightness.setValue(0)
+        self._sl_brightness.setFixedWidth(80)
+        top_bar.addWidget(self._sl_brightness)
+
+        lbl_c = QLabel("\u25d0")
+        lbl_c.setStyleSheet("color: #888; font-size: 14px;")
+        lbl_c.setToolTip(tr("Contrast"))
+        top_bar.addWidget(lbl_c)
+        self._sl_contrast = QSlider(Qt.Orientation.Horizontal)
+        self._sl_contrast.setRange(-100, 100)
+        self._sl_contrast.setValue(0)
+        self._sl_contrast.setFixedWidth(80)
+        top_bar.addWidget(self._sl_contrast)
+
+        lbl_g = QLabel("\u03b3")
+        lbl_g.setStyleSheet("color: #888; font-size: 14px; font-style: italic;")
+        lbl_g.setToolTip(tr("Gamma"))
+        top_bar.addWidget(lbl_g)
+        self._sl_gamma = QSlider(Qt.Orientation.Horizontal)
+        self._sl_gamma.setRange(20, 300)
+        self._sl_gamma.setValue(100)
+        self._sl_gamma.setFixedWidth(80)
+        top_bar.addWidget(self._sl_gamma)
+
+        btn_invert = QPushButton("\u25d1")
+        btn_invert.setCheckable(True)
+        btn_invert.setFixedWidth(30)
+        btn_invert.setToolTip(tr("Invert Colors"))
+        btn_invert.setStyleSheet("color: white; background: #333; border: 1px solid #555;")
+        self._btn_invert = btn_invert
+        top_bar.addWidget(btn_invert)
+
+        btn_reset = QPushButton("\u21ba")
+        btn_reset.setFixedWidth(30)
+        btn_reset.setToolTip(tr("Reset Image"))
+        btn_reset.setStyleSheet("color: white; background: #333; border: 1px solid #555;")
+        top_bar.addWidget(btn_reset)
+
+        top_bar.addSpacing(20)
+
+        # Close button
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(36, 36)
+        btn_close.setStyleSheet(
+            "QPushButton { color: white; background: #c0392b; border: none; border-radius: 18px; font-size: 18px; font-weight: bold; }"
+            "QPushButton:hover { background: #e74c3c; }"
+        )
+        btn_close.setToolTip(tr("Close fullscreen (Esc)"))
+        btn_close.clicked.connect(self.close)
+        top_bar.addWidget(btn_close)
+
+        layout.addLayout(top_bar)
+
+        # Zoomable image area
+        self._scroll_area = ZoomableScrollArea()
+        layout.addWidget(self._scroll_area, 1)
+
+        # Set the image
+        if pixmap and not pixmap.isNull():
+            self._scroll_area.set_image(pixmap)
+
+        # Wire adjustment controls
+        self._sl_brightness.valueChanged.connect(
+            lambda v: self._scroll_area.set_adjustments(brightness=v))
+        self._sl_contrast.valueChanged.connect(
+            lambda v: self._scroll_area.set_adjustments(contrast=v))
+        self._sl_gamma.valueChanged.connect(
+            lambda v: self._scroll_area.set_adjustments(gamma=v / 100.0))
+        btn_invert.toggled.connect(
+            lambda c: self._scroll_area.set_adjustments(invert=c))
+
+        def _reset():
+            self._sl_brightness.setValue(0)
+            self._sl_contrast.setValue(0)
+            self._sl_gamma.setValue(100)
+            self._btn_invert.setChecked(False)
+            self._scroll_area.reset_adjustments()
+        btn_reset.clicked.connect(_reset)
+
+        # Sync adjustments from parent viewer if available
+        if parent_viewer and hasattr(parent_viewer, 'scroll_area'):
+            sa = parent_viewer.scroll_area
+            self._sl_brightness.setValue(int(sa._brightness))
+            self._sl_contrast.setValue(int(sa._contrast))
+            self._sl_gamma.setValue(int(sa._gamma * 100))
+            self._btn_invert.setChecked(sa._invert)
+
+        # Update page label
+        self._update_page_label()
+
+    def _update_page_label(self):
+        if self._parent_viewer:
+            idx = self._parent_viewer.current_idx
+            total = len(self._parent_viewer.active_list)
+            if total > 0:
+                self._lbl_page.setText(f"{idx + 1} / {total}")
+
+    def set_image(self, pixmap):
+        """Update the displayed image (called when page changes)."""
+        if pixmap and not pixmap.isNull():
+            # Preserve current adjustment state
+            b = self._sl_brightness.value()
+            c = self._sl_contrast.value()
+            g = self._sl_gamma.value()
+            inv = self._btn_invert.isChecked()
+            self._scroll_area.set_image(pixmap)
+            # Re-apply adjustments after set_image resets them
+            if b or c or g != 100 or inv:
+                self._scroll_area.set_adjustments(
+                    brightness=b, contrast=c, gamma=g / 100.0, invert=inv)
+        self._update_page_label()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self.close()
+        elif key in (Qt.Key.Key_Right, Qt.Key.Key_Down):
+            self.page_changed.emit(1)
+        elif key in (Qt.Key.Key_Left, Qt.Key.Key_Up):
+            self.page_changed.emit(-1)
+        else:
+            super().keyPressEvent(event)
+
+
 class ManuscriptViewerWidget(QWidget):
     """Reusable widget for displaying manuscript images with navigation."""
     _thumbnail_ready = pyqtSignal(QPixmap, int, int)  # pixmap, page_index, load_generation
@@ -1798,6 +1961,14 @@ class ManuscriptViewerWidget(QWidget):
         top_bar.addSpacing(10)
         top_bar.addWidget(btn_zoom_out)
         top_bar.addWidget(btn_zoom_in)
+
+        # Fullscreen button
+        btn_fullscreen = QPushButton("⛶")
+        btn_fullscreen.setToolTip(tr("Fullscreen"))
+        btn_fullscreen.setFixedWidth(30)
+        btn_fullscreen.clicked.connect(self._open_fullscreen)
+        top_bar.addWidget(btn_fullscreen)
+        self._fullscreen_window = None
 
         layout.addLayout(top_bar)
 
@@ -2094,6 +2265,7 @@ class ManuscriptViewerWidget(QWidget):
             return
         if self._load_generation == generation and self.current_idx == page_idx and pix and not pix.isNull():
             self.scroll_area.set_image(pix)
+            self._sync_fullscreen_image()
 
     def _load_thumbnail_async(self, thumb_url):
         """Load thumbnail asynchronously for quick display while full image loads."""
@@ -2168,6 +2340,7 @@ class ManuscriptViewerWidget(QWidget):
             return
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
+        self._sync_fullscreen_image()
         self.slider_rotation.setValue(0)
         # Reset adjustment controls on new image
         self.slider_brightness.setValue(0)
@@ -2195,6 +2368,30 @@ class ManuscriptViewerWidget(QWidget):
                     docid += f",FL{fl_id}"
             url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid={docid}"
             QDesktopServices.openUrl(QUrl(url))
+
+    def _open_fullscreen(self):
+        """Open current image in fullscreen window."""
+        pixmap = self.scroll_area._pixmap
+        if not pixmap or pixmap.isNull():
+            return
+        win = FullscreenImageWindow(pixmap, parent_viewer=self)
+        win.page_changed.connect(self._on_fullscreen_page_change)
+        self._fullscreen_window = win
+        win.showFullScreen()
+
+    def _on_fullscreen_page_change(self, delta):
+        """Handle page navigation from fullscreen window."""
+        new_idx = self.current_idx + delta
+        if new_idx < 0 or new_idx >= len(self.active_list):
+            return
+        self.set_page(new_idx)
+
+    def _sync_fullscreen_image(self):
+        """Push current image to the fullscreen window if open."""
+        if self._fullscreen_window and not sip.isdeleted(self._fullscreen_window):
+            pixmap = self.scroll_area._pixmap
+            if pixmap and not pixmap.isNull():
+                self._fullscreen_window.set_image(pixmap)
 
     def adjust_rotation(self, delta):
         """Adjust rotation via slider to keep controls in sync."""
