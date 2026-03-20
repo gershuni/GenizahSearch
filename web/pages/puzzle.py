@@ -460,6 +460,8 @@ window.puzzleCanvas = {
             container.appendChild(ind);
         } else if (localStorage.getItem('puzzleBannerDismissed') !== '1') {
             var div = document.createElement('div');
+            var isRtl = document.documentElement.dir === 'rtl' || document.body.dir === 'rtl';
+            div.dir = isRtl ? 'rtl' : 'ltr';
             div.style.cssText = 'display:flex; align-items:center; gap:8px; padding:8px 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:4px; font-size:13px; color:#664d03;';
             var span = document.createElement('span');
             span.style.flex = '1';
@@ -2182,6 +2184,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     ui.add_head_html(PUZZLE_STYLES)
     ui.add_body_html(PUZZLE_CANVAS_JS)
 
+    # Inject banner texts synchronously (before tryInit WebSocket call)
+    # so _updateExtensionBanner() always has the correct language
+    is_he = get_language() == 'he'
+    _banner_text = 'לחוויית פאזל מיטבית, ובמיוחד להסרת רקע, התקינו את תוסף GenizahSearch Image Helper.' if is_he else 'For the best puzzle experience, especially the crucial background removal, install the GenizahSearch Image Helper extension.'
+    _indicator_text = 'תוסף פעיל' if is_he else 'Extension active'
+    _install_text = 'התקינו את התוסף' if is_he else 'Install Extension'
+    ui.add_body_html(f'<script>if(window.puzzleCanvas){{window.puzzleCanvas._bannerTexts={json.dumps({"banner": _banner_text, "indicator": _indicator_text, "install": _install_text})};}}</script>')
+
     # Track fragment metadata (Python-side)
     # NOTE: app.storage.tab requires client connection, so start empty
     # and populate in init_canvas() after client connects
@@ -3352,14 +3362,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             threshold_slider.on('change', lambda: on_threshold_change())
 
-        # ── Extension banner + indicator ──
-        # Extension banner/indicator — injected via JS into main DOM (not shadow DOM)
-        is_he = get_language() == 'he'
-        banner_text = 'לחוויית פאזל מיטבית, ובמיוחד להסרת רקע, התקינו את תוסף GenizahSearch Image Helper.' if is_he else 'For the best puzzle experience, especially the crucial background removal, install the GenizahSearch Image Helper extension.'
-        indicator_text = 'תוסף פעיל' if is_he else 'Extension active'
-        install_text = 'התקינו את התוסף' if is_he else 'Install Extension'
-
         # ── Extension banner container (empty div, populated by JS) ──
+        # Banner texts injected synchronously via add_body_html near line 2190
         ext_banner_container = ui.element('div').props('id=extBannerContainer')
 
         # ── Canvas area ──
@@ -3578,7 +3582,6 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             (function tryInit(attempts) {
                 if (typeof fabric !== "undefined") {
                     console.log("Fabric.js loaded:", fabric.version);
-                    window.puzzleCanvas._bannerTexts = {banner: ''' + json.dumps(banner_text) + ''', indicator: ''' + json.dumps(indicator_text) + ''', install: ''' + json.dumps(install_text) + '''};
                     window.puzzleCanvas.init("puzzleCanvas");
                     if (window.puzzleCanvas.canvas) {
                         console.log("Canvas size:", window.puzzleCanvas.canvas.getWidth(), "x", window.puzzleCanvas.canvas.getHeight());
