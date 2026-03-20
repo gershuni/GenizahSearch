@@ -1724,9 +1724,12 @@ class FullscreenImageWindow(QMainWindow):
     )
 
     def __init__(self, pixmap, parent_viewer=None):
-        super().__init__(None)
+        # Parent to the viewer's top-level window so modal dialogs (ResultDialog.exec())
+        # don't block input to this fullscreen window
+        parent_window = parent_viewer.window() if parent_viewer else None
+        super().__init__(parent_window)
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._parent_viewer = parent_viewer
