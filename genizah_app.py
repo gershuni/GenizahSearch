@@ -1713,17 +1713,24 @@ class ZoomableScrollArea(QGraphicsView):
 
 class FullscreenImageWindow(QMainWindow):
     """Borderless fullscreen window for manuscript image viewing.
-    Supports zoom/pan, image adjustments, page navigation (left/right arrows), Escape to close."""
+    Supports zoom/pan, rotation, image adjustments, page navigation, Escape to close."""
 
     page_changed = pyqtSignal(int)  # emitted with delta (-1 or +1) when user navigates
 
+    _BTN_STYLE = (
+        "QPushButton { color: #ccc; background: #333; border: 1px solid #555; border-radius: 3px; padding: 2px; }"
+        "QPushButton:hover { background: #444; color: white; }"
+        "QPushButton:checked { background: #555; color: white; }"
+    )
+
     def __init__(self, pixmap, parent_viewer=None):
         super().__init__(None)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self._parent_viewer = parent_viewer  # ManuscriptViewerWidget to sync page nav
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._parent_viewer = parent_viewer
 
-        # Dark background
         self.setStyleSheet("background: #111;")
 
         central = QWidget()
@@ -1732,93 +1739,142 @@ class FullscreenImageWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Top overlay bar with controls
+        # === Top toolbar ===
         top_bar = QHBoxLayout()
-        top_bar.setContentsMargins(10, 8, 10, 8)
+        top_bar.setContentsMargins(10, 6, 10, 6)
 
-        # Page info label
+        # Prev page button
+        self._btn_prev = QPushButton("◀")
+        self._btn_prev.setFixedWidth(30)
+        self._btn_prev.setStyleSheet(self._BTN_STYLE)
+        self._btn_prev.setToolTip(tr("Previous image"))
+        self._btn_prev.clicked.connect(lambda: self.page_changed.emit(-1))
+        top_bar.addWidget(self._btn_prev)
+
+        # Page info
         self._lbl_page = QLabel("")
-        self._lbl_page.setStyleSheet("color: #aaa; font-size: 13px;")
+        self._lbl_page.setStyleSheet("color: #aaa; font-size: 13px; margin: 0 6px;")
         top_bar.addWidget(self._lbl_page)
+
+        # Next page button
+        self._btn_next = QPushButton("▶")
+        self._btn_next.setFixedWidth(30)
+        self._btn_next.setStyleSheet(self._BTN_STYLE)
+        self._btn_next.setToolTip(tr("Next image"))
+        self._btn_next.clicked.connect(lambda: self.page_changed.emit(1))
+        top_bar.addWidget(self._btn_next)
+
+        top_bar.addSpacing(15)
+
+        # Zoom controls
+        btn_zoom_out = QPushButton("-")
+        btn_zoom_out.setFixedWidth(28)
+        btn_zoom_out.setStyleSheet(self._BTN_STYLE)
+        btn_zoom_out.setToolTip(tr("Zoom Out"))
+        top_bar.addWidget(btn_zoom_out)
+        btn_zoom_in = QPushButton("+")
+        btn_zoom_in.setFixedWidth(28)
+        btn_zoom_in.setStyleSheet(self._BTN_STYLE)
+        btn_zoom_in.setToolTip(tr("Zoom In"))
+        top_bar.addWidget(btn_zoom_in)
+
+        top_bar.addSpacing(10)
+
+        # Rotation controls
+        btn_rot_left = QPushButton("↺")
+        btn_rot_left.setFixedWidth(28)
+        btn_rot_left.setStyleSheet(self._BTN_STYLE)
+        btn_rot_left.setToolTip(tr("Rotate Left 90\u00b0"))
+        top_bar.addWidget(btn_rot_left)
+
+        self._slider_rotation = QSlider(Qt.Orientation.Horizontal)
+        self._slider_rotation.setRange(0, 360)
+        self._slider_rotation.setValue(0)
+        self._slider_rotation.setFixedWidth(120)
+        self._slider_rotation.setToolTip(tr("Rotate image (0-360\u00b0)"))
+        top_bar.addWidget(self._slider_rotation)
+
+        btn_rot_right = QPushButton("↻")
+        btn_rot_right.setFixedWidth(28)
+        btn_rot_right.setStyleSheet(self._BTN_STYLE)
+        btn_rot_right.setToolTip(tr("Rotate Right 90\u00b0"))
+        top_bar.addWidget(btn_rot_right)
 
         top_bar.addStretch()
 
-        # Image adjustment controls (compact)
-        lbl_b = QLabel("\u2600")
-        lbl_b.setStyleSheet("color: #888; font-size: 14px;")
-        lbl_b.setToolTip(tr("Brightness"))
-        top_bar.addWidget(lbl_b)
-        self._sl_brightness = QSlider(Qt.Orientation.Horizontal)
-        self._sl_brightness.setRange(-100, 100)
-        self._sl_brightness.setValue(0)
-        self._sl_brightness.setFixedWidth(80)
-        top_bar.addWidget(self._sl_brightness)
+        # Image adjustments
+        for icon, tip, slider_cfg in [
+            ("\u2600", tr("Brightness"), {"range": (-100, 100), "val": 0, "w": 80}),
+            ("\u25d0", tr("Contrast"), {"range": (-100, 100), "val": 0, "w": 80}),
+            ("\u03b3", tr("Gamma"), {"range": (20, 300), "val": 100, "w": 80}),
+        ]:
+            lbl = QLabel(icon)
+            lbl.setStyleSheet("color: #888; font-size: 14px;")
+            lbl.setToolTip(tip)
+            top_bar.addWidget(lbl)
+            sl = QSlider(Qt.Orientation.Horizontal)
+            sl.setRange(*slider_cfg["range"])
+            sl.setValue(slider_cfg["val"])
+            sl.setFixedWidth(slider_cfg["w"])
+            top_bar.addWidget(sl)
 
-        lbl_c = QLabel("\u25d0")
-        lbl_c.setStyleSheet("color: #888; font-size: 14px;")
-        lbl_c.setToolTip(tr("Contrast"))
-        top_bar.addWidget(lbl_c)
-        self._sl_contrast = QSlider(Qt.Orientation.Horizontal)
-        self._sl_contrast.setRange(-100, 100)
-        self._sl_contrast.setValue(0)
-        self._sl_contrast.setFixedWidth(80)
-        top_bar.addWidget(self._sl_contrast)
+        # Extract slider references (added in order: brightness, contrast, gamma)
+        sliders = [w for w in [top_bar.itemAt(i).widget() for i in range(top_bar.count())]
+                    if isinstance(w, QSlider) and w is not self._slider_rotation]
+        self._sl_brightness = sliders[0]
+        self._sl_contrast = sliders[1]
+        self._sl_gamma = sliders[2]
 
-        lbl_g = QLabel("\u03b3")
-        lbl_g.setStyleSheet("color: #888; font-size: 14px; font-style: italic;")
-        lbl_g.setToolTip(tr("Gamma"))
-        top_bar.addWidget(lbl_g)
-        self._sl_gamma = QSlider(Qt.Orientation.Horizontal)
-        self._sl_gamma.setRange(20, 300)
-        self._sl_gamma.setValue(100)
-        self._sl_gamma.setFixedWidth(80)
-        top_bar.addWidget(self._sl_gamma)
-
-        btn_invert = QPushButton("\u25d1")
-        btn_invert.setCheckable(True)
-        btn_invert.setFixedWidth(30)
-        btn_invert.setToolTip(tr("Invert Colors"))
-        btn_invert.setStyleSheet("color: white; background: #333; border: 1px solid #555;")
-        self._btn_invert = btn_invert
-        top_bar.addWidget(btn_invert)
+        self._btn_invert = QPushButton("\u25d1")
+        self._btn_invert.setCheckable(True)
+        self._btn_invert.setFixedWidth(28)
+        self._btn_invert.setToolTip(tr("Invert Colors"))
+        self._btn_invert.setStyleSheet(self._BTN_STYLE)
+        top_bar.addWidget(self._btn_invert)
 
         btn_reset = QPushButton("\u21ba")
-        btn_reset.setFixedWidth(30)
-        btn_reset.setToolTip(tr("Reset Image"))
-        btn_reset.setStyleSheet("color: white; background: #333; border: 1px solid #555;")
+        btn_reset.setFixedWidth(28)
+        btn_reset.setToolTip(tr("Reset adjustments"))
+        btn_reset.setStyleSheet(self._BTN_STYLE)
         top_bar.addWidget(btn_reset)
 
-        top_bar.addSpacing(20)
+        top_bar.addSpacing(15)
 
-        # Close button
+        # Close button — subtle, matching toolbar theme
         btn_close = QPushButton("✕")
-        btn_close.setFixedSize(36, 36)
-        btn_close.setStyleSheet(
-            "QPushButton { color: white; background: #c0392b; border: none; border-radius: 18px; font-size: 18px; font-weight: bold; }"
-            "QPushButton:hover { background: #e74c3c; }"
-        )
+        btn_close.setFixedSize(28, 28)
+        btn_close.setStyleSheet(self._BTN_STYLE)
         btn_close.setToolTip(tr("Close fullscreen (Esc)"))
         btn_close.clicked.connect(self.close)
         top_bar.addWidget(btn_close)
 
         layout.addLayout(top_bar)
 
-        # Zoomable image area
+        # === Image area ===
         self._scroll_area = ZoomableScrollArea()
         layout.addWidget(self._scroll_area, 1)
 
-        # Set the image
         if pixmap and not pixmap.isNull():
             self._scroll_area.set_image(pixmap)
 
-        # Wire adjustment controls
+        # Wire zoom
+        btn_zoom_out.clicked.connect(lambda: self._scroll_area.zoom_out())
+        btn_zoom_in.clicked.connect(lambda: self._scroll_area.zoom_in())
+
+        # Wire rotation
+        self._slider_rotation.valueChanged.connect(
+            lambda val: self._scroll_area.set_rotation(val))
+        btn_rot_left.clicked.connect(lambda: self._adjust_rotation(-90))
+        btn_rot_right.clicked.connect(lambda: self._adjust_rotation(90))
+
+        # Wire adjustments
         self._sl_brightness.valueChanged.connect(
             lambda v: self._scroll_area.set_adjustments(brightness=v))
         self._sl_contrast.valueChanged.connect(
             lambda v: self._scroll_area.set_adjustments(contrast=v))
         self._sl_gamma.valueChanged.connect(
             lambda v: self._scroll_area.set_adjustments(gamma=v / 100.0))
-        btn_invert.toggled.connect(
+        self._btn_invert.toggled.connect(
             lambda c: self._scroll_area.set_adjustments(invert=c))
 
         def _reset():
@@ -1829,16 +1885,21 @@ class FullscreenImageWindow(QMainWindow):
             self._scroll_area.reset_adjustments()
         btn_reset.clicked.connect(_reset)
 
-        # Sync adjustments from parent viewer if available
+        # Sync state from parent viewer
         if parent_viewer and hasattr(parent_viewer, 'scroll_area'):
             sa = parent_viewer.scroll_area
             self._sl_brightness.setValue(int(sa._brightness))
             self._sl_contrast.setValue(int(sa._contrast))
             self._sl_gamma.setValue(int(sa._gamma * 100))
             self._btn_invert.setChecked(sa._invert)
+            if sa._rotation:
+                self._slider_rotation.setValue(int(sa._rotation))
 
-        # Update page label
         self._update_page_label()
+
+    def _adjust_rotation(self, delta):
+        new_val = (self._slider_rotation.value() + delta) % 360
+        self._slider_rotation.setValue(int(new_val))
 
     def _update_page_label(self):
         if self._parent_viewer:
@@ -1846,17 +1907,17 @@ class FullscreenImageWindow(QMainWindow):
             total = len(self._parent_viewer.active_list)
             if total > 0:
                 self._lbl_page.setText(f"{idx + 1} / {total}")
+                self._btn_prev.setEnabled(idx > 0)
+                self._btn_next.setEnabled(idx < total - 1)
 
     def set_image(self, pixmap):
         """Update the displayed image (called when page changes)."""
         if pixmap and not pixmap.isNull():
-            # Preserve current adjustment state
             b = self._sl_brightness.value()
             c = self._sl_contrast.value()
             g = self._sl_gamma.value()
             inv = self._btn_invert.isChecked()
             self._scroll_area.set_image(pixmap)
-            # Re-apply adjustments after set_image resets them
             if b or c or g != 100 or inv:
                 self._scroll_area.set_adjustments(
                     brightness=b, contrast=c, gamma=g / 100.0, invert=inv)
@@ -1872,6 +1933,12 @@ class FullscreenImageWindow(QMainWindow):
             self.page_changed.emit(-1)
         else:
             super().keyPressEvent(event)
+
+    def showFullScreen(self):
+        super().showFullScreen()
+        self.activateWindow()
+        self.raise_()
+        self.setFocus()
 
 
 class ManuscriptViewerWidget(QWidget):
