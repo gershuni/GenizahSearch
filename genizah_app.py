@@ -14062,11 +14062,12 @@ class GenizahGUI(QMainWindow):
         self.browse_fl_input.textEdited.connect(lambda _t: self._set_last_browse_field("fl"))
         
         # Find Parallels (Top Row)
-        self.btn_find_parallels = QPushButton(tr("Find parallels"))
+        self.btn_find_parallels = QPushButton(f"🔍 {tr('Parallels')}")
+        self.btn_find_parallels.setToolTip(tr("Search for parallels"))
         self.btn_find_parallels.clicked.connect(self.browse_search_parallels)
         self.btn_find_parallels.setEnabled(False)
 
-        self.btn_b_catalog = QPushButton(tr("View on Ktiv")); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
+        self.btn_b_catalog = QPushButton(f"🌐 {tr('View on Ktiv')}"); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog); self.btn_b_catalog.setEnabled(False)
         
         # View All and Save moved to Nav Bar, defined here as class members
@@ -14088,30 +14089,24 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.btn_browse_go)
 
         # Add to View button for reading desk (immediately after Go for discoverability)
-        self.btn_b_add_to_view = QPushButton(tr("Add to View"))
+        self.btn_b_add_to_view = QPushButton(f"👁️ {tr('Add to View')}")
         self.btn_b_add_to_view.setToolTip(tr("Add current manuscript to Reading Desk"))
         self.btn_b_add_to_view.setEnabled(False)
         self.btn_b_add_to_view.clicked.connect(self._browse_add_to_view)
         row1.addWidget(self.btn_b_add_to_view)
 
-        # Add to Puzzle button (Fragment Puzzle canvas)
+        # Add to Puzzle button (Fragment Puzzle canvas) - defined here, added to ext_info_row below
         self.btn_b_add_to_puzzle = QPushButton(f"\U0001f9e9 {tr('Puzzle')}")
         self.btn_b_add_to_puzzle.setToolTip(tr("Add current manuscript to Fragment Puzzle"))
         self.btn_b_add_to_puzzle.setEnabled(False)
         self.btn_b_add_to_puzzle.clicked.connect(self._browse_add_to_puzzle)
-        row1.addWidget(self.btn_b_add_to_puzzle)
 
-        row1.addWidget(self.btn_find_parallels)
-
-        # Add to List button for browse tab
+        # Add to List button for browse tab - defined here, added to ext_info_row below
         self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_browse_add_to_list.setToolTip(tr("Add to List"))
         self.btn_browse_add_to_list.clicked.connect(self.browse_add_to_list)
         self.btn_browse_add_to_list.setEnabled(False)
-        row1.addWidget(self.btn_browse_add_to_list)
 
-        row1.addSpacing(20)
-        row1.addWidget(self.btn_b_catalog)
         row1.addStretch()
 
         # Help
@@ -14131,39 +14126,56 @@ class GenizahGUI(QMainWindow):
 
         # Extended Info button + Bibliography buttons (shared row)
         ext_info_row = QHBoxLayout()
-        self.btn_b_ext_info = QPushButton(tr("Show Extended Info"))
+        self.btn_b_ext_info = QPushButton(f"ℹ️ {tr('Info')}")
+        self.btn_b_ext_info.setToolTip(tr("Show Extended Info"))
         self.btn_b_ext_info.setCheckable(True)
         self.btn_b_ext_info.toggled.connect(self._browse_toggle_extended_info)
         self.btn_b_ext_info.setVisible(False)
-        ext_info_row.addWidget(self.btn_b_ext_info)
 
-        # Translation toggle button (browse tab)
-        self.btn_b_translations = QPushButton()
+        # Translation toggle button (browse tab) - compact icon
+        self.btn_b_translations = QPushButton("🌐")
         self.btn_b_translations.setCheckable(True)
+        self.btn_b_translations.setToolTip(tr("Toggle translations"))
+        self.btn_b_translations.setFixedWidth(32)
         _trans_on_b = load_app_config().get('show_translations', False)
         self.btn_b_translations.setChecked(_trans_on_b)
-        self.btn_b_translations.setText(tr('Translations ON') if _trans_on_b else tr('Translations OFF'))
         self.btn_b_translations.setStyleSheet(
-            "QPushButton { background-color: #0369a1; color: white; border-radius: 4px; padding: 2px 8px; }"
+            "QPushButton { background-color: #94a3b8; color: white; border-radius: 4px; padding: 2px 6px; }"
             "QPushButton:checked { background-color: #059669; }"
         )
         self.btn_b_translations.toggled.connect(self._browse_toggle_translations)
-        ext_info_row.addWidget(self.btn_b_translations)
 
-        ext_info_row.addStretch()
+        # Bibliography and catalog buttons (defined here, added to ext_info_row below)
         self.btn_b_bibliography_fjms = QPushButton()
         self.btn_b_bibliography_fjms.setVisible(False)
         self.btn_b_bibliography_fjms.clicked.connect(self._show_fjms_bibliography_dialog)
-        ext_info_row.addWidget(self.btn_b_bibliography_fjms)
         self.btn_b_bibliography_nli = QPushButton()
         self.btn_b_bibliography_nli.setVisible(False)
         self.btn_b_bibliography_nli.clicked.connect(self._show_nli_bibliography_dialog)
-        ext_info_row.addWidget(self.btn_b_bibliography_nli)
         self.btn_b_catalog_records = QPushButton(f"{tr('Catalog Records')} (0)")
         self.btn_b_catalog_records.setEnabled(False)
         self.btn_b_catalog_records.setVisible(False)
         self.btn_b_catalog_records.clicked.connect(self._show_fjms_catalog_dialog)
+
+        # External link button (browse tab) - populated dynamically per manuscript
+        self.btn_b_external_link = QPushButton(tr("External Website"))
+        self.btn_b_external_link.setToolTip(tr("Open in external library website"))
+        self.btn_b_external_link.setVisible(False)
+        self.btn_b_external_link.clicked.connect(self._browse_open_external_link)
+        self._browse_external_url = None
+
+        # ext_info_row layout: Puzzle, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
+        ext_info_row.addWidget(self.btn_b_add_to_puzzle)
+        ext_info_row.addWidget(self.btn_find_parallels)
+        ext_info_row.addWidget(self.btn_browse_add_to_list)
+        ext_info_row.addWidget(self.btn_b_ext_info)
+        ext_info_row.addWidget(self.btn_b_bibliography_fjms)
+        ext_info_row.addWidget(self.btn_b_bibliography_nli)
         ext_info_row.addWidget(self.btn_b_catalog_records)
+        ext_info_row.addWidget(self.btn_b_catalog)
+        ext_info_row.addWidget(self.btn_b_external_link)
+        ext_info_row.addStretch()
+        ext_info_row.addWidget(self.btn_b_translations)
         top_layout.addLayout(ext_info_row)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
@@ -14302,7 +14314,7 @@ class GenizahGUI(QMainWindow):
         community_bar.addWidget(self.btn_b_comment)
 
         # View Corrections button
-        self.btn_b_view_corrections = QPushButton(tr("View Corrections"))
+        self.btn_b_view_corrections = QPushButton(f"📝 {tr('View Corrections')}")
         self.btn_b_view_corrections.setToolTip(tr("View community corrections for this document"))
         self.btn_b_view_corrections.clicked.connect(self._browse_view_corrections)
         self.btn_b_view_corrections.setEnabled(False)
@@ -15460,7 +15472,7 @@ class GenizahGUI(QMainWindow):
         """Toggle browse tab extended info panel visibility."""
         self.txt_b_extended_info.setVisible(checked)
         self.btn_b_ext_info.setText(
-            tr("Hide Extended Info") if checked else tr("Show Extended Info")
+            f"ℹ️ {tr('Hide Info')}" if checked else f"ℹ️ {tr('Info')}"
         )
 
     def _show_fjms_bibliography_dialog(self):
@@ -15586,12 +15598,12 @@ class GenizahGUI(QMainWindow):
         self._b_trans_syncing = True
         try:
             save_app_config({'show_translations': checked})
-            _label = tr('Translations ON') if checked else tr('Translations OFF')
-            self.btn_b_translations.setText(_label)
+            # btn_b_translations is icon-only (compact), no text update needed
             # Sync Settings checkbox
             if hasattr(self, 'chk_show_translations'):
                 self.chk_show_translations.setChecked(checked)
             # Sync search tab button
+            _label = tr('Translations ON') if checked else tr('Translations OFF')
             if hasattr(self, 'btn_search_translations'):
                 self.btn_search_translations.setChecked(checked)
                 self.btn_search_translations.setText(_label)
