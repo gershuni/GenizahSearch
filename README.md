@@ -19,6 +19,7 @@ The Browse by Shelfmark tab now matches the ResultDialog's polished button style
 * **Cross-shelfmark navigation:** Page Prev/Next now wrap across manuscript boundaries — last page → first page of next shelfmark
 * **External library links:** Cambridge, Oxford, Manchester, Princeton buttons appear dynamically per manuscript
 * **State preservation:** Extended info open/close and image hide/show remembered across navigation
+* **Fullscreen image viewer:** Press ⛶ on any manuscript image to enter fullscreen with zoom, rotation, adjustments, and arrow-key page navigation
 
 ### Previous Releases
 

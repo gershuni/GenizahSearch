@@ -14,6 +14,7 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **Cross-shelfmark page navigation**: Prev/Next page buttons no longer disable at manuscript boundaries — navigating past last page wraps to first page of next shelfmark, and vice versa (matching ResultDialog behavior)
 - **Extended info state preserved**: Extended info panel open/close state remembered when navigating between shelfmarks
 - **ResultDialog image toggle**: Hide/show image state preserved when navigating between search results
+- **Fullscreen image viewer**: New fullscreen mode for manuscript images (both Browse and ResultDialog) — zoom/pan, rotation, brightness/contrast/gamma/invert, page navigation with arrow keys or buttons, Escape to close
 
 ### Bug Fixes
 - **Enrichment race condition**: Fixed stale Oxford metadata appearing on RNL manuscripts — `browse_load()` did not clear `current_browse_part_id` when loading non-Part manuscripts, causing Oxford Part context to leak into subsequent enrichment callbacks
