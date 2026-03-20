@@ -11313,6 +11313,7 @@ class GenizahGUI(QMainWindow):
         self.current_browse_part_id = None
         self.current_browse_part_folios = []
         self.current_browse_part_folio_idx = 0
+        self._browse_enrich_gen = 0  # generation counter for stale enrichment rejection
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -14674,8 +14675,34 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("sys")
             self.browse_load()
 
-    def on_browse_enriched_loaded(self, sid, meta):
+    def _start_browse_enrichment(self, sid, is_part=False):
+        """Centralized enrichment launch — disconnects stale worker, bumps generation counter,
+        clears Part state when entering non-Part context, resets stale UI state."""
+        self._browse_enrich_gen += 1
+        # Clear Part state when loading a non-Part manuscript to prevent stale Oxford context
+        if not is_part:
+            self.current_browse_part_id = None
+            self.current_browse_part_folios = []
+            self.current_browse_part_folio_idx = 0
+        # Reset stale UI immediately (before async enrichment returns)
+        self.btn_b_external_link.setVisible(False)
+        self._browse_external_url = None
+        # Disconnect old worker
+        if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
+            try:
+                self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
+            except (TypeError, RuntimeError):
+                pass
+        gen = self._browse_enrich_gen
+        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
+        self.enrich_browse_worker.finished_signal.connect(
+            lambda s, m, g=gen: self.on_browse_enriched_loaded(s, m, g))
+        self.enrich_browse_worker.start()
+
+    def on_browse_enriched_loaded(self, sid, meta, gen=None):
         if not meta: return
+        # Generation guard: reject stale enrichment from a previous browse action
+        if gen is not None and gen != self._browse_enrich_gen: return
         if sid != self.current_browse_sid: return
         if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
@@ -27624,15 +27651,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_toggle_img.setEnabled(False)
 
         # Trigger Unified Enrichment (Meta + Images)
-        # Disconnect old worker to prevent stale signals and GC crash
-        if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
-            try:
-                self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
-            except (TypeError, RuntimeError):
-                pass
-        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
-        self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
-        self.enrich_browse_worker.start()
+        self._start_browse_enrichment(sid, is_part=False)
 
         # Try to render page text immediately if possible
         if self.browse_reading_desk_active:
@@ -27780,17 +27799,7 @@ class GenizahGUI(QMainWindow):
         self.btn_browse_add_to_list.setEnabled(True)
 
         # Trigger metadata enrichment for Oxford Part manuscript (Phase 33 gap closure)
-        # ALWAYS start thread unconditionally -- enrich_metadata handles cache internally
-        # and builds on top of basic CSV metadata with NLI crossref and FJMS data.
-        target_sid_for_enrich = self.current_browse_sid
-        if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
-            try:
-                self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
-            except (TypeError, RuntimeError):
-                pass
-        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, target_sid_for_enrich)
-        self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
-        self.enrich_browse_worker.start()
+        self._start_browse_enrichment(self.current_browse_sid, is_part=True)
 
     def browse_navigate(self, d):
         if not self.current_browse_sid: return
@@ -27830,15 +27839,7 @@ class GenizahGUI(QMainWindow):
             # Flag: page already rendered, skip browse_load_page in enriched callback
             self._browse_nav_rendered = True
             # Trigger metadata enrichment for new manuscript
-            # ALWAYS start thread unconditionally -- enrich_metadata handles cache internally
-            if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
-                try:
-                    self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
-                except (TypeError, RuntimeError):
-                    pass
-            self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, new_sid)
-            self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
-            self.enrich_browse_worker.start()
+            self._start_browse_enrichment(new_sid, is_part=bool(self.current_browse_part_id))
         else:
             self.browse_render_page(page_data)
             # Re-fetch PGP for same-manuscript page navigation (new manuscript handled by enriched_loaded)
@@ -29013,14 +29014,7 @@ class GenizahGUI(QMainWindow):
                     self.current_browse_sid = sid
                     self.current_browse_p = None
                     # Start enrichment (images, metadata)
-                    if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
-                        try:
-                            self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
-                        except (TypeError, RuntimeError):
-                            pass
-                    self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
-                    self.enrich_browse_worker.finished_signal.connect(self.on_browse_enriched_loaded)
-                    self.enrich_browse_worker.start()
+                    self._start_browse_enrichment(sid, is_part=False)
                     # Load page text
                     self.browse_load_page()
                 QTimer.singleShot(300, _restore_browse)
