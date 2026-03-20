@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.2.1
+# Genizah Search Pro 7.2.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,19 +8,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.2.1?
+## What's New in Version 7.2.2?
+
+### v7.2.2: Desktop Browse Tab Polish
+
+The Browse by Shelfmark tab now matches the ResultDialog's polished button style, with seamless cross-shelfmark navigation.
+
+* **Icon buttons:** All action buttons have emoji icons matching ResultDialog (Puzzle, Parallels, List, Info, External links)
+* **Reorganized layout:** Action buttons moved to a dedicated row with Bibliography, Catalog, and external library links
+* **Cross-shelfmark navigation:** Page Prev/Next now wrap across manuscript boundaries — last page → first page of next shelfmark
+* **External library links:** Cambridge, Oxford, Manchester, Princeton buttons appear dynamically per manuscript
+* **State preservation:** Extended info open/close and image hide/show remembered across navigation
+
+### Previous Releases
 
 ### v7.2.1: Search UX Overhaul & Progressive Images
 
-Search is now **faster to reach and easier to scan** — a hero search bar on the home page, full-width results with inline preview, and progressive image loading across all viewers.
-
-* **Hero search bar:** Prominent search input on the home page — type and go, no clicking through menus
-* **Inline accordion results:** Full-width result cards replace the old splitter layout. Click a result to expand an inline preview with manuscript image + highlighted full text
-* **Progressive image loading:** All web viewers show a spinner → fast thumbnail (400px) → full resolution (2000px). Manuscript images appear in ~1s instead of ~10s
-* **Action buttons on cards:** Browse, Quick View (מבט מהיר), Add to List, and Catalog Records buttons directly on each result
-* **Citation auto-collapse:** Full citation footer collapses to a compact line after 10 seconds
-
-### Previous Releases
+* **Hero search bar** on the home page, inline accordion results, progressive image loading across all viewers
 
 ### v7.2.0: Image Adjustment Controls
 

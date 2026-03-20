@@ -4,6 +4,25 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.2.2] - Desktop Browse Tab Polish - 2026-03-20
+
+### Improvements
+- **Browse button icons**: All browse tab buttons now have emoji icons matching ResultDialog style (Puzzle, Parallels, List, Info, View on Ktiv, View Corrections, Add to View)
+- **Reorganized action row**: Action buttons (Puzzle, Parallels, List) moved from crowded top bar to dedicated ext_info_row alongside Info, Bibliography, and Catalog buttons
+- **External library links**: New button shows Cambridge/Oxford/Manchester/Princeton link dynamically based on manuscript source, with globe icon
+- **Compact translations toggle**: Translations ON/OFF replaced with a colored icon button (green when ON, grey when OFF) with tooltip
+- **Cross-shelfmark page navigation**: Prev/Next page buttons no longer disable at manuscript boundaries — navigating past last page wraps to first page of next shelfmark, and vice versa (matching ResultDialog behavior)
+- **Extended info state preserved**: Extended info panel open/close state remembered when navigating between shelfmarks
+- **ResultDialog image toggle**: Hide/show image state preserved when navigating between search results
+
+### Bug Fixes
+- **Enrichment race condition**: Fixed stale Oxford metadata appearing on RNL manuscripts — `browse_load()` did not clear `current_browse_part_id` when loading non-Part manuscripts, causing Oxford Part context to leak into subsequent enrichment callbacks
+- **Centralized enrichment launch**: All 4 browse enrichment paths consolidated into `_start_browse_enrichment()` with generation counter to reject stale queued cross-thread signals
+- **Lambda disconnect fix**: Stored lambda slot reference for proper `disconnect()` instead of trying to disconnect bare method (no-op)
+- **Ext-info restore flag lifecycle**: Flag survives from enrichment to PGP callback for PGP-only manuscripts; cleared unconditionally at final async step to prevent forward leak
+
+---
+
 ## [7.2.1] - Search UX Overhaul - 2026-03-19
 
 ### New Features
