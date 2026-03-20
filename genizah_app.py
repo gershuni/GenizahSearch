@@ -7716,6 +7716,7 @@ class ResultDialog(QDialog):
 
         # 2. Populate External / Image Viewer
         has_images = bool(meta.get('images_nli') or meta.get('images_ext'))
+        _prev_img_visible = self.btn_toggle_image.isChecked()
 
         self.btn_toggle_image.setVisible(has_images)
 
@@ -7738,6 +7739,11 @@ class ResultDialog(QDialog):
                 side_offset=side_offset
             )
             self.ms_viewer.load_images(meta, initial_idx, target_folio=folio_num)
+
+            # Preserve user's image toggle preference across navigation
+            if not _prev_img_visible:
+                self.btn_toggle_image.setChecked(False)
+                self.external_pane.setVisible(False)
         else:
             self.external_pane.setVisible(False)
             self.btn_toggle_image.setChecked(False)
@@ -14790,6 +14796,26 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.setEnabled(True)
         self.btn_b_add_to_view.setEnabled(True)
         self.btn_b_add_to_puzzle.setEnabled(True)
+
+        # Populate external library link button
+        self._browse_external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
+        if self._browse_external_url:
+            provider = meta.get('external_provider', '')
+            part_id_for_link = self.current_browse_part_id or self.meta_mgr.get_part_for_folio(sid)
+            if part_id_for_link or provider == 'oxford':
+                btn_label = tr("Oxford")
+            elif provider == 'cambridge' or "cudl.lib.cam.ac.uk" in (self._browse_external_url or "").lower():
+                btn_label = tr("Cambridge")
+            elif provider == 'manchester':
+                btn_label = "Manchester LUNA"
+            elif provider == 'jts':
+                btn_label = "Princeton Digital Library"
+            else:
+                btn_label = tr("External Website")
+            self.btn_b_external_link.setText(btn_label)
+            self.btn_b_external_link.setVisible(True)
+        else:
+            self.btn_b_external_link.setVisible(False)
 
         # Check for comments and corrections FIRST (resets PGP state and version combo)
         self._check_document_community_status()
@@ -27973,8 +27999,10 @@ class GenizahGUI(QMainWindow):
         else:
             self.lbl_browse_page_count.setVisible(False)
 
-        self.btn_b_prev.setEnabled(pd['current_idx'] > 1)
-        self.btn_b_next.setEnabled(pd['current_idx'] < pd['total_pages'])
+        # Keep prev/next always enabled for cross-shelfmark navigation
+        # browse_navigate already uses allow_cross=True
+        self.btn_b_prev.setEnabled(True)
+        self.btn_b_next.setEnabled(True)
         self._update_browse_add_to_list_button()
 
         parsed = self.meta_mgr.parse_full_id_components(full_header)
@@ -28022,6 +28050,13 @@ class GenizahGUI(QMainWindow):
     def browse_open_catalog(self):
         if self.current_browse_sid:
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
+
+    def _browse_open_external_link(self):
+        if hasattr(self, '_browse_external_url') and self._browse_external_url:
+            url = self._browse_external_url
+            if "cudl.lib.cam.ac.uk/iiif/" in url:
+                url = url.replace("/iiif/", "/view/")
+            QDesktopServices.openUrl(QUrl(url))
 
     def _on_browse_thumb_resolved(self, sid, _unused_url):
         if sid != self.current_browse_sid:
