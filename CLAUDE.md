@@ -140,7 +140,7 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
 POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
-WEB_PUZZLE_ENABLED=true (enables web puzzle page - requires browser extension for bg removal)
+WEB_PUZZLE_ENABLED=true (default: true; set to false to disable web puzzle page)
 PUZZLE_UPLOAD_SECRET=xxx (optional - HMAC secret for puzzle upload tokens; auto-generated if unset)
 ```
 

@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-20 (production log review: auth refresh-loop, NLI timeout retry storm, and production search debug logging identified)
+> **Last Updated:** 2026-03-20 (Chrome extension live, puzzle enabled by default, banner i18n/RTL fix)
 > **Status:** Active working document
 
 ---
@@ -47,15 +47,15 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 5 | 5 |
-| P2 Medium Bugs | 10 | 20 | 30 |
-| P3 Low Priority | 1 | 3 | 4 |
+| P2 Medium Bugs | 10 | 21 | 31 |
+| P3 Low Priority | 1 | 4 | 5 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 0 | 6 | 6 |
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **18** | **56** | **74** |
+| **Total** | **18** | **58** | **76** |
 
 ---
 
@@ -76,6 +76,7 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
+| **Browse enrichment worker cleanup no longer disconnects stale callbacks after generation-guard refactor** | `genizah_app.py:14691-14699` | ✅ Fixed (2026-03-20) | Follow-up review confirmed `_start_browse_enrichment()` now stores the lambda in `_browse_enrich_slot` and disconnects that exact callable before replacing the worker, so the generation-guard refactor once again removes old browse enrichment connections correctly. |
 | **Web auth can get stuck retrying an already-used refresh token** | `web/supabase_client.py`, `web/auth_state.py` | ❌ Open | `get_user_client()` logs and falls back to the anonymous client when Supabase returns `Invalid Refresh Token: Already Used`, but it leaves `auth_session` and cached auth UI state in NiceGUI storage. Subsequent requests keep retrying the same dead token and spam logs while the UI may still look signed in. Fix path: treat this as terminal auth failure, clear stored auth state, and prompt re-login. |
 | **NLI manifest failures are retried immediately and can hammer iiif.nli.org.il during thumbnail bursts** | `web/api.py` | ❌ Open | `fetch_fl_ids_from_nli()` does blocking 15s manifest fetches with success-only caching. When NLI is slow or rate-limits, the same `sys_id`s are retried on every request with no failure TTL/backoff and no concurrency cap, producing synchronized timeout bursts in production logs. Fix path: add a short negative cache/cooldown and optionally a small concurrency limit plus connection reuse. |
 | **Search logs expose raw queries and regex internals at INFO in production** | `genizah_core.py` | ❌ Open | `search_text_tantivy()` and the line-break search path emit `[DEBUG]` messages via `LOGGER.info`, including raw user query text, generated Tantivy query strings, regex patterns, and hit counts. This bloats production logs and captures user searches unnecessarily. Fix path: gate these logs behind a debug flag or DEBUG level and default them off in production. |
@@ -115,6 +116,7 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Auto-save not working** | `text_editor.py:374` | ג… Fixed (2026-02-03) | Auto-save implemented at lines 443-454 using NiceGUI timer |
+| **Browse extended-info open state is not restored when content arrives only from the later PGP worker** | `genizah_app.py:14923-14930,14966-14975` | ✅ Fixed (2026-03-20) | Follow-up review confirmed the restore flag now has a complete lifecycle: it is set when browse enrichment resets the panel, consumed by either enrichment HTML or `_on_browse_pgp_loaded()` when that is the first content making the panel visible, and then cleared unconditionally at the end of `_on_browse_pgp_loaded()` so it cannot leak into a later manuscript. |
 | **Race conditions in UI timers** | `parallels.py`, `search.py` | ג… Fixed (2026-02-04) | Added timer tracking and deactivation to prevent duplicates |
 | **Cache thread-safety** | `joins_panel.py:17-19` | ג… Fixed (2026-02-04) | Added threading.Lock for cache access |
 | **Filter panel overlap with progress bar** | `web/pages/search.py`, `parallels.py` | ג… Fixed (2026-03-03) | Chip bar, progress bar, results overlapped when filter panel open. Auto-collapse panel on search start + scroll to progress + spacing/z-index fix |
@@ -237,6 +239,9 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-20 | Re-reviewed the final browse-tab follow-up. Confirmed the remaining P3 is fixed: `_browse_ext_info_restore` is now consumed by whichever path first makes the panel visible (enrichment or PGP) and cleared unconditionally at the end of `_on_browse_pgp_loaded()`. | Codex |
+| 2026-03-20 | Re-reviewed the browse-tab follow-up fixes. Confirmed the lambda disconnect issue is fixed by storing/disconnecting `_browse_enrich_slot`. Narrowed the remaining P3: the restore flag no longer leaks forward, but manuscripts with no enrichment HTML still do not reopen the panel when content appears later only via `_on_browse_pgp_loaded()`. | Codex |
+| 2026-03-20 | Reviewed the 4 recent Browse by Shelfmark desktop commits. Added 2 new issues: (1) `_start_browse_enrichment()` now connects `finished_signal` through a lambda but still tries to disconnect `self.on_browse_enriched_loaded`, so stale worker callbacks are not actually disconnected; (2) the new `_browse_ext_info_restore` flag is only consumed when enrichment HTML is non-empty, so it can leak and reopen the wrong manuscript's info panel on a later navigation. | Codex |
 | 2026-03-20 | Reviewed production server logs and added 3 open issues: (1) `get_user_client()` leaves stale auth state after `Invalid Refresh Token: Already Used`, causing repeated retries and log spam; (2) `fetch_fl_ids_from_nli()` retries slow NLI IIIF manifest fetches immediately with no negative cache/backoff, causing timeout bursts; (3) search code still logs raw queries and regex internals at INFO with `[DEBUG]` labels in production. | Codex |
 | 2026-03-18 | Fixed Manchester LUNA recto/verso bug: each page has its own luna_id but code only fetched the first. Added `get_manchester_canvases()` to `NliCrossrefService` which resolves ALL crossref images to individual IIIF canvas entries. Confirmed with Ms. B 2091 (sys_id 990002081410205171): recto and verso now show distinct images. 6 new tests. | Claude |
 | 2026-03-18 | Investigated the handoff claim that NLI Vienna/Rainer images became "tiny" in the desktop puzzle after the Mosseri CUDL session. Static trace confirmed the Mosseri/Cambridge changes do not affect non-Cambridge records, and `tests/test_mosseri_cudl.py` still passes (17/17). Added a new open P2 issue for the more likely root cause: desktop puzzle `_fit_all_fragments()` always calls `fitInView()` after each new fragment, so perfectly normal 800px images can appear thumbnail-sized due to view zoom rather than bad source data. | Codex |
