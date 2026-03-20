@@ -14686,15 +14686,18 @@ class GenizahGUI(QMainWindow):
                 del _field_translation_cache[k]
         self._trans_toggle_state = {}
 
-        # Reset extended info panel for new manuscript
+        # Reset extended info panel for new manuscript — preserve user's open/close preference
+        _ext_info_was_open = self.btn_b_ext_info.isChecked()
         self.btn_b_ext_info.setVisible(False)
         self.btn_b_ext_info.setChecked(False)
         self.txt_b_extended_info.setVisible(False)
         self.txt_b_extended_info.setHtml("")
+        self._browse_ext_info_restore = _ext_info_was_open  # restore after enrichment populates
         self.btn_b_bibliography_fjms.setVisible(False)
         self.btn_b_bibliography_nli.setVisible(False)
         self.btn_b_catalog_records.setVisible(False)
         self.btn_b_catalog_records.setEnabled(False)
+        self.btn_b_external_link.setVisible(False)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
         self._browse_catalog_detail = None
@@ -14802,16 +14805,17 @@ class GenizahGUI(QMainWindow):
         if self._browse_external_url:
             provider = meta.get('external_provider', '')
             part_id_for_link = self.current_browse_part_id or self.meta_mgr.get_part_for_folio(sid)
-            if part_id_for_link or provider == 'oxford':
-                btn_label = tr("Oxford")
+            oxford_part_id_meta = meta.get('oxford_part_id')
+            if oxford_part_id_meta or part_id_for_link or provider == 'oxford':
+                btn_label = f"🌐 {tr('Oxford')}"
             elif provider == 'cambridge' or "cudl.lib.cam.ac.uk" in (self._browse_external_url or "").lower():
-                btn_label = tr("Cambridge")
+                btn_label = f"🌐 {tr('Cambridge')}"
             elif provider == 'manchester':
-                btn_label = "Manchester LUNA"
+                btn_label = "🌐 Manchester LUNA"
             elif provider == 'jts':
-                btn_label = "Princeton Digital Library"
+                btn_label = "🌐 Princeton Digital Library"
             else:
-                btn_label = tr("External Website")
+                btn_label = f"🌐 {tr('External Website')}"
             self.btn_b_external_link.setText(btn_label)
             self.btn_b_external_link.setVisible(True)
         else:
@@ -14890,6 +14894,10 @@ class GenizahGUI(QMainWindow):
             full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{enriched_html}</div>"
             self.txt_b_extended_info.setHtml(full_html)
             self.btn_b_ext_info.setVisible(True)
+            # Restore extended info open state from previous manuscript
+            if getattr(self, '_browse_ext_info_restore', False):
+                self.btn_b_ext_info.setChecked(True)
+                self._browse_ext_info_restore = False
 
         # Update joins dropdown menu (PGP joins will be added when PGP worker completes)
         self._update_joins_dropdown()
