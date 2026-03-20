@@ -14925,9 +14925,9 @@ class GenizahGUI(QMainWindow):
             # Restore extended info open state from previous manuscript
             if getattr(self, '_browse_ext_info_restore', False):
                 self.btn_b_ext_info.setChecked(True)
-        # Always clear restore flag — prevents leaking into a later manuscript
-        # if this one had no enrichment HTML
-        self._browse_ext_info_restore = False
+                self._browse_ext_info_restore = False
+        # Note: do NOT clear _browse_ext_info_restore here if enrichment was empty —
+        # PGP callback may still make the panel visible and needs the flag.
 
         # Update joins dropdown menu (PGP joins will be added when PGP worker completes)
         self._update_joins_dropdown()
@@ -14972,11 +14972,20 @@ class GenizahGUI(QMainWindow):
             base_color = palette.color(QPalette.ColorRole.Base).name()
             full_html = f"<div style='font-family:Arial; color:{text_color}; background-color:{base_color};'>{combined}</div>"
             self.txt_b_extended_info.setHtml(full_html)
+            was_hidden = not self.btn_b_ext_info.isVisible()
             self.btn_b_ext_info.setVisible(True)
+            # If PGP is the first content making extended info available,
+            # restore the user's open preference from the previous manuscript
+            if was_hidden and getattr(self, '_browse_ext_info_restore', False):
+                self.btn_b_ext_info.setChecked(True)
+                self._browse_ext_info_restore = False
         else:
             self.btn_b_ext_info.setVisible(False)
             self.btn_b_ext_info.setChecked(False)
             self.txt_b_extended_info.setVisible(False)
+        # PGP is the last async step — clear restore flag unconditionally
+        # to prevent leaking into a later manuscript
+        self._browse_ext_info_restore = False
 
         # Refresh joins dropdown now that PGP data is available
         self._update_joins_dropdown()
