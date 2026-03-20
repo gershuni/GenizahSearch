@@ -4,6 +4,17 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.2.3] - Chrome Extension Live + Puzzle Enabled - 2026-03-20
+
+### New Features
+- **Chrome Web Store install link**: Puzzle extension install banner now includes a clickable "Install Extension" / "התקינו את התוסף" button linking to the live Chrome Web Store listing
+- **Puzzle enabled by default**: `WEB_PUZZLE_ENABLED` now defaults to `True` — the Fragment Puzzle page is available on all deployments without setting an environment variable
+
+### Improvements
+- **Banner text escaping**: Switched from manual `.replace()` to `json.dumps()` for safer JS string injection in puzzle banner texts
+
+---
+
 ## [7.2.2] - Desktop Browse Tab Polish - 2026-03-20
 
 ### Improvements
