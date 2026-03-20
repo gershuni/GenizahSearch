@@ -14687,16 +14687,17 @@ class GenizahGUI(QMainWindow):
         # Reset stale UI immediately (before async enrichment returns)
         self.btn_b_external_link.setVisible(False)
         self._browse_external_url = None
-        # Disconnect old worker
+        # Disconnect old worker's slot (stored reference, not bare method)
         if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
-            try:
-                self.enrich_browse_worker.finished_signal.disconnect(self.on_browse_enriched_loaded)
-            except (TypeError, RuntimeError):
-                pass
+            if hasattr(self, '_browse_enrich_slot') and self._browse_enrich_slot is not None:
+                try:
+                    self.enrich_browse_worker.finished_signal.disconnect(self._browse_enrich_slot)
+                except (TypeError, RuntimeError):
+                    pass
         gen = self._browse_enrich_gen
+        self._browse_enrich_slot = lambda s, m, g=gen: self.on_browse_enriched_loaded(s, m, g)
         self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
-        self.enrich_browse_worker.finished_signal.connect(
-            lambda s, m, g=gen: self.on_browse_enriched_loaded(s, m, g))
+        self.enrich_browse_worker.finished_signal.connect(self._browse_enrich_slot)
         self.enrich_browse_worker.start()
 
     def on_browse_enriched_loaded(self, sid, meta, gen=None):
@@ -14924,7 +14925,9 @@ class GenizahGUI(QMainWindow):
             # Restore extended info open state from previous manuscript
             if getattr(self, '_browse_ext_info_restore', False):
                 self.btn_b_ext_info.setChecked(True)
-                self._browse_ext_info_restore = False
+        # Always clear restore flag — prevents leaking into a later manuscript
+        # if this one had no enrichment HTML
+        self._browse_ext_info_restore = False
 
         # Update joins dropdown menu (PGP joins will be added when PGP worker completes)
         self._update_joins_dropdown()
