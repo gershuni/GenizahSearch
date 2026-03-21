@@ -467,11 +467,15 @@ window.puzzleCanvas = {
             span.style.flex = '1';
             var bannerMsg = this._bannerTexts ? this._bannerTexts.banner : 'For the best puzzle experience, install the GenizahSearch Image Helper extension.';
             span.textContent = bannerMsg;
+            var isFirefox = typeof InstallTrigger !== 'undefined' || navigator.userAgent.indexOf('Firefox') !== -1;
             var link = document.createElement('a');
-            link.href = 'https://chromewebstore.google.com/detail/ngohnlbbdifmccjdnjhcpmilpdpjmkmc';
+            link.href = isFirefox
+                ? 'https://addons.mozilla.org/addon/genizahsearch-image-helper/'
+                : 'https://chromewebstore.google.com/detail/ngohnlbbdifmccjdnjhcpmilpdpjmkmc';
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
-            link.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:4px 12px; background:#1a73e8; color:#fff; border-radius:4px; text-decoration:none; font-size:12px; font-weight:500; white-space:nowrap;';
+            var linkBg = isFirefox ? '#ff9400' : '#1a73e8';
+            link.style.cssText = 'display:inline-flex; align-items:center; gap:4px; padding:4px 12px; background:' + linkBg + '; color:#fff; border-radius:4px; text-decoration:none; font-size:12px; font-weight:500; white-space:nowrap;';
             link.textContent = this._bannerTexts ? this._bannerTexts.install : 'Install Extension';
             div.appendChild(span);
             div.appendChild(link);
@@ -3631,15 +3635,26 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             doc_state['load_pending'] = 0
 
         if saved_meta and isinstance(saved_meta, dict):
+            restorable_count = 0
             for key, meta in saved_meta.items():
                 fl_id = meta.get('fl_id', '')
                 threshold = meta.get('threshold', 30)
                 processed = meta.get('processed', True)
-                if not fl_id:
+                ext_provider = meta.get('external_provider', '')
+                meta_is_cul = meta.get('is_cul', False)
+
+                if fl_id:
+                    # NLI path
+                    url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}&is_cul={str(bool(meta_is_cul)).lower()}"
+                elif ext_provider and meta.get('sys_id'):
+                    # External library path (Oxford, Manchester, JTS, Cambridge CUDL)
+                    page_idx = meta.get('page_index', 0) or 0
+                    url = f"/api/puzzle_ext_image?sys_id={meta['sys_id']}&page={page_idx}&provider={ext_provider}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}"
+                else:
+                    logger.warning(f"Session restore: skipping fragment {key} — no fl_id or external_provider")
                     continue
 
-                meta_is_cul = meta.get('is_cul', False)
-                url = f"/api/puzzle_image?fl_id={fl_id}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}&is_cul={str(bool(meta_is_cul)).lower()}"
+                restorable_count += 1
 
                 # Default positions if no saved state
                 x, y = 100, 100
@@ -3675,7 +3690,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 js_meta = json.dumps({
                     'fl_id': fl_id, 'threshold': threshold,
                     'size': 800, 'processed': processed,
-                    'sys_id': sys_id
+                    'sys_id': sys_id,
+                    'is_cul': meta_is_cul,
+                    'external_provider': ext_provider,
+                    'page_index': meta.get('page_index', 0),
+                    'image_url': meta.get('image_url', ''),
                 })
                 ui.run_javascript(
                     f'window.puzzleCanvas.addFragment("{key}", "{url}", '
@@ -3683,6 +3702,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     f'{"true" if flipH else "false"}, {"true" if flipV else "false"}, {js_meta}, false, '
                     f'{"true" if center_origin else "false"})'
                 )
+            # Fix load_pending to match actually restored count (not saved_meta count)
+            if restorable_count != len(saved_meta):
+                doc_state['load_pending'] = restorable_count
+                if restorable_count == 0:
+                    doc_state['loading'] = False
 
         # Saved documents list is refreshed on-demand when dialog opens
 
@@ -3690,8 +3714,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         await asyncio.sleep(delay)
         try:
             await coro_func(*args)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Puzzle _after_delay error in {coro_func.__name__}: {e}")
 
     asyncio.ensure_future(_after_delay(0.5, init_canvas))
 
