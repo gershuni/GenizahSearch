@@ -2133,7 +2133,7 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
         url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={ext_threshold}&size=800&processed={'true' if ext_processed else 'false'}"
         meta = {
             'fl_id': '', 'image_url': image_url, 'threshold': ext_threshold, 'size': 800,
-            'processed': True, 'sys_id': sys_id, 'is_cul': ext_is_cul,
+            'processed': ext_processed, 'sys_id': sys_id, 'is_cul': ext_is_cul,
             'external_provider': external_provider, 'page_index': page_index
         }
     else:
@@ -2490,9 +2490,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 # External library path — use puzzle_ext_image endpoint
                 page_idx = frag_page_idx if frag_page_idx >= 0 else 0
                 url = f"/api/puzzle_ext_image?sys_id={frag.sys_id}&page={page_idx}&provider={ext_provider}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}"
+                ext_is_cul = ext_provider == 'cambridge'
+                ext_processed = ext_provider != 'oxford'
                 js_meta = json.dumps({
-                    'fl_id': '', 'threshold': 30.0, 'size': 800,
-                    'processed': True, 'sys_id': frag.sys_id, 'is_cul': False,
+                    'fl_id': '', 'threshold': threshold, 'size': 800,
+                    'processed': ext_processed, 'sys_id': frag.sys_id, 'is_cul': ext_is_cul,
                     'external_provider': ext_provider, 'page_index': page_idx,
                     'image_url': frag_image_url
                 })
@@ -3707,6 +3709,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 doc_state['load_pending'] = restorable_count
                 if restorable_count == 0:
                     doc_state['loading'] = False
+                # Remove skipped entries from puzzle_meta so save/export stays in sync
+                restored_keys = {k for k, m in saved_meta.items()
+                                 if m.get('fl_id') or (m.get('external_provider') and m.get('sys_id'))}
+                for ghost_key in list(puzzle_meta):
+                    if ghost_key not in restored_keys:
+                        del puzzle_meta[ghost_key]
+                app.storage.tab['puzzle_fragments'] = puzzle_meta
 
         # Saved documents list is refreshed on-demand when dialog opens
 
@@ -3715,7 +3724,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         try:
             await coro_func(*args)
         except Exception as e:
-            logger.error(f"Puzzle _after_delay error in {coro_func.__name__}: {e}")
+            logger.exception(f"Puzzle _after_delay error in {coro_func.__name__}")
 
     asyncio.ensure_future(_after_delay(0.5, init_canvas))
 
