@@ -15,6 +15,12 @@ from web.state import state
 from web.translations import tr, is_rtl, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.components.typography import h1, h2, h3, h4
+from web.components.filter_panel import (
+    build_domain_options, build_author_options, build_work_options,
+    build_filter_summary, has_active_filters, persist_value,
+    load_filter_state, consume_incoming_filters, recompute_filter_count,
+    create_filter_handlers,
+)
 from web.services import (
     get_service,
     BrowsePage,
@@ -126,61 +132,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.domain_exclusions = set()
         app.storage.user['domain_exclusions'] = []
 
-    def _persist(key, value):
-        """Save to storage if session persistence is enabled."""
-        if app.storage.user.get('session_persistence_enabled', True):
-            app.storage.user[key] = value
-
     # --- Incoming filters from catalog browse (Path B: browse -> search) ---
     _filters_from_browse = False
     if from_browse:
-        incoming = app.storage.user.get('incoming_filters', {})
-        if incoming:
-            if incoming.get('domain'):
-                search_state.filter_domains = [incoming['domain']]
-                _persist('search_filter_domains', [incoming['domain']])
-            if incoming.get('author'):
-                search_state.filter_authors = [str(incoming['author'])]
-                _persist('search_filter_authors', [str(incoming['author'])])
-            if incoming.get('work'):
-                search_state.filter_works = [str(incoming['work'])]
-                _persist('search_filter_works', [str(incoming['work'])])
-            if incoming.get('date_from') is not None:
-                search_state.filter_date_from = int(incoming['date_from'])
-                _persist('search_filter_date_from', int(incoming['date_from']))
-            if incoming.get('date_to') is not None:
-                search_state.filter_date_to = int(incoming['date_to'])
-                _persist('search_filter_date_to', int(incoming['date_to']))
-            if incoming.get('material_exclude'):
-                search_state.filter_material_exclude = incoming['material_exclude']
-                _persist('search_filter_material_exclude', incoming['material_exclude'])
-            # Clear incoming_filters from storage after consuming
-            app.storage.user.pop('incoming_filters', None)
-            _filters_from_browse = True
+        _filters_from_browse = consume_incoming_filters(search_state, 'search', require_from_browse=False)
 
     # Restore filter state from session (only if NOT from browse, browse takes priority)
     if not _filters_from_browse:
-        # Migrate from legacy single-value keys to multi-select lists
-        _legacy_domain = app.storage.user.get('search_filter_domain', None)
-        _legacy_author = app.storage.user.get('search_filter_author', None)
-        _legacy_work = app.storage.user.get('search_filter_work', None)
-        _fd = app.storage.user.get('search_filter_domains')
-        search_state.filter_domains = _fd if _fd is not None else ([_legacy_domain] if _legacy_domain else [])
-        _fa = app.storage.user.get('search_filter_authors')
-        search_state.filter_authors = _fa if _fa is not None else ([_legacy_author] if _legacy_author else [])
-        _fw = app.storage.user.get('search_filter_works')
-        search_state.filter_works = _fw if _fw is not None else ([_legacy_work] if _legacy_work else [])
-        search_state.filter_include_mode = app.storage.user.get('search_filter_include_mode', True)
-        search_state.filter_date_from = app.storage.user.get('search_filter_date_from', None)
-        search_state.filter_date_to = app.storage.user.get('search_filter_date_to', None)
-        _fme = app.storage.user.get('search_filter_material_exclude')
-        search_state.filter_material_exclude = _fme if _fme is not None else []
-        _fta = app.storage.user.get('search_filter_text_all')
-        search_state.filter_text_all = _fta if _fta is not None else []
-        _ftany = app.storage.user.get('search_filter_text_any')
-        search_state.filter_text_any = _ftany if _ftany is not None else []
-        _ftn = app.storage.user.get('search_filter_text_not')
-        search_state.filter_text_not = _ftn if _ftn is not None else []
+        load_filter_state(search_state, 'search')
 
     # Restore word search excluded ids from session
     _wse = app.storage.user.get('word_search_excluded_ids')
@@ -188,17 +147,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
-        return any([
-            search_state.filter_domains,
-            search_state.filter_authors,
-            search_state.filter_works,
-            search_state.filter_date_from is not None,
-            search_state.filter_date_to is not None,
-            search_state.filter_material_exclude,
-            search_state.filter_text_all,
-            search_state.filter_text_any,
-            search_state.filter_text_not,
-        ])
+        return has_active_filters(search_state)
 
     # --- Search History Management ---
     def _get_search_history() -> list:
@@ -921,90 +870,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         _filter_refs = {}
 
+        # Domain/author/work option builders use shared filter_panel module
         def _build_domain_options():
-            """Build domain select options from FJMS hierarchy."""
-            from shared.fjms_service import get_fjms_service, qualify_domain_name
-            fjms = get_fjms_service(thread_safe=True)
-            if not fjms.is_available():
-                return {}
-            hierarchy = fjms.get_domain_hierarchy()
-            is_heb = get_language() == 'he'
-            options = {}
-            for parent_name, info in hierarchy.items():
-                parent_heb = info.get('parent_domain_heb', '')
-                parent_count = info.get('count', 0)
-                display = parent_heb if is_heb and parent_heb else parent_name
-                display += f" ({parent_count:,})"
-                options[parent_name] = display
-                for child in info.get('children', []):
-                    child_name = child.get('domain', '')
-                    child_heb = child.get('domain_heb', '')
-                    child_count = child.get('count', 0)
-                    qname = qualify_domain_name(child_name, parent_name)
-                    if is_heb and child_heb:
-                        c_label = f"{child_heb} ({parent_heb})" if qname != child_name else child_heb
-                    else:
-                        c_label = qname
-                    c_display = f"  \u2514 {c_label} ({child_count:,})"
-                    options[qname] = c_display
-                    # Third level: sub-sub-domains
-                    for sc in child.get('children', []):
-                        sc_name = sc.get('domain', '')
-                        sc_heb = sc.get('domain_heb', '')
-                        sc_count = sc.get('count', 0)
-                        sc_qname = qualify_domain_name(sc_name, child_name)
-                        if is_heb and sc_heb:
-                            sc_label = f"{sc_heb} ({child_heb})" if sc_qname != sc_name else sc_heb
-                        else:
-                            sc_label = sc_qname
-                        sc_display = f"    \u2514 {sc_label} ({sc_count:,})"
-                        options[sc_qname] = sc_display
-            return options
+            return build_domain_options(get_language())
 
         def _build_author_options(domain=None):
-            """Build author select options from FJMS."""
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            if not fjms.is_available():
-                return {}
-            _first_domain = domain[0] if isinstance(domain, list) and domain else (domain or None)
-            authors = fjms.get_browse_authors(domain=_first_domain)
-            options = {}
-            for a in authors:
-                pid = a.get('person_id') or a.get('author_id')
-                name = a.get('heb_desc') or a.get('eng_desc') or a.get('author_name', '')
-                eng = a.get('eng_desc', '')
-                count = a.get('count', 0)
-                key = str(pid) if pid else name
-                display = name
-                if eng and eng != name:
-                    display = f"{name} / {eng}"
-                display += f" ({count:,})"
-                options[key] = display
-            return options
+            return build_author_options(get_language(), domain)
 
         def _build_work_options(domain=None, author=None):
-            """Build work select options from FJMS."""
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            if not fjms.is_available():
-                return {}
-            _first_domain = domain[0] if isinstance(domain, list) and domain else (domain or None)
-            _first_author = author[0] if isinstance(author, list) and author else (author or None)
-            works = fjms.get_browse_works(domain=_first_domain, author=_first_author)
-            options = {}
-            for w in works:
-                tid = w.get('title_id')
-                org = w.get('org_title', '')
-                eng = w.get('eng_title', '')
-                count = w.get('count', 0)
-                key = str(tid) if tid else org
-                display = org or eng
-                if eng and eng != org:
-                    display = f"{org} / {eng}"
-                display += f" ({count:,})"
-                options[key] = display
-            return options
+            return build_work_options(get_language(), domain, author)
 
         with adv_filters_panel:
             with ui.column().classes('w-full px-4 py-3 gap-4'):
@@ -1165,9 +1039,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if term not in search_state.filter_text_not:
                             search_state.filter_text_not.append(term)
                     text_filter_input.value = ''
-                    _persist('search_filter_text_all', search_state.filter_text_all)
-                    _persist('search_filter_text_any', search_state.filter_text_any)
-                    _persist('search_filter_text_not', search_state.filter_text_not)
+                    persist_value('search_filter_text_all', search_state.filter_text_all)
+                    persist_value('search_filter_text_any', search_state.filter_text_any)
+                    persist_value('search_filter_text_not', search_state.filter_text_not)
                     asyncio.ensure_future(_recompute_filter_count())
                     _update_chip_bar()
                     _rebuild_text_chips()
@@ -1177,7 +1051,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     target = getattr(search_state, f'filter_text_{mode}')
                     if term in target:
                         target.remove(term)
-                    _persist(f'search_filter_text_{mode}', target)
+                    persist_value(f'search_filter_text_{mode}', target)
                     asyncio.ensure_future(_recompute_filter_count())
                     _update_chip_bar()
                     _rebuild_text_chips()
@@ -1311,7 +1185,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 else:
                     search_state.filter_domains = []
                 domain_select.value = search_state.filter_domains
-                _persist('search_filter_domains', search_state.filter_domains)
+                persist_value('search_filter_domains', search_state.filter_domains)
                 asyncio.ensure_future(_refresh_author_options())
                 asyncio.ensure_future(_refresh_work_options())
             elif filter_type == 'author':
@@ -1320,7 +1194,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 else:
                     search_state.filter_authors = []
                 author_select.value = search_state.filter_authors
-                _persist('search_filter_authors', search_state.filter_authors)
+                persist_value('search_filter_authors', search_state.filter_authors)
                 asyncio.ensure_future(_refresh_work_options())
             elif filter_type == 'work':
                 if value and value in search_state.filter_works:
@@ -1328,18 +1202,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 else:
                     search_state.filter_works = []
                 work_select.value = search_state.filter_works
-                _persist('search_filter_works', search_state.filter_works)
+                persist_value('search_filter_works', search_state.filter_works)
             elif filter_type == 'date':
                 search_state.filter_date_from = None
                 search_state.filter_date_to = None
                 date_from_input.value = None
                 date_to_input.value = None
-                _persist('search_filter_date_from', None)
-                _persist('search_filter_date_to', None)
+                persist_value('search_filter_date_from', None)
+                persist_value('search_filter_date_to', None)
             elif filter_type == 'material':
                 if value and value in search_state.filter_material_exclude:
                     search_state.filter_material_exclude.remove(value)
-                    _persist('search_filter_material_exclude', search_state.filter_material_exclude)
+                    persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
                     exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
             asyncio.ensure_future(_recompute_filter_count())
             _update_chip_bar()
@@ -1374,112 +1248,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         async def _recompute_filter_count():
             """Recompute manuscript count for current filters (background)."""
-            if not _has_active_filters():
-                search_state.filter_manuscript_count = None
-                search_state.restrict_sys_ids = None
-                return
-            from shared.fjms_service import get_fjms_service
+            await recompute_filter_count(search_state, _update_chip_bar)
 
-            include_mode = search_state.filter_include_mode
-            _domains = search_state.filter_domains or None
-            _authors = search_state.filter_authors or None
-            _works = search_state.filter_works or None
-
-            def _compute():
-                fjms = get_fjms_service(thread_safe=True)
-                if not fjms.is_available():
-                    return None
-                kwargs = dict(
-                    date_from=search_state.filter_date_from,
-                    date_to=search_state.filter_date_to,
-                    material_exclude=search_state.filter_material_exclude or None,
-                    text_all=search_state.filter_text_all or None,
-                    text_any=search_state.filter_text_any or None,
-                    text_not=search_state.filter_text_not or None,
-                )
-                if include_mode:
-                    kwargs['domains'] = _domains
-                    kwargs['authors'] = _authors
-                    kwargs['works'] = _works
-                else:
-                    kwargs['domains_exclude'] = _domains
-                    kwargs['authors_exclude'] = _authors
-                    kwargs['works_exclude'] = _works
-                return fjms.get_filter_sys_ids(**kwargs)
-
-            result = await run.io_bound(_compute)
-            if result is not None:
-                search_state.filter_manuscript_count = len(result)
-                search_state.restrict_sys_ids = result
-            else:
-                search_state.filter_manuscript_count = None
-                search_state.restrict_sys_ids = None
-            _update_chip_bar()
-
-        # --- Filter change handlers ---
-        def _on_domain_change(e=None):
-            val = domain_select.value or []
-            search_state.filter_domains = val if isinstance(val, list) else [val] if val else []
-            _persist('search_filter_domains', search_state.filter_domains)
-            asyncio.ensure_future(_refresh_author_options())
-            asyncio.ensure_future(_refresh_work_options())
-            asyncio.ensure_future(_recompute_filter_count())
-            _update_chip_bar()
-
-        def _on_author_change(e=None):
-            val = author_select.value or []
-            search_state.filter_authors = val if isinstance(val, list) else [val] if val else []
-            _persist('search_filter_authors', search_state.filter_authors)
-            asyncio.ensure_future(_refresh_work_options())
-            asyncio.ensure_future(_recompute_filter_count())
-            _update_chip_bar()
-
-        def _on_work_change(e=None):
-            val = work_select.value or []
-            search_state.filter_works = val if isinstance(val, list) else [val] if val else []
-            _persist('search_filter_works', search_state.filter_works)
-            asyncio.ensure_future(_recompute_filter_count())
-            _update_chip_bar()
-
-        def _on_mode_change(e=None):
-            search_state.filter_include_mode = filter_mode_toggle.value
-            _persist('search_filter_include_mode', search_state.filter_include_mode)
-            asyncio.ensure_future(_recompute_filter_count())
-            _update_chip_bar()
-
-        def _on_date_from_change(e=None):
-            val = date_from_input.value
-            search_state.filter_date_from = int(val) if val is not None and val != '' else None
-            _persist('search_filter_date_from', search_state.filter_date_from)
-            asyncio.ensure_future(_recompute_filter_count())
-            _update_chip_bar()
-
-        def _on_date_to_change(e=None):
-            val = date_to_input.value
-            search_state.filter_date_to = int(val) if val is not None and val != '' else None
-            _persist('search_filter_date_to', search_state.filter_date_to)
-            asyncio.ensure_future(_recompute_filter_count())
-            _update_chip_bar()
-
-        def _on_exclude_printed_change(e=None):
-            if exclude_printed_cb.value:
-                if 'Printed' not in search_state.filter_material_exclude:
-                    search_state.filter_material_exclude.append('Printed')
-            else:
-                if 'Printed' in search_state.filter_material_exclude:
-                    search_state.filter_material_exclude.remove('Printed')
-            _persist('search_filter_material_exclude', search_state.filter_material_exclude)
-            asyncio.ensure_future(_recompute_filter_count())
-            _update_chip_bar()
+        # --- Filter change handlers (via shared factory) ---
+        _handlers = create_filter_handlers(
+            search_state, 'search', _filter_refs,
+            _refresh_author_options, _refresh_work_options,
+            _recompute_filter_count, _update_chip_bar,
+        )
 
         # Wire up change handlers
-        domain_select.on('update:model-value', _on_domain_change)
-        author_select.on('update:model-value', _on_author_change)
-        work_select.on('update:model-value', _on_work_change)
-        filter_mode_toggle.on('update:model-value', _on_mode_change)
-        date_from_input.on('blur', _on_date_from_change)
-        date_to_input.on('blur', _on_date_to_change)
-        exclude_printed_cb.on('update:model-value', _on_exclude_printed_change)
+        domain_select.on('update:model-value', _handlers['on_domain_change'])
+        author_select.on('update:model-value', _handlers['on_author_change'])
+        work_select.on('update:model-value', _handlers['on_work_change'])
+        filter_mode_toggle.on('update:model-value', _handlers['on_mode_change'])
+        date_from_input.on('blur', _handlers['on_date_from_change'])
+        date_to_input.on('blur', _handlers['on_date_to_change'])
+        exclude_printed_cb.on('update:model-value', _handlers['on_exclude_printed_change'])
 
         # Initialize chip bar on page load
         _update_chip_bar()
@@ -1533,7 +1318,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         states = ['all', 'hide_printed', 'only_printed']
                         current_idx = states.index(search_state.printed_filter)
                         search_state.printed_filter = states[(current_idx + 1) % 3]
-                        _persist('search_printed_filter', search_state.printed_filter)
+                        persist_value('search_printed_filter', search_state.printed_filter)
                         _update_printed_filter_btn()
                         # Re-apply domain exclusions + printed filter and re-render
                         if search_state.domain_exclusions and search_state.has_domain_data:
@@ -2959,7 +2744,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.domain_excluded_results = excluded_with_reasons
             # Save excluded result reasons for restore (lightweight, capped)
             excluded_reasons = [{'sys_id': r.get('result', {}).get('display', {}).get('id', ''), 'reason': r.get('reason', '')} for r in excluded_with_reasons[:500]]
-            _persist('search_excluded_reasons', excluded_reasons)
+            persist_value('search_excluded_reasons', excluded_reasons)
 
         # Apply printed filter on top of domain-filtered results
         filtered = _apply_printed_filter(filtered)
@@ -2998,59 +2783,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return
 
         def _build_web_filter_summary(filters: dict, max_len: int = 50) -> str:
-            """Build compact filter summary like [כולל: תנ״ך, תוספתא. 1000-1300]."""
-            if not filters:
-                return ''
-            prefix = tr('include') if filters.get('include_mode', True) else tr('exclude')
-            # Build en->heb domain name map from cached hierarchy (handles qualified names & 3rd level)
-            domain_heb_map = {}
-            if get_language() == 'he' and filters.get('domains'):
-                try:
-                    from shared.fjms_service import get_fjms_service, qualify_domain_name
-                    fjms = get_fjms_service(thread_safe=True)
-                    if fjms.is_available():
-                        for pn, info in fjms.get_domain_hierarchy().items():
-                            p_heb = info.get('parent_domain_heb', '')
-                            if p_heb:
-                                domain_heb_map[pn] = p_heb
-                            for ch in info.get('children', []):
-                                c_heb = ch.get('domain_heb', '')
-                                qn = qualify_domain_name(ch['domain'], pn)
-                                if c_heb:
-                                    domain_heb_map[qn] = f"{c_heb} ({p_heb})" if qn != ch['domain'] else c_heb
-                                for sc in ch.get('children', []):
-                                    s_heb = sc.get('domain_heb', '')
-                                    sq = qualify_domain_name(sc['domain'], ch['domain'])
-                                    if s_heb:
-                                        domain_heb_map[sq] = f"{s_heb} ({c_heb})" if sq != sc['domain'] else s_heb
-                except Exception:
-                    pass
-            parts = []
-            for d in filters.get('domains', []):
-                parts.append(domain_heb_map.get(str(d), str(d)))
-            n_auth = len(filters.get('authors', []))
-            if n_auth:
-                parts.append(f"{tr('Author')} \u00d7{n_auth}")
-            n_work = len(filters.get('works', []))
-            if n_work:
-                parts.append(f"{tr('Work')} \u00d7{n_work}")
-            df, dt = filters.get('date_from'), filters.get('date_to')
-            if df and dt:
-                parts.append(f"{df}-{dt}")
-            elif df:
-                parts.append(f"{df}+")
-            elif dt:
-                parts.append(f"-{dt}")
-            if filters.get('material_exclude'):
-                parts.append(tr("No printed"))
-            elif filters.get('material_include'):
-                parts.append(tr("Printed only"))
-            if not parts:
-                return ''
-            summary = f"[{prefix}: {', '.join(parts)}]"
-            if len(summary) > max_len:
-                summary = summary[:max_len - 4] + '...]'
-            return summary
+            return build_filter_summary(filters, tr, get_language, max_len)
 
         with history_menu:
             for i, entry in enumerate(history):
@@ -3126,16 +2859,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             date_to_input.value = search_state.filter_date_to
             exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
             # Persist restored filters
-            _persist('search_filter_domains', search_state.filter_domains)
-            _persist('search_filter_authors', search_state.filter_authors)
-            _persist('search_filter_works', search_state.filter_works)
-            _persist('search_filter_include_mode', search_state.filter_include_mode)
-            _persist('search_filter_date_from', search_state.filter_date_from)
-            _persist('search_filter_date_to', search_state.filter_date_to)
-            _persist('search_filter_material_exclude', search_state.filter_material_exclude)
-            _persist('search_filter_text_all', search_state.filter_text_all)
-            _persist('search_filter_text_any', search_state.filter_text_any)
-            _persist('search_filter_text_not', search_state.filter_text_not)
+            persist_value('search_filter_domains', search_state.filter_domains)
+            persist_value('search_filter_authors', search_state.filter_authors)
+            persist_value('search_filter_works', search_state.filter_works)
+            persist_value('search_filter_include_mode', search_state.filter_include_mode)
+            persist_value('search_filter_date_from', search_state.filter_date_from)
+            persist_value('search_filter_date_to', search_state.filter_date_to)
+            persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
+            persist_value('search_filter_text_all', search_state.filter_text_all)
+            persist_value('search_filter_text_any', search_state.filter_text_any)
+            persist_value('search_filter_text_not', search_state.filter_text_not)
             _update_chip_bar()
             _rebuild_text_chips()
         else:
@@ -3874,7 +3607,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # Restore button
                             def _restore_word_result(sid=excl_sys_id):
                                 search_state.word_search_excluded_ids.discard(sid)
-                                _persist('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
+                                persist_value('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
                                 _apply_word_search_exclusions_and_render()
                             ui.button(icon='add_circle_outline', on_click=_restore_word_result).props(
                                 'flat round dense size=xs'
@@ -3898,7 +3631,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.row().classes('w-full justify-end py-2 px-2'):
                         def _clear_word_exclusions():
                             search_state.word_search_excluded_ids.clear()
-                            _persist('word_search_excluded_ids', [])
+                            persist_value('word_search_excluded_ids', [])
                             _apply_word_search_exclusions_and_render()
                         ui.button(tr('Clear All Exclusions'), icon='clear_all',
                                   on_click=_clear_word_exclusions).props('flat dense no-caps size=sm')
