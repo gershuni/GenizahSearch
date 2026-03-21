@@ -99,7 +99,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
         img.src = oxfordUrl;
         img.onload = function() {
             console.log('Oxford API image loaded');
-            if (viewerName && window[viewerName]) window[viewerName].init();
+            if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
         };
         return;
     }
@@ -122,7 +122,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
             img.src = newUrl;
             img.onload = function() {
                 console.log('Manifest-based image loaded, initializing viewer');
-                if (viewerName && window[viewerName]) window[viewerName].init();
+                if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
             };
             return;
         }
@@ -136,7 +136,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
         img.src = proxyUrl;
         img.onload = function() {
             console.log('Server proxy image loaded');
-            if (viewerName && window[viewerName]) window[viewerName].init();
+            if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
         };
         return;
     }
