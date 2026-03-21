@@ -247,144 +247,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # === VIEWER_STYLES for Advanced View image handling (must be at page level) ===
     ADVANCED_VIEWER_STYLES = '''
+    <script src="/static/manuscript_viewer.js" defer></script>
     <script>
-    // NLI IIIF base URL for direct browser access
-    const NLI_IIIF_BASE = 'https://iiif.nli.org.il/IIIFv21';
-    const advFlIdCache = {};
-
-    async function advFetchFlIdsFromManifest(sysId) {
-        if (advFlIdCache[sysId]) return advFlIdCache[sysId];
-        const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`;
-        try {
-            const resp = await fetch(manifestUrl);
-            if (!resp.ok) return [];
-            const data = await resp.json();
-            const flIds = [];
-            if (data.sequences && data.sequences[0] && data.sequences[0].canvases) {
-                for (const canvas of data.sequences[0].canvases) {
-                    const images = canvas.images || [];
-                    if (images[0] && images[0].resource && images[0].resource.service) {
-                        const serviceId = images[0].resource.service['@id'] || '';
-                        const match = serviceId.match(/FL(\\d+)/);
-                        if (match) flIds.push(match[1]);
-                    }
-                }
-            }
-            if (flIds.length > 0) advFlIdCache[sysId] = flIds;
-            return flIds;
-        } catch (e) { return []; }
-    }
-
-    async function advHandleImageError(img, sysId, pageIdx, isOxford = false) {
-        const currentSrc = img.src || '';
-        const isOxfordApiUrl = currentSrc.includes('/api/oxford_image/');
-        console.log('[advHandleImageError]', {currentSrc, sysId, pageIdx, isOxford});
-        if (isOxford && sysId && !isOxfordApiUrl && !img.dataset.triedOxford) {
-            img.dataset.triedOxford = 'true';
-            img.src = `/api/oxford_image/${sysId}?page=${pageIdx || 0}`;
-            img.onload = function() { if(window.advViewer) window.advViewer.init(); };
-            return;
-        }
-        if (isOxfordApiUrl) img.dataset.triedOxford = 'true';
-        if (sysId && !img.dataset.triedManifest) {
-            img.dataset.triedManifest = 'true';
-            const flIds = await advFetchFlIdsFromManifest(sysId);
-            if (flIds.length > 0) {
-                const idx = Math.min(pageIdx || 0, flIds.length - 1);
-                img.src = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/2000,/0/default.jpg`;
-                img.onload = function() { if(window.advViewer) window.advViewer.init(); };
-                return;
-            }
-        }
-        if (sysId && !img.dataset.triedServerProxy) {
-            img.dataset.triedServerProxy = 'true';
-            img.src = `/api/nli_image_by_sysid/${sysId}?page=${pageIdx || 0}`;
-            img.onload = function() { if(window.advViewer) window.advViewer.init(); };
-            return;
-        }
-        console.log('[advHandleImageError] All fallbacks exhausted');
-        img.style.display = 'none';
-        const parent = img.parentElement;
-        if (parent) {
-            parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 3rem;">image_not_supported</i><p>Image not available</p></div>';
-        }
-    }
-
-    window.advViewer = {
-        el: null, container: null,
-        state: { scale: 1, rotation: 0, x: 0, y: 0, isDragging: false, startX: 0, startY: 0, brightness: 0, contrast: 0, gamma: 1.0, invert: false },
-        init: function() {
-            this.el = document.querySelector('.adv-zoomable-image');
-            this.container = document.querySelector('.adv-image-container');
-            if (!this.el || !this.container) return;
-            this.el.onmousedown = this.onMouseDown.bind(this);
-            window.onmousemove = this.onMouseMove.bind(this);
-            window.onmouseup = this.onMouseUp.bind(this);
-            this.el.ondragstart = (e) => e.preventDefault();
-            this.el.onwheel = this.onWheel.bind(this);
-            this.el.style.cursor = 'grab';
-        },
-        onWheel: function(e) {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? -0.25 : 0.25;
-            this.state.scale = Math.max(0.25, Math.min(4, this.state.scale + delta));
-            this.applyTransform();
-            const zoomLabel = document.querySelector('.adv-zoom-label');
-            if (zoomLabel) zoomLabel.textContent = Math.round(this.state.scale * 100) + '%';
-        },
-        onMouseDown: function(e) {
-            if (e.button !== 0) return;
-            e.preventDefault(); e.stopPropagation();
-            this.state.isDragging = true;
-            this.state.startX = e.clientX - this.state.x;
-            this.state.startY = e.clientY - this.state.y;
-            this.el.style.cursor = 'grabbing';
-        },
-        onMouseMove: function(e) {
-            if (!this.state.isDragging) return;
-            e.preventDefault();
-            this.state.x = e.clientX - this.state.startX;
-            this.state.y = e.clientY - this.state.startY;
-            requestAnimationFrame(() => this.applyTransform());
-        },
-        onMouseUp: function() {
-            this.state.isDragging = false;
-            if (this.el) this.el.style.cursor = 'grab';
-        },
-        applyTransform: function() {
-            if (!this.el) { this.el = document.querySelector('.adv-zoomable-image'); if (!this.el) return; }
-            this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
-            this._applyFilters();
-        },
-        _applyFilters: function() {
-            if (!this.el) return;
-            const s = this.state;
-            const b = 1 + s.brightness / 100;
-            const c = 1 + s.contrast / 100;
-            const inv = s.invert ? 1 : 0;
-            let f = 'brightness(' + b + ') contrast(' + c + ') invert(' + inv + ')';
-            if (s.gamma !== 1.0) {
-                const svgFilter = document.getElementById('gamma-adv');
-                if (svgFilter) {
-                    const exp = 1.0 / s.gamma;
-                    svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
-                }
-                f += ' url(#gamma-adv)';
-            }
-            this.el.style.filter = f;
-        },
-        setBrightness: function(val) { this.state.brightness = val; this._applyFilters(); },
-        setContrast: function(val) { this.state.contrast = val; this._applyFilters(); },
-        setGamma: function(val) { this.state.gamma = val; this._applyFilters(); },
-        toggleInvert: function() { this.state.invert = !this.state.invert; this._applyFilters(); },
-        resetAdjustments: function() { this.state.brightness = 0; this.state.contrast = 0; this.state.gamma = 1.0; this.state.invert = false; this._applyFilters(); },
-        zoomIn: function() { this.state.scale = Math.min(4, this.state.scale + 0.25); this.applyTransform(); this.updateLabel(); },
-        zoomOut: function() { this.state.scale = Math.max(0.25, this.state.scale - 0.25); this.applyTransform(); this.updateLabel(); },
-        rotateLeft: function() { this.state.rotation = (this.state.rotation - 90) % 360; this.applyTransform(); },
-        rotateRight: function() { this.state.rotation = (this.state.rotation + 90) % 360; this.applyTransform(); },
-        reset: function() { this.state.x = 0; this.state.y = 0; this.state.rotation = 0; this.state.scale = 1; this.resetAdjustments(); this.applyTransform(); this.updateLabel(); },
-        updateLabel: function() { const l = document.querySelector('.adv-zoom-label'); if (l) l.textContent = Math.round(this.state.scale * 100) + '%'; }
-    };
+    // Create advanced viewer via shared factory
+    window.advViewer = createManuscriptViewer({
+        imageSelector: '.adv-zoomable-image',
+        containerSelector: '.adv-image-container',
+        zoomLabelSelector: '.adv-zoom-label',
+        gammaFilterId: 'gamma-adv'
+    });
     </script>
     <svg style="position:absolute;width:0;height:0"><filter id="gamma-adv"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
     <style>
@@ -4525,7 +4396,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     _sep = '&' if '?' in safe_img_url else '?'
                                     _adv_thumb = f"{safe_img_url}{_sep}width=400"
                                 with ui.element('div').classes('adv-image-container img-loading-container w-full').style('height: calc(100% - 48px);'):
-                                    img_html = f'''<img src="{_adv_thumb}" data-full-src="{_adv_full}" class="adv-zoomable-image" style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;" draggable="false" onload="if(window.advViewer) window.advViewer.init()" onerror="advHandleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"/>'''
+                                    img_html = f'''<img src="{_adv_thumb}" data-full-src="{_adv_full}" class="adv-zoomable-image" style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;" draggable="false" onload="if(window.advViewer) window.advViewer.init()" onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'advViewer')"/>'''
                                     ui.html(img_html, sanitize=False)
                                     ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
@@ -5190,7 +5061,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         style="transform: translate(0px, 0px) rotate(0deg) scale(1); cursor: grab; max-height: 100%;"
                                         draggable="false"
                                         onload="if(window.advViewer) window.advViewer.init()"
-                                        onerror="advHandleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"
+                                        onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'advViewer')"
                                     />
                                     '''
                                     ui.html(img_html, sanitize=False)

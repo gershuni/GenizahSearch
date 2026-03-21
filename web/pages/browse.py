@@ -44,6 +44,7 @@ from web.components.joins_panel import fetch_connected_fragments
 # ============================================================================
 
 VIEWER_STYLES = '''
+<script src="/static/manuscript_viewer.js" defer></script>
 <script>
 // Progressive image loading: show spinner → thumbnail (400px) → full (2000px)
 function progressiveLoad(img) {
@@ -78,131 +79,7 @@ function initProgressiveImages() {
     });
 }
 
-// NLI IIIF base URL for direct browser access
-const NLI_IIIF_BASE = 'https://iiif.nli.org.il/IIIFv21';
-
-// Cache for FL IDs fetched from IIIF manifests
-const flIdCache = {};
-
-// Fetch FL IDs from IIIF manifest (client-side, bypasses server blocking)
-async function fetchFlIdsFromManifest(sysId) {
-    if (flIdCache[sysId]) {
-        console.log(`[Manifest] Cache hit for ${sysId}`);
-        return flIdCache[sysId];
-    }
-
-    const manifestUrl = `${NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS${sysId}-1/manifest`;
-    console.log(`[Manifest] Fetching ${manifestUrl}`);
-    try {
-        const resp = await fetch(manifestUrl);
-        console.log(`[Manifest] Response status: ${resp.status} for ${sysId}`);
-        if (!resp.ok) {
-            console.log(`[Manifest] Failed (${resp.status}) for ${sysId}`);
-            return [];
-        }
-
-        const data = await resp.json();
-        const flIds = [];
-
-        if (data.sequences && data.sequences[0] && data.sequences[0].canvases) {
-            console.log(`[Manifest] Found ${data.sequences[0].canvases.length} canvases for ${sysId}`);
-            for (const canvas of data.sequences[0].canvases) {
-                const images = canvas.images || [];
-                if (images[0] && images[0].resource && images[0].resource.service) {
-                    const serviceId = images[0].resource.service['@id'] || '';
-                    const match = serviceId.match(/FL(\d+)/);
-                    if (match) {
-                        flIds.push(match[1]);
-                    }
-                }
-            }
-        } else {
-            console.log(`[Manifest] No canvases found in manifest for ${sysId}`);
-        }
-
-        if (flIds.length > 0) {
-            flIdCache[sysId] = flIds;
-            console.log(`[Manifest] Cached ${flIds.length} FL IDs for ${sysId}`);
-        } else {
-            console.log(`[Manifest] No FL IDs extracted for ${sysId}`);
-        }
-        return flIds;
-    } catch (e) {
-        console.error(`[Manifest] Error fetching for ${sysId}:`, e);
-        return [];
-    }
-}
-
-// Global function for handling image errors with fallback
-// Note: Server-side /api/nli_image_by_sysid now resolves FL IDs locally from
-// crossref sidecar (815K pre-resolved records). Client-side manifest fetch
-// is a last-resort fallback for uncovered manuscripts.
-async function handleImageError(img, sysId, pageIdx, isOxford = false) {
-    const currentSrc = img.src || '';
-    const isOxfordApiUrl = currentSrc.includes('/api/oxford_image/');
-    console.log(`[handleImageError] src=${currentSrc}, sysId=${sysId}, pageIdx=${pageIdx}, isOxford=${isOxford}, isOxfordApiUrl=${isOxfordApiUrl}`);
-
-    // Try 1: If Oxford and the CURRENT src is NOT already the Oxford API, try the server proxy
-    // This handles the case where direct NLI URL failed for an Oxford manuscript
-    if (isOxford && sysId && !isOxfordApiUrl && !img.dataset.triedOxford) {
-        img.dataset.triedOxford = 'true';
-        const oxfordUrl = `/api/oxford_image/${sysId}?page=${pageIdx || 0}`;
-        console.log(`Trying Oxford API: ${oxfordUrl}`);
-        img.src = oxfordUrl;
-        img.onload = function() {
-            console.log('Oxford API image loaded');
-            if (window.manuscriptViewer) window.manuscriptViewer.init();
-        };
-        return;
-    }
-
-    // If Oxford API already failed, mark it as tried
-    if (isOxfordApiUrl) {
-        img.dataset.triedOxford = 'true';
-    }
-
-    // Try 2: Fetch FL IDs from NLI IIIF manifest (client-side fallback)
-    // Since Phase 30, the server resolves FL IDs locally from the crossref sidecar,
-    // so this client-side manifest fetch should rarely be needed.
-    if (sysId && !img.dataset.triedManifest) {
-        img.dataset.triedManifest = 'true';
-        console.log(`Trying NLI manifest for sysId: ${sysId}, page: ${pageIdx}`);
-
-        const flIds = await fetchFlIdsFromManifest(sysId);
-        if (flIds.length > 0) {
-            const idx = Math.min(pageIdx || 0, flIds.length - 1);
-            const newUrl = `${NLI_IIIF_BASE}/FL${flIds[idx]}/full/2000,/0/default.jpg`;
-            console.log(`Trying FL ID from manifest: ${flIds[idx]}`);
-            img.src = newUrl;
-            img.onload = function() {
-                console.log('Manifest-based image loaded, initializing viewer');
-                if (window.manuscriptViewer) window.manuscriptViewer.init();
-            };
-            return;
-        }
-    }
-
-    // Try 3: Use server-side NLI proxy (handles collections that block browser requests)
-    if (sysId && !img.dataset.triedServerProxy) {
-        img.dataset.triedServerProxy = 'true';
-        const proxyUrl = `/api/nli_image_by_sysid/${sysId}?page=${pageIdx || 0}`;
-        console.log(`Trying server-side NLI proxy: ${proxyUrl}`);
-        img.src = proxyUrl;
-        img.onload = function() {
-            console.log('Server proxy image loaded');
-            if (window.manuscriptViewer) window.manuscriptViewer.init();
-        };
-        return;
-    }
-
-    // All fallbacks exhausted
-    console.log('All image sources failed for:', currentSrc);
-    img.style.display = 'none';
-    const parent = img.parentElement;
-    if (parent) {
-        parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
-    }
-}
+// fetchFlIdsFromManifest, handleImageError, NLI_IIIF_BASE are in /static/manuscript_viewer.js
 </script>
 <style>
     /* Image viewer container */
@@ -588,159 +465,12 @@ async function handleImageError(img, sysId, pageIdx, isOxford = false) {
     }
 </style>
 <script>
-    // Global viewer state management
-    window.manuscriptViewer = {
-        el: null,
-        container: null,
-        state: {
-            scale: 1,
-            rotation: 0,
-            x: 0,
-            y: 0,
-            isDragging: false,
-            startX: 0,
-            startY: 0,
-            brightness: 0,
-            contrast: 0,
-            gamma: 1.0,
-            invert: false
-        },
-
-        init: function() {
-            this.el = document.querySelector('.zoomable-image');
-            this.container = document.querySelector('.image-container');
-            
-            if (!this.el) {
-                console.log('manuscriptViewer: image not found');
-                return;
-            }
-            if (!this.container) {
-                console.log('manuscriptViewer: container not found');
-                return;
-            }
-            
-            console.log('manuscriptViewer: initializing drag on image');
-            
-            // Attach mousedown directly to the IMAGE element
-            this.el.onmousedown = this.onMouseDown.bind(this);
-            window.onmousemove = this.onMouseMove.bind(this);
-            window.onmouseup = this.onMouseUp.bind(this);
-            this.el.ondragstart = (e) => e.preventDefault();
-            
-            // Mouse wheel zoom - attach to image
-            this.el.onwheel = this.onWheel.bind(this);
-            
-            // Set initial cursor on the image
-            this.el.style.cursor = 'grab';
-        },
-        
-        onWheel: function(e) {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? -0.25 : 0.25;
-            this.state.scale = Math.max(0.25, Math.min(4, this.state.scale + delta));
-            this.applyTransform();
-            // Update zoom label
-            const zoomLabel = document.querySelector('.zoom-level-label');
-            if (zoomLabel) {
-                zoomLabel.textContent = Math.round(this.state.scale * 100) + '%';
-            }
-        },
-        
-        update: function(scale, rotation) {
-            this.state.scale = scale;
-            this.state.rotation = rotation;
-            this.applyTransform();
-        },
-        
-        setTransform: function(x, y, scale, rotation) {
-            this.state.x = x;
-            this.state.y = y;
-            this.state.scale = scale;
-            this.state.rotation = rotation;
-            this.applyTransform();
-        },
-
-        onMouseDown: function(e) {
-            if (e.button !== 0) return; // Only left click
-            e.preventDefault();
-            e.stopPropagation();
-            this.state.isDragging = true;
-            this.state.startX = e.clientX - this.state.x;
-            this.state.startY = e.clientY - this.state.y;
-            this.el.style.cursor = 'grabbing';
-            console.log('manuscriptViewer: drag started');
-        },
-
-        onMouseMove: function(e) {
-            if (!this.state.isDragging) return;
-            e.preventDefault();
-            
-            this.state.x = e.clientX - this.state.startX;
-            this.state.y = e.clientY - this.state.startY;
-            
-            requestAnimationFrame(() => this.applyTransform());
-        },
-
-        onMouseUp: function() {
-            if (this.state.isDragging) {
-                console.log('manuscriptViewer: drag ended');
-            }
-            this.state.isDragging = false;
-            if (this.el) this.el.style.cursor = 'grab';
-        },
-
-        applyTransform: function() {
-            if (!this.el) {
-                 this.el = document.querySelector('.zoomable-image');
-                 if (!this.el) return;
-            }
-            // Translate is applied first (screen coordinates), then rotate/scale
-            this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
-            this._applyFilters();
-        },
-
-        _applyFilters: function() {
-            if (!this.el) return;
-            const s = this.state;
-            const b = 1 + s.brightness / 100;
-            const c = 1 + s.contrast / 100;
-            const inv = s.invert ? 1 : 0;
-            let f = `brightness(${b}) contrast(${c}) invert(${inv})`;
-            if (s.gamma !== 1.0) {
-                // Update SVG gamma filter exponent
-                const svgFilter = document.getElementById('gamma-main');
-                if (svgFilter) {
-                    const exp = 1.0 / s.gamma;
-                    svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
-                }
-                f += ' url(#gamma-main)';
-            }
-            this.el.style.filter = f;
-        },
-
-        setBrightness: function(val) { this.state.brightness = val; this._applyFilters(); },
-        setContrast: function(val) { this.state.contrast = val; this._applyFilters(); },
-        setGamma: function(val) { this.state.gamma = val; this._applyFilters(); },
-        toggleInvert: function() { this.state.invert = !this.state.invert; this._applyFilters(); },
-        resetAdjustments: function() {
-            this.state.brightness = 0; this.state.contrast = 0;
-            this.state.gamma = 1.0; this.state.invert = false;
-            this._applyFilters();
-        },
-
-        reset: function() {
-            this.state.x = 0;
-            this.state.y = 0;
-            this.state.rotation = 0;
-            this.state.scale = 1;
-            this.resetAdjustments();
-            this.applyTransform();
-        }
-    };
-    
-    // Auto-init when DOM loads or changes
-    document.addEventListener('DOMContentLoaded', () => {
-        setTimeout(() => window.manuscriptViewer.init(), 500);
+    // Create viewer via shared factory (manuscript_viewer.js loaded with defer)
+    window.manuscriptViewer = createManuscriptViewer({
+        imageSelector: '.zoomable-image',
+        containerSelector: '.image-container',
+        zoomLabelSelector: '.zoom-level-label',
+        gammaFilterId: 'gamma-main'
     });
 </script>
 <svg style="position:absolute;width:0;height:0"><filter id="gamma-main"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
@@ -4385,7 +4115,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
                                         draggable="false"
                                         onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
-                                        onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js})"
+                                        onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'manuscriptViewer')"
                                     />
                                     '''
                                     ui.html(img_html, sanitize=False)
@@ -4635,7 +4365,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if '/api/nli_image_by_sysid/' in safe_img_url:
                                             _sep = '&' if '?' in safe_img_url else '?'
                                             _fs_thumb = f"{safe_img_url}{_sep}width=400"
-                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js})" />'
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'manuscriptViewer\')" />'
                                         ui.html(img_html, sanitize=False)
                                         ui.run_javascript('initProgressiveImages();')
                                     else:
