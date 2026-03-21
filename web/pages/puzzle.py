@@ -3757,10 +3757,34 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             external_provider = ''
             page_index = add_page_index
 
-            if not fl_id:
-                folios = await run.io_bound(_resolve_folios, add_sys_id)
-                if folios:
-                    # Use specified page_index if provided, otherwise first folio
+            # Always resolve folios to detect external providers (Oxford, Manchester, etc.)
+            # even when FL ID is provided — NLI stub FL IDs for external libraries return 503,
+            # so using them directly causes a ~20s fallback chain before the image loads.
+            folios = await run.io_bound(_resolve_folios, add_sys_id)
+            if folios:
+                # If _resolve_folios found an external provider, use that path
+                # (much faster than waiting for NLI timeouts)
+                if folios[0].get('external_provider'):
+                    # Match the provided FL ID to a folio, or use first
+                    matched = None
+                    if fl_id:
+                        for f in folios:
+                            if f.get('fl_id') == fl_id:
+                                matched = f
+                                break
+                    if page_index >= 0 and page_index < len(folios):
+                        first = folios[page_index]
+                    elif matched:
+                        first = matched
+                    else:
+                        first = folios[0]
+                    fl_id = ''  # clear NLI stub FL ID — use external path
+                    folio_label = first.get('label', '1r')
+                    image_url = first.get('image_url', '')
+                    external_provider = first.get('external_provider', '')
+                    page_index = first.get('page_index', 0)
+                elif not fl_id:
+                    # No FL ID provided and NLI path — use first folio
                     if page_index >= 0 and page_index < len(folios):
                         first = folios[page_index]
                     else:
