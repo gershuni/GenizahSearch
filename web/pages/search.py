@@ -247,7 +247,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # === VIEWER_STYLES for Advanced View image handling (must be at page level) ===
     ADVANCED_VIEWER_STYLES = '''
-    <script src="/static/manuscript_viewer.js" defer></script>
+    <script src="/static/manuscript_viewer.js"></script>
     <script>
     // Create advanced viewer via shared factory
     window.advViewer = createManuscriptViewer({
@@ -741,16 +741,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         _filter_refs = {}
 
-        # Domain/author/work option builders use shared filter_panel module
-        def _build_domain_options():
-            return build_domain_options(get_language())
-
-        def _build_author_options(domain=None):
-            return build_author_options(get_language(), domain)
-
-        def _build_work_options(domain=None, author=None):
-            return build_work_options(get_language(), domain, author)
-
         with adv_filters_panel:
             with ui.column().classes('w-full px-4 py-3 gap-4'):
 
@@ -1096,7 +1086,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _filter_refresh_seq['author'] += 1
             seq = _filter_refresh_seq['author']
             author_select.props('loading')
-            new_opts = await run.io_bound(_build_author_options, search_state.filter_domains)
+            lang = get_language()
+            new_opts = await run.io_bound(build_author_options, lang, search_state.filter_domains)
             if _filter_refresh_seq['author'] != seq:
                 return  # Stale -- newer request in flight
             author_select.props(remove='loading')
@@ -1108,8 +1099,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _filter_refresh_seq['work'] += 1
             seq = _filter_refresh_seq['work']
             work_select.props('loading')
+            lang = get_language()
             new_opts = await run.io_bound(
-                _build_work_options, search_state.filter_domains, search_state.filter_authors
+                build_work_options, lang, search_state.filter_domains, search_state.filter_authors
             )
             if _filter_refresh_seq['work'] != seq:
                 return  # Stale -- newer request in flight
@@ -5282,13 +5274,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     async def _deferred_filter_init():
         """Load filter select options asynchronously after page renders."""
-        d = await run.io_bound(_build_domain_options)
+        lang = get_language()  # Capture in client context before io_bound
+        d = await run.io_bound(build_domain_options, lang)
         domain_select.options = d
         domain_select.update()
-        a = await run.io_bound(_build_author_options, search_state.filter_domains)
+        a = await run.io_bound(build_author_options, lang, search_state.filter_domains)
         author_select.options = a
         author_select.update()
-        w = await run.io_bound(_build_work_options, search_state.filter_domains, search_state.filter_authors)
+        w = await run.io_bound(build_work_options, lang, search_state.filter_domains, search_state.filter_authors)
         work_select.options = w
         work_select.update()
         _update_chip_bar()

@@ -729,9 +729,6 @@ def create_parallels_page(initial_text: str = None):
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Domain')).classes('text-xs font-medium').style('color: var(--text-secondary);')
 
-                        def _build_domain_options():
-                            return build_domain_options(get_language())
-
                         p_domain_select = ui.select(
                             options={},
                             value=p_state.filter_domains,
@@ -745,9 +742,6 @@ def create_parallels_page(initial_text: str = None):
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Author')).classes('text-xs font-medium').style('color: var(--text-secondary);')
 
-                        def _build_author_options(domain=None):
-                            return build_author_options(get_language(), domain)
-
                         p_author_select = ui.select(
                             options={},
                             value=p_state.filter_authors,
@@ -760,9 +754,6 @@ def create_parallels_page(initial_text: str = None):
                     # Work filter (multi-select) — options loaded asynchronously after page renders
                     with ui.column().classes('gap-1 min-w-48 flex-grow'):
                         ui.label(tr('Work')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-
-                        def _build_work_options(domain=None, author=None):
-                            return build_work_options(get_language(), domain, author)
 
                         p_work_select = ui.select(
                             options={},
@@ -1102,7 +1093,8 @@ def create_parallels_page(initial_text: str = None):
             _p_filter_refresh_seq['author'] += 1
             seq = _p_filter_refresh_seq['author']
             p_author_select.props('loading')
-            new_opts = await run.io_bound(_build_author_options, p_state.filter_domains)
+            lang = get_language()
+            new_opts = await run.io_bound(build_author_options, lang, p_state.filter_domains)
             if _p_filter_refresh_seq['author'] != seq:
                 return  # Stale -- newer request in flight
             p_author_select.props(remove='loading')
@@ -1114,8 +1106,9 @@ def create_parallels_page(initial_text: str = None):
             _p_filter_refresh_seq['work'] += 1
             seq = _p_filter_refresh_seq['work']
             p_work_select.props('loading')
+            lang = get_language()
             new_opts = await run.io_bound(
-                _build_work_options, p_state.filter_domains, p_state.filter_authors
+                build_work_options, lang, p_state.filter_domains, p_state.filter_authors
             )
             if _p_filter_refresh_seq['work'] != seq:
                 return  # Stale -- newer request in flight
@@ -3412,13 +3405,14 @@ def create_parallels_page(initial_text: str = None):
 
     async def _deferred_p_filter_init():
         """Load filter select options asynchronously after page renders."""
-        d = await run.io_bound(_build_domain_options)
+        lang = get_language()  # Capture in client context before io_bound
+        d = await run.io_bound(build_domain_options, lang)
         p_domain_select.options = d
         p_domain_select.update()
-        a = await run.io_bound(_build_author_options, p_state.filter_domains)
+        a = await run.io_bound(build_author_options, lang, p_state.filter_domains)
         p_author_select.options = a
         p_author_select.update()
-        w = await run.io_bound(_build_work_options, p_state.filter_domains, p_state.filter_authors)
+        w = await run.io_bound(build_work_options, lang, p_state.filter_domains, p_state.filter_authors)
         p_work_select.options = w
         p_work_select.update()
         _update_p_chip_bar()

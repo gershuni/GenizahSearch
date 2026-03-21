@@ -44,7 +44,7 @@ from web.components.joins_panel import fetch_connected_fragments
 # ============================================================================
 
 VIEWER_STYLES = '''
-<script src="/static/manuscript_viewer.js" defer></script>
+<script src="/static/manuscript_viewer.js"></script>
 <script>
 // Progressive image loading: show spinner → thumbnail (400px) → full (2000px)
 function progressiveLoad(img) {
@@ -4365,7 +4365,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if '/api/nli_image_by_sysid/' in safe_img_url:
                                             _sep = '&' if '?' in safe_img_url else '?'
                                             _fs_thumb = f"{safe_img_url}{_sep}width=400"
-                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'manuscriptViewer\')" />'
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
                                         ui.html(img_html, sanitize=False)
                                         ui.run_javascript('initProgressiveImages();')
                                     else:

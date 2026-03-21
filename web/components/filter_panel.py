@@ -311,16 +311,18 @@ async def recompute_filter_count(state, update_chip_bar_fn):
                restrict_sys_ids, and _filter_recompute_gen (auto-created).
         update_chip_bar_fn: Callback to update the chip bar UI after recompute.
     """
-    if not has_active_filters(state):
-        state.filter_manuscript_count = None
-        state.restrict_sys_ids = None
-        return
-
-    # Generation guard: increment before async, check after await
+    # Generation guard: increment BEFORE any early return so in-flight
+    # older recomputes see a newer generation and discard their results.
     if not hasattr(state, '_filter_recompute_gen'):
         state._filter_recompute_gen = 0
     state._filter_recompute_gen += 1
     gen = state._filter_recompute_gen
+
+    if not has_active_filters(state):
+        state.filter_manuscript_count = None
+        state.restrict_sys_ids = None
+        update_chip_bar_fn()
+        return
 
     from shared.fjms_service import get_fjms_service
 
