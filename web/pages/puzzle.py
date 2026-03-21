@@ -3802,11 +3802,12 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 pg = page_index if page_index >= 0 else 0
                 # Cambridge CUDL images (Mosseri etc.) have blue mats like CUL T-S
                 ext_is_cul = external_provider == 'cambridge'
+                ext_processed = external_provider != 'oxford'
                 ext_threshold = 150.0 if ext_is_cul else threshold
-                url = f"/api/puzzle_ext_image?sys_id={add_sys_id}&page={pg}&provider={external_provider}&threshold={ext_threshold}&size=800&processed=true"
+                url = f"/api/puzzle_ext_image?sys_id={add_sys_id}&page={pg}&provider={external_provider}&threshold={ext_threshold}&size=800&processed={'true' if ext_processed else 'false'}"
                 js_meta = json.dumps({
                     'fl_id': '', 'image_url': image_url, 'threshold': ext_threshold, 'size': 800,
-                    'processed': True, 'sys_id': add_sys_id, 'is_cul': ext_is_cul,
+                    'processed': ext_processed, 'sys_id': add_sys_id, 'is_cul': ext_is_cul,
                     'external_provider': external_provider, 'page_index': pg
                 })
 
@@ -3821,13 +3822,16 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 sm, _ = state.meta_mgr.get_meta_for_id(add_sys_id)
                 shelfmark = sm or ''
 
+            # Use effective values (ext_threshold/ext_processed set for external path)
+            eff_threshold = ext_threshold if external_provider else threshold
+            eff_processed = ext_processed if external_provider else True
             pending_fragment_meta[key] = {
                 'sys_id': add_sys_id,
                 'shelfmark': shelfmark,
                 'folio_label': folio_label,
                 'fl_id': fl_id,
-                'threshold': threshold,
-                'processed': True,
+                'threshold': eff_threshold,
+                'processed': eff_processed,
                 'size': 800,
                 'image_url': image_url,
                 'external_provider': external_provider,
