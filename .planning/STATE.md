@@ -307,9 +307,10 @@ Recent decisions affecting current work:
 | Phase 53 P02 | 45 | 2 tasks | 3 files |
 | 260320-dvg | Add icons and reorganize Browse by Shelfmark tab buttons to match ResultDialog patterns | 2026-03-20 | c7b0bde7 | [260320-dvg-add-icons-and-reorganize-browse-by-shelf](./quick/260320-dvg-add-icons-and-reorganize-browse-by-shelf/) |
 | 260319-dt1 | Add image adjustment controls (brightness, contrast, gamma, invert) to all viewers | 2026-03-19 | a4764fd7 | [260319-dt1-add-image-controls-brightness-contrast-g](./quick/260319-dt1-add-image-controls-brightness-contrast-g/) |
+| 260321-qjh | Fix puzzle session restore for external fragments + wire Firefox addon link | 2026-03-21 | 99199a74 | [260321-qjh-fix-bug-adding-to-puzzle-in-web-does-not](./quick/260321-qjh-fix-bug-adding-to-puzzle-in-web-does-not/) |
 
 ## Session Continuity
 
-Last session: 2026-03-19T07:03:55.780Z
+Last session: 2026-03-21
 Stopped at: Completed 53-02-PLAN.md (Phase 53 plan 02 complete - metadata search guard fix)
 Resume file: None
