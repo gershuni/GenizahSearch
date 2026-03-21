@@ -3719,10 +3719,16 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         # Saved documents list is refreshed on-demand when dialog opens
 
+    # Capture the NiceGUI client so delayed tasks can use UI functions.
+    # asyncio.ensure_future loses the slot stack, so we must re-enter it.
+    from nicegui import context as _nicegui_ctx
+    _puzzle_client = _nicegui_ctx.client
+
     async def _after_delay(delay, coro_func, *args):
         await asyncio.sleep(delay)
         try:
-            await coro_func(*args)
+            with _puzzle_client:
+                await coro_func(*args)
         except Exception as e:
             logger.exception(f"Puzzle _after_delay error in {coro_func.__name__}")
 
@@ -3740,7 +3746,6 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             except ValueError:
                 add_page_index = 0
             add_fl_id = ''
-
         async def auto_add():
             """Auto-add a fragment from the initial_add query parameter after canvas init."""
             import asyncio
@@ -3770,7 +3775,6 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             if not fl_id and not external_provider:
                 ui.notify(tr('No images found for this manuscript'), type='warning')
                 return
-
             key = f"{add_sys_id},{folio_label}"
             # CUL/T-S threshold matching desktop defaults
             threshold = 30.0
