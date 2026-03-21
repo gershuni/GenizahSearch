@@ -74,11 +74,11 @@ Create `web/components/filter_panel.py` extracting the duplicated filter logic f
 
 **Module-level pure functions (no NiceGUI dependency):**
 
-1. `build_domain_options() -> dict` -- Extract from search.py:924-962 / parallels.py:785-823. Calls get_fjms_service, get_domain_hierarchy, qualify_domain_name. Returns {key: display_label} dict. Uses get_language() for Hebrew.
+1. `build_domain_options(lang: str) -> dict` -- Extract from search.py:924-962 / parallels.py:785-823. Calls get_fjms_service, get_domain_hierarchy, qualify_domain_name. Returns {key: display_label} dict. Takes `lang` parameter instead of calling get_language() internally (REVIEW P2-5: get_language() is process-global, calling it inside run.io_bound() causes cross-client label drift).
 
-2. `build_author_options(domain=None) -> dict` -- Extract from search.py:964-984 / parallels.py:838-858.
+2. `build_author_options(lang: str, domain=None) -> dict` -- Extract from search.py:964-984 / parallels.py:838-858. Same lang parameter pattern.
 
-3. `build_work_options(domain=None, author=None) -> dict` -- Extract from search.py:986-1007 / parallels.py:873-900.
+3. `build_work_options(lang: str, domain=None, author=None) -> dict` -- Extract from search.py:986-1007 / parallels.py:873-900. Same lang parameter pattern.
 
 4. `build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int = 50) -> str` -- Extract from search.py:3000-3053 / parallels.py:2025-2078. Pass `tr` and `get_language` as parameters (they're page-context-dependent in NiceGUI).
 
@@ -90,11 +90,11 @@ Create `web/components/filter_panel.py` extracting the duplicated filter logic f
 
 7. `load_filter_state(state, storage_prefix: str)` -- Extract from search.py:162-183 / parallels.py:226-247. Reads app.storage.user with the given prefix (e.g., "search_filter_" or "parallels_filter_"). Handles legacy single-value migration. Sets filter_domains, filter_authors, filter_works, filter_include_mode, filter_date_from, filter_date_to, filter_material_exclude, filter_text_all, filter_text_any, filter_text_not on the state object.
 
-8. `consume_incoming_filters(state, storage_prefix: str) -> bool` -- Extract from search.py:136-159 / parallels.py:198-223. Reads incoming_filters from storage, applies to state, persists with prefix, clears incoming_filters. Returns True if filters were consumed.
+8. `consume_incoming_filters(state, storage_prefix: str, require_from_browse: bool = False) -> bool` -- Extract from search.py:136-159 / parallels.py:198-223. Reads incoming_filters from storage, applies to state, persists with prefix, clears incoming_filters. Returns True if filters were consumed. REVIEW P2-3: search.py only consumes when `from_browse` flag is set, parallels consumes whenever incoming_filters exist. The `require_from_browse` parameter preserves this behavioral difference: search passes True, parallels passes False. Must also preserve legacy single-value-to-list migration and return the `_filters_from_browse` flag used to auto-expand the filter panel.
 
 **Async recompute function:**
 
-9. `async recompute_filter_count(state, update_chip_bar_fn)` -- Extract from search.py:1375-1417 / parallels.py:1255-1297. Takes state object and a callback for chip bar update. Uses run.io_bound for the FJMS query.
+9. `async recompute_filter_count(state, update_chip_bar_fn)` -- Extract from search.py:1375-1417 / parallels.py:1255-1297. Takes state object and a callback for chip bar update. Uses run.io_bound for the FJMS query. REVIEW P2-4: Add a generation/sequence guard to prevent out-of-order completion races — increment a generation counter before the async call, check it after await, skip update if stale. This fixes a latent bug where a slower older query could overwrite filter_manuscript_count and restrict_sys_ids from a newer filter selection. REVIEW P2-5: Only the pure FJMS query goes inside run.io_bound(); widget mutation and app.storage.user access stay outside the io_bound boundary in the caller's client context.
 
 **Change handler factory:**
 
@@ -148,10 +148,12 @@ const _flIdCache = {};
 async function fetchFlIdsFromManifest(sysId) { ... }
 // Extract from browse.py:88-134 (the verbose version with console.log)
 
-async function handleImageError(img, sysId, pageIdx, isOxford, viewerRef) { ... }
-// Extract from browse.py:140-205. Parameterize the viewer init callback:
-// instead of hardcoded `if (window.manuscriptViewer) window.manuscriptViewer.init()`
-// use `if (viewerRef) viewerRef.init()` where viewerRef defaults to window.manuscriptViewer
+async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) { ... }
+// Extract from browse.py:140-205. REVIEW P1-1: Use lazy resolver pattern instead of
+// passing viewer object directly. viewerName is a string (e.g., 'manuscriptViewer', 'advViewer')
+// resolved lazily via window[viewerName] at callback time, NOT at error handler registration time.
+// This prevents stale undefined refs when the viewer doesn't exist yet at onload time.
+// Fullscreen browse at browse.py:4638 still calls this with its own viewer lifecycle.
 
 function createManuscriptViewer(options) { ... }
 // Factory that returns a viewer object. Options:
@@ -164,7 +166,15 @@ function createManuscriptViewer(options) { ... }
 // Returns object with: init, update, setTransform, applyTransform, _applyFilters,
 //   setBrightness, setContrast, setGamma, toggleInvert, resetAdjustments,
 //   zoomIn, zoomOut, rotateLeft, rotateRight, reset, updateLabel, onWheel, etc.
-// The returned object has the SAME interface as the current manuscriptViewer/advViewer.
+// REVIEW P1-2: The returned object MUST preserve the FULL public API of both current viewers.
+// Browse relies on: init(), update(), setTransform(), applyTransform(), _applyFilters(),
+//   setBrightness(), setContrast(), setGamma(), toggleInvert(), resetAdjustments(),
+//   zoomIn(), zoomOut(), rotateLeft(), rotateRight(), reset(), updateLabel(), onWheel(),
+//   and state properties: scale, rotation, x, y, brightness, contrast, gamma, invert.
+// Search relies on: zoomIn(), zoomOut(), rotateLeft(), rotateRight(), reset(),
+//   resetAdjustments(), setBrightness(), setContrast(), setGamma(), toggleInvert(),
+//   init(), updateLabel().
+// Do NOT normalize or omit any of these — `... is not a function` regressions are P0.
 ```
 
 **Update browse.py VIEWER_STYLES:**
@@ -173,14 +183,14 @@ function createManuscriptViewer(options) { ... }
 - Remove `fetchFlIdsFromManifest` (lines 88-134), `handleImageError` (lines 140-205), and `window.manuscriptViewer = {...}` (lines 592-745)
 - Add `<script src="/static/manuscript_viewer.js"></script>` before the remaining script block
 - Replace with: `window.manuscriptViewer = createManuscriptViewer({imageSelector: '.zoomable-image', containerSelector: '.image-container', zoomLabelSelector: '.zoom-level-label', gammaFilterId: 'gamma-main'});`
-- Keep the `DOMContentLoaded` auto-init (line 742-744)
+- REVIEW P3-6: Remove `DOMContentLoaded` auto-init from the shared JS file. The file should define functions only and be idempotent. Each page calls `viewer.init()` explicitly after rendering (browse does this via setTimeout at ~4392, search at ~4797). Load the shared JS with `defer` attribute.
 
 **Update search.py ADVANCED_VIEWER_STYLES:**
 - Remove `NLI_IIIF_BASE`, `advFlIdCache`, `advFetchFlIdsFromManifest` (lines 302-327), `advHandleImageError` (lines 329-362), `window.advViewer = {...}` (lines 364-438)
 - Add `<script src="/static/manuscript_viewer.js"></script>` before remaining style block
 - Replace with: `window.advViewer = createManuscriptViewer({imageSelector: '.adv-zoomable-image', containerSelector: '.adv-image-container', zoomLabelSelector: '.adv-zoom-label', gammaFilterId: 'gamma-adv'});`
-- Update `advHandleImageError` calls in search.py HTML templates (lines ~4795, ~5460) to use `handleImageError(this, '...', idx, isOxford, window.advViewer)` instead of `advHandleImageError(this, ...)`
-- Update `handleImageError` calls in browse.py HTML templates (lines ~4388, ~4638) to pass `window.manuscriptViewer` as the viewer ref
+- Update `advHandleImageError` calls in search.py HTML templates (lines ~4795, ~5460) to use `handleImageError(this, '...', idx, isOxford, 'advViewer')` instead of `advHandleImageError(this, ...)` — REVIEW P1-1: pass viewer NAME string, not object ref
+- Update `handleImageError` calls in browse.py HTML templates (lines ~4388, ~4638) to pass `'manuscriptViewer'` as the viewer name string — REVIEW P1-1: lazy resolution via window[viewerName]
 
 **DO NOT extract the fullscreen viewer (fsViewer) or reading desk viewers (rdViewers).** These are created dynamically inside dialog JavaScript and have different lifecycle patterns. Extracting them would require significant dialog refactoring. They can be refactored in a follow-up task if desired.
 
