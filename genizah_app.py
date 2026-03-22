@@ -6210,15 +6210,14 @@ class ResultDialog(QDialog):
             self._update_add_to_list_button()
 
     def _add_to_puzzle(self):
-        """Add current result to puzzle canvas."""
+        """Add current result to puzzle canvas (mirrors _browse_add_to_puzzle logic)."""
         parent = self.parent()
         if not parent or not hasattr(parent, 'add_to_puzzle'):
             return
         sys_id = self.current_sys_id
         if not sys_id:
             return
-        fl_id = self.current_fl_id or ''
-        # Get shelfmark from current result (display.shelfmark is the canonical location)
+        # Get shelfmark from display metadata
         shelfmark = str(sys_id)
         if self.all_results and 0 <= self.current_result_idx < len(self.all_results):
             result = self.all_results[self.current_result_idx]
@@ -6226,12 +6225,17 @@ class ResultDialog(QDialog):
                          or result.get('shelfmark')
                          or result.get('call_number')
                          or str(sys_id))
-        # Use current page label if available from internal navigation
+        # Get fl_id from the viewer's image list (same approach as _browse_add_to_puzzle).
+        # Only use fl_id when on NLI images — external sources (Cambridge, Oxford, etc.)
+        # need the async PuzzleMetaLoaderThread path which carries image_url.
+        fl_id = None
         folio_label = '1r'
-        if hasattr(self, 'current_full_header') and self.current_full_header:
-            parsed = self.meta_mgr.parse_full_id_components(self.current_full_header)
-            if parsed.get('fl_id'):
-                fl_id = fl_id or parsed['fl_id']
+        if hasattr(self, 'ms_viewer') and self.ms_viewer:
+            if self.ms_viewer.active_list is self.ms_viewer.images_nli:
+                if self.ms_viewer.current_idx < len(self.ms_viewer.active_list):
+                    current_img = self.ms_viewer.active_list[self.ms_viewer.current_idx]
+                    fl_id = current_img.get('fl_id', '')
+                    folio_label = current_img.get('label', '1r')
         parent.add_to_puzzle(sys_id, shelfmark, folio_label, fl_id)
         self.close()
 
