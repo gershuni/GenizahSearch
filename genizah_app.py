@@ -6218,13 +6218,20 @@ class ResultDialog(QDialog):
         if not sys_id:
             return
         fl_id = self.current_fl_id or ''
-        # Get shelfmark from current result
+        # Get shelfmark from current result (display.shelfmark is the canonical location)
+        shelfmark = str(sys_id)
         if self.all_results and 0 <= self.current_result_idx < len(self.all_results):
             result = self.all_results[self.current_result_idx]
-            shelfmark = result.get('shelfmark', result.get('call_number', str(sys_id)))
-        else:
-            shelfmark = str(sys_id)
-        folio_label = '1r'  # default; could be improved with current page info
+            shelfmark = (result.get('display', {}).get('shelfmark')
+                         or result.get('shelfmark')
+                         or result.get('call_number')
+                         or str(sys_id))
+        # Use current page label if available from internal navigation
+        folio_label = '1r'
+        if hasattr(self, 'current_full_header') and self.current_full_header:
+            parsed = self.meta_mgr.parse_full_id_components(self.current_full_header)
+            if parsed.get('fl_id'):
+                fl_id = fl_id or parsed['fl_id']
         parent.add_to_puzzle(sys_id, shelfmark, folio_label, fl_id)
         self.close()
 
@@ -7420,6 +7427,7 @@ class ResultDialog(QDialog):
         if not self.current_sys_id:
             # Fallback for tag search results: get sys_id from display dict
             self.current_sys_id = data.get('display', {}).get('id', '')
+        self.current_fl_id = ids.get('fl_id')
         try: p = int(ids['p_num'])
         except (ValueError, TypeError, KeyError): p = 1
 
