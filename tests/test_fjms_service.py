@@ -640,14 +640,16 @@ def test_get_bibliography_returns_list(service):
     assert bib[1]["mention_type"] == "Mentioned"
     assert bib[2]["mention_type"] == "Transcription"
     # Check dict keys
-    expected_keys = {
-        "running_title", "title_year", "title_acronym", "mention_page",
-        "from_page", "to_page", "volume", "mention_type",
+    base_keys = {
+        "running_title", "running_title_heb", "title_year", "title_acronym",
+        "title_acronym_heb", "mention_page", "from_page", "to_page",
+        "volume", "e_volume", "journal_date", "mention_type",
         "transcription_type", "translation_type", "article_name",
         "article_author_eng", "article_author_heb", "catalog_acronym",
+        "comment", "note_for_display", "catalog_entry",
     }
     for entry in bib:
-        assert set(entry.keys()) == expected_keys
+        assert set(entry.keys()) == base_keys
     # Verify specific values
     assert bib[0]["running_title"] == "Goitein Med Soc"
     assert bib[0]["title_year"] == "1967"

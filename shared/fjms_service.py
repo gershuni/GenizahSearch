@@ -626,6 +626,7 @@ class FjmsService:
         self._unclassified_cache: Optional[int] = None
         self._unclassified_lock = threading.Lock()
         self._has_persons_titles: bool = False  # Set True if v5+ tables exist
+        self._has_bib_extended: bool = False  # Set True if extended bib columns exist
 
         # Resolve db_path
         if db_path is None:
@@ -679,6 +680,14 @@ class FjmsService:
                     logger.info("FjmsService: v5+ lookup tables detected (genizah_persons, genizah_titles)")
             except Exception:
                 self._has_persons_titles = False
+
+            # Detect extended bibliography columns (re-exported with JournalVolumeTxt etc.)
+            try:
+                self._conn.execute("SELECT RunningTitleHeb FROM bibliography LIMIT 0")
+                self._has_bib_extended = True
+                logger.info("FjmsService: extended bibliography columns detected")
+            except Exception:
+                self._has_bib_extended = False
         except Exception as e:
             logger.error(f"FjmsService: Failed to connect to {db_path}: {e}")
             self._conn = None
@@ -2183,10 +2192,12 @@ class FjmsService:
             sys_id: The Alma/system ID for the manuscript.
 
         Returns:
-            List of dicts with keys: running_title, title_year, title_acronym,
-            mention_page, from_page, to_page, volume, mention_type,
-            transcription_type, translation_type, article_name,
-            article_author_eng, article_author_heb, catalog_acronym.
+            List of dicts with keys: running_title, running_title_heb, title_year,
+            title_acronym, title_acronym_heb, mention_page, from_page, to_page,
+            volume, e_volume, journal_date, mention_type, transcription_type,
+            translation_type, article_name, article_author_eng, article_author_heb,
+            catalog_acronym, comment, note_for_display, catalog_entry.
+            Extended fields are None when sidecar lacks extended columns.
             Returns [] if conn is None, sys_id not found, or table missing.
         """
         if self._conn is None:
@@ -2200,8 +2211,10 @@ class FjmsService:
                 "ELSE 2 END, RunningTitle",
                 (sys_id,),
             )
-            return [
-                {
+            extended = self._has_bib_extended
+            results = []
+            for row in cursor:
+                entry = {
                     "running_title": row["RunningTitle"],
                     "title_year": row["TitleYear"],
                     "title_acronym": row["TitleAcronym"],
@@ -2217,8 +2230,24 @@ class FjmsService:
                     "article_author_heb": row["ArticleAuthorHeb"],
                     "catalog_acronym": row["CatalogAcronym"],
                 }
-                for row in cursor
-            ]
+                if extended:
+                    entry["running_title_heb"] = row["RunningTitleHeb"]
+                    entry["title_acronym_heb"] = row["TitleAcronymHeb"]
+                    entry["e_volume"] = row["EVolume"]
+                    entry["journal_date"] = row["JournalDate"]
+                    entry["comment"] = row["Comment"]
+                    entry["note_for_display"] = row["NoteForDisplay"]
+                    entry["catalog_entry"] = row["CatalogEntry"]
+                else:
+                    entry["running_title_heb"] = None
+                    entry["title_acronym_heb"] = None
+                    entry["e_volume"] = None
+                    entry["journal_date"] = None
+                    entry["comment"] = None
+                    entry["note_for_display"] = None
+                    entry["catalog_entry"] = None
+                results.append(entry)
+            return results
         except Exception as e:
             logger.error(f"FjmsService.get_bibliography error for {sys_id}: {e}")
             return []

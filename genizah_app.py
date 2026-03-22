@@ -9619,13 +9619,18 @@ class FjmsBibliographyDialog(QDialog):
         for col_idx in (6, 7):
             self.table.setColumnWidth(col_idx, 36)
 
+        is_heb = CURRENT_LANG == 'he'
         for row, e in enumerate(fjms_entries):
             author = (e.get('article_author_eng') or e.get('article_author_heb') or '').strip()
             item0 = QTableWidgetItem(author)
             item0.setData(Qt.ItemDataRole.UserRole, row)
             self.table.setItem(row, 0, item0)
             article_name = (e.get('article_name') or '').strip()
-            running_title = (e.get('running_title') or e.get('title_acronym') or '').strip()
+            if is_heb:
+                running_title = (e.get('running_title_heb') or e.get('running_title')
+                                 or e.get('title_acronym_heb') or e.get('title_acronym') or '').strip()
+            else:
+                running_title = (e.get('running_title') or e.get('title_acronym') or '').strip()
             self.table.setItem(row, 1, QTableWidgetItem(article_name if article_name else running_title))
             year = str(e.get('title_year') or '').strip()
             self.table.setItem(row, 2, QTableWidgetItem(year if year and year != 'None' else ''))
@@ -9693,11 +9698,18 @@ class FjmsBibliographyDialog(QDialog):
                 searchable = ' '.join([
                     e.get('article_author_eng') or '', e.get('article_author_heb') or '',
                     e.get('article_name') or '', e.get('running_title') or '',
-                    e.get('title_acronym') or '',
+                    e.get('running_title_heb') or '', e.get('title_acronym') or '',
+                    e.get('title_acronym_heb') or '',
                 ]).lower()
                 if text_val not in searchable:
                     show = False
             self.table.setRowHidden(row, not show)
+
+    @staticmethod
+    def _safe(val):
+        """Return stripped string or empty string for None/placeholder values."""
+        s = (val or '').strip()
+        return s if s and s != 'None' else ''
 
     def _on_row_selected(self, row, col, prev_row, prev_col):
         item = self.table.item(row, 0)
@@ -9705,21 +9717,37 @@ class FjmsBibliographyDialog(QDialog):
         if isinstance(orig_idx, int) and 0 <= orig_idx < len(self.entries):
             e = self.entries[orig_idx]
             parts = []
-            article = (e.get('article_name') or '').strip()
+            article = self._safe(e.get('article_name'))
             if article:
                 parts.append(f"{tr('Article')}: {article}")
-            author_heb = (e.get('article_author_heb') or '').strip()
+            author_heb = self._safe(e.get('article_author_heb'))
             if author_heb:
                 parts.append(f"{tr('Author')}: {author_heb}")
-            tt = (e.get('transcription_type') or '').strip()
-            if tt and tt not in ('', 'None'):
+            tt = self._safe(e.get('transcription_type'))
+            if tt:
                 parts.append(f"{tr('Transcription')}: {tr(tt)}")
-            tl = (e.get('translation_type') or '').strip()
-            if tl and tl not in ('', 'None'):
+            tl = self._safe(e.get('translation_type'))
+            if tl:
                 parts.append(f"{tr('Translation')}: {tr(tl)}")
-            cat = (e.get('catalog_acronym') or '').strip()
-            if cat and cat != 'None':
+            cat = self._safe(e.get('catalog_acronym'))
+            if cat:
                 parts.append(f"{tr('Catalog')}: {cat}")
+            # Extended fields
+            evol = self._safe(e.get('e_volume'))
+            if evol:
+                parts.append(f"{tr('Vol.')} (EN): {evol}")
+            jdate = self._safe(e.get('journal_date'))
+            if jdate:
+                parts.append(f"{tr('Date')}: {jdate}")
+            cat_entry = self._safe(e.get('catalog_entry'))
+            if cat_entry:
+                parts.append(f"{tr('Catalog')} #: {cat_entry}")
+            comment = self._safe(e.get('comment'))
+            if comment:
+                parts.append(f"{tr('Comment')}: {comment}")
+            note = self._safe(e.get('note_for_display'))
+            if note:
+                parts.append(f"{tr('Note')}: {note}")
             if parts:
                 self.detail_panel.setPlainText('\n'.join(parts))
                 self.detail_panel.setVisible(True)

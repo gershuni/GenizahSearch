@@ -10,8 +10,10 @@ Uses T/S qualifier symbols following the FJMS website pattern:
 Full → ✓+, Partial → ✓−, Exists → ✓, None → (empty).
 """
 
+import html as html_mod
+
 from nicegui import ui
-from web.translations import tr
+from web.translations import tr, get_language
 from shared.fjms_service import format_page_ref, _parse_marc_annotations, strip_marc_annotation_suffix, _ts_symbol
 from typing import List, Dict
 
@@ -72,12 +74,17 @@ def create_fjms_bibliography_dialog(
         ]
 
         def _build_rows(entries, indices=None):
+            is_heb = get_language() == 'he'
             rows = []
             for idx, e in enumerate(entries):
                 row_id = indices[idx] if indices else idx
                 author = (e.get('article_author_eng') or e.get('article_author_heb') or '').strip()
                 article_name = (e.get('article_name') or '').strip()
-                running_title = (e.get('running_title') or e.get('title_acronym') or '').strip()
+                if is_heb:
+                    running_title = (e.get('running_title_heb') or e.get('running_title')
+                                     or e.get('title_acronym_heb') or e.get('title_acronym') or '').strip()
+                else:
+                    running_title = (e.get('running_title') or e.get('title_acronym') or '').strip()
                 display_title = article_name if article_name else running_title
                 year = str(e.get('title_year') or '').strip()
                 vol = str(e.get('volume') or '').strip()
@@ -122,6 +129,11 @@ def create_fjms_bibliography_dialog(
         )
         detail_label.visible = False
 
+        def _esc(val):
+            """Escape a value for safe HTML display."""
+            s = (val or '').strip()
+            return html_mod.escape(s) if s and s != 'None' else ''
+
         def on_row_click(e):
             row_data = e.args[1] if isinstance(e.args, (list, tuple)) and len(e.args) > 1 else e.args
             if isinstance(row_data, dict):
@@ -132,10 +144,10 @@ def create_fjms_bibliography_dialog(
             if 0 <= row_id < len(fjms_entries):
                 entry = fjms_entries[row_id]
                 parts = []
-                article = (entry.get('article_name') or '').strip()
+                article = _esc(entry.get('article_name'))
                 if article:
                     parts.append(f'{tr("Article")}: {article}')
-                author_heb = (entry.get('article_author_heb') or '').strip()
+                author_heb = _esc(entry.get('article_author_heb'))
                 if author_heb:
                     parts.append(f'{tr("Author")}: {author_heb}')
                 tt = (entry.get('transcription_type') or '').strip()
@@ -144,9 +156,25 @@ def create_fjms_bibliography_dialog(
                 tl = (entry.get('translation_type') or '').strip()
                 if tl and tl not in ('', 'None'):
                     parts.append(f'{tr("Translation")}: {tr(tl)}')
-                cat = (entry.get('catalog_acronym') or '').strip()
-                if cat and cat != 'None':
+                cat = _esc(entry.get('catalog_acronym'))
+                if cat:
                     parts.append(f'{tr("Catalog")}: {cat}')
+                # Extended fields
+                evol = _esc(entry.get('e_volume'))
+                if evol:
+                    parts.append(f'{tr("Vol.")} (EN): {evol}')
+                jdate = _esc(entry.get('journal_date'))
+                if jdate:
+                    parts.append(f'{tr("Date")}: {jdate}')
+                cat_entry = _esc(entry.get('catalog_entry'))
+                if cat_entry:
+                    parts.append(f'{tr("Catalog")} #: {cat_entry}')
+                comment = _esc(entry.get('comment'))
+                if comment:
+                    parts.append(f'{tr("Comment")}: {comment}')
+                note = _esc(entry.get('note_for_display'))
+                if note:
+                    parts.append(f'{tr("Note")}: {note}')
                 if parts:
                     detail_label.content = '<br>'.join(parts)
                     detail_label.visible = True
@@ -187,7 +215,9 @@ def create_fjms_bibliography_dialog(
                         e.get('article_author_heb') or '',
                         e.get('article_name') or '',
                         e.get('running_title') or '',
+                        e.get('running_title_heb') or '',
                         e.get('title_acronym') or '',
+                        e.get('title_acronym_heb') or '',
                     ]).lower()
                     if text_val not in searchable:
                         continue

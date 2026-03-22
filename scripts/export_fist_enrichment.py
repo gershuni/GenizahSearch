@@ -795,33 +795,44 @@ def export_bibliography(source, target):
         CREATE TABLE bibliography (
             AlmaId TEXT NOT NULL,
             RunningTitle TEXT,
+            RunningTitleHeb TEXT,
             TitleYear TEXT,
             TitleAcronym TEXT,
+            TitleAcronymHeb TEXT,
             MentionPage TEXT,
             FromPage TEXT,
             ToPage TEXT,
             Volume TEXT,
+            EVolume TEXT,
+            JournalDate TEXT,
             MentionType TEXT,
             TranscriptionType TEXT,
             TranslationType TEXT,
             ArticleName TEXT,
             ArticleAuthorEng TEXT,
             ArticleAuthorHeb TEXT,
-            CatalogAcronym TEXT
+            CatalogAcronym TEXT,
+            Comment TEXT,
+            NoteForDisplay TEXT,
+            CatalogEntry TEXT
         )
     """)
 
     cursor = source.execute("""
         SELECT DISTINCT
             TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            t.RunningTitleEng, t.TitleYearEng, t.AcronymEng,
-            bib.MentionPage, bib.FromPage, bib.ToPage, bib.Volume,
+            t.RunningTitleEng, t.RunningTitleHeb,
+            t.TitleYearEng, t.AcronymEng, t.AcronymHeb,
+            bib.MentionPage, bib.FromPage, bib.ToPage,
+            COALESCE(NULLIF(bib.JournalVolumeTxt, ''), bib.Volume),
+            bib.EVolume, bib.JournalDate,
             fc.EngDesc as MentionType,
             ft.EngDesc as TranscriptionType,
             fl.EngDesc as TranslationType,
             bib.ArticleName,
             a.EngDesc as ArticleAuthorEng, a.HebDesc as ArticleAuthorHeb,
-            cat.CatAcronym
+            cat.CatAcronym,
+            bib.Comment, bib.NoteForDisplay, bib.CatalogEntry
         FROM dbo_InventoryAlma alma
         JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
         JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
@@ -838,23 +849,21 @@ def export_bibliography(source, target):
         LEFT JOIN CODE_Catalog cat ON bib.CatalogId = cat.CatalogId
     """)
 
+    n_cols = 22
+    placeholders = ", ".join(["?"] * n_cols)
+    insert_sql = f"INSERT INTO bibliography VALUES ({placeholders})"
+
     batch = []
     total = 0
     for row in tqdm(cursor, desc="  bibliography", unit=" rows"):
         batch.append(row)
         if len(batch) >= BATCH_SIZE:
-            target.executemany(
-                "INSERT INTO bibliography VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                batch,
-            )
+            target.executemany(insert_sql, batch)
             total += len(batch)
             batch = []
 
     if batch:
-        target.executemany(
-            "INSERT INTO bibliography VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            batch,
-        )
+        target.executemany(insert_sql, batch)
         total += len(batch)
 
     target.execute("CREATE INDEX idx_bib_alma ON bibliography(AlmaId)")
