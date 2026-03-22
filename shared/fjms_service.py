@@ -2432,8 +2432,9 @@ class FjmsService:
         except Exception as e:
             logger.debug(f"FjmsService.get_catalog_detail fields error for {sys_id}: {e}")
 
-        # 5. Free descriptions
+        # 5. Free descriptions (deduplicated by source_name + text)
         free_descriptions = []
+        seen_descs: set[tuple] = set()
         try:
             # Try with SourceName columns first (v4.1.0+ sidecar)
             cursor = self._conn.execute(
@@ -2442,6 +2443,10 @@ class FjmsService:
                 (sys_id,),
             )
             for row in cursor:
+                key = (row["SourceName"] or '', row["FreeDesc"] or '')
+                if key in seen_descs:
+                    continue
+                seen_descs.add(key)
                 free_descriptions.append({
                     "text": row["FreeDesc"],
                     "signature_id": row["SignatureId"],
@@ -2451,6 +2456,7 @@ class FjmsService:
         except Exception:
             # Fallback: old sidecar without SourceName columns
             free_descriptions = []
+            seen_descs = set()
             try:
                 cursor = self._conn.execute(
                     "SELECT SignatureId, FreeDesc "
@@ -2458,6 +2464,10 @@ class FjmsService:
                     (sys_id,),
                 )
                 for row in cursor:
+                    desc_text = row["FreeDesc"] or ''
+                    if desc_text in seen_descs:
+                        continue
+                    seen_descs.add(desc_text)
                     free_descriptions.append({
                         "text": row["FreeDesc"],
                         "signature_id": row["SignatureId"],
