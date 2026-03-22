@@ -19,7 +19,7 @@ milestone_name: milestone
 status: Executing Phase 53
 stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
 last_updated: "2026-03-18T19:49:02Z"
-last_activity: 2026-03-21 - Completed quick task 260321-tiv: Extract shared filter panel + manuscript viewer JS
+last_activity: 2026-03-22 - Completed quick task 260322-kr9: Close ResultDialog when adding to puzzle from desktop app
 progress:
   total_phases: 6
   completed_phases: 5
@@ -309,9 +309,10 @@ Recent decisions affecting current work:
 | 260319-dt1 | Add image adjustment controls (brightness, contrast, gamma, invert) to all viewers | 2026-03-19 | a4764fd7 | [260319-dt1-add-image-controls-brightness-contrast-g](./quick/260319-dt1-add-image-controls-brightness-contrast-g/) |
 | 260321-qjh | Fix puzzle session restore for external fragments + wire Firefox addon link | 2026-03-21 | 99199a74 | [260321-qjh-fix-bug-adding-to-puzzle-in-web-does-not](./quick/260321-qjh-fix-bug-adding-to-puzzle-in-web-does-not/) |
 | 260321-tiv | Extract shared filter panel component and manuscript viewer JS | 2026-03-21 | 6b54a1f4 | [260321-tiv-extract-shared-filter-panel-and-image-vi](./quick/260321-tiv-extract-shared-filter-panel-and-image-vi/) |
+| 260322-kr9 | Close ResultDialog when adding to puzzle from desktop app | 2026-03-22 | cab3753e | [260322-kr9-close-resultdialog-when-adding-to-puzzle](./quick/260322-kr9-close-resultdialog-when-adding-to-puzzle/) |
 
 ## Session Continuity
 
-Last session: 2026-03-21
-Stopped at: Completed quick task 260321-tiv (extract shared filter panel + manuscript viewer JS)
+Last session: 2026-03-22
+Stopped at: Completed quick task 260322-kr9: Close ResultDialog when adding to puzzle from desktop app
 Resume file: None
