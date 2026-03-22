@@ -19,7 +19,7 @@ milestone_name: milestone
 status: Executing Phase 53
 stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
 last_updated: "2026-03-18T19:49:02Z"
-last_activity: 2026-03-22 - Completed quick task 260322-uqk: Deduplicate FJMS catalog free descriptions
+last_activity: 2026-03-22 - Completed quick task 260322-uqk: FIST data fixes (catalog dedup + bibliography enhancement)
 progress:
   total_phases: 6
   completed_phases: 5
@@ -310,10 +310,10 @@ Recent decisions affecting current work:
 | 260321-qjh | Fix puzzle session restore for external fragments + wire Firefox addon link | 2026-03-21 | 99199a74 | [260321-qjh-fix-bug-adding-to-puzzle-in-web-does-not](./quick/260321-qjh-fix-bug-adding-to-puzzle-in-web-does-not/) |
 | 260321-tiv | Extract shared filter panel component and manuscript viewer JS | 2026-03-21 | 6b54a1f4 | [260321-tiv-extract-shared-filter-panel-and-image-vi](./quick/260321-tiv-extract-shared-filter-panel-and-image-vi/) |
 | 260322-kr9 | Close ResultDialog when adding to puzzle from desktop app | 2026-03-22 | cab3753e | [260322-kr9-close-resultdialog-when-adding-to-puzzle](./quick/260322-kr9-close-resultdialog-when-adding-to-puzzle/) |
-| 260322-uqk | Deduplicate FJMS catalog free descriptions (14,504 dupes across 12,507 manuscripts) | 2026-03-22 | 77e562e2 | [260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca](./quick/260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca/) |
+| 260322-uqk | Dedup FJMS catalog + enhance bibliography (8 new FIST fields, volume fix, Hebrew titles) | 2026-03-22 | da414fd6 | [260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca](./quick/260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca/) |
 
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed quick task 260322-uqk: Deduplicate FJMS catalog free descriptions
+Stopped at: Completed quick task 260322-uqk: FIST data fixes (catalog dedup + bibliography enhancement)
 Resume file: None
