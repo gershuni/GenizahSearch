@@ -4078,7 +4078,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
         from shared.puzzle_model import PuzzleFragment
         # Per-library bg removal settings:
-        # - CUL + CUDL private collections (Mosseri etc.): high threshold (115) for blue mats
+        # - CUL + CUDL private collections (Mosseri etc.): high threshold (150) for blue mats
         # - Oxford: skip bg removal — dark ink on similar-colored parchment
         # - Others: default threshold (30)
         threshold = 30.0
@@ -4087,13 +4087,13 @@ class PuzzleCanvasWindow(QMainWindow):
         if hasattr(self.app, 'meta_mgr') and self.app.meta_mgr:
             lib_code = self.app.meta_mgr.get_library_for_id(sys_id) or ''
         if lib_code == 'CUL' or external_provider == 'cambridge':
-            threshold = 115.0
+            threshold = 150.0
         elif lib_code == 'Oxford':
             skip_bg = True
         elif shelfmark:
             s = shelfmark.upper()
             if s.startswith(('T-S', 'OR.', 'ADD.')):
-                threshold = 115.0
+                threshold = 150.0
             elif s.startswith(('MS HEB.', 'MS. HEB.')):
                 skip_bg = True
         puzzle_frag = PuzzleFragment(
@@ -4525,8 +4525,12 @@ class PuzzleCanvasWindow(QMainWindow):
             item.puzzle_frag.rotation = new_rot
 
     @staticmethod
-    def _is_cul_fragment(pf) -> bool:
-        """Check if a PuzzleFragment is from CUL/CUDL (has blue conservation mat)."""
+    def _has_blue_mat(pf) -> bool:
+        """Check if a PuzzleFragment is likely from a library with blue conservation mat.
+
+        Used as a cache key hint — actual blue mat removal is also auto-detected
+        by remove_background() regardless of this hint.
+        """
         if getattr(pf, 'external_provider', '') == 'cambridge':
             return True
         if pf.shelfmark:
@@ -4580,7 +4584,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self._pending_fragments[new_key] = pf
             thr = pf.bg_removal_threshold
             thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0),
-                                             is_cul=self._is_cul_fragment(pf),
+                                             is_cul=self._has_blue_mat(pf),
                                              image_url=pf.image_url)
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
@@ -4635,7 +4639,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self._pending_fragments[new_key] = pf
             thr = pf.bg_removal_threshold
             thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0),
-                                             is_cul=self._is_cul_fragment(pf),
+                                             is_cul=self._has_blue_mat(pf),
                                              image_url=pf.image_url)
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
@@ -4764,7 +4768,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self._pending_fragments[item_key] = pf
             thread = PuzzleImageLoaderThread(
                 pf.fl_id, threshold=float(value), processed=processed,
-                is_cul=self._is_cul_fragment(pf)
+                is_cul=self._has_blue_mat(pf)
             )
             thread.image_ready.connect(partial(self._on_image_loaded, item_key))
             thread.load_failed.connect(self._on_image_failed)
@@ -4853,7 +4857,7 @@ class PuzzleCanvasWindow(QMainWindow):
             self._pending_fragments[new_key] = pf
 
             # Fetch new image
-            thread = PuzzleImageLoaderThread(new_fl_id, threshold=pf.bg_removal_threshold, is_cul=self._is_cul_fragment(pf))
+            thread = PuzzleImageLoaderThread(new_fl_id, threshold=pf.bg_removal_threshold, is_cul=self._has_blue_mat(pf))
             thread.image_ready.connect(partial(self._on_image_loaded, new_key))
             thread.load_failed.connect(self._on_image_failed)
             self._loader_threads.append(thread)
@@ -5070,7 +5074,7 @@ class PuzzleCanvasWindow(QMainWindow):
                 threshold=frag.bg_removal_threshold,
                 size=800,
                 processed=frag.processed,
-                is_cul=self._is_cul_fragment(frag),
+                is_cul=self._has_blue_mat(frag),
                 image_url=getattr(frag, 'image_url', '')
             )
             thread.image_ready.connect(partial(self._on_image_loaded, item_key))

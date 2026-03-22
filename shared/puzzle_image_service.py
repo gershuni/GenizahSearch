@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Processing algorithm version. Included in cache keys for processed images
 # so that cache entries are automatically invalidated when the background
 # removal algorithm changes.
-PROCESSING_VERSION = 'v3'
+PROCESSING_VERSION = 'v4'
 
 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
 
@@ -219,8 +219,8 @@ class PuzzleImageService:
         """
         safe_id = _safe_filename(fl_id)
         if threshold is not None:
-            # Remove specific threshold file(s)
-            pattern = f"{safe_id}_*_{threshold:.1f}.png"
+            # Remove specific threshold file(s) — match both versioned and legacy
+            pattern = f"{safe_id}_*_{threshold:.1f}*.png"
         else:
             # Remove all files for this fl_id (processed and original)
             pattern = f"{safe_id}_*"

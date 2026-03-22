@@ -12,10 +12,13 @@ from PIL import Image
 from shared.background_removal import (
     remove_background,
     detect_background_color,
-    create_cul_blue_mask,
+    detect_blue_mat,
+    create_blue_mat_mask,
+    create_cul_blue_mask,  # legacy alias
     create_mask,
     DEFAULT_THRESHOLD,
     MIN_FOREGROUND_RATIO,
+    BLUE_MAT_DETECT_THRESHOLD,
 )
 
 
@@ -100,34 +103,36 @@ class TestThresholdAndSafety:
     def test_threshold_affects_mask(self):
         """Lower threshold = tighter removal, higher = more aggressive.
 
-        Uses an image with gradient border pixels so threshold difference is visible.
+        Uses a gray background with a wide gradient ring so threshold
+        difference is clearly visible after morphological cleanup.
         """
-        # Create image with gradient transition between bg and fg
-        img = Image.new('RGB', (200, 200), (0, 0, 255))
+        # Gray background (low saturation — uses value-channel distance)
+        img = Image.new('RGB', (300, 300), (80, 80, 80))
         # Center white square
-        for x in range(75, 125):
-            for y in range(75, 125):
+        for x in range(120, 180):
+            for y in range(120, 180):
                 img.putpixel((x, y), (255, 255, 255))
-        # Add gradient border around the square (colors between blue and white)
-        for x in range(60, 140):
-            for y in range(60, 140):
-                if not (75 <= x < 125 and 75 <= y < 125):
-                    # Intermediate color -- closer to blue but not exact
-                    img.putpixel((x, y), (100, 100, 255))
+        # Wide gradient ring — values from 100 to 220 (between bg=80 and fg=255)
+        for x in range(60, 240):
+            for y in range(60, 240):
+                if not (120 <= x < 180 and 120 <= y < 180):
+                    t = min(abs(x - 150), abs(y - 150)) / 90.0
+                    v = int(80 + t * 175)  # 80 (bg-like) to 255 (fg-like)
+                    img.putpixel((x, y), (v, v, v))
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         img_bytes = buf.getvalue()
 
         result_tight = remove_background(img_bytes, threshold=5.0)
-        result_aggressive = remove_background(img_bytes, threshold=100.0)
+        result_aggressive = remove_background(img_bytes, threshold=80.0)
 
         tight_img = open_result(result_tight)
         aggressive_img = open_result(result_aggressive)
 
         # Count opaque pixels
-        tight_opaque = sum(1 for x in range(200) for y in range(200)
+        tight_opaque = sum(1 for x in range(300) for y in range(300)
                           if tight_img.getpixel((x, y))[3] > 0)
-        aggressive_opaque = sum(1 for x in range(200) for y in range(200)
+        aggressive_opaque = sum(1 for x in range(300) for y in range(300)
                                 if aggressive_img.getpixel((x, y))[3] > 0)
 
         # Tight threshold should keep more pixels opaque (gradient pixels survive)
@@ -300,20 +305,23 @@ class TestCulBlueMatRemoval:
         assert result_img.getpixel((5, 5))[3] == 0
         assert result_img.getpixel((100, 100))[3] == 255
 
-    def test_is_cul_false_does_not_affect_non_cul(self):
-        """Without is_cul=True, blue mat NOT removed when corners detect gray border."""
+    def test_is_cul_false_auto_detects_blue_mat(self):
+        """Without is_cul=True, blue mat IS now auto-detected and removed."""
         img_bytes = make_two_layer_image(
             outer_color=(180, 180, 180),  # gray border (corners detect this)
             inner_color=(0, 0, 255),       # blue mat
             fg_color=(220, 200, 170),      # parchment
         )
-        # Without is_cul, the corner-based detection finds gray, NOT blue
+        # Without is_cul, auto-detection triggers (blue mat >2% of pixels)
         result = remove_background(img_bytes, is_cul=False)
         result_img = open_result(result)
 
-        # Blue mat is NOT removed (corners only found gray)
-        # This confirms is_cul flag is needed for CUL images
-        assert result_img.getpixel((50, 150))[3] == 255  # blue still opaque
+        # Blue mat IS removed (auto-detected)
+        assert result_img.getpixel((50, 150))[3] == 0
+        # Gray border KEPT (auto-detect uses blue-only mask for safety)
+        assert result_img.getpixel((5, 5))[3] == 255
+        # Parchment kept
+        assert result_img.getpixel((150, 150))[3] == 255
 
     def test_cul_blue_mask_direct(self):
         """create_cul_blue_mask correctly identifies blue pixels by hue range."""
@@ -348,3 +356,117 @@ class TestCulBlueMatRemoval:
         # With is_cul: gray NOT removed (only blue is targeted)
         assert cul_img.getpixel((5, 5))[3] == 255
         assert cul_img.getpixel((100, 100))[3] == 255
+
+
+class TestBlueMatAutoDetection:
+    """Tests for automatic blue mat detection (no is_cul hint needed)."""
+
+    def test_detect_blue_mat_returns_high_for_blue_image(self):
+        """detect_blue_mat() returns high fraction for image with blue background."""
+        img = Image.new('RGB', (200, 200), (0, 0, 255))  # blue
+        # Small parchment center
+        for x in range(80, 120):
+            for y in range(80, 120):
+                img.putpixel((x, y), (220, 200, 170))
+        hsv_array = np.array(img.convert('HSV'))
+        frac = detect_blue_mat(hsv_array)
+        # ~96% blue (200x200 - 40x40 center = 38400/40000)
+        assert frac > 0.5
+
+    def test_detect_blue_mat_returns_low_for_gray_image(self):
+        """detect_blue_mat() returns ~0 for gray background image."""
+        img = Image.new('RGB', (200, 200), (128, 128, 128))
+        for x in range(80, 120):
+            for y in range(80, 120):
+                img.putpixel((x, y), (255, 255, 255))
+        hsv_array = np.array(img.convert('HSV'))
+        frac = detect_blue_mat(hsv_array)
+        assert frac < BLUE_MAT_DETECT_THRESHOLD
+
+    def test_auto_detect_triggers_on_blue_background(self):
+        """Blue background auto-detected and removed even without is_cul=True."""
+        # Blue background with white foreground — enough blue to trigger (>2%)
+        img_bytes = make_test_image((0, 0, 255), (255, 255, 255))
+        result = remove_background(img_bytes, is_cul=False)
+        result_img = open_result(result)
+
+        # Blue corners should be transparent (auto-detected and removed)
+        assert result_img.getpixel((5, 5))[3] == 0
+        # White center should be opaque
+        assert result_img.getpixel((100, 100))[3] == 255
+
+    def test_auto_detect_does_not_trigger_on_gray(self):
+        """Gray background does not trigger blue auto-detection."""
+        img_bytes = make_test_image((128, 128, 128), (255, 255, 255))
+        result = remove_background(img_bytes, is_cul=False)
+        result_img = open_result(result)
+
+        # Gray corners removed by normal mask, not blue mask
+        assert result_img.getpixel((5, 5))[3] == 0
+        assert result_img.getpixel((100, 100))[3] == 255
+
+    def test_auto_detect_removes_blue_keeps_gray_border(self):
+        """Auto-detected blue: removes blue mat but keeps gray border (blue-only mask).
+
+        Auto-detect uses blue-only mask (same as explicit is_cul) to avoid
+        corner-sampling damage when fragments touch the image edges.
+        """
+        img_bytes = make_two_layer_image(
+            outer_color=(180, 180, 180),  # gray border
+            inner_color=(0, 0, 255),       # blue mat
+            fg_color=(220, 200, 170),      # parchment
+        )
+        # Without is_cul, but blue mat is >2% of pixels, so auto-detect triggers
+        result = remove_background(img_bytes, is_cul=False)
+        result_img = open_result(result)
+
+        # Gray border KEPT (blue-only mask, same as explicit is_cul)
+        assert result_img.getpixel((5, 5))[3] == 255
+        # Blue mat should be transparent
+        assert result_img.getpixel((50, 150))[3] == 0
+        # Parchment center should be opaque
+        assert result_img.getpixel((150, 150))[3] == 255
+
+    def test_auto_detect_same_as_explicit_is_cul(self):
+        """Auto-detect produces same result as explicit is_cul=True.
+
+        Both use blue-only mask. Auto-detect is conservative: it avoids
+        corner-sampled normal mask which can damage parchment at edges.
+        """
+        img_bytes = make_two_layer_image(
+            outer_color=(180, 180, 180),  # gray border
+            inner_color=(0, 0, 255),       # blue mat
+            fg_color=(220, 200, 170),      # parchment
+        )
+
+        result_explicit = remove_background(img_bytes, is_cul=True)
+        result_auto = remove_background(img_bytes, is_cul=False)
+
+        explicit_img = open_result(result_explicit)
+        auto_img = open_result(result_auto)
+
+        # Both keep gray border (blue-only mask)
+        assert explicit_img.getpixel((5, 5))[3] == 255
+        assert auto_img.getpixel((5, 5))[3] == 255
+        # Both remove blue mat
+        assert explicit_img.getpixel((50, 150))[3] == 0
+        assert auto_img.getpixel((50, 150))[3] == 0
+
+    def test_small_blue_below_threshold_not_detected(self):
+        """Tiny blue area (<2%) does not trigger auto-detection."""
+        # 200x200 = 40000 pixels. 2% = 800 pixels. Make blue area ~400 (1%)
+        img = Image.new('RGB', (200, 200), (128, 128, 128))  # gray bg
+        for x in range(90, 110):
+            for y in range(90, 110):
+                img.putpixel((x, y), (0, 0, 255))  # 20x20=400 blue pixels
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        img_bytes = buf.getvalue()
+
+        hsv_array = np.array(img.convert('HSV'))
+        frac = detect_blue_mat(hsv_array)
+        assert frac < BLUE_MAT_DETECT_THRESHOLD  # <2%, not triggered
+
+    def test_legacy_alias_create_cul_blue_mask(self):
+        """Legacy alias create_cul_blue_mask still works."""
+        assert create_cul_blue_mask is create_blue_mat_mask
