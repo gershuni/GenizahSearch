@@ -6226,6 +6226,7 @@ class ResultDialog(QDialog):
             shelfmark = str(sys_id)
         folio_label = '1r'  # default; could be improved with current page info
         parent.add_to_puzzle(sys_id, shelfmark, folio_label, fl_id)
+        self.close()
 
     def _update_add_to_list_button(self):
         parent = self.parent()
