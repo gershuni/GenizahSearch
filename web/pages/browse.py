@@ -521,6 +521,7 @@ class BrowseState:
         self.reading_desk_selected_sources: dict = {}  # sys_id -> selected source index
         # Source switching state: 'nli' (default), 'cambridge', 'manchester', or 'jts'
         self.active_source: str = 'nli'
+        self.source_user_override: bool = False  # True when user explicitly clicked a source button
         # Pre-fetched FJMS metadata (populated in load_page, consumed in update_content)
         self.fjms_data: Optional[Dict[str, Any]] = None
         # Pre-fetched crossref metadata (populated in _load_enrichment, consumed in update_content)
@@ -597,6 +598,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.view_joined = False
                 state.reading_desk_entries = []
                 state.active_source = 'nli'
+                state.source_user_override = False
                 enrichment_refs.clear()
                 await load_page(p_num=1)
                 return
@@ -624,6 +626,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.view_joined = False  # Exit reading desk if active
                 state.reading_desk_entries = []
                 state.active_source = 'nli'  # Reset image source for new manuscript
+                state.source_user_override = False
                 enrichment_refs.clear()  # Prevent stale ref usage
                 await load_page(p_num=1)  # Always start at page 1 for new manuscript
             else:
@@ -665,6 +668,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         state.view_joined = False  # Exit reading desk if active
                         state.reading_desk_entries = []
                         state.active_source = 'nli'  # Reset image source for new manuscript
+                        state.source_user_override = False
                         enrichment_refs.clear()  # Prevent stale ref usage
                         asyncio.ensure_future(load_page(p_num=1))
 
@@ -1128,6 +1132,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.full_manuscript = []
                 state.reading_desk_entries = []
                 state.active_source = 'nli'  # Reset image source for new manuscript
+                state.source_user_override = False
                 enrichment_refs.clear()  # Prevent stale ref usage across navigations
                 await load_page(p_num=1)  # Load first page of new manuscript
             else:
@@ -3690,6 +3695,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _has_manchester = _src_info.get('manchester', False)
                 _has_jts = _src_info.get('jts', False)
 
+                # Auto-default to Princeton DPUL for JTS manuscripts (main image source)
+                if _has_jts_images and state.active_source == 'nli' and not state.source_user_override:
+                    state.active_source = 'jts'
+
                 # Source switching setup -- any external source with NLI enables toggling
                 _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images
                 _both_sources = _has_nli and _any_ext_images
@@ -3700,18 +3709,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 async def switch_to_nli():
                     state.active_source = 'nli'
+                    state.source_user_override = True
                     await load_page(direction=0)
 
                 async def switch_to_cambridge():
                     state.active_source = 'cambridge'
+                    state.source_user_override = True
                     await load_page(direction=0)
 
                 async def switch_to_manchester():
                     state.active_source = 'manchester'
+                    state.source_user_override = True
                     await load_page(direction=0)
 
                 async def switch_to_jts():
                     state.active_source = 'jts'
+                    state.source_user_override = True
                     await load_page(direction=0)
 
                 # NLI viewer deep link handler
