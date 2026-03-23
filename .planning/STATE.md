@@ -311,9 +311,10 @@ Recent decisions affecting current work:
 | 260321-tiv | Extract shared filter panel component and manuscript viewer JS | 2026-03-21 | 6b54a1f4 | [260321-tiv-extract-shared-filter-panel-and-image-vi](./quick/260321-tiv-extract-shared-filter-panel-and-image-vi/) |
 | 260322-kr9 | Close ResultDialog when adding to puzzle from desktop app | 2026-03-22 | cab3753e | [260322-kr9-close-resultdialog-when-adding-to-puzzle](./quick/260322-kr9-close-resultdialog-when-adding-to-puzzle/) |
 | 260322-uqk | Dedup FJMS catalog + enhance bibliography (8 new FIST fields, volume fix, Hebrew titles) | 2026-03-22 | da414fd6 | [260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca](./quick/260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca/) |
+| 260323-gmy | Add Princeton DPUL as main source for JTS images | 2026-03-23 | 36ebe881 | [260323-gmy-add-princeton-dpul-as-main-source-for-jt](./quick/260323-gmy-add-princeton-dpul-as-main-source-for-jt/) |
 
 ## Session Continuity
 
-Last session: 2026-03-22
-Stopped at: Completed quick task 260322-uqk: FIST data fixes (catalog dedup + bibliography enhancement)
+Last session: 2026-03-23
+Stopped at: Completed quick task 260323-gmy: Add Princeton DPUL as main source for JTS images
 Resume file: None
