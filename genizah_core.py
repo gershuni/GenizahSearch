@@ -3409,7 +3409,9 @@ class MetadataManager:
                 jts_manifest = crossref_svc.get_jts_manifest_url(jts_shelfmark)
                 if jts_manifest:
                     ext_link = jts_manifest
-                    current_meta['external_url'] = ext_link
+                    # external_url should be the catalog page, not the manifest
+                    jts_dpul_page = crossref_svc.get_jts_dpul_url(jts_shelfmark)
+                    current_meta['external_url'] = jts_dpul_page or ext_link
                     current_meta['external_provider'] = 'jts'
                     LOGGER.info(f"Using JTS Figgy manifest for {system_id}")
 

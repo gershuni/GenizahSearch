@@ -8033,6 +8033,12 @@ class ResultDialog(QDialog):
             self.btn_toggle_image.setChecked(False)
 
         self.external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
+        # Prefer library_viewer_url (catalog page) over manifest URL for JTS/Manchester
+        lib_viewer = meta.get('library_viewer_url')
+        if lib_viewer and lib_viewer.get('url'):
+            provider_check = meta.get('external_provider', '')
+            if provider_check in ('manchester', 'jts'):
+                self.external_url = lib_viewer['url']
         if self.external_url:
             provider = meta.get('external_provider', '')
             if oxford_part_id or provider == 'oxford':
@@ -15142,6 +15148,12 @@ class GenizahGUI(QMainWindow):
 
         # Populate external library link button
         self._browse_external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
+        # Prefer library_viewer_url (catalog page) over manifest URL for JTS/Manchester
+        _b_lib_viewer = meta.get('library_viewer_url')
+        if _b_lib_viewer and _b_lib_viewer.get('url'):
+            _b_provider = meta.get('external_provider', '')
+            if _b_provider in ('manchester', 'jts'):
+                self._browse_external_url = _b_lib_viewer['url']
         if self._browse_external_url:
             provider = meta.get('external_provider', '')
             part_id_for_link = self.current_browse_part_id or self.meta_mgr.get_part_for_folio(sid)
