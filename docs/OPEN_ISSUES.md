@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-22 (Re-review of blue-mat auto-detection: corner-mask follow-up closed)
+> **Last Updated:** 2026-03-23 (Princeton DPUL full catalog import: 36,283 JTS items, auto-default to DPUL images, external link fix)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 6 | 6 |
-| P2 Medium Bugs | 10 | 27 | 37 |
+| P2 Medium Bugs | 10 | 28 | 38 |
 | P3 Low Priority | 1 | 4 | 5 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **18** | **65** | **83** |
+| **Total** | **18** | **66** | **84** |
 
 ---
 
@@ -99,6 +99,7 @@ Move to "Completed Issues" section at bottom with date
 | **Search accordion thumbnails did not load** | `web/pages/search.py`, `web/api.py` | ✅ Fixed (2026-03-19) | Removed direct NLI IIIF URL approach. Now uses same `/api/nli_image_by_sysid/{sys_id}?page={idx}&width=300` server proxy pattern as Advanced View, with `advHandleImageError` JS fallback. Added `width` param to API for 300px thumbnails. |
 | **Browse rotation slider TypeError: JS string passed as Python handler** | `web/pages/browse.py:4289-4292` | ✅ Fixed (2026-03-19) | `.on('update:model-value', 'if(window.manuscriptViewer)...')` passed a JS string where NiceGUI expects a callable. Removed — the Python `on_change=handle_rotation_slider` already handles rotation updates. |
 | **Puzzle background removal still misses some CUL blue conservation mats** | `shared/background_removal.py`, `shared/puzzle_image_service.py` | ❌ Open | Current algorithm learns the background color from the four image corners. That works for most scans, but some Cambridge images have parchment touching the corners while the bright blue conservation mat dominates the center/background. In those cases the detector learns the parchment instead of the mat, so removal keeps the blue and can even attack the fragment. Likely fix path is smarter background sampling or multiple candidate backgrounds rather than more threshold tuning. |
+| **FIST bibliography re-export is blocked by a placeholder-count mismatch in `export_bibliography()`** | `scripts/export_fist_enrichment.py` | ✅ Fixed (2026-03-22) | Follow-up review confirmed `export_bibliography()` now defines 22 bibliography columns, selects 22 values, and uses `n_cols = 22`, so the planned bibliography sidecar re-export is no longer blocked by the earlier insert mismatch. |
 | **Auto-detected blue-mat union can attack parchment when the corner sample learns fragment pixels** | `shared/background_removal.py` | ✅ Fixed (2026-03-22) | Re-review confirmed the auto-detect branch now uses the same blue-only mask as explicit `is_cul=True` and no longer unions in the corner-sampled normal mask, so the specific parchment-hole regression path is closed. |
 | **Puzzle external fragments persist wrong restore metadata in `initial_add` auto-add flow** | `web/pages/puzzle.py` | ✅ Fixed (2026-03-21) | Final re-review confirmed the `initial_add` external branch now computes `ext_processed`, `ext_threshold`, and `ext_is_cul` the same way as the regular add path and persists the effective values into pending/session metadata, so Oxford/Cambridge external fragments restore consistently across all three entry paths. |
 | **Puzzle session restore can keep skipped fragments as ghost metadata** | `web/pages/puzzle.py` | ✅ Fixed (2026-03-21) | Re-review confirmed `init_canvas()` now prunes unrestorable entries from `puzzle_meta` and writes the filtered state back to `app.storage.tab`, so save/export stays aligned with the actual canvas contents after restore. |
@@ -248,6 +249,8 @@ All completed items have been moved to `docs/archive/`:
 | Date | Change | By |
 |------|--------|-----|
 | 2026-03-22 | Re-reviewed the blue-mat auto-detection update. Confirmed the follow-up issue is fixed: auto-detected blue mats now take the same blue-only path as explicit `is_cul=True`, so the corner-sampled normal mask is no longer unioned in and the earlier parchment-hole regression path is closed. Focused `tests/test_background_removal.py` re-run passed. | Codex |
+| 2026-03-22 | Reviewed the implemented FIST bibliography enhancement changes. Confirmed the earlier export follow-up is fixed: `export_bibliography()` now aligns the bibliography schema, SELECT list, and placeholder count at 22, so the planned re-export path is unblocked. No new review findings in this pass. | Codex |
+| 2026-03-22 | Reviewed the FIST bibliography enhancement plan and added 1 new open P2 issue: `export_bibliography()` now defines 22 bibliography columns but still generates 23 `?` placeholders, so the planned sidecar re-export would fail before populating the new fields. | Codex |
 | 2026-03-22 | Reviewed the blue-mat auto-detection follow-up. Added 1 new open P2 issue: the new auto-detect branch unions the blue-only mask with the same corner-sampled normal mask that already fails on blue-mat scans when parchment reaches the corners, so unhinted blue-mat images can still lose real fragment pixels. | Codex |
 | 2026-03-21 | Final re-review of `web/pages/puzzle.py` confirmed the remaining external-fragment follow-up is fixed: `initial_add` now uses the same effective external metadata (`processed`, `threshold`, `is_cul`) as the other add/load paths, so all three external entry points are aligned. No new findings in this pass. | Codex |
 | 2026-03-21 | Re-reviewed the puzzle follow-up fixes. Confirmed the ghost-fragment restore issue is fixed: skipped entries are now pruned from `puzzle_meta` and session storage. Narrowed the remaining external-metadata issue to the `initial_add` auto-add path, which still hard-codes `processed=true` for external fragments. | Codex |
