@@ -3147,20 +3147,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         logger.info("Search perf: first_render_ms=%.0f (results=%d)", (_t_render - _t_stage0) * 1000, len(results))
 
         # --- Enrichment helper functions (defined once, used for both stages) ---
-        def collect_all_domains(sys_ids):
+        def collect_fjms_enrichment(sys_ids):
+            """Collect all FJMS enrichment in one sidecar pass for this batch."""
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=True)
-            return fjms.get_domains_for_sys_ids(sys_ids) if fjms.is_available() else {}
-
-        def collect_catalog_counts(sys_ids):
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            return fjms.get_catalog_source_counts(sys_ids) if fjms.is_available() else {}
-
-        def collect_printed_ids(sys_ids):
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
+            if not fjms.is_available():
+                return {}, {}, set()
+            return (
+                fjms.get_domains_for_sys_ids(sys_ids),
+                fjms.get_catalog_source_counts(sys_ids),
+                fjms.get_printed_sys_ids(sys_ids),
+            )
 
         _show_trans_for_enrich = False
         try:
@@ -3173,16 +3170,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 from shared.translation_service import TranslationService
                 svc = TranslationService(thread_safe=True)
                 pgp_trans = {}
-                title_trans = {}
                 if show_trans and svc.pgp_available():
                     pgp_trans = svc.get_pgp_translations_by_sys_ids(sys_ids)
-                if svc.titles_available():
-                    title_trans = svc.get_title_translations_batch(sys_ids)
                 svc.close()
-                return pgp_trans, title_trans
+                return pgp_trans
             except Exception as e:
                 logger.warning("Translation batch lookup failed: %s", e)
-                return {}, {}
+                return {}
 
         def _process_domain_data(raw_domains):
             """Process raw domain data into search_state fields."""
@@ -3239,22 +3233,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _t_stage1 = time.perf_counter()
         visible_ids = all_sys_ids[:PAGE_SIZE]
         if visible_ids and search_state.search_generation == this_generation:
-            raw_domains, transcription_ids, catalog_counts, printed_ids, trans_tuple = await asyncio.gather(
-                run.io_bound(collect_all_domains, visible_ids),
+            fjms_tuple, transcription_ids, trans_data = await asyncio.gather(
+                run.io_bound(collect_fjms_enrichment, visible_ids),
                 run.io_bound(get_sys_ids_with_transcriptions, visible_ids),
-                run.io_bound(collect_catalog_counts, visible_ids),
-                run.io_bound(collect_printed_ids, visible_ids),
                 run.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
             )
             # Check generation before applying (user may have started a new search)
             if search_state.search_generation == this_generation:
-                trans_data, title_trans_data = trans_tuple
+                raw_domains, catalog_counts, printed_ids = fjms_tuple
                 _process_domain_data(raw_domains)
                 search_state.transcription_sys_ids = transcription_ids
                 search_state.catalog_source_counts = catalog_counts
                 search_state.printed_ids = printed_ids
                 search_state.translation_data = trans_data
-                search_state.title_translations.update(title_trans_data)
                 # Pre-cache domain hierarchy
                 if search_state.all_result_domains:
                     def fetch_hierarchy():
@@ -3281,22 +3272,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if search_state.search_generation != this_generation:
                     break  # New search started, abandon background enrichment
                 chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
-                bg_domains, bg_trans_ids, bg_counts, bg_printed, bg_trans_tuple = await asyncio.gather(
-                    run.io_bound(collect_all_domains, chunk_ids),
+                bg_fjms_tuple, bg_trans_ids, bg_trans_data = await asyncio.gather(
+                    run.io_bound(collect_fjms_enrichment, chunk_ids),
                     run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
-                    run.io_bound(collect_catalog_counts, chunk_ids),
-                    run.io_bound(collect_printed_ids, chunk_ids),
                     run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
                 )
                 if search_state.search_generation != this_generation:
                     break
-                bg_trans_data, bg_title_trans = bg_trans_tuple
+                bg_domains, bg_counts, bg_printed = bg_fjms_tuple
                 _process_domain_data(bg_domains)
                 search_state.transcription_sys_ids |= bg_trans_ids
                 search_state.catalog_source_counts.update(bg_counts)
                 search_state.printed_ids |= bg_printed
                 search_state.translation_data.update(bg_trans_data)
-                search_state.title_translations.update(bg_title_trans)
             # Final UI update + re-render after all background chunks complete
             # (P2 fix: apply filters/exclusions to newly discovered domains/printed IDs)
             if search_state.search_generation == this_generation:

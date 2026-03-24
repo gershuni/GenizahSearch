@@ -1214,16 +1214,6 @@ async def initialize_engine():
 
             print("[init] Engine initialization complete (searcher ready).", flush=True)
 
-            # 6. Pre-warm FJMS caches (non-blocking for readiness — just speeds up first browse)
-            try:
-                from shared.fjms_service import get_fjms_service
-                fjms = get_fjms_service(thread_safe=True)
-                if fjms.is_available():
-                    fjms.pre_warm_caches()
-                    print("[init] FJMS caches pre-warmed.", flush=True)
-            except Exception as e:
-                print(f"[init] FJMS cache pre-warm failed (non-fatal): {e}")
-
             return True
         except Exception as e:
             print(f"[init] Engine init FAILED: {e}", flush=True)
@@ -1231,7 +1221,24 @@ async def initialize_engine():
             traceback.print_exc()
             return False
 
-    await run.io_bound(_init_sync)
+    init_ok = await run.io_bound(_init_sync)
+
+    async def _prewarm_fjms_background():
+        """Run FJMS browse cache pre-warm after readiness, off the startup critical path."""
+        def _prewarm_sync():
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms = get_fjms_service(thread_safe=True)
+                if fjms.is_available():
+                    fjms.pre_warm_caches()
+                    print("[init] FJMS caches pre-warmed (background).", flush=True)
+            except Exception as e:
+                print(f"[init] FJMS cache pre-warm failed (non-fatal): {e}", flush=True)
+
+        await run.io_bound(_prewarm_sync)
+
+    if init_ok:
+        asyncio.create_task(_prewarm_fjms_background())
 
 app.on_startup(initialize_engine)
 
