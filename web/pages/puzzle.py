@@ -2602,9 +2602,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
     async def toggle_publish():
         """Publish or unpublish current join."""
-        from web.auth_state import GlobalAuthState
+        from web.auth_state import GlobalAuthState, create_login_dialog
         if not GlobalAuthState.is_logged_in():
-            ui.notify(tr('Please log in to publish'), type='warning')
+            create_login_dialog().open()
             return
         if not puzzle_meta:
             ui.notify(tr('Add fragments before publishing'), type='warning')

@@ -16,7 +16,7 @@ import logging
 from nicegui import ui, app, run
 from web.translations import tr, is_rtl
 from web.feature_flags import WEB_PUZZLE_ENABLED
-from web.auth_state import GlobalAuthState
+from web.auth_state import GlobalAuthState, create_login_dialog
 from web.supabase_client import (
     get_client, get_feed_items, create_discovery, update_discovery, delete_discovery,
     delete_comment, delete_correction, delete_fragment_join,
@@ -343,7 +343,7 @@ def create_discoveries_page():
             # Create new button
             def open_create_dialog():
                 if not GlobalAuthState.is_logged_in():
-                    ui.notify(tr('Please login to create a discovery'), type='warning')
+                    create_login_dialog().open()
                     return
 
                 def on_discovery_created():
@@ -1165,7 +1165,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                 with ui.row().classes('items-center gap-1'):
                                     def do_vote_up(nid=numeric_id):
                                         if not GlobalAuthState.is_logged_in():
-                                            ui.notify(tr('Login to vote'), type='warning')
+                                            create_login_dialog().open()
                                             return
                                         user_id = GlobalAuthState.get_user_id()
                                         result = vote_discovery(int(nid), user_id, 'up')
@@ -1180,7 +1180,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                 with ui.row().classes('items-center gap-1'):
                                     def do_vote_down(nid=numeric_id):
                                         if not GlobalAuthState.is_logged_in():
-                                            ui.notify(tr('Login to vote'), type='warning')
+                                            create_login_dialog().open()
                                             return
                                         user_id = GlobalAuthState.get_user_id()
                                         result = vote_discovery(int(nid), user_id, 'down')
@@ -1911,7 +1911,7 @@ def create_new_discovery_dialog(on_success=None):
 
                     user_id = GlobalAuthState.get_user_id()
                     if not user_id:
-                        ui.notify(tr('Please login to share discoveries'), type='warning')
+                        create_login_dialog().open()
                         return
 
                     page_num = None

@@ -1057,6 +1057,7 @@ async def auth_callback_route(code: str = None):
 
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
+    ui.add_head_html(POSTHOG_SCRIPT)
 
     with ui.column().classes('w-full h-screen items-center justify-center'):
         spinner = ui.spinner(size='xl')
@@ -1075,12 +1076,16 @@ async def auth_callback_route(code: str = None):
                 'access_token': session.get('access_token'),
                 'refresh_token': session.get('refresh_token'),
             }
+        from web.analytics import posthog_capture
+        posthog_capture('login_success', {'method': 'google_oauth'})
         status_label.text = 'Login successful! Redirecting...'
         await asyncio.sleep(0.5)
         ui.navigate.to('/')
 
     def show_error(message):
         """Display error and show home button."""
+        from web.analytics import posthog_capture
+        posthog_capture('login_failed', {'reason': str(message)[:100], 'method': 'google_oauth'})
         spinner.set_visibility(False)
         status_label.set_visibility(False)
         error_label.text = message
@@ -1088,7 +1093,7 @@ async def auth_callback_route(code: str = None):
         home_btn.classes(remove='hidden')
 
     try:
-        # Method 1: PKCE flow - code in query parameter (fallback if implicit not available)
+        # Method 1: PKCE flow - code in query parameter (fallback)
         if code:
             logger.info(f"OAuth callback: exchanging code {code[:20]}...")
             result = exchange_code_for_session(code)
@@ -1230,15 +1235,34 @@ async def initialize_engine():
 
 app.on_startup(initialize_engine)
 
-if __name__ in {'__main__', '__mp_main__'}:
-    print(f"\n{'='*60}")
-    print(f"  Dicta Genizah Search v{APP_VERSION}")
-    print(f"  Starting on port {APP_PORT}...")
-    print(f"{'='*60}\n")
+def _find_free_port(start_port: int, max_attempts: int = 10) -> int:
+    """Find a free port starting from start_port. Returns the first available port."""
+    import socket
+    for offset in range(max_attempts):
+        port = start_port + offset
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('0.0.0.0', port))
+                return port
+        except OSError:
+            if offset == 0:
+                print(f"  Port {port} is busy, trying next...")
+    return start_port  # Fall through — let uvicorn report the error
 
+
+if __name__ in {'__main__', '__mp_main__'}:
     # Production settings via environment variables
     reload_enabled = os.environ.get('NICEGUI_RELOAD', 'true').lower() == 'true'
     show_browser = os.environ.get('NICEGUI_SHOW', 'true').lower() == 'true'
+
+    # In dev mode, auto-find a free port if the default is busy.
+    # In production (reload=false), use the configured port strictly.
+    run_port = _find_free_port(APP_PORT) if reload_enabled else APP_PORT
+
+    print(f"\n{'='*60}")
+    print(f"  Dicta Genizah Search v{APP_VERSION}")
+    print(f"  Starting on port {run_port}...")
+    print(f"{'='*60}\n")
 
     favicon_path = os.path.join(os.path.dirname(__file__), 'static', 'favicon.ico')
 
@@ -1248,7 +1272,7 @@ if __name__ in {'__main__', '__mp_main__'}:
 
     ui.run(
         title=APP_TITLE,
-        port=APP_PORT,
+        port=run_port,
         reload=reload_enabled,
         show=show_browser,
         storage_secret='genizah-secret-v5',

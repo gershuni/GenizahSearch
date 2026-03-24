@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-23 (Princeton DPUL full catalog import: 36,283 JTS items, auto-default to DPUL images, external link fix)
+> **Last Updated:** 2026-03-24 (PostHog-driven UX fixes: parallels rageclicks, login tracking, OAuth implicit flow, discoverability)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 6 | 6 |
-| P2 Medium Bugs | 10 | 28 | 38 |
+| P2 Medium Bugs | 10 | 34 | 44 |
 | P3 Low Priority | 1 | 4 | 5 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **18** | **66** | **84** |
+| **Total** | **18** | **72** | **90** |
 
 ---
 
@@ -81,6 +81,12 @@ Move to "Completed Issues" section at bottom with date
 | **Shared filter option builders still read UI language inside `run.io_bound()` wrappers** | `web/pages/search.py`, `web/pages/parallels.py`, `web/components/filter_panel.py` | ✅ Fixed (2026-03-21) | Follow-up review confirmed both pages now capture `lang = get_language()` in client context and pass the shared `build_*_options` functions directly into `run.io_bound()`, removing the worker-thread language lookup. |
 | **Fullscreen browse fallback now targets `fsEditViewer`, but the shared fallback handler assumes every viewer has `init()`** | `web/pages/browse.py`, `web/static/manuscript_viewer.js` | ✅ Fixed (2026-03-21) | Follow-up review confirmed `7dda767d` guards all three `window[viewerName].init()` calls with `typeof ... === 'function'`, so fallback success no longer throws for fullscreen `fsEditViewer` while main-page viewers still reinitialize normally. |
 | **Browse enrichment worker cleanup no longer disconnects stale callbacks after generation-guard refactor** | `genizah_app.py:14691-14699` | ✅ Fixed (2026-03-20) | Follow-up review confirmed `_start_browse_enrichment()` now stores the lambda in `_browse_enrich_slot` and disconnects that exact callable before replacing the worker, so the generation-guard refactor once again removes old browse enrichment connections correctly. |
+| **Parallels page extreme rageclicks (365/822 total, 44% of all site frustration)** | `web/pages/parallels.py` | ✅ Fixed (2026-03-24) | PostHog showed 365 rageclicks on /parallels out of 822 site-wide. Root causes: "Find Parallels" button had 50ms gap before disable (silent re-click suppression), shelfmark headings styled like links but not clickable, expansion rows had no visible chevron, filter dropdowns opened empty during async load, export buttons always active. Fixes: immediate button disable, clickable shelfmark links to /browse, expand_more icons, loading spinners on filter selects, export buttons disabled until results exist. |
+| **Google OAuth PKCE code_verifier lost between redirect and callback** | `web/supabase_client.py` | ✅ Fixed (2026-03-24) | Supabase Python client defaulted to PKCE flow but stored code_verifier in singleton memory storage that was lost on client reset or multi-user race. Switched to implicit flow (`ClientOptions(flow_type='implicit')`) — callback Method 2 (hash token parsing) handles this correctly. Also added PostHog tracking for OAuth login_success/login_failed on the callback page (with POSTHOG_SCRIPT injection). |
+| **Login PostHog tracking gaps: 67% failure rate appeared inflated** | `web/auth_state.py`, `web/supabase_client.py`, `web/main.py` | ✅ Fixed (2026-03-24) | Multiple tracking gaps: (1) "no user returned" path never fired login_failed, (2) login_success fired right before page reload (JS injection race), (3) Google OAuth completely untracked, (4) login_failed lacked error_code/status_code, (5) sign_in blocked event loop. Fixes: added missing login_failed event, 300ms delay before reload for PostHog flush, OAuth callback tracking, enriched error properties, wrapped sign_in in run.io_bound(). |
+| **Login-gated write actions used silent disappearing toasts** | `web/pages/discoveries.py`, `web/pages/puzzle.py` | ✅ Fixed (2026-03-24) | Anonymous users clicking "New Discovery", vote, share, or Puzzle "Publish" got a 3-second toast with no actionable path. Replaced all 5 instances with `create_login_dialog().open()` — opens the actual login/register dialog. |
+| **_posthog_identify JS injection on names with apostrophes** | `web/auth_state.py` | ✅ Fixed (2026-03-24) | Pre-existing: f-string interpolation of uid/email/name broke for names like O'Brien. Switched to json.dumps() for all interpolated values, matching the safe pattern in posthog_capture(). |
+| **Dev mode zombie processes block port on Windows** | `web/main.py` | ✅ Fixed (2026-03-24) | Added _find_free_port() that auto-finds next available port (8081→8090) in dev mode (reload=true). Production mode uses configured port strictly. |
 | **Web auth can get stuck retrying an already-used refresh token** | `web/supabase_client.py`, `web/auth_state.py` | ❌ Open | `get_user_client()` logs and falls back to the anonymous client when Supabase returns `Invalid Refresh Token: Already Used`, but it leaves `auth_session` and cached auth UI state in NiceGUI storage. Subsequent requests keep retrying the same dead token and spam logs while the UI may still look signed in. Fix path: treat this as terminal auth failure, clear stored auth state, and prompt re-login. |
 | **NLI manifest failures are retried immediately and can hammer iiif.nli.org.il during thumbnail bursts** | `web/api.py` | ❌ Open | `fetch_fl_ids_from_nli()` does blocking 15s manifest fetches with success-only caching. When NLI is slow or rate-limits, the same `sys_id`s are retried on every request with no failure TTL/backoff and no concurrency cap, producing synchronized timeout bursts in production logs. Fix path: add a short negative cache/cooldown and optionally a small concurrency limit plus connection reuse. |
 | **Search logs expose raw queries and regex internals at INFO in production** | `genizah_core.py` | ❌ Open | `search_text_tantivy()` and the line-break search path emit `[DEBUG]` messages via `LOGGER.info`, including raw user query text, generated Tantivy query strings, regex patterns, and hit counts. This bloats production logs and captures user searches unnecessarily. Fix path: gate these logs behind a debug flag or DEBUG level and default them off in production. |

@@ -10,6 +10,7 @@ Uses Supabase for authentication instead of the FastAPI backend.
 
 from typing import Optional, Dict, Any
 from nicegui import app, ui
+import asyncio
 import os
 
 # Load environment variables
@@ -95,13 +96,11 @@ class GlobalAuthState:
     def _posthog_identify(cls, user: Dict, profile: Dict = None):
         """Send posthog.identify() to the browser if PostHog is loaded."""
         try:
-            uid = user.get('id', '')
-            email = user.get('email', '')
-            name = (profile or {}).get('full_name', '') or (profile or {}).get('username', '')
-            js = (
-                f"if(window.posthog)posthog.identify('{uid}',"
-                f"{{email:'{email}',name:'{name}'}})"
-            )
+            import json
+            uid = json.dumps(user.get('id', ''))
+            email = json.dumps(user.get('email', ''))
+            name = json.dumps((profile or {}).get('full_name', '') or (profile or {}).get('username', ''))
+            js = f"if(window.posthog)posthog.identify({uid},{{email:{email},name:{name}}})"
             ui.run_javascript(js)
         except Exception:
             pass  # PostHog not loaded or no client connection yet
@@ -153,11 +152,16 @@ async def do_login(email: str, password: str) -> Dict:
     Returns:
         Success dict with user info or error dict
     """
-    result = supabase_sign_in(email, password)
+    from nicegui import run
+    result = await run.io_bound(supabase_sign_in, email, password)
 
     if "error" in result:
         from web.analytics import posthog_capture
-        posthog_capture('login_failed', {'reason': str(result.get('error', ''))[:100]})
+        posthog_capture('login_failed', {
+            'reason': str(result.get('error', ''))[:100],
+            'error_code': str(result.get('error_code', ''))[:50],
+            'status_code': result.get('status_code', ''),
+        })
         return result
 
     # Store session tokens for per-user Supabase client
@@ -170,6 +174,8 @@ async def do_login(email: str, password: str) -> Dict:
 
     user = result.get('user')
     if not user:
+        from web.analytics import posthog_capture
+        posthog_capture('login_failed', {'reason': 'No user returned'})
         return {"error": "No user returned"}
 
     # Get user profile
@@ -199,7 +205,8 @@ async def do_register(email: str, username: str, password: str,
     if affiliation:
         metadata['affiliation'] = affiliation
 
-    result = supabase_sign_up(email, password, metadata if metadata else None)
+    from nicegui import run
+    result = await run.io_bound(supabase_sign_up, email, password, metadata if metadata else None)
 
     if "error" in result:
         return result
@@ -218,7 +225,7 @@ async def do_register(email: str, username: str, password: str,
         if affiliation:
             profile_data['affiliation'] = affiliation
 
-        update_profile(user['id'], profile_data)
+        await run.io_bound(update_profile, user['id'], profile_data)
 
     # Auto-login after registration
     return await do_login(email, password)
@@ -296,6 +303,8 @@ def create_login_dialog():
                             except Exception:
                                 pass  # Browser storage may not be available
                             dialog.close()
+                            # Brief delay so PostHog login_success JS capture can flush before page reload
+                            await asyncio.sleep(0.3)
                             ui.navigate.reload()
 
                     with ui.row().classes('w-full justify-end gap-2'):

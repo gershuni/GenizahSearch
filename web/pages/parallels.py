@@ -735,7 +735,7 @@ def create_parallels_page(initial_text: str = None):
                             multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense use-chips')
+                        ).classes('w-full').props('outlined dense use-chips loading')
                         _filter_refs['domain'] = p_domain_select
 
                     # Author filter (multi-select) — options loaded asynchronously after page renders
@@ -748,7 +748,7 @@ def create_parallels_page(initial_text: str = None):
                             multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense use-chips')
+                        ).classes('w-full').props('outlined dense use-chips loading')
                         _filter_refs['author'] = p_author_select
 
                     # Work filter (multi-select) — options loaded asynchronously after page renders
@@ -761,7 +761,7 @@ def create_parallels_page(initial_text: str = None):
                             multiple=True,
                             with_input=True,
                             clearable=True,
-                        ).classes('w-full').props('outlined dense use-chips')
+                        ).classes('w-full').props('outlined dense use-chips loading')
                         _filter_refs['work'] = p_work_select
 
                 with ui.row().classes('w-full gap-4 flex-wrap items-end'):
@@ -1227,11 +1227,11 @@ def create_parallels_page(initial_text: str = None):
                         value='score'
                     ).props('outlined dense').classes('w-40')
 
-                    ui.button(icon='description', on_click=lambda: ui.download('/api/export/parallels/word')).props(
-                        'flat round dense'
+                    export_word_btn = ui.button(icon='description', on_click=lambda: ui.download('/api/export/parallels/word')).props(
+                        'flat round dense disable'
                     ).tooltip(tr('Export Word'))
-                    ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/parallels/excel')).props(
-                        'flat round dense'
+                    export_excel_btn = ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/parallels/excel')).props(
+                        'flat round dense disable'
                     ).tooltip(tr('Export Excel'))
 
             results_container = ui.column().classes('w-full gap-4')
@@ -1919,6 +1919,9 @@ def create_parallels_page(initial_text: str = None):
         p_state.chunks_total = 0
         # Clear pre-search filters
         _clear_all_p_adv_filters()
+        # Disable export buttons (no results)
+        export_word_btn.props('disable')
+        export_excel_btn.props('disable')
         # Clear results container
         results_container.clear()
         with results_container:
@@ -1945,16 +1948,21 @@ def create_parallels_page(initial_text: str = None):
         if p_state.is_running:
             return
 
+        # Disable button immediately to prevent rageclicks (re-enabled in finally block of _run_search_wrapper)
+        run_btn.disable()
+
         text = text_input.value or ""
         words = len([w for w in text.split() if w])
 
         # Allow shorter texts (minimum 3 words instead of 10)
         if words < 3:
             ui.notify(tr('Enter at least 3 words'), type='warning')
+            run_btn.enable()
             return
 
         if not state.lab_engine:
             ui.notify(tr('Lab Engine not initialized'), type='negative')
+            run_btn.enable()
             return
 
         # Update variant level and max changes from UI before search
@@ -2597,9 +2605,15 @@ def create_parallels_page(initial_text: str = None):
             return
 
         if not results and not filtered_results:
+            export_word_btn.props('disable')
+            export_excel_btn.props('disable')
             with results_container:
                 show_empty_state()
             return
+
+        # Enable export buttons now that we have results
+        export_word_btn.props(remove='disable')
+        export_excel_btn.props(remove='disable')
 
         # Show partial results warning banner at top
         if is_partial:
@@ -2861,9 +2875,14 @@ def create_parallels_page(initial_text: str = None):
                     with ui.row().classes('items-center gap-3'):
                         icon_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-600);'
                         ui.icon('menu_book').classes('text-xl').style(icon_color)
-                        # Changed to H3 - with library name
+                        # Clickable shelfmark — opens browse page
                         shelfmark_color = 'color: var(--accent-amber);' if is_filtered else 'color: var(--primary-700);'
-                        h3(display_shelfmark, classes='text-lg font-bold', style=shelfmark_color)
+                        if sys_id:
+                            ui.link(display_shelfmark, f'/browse?sys_id={sys_id}', new_tab=True).classes(
+                                'text-lg font-bold no-underline hover:underline'
+                            ).style(f'{shelfmark_color} cursor: pointer;')
+                        else:
+                            h3(display_shelfmark, classes='text-lg font-bold', style=shelfmark_color)
                         badge_color = 'amber' if is_filtered else 'blue'
                         ui.badge(f"{len(items)} {tr('matches')}", color=badge_color).classes('text-xs')
 
@@ -3006,6 +3025,9 @@ def create_parallels_page(initial_text: str = None):
                     ui.label(preview).classes('text-sm flex-grow').style(
                         'color: var(--text-secondary); direction: rtl; text-align: right;'
                     )
+
+                    # Expand indicator
+                    ui.icon('expand_more').classes('text-lg transition-transform').style('color: var(--text-muted);')
 
             # Expanded content (shown on click)
             with ui.column().classes('w-full p-4 gap-4').style('background: var(--bg-card);'):
@@ -3408,12 +3430,15 @@ def create_parallels_page(initial_text: str = None):
         lang = get_language()  # Capture in client context before io_bound
         d = await run.io_bound(build_domain_options, lang)
         p_domain_select.options = d
+        p_domain_select.props(remove='loading')
         p_domain_select.update()
         a = await run.io_bound(build_author_options, lang, p_state.filter_domains)
         p_author_select.options = a
+        p_author_select.props(remove='loading')
         p_author_select.update()
         w = await run.io_bound(build_work_options, lang, p_state.filter_domains, p_state.filter_authors)
         p_work_select.options = w
+        p_work_select.props(remove='loading')
         p_work_select.update()
         _update_p_chip_bar()
 
