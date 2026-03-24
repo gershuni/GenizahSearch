@@ -611,6 +611,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Show inline error below search bar instead of full-page error
                 state.search_error = tr('No manuscript found') + f": '{state.shelfmark_query}'"
                 state.is_loading = False
+                # Clear stale page so update_content shows error/welcome, not old manuscript
+                state.current_page = None
+                state.view_joined = False
                 update_search_error()
                 update_content()
                 return
@@ -644,7 +647,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """Show a dialog with shelfmark suggestions for user to select."""
         from genizah_core import get_library_display
 
-        with ui.dialog() as dialog, ui.card().classes('p-4 min-w-96 max-w-lg'):
+        # Explicit slot context — this may be called from a detached ensure_future task
+        with content_container:
+          with ui.dialog() as dialog, ui.card().classes('p-4 min-w-96 max-w-lg'):
             # Header
             with ui.row().classes('w-full items-center justify-between mb-4'):
                 h3(tr('Select Manuscript'), classes='text-lg font-semibold m-0')
@@ -657,8 +662,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # Results list
             with ui.column().classes('w-full gap-1 max-h-80 overflow-y-auto'):
                 for result in results:
-                    def select_result(r=result):
-                        dialog.close()
+                    async def select_result(r=result):
                         state.sys_id = r.sys_id
                         state.shelfmark_query = r.shelfmark  # Update state with selected shelfmark
                         # Update the search input field if available
@@ -670,7 +674,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         state.active_source = 'nli'  # Reset image source for new manuscript
                         state.source_user_override = False
                         enrichment_refs.clear()  # Prevent stale ref usage
-                        asyncio.ensure_future(load_page(p_num=1))
+                        dialog.close()
+                        await load_page(p_num=1)
 
                     # Get library display name (short form)
                     library_short = ''
@@ -2566,9 +2571,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Navigation handler using search_shelfmark pattern
                             def make_nav_to(target=frag_shelfmark):
-                                def nav():
+                                async def nav():
                                     state.shelfmark_query = target
-                                    asyncio.ensure_future(search_shelfmark())
+                                    await search_shelfmark()
                                 return nav
 
                             with ui.row().classes(
@@ -2773,11 +2778,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # IntersectionObserver synchronizes scrolling between panes
                 current_shelfmark_upper = (page.shelfmark or '').upper()
 
-                def rd_navigate_to_fragment(target_sm):
+                async def rd_navigate_to_fragment(target_sm):
                     """Exit reading desk and navigate to a specific fragment."""
                     exit_joined_view()
                     state.shelfmark_query = target_sm
-                    asyncio.ensure_future(search_shelfmark())
+                    await search_shelfmark()
 
                 def remove_from_desk(sys_id_to_remove):
                     """Remove a fragment from the reading desk by sys_id."""
@@ -3972,9 +3977,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     asyncio.ensure_future(load_page(direction=0))
 
                                 # Navigation callback for joins
-                                def navigate_to_shelfmark(target_shelfmark: str):
+                                async def navigate_to_shelfmark(target_shelfmark: str):
                                     state.shelfmark_query = target_shelfmark
-                                    asyncio.ensure_future(search_shelfmark())
+                                    await search_shelfmark()
 
                                 # Custom Edit Button
                                 ui.button(
@@ -4575,10 +4580,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             })();
                         ''')
 
-    def set_shelfmark_and_search(shelfmark: str):
+    async def set_shelfmark_and_search(shelfmark: str):
         """Set shelfmark and trigger search."""
         state.shelfmark_query = shelfmark
-        asyncio.ensure_future(search_shelfmark())
+        await search_shelfmark()
 
     # === Main Layout ===
     with ui.column().classes('w-full max-w-7xl mx-auto p-4'):
@@ -4605,11 +4610,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if state.shelfmark_query:
                     search_input.value = state.shelfmark_query
 
-                def do_search():
+                async def do_search():
                     state.shelfmark_query = search_input.value or ''
                     state.search_error = None  # Clear previous error
                     if state.shelfmark_query.strip():
-                        asyncio.ensure_future(search_shelfmark())
+                        await search_shelfmark()
 
                 search_input.on('keydown.enter', do_search)
 

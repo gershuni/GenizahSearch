@@ -2833,6 +2833,7 @@ class MetadataManager:
         self.meta_map = {}
         self.nli_cache = {}
         self.csv_bank = {}
+        self._shelfmark_index = None
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
 
@@ -2915,10 +2916,8 @@ class MetadataManager:
                     if len(row) > 7:
                         title = row[7].strip()
 
-                    # Store all call_number variants for Mosseri (needed for CUDL label construction)
-                    call_numbers_raw = None
-                    if library_code == 'Mosseri':
-                        call_numbers_raw = [s.strip() for s in raw_shelves if s.strip()]
+                    # Keep all call_number variants for shelfmark resolution and special-library fallbacks.
+                    call_numbers_raw = [s.strip() for s in raw_shelves if s.strip()] or None
 
                     self.csv_bank[sys_id] = {
                         'shelfmark': shelf,
@@ -2927,6 +2926,9 @@ class MetadataManager:
                         'library_code': library_code,
                         'call_numbers_raw': call_numbers_raw,
                     }
+            # CSV data is authoritative for shelfmark browsing; force the normalized index
+            # to rebuild after background loading completes.
+            self._shelfmark_index = None
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
@@ -3952,10 +3954,11 @@ class MetadataManager:
         """Yield shelfmark candidates from CSV bank and cached metadata."""
         # CSV bank
         for sys_id, data in self.csv_bank.items():
-            shelf = data.get('shelfmark', '')
             title = data.get('title', '')
-            if shelf:
-                yield sys_id, shelf, title
+            variants = data.get('call_numbers_raw') or [data.get('shelfmark', '')]
+            for shelf in variants:
+                if shelf:
+                    yield sys_id, shelf, title
         # NLI cache (may contain enriched shelfmarks)
         for sys_id, data in self.nli_cache.items():
             shelf = data.get('shelfmark', '')
@@ -3972,6 +3975,18 @@ class MetadataManager:
         already deduplicated by (sys_id, norm_shelf).
         """
         if hasattr(self, '_shelfmark_index') and self._shelfmark_index is not None:
+            # The web app loads libraries.csv in a background thread. If shelfmark search runs
+            # before that finishes, we can cache an empty index and then keep reusing it forever.
+            # Rebuild once csv_bank has data.
+            if self._shelfmark_index or not self.csv_bank:
+                return self._shelfmark_index
+            self._shelfmark_index = None
+
+        if not self.csv_bank:
+            # Fall back to a synchronous load when browse shelfmark search beats the background loader.
+            self._load_csv_bank()
+
+        if self._shelfmark_index is not None:
             return self._shelfmark_index
 
         index = []

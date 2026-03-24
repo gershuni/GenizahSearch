@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-24 (PostHog-driven UX fixes: parallels rageclicks, login tracking, OAuth implicit flow, discoverability)
+> **Last Updated:** 2026-03-24 (browse shelfmark search: slot context fix, stale content fix, async caller conversion)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 6 | 6 |
-| P2 Medium Bugs | 10 | 34 | 44 |
+| P2 Medium Bugs | 10 | 37 | 47 |
 | P3 Low Priority | 1 | 4 | 5 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 6 | 1 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **18** | **72** | **90** |
+| **Total** | **18** | **75** | **93** |
 
 ---
 
@@ -87,6 +87,9 @@ Move to "Completed Issues" section at bottom with date
 | **Login-gated write actions used silent disappearing toasts** | `web/pages/discoveries.py`, `web/pages/puzzle.py` | ✅ Fixed (2026-03-24) | Anonymous users clicking "New Discovery", vote, share, or Puzzle "Publish" got a 3-second toast with no actionable path. Replaced all 5 instances with `create_login_dialog().open()` — opens the actual login/register dialog. |
 | **_posthog_identify JS injection on names with apostrophes** | `web/auth_state.py` | ✅ Fixed (2026-03-24) | Pre-existing: f-string interpolation of uid/email/name broke for names like O'Brien. Switched to json.dumps() for all interpolated values, matching the safe pattern in posthog_capture(). |
 | **Dev mode zombie processes block port on Windows** | `web/main.py` | ✅ Fixed (2026-03-24) | Added _find_free_port() that auto-finds next available port (8081→8090) in dev mode (reload=true). Production mode uses configured port strictly. |
+| **Browse shelfmark search drops alternate CSV call-number variants for non-Mosseri records** | `genizah_core.py`, `web/services.py`, `web/pages/browse.py` | ✅ Fixed (2026-03-24) | Fixed in `MetadataManager`: all `libraries.csv` `call_numbers` variants are now stored for every record, `_iter_shelfmark_sources()` indexes those variants instead of just one preferred label, and `_get_shelfmark_index()` now rebuilds when a background-startup search had cached an empty index before `csv_bank` finished loading. This addresses both alias misses and the web startup race that could make numeric shelfmarks like `ms. 920.22` / `920.22` fail broadly. |
+| **Browse shelfmark search can leave the previous manuscript visible after a genuine no-result query** | `web/pages/browse.py` | ✅ Fixed (2026-03-24) | `search_shelfmark()` now clears `state.current_page` and `state.view_joined` before calling `update_content()` on zero results, so the user sees the error/welcome state instead of stale manuscript content. |
+| **Browse multi-match shelfmark dialog is created from detached tasks and can lose NiceGUI slot context** | `web/pages/browse.py`, `web/components/joins_panel.py` | ✅ Fixed (2026-03-24) | `show_shelfmark_suggestions()` dialog is now created inside `with content_container:` for explicit slot context. Converted 5 of 6 `asyncio.ensure_future(search_shelfmark())` call sites to async event handlers (`do_search`, `set_shelfmark_and_search`, `make_nav_to`, `rd_navigate_to_fragment`, `navigate_to_shelfmark`). The remaining page-init path (`_pending_shelfmark`) stays as `ensure_future` but is covered by the dialog container guard. `handle_navigate` in joins_panel.py made async to properly await the now-async `on_navigate` callback. |
 | **Web auth can get stuck retrying an already-used refresh token** | `web/supabase_client.py`, `web/auth_state.py` | ❌ Open | `get_user_client()` logs and falls back to the anonymous client when Supabase returns `Invalid Refresh Token: Already Used`, but it leaves `auth_session` and cached auth UI state in NiceGUI storage. Subsequent requests keep retrying the same dead token and spam logs while the UI may still look signed in. Fix path: treat this as terminal auth failure, clear stored auth state, and prompt re-login. |
 | **NLI manifest failures are retried immediately and can hammer iiif.nli.org.il during thumbnail bursts** | `web/api.py` | ❌ Open | `fetch_fl_ids_from_nli()` does blocking 15s manifest fetches with success-only caching. When NLI is slow or rate-limits, the same `sys_id`s are retried on every request with no failure TTL/backoff and no concurrency cap, producing synchronized timeout bursts in production logs. Fix path: add a short negative cache/cooldown and optionally a small concurrency limit plus connection reuse. |
 | **Search logs expose raw queries and regex internals at INFO in production** | `genizah_core.py` | ❌ Open | `search_text_tantivy()` and the line-break search path emit `[DEBUG]` messages via `LOGGER.info`, including raw user query text, generated Tantivy query strings, regex patterns, and hit counts. This bloats production logs and captures user searches unnecessarily. Fix path: gate these logs behind a debug flag or DEBUG level and default them off in production. |
@@ -254,6 +257,10 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-24 | Fixed both open P2 browse shelfmark issues: (1) `search_shelfmark()` now clears `state.current_page`/`state.view_joined` on no-result so stale content is replaced; (2) `show_shelfmark_suggestions()` dialog wrapped in `with content_container:` for slot context, 5/6 `ensure_future(search_shelfmark())` callers converted to async handlers, `handle_navigate` in joins_panel made async. | Claude |
+| 2026-03-24 | Re-reviewed the browse shelfmark bug report against the current code and added 2 new open P2 issues: (1) no-result shelfmark searches still leave the previous manuscript visible because `search_shelfmark()` does not clear `state.current_page`/`state.view_joined`; (2) the multi-match suggestion dialog is still created from detached `asyncio.ensure_future(search_shelfmark())` paths and can therefore lose NiceGUI slot context. | Codex |
+| 2026-03-24 | Fixed the web browse numeric-shelfmark issue in `MetadataManager`: browse shelfmark search now stores/indexes all CSV `call_numbers` variants and no longer reuses a stale empty `_shelfmark_index` created before background `libraries.csv` loading completed. This closes the same-day open P2 issue after expanding it from alias-only misses to the broader startup-race symptom (`ms. 920.22`, `920.22`, etc.). | Codex |
+| 2026-03-24 | Reviewed the web browse `920.22` miss against the current code. Added 1 new open P2 issue: browse shelfmark search is not Tantivy-limited, but it only indexes one preferred `libraries.csv` call-number variant per record, so alternate aliases such as `Ms. ENA 920.22` can be unfindable even when the manuscript exists. | Codex |
 | 2026-03-22 | Re-reviewed the blue-mat auto-detection update. Confirmed the follow-up issue is fixed: auto-detected blue mats now take the same blue-only path as explicit `is_cul=True`, so the corner-sampled normal mask is no longer unioned in and the earlier parchment-hole regression path is closed. Focused `tests/test_background_removal.py` re-run passed. | Codex |
 | 2026-03-22 | Reviewed the implemented FIST bibliography enhancement changes. Confirmed the earlier export follow-up is fixed: `export_bibliography()` now aligns the bibliography schema, SELECT list, and placeholder count at 22, so the planned re-export path is unblocked. No new review findings in this pass. | Codex |
 | 2026-03-22 | Reviewed the FIST bibliography enhancement plan and added 1 new open P2 issue: `export_bibliography()` now defines 22 bibliography columns but still generates 23 `?` placeholders, so the planned sidecar re-export would fail before populating the new fields. | Codex |

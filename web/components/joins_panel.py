@@ -741,11 +741,13 @@ def create_joins_dialog(
                     except Exception as e:
                         logger.error("Community Puzzle Joins error: %s", e)
 
-        def handle_navigate(target_shelfmark: str):
+        async def handle_navigate(target_shelfmark: str):
             """Handle navigation to another fragment."""
             dialog.close()
             if on_navigate:
-                on_navigate(target_shelfmark)
+                result = on_navigate(target_shelfmark)
+                if hasattr(result, '__await__'):
+                    await result
             else:
                 # Default: navigate to browse page with shelfmark
                 # Use safe='' to encode all special chars including /
