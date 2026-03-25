@@ -9672,7 +9672,10 @@ class FjmsBibliographyDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         for row, e in enumerate(fjms_entries):
-            author = (e.get('article_author_eng') or e.get('article_author_heb') or '').strip()
+            if is_heb:
+                author = (e.get('article_author_heb') or e.get('article_author_eng') or '').strip()
+            else:
+                author = (e.get('article_author_eng') or e.get('article_author_heb') or '').strip()
             item0 = QTableWidgetItem(author)
             item0.setData(Qt.ItemDataRole.UserRole, row)
             self.table.setItem(row, 0, item0)
