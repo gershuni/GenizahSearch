@@ -6831,11 +6831,11 @@ class SearchEngine:
         }
         search_field = position_field_map.get(text_position, 'content')
 
-        # Wildcard components with line_start/line_end: fall back to content field.
-        # Positional fields (line_starts/line_ends) only contain exact last/first words,
+        # Wildcard components with positional fields: fall back to content field.
+        # Positional fields only contain exact tokens (first/last words or head/tail),
         # so suffix/prefix wildcards won't match extended forms. The regex +
-        # _validate_position_match post-filter handles exact line-position validation.
-        if search_field in ('line_starts', 'line_ends') and _has_wildcard_component:
+        # _validate_position_match post-filter handles exact position validation.
+        if search_field != 'content' and _has_wildcard_component:
             search_field = 'content'
 
         try:
