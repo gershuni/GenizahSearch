@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-25 (printed badge in desktop ResultDialog + browse tab, enhanced shelfmark lookup with library name stripping + ENA-MS normalization)
+> **Last Updated:** 2026-03-25 (fixed: browse splitter free resize with scrollable toolbar rows, Recently Viewed sort + auth fix)
 > **Status:** Active working document
 
 ---
@@ -47,15 +47,15 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 6 | 6 |
-| P2 Medium Bugs | 6 | 43 | 49 |
-| P3 Low Priority | 1 | 4 | 5 |
+| P2 Medium Bugs | 6 | 44 | 50 |
+| P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 0 | 6 | 6 |
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **12** | **83** | **95** |
+| **Total** | **12** | **85** | **97** |
 
 ---
 
@@ -95,6 +95,7 @@ Move to "Completed Issues" section at bottom with date
 | **Search logs expose raw queries and regex internals at INFO in production** | `genizah_core.py` | ✅ Fixed (2026-03-25) | All search/regex/Tantivy log calls in `search_text_tantivy()` and line-break search now use `LOGGER.debug()` level, not `LOGGER.info()`. Won't appear in production logs with default INFO level. |
 | **Desktop ResultDialog and browse tab missing printed material badge** | `genizah_app.py` | ✅ Fixed (2026-03-25) | Added red "🖨 Printed"/"דפוס" badge to ResultDialog info row (next to domain label) and browse tab info label. Uses FJMS `get_printed_sys_ids()` with per-session cache for browse. ResultDialog checks parent search tab's `_printed_sys_ids` first, falls back to direct FJMS lookup. |
 | **Shelfmark lookup doesn't recognize library name prefixes or ENA-MS variants** | `genizah_core.py` | ✅ Fixed (2026-03-25) | `resolve_system_by_shelfmark()` now strips full library names ("Cambridge University Library", "British Library", etc.) and common abbreviations via `_strip_library_prefix()`, not just LIBRARY_CODES keys. `normalize_shelfmark()` now normalizes "ENA-MS"/"ENA MS" → "ENA" so all JTS ENA variant forms match. Both web and desktop benefit (shared genizah_core.py). |
+| **Desktop browse-pane resize fix still fails in Reading Desk mode** | `genizah_app.py:14769-14819` | ✅ Fixed (2026-03-25) | Reading Desk toolbar and Edit bar now also wrapped in `_make_scrollable_row()`. Shelfmark input changed from fixed 180px to min 80/max 180. All 6 toolbar rows in the browse tab are now scrollable. |
 | **Web puzzle image acquisition solved via browser extension; staged rollout in progress** | `extension/`, `web/pages/puzzle.py`, `web/api.py`, `web/puzzle_tokens.py` | ✅ Fixed (2026-03-18) | Browser extension ("GenizahSearch Image Helper") fetches NLI images via user's own IP, sends to server for bg removal + disk caching. Unified `_loadImageWithFallbacks()` fallback chain: server cache → extension → localhost helper → direct NLI. Extension submitted to Chrome Web Store. `WEB_PUZZLE_ENABLED=true` set on production for staged testing. Feature flag kept for rollback. |
 | **Desktop EXE puzzle image loading fails with `No module named numpy`** | `build_app.bat`, `GenizahSearchPro.spec` | ✅ Fixed (2026-03-17) | The desktop build explicitly added `numpy` as a hidden import for puzzle background removal, but then also excluded `numpy` from the PyInstaller bundle. Running from source worked because the venv had NumPy installed; the packaged EXE failed only when puzzle image processing first imported `shared.background_removal`. Fixed by removing the contradictory `numpy` exclusion from both build entry points. |
 | **Puzzle folio navigation still fails on production after initial client-side fallback** | `web/pages/puzzle.py:717-806`, `web/pages/puzzle.py:2685-2741` | ✅ Fixed (2026-03-17) | `navigateFolio()` now shares the same localhost-helper fallback chain as initial add and reload. Production was verified live: when `/api/puzzle_image` fails due to blocked server-side IIIF fetch, the browser falls back to the user's local helper and preserves correct `fl_id`/`folio_label` updates instead of saving mismatched metadata. |
@@ -140,6 +141,7 @@ Move to "Completed Issues" section at bottom with date
 | **Cache thread-safety** | `joins_panel.py:17-19` | ג… Fixed (2026-02-04) | Added threading.Lock for cache access |
 | **Filter panel overlap with progress bar** | `web/pages/search.py`, `parallels.py` | ג… Fixed (2026-03-03) | Chip bar, progress bar, results overlapped when filter panel open. Auto-collapse panel on search start + scroll to progress + spacing/z-index fix |
 | **Pre-search domain filter: bilingual, "Other" ambiguous, missing 3rd level** | `search.py`, `parallels.py`, `genizah_app.py`, `fjms_service.py` | ג… Fixed (2026-03-03) | Dropdown showed bilingual labels (should be current lang only), "Other" had no parent disambiguation, sub-sub-domains missing. Chips also lost qualified names. Fixed all 3 issues + recursive checkbox propagation + qualified-name SQL filtering |
+| **Fixed-height browse/viewer scroll rows can clip controls on DPI-scaled Windows** | `genizah_app.py:1394-1408` | ✅ Fixed (2026-03-25) | `_make_scrollable_row()` now derives height from `container.sizeHint().height() + 8` instead of hardcoded 32/38px. Height adapts to DPI scaling automatically. |
 | **CSRF protection missing** | API endpoints | ג Deferred | Low risk - NiceGUI uses WebSocket |
 | **Puzzle BG removal: brown backing page not removed on glued manuscripts** | `shared/background_removal.py`, `web/pages/puzzle.py` | ⏳ Deferred | BL manuscripts have brown backing over blue mat; Oxford has full brown background. Color segmentation alone can't distinguish brown backing from parchment. Planned solution: interactive click-to-remove eraser tool (user clicks background areas, BFS flood fill removes connected region, additive with per-step undo). Requires persistence plumbing (save/load/export eraser steps), auth on endpoint, proper canvas coordinate transforms, Fabric event model integration. Full design: `docs/plans/INTERACTIVE_BG_REMOVAL_DESIGN.md`. Recommend implementing as a full GSD phase. |
 | **Session restore is not pixel-perfect** | genizah_app.py | ❌ Open | v6.5.1 added restore for browse tabs, catalog filters, composition results, and active tab. But composition restores flat (grouping/appendix lost), catalog sidebar doesn't highlight the selected author/work in the list widget, and browse-by-shelfmark skips full resolution (loads directly by sys_id). Could be improved to persist grouping state or re-run grouping more reliably. |
@@ -259,6 +261,8 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-25 | Fixed both Codex follow-ups: (1) Reading Desk + Edit bar toolbars now wrapped in `_make_scrollable_row()`, (2) height derived from `sizeHint()` instead of hardcoded. Also fixed: Recently Viewed empty for authenticated web users (`int('recent')` ValueError), desktop Recently Viewed sorted by shelfmark instead of view time. | Claude |
+| 2026-03-25 | Reviewed the current desktop browse-pane resize changes in `genizah_app.py` and added 2 new follow-up issues: (1) Reading Desk mode still constrains the browse splitter because its toolbar was not included in the new scrollable-row treatment; (2) the new fixed-height scroll-row helper can clip controls on DPI-scaled Windows or whenever its horizontal scrollbar appears. | Codex |
 | 2026-03-24 | Fixed both open P2 browse shelfmark issues: (1) `search_shelfmark()` now clears `state.current_page`/`state.view_joined` on no-result so stale content is replaced; (2) `show_shelfmark_suggestions()` dialog wrapped in `with content_container:` for slot context, 5/6 `ensure_future(search_shelfmark())` callers converted to async handlers, `handle_navigate` in joins_panel made async. | Claude |
 | 2026-03-24 | Re-reviewed the browse shelfmark bug report against the current code and added 2 new open P2 issues: (1) no-result shelfmark searches still leave the previous manuscript visible because `search_shelfmark()` does not clear `state.current_page`/`state.view_joined`; (2) the multi-match suggestion dialog is still created from detached `asyncio.ensure_future(search_shelfmark())` paths and can therefore lose NiceGUI slot context. | Codex |
 | 2026-03-24 | Fixed the web browse numeric-shelfmark issue in `MetadataManager`: browse shelfmark search now stores/indexes all CSV `call_numbers` variants and no longer reuses a stale empty `_shelfmark_index` created before background `libraries.csv` loading completed. This closes the same-day open P2 issue after expanding it from alias-only misses to the broader startup-race symptom (`ms. 920.22`, `920.22`, etc.). | Codex |
