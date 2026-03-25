@@ -592,7 +592,7 @@ def apply_theme_immediately():
     """Add script to apply theme before page renders to prevent flash."""
     try:
         current_theme = app.storage.user.get('theme', 'light')
-    except (AssertionError, Exception):
+    except Exception:
         current_theme = 'light'
     current_lang = _resolve_ui_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
