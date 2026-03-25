@@ -1391,6 +1391,23 @@ class CheckBoxHeader(QHeaderView):
 
         return super().event(event)
 
+def _make_scrollable_row(layout: QHBoxLayout) -> QScrollArea:
+    """Wrap a QHBoxLayout in a horizontal QScrollArea so it can shrink freely in a splitter."""
+    container = QWidget()
+    container.setLayout(layout)
+    scroll = QScrollArea()
+    scroll.setWidget(container)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    # Derive height from content sizeHint + room for thin scrollbar, DPI-safe
+    hint_h = container.sizeHint().height()
+    scroll.setFixedHeight(hint_h + 8)  # 8px for the thin scrollbar when visible
+    scroll.setStyleSheet("QScrollBar:horizontal { height: 6px; }")
+    return scroll
+
+
 class ZoomableScrollArea(QGraphicsView):
     """A GraphicsView that supports hand-panning and wheel-zooming."""
     def __init__(self, parent=None):
@@ -1966,7 +1983,6 @@ class ManuscriptViewerWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
         # Top Bar (Source + Zoom)
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(5, 5, 5, 5)
@@ -1989,7 +2005,8 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_rotation = QSlider(Qt.Orientation.Horizontal)
         self.slider_rotation.setRange(0, 360)
         self.slider_rotation.setValue(0)
-        self.slider_rotation.setFixedWidth(160)
+        self.slider_rotation.setMinimumWidth(60)
+        self.slider_rotation.setMaximumWidth(160)
         self.slider_rotation.setToolTip(tr("Rotate image (0-360°)"))
         self.slider_rotation.valueChanged.connect(lambda val: self.scroll_area.set_rotation(val))
 
@@ -2005,7 +2022,7 @@ class ManuscriptViewerWidget(QWidget):
 
         btn_rot_reset = QPushButton(f"↩️ {tr('Reset')}")
         btn_rot_reset.setToolTip(tr("Reset rotation"))
-        btn_rot_reset.setFixedWidth(60)
+        btn_rot_reset.setMaximumWidth(60)
         btn_rot_reset.clicked.connect(lambda: self.slider_rotation.setValue(0))
 
         self.btn_external = QPushButton(f"🔗 {tr('External')}")
@@ -2040,7 +2057,7 @@ class ManuscriptViewerWidget(QWidget):
         top_bar.addWidget(btn_fullscreen)
         self._fullscreen_window = None
 
-        layout.addLayout(top_bar)
+        layout.addWidget(_make_scrollable_row(top_bar))
 
         # Image adjustment controls bar
         adj_bar = QHBoxLayout()
@@ -2053,7 +2070,8 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_brightness = QSlider(Qt.Orientation.Horizontal)
         self.slider_brightness.setRange(-100, 100)
         self.slider_brightness.setValue(0)
-        self.slider_brightness.setFixedWidth(100)
+        self.slider_brightness.setMinimumWidth(40)
+        self.slider_brightness.setMaximumWidth(100)
         self.slider_brightness.setToolTip(tr("Brightness"))
         adj_bar.addWidget(self.slider_brightness)
 
@@ -2064,7 +2082,8 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_contrast = QSlider(Qt.Orientation.Horizontal)
         self.slider_contrast.setRange(-100, 100)
         self.slider_contrast.setValue(0)
-        self.slider_contrast.setFixedWidth(100)
+        self.slider_contrast.setMinimumWidth(40)
+        self.slider_contrast.setMaximumWidth(100)
         self.slider_contrast.setToolTip(tr("Contrast"))
         adj_bar.addWidget(self.slider_contrast)
 
@@ -2075,7 +2094,8 @@ class ManuscriptViewerWidget(QWidget):
         self.slider_gamma = QSlider(Qt.Orientation.Horizontal)
         self.slider_gamma.setRange(20, 300)
         self.slider_gamma.setValue(100)
-        self.slider_gamma.setFixedWidth(100)
+        self.slider_gamma.setMinimumWidth(40)
+        self.slider_gamma.setMaximumWidth(100)
         self.slider_gamma.setToolTip(tr("Gamma"))
         adj_bar.addWidget(self.slider_gamma)
 
@@ -2111,7 +2131,7 @@ class ManuscriptViewerWidget(QWidget):
 
         btn_reset_adj.clicked.connect(_reset_adjustments)
 
-        layout.addLayout(adj_bar)
+        layout.addWidget(_make_scrollable_row(adj_bar))
 
         # Attribution
         self.lbl_attribution = QLabel("")
@@ -14624,7 +14644,7 @@ class GenizahGUI(QMainWindow):
         nav_bar.addWidget(self.btn_b_toggle_img)
 
         nav_bar.addStretch()
-        text_layout.addLayout(nav_bar)
+        text_layout.addWidget(_make_scrollable_row(nav_bar))
 
         # Second row: Community buttons and version selector
         community_bar = QHBoxLayout()
@@ -14635,7 +14655,8 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo = QComboBox()
         self.browse_version_combo.blockSignals(True)
         self.browse_version_combo.addItem("V0.8", {"source": "original"})
-        self.browse_version_combo.setFixedWidth(240)  # Wider for PGP scholar names
+        self.browse_version_combo.setMinimumWidth(100)
+        self.browse_version_combo.setMaximumWidth(240)
         self.browse_version_combo.setEnabled(False)
         self.browse_version_combo.blockSignals(False)
         self.browse_version_combo.currentIndexChanged.connect(self._browse_change_version)
@@ -14696,12 +14717,16 @@ class GenizahGUI(QMainWindow):
         community_bar.addWidget(self.btn_b_joins)
 
         community_bar.addStretch()
-        text_layout.addLayout(community_bar)
+        text_layout.addWidget(_make_scrollable_row(community_bar))
 
         # Edit mode action bar (hidden by default)
         self.browse_edit_bar = QWidget()
         self.browse_edit_bar.setStyleSheet("background-color: #2c3e50; border-radius: 5px;")
-        edit_bar_layout = QHBoxLayout(self.browse_edit_bar)
+        edit_outer = QVBoxLayout(self.browse_edit_bar)
+        edit_outer.setContentsMargins(0, 0, 0, 0)
+        edit_outer.setSpacing(0)
+
+        edit_bar_layout = QHBoxLayout()
         edit_bar_layout.setContentsMargins(10, 5, 10, 5)
 
         # Edit mode label
@@ -14735,6 +14760,11 @@ class GenizahGUI(QMainWindow):
         self.btn_b_cancel_edit.setStyleSheet("background-color: #95a5a6; color: white; padding: 5px 15px; border-radius: 3px;")
         self.btn_b_cancel_edit.clicked.connect(self._browse_cancel_edit)
         edit_bar_layout.addWidget(self.btn_b_cancel_edit)
+
+        edit_scroll = _make_scrollable_row(edit_bar_layout)
+        edit_scroll.setStyleSheet("background: transparent; QScrollBar:horizontal { height: 6px; }")
+        edit_outer.addWidget(edit_scroll)
+
         self.browse_edit_bar.hide()
         text_layout.addWidget(self.browse_edit_bar)
 
@@ -14751,7 +14781,11 @@ class GenizahGUI(QMainWindow):
         self.browse_rd_toolbar.setStyleSheet(
             "background-color: #2d6a4f; border-radius: 4px;"
         )
-        rd_toolbar_layout = QHBoxLayout(self.browse_rd_toolbar)
+        rd_outer = QVBoxLayout(self.browse_rd_toolbar)
+        rd_outer.setContentsMargins(0, 0, 0, 0)
+        rd_outer.setSpacing(0)
+
+        rd_toolbar_layout = QHBoxLayout()
         rd_toolbar_layout.setContentsMargins(10, 5, 10, 5)
 
         rd_label = QLabel(f"<b style='color: white;'>{tr('Reading Desk')}</b>")
@@ -14767,7 +14801,8 @@ class GenizahGUI(QMainWindow):
         rd_toolbar_layout.addWidget(rd_shelf_label)
         self.browse_rd_shelf_input = QLineEdit()
         self.browse_rd_shelf_input.setPlaceholderText(tr("Add shelfmark..."))
-        self.browse_rd_shelf_input.setFixedWidth(180)
+        self.browse_rd_shelf_input.setMinimumWidth(80)
+        self.browse_rd_shelf_input.setMaximumWidth(180)
         self.browse_rd_shelf_input.returnPressed.connect(self._browse_rd_add_by_shelfmark)
         rd_toolbar_layout.addWidget(self.browse_rd_shelf_input)
 
@@ -14795,6 +14830,10 @@ class GenizahGUI(QMainWindow):
         )
         btn_rd_exit.clicked.connect(self._browse_exit_reading_desk)
         rd_toolbar_layout.addWidget(btn_rd_exit)
+
+        rd_scroll = _make_scrollable_row(rd_toolbar_layout)
+        rd_scroll.setStyleSheet("background: transparent; QScrollBar:horizontal { height: 6px; }")
+        rd_outer.addWidget(rd_scroll)
 
         self.browse_rd_toolbar.hide()
         text_layout.addWidget(self.browse_rd_toolbar)
