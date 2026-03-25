@@ -626,17 +626,24 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
         return
 
     # Pre-fetch all free description translations for this alma_id in one batch
-    _fd_lookup = {}  # signature_id -> english text
-    if not is_heb and alma_id:
+    _fd_lookup = {}  # signature_id -> translated text
+    if alma_id:
         try:
             from shared.translation_service import TranslationService
             _tsvc_fd = TranslationService(thread_safe=True)
             if _tsvc_fd.fjms_available():
                 sig_ids = [desc.get("signature_id") for desc in free_descriptions if desc.get("signature_id")]
                 for sid in sig_ids:
-                    en = _tsvc_fd.get_fjms_free_desc_en(alma_id, sid)
-                    if en:
-                        _fd_lookup[sid] = en
+                    if is_heb:
+                        # Hebrew UI: fetch en2he translations for English catalog descriptions
+                        he = _tsvc_fd.get_fjms_free_desc_he(alma_id, sid)
+                        if he:
+                            _fd_lookup[sid] = he
+                    else:
+                        # English UI: fetch he2en translations for Hebrew descriptions
+                        en = _tsvc_fd.get_fjms_free_desc_en(alma_id, sid)
+                        if en:
+                            _fd_lookup[sid] = en
             _tsvc_fd.close()
         except Exception:
             pass
@@ -650,7 +657,10 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
             _is_translated = False
             if sig_id and sig_id in _fd_lookup:
                 display_text = _fd_lookup[sig_id]
-                display_dir = ''  # English is LTR
+                if is_heb:
+                    display_dir = 'direction: rtl; text-align: right;'  # Hebrew translation is RTL
+                else:
+                    display_dir = ''  # English translation is LTR
                 _is_translated = True
 
             with ui.row().classes('w-full py-2 px-3').style(
@@ -675,6 +685,14 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
                         _trans_text = display_text
                         _fd_st = {'showing_original': False}
                         _fd_badge_ref = [None]
+                        if is_heb:
+                            # Hebrew UI, en2he: original is English (LTR), translated is Hebrew (RTL)
+                            _orig_dir = ''
+                            _trans_dir = 'direction: rtl; text-align: right;'
+                        else:
+                            # English UI, he2en: original is Hebrew (RTL), translated is English (LTR)
+                            _orig_dir = 'direction: rtl; text-align: right;'
+                            _trans_dir = ''
                         def _make_fd_toggle(lbl, badge_ref, orig, trans, orig_dir, trans_dir, flag):
                             def handler():
                                 flag['showing_original'] = not flag['showing_original']
@@ -693,7 +711,7 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
                         _fd_badge_ref[0] = _fd_badge
                         _fd_badge.on('click', _make_fd_toggle(
                             _fd_lbl, _fd_badge_ref, _orig_text, _trans_text,
-                            dir_style, '', _fd_st
+                            _orig_dir, _trans_dir, _fd_st
                         ))
 
 

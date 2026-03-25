@@ -78,7 +78,10 @@ def create_fjms_bibliography_dialog(
             rows = []
             for idx, e in enumerate(entries):
                 row_id = indices[idx] if indices else idx
-                author = (e.get('article_author_eng') or e.get('article_author_heb') or '').strip()
+                if is_heb:
+                    author = (e.get('article_author_heb') or e.get('article_author_eng') or '').strip()
+                else:
+                    author = (e.get('article_author_eng') or e.get('article_author_heb') or '').strip()
                 article_name = (e.get('article_name') or '').strip()
                 if is_heb:
                     running_title = (e.get('running_title_heb') or e.get('running_title')

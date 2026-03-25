@@ -330,7 +330,7 @@ class TranslationService:
     def get_fjms_free_desc_en(
         self, alma_id: str, signature_id: int
     ) -> Optional[str]:
-        """Get English translation of an FJMS free description.
+        """Get English translation of an FJMS free description (he2en).
 
         Args:
             alma_id: FJMS AlmaId identifier.
@@ -344,13 +344,45 @@ class TranslationService:
         try:
             row = self._fjms_conn.execute(
                 "SELECT translated_text FROM fjms_translations "
-                "WHERE alma_id = ? AND field_name = 'FreeDesc' AND signature_id = ?",
+                "WHERE alma_id = ? AND field_name = 'FreeDesc' AND signature_id = ? "
+                "AND direction = 'he2en'",
                 (alma_id, signature_id),
             ).fetchone()
             return row[0] if row and row[0] else None
         except Exception as e:
             logger.warning(
                 "Error reading FJMS free desc translation for %s/%s: %s",
+                alma_id,
+                signature_id,
+                e,
+            )
+            return None
+
+    def get_fjms_free_desc_he(
+        self, alma_id: str, signature_id: int
+    ) -> Optional[str]:
+        """Get Hebrew translation of an FJMS free description (en2he).
+
+        Args:
+            alma_id: FJMS AlmaId identifier.
+            signature_id: Signature ID for the free description.
+
+        Returns:
+            Translated free description text, or None if not found.
+        """
+        if not self._fjms_has_translations or not self._fjms_conn:
+            return None
+        try:
+            row = self._fjms_conn.execute(
+                "SELECT translated_text FROM fjms_translations "
+                "WHERE alma_id = ? AND field_name = 'FreeDesc' AND signature_id = ? "
+                "AND direction = 'en2he'",
+                (alma_id, signature_id),
+            ).fetchone()
+            return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.warning(
+                "Error reading FJMS free desc he translation for %s/%s: %s",
                 alma_id,
                 signature_id,
                 e,
