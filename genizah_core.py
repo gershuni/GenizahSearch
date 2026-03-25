@@ -5789,17 +5789,27 @@ class SearchEngine:
                     else:
                         clean_vars.append(f'"{t_clean}"')
 
-                # For suffix wildcards, also add sofit-converted stem for better Tantivy recall.
-                # E.g., for שלום* the Tantivy query should also include שלומ so that
-                # documents containing only derived forms (e.g., שלומו) are found.
+                # For suffix wildcards, expand with grammatical suffixes so Tantivy
+                # finds documents containing derived forms (e.g., שלומו for שלום*).
+                # Also add sofit-converted stem as fallback.
                 wildcard = comp.get('wildcard')
                 if wildcard == 'suffix':
                     for w in comp.get('original_words', []):
+                        for sfx in expand_grammatical_suffixes(w):
+                            if sfx not in seen:
+                                seen.add(sfx)
+                                clean_vars.append(f'"{sfx}"')
                         if w and w[-1] in _SOFIT_TO_NORMAL:
                             converted = w[:-1] + _SOFIT_TO_NORMAL[w[-1]]
                             if converted not in seen:
                                 seen.add(converted)
-                                clean_vars.append(f'"{converted}"^3')
+                                clean_vars.append(f'"{converted}"')
+                elif wildcard == 'prefix':
+                    for w in comp.get('original_words', []):
+                        for pfx in expand_grammatical_prefixes(w):
+                            if pfx not in seen:
+                                seen.add(pfx)
+                                clean_vars.append(f'"{pfx}"')
 
                 # Flex spacing: add split alternatives so Tantivy finds
                 # documents where a word appears with spaces (e.g., "בן דוד"
@@ -6348,16 +6358,22 @@ class SearchEngine:
                     field = 'content'
 
                 # Wildcard components: use content field (not positional)
-                # since the matched word may differ from the base stem,
-                # and add sofit-converted stems for suffix wildcards
+                # since the matched word may differ from the base stem.
+                # Expand with grammatical suffixes/prefixes for Tantivy recall.
                 if comp.wildcard in ('suffix', 'prefix', 'pattern'):
+                    wc_terms = []
                     for w in comp.words:
-                        tantivy_parts.append(f'content:"{w}"')
-                    if comp.wildcard == 'suffix':
-                        for w in comp.words:
+                        wc_terms.append(f'content:"{w}"')
+                        if comp.wildcard == 'suffix':
+                            for sfx in expand_grammatical_suffixes(w):
+                                wc_terms.append(f'content:"{sfx}"')
                             if w and w[-1] in _SOFIT_TO_NORMAL:
                                 converted = w[:-1] + _SOFIT_TO_NORMAL[w[-1]]
-                                tantivy_parts.append(f'content:"{converted}"')
+                                wc_terms.append(f'content:"{converted}"')
+                        elif comp.wildcard == 'prefix':
+                            for pfx in expand_grammatical_prefixes(w):
+                                wc_terms.append(f'content:"{pfx}"')
+                    tantivy_parts.append(f'({" OR ".join(wc_terms)})')
                 else:
                     # Use expanded terms (plene, grammatical, JA, variants)
                     # for better Tantivy recall, matching the normal path strategy.
