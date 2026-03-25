@@ -50,7 +50,7 @@ class TestPuzzleDocument:
         assert isinstance(doc.id, str) and len(doc.id) > 0
         assert doc.title == ''
         assert doc.notes == ''
-        assert doc.join_type == 'uncertain'
+        assert doc.join_type == 'physical'
         assert doc.fragments == []
         assert isinstance(doc.created_at, str) and len(doc.created_at) > 0
         assert isinstance(doc.updated_at, str) and len(doc.updated_at) > 0
@@ -100,7 +100,7 @@ class TestPuzzleDocument:
         assert restored.id == doc.id
         assert restored.fragments == []
         assert restored.title == ''
-        assert restored.join_type == 'uncertain'
+        assert restored.join_type == 'physical'
 
     def test_join_type_values(self):
         """join_type accepts physical, content, uncertain."""

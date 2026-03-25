@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.2.3
+# Genizah Search Pro 7.2.4
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,16 +8,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.2.3?
+## What's New in Version 7.2.4?
+
+### v7.2.4: JTS Image Upgrade + Shelfmark Search Fixes
+
+JTS manuscript images now load from Princeton's Digital PUL library — a major reliability upgrade covering 36,000+ items. Shelfmark search is smarter: it now handles full library names and ENA variant formats.
+
+* **Princeton DPUL images for JTS**: Auto-default to high-quality Princeton Digital PUL images for all JTS manuscripts
+* **Better shelfmark lookup**: Recognizes full library names ("Cambridge University Library"), normalizes ENA-MS/ENA MS variants
+* **"Printed" badge**: Desktop browse and search results now flag printed materials
+* **Blue mat auto-detection**: Background removal works across all libraries, not just Cambridge
+* **Faster search**: Removed redundant enrichment pass for better performance
+* **Puzzle fixes**: Reliable add-from-browse, correct external fragment handling, session restore
 
 ### v7.2.3: Chrome Extension Live + Puzzle Enabled
-
-The GenizahSearch Image Helper Chrome extension is now live on the Chrome Web Store. The web puzzle is enabled by default on all deployments.
-
-* **Install link in banner**: Users without the extension see a yellow banner with a blue "Install Extension" button linking directly to the Chrome Web Store
-* **Puzzle always on**: No longer requires `WEB_PUZZLE_ENABLED=true` — available everywhere out of the box
-
-### v7.2.2: Desktop Browse Tab Polish
 
 The Browse by Shelfmark tab now matches the ResultDialog's polished button style, with seamless cross-shelfmark navigation.
 

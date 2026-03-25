@@ -233,6 +233,7 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
+- March 2026: v7.2.4 JTS Image Upgrade + Shelfmark Search Fixes -- Princeton DPUL as primary JTS image source (36K items), desktop Printed badge, blue mat auto-detection, enhanced shelfmark lookup (full library name stripping, ENA-MS normalization), FJMS bibliography enrichment (8 new fields), catalog dedup, search perf (removed duplicate enrichment), shared JS extraction (~1050 lines), browse/puzzle/PostHog bug fixes (both apps)
 - March 2026: PostHog-driven UX & Auth fixes -- parallels rageclick prevention (immediate button disable, clickable shelfmarks, filter loading spinners, expansion chevrons, export button state), OAuth implicit flow fix (PKCE code_verifier issue), login PostHog tracking (login_failed enrichment, OAuth callback events, POSTHOG_SCRIPT on callback page, run.io_bound for non-blocking login), login dialog for anonymous write actions (discoveries vote/create/share, puzzle publish), _posthog_identify XSS fix (json.dumps), dev-mode auto port finding (both apps)
 - March 2026: Princeton DPUL as primary JTS image source -- full DPUL catalog import (36,283 items, v1 had 453), JTS manuscripts auto-default to DPUL images in web browse, external link points to DPUL catalog page instead of manifest URL (both apps)
 - March 2026: v7.2.3 Chrome Extension Live + Puzzle Enabled -- Chrome Web Store install link in puzzle banner (bilingual), WEB_PUZZLE_ENABLED defaults to True, json.dumps() escaping for banner texts

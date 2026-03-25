@@ -640,7 +640,7 @@ class TestApplyExplosionGuard:
         )
         # Cascade should have disabled suffixes instead of erroring
         assert warning is not None, "Should have triggered cascade warning"
-        assert "suffix" in warning.lower(), f"Warning should mention suffix disabling, got: {warning}"
+        assert "suffix" in warning.lower() or "סיומות" in warning, f"Warning should mention suffix disabling, got: {warning}"
         assert expanded[0].grammatical_suffixes is False
 
     def test_suffixes_with_manageable_count(self):

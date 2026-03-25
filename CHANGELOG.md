@@ -4,6 +4,35 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.2.4] - JTS Image Upgrade + Shelfmark Search Fixes - 2026-03-25
+
+### New Features
+- **Princeton DPUL as primary JTS image source**: JTS manuscripts now auto-default to Princeton Digital PUL images (36,283 items via full DPUL catalog import v2), replacing unreliable manifest-based loading
+- **Desktop "Printed" badge**: ResultDialog info row and browse tab now show "Printed"/"דפוס" badge for printed materials, with per-session FJMS cache
+- **Blue mat auto-detection**: Background removal now auto-detects blue conservation mats across all libraries instead of hardcoding CUL only
+
+### Improvements
+- **Enhanced shelfmark lookup**: Strips full library names ("Cambridge University Library", "British Library") not just codes; ENA-MS/ENA MS normalized to ENA for JTS variant matching
+- **FJMS bibliography enrichment**: 8 new FIST fields (JournalVolumeTxt, Hebrew title support), fixed volume source attribution
+- **Deduplicated catalog descriptions**: FJMS catalog free descriptions no longer show duplicates in get_catalog_detail()
+- **Search performance**: Removed duplicate search enrichment pass and redundant background FJMS prewarm
+- **Shared JS extraction**: Filter panel and manuscript viewer JavaScript extracted into reusable modules (~1,050 lines deduplicated)
+
+### Bug Fixes
+- **Browse shelfmark search**: Fixed slot context, stale content, and async caller issues
+- **PostHog UX & auth**: Rageclick prevention (immediate button disable), OAuth implicit flow fix, login tracking enrichment, login dialog for anonymous write actions
+- **JTS external link**: Now points to DPUL catalog page instead of raw manifest URL
+- **Puzzle from ResultDialog**: Fixed add-to-puzzle using correct viewer image list, proper shelfmark/fl_id, and auto-close dialog
+- **Puzzle external fragments**: Fixed session restore, metadata persistence, NLI timeout skip for non-NLI libraries, NiceGUI context loss on add-from-browse
+- **Puzzle extension banner**: Fixed English text showing in Hebrew UI
+- **Image viewer**: Guarded viewer.init() call in handleImageError for viewers without init
+
+### Tests
+- Fixed puzzle model tests (join_type default changed to 'physical')
+- Fixed responsa explosion guard tests (Hebrew tr() warning assertions)
+
+---
+
 ## [7.2.3] - Chrome Extension Live + Puzzle Enabled - 2026-03-20
 
 ### New Features

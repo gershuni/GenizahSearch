@@ -351,7 +351,7 @@ class TestExplosionGuardEndToEnd:
         )
         # Cascade should have disabled suffixes (and possibly variants) instead of erroring
         assert warning is not None, "Should have triggered cascade warning"
-        assert "suffix" in warning.lower() or "Grammatical suffix" in warning, (
+        assert "suffix" in warning.lower() or "סיומות" in warning, (
             f"Warning should mention suffix disabling, got: {warning}"
         )
         # The component's grammatical_suffixes should be False after cascade

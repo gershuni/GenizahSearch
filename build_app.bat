@@ -1,9 +1,6 @@
 @echo off
 REM Build GenizahSearchPro desktop application
 REM Run from the project root directory with venv activated
-REM
-REM NOTE: If antivirus software flags this application, see ANTIVIRUS_INFO.md
-REM for instructions on submitting the app for whitelisting.
 
 REM Checkpoint any WAL journals into main .db files before bundling.
 REM PyInstaller copies only the .db file — WAL/SHM journals are lost,
@@ -47,5 +44,4 @@ pyinstaller --noconfirm --noconsole --onedir --clean ^
 echo.
 echo Build complete! Output in dist\GenizahSearchPro
 echo.
-echo IMPORTANT: If antivirus software flags this application as a false positive,
-echo see ANTIVIRUS_INFO.txt for instructions on submitting the app for whitelisting.
+pause
