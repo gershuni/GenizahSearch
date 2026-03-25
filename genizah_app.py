@@ -5858,7 +5858,12 @@ class ResultDialog(QDialog):
         self.lbl_rd_domains.setStyleSheet("color: #8e44ad; font-size: 11px;")
         self.lbl_rd_domains.setVisible(False)
 
-        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
+        # Printed material badge (inlined on info_row)
+        self.lbl_rd_printed = QLabel("")
+        self.lbl_rd_printed.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 11px;")
+        self.lbl_rd_printed.setVisible(False)
+
+        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_rd_printed); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
@@ -7686,10 +7691,11 @@ class ResultDialog(QDialog):
         self._update_rd_domain_label()
 
     def _update_rd_domain_label(self):
-        """Update domain info label for the current result in ResultDialog."""
+        """Update domain info label and printed badge for the current result in ResultDialog."""
         parent = self.parent()
         if not parent or not hasattr(parent, '_result_domain_map'):
             self.lbl_rd_domains.setVisible(False)
+            self.lbl_rd_printed.setVisible(False)
             return
 
         domain_names = parent._result_domain_map.get(self.current_sys_id, [])
@@ -7699,6 +7705,25 @@ class ResultDialog(QDialog):
             self.lbl_rd_domains.setVisible(True)
         else:
             self.lbl_rd_domains.setVisible(False)
+
+        # Printed material badge — check search tab cache first, then FJMS direct lookup
+        printed_ids = getattr(parent, '_printed_sys_ids', None) or getattr(parent, '_comp_printed_sys_ids', None) or set()
+        is_printed = self.current_sys_id and self.current_sys_id in printed_ids
+        if not is_printed and self.current_sys_id and not printed_ids:
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms_svc = get_fjms_service()
+                if fjms_svc.is_available():
+                    is_printed = bool(fjms_svc.get_printed_sys_ids([self.current_sys_id]))
+            except Exception:
+                pass
+        if is_printed:
+            _printed_tag = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
+            self.lbl_rd_printed.setText(f" | 🖨 {_printed_tag}")
+            self.lbl_rd_printed.setToolTip(tr("Printed material (not handwritten manuscript)"))
+            self.lbl_rd_printed.setVisible(True)
+        else:
+            self.lbl_rd_printed.setVisible(False)
 
         self.lbl_meta_loading.setVisible(False)
         self.lbl_title.setText('')
@@ -11632,6 +11657,7 @@ class GenizahGUI(QMainWindow):
         self.current_browse_part_folios = []
         self.current_browse_part_folio_idx = 0
         self._browse_enrich_gen = 0  # generation counter for stale enrichment rejection
+        self._browse_printed_cache = {}  # {sys_id: bool} — avoids repeated FJMS queries per page nav
         self.meta_loader = None
         self.meta_cached_count = 0
         self.meta_to_fetch_count = 0
@@ -14993,6 +15019,26 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("sys")
             self.browse_load()
 
+    def _browse_append_printed_badge(self, info_text: str) -> str:
+        """Append printed material badge to browse info label text if applicable."""
+        sid = getattr(self, 'current_browse_sid', None)
+        if not sid:
+            return info_text
+        # Check cache first
+        if sid not in self._browse_printed_cache:
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms_svc = get_fjms_service()
+                self._browse_printed_cache[sid] = (
+                    fjms_svc.is_available() and bool(fjms_svc.get_printed_sys_ids([sid]))
+                )
+            except Exception:
+                self._browse_printed_cache[sid] = False
+        if self._browse_printed_cache[sid]:
+            _printed_tag = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
+            info_text += f" | <span style='color: #dc2626; font-weight: bold;'>\U0001f5a8 {_printed_tag}</span>"
+        return info_text
+
     def _start_browse_enrichment(self, sid, is_part=False):
         """Centralized enrichment launch — disconnects stale worker, bumps generation counter,
         clears Part state when entering non-Part context, resets stale UI state."""
@@ -15117,6 +15163,9 @@ class GenizahGUI(QMainWindow):
         catalog_entry = meta.get('catalog_entry')
         if catalog_entry:
             label_text += f" | {catalog_entry}"
+
+        # Printed material badge
+        label_text = self._browse_append_printed_badge(label_text)
 
         self.browse_info_lbl.setText(label_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
@@ -28289,6 +28338,10 @@ class GenizahGUI(QMainWindow):
         catalog_entry = cached_meta.get('catalog_entry')
         if catalog_entry:
             info_text += f" | {catalog_entry}"
+
+        # Printed material badge
+        info_text = self._browse_append_printed_badge(info_text)
+
         self.browse_info_lbl.setText(info_text)
         self.browse_info_lbl.setToolTip('\n'.join(tooltip_parts) if tooltip_parts else '')
         if input_shelf:

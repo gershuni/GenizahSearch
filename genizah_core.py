@@ -166,6 +166,9 @@ def normalize_shelfmark(shelfmark: str) -> str:
     # Normalize CAJS "Halper" to "Genizah" (FIST uses Halper, CSV uses Genizah prefix)
     if cleaned.startswith("halper") and not cleaned.startswith("halpern"):
         cleaned = "genizah" + cleaned[6:]
+    # Normalize JTS "ENA-MS" / "ENA MS" to "ENA" (CSV uses "ENA 2956", users type "ENA-MS 2956")
+    if cleaned.startswith("enams"):
+        cleaned = "ena" + cleaned[5:]
 
     return cleaned
 
@@ -1707,6 +1710,65 @@ def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
     if effective_lang == 'he':
         return LIBRARY_CODES_HE.get(code, LIBRARY_CODES.get(code, code))
     return LIBRARY_CODES.get(code, code)
+
+
+# ── Library prefix stripping for shelfmark lookup ────────────────────────────
+
+# Common short names / abbreviations that users type before a shelfmark.
+# Ordered longest-first so "Cambridge University Library" matches before "Cambridge".
+_LIBRARY_PREFIX_ALIASES = None  # Built lazily
+
+def _get_library_prefix_aliases():
+    """Build sorted list of (lowercase_prefix, ) for library name stripping."""
+    global _LIBRARY_PREFIX_ALIASES
+    if _LIBRARY_PREFIX_ALIASES is not None:
+        return _LIBRARY_PREFIX_ALIASES
+    prefixes = set()
+    # Library codes (CUL, JTS, BL, etc.)
+    for code in LIBRARY_CODES:
+        prefixes.add(code.lower())
+    # Full library names from LIBRARY_CODES values
+    for name in LIBRARY_CODES.values():
+        prefixes.add(name.lower())
+    # Common short aliases users are likely to type
+    _extra = [
+        'cambridge', 'oxford', 'manchester', 'british library', 'bodleian',
+        'rylands', 'john rylands', 'national library of russia',
+        'jewish theological seminary', 'jts library',
+        'alliance israélite', 'alliance israelite',
+        'hebrew union college', 'university of pennsylvania',
+        'princeton', 'columbia', 'harvard', 'yale',
+        'national library of israel', 'bnf', 'bibliothèque nationale',
+        'state library of berlin', 'bavarian state library',
+        'ben zvi', 'bar ilan', 'tel aviv university',
+        'schocken', 'sassoon', 'adler',
+    ]
+    for a in _extra:
+        prefixes.add(a.lower())
+    # Sort longest-first so "Cambridge University Library" matches before "Cambridge"
+    _LIBRARY_PREFIX_ALIASES = sorted(prefixes, key=len, reverse=True)
+    return _LIBRARY_PREFIX_ALIASES
+
+def _strip_library_prefix(query: str) -> str:
+    """Strip a leading library name/code prefix from a shelfmark query.
+
+    Examples:
+        "Cambridge T-S 12.123"  -> "T-S 12.123"
+        "British Library Or 5557B" -> "Or 5557B"
+        "CUL T-S AS 31.1" -> "T-S AS 31.1"
+    """
+    if not query:
+        return query
+    q_lower = query.lower()
+    for prefix in _get_library_prefix_aliases():
+        if q_lower.startswith(prefix):
+            rest = query[len(prefix):]
+            # Must be followed by whitespace or punctuation (not part of shelfmark)
+            if rest and rest[0] in (' ', ',', ':', '-', '|', '\t'):
+                return rest.lstrip(' ,:|:\t-')
+            elif rest == '':
+                return ''  # query was just the library name
+    return query
 
 
 # ==============================================================================
@@ -4008,13 +4070,10 @@ class MetadataManager:
         """
         result = {'sys_id': None, 'options': [], 'selected_shelfmark': None}
 
-        # Strip known library code prefix (e.g. "CUL T-S 12.123" -> "T-S 12.123")
+        # Strip known library prefix (code, full name, or common abbreviation)
         if query:
             q = query.strip()
-            for code in LIBRARY_CODES:
-                if q.upper().startswith(code.upper() + ' '):
-                    q = q[len(code):].lstrip()
-                    break
+            q = _strip_library_prefix(q)
             query = q
 
         norm_query = self._normalize_shelfmark(query)
