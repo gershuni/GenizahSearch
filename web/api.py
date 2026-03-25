@@ -25,7 +25,7 @@ NLI_CACHE_TTL = int(os.environ.get('NLI_CACHE_TTL', '300'))  # 5 minutes default
 NLI_FAIL_CACHE_TTL = 60  # negative-cache failures for 60s to avoid hammering NLI
 NLI_DISK_CACHE_TTL = int(os.environ.get('NLI_DISK_CACHE_TTL', str(30 * 24 * 60 * 60)))  # 30 days
 IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes default
-NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCHES', '4')))
+NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCHES', '8')))
 NLI_SEMAPHORE_TIMEOUT = int(os.environ.get('NLI_SEMAPHORE_TIMEOUT', '20'))
 NLI_PERSISTENT_CACHE_FILE = os.path.join(Config.INDEX_DIR, 'nli_fl_ids_cache.json')
 
