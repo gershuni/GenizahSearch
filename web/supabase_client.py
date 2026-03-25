@@ -844,7 +844,7 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
     """Get comments with optional filters."""
     try:
         client = get_client()
-        query = client.table('comments').select('*')
+        query = client.table('comments').select('*, profiles(full_name, username)')
 
         if sys_id:
             query = query.eq('sys_id', sys_id)
@@ -861,7 +861,7 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
             reset_client()
             try:
                 client = get_client()
-                query = client.table('comments').select('*')
+                query = client.table('comments').select('*, profiles(full_name, username)')
                 if sys_id:
                     query = query.eq('sys_id', sys_id)
                 if author_id:
@@ -1126,7 +1126,7 @@ def get_discovery_responses(discovery_id: int) -> List[Dict]:
     """Get responses for a discovery."""
     try:
         client = get_client()
-        response = client.table('discovery_responses').select('*').eq(
+        response = client.table('discovery_responses').select('*, profiles(full_name, username)').eq(
             'discovery_id', discovery_id
         ).order('created_at', desc=False).execute()
         return response.data or []
