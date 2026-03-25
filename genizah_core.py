@@ -6248,6 +6248,20 @@ class SearchEngine:
             # Build per-component alternatives
             comp_parts = []
             for ci, word_set in enumerate(expanded_groups[gi]):
+                # Check if component has a wildcard — dispatch to wildcard regex builder
+                comp = group.components[ci] if ci < len(group.components) else None
+                if comp and comp.wildcard:
+                    comp_dict = {
+                        'wildcard': comp.wildcard,
+                        'wildcard_pattern': comp.wildcard_pattern,
+                        'regex_terms': sorted(word_set, key=len, reverse=True),
+                        'original_words': comp.words,
+                    }
+                    wc_pat = _build_wildcard_regex(comp_dict)
+                    if wc_pat:
+                        comp_parts.append(wc_pat)
+                        continue
+                # Plain word path (non-wildcard or wildcard fallback)
                 sorted_words = sorted(word_set, key=len, reverse=True)
                 escaped = [make_mark_tolerant_pattern(re.escape(w)) for w in sorted_words]
                 if not escaped:
@@ -6333,8 +6347,35 @@ class SearchEngine:
                 else:
                     field = 'content'
 
-                for w in comp.words:
-                    tantivy_parts.append(f'{field}:"{w}"')
+                # Wildcard components: use content field (not positional)
+                # since the matched word may differ from the base stem,
+                # and add sofit-converted stems for suffix wildcards
+                if comp.wildcard in ('suffix', 'prefix', 'pattern'):
+                    for w in comp.words:
+                        tantivy_parts.append(f'content:"{w}"')
+                    if comp.wildcard == 'suffix':
+                        for w in comp.words:
+                            if w and w[-1] in _SOFIT_TO_NORMAL:
+                                converted = w[:-1] + _SOFIT_TO_NORMAL[w[-1]]
+                                tantivy_parts.append(f'content:"{converted}"')
+                else:
+                    # Use expanded terms (plene, grammatical, JA, variants)
+                    # for better Tantivy recall, matching the normal path strategy.
+                    # Boost original words higher for scoring.
+                    original_set = set(comp.words)
+                    tantivy_clause_terms = []
+                    seen = set()
+                    for w in expanded:
+                        w_clean = w.replace('"', '')
+                        if not w_clean or w_clean in seen:
+                            continue
+                        seen.add(w_clean)
+                        if w_clean in original_set:
+                            tantivy_clause_terms.append(f'{field}:"{w_clean}"^5')
+                        else:
+                            tantivy_clause_terms.append(f'{field}:"{w_clean}"')
+                    if tantivy_clause_terms:
+                        tantivy_parts.append(f'({" OR ".join(tantivy_clause_terms)})')
 
             expanded_groups.append(group_expanded)
 
@@ -6552,6 +6593,7 @@ class SearchEngine:
 
         if not self.searcher: return []
         _line_constraints = {}  # Per-line position constraints (L3:word syntax)
+        _has_wildcard_component = False  # Set True when any Responsa component has a wildcard
 
         # Strip combining diacritical marks and geresh/gershayim from query
         # Skip for Regex mode -- user controls the pattern directly
@@ -6707,6 +6749,8 @@ class SearchEngine:
                     'flex_patterns': flex_patterns,
                     'inline_pattern': comp.inline_pattern,
                 })
+                if comp.wildcard:
+                    _has_wildcard_component = True
 
             # Calculate total expanded terms for UI display
             total_expanded = sum(len(cd['tantivy_terms']) for cd in component_dicts)
@@ -6786,6 +6830,13 @@ class SearchEngine:
             'line_end': 'line_ends',
         }
         search_field = position_field_map.get(text_position, 'content')
+
+        # Wildcard components with line_start/line_end: fall back to content field.
+        # Positional fields (line_starts/line_ends) only contain exact last/first words,
+        # so suffix/prefix wildcards won't match extended forms. The regex +
+        # _validate_position_match post-filter handles exact line-position validation.
+        if search_field in ('line_starts', 'line_ends') and _has_wildcard_component:
+            search_field = 'content'
 
         try:
             query = self.index.parse_query(t_query_str, [search_field])
