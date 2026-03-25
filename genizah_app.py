@@ -14943,7 +14943,17 @@ class GenizahGUI(QMainWindow):
         self.browse_current_list_id = list_id
         self.browse_list_items.clear()
 
-        items = self.lists_mgr.get_items_sorted(list_id, sort_by='shelfmark')
+        if list_id == 'recent':
+            items = self.lists_mgr.get_items_in_list('recent')
+            # Enrich with metadata
+            if self.meta_mgr:
+                for item in items:
+                    sid = item.get('sys_id', '')
+                    shelfmark, title = self.meta_mgr.get_meta_for_id(sid)
+                    item['shelfmark'] = item.get('shelfmark_override') or shelfmark or 'Unknown'
+                    item['title'] = title or ''
+        else:
+            items = self.lists_mgr.get_items_sorted(list_id, sort_by='shelfmark')
         if not items:
             empty_item = QListWidgetItem(tr("No items in this list."))
             empty_item.setFlags(empty_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
