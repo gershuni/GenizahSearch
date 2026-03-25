@@ -522,6 +522,8 @@ class UserListsManager:
     async def get_items_in_list(self, list_id: str) -> List[Dict]:
         """Get all items in a list."""
         if self.is_authenticated:
+            if list_id == 'recent':
+                return self._format_recent_items(get_recent_items(self.user_id))
             try:
                 list_id_int = int(list_id)
             except ValueError:
@@ -534,6 +536,8 @@ class UserListsManager:
     def get_items_in_list_sync(self, list_id: str) -> List[Dict]:
         """Synchronous version of get_items_in_list."""
         if self.is_authenticated:
+            if list_id == 'recent':
+                return self._format_recent_items(get_recent_items(self.user_id))
             try:
                 list_id_int = int(list_id)
             except ValueError:
@@ -542,6 +546,20 @@ class UserListsManager:
         elif self.local_mgr:
             return self.local_mgr.get_items_in_list(list_id)
         return []
+
+    @staticmethod
+    def _format_recent_items(rows: List[Dict]) -> List[Dict]:
+        """Convert Supabase recent_items rows to the item dict format expected by callers."""
+        return [
+            {
+                'item_id': row.get('sys_id', ''),
+                'sys_id': row.get('sys_id', ''),
+                'shelfmark': row.get('shelfmark', ''),
+                'title': row.get('title', ''),
+                'fl_id': row.get('fl_id', ''),
+            }
+            for row in rows
+        ]
 
     def is_item_in_any_list(self, item_id: str) -> bool:
         """Check if item is in any list."""
