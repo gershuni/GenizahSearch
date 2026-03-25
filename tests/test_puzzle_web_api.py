@@ -2,6 +2,7 @@
 """Tests for puzzle API endpoints in web/api.py."""
 
 import io
+import json
 import pytest
 from unittest.mock import patch, MagicMock
 from PIL import Image
@@ -185,6 +186,58 @@ class TestPuzzleEndpointCodePaths:
         )
         assert resp.media_type == 'image/jpeg'
         assert resp.body == mock_jpeg_bytes
+
+
+class TestNliPersistentCacheHelpers:
+    """Tests for restart-persistent NLI FL-ID cache helpers."""
+
+    def test_persistent_cache_round_trip_skips_invalid_entries(self, tmp_path):
+        """Only positive FL-ID lists are persisted and reloaded."""
+        from web.api import _load_nli_persistent_cache, _save_nli_persistent_cache
+
+        cache_path = tmp_path / 'nli_fl_ids_cache.json'
+        cache = {
+            '990000000000000001': ['FL123', '00456'],
+            '990000000000000002': 'not-a-list',
+            '990000000000000003': [],
+        }
+        cache_time = {
+            '990000000000000001': 100.0,
+            '990000000000000002': 100.0,
+            '990000000000000003': 100.0,
+        }
+
+        _save_nli_persistent_cache(cache, cache_time, cache_path=str(cache_path), now=100.0)
+        loaded_cache, loaded_cache_time = _load_nli_persistent_cache(
+            cache_path=str(cache_path),
+            now=120.0,
+        )
+
+        assert loaded_cache == {'990000000000000001': ['123', '00456']}
+        assert loaded_cache_time == {'990000000000000001': 120.0}
+
+    def test_persistent_cache_prunes_expired_entries(self, tmp_path):
+        """Expired persisted entries are dropped during reload."""
+        import web.api
+
+        cache_path = tmp_path / 'nli_fl_ids_cache.json'
+        payload = {
+            'version': 1,
+            'entries': {
+                'fresh': {'fl_ids': ['111'], 'cached_at': 95.0},
+                'stale': {'fl_ids': ['222'], 'cached_at': 10.0},
+            },
+        }
+        cache_path.write_text(json.dumps(payload), encoding='utf-8')
+
+        with patch.object(web.api, 'NLI_DISK_CACHE_TTL', 20):
+            loaded_cache, loaded_cache_time = web.api._load_nli_persistent_cache(
+                cache_path=str(cache_path),
+                now=100.0,
+            )
+
+        assert loaded_cache == {'fresh': ['111']}
+        assert loaded_cache_time == {'fresh': 100.0}
 
 
 class TestPuzzleFoliosExternalFallback:

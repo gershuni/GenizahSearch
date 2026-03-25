@@ -53,6 +53,9 @@ SUPABASE_ANON_KEY=your-anon-key
 GENIZAH_PORT=8081
 WEB_PUZZLE_ENABLED=true   # enables web puzzle page (set false to hide)
 PUZZLE_UPLOAD_SECRET=xxx  # HMAC secret for puzzle upload tokens (auto-generated if unset)
+NLI_DISK_CACHE_TTL=2592000  # restart-persistent NLI FL-ID cache TTL in seconds (default 30 days)
+NLI_MAX_CONCURRENT_FETCHES=4  # concurrent NLI manifest fetch cap
+NLI_SEMAPHORE_TIMEOUT=20  # seconds to wait for an NLI fetch slot
 ```
 
 > **Note:** You can get Supabase credentials from the project admin, or set up your own Supabase project for development.
@@ -285,6 +288,9 @@ results = engine.execute_search('שלום', mode='variants', gap=2, limit=100)
 | `POSTHOG_API_KEY` | No | PostHog analytics (optional, enables session recordings) |
 | `GENIZAH_PORT` | No | Web app port (default: 8081) |
 | `NICEGUI_RELOAD` | No | Hot reload (default: true in dev) |
+| `NLI_DISK_CACHE_TTL` | No | Persistent NLI FL-ID cache TTL in seconds (default: 2592000 / 30 days) |
+| `NLI_MAX_CONCURRENT_FETCHES` | No | Concurrent NLI manifest fetch cap (default: 4) |
+| `NLI_SEMAPHORE_TIMEOUT` | No | Seconds to wait for an NLI semaphore slot before returning empty (default: 20) |
 
 ---
 

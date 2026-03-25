@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-25 (fixed: browse splitter free resize with scrollable toolbar rows, Recently Viewed sort + auth fix)
+> **Last Updated:** 2026-03-25 (fixed: restart-persistent NLI FL-ID cache for post-restart timeout storms, browse splitter free resize with scrollable toolbar rows, Recently Viewed sort + auth fix; reviewed responsa wildcard line-break/profile follow-ups)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 6 | 6 |
-| P2 Medium Bugs | 6 | 44 | 50 |
+| P2 Medium Bugs | 8 | 45 | 53 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **12** | **85** | **97** |
+| **Total** | **14** | **86** | **100** |
 
 ---
 
@@ -76,6 +76,8 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses** | `genizah_core.py` | ❌ Open | Review of the 2026-03-25 wildcard fixes found that `build_tantivy_query()` and `_execute_line_break_search()` now expand each suffix/prefix wildcard into ~25 real grammatical forms for Tantivy recall, but `_count_expanded_terms()` / `_apply_explosion_guard()` still counts wildcard components as a single base word unless explicit grammatical prefix/suffix modifiers are set. Wildcard-heavy queries can therefore slip past the 500-term guard and generate much larger Tantivy queries than the system estimates, risking slower searches or query-parser failures. |
+| **Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches** | `genizah_core.py` | ❌ Open | Follow-up review on 2026-03-25 confirmed the line-break path now reuses expanded terms for non-wildcards and fixes suffix wildcard recall, but pattern wildcards (`*a*b*`) still cannot be meaningfully prefiltered from Tantivy using the current stem-based strategy. This matches the normal Responsa limitation: regex is correct, but candidate recall may still miss some pattern-only hits before post-filtering. |
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
 | **Shared filter recompute generation guard still allows stale results after clearing the last active filter** | `web/components/filter_panel.py` | ✅ Fixed (2026-03-21) | Follow-up review confirmed `c2734168` increments `_filter_recompute_gen` before the empty-filter early return, so older in-flight recomputes now discard their stale results instead of repopulating cleared filters. |
 | **Shared filter option builders still read UI language inside `run.io_bound()` wrappers** | `web/pages/search.py`, `web/pages/parallels.py`, `web/components/filter_panel.py` | ✅ Fixed (2026-03-21) | Follow-up review confirmed both pages now capture `lang = get_language()` in client context and pass the shared `build_*_options` functions directly into `run.io_bound()`, removing the worker-thread language lookup. |
@@ -92,6 +94,7 @@ Move to "Completed Issues" section at bottom with date
 | **Browse multi-match shelfmark dialog is created from detached tasks and can lose NiceGUI slot context** | `web/pages/browse.py`, `web/components/joins_panel.py` | ✅ Fixed (2026-03-24) | `show_shelfmark_suggestions()` dialog is now created inside `with content_container:` for explicit slot context. Converted 5 of 6 `asyncio.ensure_future(search_shelfmark())` call sites to async event handlers (`do_search`, `set_shelfmark_and_search`, `make_nav_to`, `rd_navigate_to_fragment`, `navigate_to_shelfmark`). The remaining page-init path (`_pending_shelfmark`) stays as `ensure_future` but is covered by the dialog container guard. `handle_navigate` in joins_panel.py made async to properly await the now-async `on_navigate` callback. |
 | **Web auth can get stuck retrying an already-used refresh token** | `web/supabase_client.py`, `web/auth_state.py` | ✅ Fixed (2026-03-25) | `_clear_stale_auth()` added to `supabase_client.py` — detects terminal token errors (consumed/expired/invalid refresh tokens) and clears `auth_session` from NiceGUI user storage, breaking the retry loop. Fallback to anonymous client works cleanly. |
 | **NLI manifest failures are retried immediately and can hammer iiif.nli.org.il during thumbnail bursts** | `web/api.py` | ✅ Fixed (2026-03-25) | `fetch_fl_ids_from_nli()` now has a 60-second negative cache (`NLI_FAIL_CACHE_TTL`). Failed sys_ids return empty immediately during cooldown instead of retrying, preventing synchronized timeout bursts. |
+| **NLI FL-ID cache resets on service restart and triggers semaphore timeout storms while the cache rewarms** | `web/api.py` | ✅ Fixed (2026-03-25) | Added a restart-persistent positive FL-ID cache at `Config.INDEX_DIR/nli_fl_ids_cache.json`, loaded on startup with a 30-day disk TTL. Popular manuscripts now keep their resolved FL IDs across `genizah-web` restarts, eliminating the empty-cache cold-start burst without increasing default NLI concurrency. Also made the semaphore cap/timeout env-configurable (`NLI_MAX_CONCURRENT_FETCHES`, `NLI_SEMAPHORE_TIMEOUT`) for future tuning. |
 | **Search logs expose raw queries and regex internals at INFO in production** | `genizah_core.py` | ✅ Fixed (2026-03-25) | All search/regex/Tantivy log calls in `search_text_tantivy()` and line-break search now use `LOGGER.debug()` level, not `LOGGER.info()`. Won't appear in production logs with default INFO level. |
 | **Desktop ResultDialog and browse tab missing printed material badge** | `genizah_app.py` | ✅ Fixed (2026-03-25) | Added red "🖨 Printed"/"דפוס" badge to ResultDialog info row (next to domain label) and browse tab info label. Uses FJMS `get_printed_sys_ids()` with per-session cache for browse. ResultDialog checks parent search tab's `_printed_sys_ids` first, falls back to direct FJMS lookup. |
 | **Shelfmark lookup doesn't recognize library name prefixes or ENA-MS variants** | `genizah_core.py` | ✅ Fixed (2026-03-25) | `resolve_system_by_shelfmark()` now strips full library names ("Cambridge University Library", "British Library", etc.) and common abbreviations via `_strip_library_prefix()`, not just LIBRARY_CODES keys. `normalize_shelfmark()` now normalizes "ENA-MS"/"ENA MS" → "ENA" so all JTS ENA variant forms match. Both web and desktop benefit (shared genizah_core.py). |
@@ -261,6 +264,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-25 | Fixed the post-restart NLI FL-ID timeout storm in `web/api.py`: added a restart-persistent positive cache file (`Config.INDEX_DIR/nli_fl_ids_cache.json`) so resolved FL IDs survive `genizah-web` restarts, and made the NLI semaphore cap/timeout env-configurable for future tuning without changing the default 4/20 settings. Added regression tests for persistent cache round-trip + TTL pruning. | Codex |
 | 2026-03-25 | Fixed both Codex follow-ups: (1) Reading Desk + Edit bar toolbars now wrapped in `_make_scrollable_row()`, (2) height derived from `sizeHint()` instead of hardcoded. Also fixed: Recently Viewed empty for authenticated web users (`int('recent')` ValueError), desktop Recently Viewed sorted by shelfmark instead of view time. | Claude |
 | 2026-03-25 | Reviewed the current desktop browse-pane resize changes in `genizah_app.py` and added 2 new follow-up issues: (1) Reading Desk mode still constrains the browse splitter because its toolbar was not included in the new scrollable-row treatment; (2) the new fixed-height scroll-row helper can clip controls on DPI-scaled Windows or whenever its horizontal scrollbar appears. | Codex |
 | 2026-03-24 | Fixed both open P2 browse shelfmark issues: (1) `search_shelfmark()` now clears `state.current_page`/`state.view_joined` on no-result so stale content is replaced; (2) `show_shelfmark_suggestions()` dialog wrapped in `with content_container:` for slot context, 5/6 `ensure_future(search_shelfmark())` callers converted to async handlers, `handle_navigate` in joins_panel made async. | Claude |

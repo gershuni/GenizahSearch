@@ -1,4 +1,5 @@
 import logging
+import json
 
 from nicegui import app
 from fastapi import Response
@@ -22,17 +23,24 @@ logger = logging.getLogger(__name__)
 # Cache TTL values (configurable via environment variables)
 NLI_CACHE_TTL = int(os.environ.get('NLI_CACHE_TTL', '300'))  # 5 minutes default
 NLI_FAIL_CACHE_TTL = 60  # negative-cache failures for 60s to avoid hammering NLI
+NLI_DISK_CACHE_TTL = int(os.environ.get('NLI_DISK_CACHE_TTL', str(30 * 24 * 60 * 60)))  # 30 days
 IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes default
+NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCHES', '4')))
+NLI_SEMAPHORE_TIMEOUT = int(os.environ.get('NLI_SEMAPHORE_TIMEOUT', '20'))
+NLI_PERSISTENT_CACHE_FILE = os.path.join(Config.INDEX_DIR, 'nli_fl_ids_cache.json')
 
 # Concurrency cap for NLI IIIF fetches (prevents burst-flooding the upstream)
-_nli_semaphore = threading.Semaphore(4)
+_nli_semaphore = threading.Semaphore(NLI_MAX_CONCURRENT_FETCHES)
 
 # Persistent session for NLI requests (connection reuse via keep-alive)
 _nli_session = requests.Session()
 _nli_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 })
-_nli_adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=8)
+_nli_adapter = requests.adapters.HTTPAdapter(
+    pool_connections=NLI_MAX_CONCURRENT_FETCHES,
+    pool_maxsize=max(8, NLI_MAX_CONCURRENT_FETCHES * 2),
+)
 _nli_session.mount('https://iiif.nli.org.il', _nli_adapter)
 
 # Allowed domains for image proxy (prevents SSRF attacks)
@@ -46,6 +54,122 @@ ALLOWED_IMAGE_DOMAINS = [
     'iiif-cloud.princeton.edu',
     'figgy.princeton.edu',
 ]
+
+
+def _normalize_persisted_fl_ids(fl_ids) -> list[str]:
+    """Normalize persisted FL IDs to a clean list of digit strings."""
+    normalized = []
+    for fl_id in fl_ids or []:
+        digits = re.sub(r'\D', '', str(fl_id))
+        if digits:
+            normalized.append(digits)
+    return normalized
+
+
+def _load_nli_persistent_cache(
+    cache_path: str = NLI_PERSISTENT_CACHE_FILE,
+    *,
+    now: float | None = None,
+) -> tuple[dict[str, list[str]], dict[str, float]]:
+    """Load persisted positive NLI FL-ID cache entries from disk.
+
+    Persisted entries are rehydrated with a fresh in-memory timestamp so they
+    can absorb the immediate post-restart burst even if they were last fetched
+    hours or days earlier.
+    """
+    import time as _time
+
+    now = _time.time() if now is None else now
+    if NLI_DISK_CACHE_TTL <= 0:
+        return {}, {}
+
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return {}, {}
+    except Exception as e:
+        logger.warning(f"Failed to load persisted NLI FL-ID cache from {cache_path}: {e}")
+        return {}, {}
+
+    entries = payload.get('entries', {}) if isinstance(payload, dict) else {}
+    cache: dict[str, list[str]] = {}
+    cache_time: dict[str, float] = {}
+    changed = False
+
+    for system_id, entry in entries.items():
+        if not isinstance(entry, dict):
+            changed = True
+            continue
+        cached_at = entry.get('cached_at')
+        if not isinstance(cached_at, (int, float)):
+            changed = True
+            continue
+        if now - float(cached_at) >= NLI_DISK_CACHE_TTL:
+            changed = True
+            continue
+        fl_ids = _normalize_persisted_fl_ids(entry.get('fl_ids', []))
+        if not fl_ids:
+            changed = True
+            continue
+        cache[str(system_id)] = fl_ids
+        cache_time[str(system_id)] = now
+
+    if changed:
+        _save_nli_persistent_cache(cache, cache_time, cache_path=cache_path, now=now)
+
+    if cache:
+        logger.info(f"Loaded {len(cache)} persisted NLI FL-ID cache entries from {cache_path}")
+    return cache, cache_time
+
+
+def _save_nli_persistent_cache(
+    cache: dict[str, object],
+    cache_time: dict[str, float],
+    cache_path: str = NLI_PERSISTENT_CACHE_FILE,
+    *,
+    now: float | None = None,
+) -> None:
+    """Persist positive NLI FL-ID cache entries with an atomic file replace."""
+    import time as _time
+
+    now = _time.time() if now is None else now
+    if NLI_DISK_CACHE_TTL <= 0:
+        return
+
+    entries = {}
+    for system_id, fl_ids in cache.items():
+        if not isinstance(fl_ids, list):
+            continue
+        cached_at = cache_time.get(system_id)
+        if not isinstance(cached_at, (int, float)):
+            continue
+        if now - float(cached_at) >= NLI_DISK_CACHE_TTL:
+            continue
+        normalized_fl_ids = _normalize_persisted_fl_ids(fl_ids)
+        if not normalized_fl_ids:
+            continue
+        entries[str(system_id)] = {
+            'fl_ids': normalized_fl_ids,
+            'cached_at': float(cached_at),
+        }
+
+    payload = {'version': 1, 'entries': entries}
+    temp_path = f"{cache_path}.tmp"
+    try:
+        cache_dir = os.path.dirname(cache_path)
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+        with open(temp_path, 'w', encoding='utf-8') as handle:
+            json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
+        os.replace(temp_path, cache_path)
+    except Exception as e:
+        logger.warning(f"Failed to persist NLI FL-ID cache to {cache_path}: {e}")
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
 
 def init_api_routes():
     """Register API routes for image proxy and exports."""
@@ -110,22 +234,32 @@ def init_api_routes():
 
     # Sentinel for negative cache entries (distinguishes "cached empty" from "not cached")
     _NLI_FAIL_SENTINEL = object()
+    _nli_cache, _nli_cache_time = _load_nli_persistent_cache()
+    _nli_cache_lock = threading.Lock()
 
-    def fetch_fl_ids_from_nli(system_id: str, _cache={}, _cache_time={}) -> list:
+    def _persist_positive_cache_snapshot() -> None:
+        with _nli_cache_lock:
+            cache_snapshot = dict(_nli_cache)
+            cache_time_snapshot = dict(_nli_cache_time)
+        _save_nli_persistent_cache(cache_snapshot, cache_time_snapshot)
+
+    def fetch_fl_ids_from_nli(system_id: str) -> list:
         """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached.
 
         Resolution order:
         1. In-memory cache — includes negative entries to avoid retrying failures (fastest)
-        2. Local SQLite sidecar via NliCrossrefService (no network, ~815K pre-resolved records)
+        2. Restart-persistent positive cache file under Config.INDEX_DIR
         3. NLI IIIF manifest network fetch (all pages)
         4. NLI MARC API fallback (typically 1 FL ID)
         """
         import time as _time
 
         # Check cache first (both positive and negative entries)
-        if system_id in _cache:
-            cache_age = _time.time() - _cache_time.get(system_id, 0)
-            cached_val = _cache[system_id]
+        with _nli_cache_lock:
+            cached_present = system_id in _nli_cache
+            cached_val = _nli_cache.get(system_id)
+            cache_age = _time.time() - _nli_cache_time.get(system_id, 0)
+        if cached_present:
             if cached_val is _NLI_FAIL_SENTINEL:
                 # Negative cache: return empty if still within cooldown
                 if cache_age < NLI_FAIL_CACHE_TTL:
@@ -134,28 +268,27 @@ def init_api_routes():
             elif cache_age < NLI_CACHE_TTL:
                 return cached_val
 
-        # NOTE: Crossref FGPImageNumberId != IIIF FL number. Cannot use sidecar for image URLs.
-        # Always use IIIF manifest for canonical FL IDs.
-
         # Acquire semaphore to cap concurrent NLI requests
-        acquired = _nli_semaphore.acquire(timeout=20)
+        acquired = _nli_semaphore.acquire(timeout=NLI_SEMAPHORE_TIMEOUT)
         if not acquired:
             logger.warning(f"NLI semaphore timeout for {system_id} — too many concurrent fetches")
             return []
         try:
-            return _fetch_fl_ids_network(system_id, _cache, _cache_time)
+            return _fetch_fl_ids_network(system_id)
         finally:
             _nli_semaphore.release()
 
-    def _fetch_fl_ids_network(system_id: str, _cache, _cache_time) -> list:
+    def _fetch_fl_ids_network(system_id: str) -> list:
         """Network fetch for FL IDs (called under semaphore)."""
         import time as _time
 
         # Re-check cache after acquiring semaphore (another thread may have resolved it
         # or stored a negative entry while we were waiting)
-        if system_id in _cache:
-            cached_val = _cache[system_id]
-            cache_age = _time.time() - _cache_time.get(system_id, 0)
+        with _nli_cache_lock:
+            cached_present = system_id in _nli_cache
+            cached_val = _nli_cache.get(system_id)
+            cache_age = _time.time() - _nli_cache_time.get(system_id, 0)
+        if cached_present:
             if cached_val is _NLI_FAIL_SENTINEL:
                 if cache_age < NLI_FAIL_CACHE_TTL:
                     return []
@@ -184,8 +317,10 @@ def init_api_routes():
                                 fl_ids.append(fl_match.group(1))
 
                 if fl_ids:
-                    _cache[system_id] = fl_ids
-                    _cache_time[system_id] = _time.time()
+                    with _nli_cache_lock:
+                        _nli_cache[system_id] = fl_ids
+                        _nli_cache_time[system_id] = _time.time()
+                    _persist_positive_cache_snapshot()
                     logger.info(f"Resolved {len(fl_ids)} FL IDs for {system_id} from network IIIF manifest")
                     return fl_ids
         except Exception as e:
@@ -204,16 +339,19 @@ def init_api_routes():
                         seen.add(fl_id)
                         unique_fl_ids.append(fl_id)
                 if unique_fl_ids:
-                    _cache[system_id] = unique_fl_ids
-                    _cache_time[system_id] = _time.time()
+                    with _nli_cache_lock:
+                        _nli_cache[system_id] = unique_fl_ids
+                        _nli_cache_time[system_id] = _time.time()
+                    _persist_positive_cache_snapshot()
                     logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
                     return unique_fl_ids
         except Exception as e:
             logger.error(f"MARC fallback also failed for {system_id}: {e}")
 
         # Both attempts failed — negative-cache to avoid immediate retry
-        _cache[system_id] = _NLI_FAIL_SENTINEL
-        _cache_time[system_id] = _time.time()
+        with _nli_cache_lock:
+            _nli_cache[system_id] = _NLI_FAIL_SENTINEL
+            _nli_cache_time[system_id] = _time.time()
         return []
 
     @app.get('/api/fl_ids/{sys_id}')
