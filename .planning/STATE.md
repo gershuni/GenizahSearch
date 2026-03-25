@@ -19,7 +19,7 @@ milestone_name: milestone
 status: Executing Phase 53
 stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
 last_updated: "2026-03-18T19:49:02Z"
-last_activity: 2026-03-25 - Completed quick task 260325-hhn: Fix missing FJMS bibliography author + untranslated Penn/Halper catalog entries
+last_activity: 2026-03-25 - Completed quick task 260325-kkp: Fix Responsa wildcard + line-break pipe
 progress:
   total_phases: 6
   completed_phases: 5
@@ -314,9 +314,10 @@ Recent decisions affecting current work:
 | 260323-gmy | Add Princeton DPUL as main source for JTS images | 2026-03-23 | 36ebe881 | [260323-gmy-add-princeton-dpul-as-main-source-for-jt](./quick/260323-gmy-add-princeton-dpul-as-main-source-for-jt/) |
 | 260325-eol | Fix browse tab Recently Viewed list: sort by view time + make resizable | 2026-03-25 | a346b2f3 | [260325-eol-fix-browse-tab-recently-viewed-list-sort](./quick/260325-eol-fix-browse-tab-recently-viewed-list-sort/) |
 | 260325-hhn | Fix missing FJMS bibliography author + untranslated Penn/Halper catalog entries | 2026-03-25 | pending | [260325-hhn-fix-missing-fjms-bibliography-author-unt](./quick/260325-hhn-fix-missing-fjms-bibliography-author-unt/) |
+| 260325-kkp | Fix Responsa wildcard (*) ignored with line-break pipe (\|) and line position options | 2026-03-25 | 9ff25977 | [260325-kkp-fix-responsa-wildcard-ignored-when-combi](./quick/260325-kkp-fix-responsa-wildcard-ignored-when-combi/) |
 
 ## Session Continuity
 
-Last session: 2026-03-23
-Stopped at: Completed quick task 260323-gmy: Add Princeton DPUL as main source for JTS images
+Last session: 2026-03-25
+Stopped at: Completed quick task 260325-kkp: Fix Responsa wildcard + line-break pipe
 Resume file: None
