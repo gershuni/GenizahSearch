@@ -19,7 +19,7 @@ milestone_name: milestone
 status: Executing Phase 53
 stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
 last_updated: "2026-03-18T19:49:02Z"
-last_activity: 2026-03-22 - Completed quick task 260322-uqk: FIST data fixes (catalog dedup + bibliography enhancement)
+last_activity: 2026-03-25 - Completed quick task 260325-eol: Fix browse tab Recently Viewed list sort + auth fix
 progress:
   total_phases: 6
   completed_phases: 5
@@ -312,6 +312,7 @@ Recent decisions affecting current work:
 | 260322-kr9 | Close ResultDialog when adding to puzzle from desktop app | 2026-03-22 | cab3753e | [260322-kr9-close-resultdialog-when-adding-to-puzzle](./quick/260322-kr9-close-resultdialog-when-adding-to-puzzle/) |
 | 260322-uqk | Dedup FJMS catalog + enhance bibliography (8 new FIST fields, volume fix, Hebrew titles) | 2026-03-22 | da414fd6 | [260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca](./quick/260322-uqk-fix-fist-data-issues-deduplicate-fjms-ca/) |
 | 260323-gmy | Add Princeton DPUL as main source for JTS images | 2026-03-23 | 36ebe881 | [260323-gmy-add-princeton-dpul-as-main-source-for-jt](./quick/260323-gmy-add-princeton-dpul-as-main-source-for-jt/) |
+| 260325-eol | Fix browse tab Recently Viewed list: sort by view time + make resizable | 2026-03-25 | a346b2f3 | [260325-eol-fix-browse-tab-recently-viewed-list-sort](./quick/260325-eol-fix-browse-tab-recently-viewed-list-sort/) |
 
 ## Session Continuity
 
