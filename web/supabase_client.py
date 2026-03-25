@@ -840,11 +840,31 @@ def update_correction(correction_id: int, data: Dict) -> Dict:
 # COMMENTS OPERATIONS
 # ============================================================================
 
+def _enrich_with_profiles(client, rows: List[Dict], id_field: str = 'author_id') -> List[Dict]:
+    """Batch-resolve user IDs to profile data and attach as 'profiles' key."""
+    if not rows:
+        return rows
+    user_ids = set(r.get(id_field) for r in rows if r.get(id_field))
+    if not user_ids:
+        return rows
+    try:
+        profiles_response = client.table('profiles').select(
+            'id, full_name, username'
+        ).in_('id', list(user_ids)).execute()
+        profiles_map = {p['id']: p for p in (profiles_response.data or [])}
+    except Exception:
+        profiles_map = {}
+    for r in rows:
+        aid = r.get(id_field)
+        r['profiles'] = profiles_map.get(aid, {}) if aid else {}
+    return rows
+
+
 def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = True) -> List[Dict]:
     """Get comments with optional filters."""
     try:
         client = get_client()
-        query = client.table('comments').select('*, profiles(full_name, username)')
+        query = client.table('comments').select('*')
 
         if sys_id:
             query = query.eq('sys_id', sys_id)
@@ -854,21 +874,23 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
             query = query.eq('is_public', is_public)
 
         response = query.order('created_at', desc=True).execute()
-        return response.data or []
+        comments = response.data or []
+        return _enrich_with_profiles(client, comments)
     except Exception as e:
         if _is_jwt_expired(e):
             logger.warning("JWT expired in get_comments, resetting client and retrying")
             reset_client()
             try:
                 client = get_client()
-                query = client.table('comments').select('*, profiles(full_name, username)')
+                query = client.table('comments').select('*')
                 if sys_id:
                     query = query.eq('sys_id', sys_id)
                 if author_id:
                     query = query.eq('author_id', author_id)
                 if is_public is not None:
                     query = query.eq('is_public', is_public)
-                return query.order('created_at', desc=True).execute().data or []
+                comments = query.order('created_at', desc=True).execute().data or []
+                return _enrich_with_profiles(client, comments)
             except Exception as e2:
                 logger.error(f"Error getting comments (retry): {e2}")
                 return []
@@ -1126,10 +1148,11 @@ def get_discovery_responses(discovery_id: int) -> List[Dict]:
     """Get responses for a discovery."""
     try:
         client = get_client()
-        response = client.table('discovery_responses').select('*, profiles(full_name, username)').eq(
+        response = client.table('discovery_responses').select('*').eq(
             'discovery_id', discovery_id
         ).order('created_at', desc=False).execute()
-        return response.data or []
+        rows = response.data or []
+        return _enrich_with_profiles(client, rows, id_field='user_id')
     except Exception as e:
         logger.error(f"Error getting discovery responses: {e}")
         return []
