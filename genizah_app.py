@@ -1760,7 +1760,9 @@ class FullscreenImageWindow(QMainWindow):
         layout.setSpacing(0)
 
         # === Top toolbar ===
-        top_bar = QHBoxLayout()
+        top_bar_widget = QWidget()
+        top_bar_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)  # arrows are spatial, not semantic
+        top_bar = QHBoxLayout(top_bar_widget)
         top_bar.setContentsMargins(10, 6, 10, 6)
 
         # Prev page button
@@ -1868,7 +1870,7 @@ class FullscreenImageWindow(QMainWindow):
         btn_close.clicked.connect(self.close)
         top_bar.addWidget(btn_close)
 
-        layout.addLayout(top_bar)
+        layout.addWidget(top_bar_widget)
 
         # === Image area ===
         self._scroll_area = ZoomableScrollArea()
