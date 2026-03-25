@@ -107,6 +107,18 @@ def translate_with_retry(text: str, few_shot_prompt: str, direction: str = "en2h
     return None
 
 
+def has_english(text: str, min_latin: int = 10) -> bool:
+    """Return True if text contains significant English content worth translating.
+
+    Scholarly catalog descriptions often mix English framing with Hebrew/Arabic
+    titles, incipits, and names in Hebrew script. Texts with >=min_latin Latin
+    letters contain English scholarly content that should be translated.
+    Pure Hebrew texts (below threshold) are left as-is.
+    """
+    latin = sum(1 for c in text if ("A" <= c <= "Z") or ("a" <= c <= "z"))
+    return latin >= min_latin
+
+
 def get_candidates(conn: sqlite3.Connection, min_length: int) -> list[tuple[str, str, str]]:
     """Get English catalog free descriptions needing en2he translation."""
     rows = conn.execute(
@@ -123,7 +135,8 @@ def get_candidates(conn: sqlite3.Connection, min_length: int) -> list[tuple[str,
         )""",
         (min_length,),
     ).fetchall()
-    return [(str(r[0]), r[1], r[2]) for r in rows]
+    # Filter to English text only (>=10 Latin chars = has scholarly English content)
+    return [(str(r[0]), r[1], r[2]) for r in rows if has_english(r[2], min_latin=10)]
 
 
 def cleanup_bad_translations(conn: sqlite3.Connection, dry_run: bool = False) -> int:
