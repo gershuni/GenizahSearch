@@ -2418,11 +2418,11 @@ class FjmsService:
         except Exception as e:
             logger.debug(f"FjmsService.get_catalog_detail running_titles error for {sys_id}: {e}")
 
-        # 3. Sizes
+        # 3. Sizes (v1.0.0 schema: SizeX_cm/SizeY_cm; dict keys preserved for backward compat)
         sizes = {}
         try:
             cursor = self._conn.execute(
-                "SELECT UnitCatalogRecId, SizeX, SizeY, InnerSizeX, InnerSizeY "
+                "SELECT UnitCatalogRecId, SizeX_cm, SizeY_cm, InnerSizeX_cm, InnerSizeY_cm "
                 "FROM catalog_sizes WHERE AlmaId = ?",
                 (sys_id,),
             )
@@ -2431,10 +2431,10 @@ class FjmsService:
                 if rec_id not in sizes:
                     sizes[rec_id] = []
                 sizes[rec_id].append({
-                    "size_x": row["SizeX"],
-                    "size_y": row["SizeY"],
-                    "inner_size_x": row["InnerSizeX"],
-                    "inner_size_y": row["InnerSizeY"],
+                    "size_x": row["SizeX_cm"],
+                    "size_y": row["SizeY_cm"],
+                    "inner_size_x": row["InnerSizeX_cm"],
+                    "inner_size_y": row["InnerSizeY_cm"],
                 })
         except Exception as e:
             logger.debug(f"FjmsService.get_catalog_detail sizes error for {sys_id}: {e}")

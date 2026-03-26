@@ -237,15 +237,16 @@ def test_db(tmp_path):
         ("990001", 101, "Lamentations Commentary", None),
     ])
 
-    # catalog_sizes
+    # catalog_sizes (v1.0.0 schema with normalized cm values and flags)
     conn.execute("""
         CREATE TABLE catalog_sizes (
             AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,
-            SizeX REAL, SizeY REAL, InnerSizeX REAL, InnerSizeY REAL
+            SizeX_cm REAL, SizeY_cm REAL, InnerSizeX_cm REAL, InnerSizeY_cm REAL,
+            SizeUnit TEXT, Measurement_Scope TEXT, Flag_WH_Swap TEXT, Flag_Unit_Error TEXT
         )
     """)
-    conn.executemany("INSERT INTO catalog_sizes VALUES (?, ?, ?, ?, ?, ?)", [
-        ("990001", 100, 165.0, 210.0, None, None),
+    conn.executemany("INSERT INTO catalog_sizes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+        ("990001", 100, 165.0, 210.0, None, None, "mm", None, None, None),
     ])
 
     # catalog_fields
