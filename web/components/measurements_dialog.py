@@ -104,12 +104,21 @@ def _kv_row(label: str, value: str, is_heb: bool = False):
         )
 
 
+def _unit_label(unit: str) -> str:
+    """Translate unit label for display."""
+    unit_map = {'cm': 'ס"מ', 'mm': 'מ"מ'}
+    lang = get_language()
+    if lang == 'he' and unit.lower() in unit_map:
+        return unit_map[unit.lower()]
+    return unit
+
+
 def _fmt_dim(w, h, unit='cm'):
     """Format width x height with 1 decimal place."""
     if w is None or h is None:
         return None
     try:
-        return f"{float(w):.1f} \u00d7 {float(h):.1f} {unit}"
+        return f"{float(w):.1f} \u00d7 {float(h):.1f} {_unit_label(unit)}"
     except (ValueError, TypeError):
         return None
 
@@ -151,7 +160,7 @@ def _render_summary_section(summary: dict, is_heb: bool):
         if abs(float(min_w) - float(max_w)) < 0.05 and abs(float(min_h) - float(max_h)) < 0.05:
             range_str = _fmt_dim(min_w, min_h) or ''
         else:
-            range_str = f'{tr("Width")}: {_fmt_val(min_w)}-{_fmt_val(max_w)} cm, {tr("Height")}: {_fmt_val(min_h)}-{_fmt_val(max_h)} cm'
+            range_str = f'{tr("Width")}: {_fmt_val(min_w)}-{_fmt_val(max_w)} {_unit_label("cm")}, {tr("Height")}: {_fmt_val(min_h)}-{_fmt_val(max_h)} {_unit_label("cm")}'
         if range_str:
             _kv_row(tr("Computed Dimensions"), range_str, is_heb)
 
@@ -193,7 +202,7 @@ def _render_summary_section(summary: dict, is_heb: bool):
             parts.append(f"{computed_count} {tr('with text')}")
         if blank_count:
             parts.append(f"{blank_count} {tr('blank')}")
-        _kv_row(tr("Image") + "s", ', '.join(parts), is_heb)
+        _kv_row(tr("Images"), ', '.join(parts), is_heb)
 
 
 def _render_catalog_sizes_section(catalog_sizes: list, is_heb: bool):
@@ -245,7 +254,7 @@ def _render_computed_section(computed: list, extra_info: list, is_heb: bool):
             tr("Verso") if "verso" in str(side).lower() else str(side)
         )
         if many_images:
-            with ui.expansion(f'{side_label} ({len(rows)} {tr("Image")}s)').classes(
+            with ui.expansion(f'{side_label} ({len(rows)} {tr("Images")})').classes(
                 'w-full'
             ).props('dense'):
                 for row in rows:
@@ -307,7 +316,7 @@ def _render_computed_row(row: dict, ei_map: dict, is_heb: bool):
             margin_parts.append(f"\u2190{lm}")
         if rm:
             margin_parts.append(f"\u2192{rm}")
-        _kv_row(tr("Margins") + " (cm)", '  '.join(margin_parts), is_heb)
+        _kv_row(tr("Margins") + f" ({_unit_label('cm')})", '  '.join(margin_parts), is_heb)
 
     # Line count
     num_lines = row.get("Num_Lines")
@@ -317,7 +326,7 @@ def _render_computed_row(row: dict, ei_map: dict, is_heb: bool):
     # Line height
     line_h = row.get("Avg_Line_Height_Text_mm")
     if line_h is not None:
-        _kv_row(tr("Line Height"), f"{_fmt_val(line_h)} mm", is_heb)
+        _kv_row(tr("Line Height"), f"{_fmt_val(line_h)} {_unit_label('mm')}", is_heb)
 
     # Text density
     density = row.get("Text_Density_per10cm")
