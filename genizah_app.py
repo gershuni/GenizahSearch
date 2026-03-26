@@ -1978,6 +1978,7 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = None
         self.external_provider = None
         self._closing = False
+        self._thumb_threads = []  # Track thumbnail threads for cleanup
         self._thumbnail_ready.connect(self._on_thumbnail_ready)
         self.init_ui()
 
@@ -2336,6 +2337,15 @@ class ManuscriptViewerWidget(QWidget):
         url = self.active_list[index]['url']
         final = self._resolve_url(url)
 
+        # Cancel previous preload worker to prevent GC of running QThread
+        if self.preload_worker and self.preload_worker.isRunning():
+            self.preload_worker.cancel()
+            try:
+                self.preload_worker.image_loaded.disconnect()
+                self.preload_worker.load_failed.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+
         # Spawn thread without connecting signals (just for cache)
         # Store ref to prevent GC
         self.preload_worker = ImageLoaderThread(final)
@@ -2346,10 +2356,15 @@ class ManuscriptViewerWidget(QWidget):
         self._closing = True
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
-            self.loader_thread.wait(2000)
+            try:
+                self.loader_thread.image_loaded.disconnect()
+                self.loader_thread.load_failed.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            self.loader_thread.wait(500)  # Short wait only on widget destruction
         if self.preload_worker and self.preload_worker.isRunning():
             self.preload_worker.cancel()
-            self.preload_worker.wait(1000)
+            self.preload_worker.wait(500)
 
     def _on_thumbnail_ready(self, pix, page_idx, generation):
         """Handle thumbnail loaded signal - only display if still on same page and same load generation."""
@@ -2383,7 +2398,11 @@ class ManuscriptViewerWidget(QWidget):
                 pass  # Thumbnail load failed, full image will replace it
 
         # Run in background thread to avoid blocking UI
-        threading.Thread(target=fetch_and_emit, daemon=True).start()
+        t = threading.Thread(target=fetch_and_emit, daemon=True)
+        # Track thread references to prevent premature GC
+        self._thumb_threads = [t2 for t2 in self._thumb_threads if t2.is_alive()]
+        self._thumb_threads.append(t)
+        t.start()
 
     def set_page(self, index):
         if not self.active_list:
@@ -2407,11 +2426,16 @@ class ManuscriptViewerWidget(QWidget):
             thumb_url = f"{base_url}/full/400,/0/default.jpg"
 
         self.scroll_area.set_status_message(tr("Loading..."))
+        gen = self._load_generation  # Capture for generation guard
 
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
-            # Use short timeout to avoid blocking UI - thread will finish in background
-            self.loader_thread.wait(500)
+            # Disconnect signals to prevent stale delivery — do NOT block with wait()
+            try:
+                self.loader_thread.image_loaded.disconnect()
+                self.loader_thread.load_failed.disconnect()
+            except (TypeError, RuntimeError):
+                pass
 
         # Load low-res preview first for instant display, then high-res replaces it
         if thumb_url:
@@ -2420,8 +2444,12 @@ class ManuscriptViewerWidget(QWidget):
         final_url = self._resolve_url(base_url)
 
         self.loader_thread = ImageLoaderThread(final_url)
-        self.loader_thread.image_loaded.connect(self.display_image)
-        self.loader_thread.load_failed.connect(lambda: None if self._closing else self.scroll_area.set_status_message(tr("No Image")))
+        self.loader_thread.image_loaded.connect(
+            lambda img, g=gen: self.display_image(img) if g == self._load_generation and not self._closing else None
+        )
+        self.loader_thread.load_failed.connect(
+            lambda g=gen: None if g != self._load_generation or self._closing else self.scroll_area.set_status_message(tr("No Image"))
+        )
         self.loader_thread.start()
 
         # Preload next image
@@ -8351,7 +8379,12 @@ class ResultDialog(QDialog):
                     
             if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
                 self.browse_img_thread.cancel()
-                self.browse_img_thread.wait()
+                try:
+                    self.browse_img_thread.image_loaded.disconnect()
+                    self.browse_img_thread.load_failed.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                self.browse_img_thread.wait(500)
 
             # Stop manuscript viewer image threads
             if getattr(self, 'ms_viewer', None):
@@ -28549,8 +28582,12 @@ class GenizahGUI(QMainWindow):
     def cancel_browse_image_thread(self):
         if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
             self.browse_img_thread.cancel()
-            # Use short timeout to avoid blocking UI - thread will finish in background
-            self.browse_img_thread.wait(500)
+            # Disconnect signals to prevent stale delivery — do NOT block with wait()
+            try:
+                self.browse_img_thread.image_loaded.disconnect()
+                self.browse_img_thread.load_failed.disconnect()
+            except (TypeError, RuntimeError):
+                pass
 
     def fetch_browse_thumbnail(self, sys_id, meta=None):
         self.cancel_browse_image_thread()
