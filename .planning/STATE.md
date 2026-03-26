@@ -2,43 +2,39 @@
 gsd_state_version: 1.0
 milestone: v7.3
 milestone_name: Search Refinement & Scholarly Joins
-status: executing
-stopped_at: Phase 54 context gathered
-last_updated: "2026-03-26T11:30:26.594Z"
-last_activity: 2026-03-26 -- Completed quick task 260326-jwi: fix desktop browse tab crash
+status: Phase complete — ready for verification
+stopped_at: Completed 54-02-PLAN.md Tasks 1-2 (awaiting visual verification checkpoint)
+last_updated: "2026-03-26T11:47:38.848Z"
 progress:
   total_phases: 11
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 19
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-26)
+See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 54 — dimensions-display-filtering
+**Current focus:** Phase 53 — fill-missing-genizah-manuscripts-from-fist
 
 ## Current Position
 
-Phase: 54 (dimensions-display-filtering) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 54
-Last activity: 2026-03-26 -- Completed quick task 260326-jwi: fix desktop browse tab crash
+Phase: 53 (fill-missing-genizah-manuscripts-from-fist) — COMPLETE
+Plan: 2 of 2 (all complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: ~175 (across 12 milestones)
+- Total plans completed: ~161 (across 10 milestones)
 - Average duration: ~12 min (historical)
 
 **Recent Trend:**
 
-- v7.0.0: 15 plans, 6 phases, 2 days
 - v6.5.0: 26 plans, 5 phases, 15 days
 - v6.0.0: 21 plans, 6 phases, 6 days
 - Trend: Stable
@@ -79,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 53-01]: LibraryId 230 (Vernadsky) mapped to 'Harkavy' code (shelfmarks are Harkavi-prefixed)
 - [Phase Phase 53-02]: Metadata search extracted into _execute_metadata_search helper, moved above Tantivy guard; uses meta_mgr.get_meta_for_id(sid) for display dict (not self.csv_bank which doesn't exist on SearchEngine)
 - [Phase Phase 53-02]: metadata_only flag on all metadata search results: True for records without Tantivy text (FIST-only), False for records with text; browse page hides page nav for metadata_only=True results
+- [Phase 54]: Single import_measurements.py script as sole owner of all measurement tables; flag exclusion at aggregation time in summary
+- [Phase 54]: Teal color scheme for measurements dialog, distinct from catalog and bib
+- [Phase 54]: Web async dialog fetch via run.io_bound; desktop lazy-fetch on first click
 
 ### Pending Todos
 
@@ -96,7 +95,6 @@ Recent decisions affecting current work:
 - IIIF physicalScale metadata availability unverified -- DPI calibration may reduce to per-library lookup table + manual override
 - Background removal edge quality on real Genizah manuscripts verified good during Phase 48 interactive testing; hue-weighted removal added for colored backgrounds
 - NLI S1/S2 recto/verso pairing convention needs verification across libraries (Phase 51)
-- Dimension units in catalog_sizes unverified (likely mm) -- needs spot-check against known manuscript at Phase 54 start
 
 ### Quick Tasks Completed
 
@@ -135,11 +133,11 @@ Recent decisions affecting current work:
 | 260325-eol | Fix browse tab Recently Viewed list: sort by view time + make resizable | 2026-03-25 | a346b2f3 | [260325-eol-fix-browse-tab-recently-viewed-list-sort](./quick/260325-eol-fix-browse-tab-recently-viewed-list-sort/) |
 | 260325-hhn | Fix missing FJMS bibliography author + untranslated Penn/Halper catalog entries | 2026-03-25 | pending | [260325-hhn-fix-missing-fjms-bibliography-author-unt](./quick/260325-hhn-fix-missing-fjms-bibliography-author-unt/) |
 | 260325-kkp | Fix Responsa wildcard (*) ignored with line-break pipe (\|) and line position options | 2026-03-25 | 9ff25977 | [260325-kkp-fix-responsa-wildcard-ignored-when-combi](./quick/260325-kkp-fix-responsa-wildcard-ignored-when-combi/) |
-| 260326-jwi | Fix desktop browse tab crash when rapidly navigating images | 2026-03-26 | 77b43536 | [260326-jwi-fix-desktop-browse-tab-crash-when-rapidl](./quick/260326-jwi-fix-desktop-browse-tab-crash-when-rapidl/) |
+| Phase 54 P01 | 5min | 2 tasks | 6 files |
+| Phase 54 P02 | 6min | 2 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-03-26T09:16:18.231Z
-Stopped at: Phase 54 context gathered
-Resume file: .planning/phases/54-dimensions-display-filtering/54-CONTEXT.md
-Next step: /gsd:plan-phase 54
+Last session: 2026-03-26T11:47:38.844Z
+Stopped at: Completed 54-02-PLAN.md Tasks 1-2 (awaiting visual verification checkpoint)
+Resume file: None

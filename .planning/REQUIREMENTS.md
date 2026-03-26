@@ -28,10 +28,10 @@
 
 ### Dimensions
 
-- [ ] **DIM-01**: User can see manuscript dimensions (width x height) in browse and result views (web + desktop)
+- [x] **DIM-01**: User can see manuscript dimensions (width x height) in browse and result views (web + desktop)
 - [ ] **DIM-02**: User can filter search by dimension range (min/max width and height) as a pre-search filter (web + desktop)
 - [ ] **DIM-03**: User can filter within results by dimension range as a post-search filter (web + desktop)
-- [ ] **DIM-04**: Dimensions are normalized across units (cm/mm/inch) with appropriate display formatting (shared service)
+- [x] **DIM-04**: Dimensions are normalized across units (cm/mm/inch) with appropriate display formatting (shared service)
 
 ## v2 Requirements
 
@@ -62,10 +62,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DIM-01 | Phase 54 | Pending |
+| DIM-01 | Phase 54 | Complete |
 | DIM-02 | Phase 54 | Pending |
 | DIM-03 | Phase 54 | Pending |
-| DIM-04 | Phase 54 | Pending |
+| DIM-04 | Phase 54 | Complete |
 | SRCH-01 | Phase 55 | Pending |
 | SRCH-02 | Phase 55 | Pending |
 | SRCH-03 | Phase 55 | Pending |
