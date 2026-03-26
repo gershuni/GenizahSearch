@@ -2575,6 +2575,126 @@ class FjmsService:
             "mentions": mentions,
         }
 
+    def get_measurements(self, sys_id: str) -> dict:
+        """Get all measurement data for a manuscript.
+
+        Returns dict with keys: catalog_sizes, computed, extra_info, blank_images, summary.
+        Flagged records are excluded per D-11.
+        Gracefully handles missing tables (old sidecars).
+        """
+        if self._conn is None:
+            return {"catalog_sizes": [], "computed": [], "extra_info": [],
+                    "blank_images": [], "summary": None}
+
+        result = {"catalog_sizes": [], "computed": [], "extra_info": [],
+                  "blank_images": [], "summary": None}
+
+        # Summary row (manuscript_measurements)
+        try:
+            cursor = self._conn.execute(
+                "SELECT * FROM manuscript_measurements WHERE AlmaId = ?", (sys_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                result["summary"] = dict(row)
+        except Exception:
+            pass  # Table may not exist in old sidecars
+
+        # Catalog sizes (exclude flagged per D-11/D-13)
+        try:
+            cursor = self._conn.execute(
+                "SELECT AlmaId, UnitCatalogRecId, SizeX_cm, SizeY_cm, "
+                "InnerSizeX_cm, InnerSizeY_cm, SizeUnit, Measurement_Scope "
+                "FROM catalog_sizes WHERE AlmaId = ? "
+                "AND Flag_WH_Swap IS NULL AND Flag_Unit_Error IS NULL",
+                (sys_id,),
+            )
+            result["catalog_sizes"] = [dict(r) for r in cursor]
+        except Exception:
+            pass
+
+        # Computed measurements (exclude all 4 flags per D-11)
+        try:
+            cursor = self._conn.execute(
+                "SELECT FGP, Image_Side, Component_Num, Bifolio_Side, "
+                "Page_Width_cm, Page_Height_cm, Num_Lines, "
+                "Left_Margin_cm, Right_Margin_cm, Top_Margin_cm, Bottom_Margin_cm, "
+                "Written_Width_cm, Written_Height_cm, "
+                "Avg_Line_Height_Text_mm, Text_Density_per10cm, DpiGrid "
+                "FROM computed_measurements WHERE AlmaId = ? "
+                "AND Flag_DPI_High = 0 AND Flag_DPI_Low = 0 "
+                "AND Flag_Negative_Margin = 0 AND Flag_BifolioLoc_Error = 0",
+                (sys_id,),
+            )
+            result["computed"] = [dict(r) for r in cursor]
+        except Exception:
+            pass
+
+        # Extra info for this manuscript
+        try:
+            cursor = self._conn.execute(
+                "SELECT FGP, Shelfmark, Material, Size_Category, "
+                "NumFolio, NumBifolio, Image_Type "
+                "FROM extra_info WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            result["extra_info"] = [dict(r) for r in cursor]
+        except Exception:
+            pass
+
+        # Blank images (fragments without text blocks)
+        try:
+            cursor = self._conn.execute(
+                "SELECT FGP, Fragment_Width_cm, Fragment_Height_cm, IsNotWhole "
+                "FROM blank_images WHERE AlmaId = ?",
+                (sys_id,),
+            )
+            result["blank_images"] = [dict(r) for r in cursor]
+        except Exception:
+            pass
+
+        return result
+
+    def has_measurements(self, sys_id: str) -> bool:
+        """Check if a manuscript has any measurement data.
+
+        Checks manuscript_measurements summary, catalog_sizes, and computed_measurements.
+        Returns False gracefully if measurement tables don't exist (old sidecars).
+        """
+        if self._conn is None:
+            return False
+        # Check summary first (fastest -- single indexed lookup)
+        try:
+            row = self._conn.execute(
+                "SELECT 1 FROM manuscript_measurements WHERE AlmaId = ? LIMIT 1",
+                (sys_id,),
+            ).fetchone()
+            if row:
+                return True
+        except Exception:
+            pass
+        # Fallback: check catalog_sizes (may have data not in summary)
+        try:
+            row = self._conn.execute(
+                "SELECT 1 FROM catalog_sizes WHERE AlmaId = ? LIMIT 1",
+                (sys_id,),
+            ).fetchone()
+            if row:
+                return True
+        except Exception:
+            pass
+        # Fallback: check computed_measurements
+        try:
+            row = self._conn.execute(
+                "SELECT 1 FROM computed_measurements WHERE AlmaId = ? LIMIT 1",
+                (sys_id,),
+            ).fetchone()
+            if row:
+                return True
+        except Exception:
+            pass
+        return False
+
     def close(self):
         """Close the database connection if open."""
         if self._conn is not None:
