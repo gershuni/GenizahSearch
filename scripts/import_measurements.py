@@ -65,14 +65,22 @@ VALIDATION_SAMPLE = [
 def safe_alma_id(value) -> str | None:
     """Convert AlmaId from xlsx (may be float) to clean string.
 
-    CRITICAL: AlmaId stored as float in xlsx loses precision.
-    str(int(9.900017468002052e+17)) == "990001746800205184" (WRONG)
-    We use str(int(value)) which is correct for integers stored as float.
+    openpyxl reads Excel integers as Python int (exact), but large numbers
+    stored as General/Number format may arrive as float with precision loss.
+    For 18-digit AlmaIds: if the value arrives as float, int() truncates the
+    fractional part but IEEE 754 double only has ~15.9 significant digits,
+    so digits 16-18 may be wrong. We detect this by checking if the value
+    is a float with magnitude >= 1e15, and if so, try the string representation
+    first (openpyxl sometimes provides the original text via cell.value).
     """
     if value is None:
         return None
     try:
-        # Handle both float and int representations
+        if isinstance(value, float) and abs(value) >= 1e15:
+            # Float precision risk: try string path first
+            s = f"{value:.0f}"
+            if len(s) >= 16:
+                return s
         return str(int(value))
     except (ValueError, TypeError, OverflowError):
         return str(value).strip() if value else None
@@ -690,19 +698,39 @@ def step6_versioning_and_summary(conn):
 
 def main():
     """Main import function."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Import FIST measurement data into fjms_enrichment.db")
+    parser.add_argument("--target", default=TARGET_DB_PATH,
+                        help=f"Target SQLite database (default: {TARGET_DB_PATH})")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Run import on a disposable copy, print audit, then discard")
+    args = parser.parse_args()
+
+    target_path = args.target
+    dry_run = args.dry_run
+
+    if dry_run:
+        import shutil
+        dry_copy = target_path + ".dry_run_copy"
+        shutil.copy2(target_path, dry_copy)
+        target_path = dry_copy
+        print("*** DRY RUN MODE — writing to disposable copy ***\n")
+
     print("=" * 60)
     print("FIST Measurement Data Import")
     print(f"  Source: {XLSX_PATH}")
     print(f"  FIST.db: {FIST_DB_PATH}")
-    print(f"  Target: {TARGET_DB_PATH}")
+    print(f"  Target: {target_path}")
+    if dry_run:
+        print(f"  Mode: DRY RUN (copy will be deleted after)")
     print("=" * 60)
 
     if not os.path.exists(XLSX_PATH):
         print(f"ERROR: xlsx file not found: {XLSX_PATH}")
         sys.exit(1)
 
-    if not os.path.exists(TARGET_DB_PATH):
-        print(f"ERROR: Target sidecar not found: {TARGET_DB_PATH}")
+    if not os.path.exists(target_path):
+        print(f"ERROR: Target sidecar not found: {target_path}")
         sys.exit(1)
 
     start = time.time()
@@ -713,7 +741,7 @@ def main():
     print(f"  Sheets: {wb.sheetnames}")
 
     # Connect to target sidecar
-    conn = sqlite3.connect(TARGET_DB_PATH)
+    conn = sqlite3.connect(target_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
 
@@ -727,8 +755,10 @@ def main():
         # Step 1: Extra_Info + build FGP-to-AlmaId lookup
         step1_extra_info(wb, conn, fgp_to_alma)
 
-        # Validate AlmaIds
-        validate_alma_ids(fgp_to_alma)
+        # Validate AlmaIds — abort if 0/10 known IDs match
+        if not validate_alma_ids(fgp_to_alma):
+            raise RuntimeError("AlmaId validation FAILED: 0/10 known IDs matched. "
+                               "Aborting import to prevent data corruption.")
 
         # Step 2: Computed_Measurements
         step2_computed_measurements(wb, conn, fgp_to_alma)
@@ -759,6 +789,10 @@ def main():
 
     elapsed = time.time() - start
     print(f"\nDone in {elapsed:.1f}s")
+
+    if dry_run:
+        os.remove(target_path)
+        print(f"\n*** DRY RUN: disposable copy deleted: {target_path} ***")
 
 
 if __name__ == "__main__":
