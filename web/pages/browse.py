@@ -887,6 +887,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         'bibliography': fjms.get_bibliography(_page_sys_id),
                         'source_names': fjms.get_source_names(_page_sys_id),
                         'catalog_refs': fjms.get_catalog_refs(_page_sys_id),
+                        'has_measurements': fjms.has_measurements(_page_sys_id),
                     }
                 return None
 

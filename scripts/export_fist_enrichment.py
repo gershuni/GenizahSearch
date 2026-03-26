@@ -412,6 +412,10 @@ def export_catalog_running_titles(source, target):
     return total
 
 
+# NOTE: catalog_sizes table is replaced by scripts/import_measurements.py
+# with normalized cm values from FIST_Computed_Measurements.xlsx.
+# This function remains as fallback for raw FIST.db-only exports.
+# Canonical build order: (1) export_fist_enrichment.py, (2) import_measurements.py
 def export_catalog_sizes(source, target):
     """Export catalog sizes from FIST to sidecar."""
     print("Exporting catalog sizes...")
