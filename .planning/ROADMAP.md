@@ -158,7 +158,7 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 **Milestone Goal:** Search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments -- dimensions display and filtering, search within results, exclude known manuscripts, and FIST joins enrichment with a dedicated search mode. Both web (NiceGUI) and desktop (PyQt6).
 
 **v7.3 Search Refinement & Scholarly Joins (Phases 54-57):**
-- [ ] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse (both apps). Filtering deferred to Phase 55.
+- [x] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse (both apps). Filtering deferred to Phase 55. (completed 2026-03-26)
 - [ ] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps)
 - [ ] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps)
 - [ ] **Phase 57: FIST Joins Browse & Search Mode** - Clickable join partners in browse, "Has joins" search filter, post-search join partner enrichment with group capping (both apps)
@@ -282,8 +282,8 @@ Plans:
   4. fjms_enrichment.db contains computed_measurements (~434K rows), extra_info (~743K rows), blank_images (~165K rows), and updated catalog_sizes with normalized cm values
 **Plans**: 2 plans
 Plans:
-- [ ] 54-01-PLAN.md — Import script + FjmsService.get_measurements() + catalog_sizes migration + tests
-- [ ] 54-02-PLAN.md — Web + desktop measurements dialog + browse button wiring + visual checkpoint
+- [x] 54-01-PLAN.md — Import script + FjmsService.get_measurements() + catalog_sizes migration + tests
+- [x] 54-02-PLAN.md — Web + desktop measurements dialog + browse button wiring + visual checkpoint
 
 ### Phase 55: Search Within Results
 **Goal**: Researchers can progressively refine their search by running a second query restricted to the manuscripts from their current result set
@@ -336,7 +336,7 @@ Plans:
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
-| 54. Dimensions Display & Filtering | 0/2 | In progress | - |
+| 54. Dimensions Display & Filtering | 2/2 | Complete   | 2026-03-26 |
 | 55. Search Within Results | 0/? | Not started | - |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |

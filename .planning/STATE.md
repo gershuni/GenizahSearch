@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.0.0
-milestone_name: Fragment Puzzle
-status: not_started
-stopped_at: Completed 54-01-PLAN.md
-last_updated: "2026-03-26T11:37:54.461Z"
+milestone: v7.3
+milestone_name: Search Refinement & Scholarly Joins
+status: Phase complete — ready for verification
+stopped_at: Completed 54-02-PLAN.md Tasks 1-2 (awaiting visual verification checkpoint)
+last_updated: "2026-03-26T11:47:38.848Z"
 progress:
-  total_phases: 56
-  completed_phases: 54
-  total_plans: 178
-  completed_plans: 179
+  total_phases: 11
+  completed_phases: 7
+  total_plans: 19
+  completed_plans: 19
 ---
 
 # Project State
@@ -76,6 +76,8 @@ Recent decisions affecting current work:
 - [Phase Phase 53-02]: Metadata search extracted into _execute_metadata_search helper, moved above Tantivy guard; uses meta_mgr.get_meta_for_id(sid) for display dict (not self.csv_bank which doesn't exist on SearchEngine)
 - [Phase Phase 53-02]: metadata_only flag on all metadata search results: True for records without Tantivy text (FIST-only), False for records with text; browse page hides page nav for metadata_only=True results
 - [Phase 54]: Single import_measurements.py script as sole owner of all measurement tables; flag exclusion at aggregation time in summary
+- [Phase 54]: Teal color scheme for measurements dialog, distinct from catalog and bib
+- [Phase 54]: Web async dialog fetch via run.io_bound; desktop lazy-fetch on first click
 
 ### Pending Todos
 
@@ -132,9 +134,10 @@ Recent decisions affecting current work:
 | 260325-hhn | Fix missing FJMS bibliography author + untranslated Penn/Halper catalog entries | 2026-03-25 | pending | [260325-hhn-fix-missing-fjms-bibliography-author-unt](./quick/260325-hhn-fix-missing-fjms-bibliography-author-unt/) |
 | 260325-kkp | Fix Responsa wildcard (*) ignored with line-break pipe (\|) and line position options | 2026-03-25 | 9ff25977 | [260325-kkp-fix-responsa-wildcard-ignored-when-combi](./quick/260325-kkp-fix-responsa-wildcard-ignored-when-combi/) |
 | Phase 54 P01 | 5min | 2 tasks | 6 files |
+| Phase 54 P02 | 6min | 2 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-03-26T11:37:54.456Z
-Stopped at: Completed 54-01-PLAN.md
+Last session: 2026-03-26T11:47:38.844Z
+Stopped at: Completed 54-02-PLAN.md Tasks 1-2 (awaiting visual verification checkpoint)
 Resume file: None
