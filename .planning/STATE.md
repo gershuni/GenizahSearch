@@ -2,6 +2,21 @@
 gsd_state_version: 1.0
 milestone: v7.3
 milestone_name: Search Refinement & Scholarly Joins
+status: roadmap_created
+stopped_at: Roadmap created (Phases 54-57), awaiting plan-phase
+last_updated: "2026-03-26T00:00:00.000Z"
+last_activity: 2026-03-26 — Roadmap created for v7.3 (4 phases, 14 requirements mapped)
+progress:
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+---
+
+---
+gsd_state_version: 1.0
+milestone: v7.3
+milestone_name: Search Refinement & Scholarly Joins
 status: not_started
 stopped_at: null
 last_updated: "2026-03-26T00:00:00.000Z"
@@ -202,27 +217,28 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-15)
+See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
 **Current focus:** Milestone v7.3 — Search Refinement & Scholarly Joins
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 54 (Dimensions Display & Filtering) — not started
 Plan: —
-Status: Defining requirements
-Last activity: 2026-03-26 — Milestone v7.3 started
+Status: Roadmap created, awaiting plan-phase 54
+Last activity: 2026-03-26 — Roadmap created for v7.3 (4 phases, 14 requirements)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: ~161 (across 10 milestones)
+- Total plans completed: ~175 (across 12 milestones)
 - Average duration: ~12 min (historical)
 
 **Recent Trend:**
 
+- v7.0.0: 15 plans, 6 phases, 2 days
 - v6.5.0: 26 plans, 5 phases, 15 days
 - v6.0.0: 21 plans, 6 phases, 6 days
 - Trend: Stable
@@ -280,6 +296,7 @@ Recent decisions affecting current work:
 - IIIF physicalScale metadata availability unverified -- DPI calibration may reduce to per-library lookup table + manual override
 - Background removal edge quality on real Genizah manuscripts verified good during Phase 48 interactive testing; hue-weighted removal added for colored backgrounds
 - NLI S1/S2 recto/verso pairing convention needs verification across libraries (Phase 51)
+- Dimension units in catalog_sizes unverified (likely mm) -- needs spot-check against known manuscript at Phase 54 start
 
 ### Quick Tasks Completed
 
@@ -321,6 +338,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-25
-Stopped at: Completed quick task 260325-kkp: Fix Responsa wildcard + line-break pipe
+Last session: 2026-03-26
+Stopped at: Roadmap created for v7.3 (Phases 54-57, 14 requirements mapped)
 Resume file: None
+Next step: /gsd:plan-phase 54

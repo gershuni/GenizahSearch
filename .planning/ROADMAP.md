@@ -12,8 +12,9 @@
 - **v6.0.0 Local Data Architecture** -- Phases 35-40 (shipped 2026-02-22)
 - **v6.1.0 Catalog Browse & Navigation** -- Phase 41 (shipped 2026-02-27)
 - **v6.5.0 Search UX & Filtered Search** -- Phases 42-46 (shipped 2026-03-14)
-- **v7.0.0 Fragment Puzzle** -- Phases 47-52 (planned)
-- **v7.1.0 FIST Gap Fill** -- Phase 53 (planned)
+- **v7.0.0 Fragment Puzzle** -- Phases 47-52 (shipped 2026-03-17)
+- **v7.1.0 FIST Gap Fill** -- Phase 53 (shipped 2026-03-19)
+- **v7.3 Search Refinement & Scholarly Joins** -- Phases 54-57 (planned)
 
 ## Phases
 
@@ -133,24 +134,34 @@ Hebrew library names, bidirectional filtered search (domain/author/work/date/mat
 
 </details>
 
-### v7.0.0 Fragment Puzzle (Planned)
+<details>
+<summary>v7.0.0 Fragment Puzzle (Phases 47-52) -- SHIPPED 2026-03-17</summary>
 
-**Milestone Goal:** Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal, DPI calibration, recto/verso views, join document persistence, and community publishing -- in both web (NiceGUI + Fabric.js) and desktop (PyQt6 + QGraphicsScene).
+6 phases, 15 plans.
+Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal,
+DPI calibration, recto/verso views, join document persistence, and community publishing --
+in both web (NiceGUI + Fabric.js) and desktop (PyQt6 + QGraphicsScene).
 
-**v7.0.0 Fragment Puzzle (Phases 47-52):**
-- [x] **Phase 47: Foundation + Background Removal** - Shared data model, joins.db sidecar, IIIF image loading, HSV background removal engine (completed 2026-03-16)
-- [x] **Phase 48: Desktop Canvas** - QGraphicsScene-based puzzle widget with drag, rotate, flip, resize, crop, keyboard shortcuts, and fragment loading from Browse/ResultDialog/Lists (completed 2026-03-16)
-- [x] **Phase 49: Web Canvas** - Fabric.js canvas embedded in NiceGUI with full manipulation parity and CORS-proxied images (completed 2026-03-16)
-- [x] **Phase 50: Join Documents** - Save/load puzzle arrangements to joins.db, metadata editing, composite image export (completed 2026-03-16)
-- [x] **Phase 51: Recto/Verso** - Auto-generated verso view from recto arrangement with correct verso images (already implemented during Phases 48-49, completed 2026-03-17)
-- [x] **Phase 52: Community + Integration** - Personal workspace, publish for review, browse published joins, entry points from browse/search (completed 2026-03-17)
+</details>
 
-### v7.1.0 FIST Gap Fill (Planned)
+<details>
+<summary>v7.1.0 FIST Gap Fill (Phase 53) -- SHIPPED 2026-03-19</summary>
 
-**Milestone Goal:** Add 38,673 Genizah manuscripts from FIST.db that are missing from libraries.csv, making them browsable with images and FJMS enrichment. Data-only phase — no Tantivy index rebuild needed.
+1 phase, 2 plans.
+Added 38,673 Genizah manuscripts from FIST.db that were missing from libraries.csv.
+Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new library codes.
 
-**v7.1.0 FIST Gap Fill (Phase 53):**
-- [x] **Phase 53: Fill Missing Genizah Manuscripts from FIST** - CSV generation, library code mapping, metadata search guard fix (completed 2026-03-19)
+</details>
+
+### v7.3 Search Refinement & Scholarly Joins (Planned)
+
+**Milestone Goal:** Search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments -- dimensions display and filtering, search within results, exclude known manuscripts, and FIST joins enrichment with a dedicated search mode. Both web (NiceGUI) and desktop (PyQt6).
+
+**v7.3 Search Refinement & Scholarly Joins (Phases 54-57):**
+- [ ] **Phase 54: Dimensions Display & Filtering** - Unit verification, batch size service, display in browse/results, pre-search and post-search dimension range filters, outlier clamping (both apps)
+- [ ] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps)
+- [ ] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps)
+- [ ] **Phase 57: FIST Joins Browse & Search Mode** - Clickable join partners in browse, "Has joins" search filter, post-search join partner enrichment with group capping (both apps)
 
 ## Phase Details
 
@@ -257,14 +268,63 @@ Plans:
   7. (GAP-07) Shelfmark normalization handles Yevr->EVR and Halper->Genizah aliases
 **Plans**: 2 plans
 Plans:
-- [ ] 53-01-PLAN.md -- CSV generation from FIST.db + library codes + shelfmark normalization
-- [ ] 53-02-PLAN.md -- Metadata search guard fix + validation tests + visual verification
+- [x] 53-01-PLAN.md -- CSV generation from FIST.db + library codes + shelfmark normalization
+- [x] 53-02-PLAN.md -- Metadata search guard fix + validation tests + visual verification
+
+### Phase 54: Dimensions Display & Filtering
+**Goal**: Researchers can see manuscript physical dimensions in browse and search results, and filter searches by size range to find fragments of matching dimensions
+**Depends on**: Nothing (first phase of v7.3 milestone)
+**Requirements**: DIM-01, DIM-02, DIM-03, DIM-04
+**Success Criteria** (what must be TRUE):
+  1. User can see manuscript dimensions (e.g., "15.2 x 22.1 cm") in the browse page detail panel and in search result cards for manuscripts that have size data in catalog_sizes (105K of 255K manuscripts)
+  2. User can set min/max width and height values in the pre-search filter panel, and search results are restricted to manuscripts within that size range (both apps)
+  3. User can filter within existing search results by dimension range as a post-search refinement, narrowing displayed results without re-running the search (both apps)
+  4. Dimensions are displayed consistently in centimeters regardless of the source unit (mm/cm/inch), with the normalization handled in a shared service method
+  5. Dimension filter slider/input bounds are clamped to sensible ranges (P5/P95 percentiles) so that outlier values (0.7mm, 7230mm) do not make the controls unusable
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 55: Search Within Results
+**Goal**: Researchers can progressively refine their search by running a second query restricted to the manuscripts from their current result set
+**Depends on**: Phase 54 (dimensions visible when refining enriches the combined experience; not a hard dependency)
+**Requirements**: SRCH-01, SRCH-02, SRCH-03
+**Success Criteria** (what must be TRUE):
+  1. User can click "Search within these N results" in the search results header, enter a new query, and see results restricted to only the sys_ids from the previous result set (both apps)
+  2. A breadcrumb or chip displays the refinement chain showing the original query, making the active scope visible at all times (both apps)
+  3. User can click a clear button on the breadcrumb to return to unrestricted search, removing the restrict set in one action (both apps)
+  4. Search-within correctly intersects with any active pre-search filters (domain, dimensions, etc.) -- the restrict set narrows further, never replaces existing filters
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 56: Exclude Known Manuscripts
+**Goal**: Researchers can hide manuscripts they have already reviewed from search results, using either a saved cloud list or an imported shelfmark file
+**Depends on**: Phase 55 (reuses breadcrumb/chip UX patterns for exclusion display; not a hard dependency)
+**Requirements**: EXCL-01, EXCL-02, EXCL-03, EXCL-04
+**Success Criteria** (what must be TRUE):
+  1. User can select a saved Supabase list from a picker dialog and all manuscripts in that list are hidden from subsequent search results (both apps)
+  2. User can import a text or CSV file of shelfmarks, and after resolution a report shows how many resolved vs. failed (e.g., "Resolved 80/100 shelfmarks. 20 not found: [list]") (both apps)
+  3. Shelfmark resolution handles variant conventions (CUL T-S vs T-S, full library names, Yevr/EVR aliases) using the existing normalize_shelfmark pipeline (both apps)
+  4. Search results show the exclusion count (e.g., "3 excluded") with a breakdown by source (list name vs. imported file) and per-source clear buttons (both apps)
+  5. Exclusion state persists within the session (web: SearchUIState; desktop: session state JSON) so that switching between searches does not lose the active exclude set
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 57: FIST Joins Browse & Search Mode
+**Goal**: Researchers can discover scholarly join relationships while browsing and can restrict searches to only manuscripts with known FIST joins, seeing join partners alongside their search results
+**Depends on**: Phase 54 (dimensions can appear for join partners); Phase 56 (exclude can filter join group members)
+**Requirements**: JOIN-01, JOIN-02, JOIN-03
+**Success Criteria** (what must be TRUE):
+  1. User can see FIST join group partners in the browse enrichment panel with clickable shelfmarks that navigate to the partner manuscript's browse view (both apps)
+  2. User can enable a "Has joins" toggle in the search filter panel that restricts results to the ~20K manuscripts with FIST join records, and the toggle shows the available manuscript count before searching (both apps)
+  3. Search results for manuscripts with joins display an expandable join partners section showing up to 10 partners inline with "and N more..." for larger groups, including join type and scholar attribution (both apps)
+  4. Join partner enrichment uses batch lookup (single SQL query for all result sys_ids) rather than per-result queries, keeping search performance comparable to unfiltered search
+**Plans**: TBD
 
 ## Progress
 
-**Total milestones shipped:** 10 (v7.0.0 completing now)
-**Total phases completed:** 52 (Phases 1-52)
-**Total plans completed:** ~173
+**Total milestones shipped:** 12 (through v7.1.0)
+**Total phases completed:** 53 (Phases 1-53)
+**Total plans completed:** ~175
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -275,7 +335,11 @@ Plans:
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
+| 54. Dimensions Display & Filtering | 0/? | Not started | - |
+| 55. Search Within Results | 0/? | Not started | - |
+| 56. Exclude Known Manuscripts | 0/? | Not started | - |
+| 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-18 after Phase 53 planning (2 plans created)*
+*Last updated: 2026-03-26 after v7.3 roadmap creation (Phases 54-57)*

@@ -62,26 +62,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRCH-01 | TBD | Pending |
-| SRCH-02 | TBD | Pending |
-| SRCH-03 | TBD | Pending |
-| EXCL-01 | TBD | Pending |
-| EXCL-02 | TBD | Pending |
-| EXCL-03 | TBD | Pending |
-| EXCL-04 | TBD | Pending |
-| JOIN-01 | TBD | Pending |
-| JOIN-02 | TBD | Pending |
-| JOIN-03 | TBD | Pending |
-| DIM-01 | TBD | Pending |
-| DIM-02 | TBD | Pending |
-| DIM-03 | TBD | Pending |
-| DIM-04 | TBD | Pending |
+| DIM-01 | Phase 54 | Pending |
+| DIM-02 | Phase 54 | Pending |
+| DIM-03 | Phase 54 | Pending |
+| DIM-04 | Phase 54 | Pending |
+| SRCH-01 | Phase 55 | Pending |
+| SRCH-02 | Phase 55 | Pending |
+| SRCH-03 | Phase 55 | Pending |
+| EXCL-01 | Phase 56 | Pending |
+| EXCL-02 | Phase 56 | Pending |
+| EXCL-03 | Phase 56 | Pending |
+| EXCL-04 | Phase 56 | Pending |
+| JOIN-01 | Phase 57 | Pending |
+| JOIN-02 | Phase 57 | Pending |
+| JOIN-03 | Phase 57 | Pending |
 
 **Coverage:**
 - v7.3 requirements: 14 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 14
+- Mapped to phases: 14/14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-26*
-*Last updated: 2026-03-26 after initial definition*
+*Last updated: 2026-03-26 after roadmap creation (all 14 requirements mapped)*
