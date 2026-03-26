@@ -1,200 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: executing
-stopped_at: Completed 53-02-PLAN.md (Phase 53 plan 02 complete - metadata search guard fix)
-last_updated: "2026-03-19T07:09:30.494Z"
-progress:
-  total_phases: 7
-  completed_phases: 6
-  total_plans: 17
-  completed_plans: 17
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: Executing Phase 53
-stopped_at: Completed 52-03-PLAN.md (desktop community publishing - Phase 52 complete)
-last_updated: "2026-03-18T19:49:02Z"
-last_activity: 2026-03-25 - Completed quick task 260325-kkp: Fix Responsa wildcard + line-break pipe
-progress:
-  total_phases: 6
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Completed 52-02-PLAN.md (web community publishing UI)
-last_updated: "2026-03-17T11:07:06.184Z"
-last_activity: 2026-03-18 - Completed quick task 260318-kk1: Fix puzzle image loading for non-NLI libraries
-progress:
-  total_phases: 6
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Completed 52-01-PLAN.md (all tasks done, Supabase schema applied)
-last_updated: "2026-03-17T11:06:45.271Z"
-last_activity: "2026-03-17 - Completed quick task 260317-gsb: Fix desktop corrections showing anonymous for all users"
-progress:
-  [██████████] 100%
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
-  percent: 87
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Phase 52 context gathered
-last_updated: "2026-03-17T08:27:17.757Z"
-last_activity: 2026-03-16 -- Completed 49-01 web puzzle page with Fabric.js canvas, API endpoints, nav integration
-progress:
-  [█████████░] 87%
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Completed 50-03-PLAN.md
-last_updated: "2026-03-16T18:23:22.382Z"
-last_activity: 2026-03-17 - Completed quick task 260317-aru: Fix background removal for CUL blue conservation mat
-progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Phase 49 context gathered
-last_updated: "2026-03-16T10:08:03.839Z"
-last_activity: 2026-03-16 -- Completed Phase 48 (Desktop Canvas) with full interactive verification
-progress:
-  total_phases: 6
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Completed 48-03-PLAN.md (Phase 48 complete)
-last_updated: "2026-03-16T09:06:41.953Z"
-last_activity: 2026-03-16 -- Completed 48-03 integration buttons + visual checkpoint with extensive UX polish
-progress:
-  total_phases: 6
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Phase 48 context gathered
-last_updated: "2026-03-16T05:31:08.140Z"
-last_activity: 2026-03-16 -- Completed 47-03 puzzle image service with IIIF fetch, bg removal, disk cache
-progress:
-  total_phases: 6
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 100
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Completed 47-03-PLAN.md
-last_updated: "2026-03-16T03:15:20.367Z"
-last_activity: 2026-03-16 -- Completed 47-02 background removal engine
-progress:
-  [██████████] 100%
-  completed_phases: 0
-  total_plans: 4
-  completed_plans: 3
-  percent: 75
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Completed 47-03-PLAN.md
-last_updated: "2026-03-16T03:11:24.924Z"
-last_activity: 2026-03-16 -- Completed 47-02 background removal engine
-progress:
-  [████████░░] 75%
-  completed_phases: 0
-  total_plans: 4
-  completed_plans: 2
----
-
----
-gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: not_started
-stopped_at: Phase 47 context gathered
-last_updated: "2026-03-15T21:29:00.725Z"
-last_activity: 2026-03-15 -- Roadmap created for v7.0.0 Fragment Puzzle (6 phases, 23 requirements)
-progress:
-  total_phases: 6
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
----
-
----
-gsd_state_version: 1.0
 milestone: v7.0.0
 milestone_name: Fragment Puzzle
 status: not_started
-stopped_at: null
-last_updated: "2026-03-15T14:00:00.000Z"
-last_activity: 2026-03-15 - Roadmap created for v7.0.0 Fragment Puzzle (6 phases, 23 requirements)
+stopped_at: Completed 54-01-PLAN.md
+last_updated: "2026-03-26T11:37:54.461Z"
 progress:
-  total_phases: 6
-  completed_phases: 0
-  total_plans: 4
-  completed_plans: 3
-  percent: 75
+  total_phases: 56
+  completed_phases: 54
+  total_plans: 178
+  completed_plans: 179
 ---
 
 # Project State
@@ -260,6 +75,7 @@ Recent decisions affecting current work:
 - [Phase 53-01]: LibraryId 230 (Vernadsky) mapped to 'Harkavy' code (shelfmarks are Harkavi-prefixed)
 - [Phase Phase 53-02]: Metadata search extracted into _execute_metadata_search helper, moved above Tantivy guard; uses meta_mgr.get_meta_for_id(sid) for display dict (not self.csv_bank which doesn't exist on SearchEngine)
 - [Phase Phase 53-02]: metadata_only flag on all metadata search results: True for records without Tantivy text (FIST-only), False for records with text; browse page hides page nav for metadata_only=True results
+- [Phase 54]: Single import_measurements.py script as sole owner of all measurement tables; flag exclusion at aggregation time in summary
 
 ### Pending Todos
 
@@ -315,9 +131,10 @@ Recent decisions affecting current work:
 | 260325-eol | Fix browse tab Recently Viewed list: sort by view time + make resizable | 2026-03-25 | a346b2f3 | [260325-eol-fix-browse-tab-recently-viewed-list-sort](./quick/260325-eol-fix-browse-tab-recently-viewed-list-sort/) |
 | 260325-hhn | Fix missing FJMS bibliography author + untranslated Penn/Halper catalog entries | 2026-03-25 | pending | [260325-hhn-fix-missing-fjms-bibliography-author-unt](./quick/260325-hhn-fix-missing-fjms-bibliography-author-unt/) |
 | 260325-kkp | Fix Responsa wildcard (*) ignored with line-break pipe (\|) and line position options | 2026-03-25 | 9ff25977 | [260325-kkp-fix-responsa-wildcard-ignored-when-combi](./quick/260325-kkp-fix-responsa-wildcard-ignored-when-combi/) |
+| Phase 54 P01 | 5min | 2 tasks | 6 files |
 
 ## Session Continuity
 
-Last session: 2026-03-25
-Stopped at: Completed quick task 260325-kkp: Fix Responsa wildcard + line-break pipe
+Last session: 2026-03-26T11:37:54.456Z
+Stopped at: Completed 54-01-PLAN.md
 Resume file: None
