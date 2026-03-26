@@ -158,7 +158,7 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 **Milestone Goal:** Search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments -- dimensions display and filtering, search within results, exclude known manuscripts, and FIST joins enrichment with a dedicated search mode. Both web (NiceGUI) and desktop (PyQt6).
 
 **v7.3 Search Refinement & Scholarly Joins (Phases 54-57):**
-- [ ] **Phase 54: Dimensions Display & Filtering** - Unit verification, batch size service, display in browse/results, pre-search and post-search dimension range filters, outlier clamping (both apps)
+- [ ] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse (both apps). Filtering deferred to Phase 55.
 - [ ] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps)
 - [ ] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps)
 - [ ] **Phase 57: FIST Joins Browse & Search Mode** - Clickable join partners in browse, "Has joins" search filter, post-search join partner enrichment with group capping (both apps)
@@ -272,17 +272,18 @@ Plans:
 - [x] 53-02-PLAN.md -- Metadata search guard fix + validation tests + visual verification
 
 ### Phase 54: Dimensions Display & Filtering
-**Goal**: Researchers can see manuscript physical dimensions in browse and search results, and filter searches by size range to find fragments of matching dimensions
+**Goal**: Researchers can see manuscript physical dimensions, margins, line counts, material, and text density via a measurements dialog in the browse page, backed by FIST computed measurement data imported into fjms_enrichment.db
 **Depends on**: Nothing (first phase of v7.3 milestone)
 **Requirements**: DIM-01, DIM-02, DIM-03, DIM-04
 **Success Criteria** (what must be TRUE):
-  1. User can see manuscript dimensions (e.g., "15.2 x 22.1 cm") in the browse page detail panel and in search result cards for manuscripts that have size data in catalog_sizes (105K of 255K manuscripts)
-  2. User can set min/max width and height values in the pre-search filter panel, and search results are restricted to manuscripts within that size range (both apps)
-  3. User can filter within existing search results by dimension range as a post-search refinement, narrowing displayed results without re-running the search (both apps)
-  4. Dimensions are displayed consistently in centimeters regardless of the source unit (mm/cm/inch), with the normalization handled in a shared service method
-  5. Dimension filter slider/input bounds are clamped to sensible ranges (P5/P95 percentiles) so that outlier values (0.7mm, 7230mm) do not make the controls unusable
-**Plans**: TBD
-**UI hint**: yes
+  1. (DIM-01) User can click a "Measurements" button in the browse page to see a dialog showing page dimensions, margins, written area, line counts, text density, and material for manuscripts with measurement data (both apps)
+  2. (DIM-04) Dimensions displayed in normalized centimeters using pre-computed values from FIST xlsx
+  3. (DIM-02/DIM-03 partial) manuscript_measurements summary table exists with indexed width/height columns ready for Phase 55 filtering
+  4. fjms_enrichment.db contains computed_measurements (~434K rows), extra_info (~743K rows), blank_images (~165K rows), and updated catalog_sizes with normalized cm values
+**Plans**: 2 plans
+Plans:
+- [ ] 54-01-PLAN.md — Import script + FjmsService.get_measurements() + catalog_sizes migration + tests
+- [ ] 54-02-PLAN.md — Web + desktop measurements dialog + browse button wiring + visual checkpoint
 
 ### Phase 55: Search Within Results
 **Goal**: Researchers can progressively refine their search by running a second query restricted to the manuscripts from their current result set
@@ -335,11 +336,11 @@ Plans:
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
-| 54. Dimensions Display & Filtering | 0/? | Not started | - |
+| 54. Dimensions Display & Filtering | 0/2 | In progress | - |
 | 55. Search Within Results | 0/? | Not started | - |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-26 after v7.3 roadmap creation (Phases 54-57)*
+*Last updated: 2026-03-26 after Phase 54 planning (2 plans in 2 waves)*
