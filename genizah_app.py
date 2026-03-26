@@ -5829,6 +5829,12 @@ class ResultDialog(QDialog):
         self.btn_compact_catalog.clicked.connect(self._show_rd_catalog)
         compact_layout.addWidget(self.btn_compact_catalog)
 
+        # Measurements (compact)
+        self.btn_compact_measurements = QPushButton()
+        self.btn_compact_measurements.setVisible(False)
+        self.btn_compact_measurements.clicked.connect(self._show_rd_measurements)
+        compact_layout.addWidget(self.btn_compact_measurements)
+
         # Joins (compact) - chain icon like normal mode
         self.btn_compact_joins = QToolButton()
         self.btn_compact_joins.setText("🔗")
@@ -5950,6 +5956,12 @@ class ResultDialog(QDialog):
         self.btn_rd_catalog.setEnabled(False)
         self.btn_rd_catalog.setVisible(False)
         self.btn_rd_catalog.clicked.connect(self._show_rd_catalog)
+        self.btn_rd_measurements = QPushButton(f"\U0001f4cf {tr('Measurements')}")
+        self.btn_rd_measurements.setToolTip(tr("Physical Measurements"))
+        self.btn_rd_measurements.setEnabled(False)
+        self.btn_rd_measurements.setVisible(False)
+        self.btn_rd_measurements.clicked.connect(self._show_rd_measurements)
+        self._rd_measurements_data = None
         self._rd_fjms_bib = []
         self._rd_marc_bib = []
         self._rd_catalog_detail = None
@@ -5975,6 +5987,7 @@ class ResultDialog(QDialog):
         action_row.addWidget(self.btn_rd_bib_fjms)
         action_row.addWidget(self.btn_rd_bib_nli)
         action_row.addWidget(self.btn_rd_catalog)
+        action_row.addWidget(self.btn_rd_measurements)
         action_row.addWidget(self.btn_toggle_image)
         action_row.addWidget(self.btn_rd_translations)
 
@@ -7692,6 +7705,11 @@ class ResultDialog(QDialog):
             self.btn_compact_bib_nli.setVisible(False)
         if hasattr(self, 'btn_compact_catalog'):
             self.btn_compact_catalog.setVisible(False)
+        self._rd_measurements_data = None
+        self.btn_rd_measurements.setVisible(False)
+        self.btn_rd_measurements.setEnabled(False)
+        if hasattr(self, 'btn_compact_measurements'):
+            self.btn_compact_measurements.setVisible(False)
         parent = self.parent()
         if parent:
             # Disconnect old worker signals first to prevent stale results
@@ -8015,6 +8033,27 @@ class ResultDialog(QDialog):
         )
         dlg.exec()
 
+    def _show_rd_measurements(self):
+        """Open measurements dialog from reading desk (lazy fetch on first click)."""
+        if self._rd_measurements_data is None and self.current_sys_id:
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms_svc = get_fjms_service()
+                if fjms_svc.is_available():
+                    self._rd_measurements_data = fjms_svc.get_measurements(self.current_sys_id)
+            except Exception:
+                pass
+
+        if self._rd_measurements_data:
+            shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
+            dlg = FjmsMeasurementsDialog(
+                self._rd_measurements_data,
+                sys_id=self.current_sys_id or '',
+                shelfmark=shelf,
+                parent=self,
+            )
+            dlg.exec()
+
     def toggle_external_viewer(self, checked):
         self.external_pane.setVisible(checked)
         if checked:
@@ -8149,6 +8188,27 @@ class ResultDialog(QDialog):
             self.btn_rd_catalog.setVisible(False)
             if hasattr(self, 'btn_compact_catalog'):
                 self.btn_compact_catalog.setVisible(False)
+
+        # Measurements button (lazy check via has_measurements)
+        self._rd_measurements_data = None
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms_svc_m = get_fjms_service()
+            if fjms_svc_m.is_available() and fjms_svc_m.has_measurements(self.current_sys_id):
+                self.btn_rd_measurements.setVisible(True)
+                self.btn_rd_measurements.setEnabled(True)
+                self.btn_rd_measurements.setText(f"\U0001f4cf {tr('Measurements')}")
+                if hasattr(self, 'btn_compact_measurements'):
+                    self.btn_compact_measurements.setVisible(True)
+                    self.btn_compact_measurements.setText(f"\U0001f4cf {tr('Meas.')}")
+            else:
+                self.btn_rd_measurements.setVisible(False)
+                if hasattr(self, 'btn_compact_measurements'):
+                    self.btn_compact_measurements.setVisible(False)
+        except Exception:
+            self.btn_rd_measurements.setVisible(False)
+            if hasattr(self, 'btn_compact_measurements'):
+                self.btn_compact_measurements.setVisible(False)
 
         # 4. Build Extended Info HTML (Text)
         # Store enrichment meta for translate badge rebuild
@@ -10499,6 +10559,244 @@ class FjmsCatalogDialog(QDialog):
         if s.endswith('.0'):
             return s[:-2]
         return s
+
+
+class FjmsMeasurementsDialog(QDialog):
+    """Dialog showing physical measurements for a manuscript.
+
+    Displays catalog dimensions, computed per-image measurements (page size,
+    margins, line count, text density), and blank image fragment dimensions.
+    """
+
+    def __init__(self, data: dict, sys_id: str = '', shelfmark: str = '', parent=None):
+        import html as html_module
+        super().__init__(parent)
+        self.setWindowTitle(f'{tr("Measurements")} \u2014 {shelfmark}' if shelfmark else tr('Measurements'))
+        self.setMinimumSize(700, 450)
+        self.resize(800, 600)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Header with teal color (dark mode aware)
+        palette = QApplication.palette()
+        is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+        header_color = '#4db6ac' if is_dark else '#00695c'
+        header = QLabel(f'<h3 style="color: {header_color};">\U0001f4cf {tr("Measurements")} \u2014 {html_module.escape(shelfmark)}</h3>')
+        layout.addWidget(header)
+
+        # Content browser
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(False)
+        layout.addWidget(browser)
+
+        html_content = self._build_html(data, is_dark)
+        browser.setHtml(html_content)
+
+        # Close button
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton(tr("Close"))
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _build_html(self, data: dict, is_dark: bool) -> str:
+        """Build HTML content for the measurements dialog."""
+        import html as html_module
+
+        text_color = '#e0e0e0' if is_dark else '#333333'
+        border_color = '#555' if is_dark else '#ddd'
+        header_bg = '#1a3a3a' if is_dark else '#e0f2f1'
+        header_fg = '#4db6ac' if is_dark else '#00695c'
+        alt_bg = '#1e1e1e' if is_dark else '#fafafa'
+
+        css = f"""
+        <style>
+        body {{ color: {text_color}; font-size: 13px; }}
+        h4 {{ color: {header_fg}; margin: 16px 0 8px 0; padding: 6px 10px;
+              background: {header_bg}; border-radius: 4px; }}
+        table {{ border-collapse: collapse; width: 100%; margin-bottom: 12px; }}
+        th, td {{ border: 1px solid {border_color}; padding: 5px 8px; text-align: left; }}
+        th {{ background: {header_bg}; color: {header_fg}; font-weight: bold; }}
+        tr:nth-child(even) {{ background: {alt_bg}; }}
+        .dim {{ font-weight: 600; }}
+        .muted {{ color: {'#888' if is_dark else '#999'}; font-style: italic; }}
+        </style>
+        """
+
+        summary = data.get("summary")
+        catalog_sizes = data.get("catalog_sizes", [])
+        computed = data.get("computed", [])
+        extra_info = data.get("extra_info", [])
+        blank_images = data.get("blank_images", [])
+
+        parts = [css]
+
+        if not summary and not catalog_sizes and not computed and not blank_images:
+            parts.append(f'<p class="muted">{html_module.escape(tr("No measurement data available"))}</p>')
+            return ''.join(parts)
+
+        # Section 1: Summary
+        if summary:
+            parts.append(f'<h4>\U0001f4cf {html_module.escape(tr("Physical Measurements"))}</h4>')
+            parts.append('<table>')
+
+            cw = summary.get("catalog_width_cm")
+            ch = summary.get("catalog_height_cm")
+            if cw is not None and ch is not None:
+                parts.append(f'<tr><th>{html_module.escape(tr("Catalog Dimensions"))}</th>'
+                             f'<td class="dim">{float(cw):.1f} \u00d7 {float(ch):.1f} cm</td></tr>')
+
+            ciw = summary.get("catalog_inner_width_cm")
+            cih = summary.get("catalog_inner_height_cm")
+            if ciw is not None and cih is not None:
+                parts.append(f'<tr><th>{html_module.escape(tr("Catalog Dimensions"))} ({html_module.escape(tr("Inner"))})</th>'
+                             f'<td class="dim">{float(ciw):.1f} \u00d7 {float(cih):.1f} cm</td></tr>')
+
+            min_w = summary.get("min_computed_width_cm")
+            max_w = summary.get("max_computed_width_cm")
+            min_h = summary.get("min_computed_height_cm")
+            max_h = summary.get("max_computed_height_cm")
+            if min_w is not None and max_w is not None:
+                if abs(float(min_w) - float(max_w)) < 0.05 and abs(float(min_h) - float(max_h)) < 0.05:
+                    range_str = f'{float(min_w):.1f} \u00d7 {float(min_h):.1f} cm'
+                else:
+                    range_str = (f'{tr("Width")}: {float(min_w):.1f}-{float(max_w):.1f} cm, '
+                                 f'{tr("Height")}: {float(min_h):.1f}-{float(max_h):.1f} cm')
+                parts.append(f'<tr><th>{html_module.escape(tr("Computed Dimensions"))}</th>'
+                             f'<td class="dim">{html_module.escape(range_str)}</td></tr>')
+
+            material = summary.get("material")
+            if material:
+                parts.append(f'<tr><th>{html_module.escape(tr("Material"))}</th>'
+                             f'<td>{html_module.escape(str(material))}</td></tr>')
+
+            size_cat = summary.get("size_category")
+            if size_cat:
+                parts.append(f'<tr><th>{html_module.escape(tr("Size Category"))}</th>'
+                             f'<td>{html_module.escape(str(size_cat))}</td></tr>')
+
+            min_lines = summary.get("min_num_lines")
+            max_lines = summary.get("max_num_lines")
+            avg_lines = summary.get("avg_num_lines")
+            if min_lines is not None and max_lines is not None:
+                if min_lines == max_lines:
+                    lines_str = str(int(min_lines))
+                else:
+                    lines_str = f"{int(min_lines)}-{int(max_lines)}"
+                if avg_lines is not None:
+                    lines_str += f" ({tr('avg')}: {float(avg_lines):.1f})"
+                parts.append(f'<tr><th>{html_module.escape(tr("Lines"))}</th>'
+                             f'<td>{html_module.escape(lines_str)}</td></tr>')
+
+            avg_density = summary.get("avg_text_density")
+            if avg_density is not None:
+                parts.append(f'<tr><th>{html_module.escape(tr("Text Density"))}</th>'
+                             f'<td>{float(avg_density):.1f} {html_module.escape(tr("per 10cm"))}</td></tr>')
+
+            parts.append('</table>')
+
+        # Section 2: Catalog Sizes
+        if catalog_sizes:
+            parts.append(f'<h4>{html_module.escape(tr("Catalog Dimensions"))}</h4>')
+            parts.append('<table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>'.format(
+                html_module.escape(tr("Page Size")),
+                html_module.escape(tr("Written Area")),
+                html_module.escape(tr("Margins")),
+                html_module.escape(tr("Material")),
+            ))
+            for sz in catalog_sizes:
+                sx = sz.get("SizeX_cm")
+                sy = sz.get("SizeY_cm")
+                isx = sz.get("InnerSizeX_cm")
+                isy = sz.get("InnerSizeY_cm")
+                scope = html_module.escape(str(sz.get("Measurement_Scope") or ""))
+                unit = html_module.escape(str(sz.get("SizeUnit") or "cm"))
+
+                outer = f'{float(sx):.1f} \u00d7 {float(sy):.1f} {unit}' if sx and sy else '\u2014'
+                inner = f'{float(isx):.1f} \u00d7 {float(isy):.1f} {unit}' if isx and isy else '\u2014'
+                parts.append(f'<tr><td class="dim">{outer}</td><td>{inner}</td>'
+                             f'<td>{scope}</td><td>{unit}</td></tr>')
+            parts.append('</table>')
+
+        # Section 3: Computed Measurements
+        if computed:
+            parts.append(f'<h4>{html_module.escape(tr("Computed Dimensions"))}</h4>')
+
+            # Group by Image_Side
+            side_groups = {}
+            ei_map = {ei.get("FGP"): ei for ei in extra_info if ei.get("FGP")}
+            for row in computed:
+                side = row.get("Image_Side") or "Unknown"
+                side_groups.setdefault(side, []).append(row)
+
+            for side, rows in side_groups.items():
+                side_label = tr("Recto") if "recto" in str(side).lower() else (
+                    tr("Verso") if "verso" in str(side).lower() else html_module.escape(str(side)))
+                parts.append(f'<p><b>{side_label}</b></p>')
+                parts.append('<table><tr>'
+                             f'<th>FGP</th>'
+                             f'<th>{html_module.escape(tr("Page Size"))}</th>'
+                             f'<th>{html_module.escape(tr("Written Area"))}</th>'
+                             f'<th>{html_module.escape(tr("Margins"))} (cm)</th>'
+                             f'<th>{html_module.escape(tr("Lines"))}</th>'
+                             f'<th>{html_module.escape(tr("Text Density"))}</th>'
+                             f'<th>{html_module.escape(tr("DPI Quality"))}</th>'
+                             '</tr>')
+
+                for row in rows:
+                    fgp = row.get("FGP") or ""
+                    pw = row.get("Page_Width_cm")
+                    ph = row.get("Page_Height_cm")
+                    ww = row.get("Written_Width_cm")
+                    wh = row.get("Written_Height_cm")
+                    lm = row.get("Left_Margin_cm")
+                    rm = row.get("Right_Margin_cm")
+                    tm = row.get("Top_Margin_cm")
+                    bm = row.get("Bottom_Margin_cm")
+                    nl = row.get("Num_Lines")
+                    density = row.get("Text_Density_per10cm")
+                    dpi = row.get("DpiGrid")
+
+                    page_dim = f'{float(pw):.1f} \u00d7 {float(ph):.1f}' if pw and ph else '\u2014'
+                    written = f'{float(ww):.1f} \u00d7 {float(wh):.1f}' if ww and wh else '\u2014'
+
+                    margin_parts = []
+                    if tm is not None: margin_parts.append(f'\u2191{float(tm):.1f}')
+                    if bm is not None: margin_parts.append(f'\u2193{float(bm):.1f}')
+                    if lm is not None: margin_parts.append(f'\u2190{float(lm):.1f}')
+                    if rm is not None: margin_parts.append(f'\u2192{float(rm):.1f}')
+                    margins_str = ' '.join(margin_parts) if margin_parts else '\u2014'
+
+                    lines_str = str(int(nl)) if nl is not None else '\u2014'
+                    density_str = f'{float(density):.1f}' if density is not None else '\u2014'
+                    dpi_str = html_module.escape(tr("Grid calibrated")) if dpi and float(dpi) > 0 else html_module.escape(tr("Ruler only"))
+
+                    parts.append(f'<tr><td>{html_module.escape(str(fgp))}</td>'
+                                 f'<td class="dim">{page_dim}</td><td>{written}</td>'
+                                 f'<td>{margins_str}</td><td>{lines_str}</td>'
+                                 f'<td>{density_str}</td><td>{dpi_str}</td></tr>')
+                parts.append('</table>')
+
+        # Section 4: Blank Images
+        if blank_images:
+            parts.append(f'<h4>{html_module.escape(tr("Fragment Dimensions (no text block)"))}</h4>')
+            parts.append(f'<table><tr><th>FGP</th>'
+                         f'<th>{html_module.escape(tr("Page Size"))}</th>'
+                         f'<th>{html_module.escape(tr("Material"))}</th></tr>')
+            for bi in blank_images:
+                fgp = bi.get("FGP") or ""
+                fw = bi.get("Fragment_Width_cm")
+                fh = bi.get("Fragment_Height_cm")
+                not_whole = bi.get("IsNotWhole")
+                dim = f'{float(fw):.1f} \u00d7 {float(fh):.1f} cm' if fw and fh else '\u2014'
+                note = f' ({html_module.escape(tr("Incomplete fragment"))})' if not_whole else ''
+                parts.append(f'<tr><td>{html_module.escape(str(fgp))}</td>'
+                             f'<td class="dim">{dim}{note}</td><td></td></tr>')
+            parts.append('</table>')
+
+        return ''.join(parts)
 
 
 class NliBibliographyDialog(QDialog):
