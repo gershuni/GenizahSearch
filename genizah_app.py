@@ -1979,6 +1979,8 @@ class ManuscriptViewerWidget(QWidget):
         self.external_provider = None
         self._closing = False
         self._thumb_threads = []  # Track thumbnail threads for cleanup
+        self._nav_debounce_timer = None  # QTimer for debouncing rapid set_page calls
+        self._pending_page_idx = None    # Deferred page index
         self._thumbnail_ready.connect(self._on_thumbnail_ready)
         self.init_ui()
 
@@ -2354,6 +2356,8 @@ class ManuscriptViewerWidget(QWidget):
     def stop_threads(self):
         """Stop all running image loading threads. Call before destroying widget."""
         self._closing = True
+        if self._nav_debounce_timer is not None:
+            self._nav_debounce_timer.stop()
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
             try:
@@ -2415,7 +2419,38 @@ class ManuscriptViewerWidget(QWidget):
         if index >= len(self.active_list): index = len(self.active_list) - 1
 
         self.current_idx = index
-        self._load_generation += 1  # Invalidate any in-flight thumbnail callbacks
+        self._load_generation += 1  # Invalidate any in-flight callbacks immediately
+
+        # Update status text immediately for responsiveness
+        self.scroll_area.set_status_message(tr("Loading..."))
+
+        # Cancel any pending debounced load
+        if self._nav_debounce_timer is not None:
+            self._nav_debounce_timer.stop()
+
+        # Store pending index and schedule actual load after debounce settles
+        self._pending_page_idx = index
+        self._nav_debounce_timer = QTimer()
+        self._nav_debounce_timer.setSingleShot(True)
+        self._nav_debounce_timer.timeout.connect(self._execute_set_page)
+        self._nav_debounce_timer.start(150)  # 150ms debounce
+
+    def _execute_set_page(self):
+        """Actually load the image after debounce settles."""
+        index = self._pending_page_idx
+        if index is None or self._closing:
+            return
+
+        # Re-check bounds (active_list may have changed)
+        if not self.active_list:
+            return
+        if index < 0: index = 0
+        if index >= len(self.active_list): index = len(self.active_list) - 1
+
+        self.current_idx = index
+        self._load_generation += 1  # Fresh generation for actual load
+        gen = self._load_generation
+
         img_data = self.active_list[index]
         base_url = img_data['url']
 
@@ -2425,12 +2460,9 @@ class ManuscriptViewerWidget(QWidget):
         if not thumb_url and 'iiif.nli.org.il' in base_url:
             thumb_url = f"{base_url}/full/400,/0/default.jpg"
 
-        self.scroll_area.set_status_message(tr("Loading..."))
-        gen = self._load_generation  # Capture for generation guard
-
+        # Cancel previous loader (non-blocking)
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.cancel()
-            # Disconnect signals to prevent stale delivery — do NOT block with wait()
             try:
                 self.loader_thread.image_loaded.disconnect()
                 self.loader_thread.load_failed.disconnect()
