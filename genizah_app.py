@@ -8360,17 +8360,22 @@ class ResultDialog(QDialog):
             return
         self.apply_metadata(meta or {})
 
+    @staticmethod
+    def _wait_or_terminate_thread(thread, timeout_ms=2000):
+        """Wait for a QThread to finish; terminate as last resort."""
+        thread.cancel()
+        if not thread.wait(timeout_ms):
+            logger.warning("Image thread did not finish in %dms, terminating", timeout_ms)
+            thread.terminate()
+            thread.wait()
+
     def cancel_image_thread(self):
         img_thread = getattr(self, 'img_thread', None)
         if img_thread and img_thread.isRunning():
-            img_thread.cancel()
-            # Use short timeout to avoid blocking UI - thread will finish in background
-            img_thread.wait(500)
+            self._wait_or_terminate_thread(img_thread)
 
         if getattr(self, 'ext_img_thread', None) and self.ext_img_thread.isRunning():
-            self.ext_img_thread.cancel()
-            # Use short timeout to avoid blocking UI - thread will finish in background
-            self.ext_img_thread.wait(500)
+            self._wait_or_terminate_thread(self.ext_img_thread)
 
     def fetch_image(self, sys_id, meta=None):
         self.cancel_image_thread()
@@ -8488,13 +8493,12 @@ class ResultDialog(QDialog):
                     self.group_thread.wait()
                     
             if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
-                self.browse_img_thread.cancel()
                 try:
                     self.browse_img_thread.image_loaded.disconnect()
                     self.browse_img_thread.load_failed.disconnect()
                 except (TypeError, RuntimeError):
                     pass
-                self.browse_img_thread.wait(500)
+                self._wait_or_terminate_thread(self.browse_img_thread)
 
             # Stop manuscript viewer image threads
             if getattr(self, 'ms_viewer', None):

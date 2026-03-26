@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-26 (reviewed quick task 260326-jwi follow-up; reopened a narrower browse-thread teardown gap after `f69bd9f4`)
+> **Last Updated:** 2026-03-26 (reviewed quick task 260326-jwi follow-up; main browse teardown fixed, but found remaining ResultDialog image-thread teardown gap after `d27335d1`)
 > **Status:** Active working document
 
 ---
@@ -65,7 +65,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Desktop browse image-thread teardown still drops running QThreads after a 500ms wait** | `genizah_app.py` | ✅ Fixed (2026-03-26) | Replaced 500ms bounded waits with `_wait_or_terminate(thread, 2000)`: waits 2s for cooperative cancel, then `terminate()` + `wait()` as hard kill to guarantee the thread is dead before references are released. Same pattern in `closeEvent` for `_browse_inflight`. No reference is dropped while a thread is still running. |
+| **ResultDialog image preview threads still drop running QThreads after a 500ms wait** | `genizah_app.py` | ✅ Fixed (2026-03-26) | Added `_wait_or_terminate_thread()` to `ResultDialog`: `cancel_image_thread()` and `closeEvent()` now use 2s cooperative wait + hard `terminate()` fallback for `img_thread`, `ext_img_thread`, and `browse_img_thread`. Same pattern as browse-tab fix. |
 | **Puzzle process endpoint allows unauthenticated cache poisoning / arbitrary uploads** | `web/api.py`, `web/puzzle_tokens.py`, `shared/puzzle_image_service.py` | ✅ Fixed (2026-03-18) | Fixed via HMAC upload tokens: `GET /api/puzzle_image` returns a signed token on cache miss; `POST /api/puzzle_process` and `POST /api/puzzle_upload_derivative` require valid token (5-min expiry, fl_id-bound). Also added size limit (10MB), content-type validation (JPEG/PNG), and rate limiting (60/min/IP). |
 | **Desktop Path Traversal** | `filter_text_dialog.py:16-23,58` | ג… Fixed (2026-02-03) | Already fixed - uses `_sanitize_cache_filename()` whitelist approach |
 
@@ -267,7 +267,7 @@ All completed items have been moved to `docs/archive/`:
 | Date | Change | By |
 |------|--------|-----|
 | 2026-03-26 | Fixed P1 QThread lifecycle issue in `ManuscriptViewerWidget`: added `_retire_thread()` + `_inflight_threads` list to keep canceled threads alive until `finished`. Persistent `QTimer(self)` for debounce. Same pattern for `_preload()`, `cancel_browse_image_thread()`, `closeEvent`. | Claude |
-| 2026-03-26 | Re-reviewed follow-up commit `f69bd9f4`. Confirmed the original cancel-and-replace ownership bug is fixed for active browse navigation, but reopened the issue in narrower form: teardown still waits only 500ms and then drops retained loader references, so closing the app/dialog during a slow 10-30s image request can still destroy a running `QThread`. | Codex |
+| 2026-03-26 | Re-reviewed follow-up commit `d27335d1`. Confirmed the original browse-tab teardown finding is fixed: `ManuscriptViewerWidget.stop_threads()` and the main-window `_browse_inflight` close path now use `_wait_or_terminate(...)`, so those retained loaders are no longer dropped alive. Added 1 new open P1 issue in narrower scope: `ResultDialog` still tears down `img_thread`, `ext_img_thread`, and `browse_img_thread` with only `wait(500)`, so closing the dialog during a slow image fetch can still destroy a running `QThread`. | Codex |
 | 2026-03-26 | Reviewed quick task `260326-jwi` (`26bd024a`, `1ee0cf74`, wrapped by `34a57c5b`). Added 1 new open P1 issue: the new cancel-and-replace pattern for desktop browse image threads still drops the last Python reference to running `ImageLoaderThread` instances, so rapid navigation can still hit `QThread: Destroyed while thread is still running` / process aborts despite the new generation guards. | Codex |
 | 2026-03-25 | Fixed the post-restart NLI FL-ID timeout storm in `web/api.py`: added a restart-persistent positive cache file (`Config.INDEX_DIR/nli_fl_ids_cache.json`) so resolved FL IDs survive `genizah-web` restarts, and made the NLI semaphore cap/timeout env-configurable for future tuning without changing the default 4/20 settings. Added regression tests for persistent cache round-trip + TTL pruning. | Codex |
 | 2026-03-25 | Fixed both Codex follow-ups: (1) Reading Desk + Edit bar toolbars now wrapped in `_make_scrollable_row()`, (2) height derived from `sizeHint()` instead of hardcoded. Also fixed: Recently Viewed empty for authenticated web users (`int('recent')` ValueError), desktop Recently Viewed sorted by shelfmark instead of view time. | Claude |
