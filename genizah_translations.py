@@ -2426,6 +2426,16 @@ TRANSLATIONS = {
         "חיפוש לפי מספר מדף או כותרת מוצא כעת כתבי יד גם ללא תעתיקים — עם תמונות ונתוני קטלוג.",
     "Shelfmark normalization: Yevr/Halper aliases for cross-collection search compatibility.":
         "נרמול סימני מדף: כינויי Yevr/Halper לתאימות חיפוש בין אוספים.",
+    "New: Manuscript measurements — dimensions, margins, line counts & material via Measurements button in browse. 400K bibliography duplicates removed.":
+        'חדש: מידות פיזיות של כתבי יד — מידות, שוליים, שורות וחומר בלחצן ייעודי בעיון. 400 אלף כפילויות ביבליוגרפיות הוסרו.',
+    "Manuscript measurements — new Measurements button in browse shows physical dimensions, margins, writing area, line counts, text density and material for 231K manuscripts.":
+        'מידות כתבי יד — לחצן "מידות" חדש בעיון מציג מידות פיזיות, שוליים, שטח כתיבה, מספר שורות, צפיפות טקסט וחומר עבור 231 אלף כתבי יד.',
+    "Bibliography cleanup — removed over 400,000 duplicate entries (48% reduction) for cleaner scholarly references.":
+        "ניקוי ביבליוגרפיה — הוסרו למעלה מ-400 אלף רשומות כפולות (הפחתה של 48%), להצגה נקייה יותר של מקורות מדעיים.",
+    "55,000 new Hebrew translations — English catalog free descriptions now available in Hebrew via Dicta Translation.":
+        "55 אלף תרגומים חדשים לעברית — תיאורים חופשיים מהקטלוג זמינים כעת בעברית באמצעות דיקטה תרגום.",
+    "Desktop stability — fixed crash when rapidly navigating between manuscripts in the browse tab.":
+        "יציבות שולחן העבודה — תוקנה קריסה בניווט מהיר בין כתבי יד בלשונית העיון.",
     "Focused Search: filter manuscripts by domain, author, work, date, and material before searching":
         "חיפוש ממוקד: סינון כתבי יד לפי תחום, מחבר, יצירה, תאריך וחומר לפני החיפוש",
     "Catalog & Metadata Translations: Hebrew/English translations for titles, descriptions, and catalog data via Dicta Translation":
@@ -3006,6 +3016,7 @@ TRANSLATIONS = {
     "Invert Colors": "הפוך צבעים",
     "Reset Image": "איפוס תמונה",
     "Image adjustment controls — brightness, contrast, gamma & invert on all image viewers. Better reading of difficult manuscripts.": "בקרות התאמת תמונה — בהירות, ניגודיות, גמא והיפוך צבעים בכל מציגי התמונות. קריאה טובה יותר של כתבי יד קשים.",
+    "Manuscript measurements — physical dimensions, margins, line counts & material now visible via Measurements button in browse. Plus 400K bibliography duplicates removed.": "מידות כתבי יד — מידות פיזיות, שוליים, מספר שורות וחומר זמינים כעת בלחצן מידות בעיון. בנוסף הוסרו 400 אלף כפילויות ביבליוגרפיות.",
 }
 
 # Hebrew library display names (keyed by library_code)

@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-26 (reviewed quick task 260326-jwi follow-up; main browse teardown fixed, but found remaining ResultDialog image-thread teardown gap after `d27335d1`)
+> **Last Updated:** 2026-03-26 (reviewed quick task 260326-jwi follow-up; confirmed ResultDialog image-thread teardown fix after `0c291bbd`)
 > **Status:** Active working document
 
 ---
@@ -46,7 +46,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
-| P1 Critical Bugs | 1 | 6 | 7 |
+| P1 Critical Bugs | 0 | 7 | 7 |
 | P2 Medium Bugs | 8 | 45 | 53 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **15** | **86** | **101** |
+| **Total** | **14** | **87** | **101** |
 
 ---
 
@@ -77,6 +77,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Desktop What's New dialog: RTL text alignment not fully right-aligned in Hebrew** | `genizah_app.py` | ❌ Open | The QLabel HTML rendering doesn't perfectly right-align `<p dir='rtl'>` bullet text in the WhatsNewDialog. Content is readable but left-edge aligned despite RTL direction. Low priority cosmetic issue. |
 | **Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses** | `genizah_core.py` | ❌ Open | Review of the 2026-03-25 wildcard fixes found that `build_tantivy_query()` and `_execute_line_break_search()` now expand each suffix/prefix wildcard into ~25 real grammatical forms for Tantivy recall, but `_count_expanded_terms()` / `_apply_explosion_guard()` still counts wildcard components as a single base word unless explicit grammatical prefix/suffix modifiers are set. Wildcard-heavy queries can therefore slip past the 500-term guard and generate much larger Tantivy queries than the system estimates, risking slower searches or query-parser failures. |
 | **Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches** | `genizah_core.py` | ❌ Open | Follow-up review on 2026-03-25 confirmed the line-break path now reuses expanded terms for non-wildcards and fixes suffix wildcard recall, but pattern wildcards (`*a*b*`) still cannot be meaningfully prefiltered from Tantivy using the current stem-based strategy. This matches the normal Responsa limitation: regex is correct, but candidate recall may still miss some pattern-only hits before post-filtering. |
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
@@ -267,6 +268,7 @@ All completed items have been moved to `docs/archive/`:
 | Date | Change | By |
 |------|--------|-----|
 | 2026-03-26 | Fixed P1 QThread lifecycle issue in `ManuscriptViewerWidget`: added `_retire_thread()` + `_inflight_threads` list to keep canceled threads alive until `finished`. Persistent `QTimer(self)` for debounce. Same pattern for `_preload()`, `cancel_browse_image_thread()`, `closeEvent`. | Claude |
+| 2026-03-26 | Re-reviewed follow-up commit `0c291bbd`. Confirmed the remaining `ResultDialog` teardown finding is fixed: `cancel_image_thread()` now uses `_wait_or_terminate_thread()` for `img_thread` and `ext_img_thread`, and `closeEvent()` does the same for `browse_img_thread`. No new review findings in this pass. | Codex |
 | 2026-03-26 | Re-reviewed follow-up commit `d27335d1`. Confirmed the original browse-tab teardown finding is fixed: `ManuscriptViewerWidget.stop_threads()` and the main-window `_browse_inflight` close path now use `_wait_or_terminate(...)`, so those retained loaders are no longer dropped alive. Added 1 new open P1 issue in narrower scope: `ResultDialog` still tears down `img_thread`, `ext_img_thread`, and `browse_img_thread` with only `wait(500)`, so closing the dialog during a slow image fetch can still destroy a running `QThread`. | Codex |
 | 2026-03-26 | Reviewed quick task `260326-jwi` (`26bd024a`, `1ee0cf74`, wrapped by `34a57c5b`). Added 1 new open P1 issue: the new cancel-and-replace pattern for desktop browse image threads still drops the last Python reference to running `ImageLoaderThread` instances, so rapid navigation can still hit `QThread: Destroyed while thread is still running` / process aborts despite the new generation guards. | Codex |
 | 2026-03-25 | Fixed the post-restart NLI FL-ID timeout storm in `web/api.py`: added a restart-persistent positive cache file (`Config.INDEX_DIR/nli_fl_ids_cache.json`) so resolved FL IDs survive `genizah-web` restarts, and made the NLI semaphore cap/timeout env-configurable for future tuning without changing the default 4/20 settings. Added regression tests for persistent cache round-trip + TTL pruning. | Codex |

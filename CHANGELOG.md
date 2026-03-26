@@ -4,6 +4,25 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.3.0] - Manuscript Measurements, Bibliography Cleanup & Desktop Stability - 2026-03-26
+
+### New Features
+- **Manuscript Measurements dialog**: New "Measurements" button in browse (web + desktop) opens a detailed dialog showing physical dimensions, margins, line counts, text density, material, and DPI quality — per-image data from 434K computed measurements and 179K catalog size records across 231K manuscripts
+
+### Improvements
+- **Bibliography dedup**: Removed ~401K duplicate bibliography entries (828K → 427K, 48.4% reduction) via exact and near-dupe merge passes
+- **55K new Hebrew translations**: English free descriptions (FreeDesc) now available in Hebrew via Dicta Translation, with hallucination filtering
+- **Persistent NLI FL-ID cache**: Cache survives service restarts, reducing repeated IIIF manifest lookups
+- **NLI concurrent fetches**: Default bumped from 4 to 8 for faster image loading
+
+### Bug Fixes
+- **Desktop browse tab crash**: Fixed crash when rapidly navigating between manuscripts — added 150ms navigation debounce, generation guard, and proper QThread lifecycle for image loaders
+- **Desktop image thread lifecycle**: Threads now properly terminate on teardown instead of being dropped, preventing orphaned workers
+- **ResultDialog image threads**: Wait-or-terminate pattern prevents thread leaks when closing dialogs
+- **Profiles FK join**: Reverted broken foreign key join in community comments/responses, using batch lookup instead
+
+---
+
 ## [7.2.4] - JTS Image Upgrade + Shelfmark Search Fixes - 2026-03-25
 
 ### New Features

@@ -822,35 +822,56 @@ def export_bibliography(source, target):
         )
     """)
 
+    # GROUP BY content columns to deduplicate across FIST XML import batches
+    # (Comment field contains batch markers that make DISTINCT ineffective)
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            t.RunningTitleEng, t.RunningTitleHeb,
-            t.TitleYearEng, t.AcronymEng, t.AcronymHeb,
-            bib.MentionPage, bib.FromPage, bib.ToPage,
-            COALESCE(NULLIF(bib.JournalVolumeTxt, ''), bib.Volume),
-            bib.EVolume, bib.JournalDate,
-            fc.EngDesc as MentionType,
-            ft.EngDesc as TranscriptionType,
-            fl.EngDesc as TranslationType,
-            bib.ArticleName,
-            a.EngDesc as ArticleAuthorEng, a.HebDesc as ArticleAuthorHeb,
-            cat.CatAcronym,
-            bib.Comment, bib.NoteForDisplay, bib.CatalogEntry
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitBibliographyReference bib ON sig.SignatureId = bib.SignatureId
-        LEFT JOIN CODE_Title t ON bib.TitleId = t.TitleId
-        LEFT JOIN CODE_FullCode fc ON ABS(bib.MentionTypeCode) = fc.ComputedCode
-        LEFT JOIN CODE_FullCode ft ON bib.IsHasTranscriptionCode = ft.ComputedCode
-        LEFT JOIN CODE_FullCode fl ON bib.IsHasTranslationCode = fl.ComputedCode
-        LEFT JOIN dbo_BibMultiArticleAuthor baa
-            ON bib.UnitBibliographyReferenceId = baa.UnitBibliographyReferenceId
-            AND baa.AuthorOrder = 1
-        LEFT JOIN CODE_Author a ON baa.ArticleAuthorId = a.AuthorId
-        LEFT JOIN CODE_Catalog cat ON bib.CatalogId = cat.CatalogId
+        SELECT
+            AlmaId, RunningTitleEng, RunningTitleHeb,
+            TitleYearEng, AcronymEng, AcronymHeb,
+            MentionPage, FromPage, ToPage, Vol,
+            EVolume, JournalDate, MentionType,
+            TranscriptionType, TranslationType,
+            ArticleName, ArticleAuthorEng, ArticleAuthorHeb,
+            CatAcronym,
+            MAX(Comment) as Comment,
+            NoteForDisplay, CatalogEntry
+        FROM (
+            SELECT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                t.RunningTitleEng, t.RunningTitleHeb,
+                t.TitleYearEng, t.AcronymEng, t.AcronymHeb,
+                bib.MentionPage, bib.FromPage, bib.ToPage,
+                COALESCE(NULLIF(bib.JournalVolumeTxt, ''), bib.Volume) as Vol,
+                bib.EVolume, bib.JournalDate,
+                fc.EngDesc as MentionType,
+                ft.EngDesc as TranscriptionType,
+                fl.EngDesc as TranslationType,
+                bib.ArticleName,
+                a.EngDesc as ArticleAuthorEng, a.HebDesc as ArticleAuthorHeb,
+                cat.CatAcronym,
+                bib.Comment, bib.NoteForDisplay, bib.CatalogEntry
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitBibliographyReference bib ON sig.SignatureId = bib.SignatureId
+            LEFT JOIN CODE_Title t ON bib.TitleId = t.TitleId
+            LEFT JOIN CODE_FullCode fc ON ABS(bib.MentionTypeCode) = fc.ComputedCode
+            LEFT JOIN CODE_FullCode ft ON bib.IsHasTranscriptionCode = ft.ComputedCode
+            LEFT JOIN CODE_FullCode fl ON bib.IsHasTranslationCode = fl.ComputedCode
+            LEFT JOIN dbo_BibMultiArticleAuthor baa
+                ON bib.UnitBibliographyReferenceId = baa.UnitBibliographyReferenceId
+                AND baa.AuthorOrder = 1
+            LEFT JOIN CODE_Author a ON baa.ArticleAuthorId = a.AuthorId
+            LEFT JOIN CODE_Catalog cat ON bib.CatalogId = cat.CatalogId
+        )
+        GROUP BY AlmaId, RunningTitleEng, RunningTitleHeb,
+                 TitleYearEng, AcronymEng, AcronymHeb,
+                 MentionPage, FromPage, ToPage, Vol,
+                 EVolume, JournalDate, MentionType,
+                 TranscriptionType, TranslationType,
+                 ArticleName, ArticleAuthorEng, ArticleAuthorHeb,
+                 CatAcronym, NoteForDisplay, CatalogEntry
     """)
 
     n_cols = 22

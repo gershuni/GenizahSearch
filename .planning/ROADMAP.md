@@ -336,7 +336,7 @@ Plans:
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
-| 54. Dimensions Display & Filtering | 2/2 | Complete   | 2026-03-26 |
+| 54. Dimensions Display & Filtering | 2/2 | Complete    | 2026-03-26 |
 | 55. Search Within Results | 0/? | Not started | - |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |

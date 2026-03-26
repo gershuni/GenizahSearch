@@ -327,7 +327,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: 38,673 Genizah manuscripts added — images and metadata for fragments without transcriptions. 255K+ records across 52 libraries."))
+        self.lbl_msg.setText(tr("New: Manuscript measurements — dimensions, margins, line counts & material via Measurements button in browse. 400K bibliography duplicates removed."))
         self.show()
 
     def on_learn_more(self):
@@ -359,18 +359,23 @@ class WhatsNewDialog(QDialog):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        features_html = (
-            "<ul dir='rtl' style='font-size: 14px; line-height: 1.8; text-align: right;'>"
-            f"<li><b>{tr('38,673 new Genizah manuscripts added — images and metadata for fragments without transcriptions. 255,615 records across 52 libraries.')}</b></li>"
-            f"<li><b>{tr('7 new library collections: Solomon Halberstam, Reinach, Vatican, Central Archives, JC Mainz, Corwin, Mehlman.')}</b></li>"
-            f"<li><b>{tr('Search by shelfmark or title now finds manuscripts even without transcription text — with images and scholarly catalog data.')}</b></li>"
-            f"<li><b>{tr('Shelfmark normalization: Yevr/Halper aliases for cross-collection search compatibility.')}</b></li>"
-            "</ul>"
-        )
+        is_heb = CURRENT_LANG == 'he'
+        items = [
+            tr('Manuscript measurements — new Measurements button in browse shows physical dimensions, margins, writing area, line counts, text density and material for 231K manuscripts.'),
+            tr('Bibliography cleanup — removed over 400,000 duplicate entries (48% reduction) for cleaner scholarly references.'),
+            tr('55,000 new Hebrew translations — English catalog free descriptions now available in Hebrew via Dicta Translation.'),
+            tr('Desktop stability — fixed crash when rapidly navigating between manuscripts in the browse tab.'),
+        ]
+        align = 'right' if is_heb else 'left'
+        dir_attr = "dir='rtl'" if is_heb else ""
+        lines = ''.join(f"<p {dir_attr} style='margin: 8px 0; text-align: {align};'><b>\u2022 {item}</b></p>" for item in items)
+        features_html = f"<div style='font-size: 14px; line-height: 1.8;'>{lines}</div>"
+
         features_label = QLabel(features_html)
         features_label.setWordWrap(True)
         features_label.setTextFormat(Qt.TextFormat.RichText)
-        features_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        if is_heb:
+            features_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         layout.addWidget(features_label)
 
         layout.addStretch()

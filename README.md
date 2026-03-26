@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.2.4
+# Genizah Search Pro 7.3.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,18 +8,17 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.2.4?
+## What's New in Version 7.3.0?
 
-### v7.2.4: JTS Image Upgrade + Shelfmark Search Fixes
+### v7.3.0: Manuscript Measurements, Bibliography Cleanup & Desktop Stability
 
-JTS manuscript images now load from Princeton's Digital PUL library — a major reliability upgrade covering 36,000+ items. Shelfmark search is smarter: it now handles full library names and ENA variant formats.
+**Manuscript Measurements** — A new Measurements button in the browse page opens a detailed dialog showing physical dimensions, margins, writing area, line counts, text density, and material for manuscripts with measurement data (231K manuscripts covered). Data sourced from FJMS computed measurements, thanks to Ephraim Meiri's invaluable work.
 
-* **Princeton DPUL images for JTS**: Auto-default to high-quality Princeton Digital PUL images for all JTS manuscripts
-* **Better shelfmark lookup**: Recognizes full library names ("Cambridge University Library"), normalizes ENA-MS/ENA MS variants
-* **"Printed" badge**: Desktop browse and search results now flag printed materials
-* **Blue mat auto-detection**: Background removal works across all libraries, not just Cambridge
-* **Faster search**: Removed redundant enrichment pass for better performance
-* **Puzzle fixes**: Reliable add-from-browse, correct external fragment handling, session restore
+**Bibliography Cleanup** — Removed over 400,000 duplicate bibliography entries (48% reduction), providing cleaner scholarly references across the corpus.
+
+**55,000 New Hebrew Translations** — English catalog free descriptions now available in Hebrew using Dicta Translation, with quality-filtered output.
+
+**Desktop Stability** — Fixed a crash when rapidly navigating between manuscripts in the browse tab, along with image thread lifecycle improvements preventing orphaned workers.
 
 ### v7.2.3: Chrome Extension Live + Puzzle Enabled
 
