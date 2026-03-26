@@ -1,428 +1,316 @@
-# Architecture Patterns: Fragment Puzzle / Jigsaw Join Tool
+# Architecture Patterns: Search Refinement & Scholarly Joins
 
-**Domain:** Visual fragment assembly tool for manuscript research platform
-**Researched:** 2026-03-15
-**Confidence:** HIGH (based on existing codebase analysis, verified framework capabilities)
+**Domain:** Search refinement, exclusion filtering, FIST joins search, dimensions filtering
+**Researched:** 2026-03-26
+**Confidence:** HIGH (based on existing codebase analysis -- all integration points verified in source)
 
 ## Recommended Architecture
 
-The fragment puzzle tool adds a **canvas-based visual assembly layer** on top of the existing dual-app architecture. The key architectural decision: canvas implementations are entirely separate (JavaScript for web, QGraphicsScene for desktop) while sharing a common data model and image processing pipeline via `shared/puzzle_service.py`.
-
-```
-                        shared/puzzle_service.py
-                        shared/background_removal.py
-                        (data model, image processing,
-                         IIIF metadata, serialization)
-                              |
-              +---------------+---------------+
-              |                               |
-    Web (NiceGUI)                    Desktop (PyQt6)
-    Fabric.js canvas                 QGraphicsScene
-    (custom JS component)           (PuzzleFragmentItem subclass)
-    web/components/                  genizah_app.py or
-      puzzle_canvas.py                puzzle_widget.py
-      puzzle_canvas.js
-              |                               |
-              +---------------+---------------+
-                              |
-              +---------------+---------------+
-              |                               |
-    joins.db (local SQLite)        Supabase (published joins)
-    (drafts, offline work)         + Storage (composite images)
-```
+All four features integrate with the **existing `restrict_sys_ids` pipeline** in genizah_core.py. No new search engine paths are needed. The pattern is: compute a set of sys_ids from filters/state, pass to `execute_search()` or `search_composition_logic()` as `restrict_sys_ids`.
 
 ### Component Boundaries
 
 | Component | Responsibility | Communicates With |
 |-----------|---------------|-------------------|
-| `shared/puzzle_service.py` | Data model (PuzzleDocument, PuzzleFragment), DPI calibration, IIIF info fetch, composite image export, serialization | NliCrossrefService, FjmsService, joins.db, web+desktop canvases |
-| `shared/background_removal.py` | OpenCV-based color segmentation and alpha mask generation | puzzle_service (called during fragment add) |
-| `web/components/puzzle_canvas.py` + `.js` | NiceGUI custom component wrapping Fabric.js; drag/rotate/flip/scale, selection, toolbar | puzzle_service (data), web/api.py (image proxy) |
-| Desktop `PuzzleWidget` (QWidget) | QGraphicsScene with movable PuzzleFragmentItem objects, toolbar, keyboard shortcuts | puzzle_service (data), ImageLoaderThread (image fetch) |
-| `web/supabase_client.py` extensions | CRUD for published join_documents + Storage upload | Supabase cloud |
-| `joins.db` (new SQLite sidecar) | Local persistence for join documents (drafts + published cache) | puzzle_service.py only |
+| `genizah_core.SearchEngine` | Search with restrict_sys_ids (EXISTING) | Tantivy index |
+| `shared/fjms_service.FjmsService` | get_filter_sys_ids() (EXISTING), new: dimensions filter, joins search | fjms_enrichment.db |
+| `web/components/filter_panel.py` | Pre-search filter UI logic (EXISTING, EXTEND) | FjmsService |
+| `web/pages/search.py` SearchUIState | Per-session state (EXISTING, EXTEND) | filter_panel, core |
+| `genizah_app.py` | Desktop search/browse tabs (EXISTING, EXTEND) | FjmsService, core |
 
-### Data Flow
-
-**Adding a fragment to the canvas:**
+### Data Flow: Four Features
 
 ```
-1. User selects manuscript (sys_id) from browse/search
-2. puzzle_service.resolve_fragment_images(sys_id)
-   -> NliCrossrefService.get_folio_images(sys_id) -> IIIF URLs + FL IDs
-   -> fetch IIIF info.json for each -> {width, height}
-3. Image loaded:
-   - Web: browser loads via /api/nli_image proxy (existing)
-   - Desktop: ImageLoaderThread with disk cache (existing)
-4. Background removal (Python, server-side for both):
-   -> background_removal.remove_background(image_bytes) -> RGBA PNG with alpha mask
-   - Web: served via new /api/puzzle/process_image/{fl_id} endpoint
-   - Desktop: called directly from puzzle_service, result -> QPixmap
-5. Canvas creates interactive object:
-   - Web: fabric.Image from data URL (supports alpha transparency)
-   - Desktop: QGraphicsPixmapItem from QPixmap (supports alpha via ARGB32)
+Feature 1: Search Within Results
+================================
+Current results (sys_ids) ──> restrict_sys_ids ──> execute_search()
+                                                      │
+                                                      v
+                                              Filtered results
+
+Feature 2: Exclude by List
+===========================
+Supabase list ──> get_list_items() ──> sys_ids ──> subtract from restrict_sys_ids
+  OR                                                    │
+Imported file ──> parse shelfmarks ──> resolve sys_ids  │
+                                                        v
+                                              execute_search() / post-filter
+
+Feature 3: FIST Joins Search Mode
+===================================
+Search query ──> execute_search(restrict_sys_ids=joins_sys_ids)
+                                      │
+                                      v
+Results ──> enrich with join group info ──> display join partners
+
+Feature 4: Dimensions Filter
+==============================
+                Pre-search path:
+min/max W/H ──> FjmsService.get_filter_sys_ids() ──> restrict_sys_ids
+                                                          │
+                Post-search path:                         v
+Results ──> batch lookup catalog_sizes ──> filter client-side
 ```
 
-**Saving a join document:**
+## Integration Point Analysis
 
-```
-1. Canvas serializes fragment positions + transforms to JSON
-   Each fragment: {sys_id, fl_id, x, y, rotation, scale, flip_h, flip_v}
-2. Web: ui.run_javascript('JSON.stringify(canvas.toJSON())') -> Python
-   Desktop: iterate scene.items(), extract transforms
-3. puzzle_service.save_join_document(fragments_json, metadata)
-   -> Always save to joins.db (local, immediate)
-   -> If publishing: also upload to Supabase join_documents + Storage
-4. Composite image rendered via Pillow (puzzle_service.export_composite())
-   -> Stored locally and/or uploaded to Supabase Storage
-```
+### Feature 1: Search Within Results
 
-**Recto/Verso toggle:**
+**Mechanism:** Already 90% built. The `restrict_sys_ids` parameter on `execute_search()` and `search_composition_logic()` is the exact mechanism needed. The desktop catalog browse already has a "Search in these results" button (line 17615, `_catalog_search_in_results`).
 
-```
-1. User arranges recto -> positions saved as recto_layout
-2. Toggle to verso -> auto-generate mirror layout:
-   - Mirror all X positions around canvas center
-   - Swap each fragment to its verso FL ID (NLI: S1=recto, S2=verso)
-   - Load verso images (same sys_id, page+1 or S2 variant)
-3. Verso layout independently editable
-4. Join document stores both recto_layout and verso_layout
-```
+**What exists:**
+- `execute_search(..., restrict_sys_ids=set)` -- genizah_core.py:6605
+- `search_composition_logic(..., restrict_sys_ids=set)` -- genizah_core.py:7006
+- Desktop: `_catalog_search_in_results()` navigates browse->search with filter sys_ids (line 18512)
+- Web: `SearchUIState.restrict_sys_ids` already stored per-session (search.py:94)
 
-## Component Details
+**What to build:**
+- Web: "Search within results" button in search results header. On click: collect sys_ids from current `search_state.results`, store as `search_state.search_within_sys_ids`, combine with any pre-search `restrict_sys_ids` via intersection.
+- Desktop: Same button in word search results panel. Collect sys_ids from `self.last_results`, pass as restrict_sys_ids on next search.
+- Both: Show breadcrumb/chip indicating "searching within N results" with clear button.
+- Core: No changes needed -- restrict_sys_ids already works.
 
-### 1. Web Canvas: Fabric.js via NiceGUI Custom Component
+**Key decision:** Intersection, not replacement. If user has pre-search domain filter (1000 sys_ids) AND searches within results (50 sys_ids), the effective restrict set is the intersection (<=50). This is naturally correct since the 50 results are already within the 1000.
 
-**Why Fabric.js:** Standard library for interactive canvas object manipulation. Built-in drag, rotate, scale, flip per object. Active maintenance, large community. The existing `advViewer` (search.py) is CSS transform-based -- it only handles a single image with zoom/pan/rotate. The puzzle needs true multi-object canvas manipulation.
+### Feature 2: Exclude Known Manuscripts
 
-**Integration with NiceGUI:** The project already uses `ui.run_javascript()` extensively (~20 call sites in search.py for advViewer). For the puzzle, create a proper custom component:
+**Mechanism:** Two sub-features: (a) exclude by Supabase list, (b) exclude by imported shelfmark file.
 
-```
-web/components/puzzle_canvas.py    -- Python NiceGUI Element subclass
-web/components/puzzle_canvas.js    -- Fabric.js canvas logic (Vue component)
-```
+**What exists:**
+- Desktop: `excluded_sys_ids` and `excluded_shelfmarks` sets already maintained (genizah_app.py:11651-11652), used in composition search results filtering (line 25944-25965). Session persistence for both (line 29057-29058).
+- Web: `word_search_excluded_ids` set in SearchUIState (search.py:98) for per-manuscript exclusion.
+- Supabase: `get_user_lists(user_id)` returns lists, `get_list_items(list_id)` returns items with `sys_id` field (supabase_client.py:443, 595).
+- Both apps: Lists page with cloud sync already exists.
 
-Python manages state and communicates via NiceGUI's `run_javascript()` / `emit()` bridge. JS handles all rendering and interaction. State of truth for visual positions lives in the JS canvas; Python requests it on save.
+**What to build:**
+- Pre-search exclusion: Add `exclude_sys_ids: set` parameter to the restrict_sys_ids pipeline. Computed as: `final_restrict = (restrict_sys_ids - exclude_sys_ids)` if restrict is set, else all_sys_ids minus exclude_sys_ids (expensive -- better to post-filter).
+- **Recommended approach:** Post-search exclusion for list-based exclude (simpler, no restrict_sys_ids changes). Filter results after search by removing any result whose sys_id is in the exclude set. This matches the existing desktop pattern.
+- List picker: Dropdown showing user's Supabase lists. On select, fetch list items, extract sys_ids, store in exclude set.
+- File import: Parse a text file of shelfmarks (one per line), resolve to sys_ids via `genizah_core.csv_bank` lookup, store in exclude set.
+- Shelfmark resolution: Use existing `SearchEngine.normalize_shelfmark()` and csv_bank index for lookup.
 
-**Key Fabric.js features needed:**
-- `fabric.Image` objects with per-object transforms
-- `canvas.toJSON()` / `canvas.loadFromJSON()` for serialization
-- `canvas.toDataURL()` for quick preview export
-- Object controls (rotation handle, corner scale handles)
-- Transparency (RGBA images with alpha from background removal)
-- Z-order management (bring to front/send to back)
+**Key decision:** Post-search filtering is simpler and matches desktop precedent. Pre-search exclusion via restrict_sys_ids would require computing `all_sys_ids - exclude_set` which is ~217K - N, wasteful when N is small. Exception: if exclude set is huge (>10K), pre-search via Tantivy NOT clauses may help, but this is an edge case.
 
-**Loading Fabric.js:** ~300KB minified from CDN via `ui.add_head_html('<script src="...">')`, same as other external JS.
+### Feature 3: FIST Joins Search Mode
 
-**Example bridge pattern:**
-```python
-# Add fragment to canvas (Python -> JS)
-await ui.run_javascript(f'''
-    fabric.Image.fromURL("{processed_image_data_url}", function(img) {{
-        img.set({{ left: 100, top: 100, angle: 0, fragmentId: "{fl_id}" }});
-        canvas.add(img);
-        canvas.setActiveObject(img);
-        canvas.renderAll();
-    }});
-''')
+**Mechanism:** Two sub-features: (a) joins suggestions in browse enrichment, (b) dedicated "search within join groups" mode.
 
-# Get state for saving (Python <- JS)
-state_json = await ui.run_javascript('JSON.stringify(canvas.toJSON())')
-```
+**What exists:**
+- `FjmsService.get_join_group(sys_id)` returns join partners for a single manuscript (fjms_service.py:1991).
+- joins table: 48,655 rows, 20,088 distinct AlmaIds, 14,906 groups, avg 3.3 fragments/group.
+- Indexes: `idx_joins_alma(AlmaId)`, `idx_joins_group(JoinGroupId)`.
+- Browse page already shows join group info via `get_join_group()`.
 
-### 2. Desktop Canvas: QGraphicsScene with Custom Items
+**What to build:**
 
-**Why QGraphicsScene:** Already in the codebase. `ZoomableScrollArea` (genizah_app.py:1391) demonstrates: QGraphicsView + QGraphicsScene + QGraphicsPixmapItem with pan/zoom, rotation, context menus. QGraphicsScene natively supports multiple items with independent transforms, z-ordering, and selection.
+**(a) Browse enrichment (already partially exists):**
+- Enhance existing join display with clickable partners that navigate to browse.
+- Show join type badges, scholar attribution (already in data).
 
-**Implementation:**
+**(b) Joins search mode:**
+- New search mode or pre-search filter: "Search only in manuscripts with FIST joins."
+- Compute `joins_sys_ids` = set of all 20,088 AlmaIds in joins table. Cache this set (it's static).
+- Pass as restrict_sys_ids to any search mode.
+- **Enhanced mode:** After search, enrich results with join partner info. For each result that has joins, show a expandable section listing partner shelfmarks with links.
+- New FjmsService method: `get_all_join_sys_ids() -> set[str]` (simple SELECT DISTINCT AlmaId FROM joins).
+- New FjmsService method: `get_join_groups_batch(sys_ids: list[str]) -> dict[str, list[dict]]` for post-search enrichment (avoid N+1 queries).
 
-```python
-class PuzzleFragmentItem(QGraphicsPixmapItem):
-    """A single manuscript fragment on the puzzle canvas."""
-    def __init__(self, pixmap: QPixmap, fragment_id: str, parent=None):
-        super().__init__(pixmap, parent)
-        self.fragment_id = fragment_id
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
-        self.setTransformOriginPoint(pixmap.width()/2, pixmap.height()/2)
-        # Right-click context menu (existing pattern from ZoomableScrollArea)
-        self.setAcceptHoverEvents(True)
-```
-
-**Reuse from ZoomableScrollArea:**
-- Pan/zoom (Ctrl+wheel zoom at line 1527, drag mode at line 1400)
-- Rotation (`setRotation()` at line 1520)
-- Fit-to-viewport (`fitInView()` at line 1570)
-- Context menu pattern (line 1427)
-
-**Key extension:** Multiple movable items instead of a single pixmap. Add selection handles, rotation handle, and flip via QTransform with negative scale.
-
-### 3. Shared Service: puzzle_service.py
-
-Following `shared/document_service.py`, `shared/fjms_service.py` pattern:
+**New FjmsService methods needed:**
 
 ```python
-@dataclass
-class PuzzleFragment:
-    sys_id: str
-    fl_id: str              # NLI FL ID for this side
-    shelfmark: str
-    side: str               # 'recto' or 'verso'
-    paired_fl_id: str       # the other side's FL ID
-    image_url: str          # IIIF URL
-    width_px: int           # from info.json
-    height_px: int
-    dpi: float              # estimated or from IIIF physical dimensions
-    x: float = 0.0          # canvas position (per-layout)
-    y: float = 0.0
-    rotation: float = 0.0
-    scale: float = 1.0
-    flip_h: bool = False
-    flip_v: bool = False
+def get_all_join_sys_ids(self) -> set:
+    """Return set of all AlmaIds that appear in joins table. Cached."""
+    cursor = self._conn.execute("SELECT DISTINCT AlmaId FROM joins")
+    return {row[0] for row in cursor}
 
-@dataclass
-class PuzzleDocument:
-    id: str                  # UUID
-    user_id: str
-    title: str
-    fragments: List[PuzzleFragment]
-    recto_layout: dict
-    verso_layout: dict
-    join_type: str           # physical, content, uncertain
-    notes: str
-    status: str              # draft, proposed, confirmed
-    created_at: str
-    updated_at: str
-    composite_recto_path: str
-    composite_verso_path: str
+def get_join_groups_batch(self, sys_ids: list) -> dict:
+    """Batch lookup join groups for multiple sys_ids. Returns {sys_id: [partners]}."""
+    # Use IN clause with batching for large sets
+    ...
+
+def search_join_groups(self, query: str) -> list[dict]:
+    """Search join groups by scholar name, comment text, or shelfmark."""
+    # FTS5 or LIKE on ScholarName/Comment fields
+    ...
 ```
 
-### 4. Background Removal: shared/background_removal.py
+### Feature 4: Dimensions Range Filtering
 
-**Approach: HSV color-based segmentation.** Manuscript photos from NLI, Cambridge, etc. have solid-color library backgrounds (dark blue, black, grey, green felt). Well-constrained problem for traditional CV.
+**Mechanism:** Pre-search filter (restrict_sys_ids) and/or post-search filter.
 
-**Why not ML (rembg/U-2-Net):** ~180MB model dependency. Overkill for solid-color backgrounds. Slower (seconds vs. milliseconds).
+**What exists:**
+- `catalog_sizes` table: 178,579 rows, 104,650 distinct AlmaIds, with SizeX/SizeY/InnerSizeX/InnerSizeY.
+- Index: `idx_catsz_alma(AlmaId)`.
+- `FjmsService.get_catalog_detail()` already fetches sizes per manuscript (fjms_service.py:2421-2440).
+- Sizes range: 0.7-7230mm X, 0.7-8617mm Y (likely in mm, with some outliers).
 
-**Why not GrabCut:** Requires user-provided initial rectangle. Semi-interactive.
+**What to build:**
 
-**Pipeline:**
-```python
-def remove_background(image_bytes: bytes, bg_color_hint: str = 'auto') -> bytes:
-    """Returns RGBA PNG bytes with transparent background."""
-    # 1. Decode to BGR numpy array
-    # 2. Convert to HSV
-    # 3. Sample 20x20 blocks at 4 corners -> median HSV = background color
-    # 4. cv2.inRange() with tolerance (+/-15 H, +/-40 S, +/-40 V) -> mask
-    # 5. Morphological cleanup (MORPH_CLOSE then MORPH_OPEN)
-    # 6. Keep largest contour only
-    # 7. GaussianBlur on mask edges for smooth alpha transition
-    # 8. Composite RGBA = BGR + alpha mask
-    # 9. Encode PNG, return bytes
-```
+**(a) Pre-search dimension filter:**
+- Extend `FjmsService.get_filter_sys_ids()` with `size_x_min`, `size_x_max`, `size_y_min`, `size_y_max` parameters.
+- SQL: `SELECT DISTINCT AlmaId FROM catalog_sizes WHERE SizeX BETWEEN ? AND ? AND SizeY BETWEEN ? AND ?`
+- Intersect with other filter criteria in the existing get_filter_sys_ids pipeline.
+- UI: Two range sliders or min/max input fields in the pre-search filter panel.
 
-**Performance:** ~100-300ms per 2000x3000px image. Parallelize with ThreadPoolExecutor for multi-fragment loading.
+**(b) Post-search dimension display:**
+- Batch lookup sizes for search result sys_ids.
+- New FjmsService method: `get_sizes_batch(sys_ids: list) -> dict[str, dict]` returning `{alma_id: {size_x, size_y, inner_size_x, inner_size_y}}`.
+- Display in result cards (e.g., "15.2 x 22.1 cm" badge).
 
-**Dependency:** `opencv-python-headless` (~40MB). Headless variant avoids GUI conflicts with PyQt6.
+**(c) Post-search dimension filter:**
+- Client-side filter within displayed results, similar to existing domain/printed filters.
+- Filter results by dimension range after enrichment.
 
-**Fallback:** If OpenCV unavailable or removal fails, show original image with opaque background. Users can still arrange fragments.
-
-### 5. DPI Calibration
-
-IIIF info.json provides `width` and `height` in pixels (required). Physical dimensions via optional `service` property with `physicalScale`/`physicalUnits` -- most Genizah servers do NOT provide this.
-
-**Approach:**
-1. Fetch info.json: `{iiif_base}/info.json` -> get native width/height
-2. Check for physical dimensions service (bonus)
-3. Fallback DPI by library: NLI ~400 PPI, Cambridge ~300-400 PPI, default 400 PPI
-4. Allow user override per fragment
-5. **Relative sizing is sufficient for Phase 1:** fragments from same library have consistent DPI, so pixel-ratio sizing is correct for visual alignment
-
-### 6. Storage Architecture
-
-**Local-first with optional cloud publish.** This follows the project's "offline-capable" principle.
-
-**joins.db (new local SQLite sidecar):**
+**New index needed:**
 ```sql
-CREATE TABLE join_documents (
-    id TEXT PRIMARY KEY,              -- UUID
-    user_id TEXT,
-    title TEXT,
-    fragments TEXT NOT NULL,          -- JSON array of fragment descriptors
-    recto_layout TEXT,                -- JSON {fl_id: {x, y, rotation, scale, flip_h, flip_v}}
-    verso_layout TEXT,
-    join_type TEXT DEFAULT 'uncertain',
-    notes TEXT,
-    status TEXT DEFAULT 'draft',
-    composite_recto BLOB,             -- compressed PNG
-    composite_verso BLOB,
-    supabase_id TEXT,                 -- NULL until published
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE INDEX idx_catsz_size ON catalog_sizes(SizeX, SizeY);
 ```
+This speeds up pre-search range queries. Current `idx_catsz_alma` only helps per-manuscript lookups.
 
-**Supabase (for published joins only):**
-```sql
-CREATE TABLE join_documents (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES auth.users NOT NULL,
-    title TEXT,
-    fragments JSONB NOT NULL,
-    recto_layout JSONB,
-    verso_layout JSONB,
-    join_type TEXT CHECK (join_type IN ('physical', 'content', 'uncertain')),
-    notes TEXT,
-    status TEXT DEFAULT 'proposed' CHECK (status IN ('proposed', 'confirmed')),
-    composite_recto_url TEXT,
-    composite_verso_url TEXT,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-ALTER TABLE join_documents ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Anyone reads published" ON join_documents
-    FOR SELECT USING (true);
-CREATE POLICY "Users insert own" ON join_documents
-    FOR INSERT WITH CHECK (user_id = auth.uid());
-CREATE POLICY "Users update own" ON join_documents
-    FOR UPDATE USING (user_id = auth.uid());
-```
-
-**Supabase Storage bucket:** `puzzle-composites` with path `{user_id}/{doc_id}/recto.png`.
-
-**Rationale for local-first:**
-- Saves are instant (no network round-trip)
-- Works offline (desktop users)
-- Drafts never leave the user's machine
-- Publishing is an explicit action (upload to Supabase)
-- Same pattern as `session_persistence.py` for local + Supabase for community
-
-**Relationship to existing fragment_joins table:**
-- `fragment_joins`: pairwise A-B join claims (text metadata only, existing)
-- `join_documents`: visual puzzle assemblies (images + positions, new)
-- Coexist: puzzle tool creates visual evidence for textual join claims
-- Optional link: join_document.notes can reference fragment_join IDs
+**Units:** Values appear to be in mm (e.g., SizeX=150 = 15cm). Display should convert to cm. Need to verify units -- check a known manuscript.
 
 ## Patterns to Follow
 
-### Pattern 1: Shared Service + App-Specific UI (Existing)
-**What:** All data logic in `shared/`, all rendering in app-specific code.
-**Applied here:** `shared/puzzle_service.py` + `shared/background_removal.py` handle data. Web (Fabric.js) and desktop (QGraphicsScene) are independent UIs consuming the same data model.
+### Pattern 1: restrict_sys_ids Pipeline (EXISTING)
+**What:** All search functions accept an optional `restrict_sys_ids: set` parameter. When set, only manuscripts in this set are returned.
+**When:** Any pre-search filtering scenario.
+**How it works in Tantivy:** For sets <= 500, sys_ids are injected as OR clauses in the Tantivy query string: `(original_query) AND (full_header:"id1" OR full_header:"id2" ...)`. For larger sets, post-Tantivy filtering via a uid lookup set.
+**Implication:** Sets > 500 are filtered post-Tantivy (still fast). Very large restrict sets (>10K) have negligible overhead since filtering is O(1) per hit.
 
-### Pattern 2: NiceGUI JavaScript Bridge (Existing)
-**What:** Python manages state, JavaScript handles rendering via `ui.run_javascript()`.
-**Applied here:** Canvas JS receives image data URLs from Python, emits state snapshots back on save. Same pattern as advViewer but formalized as a Vue component.
+### Pattern 2: Post-Search Enrichment (EXISTING)
+**What:** After search returns results, batch-fetch additional metadata (PGP info, domains, translations) for display.
+**When:** Adding dimensions or join info to search results.
+**Example:** Search returns 50 results. Batch-fetch sizes for those 50 sys_ids. Display inline.
 
-### Pattern 3: SQLite Sidecar for Local Data (Existing)
-**What:** Structured data in SQLite, accessed via service module, auto-detect from project root.
-**Applied here:** joins.db stores join documents locally. Same pattern as pgp.db, fjms_enrichment.db, nli_crossref.db.
+### Pattern 3: Filter Panel Extension (EXISTING)
+**What:** `web/components/filter_panel.py` provides shared filter logic. `get_filter_sys_ids()` in FjmsService computes the restrict set.
+**When:** Adding dimensions as a new filter criterion.
+**How to extend:** Add parameters to `get_filter_sys_ids()`, add UI controls in filter panel, add state fields to SearchUIState.
 
-### Pattern 4: Image Loading Through Existing Pipeline (Existing)
-**What:** Reuse IIIF image loading (web: `/api/nli_image` proxy; desktop: `ImageLoaderThread` with disk cache).
-**Applied here:** Fragment images load through the same proxy/thread as browse and search. Background removal is a post-processing step, not a parallel pipeline.
-
-### Pattern 5: Graceful Degradation (Existing)
-**What:** Feature works with reduced functionality when dependencies unavailable.
-**Applied here:** No OpenCV -> show original images. No IIIF info.json -> use default DPI. No Supabase -> save locally only.
-
-### Pattern 6: Async Image Loading (Existing)
-**What:** Images loaded in background thread to avoid UI blocking.
-**Applied here (desktop):** Reuse ImageLoaderThread. Each fragment triggers async load + background removal callback.
-**Applied here (web):** Background removal via `run.io_bound()`. Processed image sent to browser as data URL.
+### Pattern 4: Session State Persistence (EXISTING)
+**What:** Desktop persists search state (excluded_sys_ids, filters, results) to JSON. Web uses per-session SearchUIState.
+**When:** Preserving exclude lists and "search within" state across interactions.
+**Desktop:** `_save_session_state()` / `_restore_session_state()` in genizah_app.py.
+**Web:** SearchUIState dataclass fields in search.py.
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Shared Canvas Abstraction
-**What:** Unified canvas API abstracting over Fabric.js and QGraphicsScene.
-**Why bad:** Fundamentally different paradigms (DOM/JS events vs. Qt paint system). Leaky abstraction, limits both implementations.
-**Instead:** Share data model only. Independent native canvas implementations.
+### Anti-Pattern 1: Computing Full Complement for Exclusion
+**What:** Computing `all_sys_ids - exclude_set` to pass as restrict_sys_ids.
+**Why bad:** 217K - 100 = 216,900 sys_ids. The restrict_sys_ids mechanism is optimized for small sets (<= 500 get Tantivy-level filtering). Large sets work but add overhead.
+**Instead:** Post-search filter: run search normally, then remove excluded sys_ids from results. This is O(N) where N = result count, not corpus size.
 
-### Anti-Pattern 2: Client-Side Background Removal for Web
-**What:** Running OpenCV.js (~8MB) in the browser.
-**Why bad:** Huge download. Slow without hardware acceleration. Inconsistent across browsers.
-**Instead:** Background removal runs in NiceGUI Python process (same server, no network hop). Processed PNG served via image proxy.
+### Anti-Pattern 2: N+1 Queries for Join Enrichment
+**What:** Calling `get_join_group(sys_id)` for each of 50 search results.
+**Why bad:** 50 separate SQLite queries when one batched query suffices.
+**Instead:** Build `get_join_groups_batch(sys_ids)` that uses a single SQL query with IN clause.
 
-### Anti-Pattern 3: Storing Full IIIF Images in SQLite
-**What:** Storing original 2000px fragment images as BLOBs in joins.db.
-**Why bad:** 500KB-2MB per image. 5-fragment join = 5-10MB per save. DB bloats.
-**Instead:** Store only IIIF URLs + fragment metadata. Re-fetch from IIIF on load. Store ONLY the final composite as BLOB (single rendered output, compressed).
+### Anti-Pattern 3: Unbounded Join Group Expansion
+**What:** For "search within join groups" mode, expanding all join partners of all results into the restrict set.
+**Why bad:** A single group can have 167 fragments (Group 1065). If a search returns 50 results each in large groups, the expanded set could be huge and the UX confusing.
+**Instead:** Show join partners as enrichment data alongside results, not as additional search results. Let users click to explore specific partners.
 
-### Anti-Pattern 4: Bidirectional Real-Time State Sync
-**What:** Mirroring every canvas state change to Python in real-time.
-**Why bad:** High-frequency drag events create excessive WebSocket traffic. State goes out of sync.
-**Instead:** Canvas is single source of truth for visual state. Python requests state only at save/export.
+### Anti-Pattern 4: Mixing Pre-search and Post-search Dimensions
+**What:** Applying dimension filter both pre-search and post-search independently.
+**Why bad:** Confusing UX -- user applies filter pre-search, then sees a different dimension filter in results panel.
+**Instead:** One path: pre-search dimension filter in the filter panel (restricts search). Post-search: display dimensions, allow sort by size, but not a separate filter.
 
-### Anti-Pattern 5: Server-Side Canvas Rendering
-**What:** Rendering the interactive canvas on the server and streaming to browser.
-**Why bad:** Latency on every interaction. Defeats visual puzzle purpose.
-**Instead:** All canvas interaction is client-side. Server handles processing and persistence only.
+## New vs Modified Components
 
-## Integration Points with Existing Code
+### New Components
+| Component | Type | Purpose |
+|-----------|------|---------|
+| `FjmsService.get_all_join_sys_ids()` | Method | Return cached set of all join AlmaIds |
+| `FjmsService.get_join_groups_batch()` | Method | Batch join group lookup for search results |
+| `FjmsService.get_sizes_batch()` | Method | Batch size lookup for search results |
+| Dimension filter UI (web) | UI controls | Min/max width/height inputs in filter panel |
+| Dimension filter UI (desktop) | UI controls | Same in desktop filter section |
+| Search-within button (web) | UI control | Button in search results header |
+| Exclude-by-list picker (web) | UI dialog | Select list or import file for exclusion |
+| Exclude-by-list picker (desktop) | UI dialog | Same for desktop |
+| Joins search mode toggle (web) | UI control | Checkbox/toggle in search mode options |
+| Joins search mode toggle (desktop) | UI control | Same for desktop |
 
-### Files to Modify
+### Modified Components
+| Component | Change |
+|-----------|--------|
+| `FjmsService.get_filter_sys_ids()` | Add size_x_min/max, size_y_min/max params |
+| `web/pages/search.py` SearchUIState | Add search_within_sys_ids, exclude_sys_ids, joins_mode fields |
+| `web/pages/search.py` search handler | Combine restrict sets (filters + search-within + joins) |
+| `web/pages/search.py` results renderer | Show dimensions, join partners in result cards |
+| `web/components/filter_panel.py` | Add dimension range controls |
+| `genizah_app.py` search tab | Add search-within button, joins toggle, exclude-by-list |
+| `genizah_app.py` browse tab | Enhanced join partner display with navigation |
+| `genizah_app.py` session state | Persist new filter state fields |
+| `fjms_enrichment.db` | Add idx_catsz_size index for range queries |
 
-| File | Change | Reason |
-|------|--------|--------|
-| `web/supabase_client.py` | Add CRUD for published join_documents + Storage upload | Cloud persistence |
-| `web/api.py` | Add `/api/puzzle/process_image/{fl_id}` endpoint | Serve background-removed RGBA images |
-| `web/pages/browse.py` | Add "Open in Puzzle" button on manuscript view | Entry point from browse |
-| `web/pages/search.py` | Add "Add to Puzzle" action in result menu | Entry point from search |
-| `web/main.py` | Register `/puzzle` route | New page |
-| `genizah_app.py` | Add puzzle tab/dialog launcher, toolbar action | Desktop entry point |
-| `shared/nli_crossref_service.py` | Add `get_recto_verso_pairs(sys_id)` method | Map recto FL IDs to verso using S1/S2 |
-| `supabase_corrections_client.py` | Add join_document publish/fetch (desktop) | Desktop Supabase access |
+## Suggested Build Order
 
-### New Files
+The order is driven by dependency chains and incremental value:
 
-| File | Purpose |
-|------|---------|
-| `shared/puzzle_service.py` | Data model, IIIF info, serialization, composite export |
-| `shared/background_removal.py` | OpenCV HSV-based background removal |
-| `web/components/puzzle_canvas.py` | NiceGUI Python component wrapper |
-| `web/components/puzzle_canvas.js` | Fabric.js canvas (Vue component) |
-| `web/pages/puzzle.py` | Puzzle workspace page |
-| `tests/test_background_removal.py` | Background removal unit tests |
-| `tests/test_puzzle_service.py` | Data model + serialization tests |
+```
+Phase 1: Dimensions Display + Pre-search Filter
+  - Add get_sizes_batch() to FjmsService
+  - Add idx_catsz_size index
+  - Extend get_filter_sys_ids() with dimension params
+  - Add dimension inputs to filter panel (web + desktop)
+  - Show dimensions in search results and browse
+  Rationale: Lowest risk, extends existing filter pipeline, no new search paths.
+  Dependencies: None.
 
-### Existing Infrastructure Reused Without Modification
+Phase 2: Search Within Results
+  - Add search-within button to web search results header
+  - Add search-within button to desktop search results
+  - Collect sys_ids from current results, store in state
+  - Intersect with any existing restrict_sys_ids
+  - Show "searching within N results" breadcrumb
+  Rationale: High user value, trivial core changes (restrict_sys_ids exists).
+  Dependencies: None (but placing after Phase 1 lets dimensions filter enrich the search-within experience).
 
-| Component | How Reused |
-|-----------|------------|
-| `NliCrossrefService.get_folio_images()` | Get FL IDs and folio labels for manuscript |
-| `NliCrossrefService.get_image_sources()` | Determine available image providers |
-| `FjmsService.get_joins_for_fragment()` | Pre-populate with known FJMS join groups |
-| `ImageLoaderThread` (desktop, line 2114) | Load fragment images with cache + fallback |
-| `/api/nli_image/{fl_id}` proxy (web) | CORS-safe image fetch |
-| `/api/cambridge_image/{sys_id}` proxy (web) | Cambridge IIIF images |
-| `ZoomableScrollArea` (desktop, line 1391) | Reference for QGraphicsScene pan/zoom |
-| Supabase auth + RLS patterns | User ownership, visibility |
-| `session_persistence.py` pattern | Local session save/restore |
-| `reading_desk_model.py` pattern | Multi-fragment data model reference |
+Phase 3: Exclude by List
+  - Add list picker dialog (web + desktop)
+  - Fetch list items from Supabase, extract sys_ids
+  - Add file import with shelfmark resolution
+  - Post-search exclusion filter
+  - Persist exclude set in session state
+  Rationale: Requires Supabase integration + shelfmark resolution.
+  Dependencies: None technically, but logically follows search-within.
+
+Phase 4: FIST Joins Browse Enrichment + Search Mode
+  - Add get_all_join_sys_ids() and get_join_groups_batch()
+  - Enhance browse join display with clickable partners
+  - Add "Has joins" toggle in filter panel / search mode
+  - Post-search enrichment with join partner display
+  Rationale: Most complex feature. Benefits from phases 1-3 being stable.
+  Dependencies: Phase 1 (dimensions can be shown for join partners too).
+```
 
 ## Scalability Considerations
 
-| Concern | 2-3 fragments (typical) | 10+ fragments (large join) | Notes |
-|---------|------------------------|---------------------------|-------|
-| Canvas performance | Trivial | Both Fabric.js and QGraphicsScene handle dozens easily | Not a concern |
-| Image memory (browser) | ~20MB (3 RGBA 2000px PNGs) | ~70MB | Within browser limits |
-| Image memory (desktop) | ~20MB | ~70MB | Desktop has more headroom |
-| Background removal | ~300ms x 3 = ~1s | ~300ms x 10 = ~3s (parallelize) | Show progress indicator |
-| IIIF info.json | 3 HTTP GETs | 10 parallel GETs | Cache in memory |
-| joins.db size | ~100KB per doc | Same | Composite BLOBs are main size factor |
-| Supabase Storage | 2 composites ~1-2MB each | 2 composites ~3-5MB | Within free tier |
+| Concern | Current | At Scale |
+|---------|---------|----------|
+| restrict_sys_ids size | <= 500 uses Tantivy, > 500 post-filters | 20K join sys_ids: post-filter is fine (~0.1ms per hit) |
+| Dimension range query | 178K rows, indexed | Fast with compound index; <10ms |
+| Join batch lookup | 50 results typical | IN clause with 50 IDs: <5ms |
+| Exclude set size | Typical list: 10-500 items | Post-filter O(1) per result; handles 10K+ |
+| Session state size | JSON serialization | Adding ~500 sys_ids to state: negligible |
+
+## Database Changes
+
+### New Index (fjms_enrichment.db)
+```sql
+CREATE INDEX IF NOT EXISTS idx_catsz_size ON catalog_sizes(SizeX, SizeY);
+```
+
+### No Schema Changes
+All features use existing tables. No new SQLite tables or Supabase tables needed.
 
 ## Sources
 
-- Existing codebase: `genizah_app.py` ZoomableScrollArea (line 1391), ImageLoaderThread (line 2114)
-- Existing codebase: `web/api.py` image proxy endpoints
-- Existing codebase: `shared/nli_crossref_service.py` (image metadata, FL IDs, folio parsing)
-- Existing codebase: `web/supabase_client.py` fragment_joins CRUD pattern
-- Existing codebase: `shared/reading_desk_model.py` multi-fragment data model
-- [Fabric.js documentation](https://fabricjs.com/)
-- [Qt QGraphicsScene documentation](https://doc.qt.io/qt-6/qgraphicsscene.html)
-- [NiceGUI run_javascript](https://nicegui.io/documentation/run_javascript)
-- [IIIF Image API 2.1 info.json specification](https://iiif.io/api/image/2.1/)
-- [OpenCV background removal techniques](https://opencv.org/blog/remove-backgrounds-from-images-using-opencv/)
+- genizah_core.py: execute_search() at line 6605, restrict_sys_ids pipeline
+- shared/fjms_service.py: get_filter_sys_ids() at line 848, get_join_group() at line 1991, catalog_sizes at line 2421
+- web/pages/search.py: SearchUIState at line 76, filter computation at line 2856
+- web/components/filter_panel.py: build_domain_options(), build_author_options()
+- web/supabase_client.py: get_user_lists() at line 443, get_list_items() at line 595
+- genizah_app.py: excluded_sys_ids at line 11651, _catalog_search_in_results at line 18512
+- fjms_enrichment.db: catalog_sizes (178K rows, 105K AlmaIds), joins (48K rows, 20K AlmaIds, 15K groups)
