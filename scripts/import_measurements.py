@@ -67,7 +67,11 @@ def build_fgp_to_alma_from_fist(fist_db_path: str) -> dict[str, str]:
     """)
     fgp_to_alma = {}
     for fgp_id, alma_id in cursor:
+        # FIST.db stores FGPImageNumberId as integer (1, 2, 3...)
+        # xlsx FGP column uses "C" prefix (C1, C2, C3...)
+        # Store both formats for robust matching
         fgp_to_alma[str(fgp_id)] = alma_id
+        fgp_to_alma[f"C{fgp_id}"] = alma_id
     conn.close()
     return fgp_to_alma
 
