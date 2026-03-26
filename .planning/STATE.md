@@ -5,7 +5,7 @@ milestone_name: Search Refinement & Scholarly Joins
 status: executing
 stopped_at: Phase 54 context gathered
 last_updated: "2026-03-26T11:30:26.594Z"
-last_activity: 2026-03-26 -- Phase 54 execution started
+last_activity: 2026-03-26 -- Completed quick task 260326-jwi: fix desktop browse tab crash
 progress:
   total_phases: 11
   completed_phases: 6
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 Phase: 54 (dimensions-display-filtering) — EXECUTING
 Plan: 1 of 2
 Status: Executing Phase 54
-Last activity: 2026-03-26 -- Phase 54 execution started
+Last activity: 2026-03-26 -- Completed quick task 260326-jwi: fix desktop browse tab crash
 
 ## Performance Metrics
 
@@ -135,6 +135,7 @@ Recent decisions affecting current work:
 | 260325-eol | Fix browse tab Recently Viewed list: sort by view time + make resizable | 2026-03-25 | a346b2f3 | [260325-eol-fix-browse-tab-recently-viewed-list-sort](./quick/260325-eol-fix-browse-tab-recently-viewed-list-sort/) |
 | 260325-hhn | Fix missing FJMS bibliography author + untranslated Penn/Halper catalog entries | 2026-03-25 | pending | [260325-hhn-fix-missing-fjms-bibliography-author-unt](./quick/260325-hhn-fix-missing-fjms-bibliography-author-unt/) |
 | 260325-kkp | Fix Responsa wildcard (*) ignored with line-break pipe (\|) and line position options | 2026-03-25 | 9ff25977 | [260325-kkp-fix-responsa-wildcard-ignored-when-combi](./quick/260325-kkp-fix-responsa-wildcard-ignored-when-combi/) |
+| 260326-jwi | Fix desktop browse tab crash when rapidly navigating images | 2026-03-26 | 77b43536 | [260326-jwi-fix-desktop-browse-tab-crash-when-rapidl](./quick/260326-jwi-fix-desktop-browse-tab-crash-when-rapidl/) |
 
 ## Session Continuity
 
