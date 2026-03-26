@@ -2,8 +2,8 @@
 phase: 54
 slug: dimensions-display-filtering
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-03-26
 ---
 
@@ -38,8 +38,8 @@ created: 2026-03-26
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | DIM-01 | unit+integration | `pytest tests/test_measurements.py -q` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | DIM-04 | unit | `pytest tests/test_measurements.py -q` | ❌ W0 | ⬜ pending |
+| TBD | TBD | TBD | DIM-01 | unit+integration | `pytest tests/test_measurements.py -q` | ✅ in-task | ⬜ pending |
+| TBD | TBD | TBD | DIM-04 | unit | `pytest tests/test_measurements.py -q` | ✅ in-task | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -47,10 +47,10 @@ created: 2026-03-26
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_measurements.py` — stubs for DIM-01, DIM-04
-- [ ] Test fixtures for measurement data samples
+- [x] `tests/test_measurements.py` — created within Plan 01 Task 1 (test file is part of the task action, not a separate wave)
+- [x] Test fixtures for measurement data samples — in-memory SQLite fixtures within test file
 
-*Existing pytest infrastructure covers framework needs.*
+*No separate Wave 0 task needed. Tests are created alongside production code in Task 1.*
 
 ---
 
