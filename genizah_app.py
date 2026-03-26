@@ -8272,7 +8272,8 @@ class ResultDialog(QDialog):
         try:
             from shared.fjms_service import get_fjms_service
             fjms_svc_m = get_fjms_service()
-            if fjms_svc_m.is_available() and fjms_svc_m.has_measurements(self.current_sys_id):
+            has_m = fjms_svc_m.is_available() and fjms_svc_m.has_measurements(self.current_sys_id)
+            if has_m:
                 self.btn_rd_measurements.setVisible(True)
                 self.btn_rd_measurements.setEnabled(True)
                 self.btn_rd_measurements.setText(f"\U0001f4cf {tr('Measurements')}")
@@ -8283,7 +8284,9 @@ class ResultDialog(QDialog):
                 self.btn_rd_measurements.setVisible(False)
                 if hasattr(self, 'btn_compact_measurements'):
                     self.btn_compact_measurements.setVisible(False)
-        except Exception:
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.btn_rd_measurements.setVisible(False)
             if hasattr(self, 'btn_compact_measurements'):
                 self.btn_compact_measurements.setVisible(False)
@@ -14918,6 +14921,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_catalog_records.setVisible(False)
         self.btn_b_catalog_records.clicked.connect(self._show_fjms_catalog_dialog)
 
+        self.btn_b_measurements = QPushButton(f"\U0001f4cf {tr('Measurements')}")
+        self.btn_b_measurements.setToolTip(tr("Physical Measurements"))
+        self.btn_b_measurements.setEnabled(False)
+        self.btn_b_measurements.setVisible(False)
+        self.btn_b_measurements.clicked.connect(self._show_browse_measurements_dialog)
+        self._browse_measurements_data = None
+
         # External link button (browse tab) - populated dynamically per manuscript
         self.btn_b_external_link = QPushButton(tr("External Website"))
         self.btn_b_external_link.setToolTip(tr("Open in external library website"))
@@ -14933,6 +14943,7 @@ class GenizahGUI(QMainWindow):
         ext_info_row.addWidget(self.btn_b_bibliography_fjms)
         ext_info_row.addWidget(self.btn_b_bibliography_nli)
         ext_info_row.addWidget(self.btn_b_catalog_records)
+        ext_info_row.addWidget(self.btn_b_measurements)
         ext_info_row.addWidget(self.btn_b_catalog)
         ext_info_row.addWidget(self.btn_b_external_link)
         ext_info_row.addStretch()
@@ -15528,6 +15539,9 @@ class GenizahGUI(QMainWindow):
         self.btn_b_bibliography_nli.setVisible(False)
         self.btn_b_catalog_records.setVisible(False)
         self.btn_b_catalog_records.setEnabled(False)
+        self.btn_b_measurements.setVisible(False)
+        self.btn_b_measurements.setEnabled(False)
+        self._browse_measurements_data = None
         self.btn_b_external_link.setVisible(False)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
@@ -15725,6 +15739,17 @@ class GenizahGUI(QMainWindow):
                 self.btn_b_catalog_records.setVisible(True)
         except Exception:
             self.btn_b_catalog_records.setVisible(False)
+
+        # Measurements button
+        self._browse_measurements_data = None
+        try:
+            if fjms_svc and fjms_svc.is_available() and fjms_svc.has_measurements(sid):
+                self.btn_b_measurements.setVisible(True)
+                self.btn_b_measurements.setEnabled(True)
+            else:
+                self.btn_b_measurements.setVisible(False)
+        except Exception:
+            self.btn_b_measurements.setVisible(False)
 
         enriched_html = fjms_domain_html + fjms_catalog_html + catalog_refs_html + secondary_meta_html + enriched_html
 
@@ -16412,6 +16437,27 @@ class GenizahGUI(QMainWindow):
             parent=self,
         )
         dlg.exec()
+
+    def _show_browse_measurements_dialog(self):
+        """Open measurements dialog from Browse tab (lazy fetch on first click)."""
+        if self._browse_measurements_data is None and self.current_browse_sid:
+            try:
+                from shared.fjms_service import get_fjms_service
+                fjms_svc = get_fjms_service()
+                if fjms_svc.is_available():
+                    self._browse_measurements_data = fjms_svc.get_measurements(self.current_browse_sid)
+            except Exception:
+                pass
+
+        if self._browse_measurements_data:
+            shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
+            dlg = FjmsMeasurementsDialog(
+                self._browse_measurements_data,
+                sys_id=self.current_browse_sid or '',
+                shelfmark=shelf,
+                parent=self,
+            )
+            dlg.exec()
 
     def _on_browse_ext_link_clicked(self, url):
         """Handle clicks on links in browse tab extended info."""
