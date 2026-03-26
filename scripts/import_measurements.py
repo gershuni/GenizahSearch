@@ -47,35 +47,50 @@ XLSX_PATH = "fist_data/FIST_Computed_Measurements.xlsx"
 FIST_DB_PATH = "FIST_DB_BACKUP/FIST.db"
 TARGET_DB_PATH = "fist_data/fjms_enrichment.db"
 
-# Known system_numbers for AlmaId validation (sample from libraries.csv)
-VALIDATION_SAMPLE = [
-    "990001746800205171",
-    "990002066950205171",
-    "990001751430205171",
-    "990001746810205171",
-    "990001741200205171",
-    "990000100109705171",
-    "990000097439705171",
-    "990000100199705171",
-    "990001752510205171",
-    "990001757970205171",
-]
+def build_fgp_to_alma_from_fist(fist_db_path: str) -> dict[str, str]:
+    """Build FGP→AlmaId lookup from FIST.db (exact integers, no float precision loss).
 
+    The xlsx Extra_Info sheet stores 18-digit AlmaIds as Excel Number (float64),
+    which corrupts the last 2-3 digits due to IEEE 754 double precision (~15.9 sig digits).
+    Example: xlsx has 9.900017468002052e+17 → int() gives 990001746800205184 (WRONG)
+             FIST.db has AlmaId=990001746800205171 (CORRECT)
 
-def safe_alma_id(value) -> str | None:
-    """Convert AlmaId from xlsx (may be float) to clean string.
-
-    CRITICAL: AlmaId stored as float in xlsx loses precision.
-    str(int(9.900017468002052e+17)) == "990001746800205184" (WRONG)
-    We use str(int(value)) which is correct for integers stored as float.
+    So we ignore the xlsx AlmaId column entirely and build the lookup from FIST.db:
+    dbo_ImgDigitalImage.FGPImageNumberId → dbo_InventoryAlma.AlmaId
     """
-    if value is None:
-        return None
-    try:
-        # Handle both float and int representations
-        return str(int(value))
-    except (ValueError, TypeError, OverflowError):
-        return str(value).strip() if value else None
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(fist_db_path)
+    cursor = conn.execute("""
+        SELECT img.FGPImageNumberId, CAST(alma.AlmaId AS TEXT)
+        FROM dbo_ImgDigitalImage img
+        JOIN dbo_InventoryAlma alma ON img.InventoryId = alma.InventoryId
+    """)
+    fgp_to_alma = {}
+    for fgp_id, alma_id in cursor:
+        fgp_to_alma[str(fgp_id)] = alma_id
+    conn.close()
+    return fgp_to_alma
+
+
+def build_shelfmark_to_alma_from_fist(fist_db_path: str) -> dict[str, str]:
+    """Build Shelfmark→AlmaId lookup from FIST.db for catalog_sizes resolution.
+
+    Uses MIN(AlmaId) per Shelfmark when multiple exist (matching xlsx About sheet convention).
+    """
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(fist_db_path)
+    cursor = conn.execute("""
+        SELECT inv.Shelfmark, CAST(MIN(alma.AlmaId) AS TEXT)
+        FROM dbo_Inventory inv
+        JOIN dbo_InventoryAlma alma ON inv.InventoryId = alma.InventoryId
+        GROUP BY inv.Shelfmark
+    """)
+    sm_to_alma = {}
+    for shelfmark, alma_id in cursor:
+        if shelfmark:
+            sm_to_alma[shelfmark.strip()] = alma_id
+    conn.close()
+    return sm_to_alma
 
 
 def read_header_map(ws, expected_columns: list[str]) -> dict[str, int]:
@@ -98,12 +113,13 @@ def read_header_map(ws, expected_columns: list[str]) -> dict[str, int]:
 
 
 def step1_extra_info(wb, conn, fgp_to_alma: dict):
-    """Step 1: Import Extra_Info sheet and build FGP-to-AlmaId lookup."""
+    """Step 1: Import Extra_Info sheet using FIST.db AlmaIds (not xlsx float AlmaIds)."""
     print("\nStep 1: Importing Extra_Info sheet...")
     ws = wb["Extra_Info"]
 
+    # Note: AlmaId not in expected_cols — we get it from fgp_to_alma (FIST.db), not xlsx
     expected_cols = [
-        "FGP", "Shelfmark", "AlmaId", "Material", "Size_Category",
+        "FGP", "Shelfmark", "Material", "Size_Category",
         "NumFolio", "NumBifolio", "PixelWidth", "PixelHeight",
         "Image_Type", "Rotation_Angle_deg",
     ]
@@ -136,11 +152,9 @@ def step1_extra_info(wb, conn, fgp_to_alma: dict):
             continue
         fgp = str(fgp).strip()
 
-        alma_raw = row[hdr.get("AlmaId", 4)]
-        alma_id = safe_alma_id(alma_raw)
-
+        # AlmaId from FIST.db lookup (exact integer), NOT from xlsx (float precision loss)
+        alma_id = fgp_to_alma.get(fgp)
         if alma_id:
-            fgp_to_alma[fgp] = alma_id
             alma_found += 1
 
         batch.append((
@@ -181,35 +195,35 @@ def step1_extra_info(wb, conn, fgp_to_alma: dict):
 
 
 def validate_alma_ids(fgp_to_alma: dict, libraries_csv_path: str = "libraries.csv"):
-    """Validate converted AlmaIds against known system_numbers."""
-    print("\n  AlmaId validation:")
+    """Validate FIST.db-sourced AlmaIds against libraries.csv system_numbers."""
+    print("\n  AlmaId validation (FIST.db-sourced, no xlsx float conversion):")
 
-    # Check against hardcoded sample
     alma_values = set(fgp_to_alma.values())
-    matched = sum(1 for sid in VALIDATION_SAMPLE if sid in alma_values)
-    print(f"    Hardcoded sample: {matched}/{len(VALIDATION_SAMPLE)} known IDs found in lookup")
+    print(f"    Total distinct AlmaIds: {len(alma_values):,}")
 
-    if matched == 0:
-        print("    WARNING: 0/10 known AlmaIds matched! Check conversion logic.")
-        return False
-
-    # Also try matching against libraries.csv if available
+    # Validate against libraries.csv
     if os.path.exists(libraries_csv_path):
         csv_ids = set()
         try:
             with open(libraries_csv_path, "r", encoding="utf-8-sig") as f:
                 for i, line in enumerate(f):
                     if i == 0:
-                        continue  # skip header
+                        continue
                     parts = line.strip().split(",")
                     if parts:
                         csv_ids.add(parts[0])
-                    if i >= 5000:
-                        break
             overlap = len(alma_values & csv_ids)
-            print(f"    Libraries.csv sample (5K rows): {overlap} AlmaIds match system_numbers")
+            pct = (overlap / len(alma_values) * 100) if alma_values else 0
+            print(f"    libraries.csv match: {overlap:,}/{len(alma_values):,} ({pct:.1f}%)")
+            if overlap == 0:
+                print("    FATAL: 0 AlmaIds matched libraries.csv! FIST.db→AlmaId join may be broken.")
+                return False
+            if pct < 50:
+                print(f"    WARNING: Only {pct:.1f}% matched — some AlmaIds may not be in current libraries.csv")
         except Exception as e:
             print(f"    Could not read libraries.csv for validation: {e}")
+    else:
+        print(f"    libraries.csv not found at {libraries_csv_path} — skipping validation")
 
     return True
 
@@ -368,77 +382,27 @@ def step3_blank_images(wb, conn, fgp_to_alma: dict):
     return total
 
 
-def step4_catalog_sizes(wb, conn, fist_db_path: str):
+def step4_catalog_sizes(wb, conn, sm_to_alma: dict):
     """Step 4: Replace catalog_sizes with normalized cm values.
 
-    Merges xlsx Catalog_Sizes (pre-normalized cm values + flags) with
-    FIST.db join chain for AlmaId resolution.
+    The xlsx Catalog_Sizes sheet has Shelfmark (not UnitCatalogRecId).
+    We resolve Shelfmark→AlmaId using the sm_to_alma lookup built from FIST.db.
     """
     print("\nStep 4: Replacing catalog_sizes with normalized cm values...")
 
     ws = wb["Catalog_Sizes"]
     expected_cols = [
-        "UnitCatalogRecId", "SizeX_cm", "SizeY_cm",
+        "Shelfmark", "SizeX_cm", "SizeY_cm",
         "InnerSizeX_cm", "InnerSizeY_cm", "SizeUnit",
         "Measurement_Scope", "Flag_WH_Swap", "Flag_Unit_Error",
     ]
     hdr = read_header_map(ws, expected_cols)
 
-    # (a) Read xlsx into dict keyed by UnitCatalogRecId
-    xlsx_data = {}
-    xlsx_total = 0
-    for row in tqdm(ws.iter_rows(min_row=2, values_only=True), desc="  catalog_sizes xlsx", unit=" rows"):
-        rec_id = row[hdr.get("UnitCatalogRecId", 2)]
-        if rec_id is None:
-            continue
-        try:
-            rec_id = int(rec_id)
-        except (ValueError, TypeError):
-            continue
-        xlsx_total += 1
-
-        def g(col, default_idx=0):
-            idx = hdr.get(col, default_idx)
-            return row[idx] if idx is not None and idx < len(row) else None
-
-        xlsx_data[rec_id] = {
-            "SizeX_cm": g("SizeX_cm", 3),
-            "SizeY_cm": g("SizeY_cm", 4),
-            "InnerSizeX_cm": g("InnerSizeX_cm", 5),
-            "InnerSizeY_cm": g("InnerSizeY_cm", 6),
-            "SizeUnit": g("SizeUnit", 7),
-            "Measurement_Scope": g("Measurement_Scope", 8),
-            "Flag_WH_Swap": g("Flag_WH_Swap", 9),
-            "Flag_Unit_Error": g("Flag_Unit_Error", 10),
-        }
-
-    print(f"  Read {xlsx_total:,} xlsx rows ({len(xlsx_data):,} unique UnitCatalogRecIds)")
-
-    # (b) Query FIST.db for (AlmaId, UnitCatalogRecId)
-    if not os.path.exists(fist_db_path):
-        print(f"  ERROR: FIST.db not found at {fist_db_path}")
-        return 0
-
-    fist_conn = sqlite3.connect(fist_db_path)
-    fist_conn.row_factory = sqlite3.Row
-    fist_cursor = fist_conn.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.UnitCatalogRecId
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        JOIN dbo_CatalogMultiSize sz ON cat.UnitCatalogRecId = sz.UnitCatalogRecId
-    """)
-
-    # (c) Merge and insert
     conn.execute("DROP TABLE IF EXISTS catalog_sizes")
     conn.execute("""
         CREATE TABLE catalog_sizes (
             AlmaId TEXT NOT NULL,
-            UnitCatalogRecId INTEGER NOT NULL,
+            Shelfmark TEXT,
             SizeX_cm REAL,
             SizeY_cm REAL,
             InnerSizeX_cm REAL,
@@ -453,27 +417,34 @@ def step4_catalog_sizes(wb, conn, fist_db_path: str):
     batch = []
     total = 0
     matched = 0
-    unmatched_fist = 0
+    unmatched = 0
     unmatched_samples = []
 
-    for fist_row in tqdm(fist_cursor, desc="  catalog_sizes merge", unit=" rows"):
-        alma_id = str(fist_row["AlmaId"]).strip()
-        rec_id = int(fist_row["UnitCatalogRecId"])
-
-        xlsx_rec = xlsx_data.get(rec_id)
-        if xlsx_rec is None:
-            unmatched_fist += 1
-            if len(unmatched_samples) < 5:
-                unmatched_samples.append(f"UnitCatalogRecId={rec_id}, AlmaId={alma_id}")
+    for row in tqdm(ws.iter_rows(min_row=2, values_only=True), desc="  catalog_sizes", unit=" rows"):
+        shelfmark = row[hdr.get("Shelfmark", 0)]
+        if shelfmark is None:
             continue
+        shelfmark = str(shelfmark).strip()
+
+        # Resolve Shelfmark → AlmaId via FIST.db lookup
+        alma_id = sm_to_alma.get(shelfmark)
+        if alma_id is None:
+            unmatched += 1
+            if len(unmatched_samples) < 5:
+                unmatched_samples.append(shelfmark)
+            continue
+
+        def g(col):
+            idx = hdr.get(col)
+            return row[idx] if idx is not None and idx < len(row) else None
 
         matched += 1
         batch.append((
-            alma_id, rec_id,
-            xlsx_rec["SizeX_cm"], xlsx_rec["SizeY_cm"],
-            xlsx_rec["InnerSizeX_cm"], xlsx_rec["InnerSizeY_cm"],
-            xlsx_rec["SizeUnit"], xlsx_rec["Measurement_Scope"],
-            xlsx_rec["Flag_WH_Swap"], xlsx_rec["Flag_Unit_Error"],
+            alma_id, shelfmark,
+            g("SizeX_cm"), g("SizeY_cm"),
+            g("InnerSizeX_cm"), g("InnerSizeY_cm"),
+            g("SizeUnit"), g("Measurement_Scope"),
+            g("Flag_WH_Swap"), g("Flag_Unit_Error"),
         ))
 
         if len(batch) >= BATCH_SIZE:
@@ -491,18 +462,15 @@ def step4_catalog_sizes(wb, conn, fist_db_path: str):
         )
         total += len(batch)
 
-    fist_conn.close()
-
     conn.execute("CREATE INDEX IF NOT EXISTS idx_catsz_alma ON catalog_sizes(AlmaId)")
 
     distinct_alma = conn.execute("SELECT COUNT(DISTINCT AlmaId) FROM catalog_sizes").fetchone()[0]
 
     # Audit report
     print(f"\n  Catalog_Sizes Audit:")
-    print(f"    Total xlsx UnitCatalogRecIds read: {len(xlsx_data):,}")
-    print(f"    Total FIST.db rows processed: {matched + unmatched_fist:,}")
-    print(f"    Matched (in both xlsx and FIST.db): {matched:,}")
-    print(f"    Unmatched FIST.db rows (UnitCatalogRecId not in xlsx): {unmatched_fist:,}")
+    print(f"    Total xlsx rows with shelfmark: {matched + unmatched:,}")
+    print(f"    Matched (Shelfmark found in FIST.db): {matched:,}")
+    print(f"    Unmatched (Shelfmark not in FIST.db): {unmatched:,}")
     if unmatched_samples:
         print(f"    Unmatched samples: {unmatched_samples}")
     print(f"    Final inserted rows: {total:,}")
@@ -690,19 +658,42 @@ def step6_versioning_and_summary(conn):
 
 def main():
     """Main import function."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Import FIST measurement data into fjms_enrichment.db")
+    parser.add_argument("--target", default=TARGET_DB_PATH,
+                        help=f"Target SQLite database (default: {TARGET_DB_PATH})")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Run import on a disposable copy, print audit, then discard")
+    args = parser.parse_args()
+
+    target_path = args.target
+
+    if args.dry_run:
+        import shutil
+        dry_copy = target_path + ".dry_run_copy"
+        shutil.copy2(target_path, dry_copy)
+        target_path = dry_copy
+        print("*** DRY RUN MODE — writing to disposable copy ***\n")
+
     print("=" * 60)
     print("FIST Measurement Data Import")
     print(f"  Source: {XLSX_PATH}")
     print(f"  FIST.db: {FIST_DB_PATH}")
-    print(f"  Target: {TARGET_DB_PATH}")
+    print(f"  Target: {target_path}")
+    if args.dry_run:
+        print(f"  Mode: DRY RUN")
     print("=" * 60)
 
     if not os.path.exists(XLSX_PATH):
         print(f"ERROR: xlsx file not found: {XLSX_PATH}")
         sys.exit(1)
 
-    if not os.path.exists(TARGET_DB_PATH):
-        print(f"ERROR: Target sidecar not found: {TARGET_DB_PATH}")
+    if not os.path.exists(FIST_DB_PATH):
+        print(f"ERROR: FIST.db not found: {FIST_DB_PATH}")
+        sys.exit(1)
+
+    if not os.path.exists(target_path):
+        print(f"ERROR: Target sidecar not found: {target_path}")
         sys.exit(1)
 
     start = time.time()
@@ -712,8 +703,23 @@ def main():
     wb = openpyxl.load_workbook(XLSX_PATH, read_only=True)
     print(f"  Sheets: {wb.sheetnames}")
 
+    # Build AlmaId lookups from FIST.db (exact integers, no xlsx float precision loss)
+    print("\nBuilding FGP→AlmaId lookup from FIST.db...")
+    fgp_to_alma = build_fgp_to_alma_from_fist(FIST_DB_PATH)
+    print(f"  {len(fgp_to_alma):,} FGP→AlmaId mappings")
+
+    print("Building Shelfmark→AlmaId lookup from FIST.db...")
+    sm_to_alma = build_shelfmark_to_alma_from_fist(FIST_DB_PATH)
+    print(f"  {len(sm_to_alma):,} Shelfmark→AlmaId mappings")
+
+    # Validate AlmaIds against libraries.csv
+    if not validate_alma_ids(fgp_to_alma):
+        print("\nFATAL: AlmaId validation failed. Aborting.")
+        wb.close()
+        sys.exit(1)
+
     # Connect to target sidecar
-    conn = sqlite3.connect(TARGET_DB_PATH)
+    conn = sqlite3.connect(target_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
 
@@ -722,13 +728,8 @@ def main():
     conn.execute("BEGIN")
 
     try:
-        fgp_to_alma: dict[str, str] = {}
-
-        # Step 1: Extra_Info + build FGP-to-AlmaId lookup
+        # Step 1: Extra_Info (uses fgp_to_alma from FIST.db, ignores xlsx AlmaId column)
         step1_extra_info(wb, conn, fgp_to_alma)
-
-        # Validate AlmaIds
-        validate_alma_ids(fgp_to_alma)
 
         # Step 2: Computed_Measurements
         step2_computed_measurements(wb, conn, fgp_to_alma)
@@ -736,8 +737,8 @@ def main():
         # Step 3: Blank_Images
         step3_blank_images(wb, conn, fgp_to_alma)
 
-        # Step 4: Replace catalog_sizes with normalized cm values
-        step4_catalog_sizes(wb, conn, FIST_DB_PATH)
+        # Step 4: Replace catalog_sizes (uses sm_to_alma from FIST.db)
+        step4_catalog_sizes(wb, conn, sm_to_alma)
 
         # Step 5: Build manuscript_measurements summary
         step5_manuscript_measurements(conn)
@@ -759,6 +760,10 @@ def main():
 
     elapsed = time.time() - start
     print(f"\nDone in {elapsed:.1f}s")
+
+    if args.dry_run:
+        os.remove(target_path)
+        print(f"\n*** DRY RUN: disposable copy deleted ***")
 
 
 if __name__ == "__main__":

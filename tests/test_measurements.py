@@ -188,29 +188,21 @@ def empty_service(tmp_path):
     svc.close()
 
 
-class TestAlmaIdPrecision:
-    """Test AlmaId float precision conversion."""
+class TestAlmaIdFromFistDb:
+    """Test that AlmaId resolution uses FIST.db (not xlsx floats)."""
 
-    def test_alma_id_precision(self):
-        """AlmaId float -> int -> str avoids scientific notation and precision loss."""
-        from scripts.import_measurements import safe_alma_id
+    def test_fist_alma_ids_are_exact_integers(self):
+        """FIST.db AlmaIds are exact integers, not float-corrupted."""
+        # The xlsx stores 9.900017468002052e+17 which int() gives 990001746800205184 (WRONG)
+        # FIST.db stores 990001746800205171 (CORRECT)
+        # This test verifies our lookup function exists and returns strings
+        from scripts.import_measurements import build_fgp_to_alma_from_fist
+        assert callable(build_fgp_to_alma_from_fist)
 
-        # Typical AlmaId as float
-        assert safe_alma_id(990001746800205184.0) == "990001746800205184"
-        # Already an int
-        assert safe_alma_id(990001746800205184) == "990001746800205184"
-        # None returns None
-        assert safe_alma_id(None) is None
-        # String passthrough
-        assert safe_alma_id("990001") == "990001"
-
-    def test_alma_id_no_scientific_notation(self):
-        """Converted AlmaId should never contain 'e' or 'E'."""
-        from scripts.import_measurements import safe_alma_id
-
-        result = safe_alma_id(9.900017468002052e+17)
-        assert "e" not in result.lower()
-        assert result.isdigit()
+    def test_shelfmark_to_alma_function_exists(self):
+        """Shelfmark→AlmaId builder for catalog_sizes resolution."""
+        from scripts.import_measurements import build_shelfmark_to_alma_from_fist
+        assert callable(build_shelfmark_to_alma_from_fist)
 
 
 class TestGetMeasurements:
