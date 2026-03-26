@@ -8,9 +8,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: (planning next)
+## Current Milestone: v7.3 Search Refinement & Scholarly Joins
 
-No active milestone. Use `/gsd:new-milestone` to start the next cycle.
+**Goal:** Add search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments.
+
+**Target features:**
+- Search within results: re-run a second query restricted to current result set's sys_ids
+- Exclude known manuscripts: hide manuscripts from results via saved lists or imported shelfmark file
+- FIST joins suggestions: browse enrichment + dedicated search mode for FIST join groups (48K records / 15K groups)
+- Dimensions display & filtering: show manuscript dimensions in browse/results, pre-search and post-search range filtering (178K size records / 105K AlmaIds)
 
 ## Current State (after v7.0.0 shipped)
 
@@ -132,7 +138,13 @@ No active milestone. Use `/gsd:new-milestone` to start the next cycle.
 
 ### Active
 
-(None — planning next milestone)
+- [ ] Search within results: restrict second query to current result set sys_ids (both apps)
+- [ ] Exclude known manuscripts from search: via saved lists or imported shelfmark file (both apps)
+- [ ] FIST join group suggestions in browse enrichment (both apps)
+- [ ] Search within FIST join groups: dedicated search mode (both apps)
+- [ ] Manuscript dimensions display in browse/results (both apps)
+- [ ] Pre-search dimension range filter (min/max width/height) (both apps)
+- [ ] Post-search dimension filtering within results (both apps)
 
 ### Out of Scope
 
@@ -200,5 +212,22 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Transcription deferred to v7.0.0 | v6.5.0 focuses on UX + filtering; transcription is separate milestone | ⚠️ Revisit — v7.0.0 now Fragment Puzzle; transcription deferred further |
 | Fragment Puzzle as v7.0.0 | Visual join assembly tool is a unique research capability; transcription search deferred | — Pending |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd:transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd:complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-03-15 after v7.0.0 Fragment Puzzle milestone started*
+*Last updated: 2026-03-26 after v7.3 Search Refinement & Scholarly Joins milestone started*

@@ -1,15 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v5.6
-milestone_name: milestone
-status: executing
-stopped_at: Completed 53-02-PLAN.md (Phase 53 plan 02 complete - metadata search guard fix)
-last_updated: "2026-03-19T07:09:30.494Z"
+milestone: v7.3
+milestone_name: Search Refinement & Scholarly Joins
+status: not_started
+stopped_at: null
+last_updated: "2026-03-26T00:00:00.000Z"
+last_activity: 2026-03-26 — Milestone v7.3 started
 progress:
-  total_phases: 7
-  completed_phases: 6
-  total_plans: 17
-  completed_plans: 17
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 ---
@@ -204,12 +205,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 53 — fill-missing-genizah-manuscripts-from-fist
+**Current focus:** Milestone v7.3 — Search Refinement & Scholarly Joins
 
 ## Current Position
 
-Phase: 53 (fill-missing-genizah-manuscripts-from-fist) — COMPLETE
-Plan: 2 of 2 (all complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-26 — Milestone v7.3 started
 
 ## Performance Metrics
 
