@@ -2374,6 +2374,14 @@ class ManuscriptViewerWidget(QWidget):
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
+    def _wait_or_terminate(self, thread, timeout_ms=2000):
+        """Wait for a QThread to finish; terminate as last resort to prevent destroyed-while-running."""
+        thread.cancel()
+        if not thread.wait(timeout_ms):
+            logger.warning("Image thread did not finish in %dms, terminating", timeout_ms)
+            thread.terminate()
+            thread.wait()
+
     def stop_threads(self):
         """Stop all running image loading threads. Call before destroying widget."""
         self._closing = True
@@ -2381,17 +2389,15 @@ class ManuscriptViewerWidget(QWidget):
         # Cancel active threads
         for thread in [self.loader_thread, self.preload_worker]:
             if thread and thread.isRunning():
-                thread.cancel()
                 try:
                     thread.image_loaded.disconnect()
                     thread.load_failed.disconnect()
                 except (TypeError, RuntimeError):
                     pass
-                thread.wait(500)
+                self._wait_or_terminate(thread)
         # Wait on any in-flight retired threads
         for thread in list(self._inflight_threads):
-            thread.cancel()
-            thread.wait(500)
+            self._wait_or_terminate(thread)
         self._inflight_threads.clear()
 
     def _on_thumbnail_ready(self, pix, page_idx, generation):
@@ -29998,7 +30004,10 @@ class GenizahGUI(QMainWindow):
             self.cancel_browse_image_thread()
             for t in getattr(self, '_browse_inflight', []):
                 t.cancel()
-                t.wait(500)
+                if not t.wait(2000):
+                    logger.warning("Browse image thread did not finish in 2s, terminating")
+                    t.terminate()
+                    t.wait()
         finally:
             super().closeEvent(event)
 
