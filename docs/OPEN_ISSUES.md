@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-25 (fixed: restart-persistent NLI FL-ID cache for post-restart timeout storms, browse splitter free resize with scrollable toolbar rows, Recently Viewed sort + auth fix; reviewed responsa wildcard line-break/profile follow-ups)
+> **Last Updated:** 2026-03-26 (reviewed quick task 260326-jwi; added browse-thread lifecycle follow-up on canceled/replaced image QThreads)
 > **Status:** Active working document
 
 ---
@@ -46,7 +46,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
-| P1 Critical Bugs | 0 | 6 | 6 |
+| P1 Critical Bugs | 1 | 6 | 7 |
 | P2 Medium Bugs | 8 | 45 | 53 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **14** | **86** | **100** |
+| **Total** | **15** | **86** | **101** |
 
 ---
 
@@ -65,6 +65,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Desktop browse image-thread cancel/replacement can still destroy running QThreads during rapid navigation** | `genizah_app.py` | ✅ Fixed (2026-03-26) | Added `_retire_thread()` pattern: canceled threads moved to `_inflight_threads` list, kept alive until `finished` signal fires, then `deleteLater()`. Same pattern applied to `_preload()` and `cancel_browse_image_thread()`. Persistent `QTimer(self)` replaces per-click timer allocation. `stop_threads()` and `closeEvent` wait on all in-flight threads at destruction. |
 | **Puzzle process endpoint allows unauthenticated cache poisoning / arbitrary uploads** | `web/api.py`, `web/puzzle_tokens.py`, `shared/puzzle_image_service.py` | ✅ Fixed (2026-03-18) | Fixed via HMAC upload tokens: `GET /api/puzzle_image` returns a signed token on cache miss; `POST /api/puzzle_process` and `POST /api/puzzle_upload_derivative` require valid token (5-min expiry, fl_id-bound). Also added size limit (10MB), content-type validation (JPEG/PNG), and rate limiting (60/min/IP). |
 | **Desktop Path Traversal** | `filter_text_dialog.py:16-23,58` | ג… Fixed (2026-02-03) | Already fixed - uses `_sanitize_cache_filename()` whitelist approach |
 
@@ -147,6 +148,7 @@ Move to "Completed Issues" section at bottom with date
 | **Fixed-height browse/viewer scroll rows can clip controls on DPI-scaled Windows** | `genizah_app.py:1394-1408` | ✅ Fixed (2026-03-25) | `_make_scrollable_row()` now derives height from `container.sizeHint().height() + 8` instead of hardcoded 32/38px. Height adapts to DPI scaling automatically. |
 | **CSRF protection missing** | API endpoints | ג Deferred | Low risk - NiceGUI uses WebSocket |
 | **Puzzle BG removal: brown backing page not removed on glued manuscripts** | `shared/background_removal.py`, `web/pages/puzzle.py` | ⏳ Deferred | BL manuscripts have brown backing over blue mat; Oxford has full brown background. Color segmentation alone can't distinguish brown backing from parchment. Planned solution: interactive click-to-remove eraser tool (user clicks background areas, BFS flood fill removes connected region, additive with per-step undo). Requires persistence plumbing (save/load/export eraser steps), auth on endpoint, proper canvas coordinate transforms, Fabric event model integration. Full design: `docs/plans/INTERACTIVE_BG_REMOVAL_DESIGN.md`. Recommend implementing as a full GSD phase. |
+| **FJMS enrichment DB: fixed Shivtiel transliteration, Sussmann Supplement translation, removed empty "צוות 500" records — pending upload to server** | `fist_data/fjms_enrichment.db` | ❌ Open | Fixed locally on 2026-03-26: (1) `SourceNameHeb` "קטלוג שבתיאל/ניסן" → "קטלוג שבטיאל/ניסן" (tav→tet, 16,936 rows in catalog+free_desc), (2) "Sussmann (Talmud) – Supplement Catalog" untranslated → "קטלוג זוסמן (תלמוד) – נספח" (191 rows), (3) deleted 34 empty "צוות 500" catalog + 2 free_desc placeholder records. **Upload to server after current en2he translation script finishes** (writing to fjms_translations table, different tables but same .db file — uploading while running risks corruption). |
 | **Session restore is not pixel-perfect** | genizah_app.py | ❌ Open | v6.5.1 added restore for browse tabs, catalog filters, composition results, and active tab. But composition restores flat (grouping/appendix lost), catalog sidebar doesn't highlight the selected author/work in the list widget, and browse-by-shelfmark skips full resolution (loads directly by sys_id). Could be improved to persist grouping state or re-run grouping more reliably. |
 | **BrowseState.meta_mgr AttributeError in joined view** | `web/pages/browse.py:3255` | ✅ Fixed (2026-03-17) | `state.meta_mgr` accessed without guard in Oxford detection code path. Fixed with `getattr(state, 'meta_mgr', None)`. |
 | **Desktop discovery stats all zeros** | `supabase_corrections_client.py` | ✅ Fixed (2026-03-17) | `get_discovery_stats()` only queried discoveries table type column, returning keys that didn't match UI stat_labels. Now queries corrections, profiles, fragment_joins tables. |
@@ -264,6 +266,8 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-26 | Fixed P1 QThread lifecycle issue in `ManuscriptViewerWidget`: added `_retire_thread()` + `_inflight_threads` list to keep canceled threads alive until `finished`. Persistent `QTimer(self)` for debounce. Same pattern for `_preload()`, `cancel_browse_image_thread()`, `closeEvent`. | Claude |
+| 2026-03-26 | Reviewed quick task `260326-jwi` (`26bd024a`, `1ee0cf74`, wrapped by `34a57c5b`). Added 1 new open P1 issue: the new cancel-and-replace pattern for desktop browse image threads still drops the last Python reference to running `ImageLoaderThread` instances, so rapid navigation can still hit `QThread: Destroyed while thread is still running` / process aborts despite the new generation guards. | Codex |
 | 2026-03-25 | Fixed the post-restart NLI FL-ID timeout storm in `web/api.py`: added a restart-persistent positive cache file (`Config.INDEX_DIR/nli_fl_ids_cache.json`) so resolved FL IDs survive `genizah-web` restarts, and made the NLI semaphore cap/timeout env-configurable for future tuning without changing the default 4/20 settings. Added regression tests for persistent cache round-trip + TTL pruning. | Codex |
 | 2026-03-25 | Fixed both Codex follow-ups: (1) Reading Desk + Edit bar toolbars now wrapped in `_make_scrollable_row()`, (2) height derived from `sizeHint()` instead of hardcoded. Also fixed: Recently Viewed empty for authenticated web users (`int('recent')` ValueError), desktop Recently Viewed sorted by shelfmark instead of view time. | Claude |
 | 2026-03-25 | Reviewed the current desktop browse-pane resize changes in `genizah_app.py` and added 2 new follow-up issues: (1) Reading Desk mode still constrains the browse splitter because its toolbar was not included in the new scrollable-row treatment; (2) the new fixed-height scroll-row helper can clip controls on DPI-scaled Windows or whenever its horizontal scrollbar appears. | Codex |

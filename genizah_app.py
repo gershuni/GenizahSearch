@@ -1976,10 +1976,13 @@ class ManuscriptViewerWidget(QWidget):
         self._load_generation = 0  # increments on each set_page/load_images to reject stale callbacks
         self.loader_thread = None
         self.preload_worker = None
+        self._inflight_threads = []  # Canceled-but-still-running QThreads kept alive until finished
         self.external_provider = None
         self._closing = False
         self._thumb_threads = []  # Track thumbnail threads for cleanup
-        self._nav_debounce_timer = None  # QTimer for debouncing rapid set_page calls
+        self._nav_debounce_timer = QTimer(self)  # Persistent QTimer for debouncing rapid set_page calls
+        self._nav_debounce_timer.setSingleShot(True)
+        self._nav_debounce_timer.timeout.connect(self._execute_set_page)
         self._pending_page_idx = None    # Deferred page index
         self._thumbnail_ready.connect(self._on_thumbnail_ready)
         self.init_ui()
@@ -2334,41 +2337,62 @@ class ManuscriptViewerWidget(QWidget):
         if base_url.endswith('.jpg'): return base_url
         return f"{base_url}/full/2000,/0/default.jpg"
 
+    def _retire_thread(self, thread):
+        """Move a canceled QThread to the in-flight list so it stays alive until finished."""
+        if thread is None:
+            return
+        thread.cancel()
+        try:
+            thread.image_loaded.disconnect()
+            thread.load_failed.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        if thread.isRunning():
+            self._inflight_threads.append(thread)
+            thread.finished.connect(lambda t=thread: self._cleanup_inflight(t))
+        else:
+            thread.deleteLater()
+
+    def _cleanup_inflight(self, thread):
+        """Remove a finished thread from the in-flight list and schedule deletion."""
+        try:
+            self._inflight_threads.remove(thread)
+        except ValueError:
+            pass
+        thread.deleteLater()
+
     def _preload(self, index):
         if index < 0 or index >= len(self.active_list): return
         url = self.active_list[index]['url']
         final = self._resolve_url(url)
 
-        # Cancel previous preload worker to prevent GC of running QThread
-        if self.preload_worker and self.preload_worker.isRunning():
-            self.preload_worker.cancel()
-            try:
-                self.preload_worker.image_loaded.disconnect()
-                self.preload_worker.load_failed.disconnect()
-            except (TypeError, RuntimeError):
-                pass
+        # Retire previous preload worker safely
+        if self.preload_worker:
+            self._retire_thread(self.preload_worker)
 
         # Spawn thread without connecting signals (just for cache)
-        # Store ref to prevent GC
         self.preload_worker = ImageLoaderThread(final)
         self.preload_worker.start()
 
     def stop_threads(self):
         """Stop all running image loading threads. Call before destroying widget."""
         self._closing = True
-        if self._nav_debounce_timer is not None:
-            self._nav_debounce_timer.stop()
-        if self.loader_thread and self.loader_thread.isRunning():
-            self.loader_thread.cancel()
-            try:
-                self.loader_thread.image_loaded.disconnect()
-                self.loader_thread.load_failed.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self.loader_thread.wait(500)  # Short wait only on widget destruction
-        if self.preload_worker and self.preload_worker.isRunning():
-            self.preload_worker.cancel()
-            self.preload_worker.wait(500)
+        self._nav_debounce_timer.stop()
+        # Cancel active threads
+        for thread in [self.loader_thread, self.preload_worker]:
+            if thread and thread.isRunning():
+                thread.cancel()
+                try:
+                    thread.image_loaded.disconnect()
+                    thread.load_failed.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                thread.wait(500)
+        # Wait on any in-flight retired threads
+        for thread in list(self._inflight_threads):
+            thread.cancel()
+            thread.wait(500)
+        self._inflight_threads.clear()
 
     def _on_thumbnail_ready(self, pix, page_idx, generation):
         """Handle thumbnail loaded signal - only display if still on same page and same load generation."""
@@ -2424,15 +2448,8 @@ class ManuscriptViewerWidget(QWidget):
         # Update status text immediately for responsiveness
         self.scroll_area.set_status_message(tr("Loading..."))
 
-        # Cancel any pending debounced load
-        if self._nav_debounce_timer is not None:
-            self._nav_debounce_timer.stop()
-
-        # Store pending index and schedule actual load after debounce settles
+        # Store pending index and restart debounce timer (persistent, not recreated)
         self._pending_page_idx = index
-        self._nav_debounce_timer = QTimer()
-        self._nav_debounce_timer.setSingleShot(True)
-        self._nav_debounce_timer.timeout.connect(self._execute_set_page)
         self._nav_debounce_timer.start(150)  # 150ms debounce
 
     def _execute_set_page(self):
@@ -2460,14 +2477,9 @@ class ManuscriptViewerWidget(QWidget):
         if not thumb_url and 'iiif.nli.org.il' in base_url:
             thumb_url = f"{base_url}/full/400,/0/default.jpg"
 
-        # Cancel previous loader (non-blocking)
-        if self.loader_thread and self.loader_thread.isRunning():
-            self.loader_thread.cancel()
-            try:
-                self.loader_thread.image_loaded.disconnect()
-                self.loader_thread.load_failed.disconnect()
-            except (TypeError, RuntimeError):
-                pass
+        # Retire previous loader safely (stays alive in _inflight_threads until finished)
+        if self.loader_thread:
+            self._retire_thread(self.loader_thread)
 
         # Load low-res preview first for instant display, then high-res replaces it
         if thumb_url:
@@ -28612,14 +28624,27 @@ class GenizahGUI(QMainWindow):
         self.browse_thumb.setText("No Preview")
 
     def cancel_browse_image_thread(self):
-        if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
-            self.browse_img_thread.cancel()
-            # Disconnect signals to prevent stale delivery — do NOT block with wait()
+        thread = getattr(self, 'browse_img_thread', None)
+        if thread and thread.isRunning():
+            thread.cancel()
             try:
-                self.browse_img_thread.image_loaded.disconnect()
-                self.browse_img_thread.load_failed.disconnect()
+                thread.image_loaded.disconnect()
+                thread.load_failed.disconnect()
             except (TypeError, RuntimeError):
                 pass
+            # Keep alive until finished to prevent QThread destruction while running
+            if not hasattr(self, '_browse_inflight'):
+                self._browse_inflight = []
+            self._browse_inflight.append(thread)
+            thread.finished.connect(lambda t=thread: self._cleanup_browse_inflight(t))
+
+    def _cleanup_browse_inflight(self, thread):
+        """Remove finished browse thread from in-flight list."""
+        try:
+            self._browse_inflight.remove(thread)
+        except (ValueError, AttributeError):
+            pass
+        thread.deleteLater()
 
     def fetch_browse_thumbnail(self, sys_id, meta=None):
         self.cancel_browse_image_thread()
@@ -29671,6 +29696,11 @@ class GenizahGUI(QMainWindow):
             # Stop browse tab viewer image threads
             if getattr(self, 'browse_viewer', None):
                 self.browse_viewer.stop_threads()
+            # Stop browse thumbnail threads
+            self.cancel_browse_image_thread()
+            for t in getattr(self, '_browse_inflight', []):
+                t.cancel()
+                t.wait(500)
         finally:
             super().closeEvent(event)
 
