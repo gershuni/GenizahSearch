@@ -3110,4 +3110,7 @@ LIBRARY_CODES_HE = {
     'CentralArch': 'הארכיון המרכזי לתולדות העם היהודי',
     'JCMainz': 'הקהילה היהודית של מיינץ',
     'Corwin': 'אוסף קורווין',
+
+    # --- Pesach 2026 Easter Eggs ---
+    'Browse Collection': 'דפדוף באוסף',
 }

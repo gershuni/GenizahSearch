@@ -155,7 +155,7 @@ def _save_nli_persistent_cache(
         }
 
     payload = {'version': 1, 'entries': entries}
-    temp_path = f"{cache_path}.tmp"
+    temp_path = f"{cache_path}.tmp.{os.getpid()}.{threading.get_ident()}"
     try:
         cache_dir = os.path.dirname(cache_path)
         if cache_dir:
