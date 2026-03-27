@@ -271,6 +271,69 @@ class TestHasMeasurements:
         assert empty_service.has_measurements("990001") is False
 
 
+class TestLineHeightColumn:
+    """Test avg_line_height_mm column in manuscript_measurements."""
+
+    def test_line_height_column(self, measurement_service):
+        """After import, manuscript_measurements has avg_line_height_mm with non-NULL values."""
+        result = measurement_service.get_measurements("990001")
+        summary = result["summary"]
+        assert "avg_line_height_mm" in summary
+        assert summary["avg_line_height_mm"] is not None
+        # 990001 has 2 unflagged rows: 3.5 and 3.4 -> avg = 3.45
+        assert abs(summary["avg_line_height_mm"] - 3.45) < 0.01
+
+    def test_line_height_column_990002(self, measurement_service):
+        """990002 should also have avg_line_height_mm populated."""
+        result = measurement_service.get_measurements("990002")
+        summary = result["summary"]
+        assert summary["avg_line_height_mm"] is not None
+        # 990002 has 1 unflagged row: 4.0
+        assert abs(summary["avg_line_height_mm"] - 4.0) < 0.01
+
+    def test_migrate_add_line_height_idempotent(self, tmp_path):
+        """Calling migrate_add_line_height twice does not error (idempotent)."""
+        from scripts.import_measurements import migrate_add_line_height
+        db_path = str(tmp_path / "test_migrate.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _create_measurement_tables(conn)
+        # Call migrate twice -- should not error
+        migrate_add_line_height(conn)
+        migrate_add_line_height(conn)
+        # Column should exist
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(manuscript_measurements)")}
+        assert "avg_line_height_mm" in cols
+        conn.close()
+
+    def test_line_height_excludes_flagged(self, tmp_path):
+        """avg_line_height_mm aggregation excludes flagged rows."""
+        from scripts.import_measurements import migrate_add_line_height
+        db_path = str(tmp_path / "test_flag_excl.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _create_measurement_tables(conn)
+        # Remove avg_line_height_mm if present, re-add via migration
+        try:
+            # Drop and recreate without the column to test migration
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(manuscript_measurements)")}
+            if "avg_line_height_mm" not in cols:
+                pass  # Column not there yet, migration will add it
+        except Exception:
+            pass
+        migrate_add_line_height(conn)
+        row = conn.execute(
+            "SELECT avg_line_height_mm FROM manuscript_measurements WHERE AlmaId = ?",
+            ("990001",)
+        ).fetchone()
+        # Flagged FGP003 has Avg_Line_Height_Text_mm=10.0 but Flag_DPI_High=1
+        # Unflagged: 3.5 and 3.4 -> avg = 3.45
+        assert row is not None
+        assert row[0] is not None
+        assert abs(row[0] - 3.45) < 0.01
+        conn.close()
+
+
 class TestFlagExclusion:
     """Test that flagged records are excluded from queries."""
 
