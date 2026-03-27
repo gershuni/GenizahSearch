@@ -285,7 +285,7 @@ Plans:
 Plans:
 - [x] 54-01-PLAN.md — Import script + FjmsService.get_measurements() + catalog_sizes migration + tests
 - [x] 54-02-PLAN.md — Web + desktop measurements dialog + browse button wiring + visual checkpoint
-- [ ] 54-03-PLAN.md — Measurement filtering backend: service extensions + batch lookup + tests (DIM-02, DIM-03)
+- [x] 54-03-PLAN.md — Measurement filtering backend: service extensions + batch lookup + tests (DIM-02, DIM-03)
 - [ ] 54-04-PLAN.md — Measurement filtering UI: web + desktop pre-search and post-search panels (DIM-02, DIM-03)
 
 ### Phase 55: Search Within Results
@@ -339,7 +339,7 @@ Plans:
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
-| 54. Dimensions Display & Filtering | 2/4 | In progress | - |
+| 54. Dimensions Display & Filtering | 3/4 | In Progress|  |
 | 55. Search Within Results | 0/? | Not started | - |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
