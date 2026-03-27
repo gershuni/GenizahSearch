@@ -67,7 +67,7 @@ def page_meta(
     _t = _html.escape(title)
     _d = _html.escape(description)
     url = f'{_SITE_URL}{path}'
-    robots = '<meta name="robots" content="noindex, nofollow">\n' if noindex else ''
+    robots = '<meta name="robots" content="noindex, follow">\n' if noindex else ''
     return f'''
 <!-- Meta Tags -->
 {robots}<meta name="description" content="{_d}">

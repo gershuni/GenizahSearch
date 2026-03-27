@@ -248,7 +248,6 @@ def init_api_routes():
             ('/catalog-browse', '0.8', 'weekly'),
             ('/discoveries', '0.7', 'weekly'),
             ('/browse', '0.6', 'daily'),
-            ('/puzzle', '0.6', 'weekly'),
             ('/about', '0.6', 'monthly'),
             ('/help', '0.5', 'monthly'),
             ('/download', '0.5', 'monthly'),
