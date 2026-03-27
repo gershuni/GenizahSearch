@@ -4,6 +4,18 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.3.1] - SEO Foundation - 2026-03-27
+
+### Improvements
+- **Per-page metadata**: Every web route now has a unique title, description, canonical URL, and OG/Twitter tags (replaced global META_TAGS that pointed every page's canonical at the homepage)
+- **Manuscript-specific metadata**: Browse pages with sys_id resolve the real shelfmark for title/description/canonical (e.g., "T-S 12.123 — Manuscript | Dicta Genizah Search")
+- **Manuscript sitemap**: Sitemap index with ~255K manuscript URLs in 40K-per-file chunks, replacing the previous 11-URL static sitemap
+- **Indexability policy**: Search, parallels, lists, settings, corrections, admin, and profile pages marked `noindex, follow`; robots.txt aligned
+- **Homepage structured data**: WebSite JSON-LD with publisher, bilingual name, and languages
+- **Performance hints**: Preconnect for NLI IIIF server, DNS prefetch for Cambridge CUDL
+
+---
+
 ## [7.3.0] - Manuscript Measurements, Bibliography Cleanup & Desktop Stability - 2026-03-26
 
 ### New Features

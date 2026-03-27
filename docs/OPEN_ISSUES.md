@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-26 (reviewed quick task 260326-jwi follow-up; confirmed ResultDialog image-thread teardown fix after `0c291bbd`)
+> **Last Updated:** 2026-03-27 (SEO fixes deployed: per-page metadata, manuscript sitemap, indexability policy)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 8 | 45 | 53 |
+| P2 Medium Bugs | 9 | 48 | 57 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **14** | **87** | **101** |
+| **Total** | **15** | **90** | **105** |
 
 ---
 
@@ -78,6 +78,10 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **FjmsService batch queries intermittently fail with "bad parameter or other API misuse" / "tuple index out of range"** | `shared/fjms_service.py` | ❌ Open | `get_printed_sys_ids()` and `get_domains_for_sys_ids()` use `row["AlmaId"]` dict access which requires `conn.row_factory = sqlite3.Row`. Under concurrent access or connection recycling, row_factory may be lost, causing "bad parameter" (SQLite API error) or "tuple index out of range" (fallback to tuple row). Pre-existing, intermittent, fails gracefully (returns empty set/dict). |
+| **Site-wide canonical points almost every route at the homepage** | `web/main.py` | ✅ Fixed (2026-03-27) | Replaced global `META_TAGS` with per-page `page_meta()` builder. Each route now has correct canonical, OG, and Twitter metadata. `/about` double-injection eliminated. |
+| **Most indexable web routes share the same title/description/OG metadata** | `web/main.py` | ✅ Fixed (2026-03-27) | Every `@ui.page()` route now has a `title=` param. Dynamic pages (`/browse` with sys_id, `/catalog-browse` with filters) override via `ui.page_title()`. Browse resolves real shelfmark from csv_bank. |
+| **Sitemap advertises only 11 static URLs and omits manuscript/category inventory** | `web/api.py` | ✅ Fixed (2026-03-27) | Sitemap index architecture: `sitemap-static.xml` (editorial pages) + `sitemap-manuscripts-{chunk}.xml` (40K per file, ~255K total from csv_bank). Cache only persists non-empty results to avoid warmup poisoning. |
+| **Browse/catalog raw HTML is mostly an app shell, with little indexable content before hydration** | `web/pages/browse.py`, `web/pages/catalog_browse.py` | ❌ Open | Head tags (title, meta, canonical, OG) are now correct and manuscript-specific, but body content still loads via WebSocket after initial render. Verify via Search Console URL Inspection whether Google renders enough content before investing in prerendering. |
 | **Desktop What's New dialog: RTL text alignment not fully right-aligned in Hebrew** | `genizah_app.py` | ❌ Open | The QLabel HTML rendering doesn't perfectly right-align `<p dir='rtl'>` bullet text in the WhatsNewDialog. Content is readable but left-edge aligned despite RTL direction. Low priority cosmetic issue. |
 | **Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses** | `genizah_core.py` | ❌ Open | Review of the 2026-03-25 wildcard fixes found that `build_tantivy_query()` and `_execute_line_break_search()` now expand each suffix/prefix wildcard into ~25 real grammatical forms for Tantivy recall, but `_count_expanded_terms()` / `_apply_explosion_guard()` still counts wildcard components as a single base word unless explicit grammatical prefix/suffix modifiers are set. Wildcard-heavy queries can therefore slip past the 500-term guard and generate much larger Tantivy queries than the system estimates, risking slower searches or query-parser failures. |
 | **Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches** | `genizah_core.py` | ❌ Open | Follow-up review on 2026-03-25 confirmed the line-break path now reuses expanded terms for non-wildcards and fixes suffix wildcard recall, but pattern wildcards (`*a*b*`) still cannot be meaningfully prefiltered from Tantivy using the current stem-based strategy. This matches the normal Responsa limitation: regex is correct, but candidate recall may still miss some pattern-only hits before post-filtering. |
