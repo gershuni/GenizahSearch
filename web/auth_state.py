@@ -38,12 +38,18 @@ class GlobalAuthState:
     @classmethod
     def get_user(cls) -> Optional[Dict]:
         """Get the current user info."""
-        return app.storage.user.get(cls.USER_KEY)
+        try:
+            return app.storage.user.get(cls.USER_KEY)
+        except (AssertionError, Exception):
+            return None
 
     @classmethod
     def get_profile(cls) -> Optional[Dict]:
         """Get the current user's profile."""
-        return app.storage.user.get(cls.PROFILE_KEY)
+        try:
+            return app.storage.user.get(cls.PROFILE_KEY)
+        except (AssertionError, Exception):
+            return None
 
     @classmethod
     def is_logged_in(cls) -> bool:
