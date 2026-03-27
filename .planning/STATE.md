@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v7.3
 milestone_name: Search Refinement & Scholarly Joins
 status: Ready to plan
-stopped_at: Phase 54 filtering context gathered
-last_updated: "2026-03-27T06:05:18.206Z"
+stopped_at: Completed 54-04-PLAN.md
+last_updated: "2026-03-27T10:44:38.870Z"
 progress:
   total_phases: 11
-  completed_phases: 7
-  total_plans: 19
-  completed_plans: 19
+  completed_phases: 6
+  total_plans: 21
+  completed_plans: 20
 ---
 
 # Project State
@@ -78,6 +78,7 @@ Recent decisions affecting current work:
 - [Phase 54]: Single import_measurements.py script as sole owner of all measurement tables; flag exclusion at aggregation time in summary
 - [Phase 54]: Teal color scheme for measurements dialog, distinct from catalog and bib
 - [Phase 54]: Web async dialog fetch via run.io_bound; desktop lazy-fetch on first click
+- [Phase 54]: Material labeled 'Material (measured)' to distinguish from printed filter; post-search state separate from pre-search; shared _apply_measurement_post_filters helper in web; _measurement_fetch_complete race guard in desktop
 
 ### Pending Todos
 
@@ -136,9 +137,10 @@ Recent decisions affecting current work:
 | Phase 54 P01 | 5min | 2 tasks | 6 files |
 | Phase 54 P02 | 6min | 2 tasks | 4 files |
 | 260326-u9e | Reorganize docs/ folder: archive 28 completed/stale docs, update indexes | 2026-03-26 | 3927e257 | [260326-u9e-reorganize-docs-folder-archive-outdated-](./quick/260326-u9e-reorganize-docs-folder-archive-outdated-/) |
+| Phase 54 P04 | 25min | 2 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-03-27T06:05:18.200Z
-Stopped at: Phase 54 filtering context gathered
-Resume file: .planning/phases/54-dimensions-display-filtering/54-CONTEXT.md
+Last session: 2026-03-27T10:44:38.866Z
+Stopped at: Completed 54-04-PLAN.md
+Resume file: None
