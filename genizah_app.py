@@ -9055,6 +9055,18 @@ class FilterCountWorker(QThread):
                 text_all=self.filters.get('text_all') or None,
                 text_any=self.filters.get('text_any') or None,
                 text_not=self.filters.get('text_not') or None,
+                # Measurement filters (Phase 54)
+                width_min=self.filters.get('width_min'),
+                width_max=self.filters.get('width_max'),
+                height_min=self.filters.get('height_min'),
+                height_max=self.filters.get('height_max'),
+                line_count_min=self.filters.get('line_count_min'),
+                line_count_max=self.filters.get('line_count_max'),
+                line_height_min=self.filters.get('line_height_min'),
+                line_height_max=self.filters.get('line_height_max'),
+                text_density_min=self.filters.get('text_density_min'),
+                text_density_max=self.filters.get('text_density_max'),
+                measurement_material=self.filters.get('measurement_material'),
             )
             _domains = self.filters.get('domains') or None
             _authors = self.filters.get('authors') or None
@@ -9092,7 +9104,7 @@ class PreSearchFilterDialog(QDialog):
         from PyQt6.QtWidgets import QRadioButton, QButtonGroup
         super().__init__(parent)
         self.setWindowTitle(tr("Search only in..."))
-        self.setMinimumSize(780, 620)
+        self.setMinimumSize(780, 720)
         self._current_filters = current_filters.copy() if current_filters else {}
         self._count_worker = None
         self._result_set = None  # computed restrict_sys_ids
@@ -9255,6 +9267,80 @@ class PreSearchFilterDialog(QDialog):
         text_input_layout.addWidget(add_term_btn)
         text_layout.addLayout(text_input_layout)
         right_layout.addWidget(text_group)
+
+        # --- Measurement filters (Phase 54, DIM-02) ---
+        meas_group = QGroupBox(tr("Measurements"))
+        meas_layout = QGridLayout(meas_group)
+        MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
+
+        def _make_meas_spin(row, label, max_val, decimals, suffix):
+            meas_layout.addWidget(QLabel(label), row, 0)
+            spin_min = QDoubleSpinBox()
+            spin_min.setRange(0, max_val)
+            spin_min.setDecimals(decimals)
+            spin_min.setSpecialValueText("")
+            spin_min.setValue(0)
+            if suffix:
+                spin_min.setSuffix(f" {suffix}")
+            spin_min.setPrefix(tr("Min") + ": ")
+            spin_min.editingFinished.connect(self._on_filter_changed)
+            meas_layout.addWidget(spin_min, row, 1)
+            spin_max = QDoubleSpinBox()
+            spin_max.setRange(0, max_val)
+            spin_max.setDecimals(decimals)
+            spin_max.setSpecialValueText("")
+            spin_max.setValue(0)
+            if suffix:
+                spin_max.setSuffix(f" {suffix}")
+            spin_max.setPrefix(tr("Max") + ": ")
+            spin_max.editingFinished.connect(self._on_filter_changed)
+            meas_layout.addWidget(spin_max, row, 2)
+            return spin_min, spin_max
+
+        self.meas_width_min, self.meas_width_max = _make_meas_spin(0, tr("Width (cm)"), 100, 1, "cm")
+        self.meas_height_min, self.meas_height_max = _make_meas_spin(1, tr("Height (cm)"), 100, 1, "cm")
+        self.meas_lines_min, self.meas_lines_max = _make_meas_spin(2, tr("Lines"), 200, 0, "")
+        self.meas_line_height_min, self.meas_line_height_max = _make_meas_spin(3, tr("Line Height (mm)"), 20, 1, "mm")
+        self.meas_density_min, self.meas_density_max = _make_meas_spin(4, tr("Text Density"), 100, 1, "")
+
+        # Material multi-select via checkboxes -- "Material (measured)" per review concern #7
+        meas_layout.addWidget(QLabel(tr("Material (measured)")), 5, 0)
+        self._meas_material_checks = {}
+        mat_widget = QWidget()
+        mat_layout_inner = QHBoxLayout(mat_widget)
+        mat_layout_inner.setContentsMargins(0, 0, 0, 0)
+        for mat in MEASUREMENT_MATERIALS:
+            cb = QCheckBox(mat)
+            cb.stateChanged.connect(self._on_filter_changed)
+            mat_layout_inner.addWidget(cb)
+            self._meas_material_checks[mat] = cb
+        meas_layout.addWidget(mat_widget, 5, 1, 1, 2)
+
+        # Restore measurement values from current_filters
+        if self._current_filters.get('width_min'):
+            self.meas_width_min.setValue(self._current_filters['width_min'])
+        if self._current_filters.get('width_max'):
+            self.meas_width_max.setValue(self._current_filters['width_max'])
+        if self._current_filters.get('height_min'):
+            self.meas_height_min.setValue(self._current_filters['height_min'])
+        if self._current_filters.get('height_max'):
+            self.meas_height_max.setValue(self._current_filters['height_max'])
+        if self._current_filters.get('line_count_min'):
+            self.meas_lines_min.setValue(self._current_filters['line_count_min'])
+        if self._current_filters.get('line_count_max'):
+            self.meas_lines_max.setValue(self._current_filters['line_count_max'])
+        if self._current_filters.get('line_height_min'):
+            self.meas_line_height_min.setValue(self._current_filters['line_height_min'])
+        if self._current_filters.get('line_height_max'):
+            self.meas_line_height_max.setValue(self._current_filters['line_height_max'])
+        if self._current_filters.get('text_density_min'):
+            self.meas_density_min.setValue(self._current_filters['text_density_min'])
+        if self._current_filters.get('text_density_max'):
+            self.meas_density_max.setValue(self._current_filters['text_density_max'])
+        for mat, cb in self._meas_material_checks.items():
+            cb.setChecked(mat in (self._current_filters.get('measurement_material') or []))
+
+        right_layout.addWidget(meas_group)
 
         body_layout.addLayout(right_layout, 1)  # stretch factor 1
         layout.addLayout(body_layout)
@@ -9666,6 +9752,29 @@ class PreSearchFilterDialog(QDialog):
                     f"{prefix} {t}", color,
                     lambda checked=False, m=mode, term=t: self._remove_text_term(m, term)))
 
+        # Measurement chips (Phase 54, teal #e0f2f1)
+        def _fmt_range_chip(prefix, vmin, vmax, unit=''):
+            u = f' {unit}' if unit else ''
+            if vmin and vmax:
+                return f"{prefix}: {vmin}-{vmax}{u}"
+            elif vmin:
+                return f"{prefix}: \u2265{vmin}{u}"
+            elif vmax:
+                return f"{prefix}: \u2264{vmax}{u}"
+            return None
+        _mf = self._get_measurement_filters()
+        for _chip_text in [
+            _fmt_range_chip('W', _mf.get('width_min'), _mf.get('width_max'), 'cm'),
+            _fmt_range_chip('H', _mf.get('height_min'), _mf.get('height_max'), 'cm'),
+            _fmt_range_chip(tr('Lines'), _mf.get('line_count_min'), _mf.get('line_count_max')),
+            _fmt_range_chip('LH', _mf.get('line_height_min'), _mf.get('line_height_max'), 'mm'),
+            _fmt_range_chip(tr('Density'), _mf.get('text_density_min'), _mf.get('text_density_max')),
+        ]:
+            if _chip_text:
+                self.chip_bar_layout.addWidget(self._make_chip(_chip_text, '#e0f2f1'))
+        for _mat in _mf.get('measurement_material', []):
+            self.chip_bar_layout.addWidget(self._make_chip(_mat, '#e0f2f1'))
+
         self.chip_bar_layout.addStretch()
 
     def _get_current_filter_dict(self) -> dict:
@@ -9698,7 +9807,37 @@ class PreSearchFilterDialog(QDialog):
             filters['text_any'] = list(self._text_any)
         if self._text_not:
             filters['text_not'] = list(self._text_not)
+        # Measurement filters (Phase 54)
+        filters.update(self._get_measurement_filters())
         return filters
+
+    def _get_measurement_filters(self) -> dict:
+        """Extract measurement filter values from dialog spin boxes and checkboxes."""
+        result = {}
+        if self.meas_width_min.value() > 0:
+            result['width_min'] = self.meas_width_min.value()
+        if self.meas_width_max.value() > 0:
+            result['width_max'] = self.meas_width_max.value()
+        if self.meas_height_min.value() > 0:
+            result['height_min'] = self.meas_height_min.value()
+        if self.meas_height_max.value() > 0:
+            result['height_max'] = self.meas_height_max.value()
+        if self.meas_lines_min.value() > 0:
+            result['line_count_min'] = int(self.meas_lines_min.value())
+        if self.meas_lines_max.value() > 0:
+            result['line_count_max'] = int(self.meas_lines_max.value())
+        if self.meas_line_height_min.value() > 0:
+            result['line_height_min'] = self.meas_line_height_min.value()
+        if self.meas_line_height_max.value() > 0:
+            result['line_height_max'] = self.meas_line_height_max.value()
+        if self.meas_density_min.value() > 0:
+            result['text_density_min'] = self.meas_density_min.value()
+        if self.meas_density_max.value() > 0:
+            result['text_density_max'] = self.meas_density_max.value()
+        checked = [m for m, cb in self._meas_material_checks.items() if cb.isChecked()]
+        if checked:
+            result['measurement_material'] = checked
+        return result
 
     def _get_display_name(self, key, data_map):
         """Get display name (without count) from data map."""
@@ -9756,6 +9895,19 @@ class PreSearchFilterDialog(QDialog):
         self._text_all.clear()
         self._text_any.clear()
         self._text_not.clear()
+        # Clear measurement filters (Phase 54)
+        self.meas_width_min.setValue(0)
+        self.meas_width_max.setValue(0)
+        self.meas_height_min.setValue(0)
+        self.meas_height_max.setValue(0)
+        self.meas_lines_min.setValue(0)
+        self.meas_lines_max.setValue(0)
+        self.meas_line_height_min.setValue(0)
+        self.meas_line_height_max.setValue(0)
+        self.meas_density_min.setValue(0)
+        self.meas_density_max.setValue(0)
+        for cb in self._meas_material_checks.values():
+            cb.setChecked(False)
         self._rebuild_dialog_chips()
         self._update_count()
 
@@ -14190,6 +14342,9 @@ class GenizahGUI(QMainWindow):
         self._domain_exclusions = set()
         self._result_domain_counts = {}  # domain_name -> count in current results
         self._result_domain_map = {}  # sys_id -> list of domain names
+        self._result_measurement_map = {}  # Phase 54: sys_id -> measurement summary dict
+        self._measurement_fetch_complete = False  # Phase 54: race guard
+        self._post_measurement_filters = {}  # Phase 54: separate from pre_search_filters
         self._has_result_domains = False
 
         # Pre-search Filters button (Phase 45-03)
@@ -24102,7 +24257,7 @@ class GenizahGUI(QMainWindow):
             )
 
     def _launch_enrichment_workers(self, results, defer=False):
-        """Launch domain, PGP badge, and printed badge enrichment workers."""
+        """Launch domain, PGP badge, printed badge, and measurement enrichment workers."""
         def _start():
             from gui_threads import DomainEnrichmentWorker
             sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
@@ -24124,6 +24279,27 @@ class GenizahGUI(QMainWindow):
                 self._printed_badge_worker = PrintedBadgeWorker(sys_ids)
                 self._printed_badge_worker.finished.connect(self._on_printed_badges_loaded)
                 self._printed_badge_worker.start()
+
+                # Phase 54: batch fetch measurement summaries for post-search filtering
+                self._measurement_fetch_complete = False
+                try:
+                    from shared.fjms_service import get_fjms_service
+                    fjms = get_fjms_service()
+                    if fjms.is_available():
+                        self._result_measurement_map = fjms.get_measurement_summaries_batch(sys_ids)
+                    else:
+                        self._result_measurement_map = {}
+                except Exception:
+                    self._result_measurement_map = {}
+                self._measurement_fetch_complete = True
+                # Initialize post-search measurement filters from pre-search
+                _meas_keys = ('width_min', 'width_max', 'height_min', 'height_max',
+                              'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
+                              'text_density_min', 'text_density_max', 'measurement_material')
+                self._post_measurement_filters = {
+                    k: v for k, v in (getattr(self, 'pre_search_filters', {}) or {}).items()
+                    if k in _meas_keys
+                }
 
         if defer:
             QTimer.singleShot(500, _start)
@@ -24204,7 +24380,13 @@ class GenizahGUI(QMainWindow):
         has_domain_exclusions = bool(self._domain_exclusions) and self._has_result_domains
         hide_uncategorized = "Uncategorized" in self._domain_exclusions if has_domain_exclusions else False
 
-        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all':
+        _has_meas_post = any(
+            getattr(self, '_post_measurement_filters', {}).get(k) is not None
+            for k in ['width_min', 'width_max', 'height_min', 'height_max',
+                       'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
+                       'text_density_min', 'text_density_max']
+        ) or getattr(self, '_post_measurement_filters', {}).get('measurement_material')
+        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all' and not _has_meas_post:
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
@@ -24256,6 +24438,43 @@ class GenizahGUI(QMainWindow):
                     visible = False
                 elif self._printed_filter_state == 'only_printed' and not is_printed:
                     visible = False
+
+            # E. Check Measurement Post-Filters (Phase 54, separate state from pre_search_filters)
+            if visible:
+                mf = getattr(self, '_post_measurement_filters', {})
+                _has_mf = any(mf.get(k) is not None for k in [
+                    'width_min', 'width_max', 'height_min', 'height_max',
+                    'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
+                    'text_density_min', 'text_density_max',
+                ]) or mf.get('measurement_material')
+                if _has_mf:
+                    # Review concern #8: only filter if fetch is complete
+                    if not getattr(self, '_measurement_fetch_complete', False):
+                        pass  # Data still loading -- show row
+                    else:
+                        item = self.results_table.item(row, self.COL_SYS_ID)
+                        sys_id = item.text().strip() if item else None
+                        md = getattr(self, '_result_measurement_map', {}).get(sys_id)
+                        if md is None:
+                            visible = False  # D-26: exclude without data (fetch completed)
+                        else:
+                            def _meas_check(val, vmin_key, vmax_key):
+                                vmin = mf.get(vmin_key)
+                                vmax = mf.get(vmax_key)
+                                if val is None and (vmin is not None or vmax is not None):
+                                    return False
+                                if vmin is not None and val < vmin:
+                                    return False
+                                if vmax is not None and val > vmax:
+                                    return False
+                                return True
+                            if not _meas_check(md.get('width_cm'), 'width_min', 'width_max'): visible = False
+                            elif not _meas_check(md.get('height_cm'), 'height_min', 'height_max'): visible = False
+                            elif not _meas_check(md.get('avg_num_lines'), 'line_count_min', 'line_count_max'): visible = False
+                            elif not _meas_check(md.get('avg_line_height_mm'), 'line_height_min', 'line_height_max'): visible = False
+                            elif not _meas_check(md.get('avg_text_density'), 'text_density_min', 'text_density_max'): visible = False
+                            elif mf.get('measurement_material'):
+                                if md.get('material') not in mf['measurement_material']: visible = False
 
             self.results_table.setRowHidden(row, not visible)
 
@@ -29695,6 +29914,7 @@ class GenizahGUI(QMainWindow):
                 'was_interrupted': getattr(self, 'is_comp_running', False),
                 # Pre-search filters (Phase 45-03) -- shared across search/composition
                 'pre_search_filters': getattr(self, 'pre_search_filters', {}),
+                'post_measurement_filters': getattr(self, '_post_measurement_filters', {}),
                 'word_excluded_sys_ids': sorted(getattr(self, 'word_excluded_sys_ids', set())),
                 'active_tab': self.tabs.currentIndex() if hasattr(self, 'tabs') else 0,
                 'browse_shelfmark': {
@@ -29963,6 +30183,7 @@ class GenizahGUI(QMainWindow):
 
             # Restore pre-search filters (Phase 45-03)
             self.pre_search_filters = state.get('pre_search_filters', {})
+            self._post_measurement_filters = state.get('post_measurement_filters', {})
             self.word_excluded_sys_ids = set(state.get('word_excluded_sys_ids', []))
             if self.pre_search_filters:
                 # Recompute restrict_sys_ids from saved filters
