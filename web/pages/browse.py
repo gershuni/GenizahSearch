@@ -556,7 +556,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     slider_refs = {}  # References for UI controls to allow updates from code
     enrichment_refs = {}  # Containers for PGP link, version selector, joins button
     _load_generation = {'value': 0}  # Guard against stale enrichment updates
-    _initial_highlight = highlight  # Preserve for URL sync across page turns
+    _page_client = ui.context.client  # Capture client for JS dispatch from detached tasks
+    _url_state = {'highlight': highlight, 'last_sys_id': initial_sys_id}  # Track across navigations
 
     if initial_sys_id:
         state.sys_id = initial_sys_id
@@ -564,26 +565,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.highlight_terms = highlight
 
     def _update_browser_url():
-        """Sync the browser URL bar with the current manuscript/page for sharing."""
+        """Sync the browser URL bar with the current manuscript/page for sharing.
+
+        Uses the captured _page_client to dispatch JS even when called from
+        detached asyncio.ensure_future() tasks that lack NiceGUI client context.
+        Clears highlight when manuscript changes (stale highlight from search entry).
+        """
         page = state.current_page
         if not page or not state.sys_id:
-            logger.debug('_update_browser_url: skipped (no page or sys_id)')
             return
+        # Clear highlight when navigating to a different manuscript
+        if _url_state['last_sys_id'] and _url_state['last_sys_id'] != state.sys_id:
+            _url_state['highlight'] = None
+        _url_state['last_sys_id'] = state.sys_id
         from urllib.parse import urlencode
         import json as _json
         params = {'sys_id': state.sys_id}
         if page.p_num and page.p_num > 0:
             params['page'] = page.p_num
-        if _initial_highlight:
-            params['highlight'] = _initial_highlight
+        if _url_state['highlight']:
+            params['highlight'] = _url_state['highlight']
         qs = urlencode(params)
         new_url = f'/browse?{qs}'
         shelfmark = page.shelfmark or state.sys_id
         safe_url = _json.dumps(new_url)
         safe_title = _json.dumps(f'{shelfmark} — Manuscript | Dicta Genizah Search')
-        js = f'try {{ history.replaceState(null, "", {safe_url}); document.title = {safe_title}; }} catch(e) {{ console.error("URL update failed", e); }}'
-        logger.info('_update_browser_url: %s', new_url)
-        ui.run_javascript(js)
+        js = f'try {{ history.replaceState(null, "", {safe_url}); document.title = {safe_title}; }} catch(e) {{}}'
+        _page_client.run_javascript(js)
     # If a shelfmark was passed via URL (not already resolved to sys_id), set it for auto-search on load
     _pending_shelfmark = initial_shelfmark
 
