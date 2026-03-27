@@ -1,14 +1,142 @@
 ---
 phase: 54
-reviewers: [codex]
-reviewed_at: 2026-03-27T10:30:00Z
-plans_reviewed: [54-01-PLAN.md, 54-02-PLAN.md, 54-03-PLAN.md]
-rounds: 3
+reviewers: [gemini, codex]
+reviewed_at: 2026-03-27T12:40:00Z
+plans_reviewed: [54-01-PLAN.md, 54-02-PLAN.md, 54-03-PLAN.md, 54-04-PLAN.md]
+rounds: 4
 ---
 
 # Cross-AI Plan Review — Phase 54
 
+## Round 4: Gemini + Codex Review (Revised Plans 54-03, 54-04)
+
+### Gemini Review (gemini-2.5-pro)
+
+#### Summary
+
+The implementation plans for Wave 1 (Backend) and Wave 2 (UI) are technically sound, highly detailed, and demonstrate a strong commitment to addressing the architectural concerns raised in Round 3. The strategy of separating pre-search and post-search states in both the Web and Desktop applications directly resolves the most critical risk of state loss and coupling. The use of a batch lookup mechanism for post-search measurements is an efficient way to handle "sidecar" data that isn't indexed in the primary search engine (Tantivy). The backend testing plan is comprehensive, covering edge cases like unit normalization and NULL exclusion.
+
+#### Concerns
+
+**Round 3 Resolution Audit:**
+- Concerns 1, 2, 3 (State Coupling/Loss): **RESOLVED.** Plan 54-04 explicitly defines separate storage for pre- and post-search filters.
+- Concern 6 (Performance): **RESOLVED.** Move from on_change to blur/editingFinished prevents excessive recomputations.
+- Concern 7 (Migration Risk): **RESOLVED.** PRAGMA existence checks ensure idempotency and stability.
+
+| # | Severity | Concern | Action |
+|---|----------|---------|--------|
+| 1 | MEDIUM | Material multi-select query — backend `measurement_material` param must handle `list[str]` with IN clause, not single string | Executor: verify IN clause implementation |
+| 2 | MEDIUM | Normalization logic consistency — min > max normalization only specified in UI, backend could receive inverted ranges | Executor: add backend guard clause |
+| 3 | LOW | UI automation coverage — Plan 54-04 lacks specific UI verification steps | Noted |
+| 4 | LOW | Material label translations — ensure the five material types are translated, not just section header | Executor: verify |
+
+#### Suggestions
+- Add backend guard clause for reversed min/max pairs
+- Ensure SQL IN clause behavior for material multi-select
+- Add visual indicator on Apply button during processing
+- Verify unit labels match DB schema (mm vs cm)
+
+#### Execution Readiness
+**GO**
+
+---
+
+### Codex Review (GPT-5.4 / o3)
+
+#### Plan 54-03: Backend
+
+##### Summary
+Mostly solid and much better scoped than the prior round. Splitting schema/import work from service/query work is the right order. The proposed `get_measurement_summaries_batch()` closes a real gap for DIM-03. Plan addresses several earlier concerns well: wave ordering explicit, batch lookup called out, dedup called out, service-level tests broad enough.
+
+##### Concerns
+
+| # | Severity | Concern | Action |
+|---|----------|---------|--------|
+| 1 | MEDIUM | Row-factory concern not fully resolved — `dict(row)` insufficient if `row` is already a tuple (intermittent issue) | Executor: fall back to cursor.description or positional unpacking |
+| 2 | MEDIUM | Index coverage incomplete — new filters add line count, line height, text density, material but no indexes planned for these | Executor: add indexes for avg_line_height_mm, avg_text_density, material |
+| 3 | MEDIUM | D-19 normalization not owned in backend tests — reversed input pairs (min > max) not tested | Executor: add reversed bounds test |
+| 4 | LOW | Test fixture schema — adding avg_line_height_mm will break current inserts unless existing fixture updated | Executor: update fixture |
+| 5 | LOW | Width/height semantics — should state exactly which summary column drives each bound | Executor: document in code comments |
+
+##### Suggestions
+- Add shared normalization helper for numeric ranges
+- Make batch method robust to tuple rows via cursor.description fallback
+- Add indexes for new filter columns
+- Add reversed min/max test + intersection test with non-measurement filter
+- Return normalized summary shape from batch method
+
+##### Execution Readiness
+**CONDITIONAL GO**
+
+---
+
+#### Plan 54-04: UI
+
+##### Summary
+Directionally correct on desktop, partially convincing on web. Desktop replan addresses pre/post coupling with separate `_post_measurement_filters` dict. Web plan underspecified for rerender persistence: current post-search rendering spread across `apply_filters()`, domain exclusion, printed filtering, word-exclusion, history restore, and staged enrichment — "read from state not widgets" only fixes one code path.
+
+##### Concerns
+
+| # | Severity | Concern | Action |
+|---|----------|---------|--------|
+| 1 | HIGH | Web rerender persistence — "read from state, not widgets" only fixes apply_filters path. Domain exclusions, printed toggles, history restore, staged enrichment all re-render results without composing measurement post-filters | Executor: route ALL rerender paths through shared measurement post-filter |
+| 2 | MEDIUM | Desktop persistence path wrong — app uses `_save_session()` + `shared/session_persistence.py`, NOT QSettings for this flow | Executor: use existing session machinery |
+| 3 | MEDIUM | Material label ambiguity — existing printed/non-printed controls vs new measurement material; plan separates backend keys but not user-facing labels | Executor: use "Material (measured)" or "Physical Material" label |
+| 4 | MEDIUM | Desktop batch fetch race — `_result_measurement_map` populated after search but before rows rendered; missing rows handled as "exclude" could oscillate | Executor: handle missing as "pending" during fetch |
+| 5 | LOW | Material values hardcoded — brittle if DB gets new values | Acceptable short-term |
+| 6 | LOW | UI-state tests still open — no concrete test for rerender persistence, separate state, Enter-to-apply | Consider adding |
+
+##### Suggestions
+- Create one shared post-search filtering pipeline on web; route every rerender through it
+- Persist desktop post-search measurement state through existing session/history machinery
+- Add shared pure-Python matcher for post-search measurement rules (web + desktop identical semantics)
+- Add targeted UI/state tests: rerender persistence, pre/post independence, session restore, Enter-to-apply
+
+##### Execution Readiness
+**BLOCK** — Web rerender integration point must be made explicit before execution
+
+---
+
+## Consensus Summary
+
+### Agreed Strengths (both reviewers)
+- Backend plan (54-03) is well-structured with correct wave ordering and comprehensive tests
+- Pre/post state separation architecture is sound in both apps
+- Batch lookup pattern for post-search is efficient and correct
+- Round 3 concerns 5-9 are genuinely resolved
+
+### Agreed Concerns (both reviewers — highest priority)
+
+| # | Severity | Concern | Gemini | Codex |
+|---|----------|---------|--------|-------|
+| 1 | HIGH | Web rerender persistence — measurement post-filters only applied in apply_filters(), not in other rerender paths (domain exclusion, printed toggle, history restore, staged enrichment) | Implicit (noted normalization gap) | Explicit BLOCK |
+| 2 | MEDIUM | Material multi-select contract — backend `measurement_material` param must accept list and use IN clause | Both flagged |
+| 3 | MEDIUM | Min > max normalization ownership — not tested in backend, only assumed in UI | Both flagged |
+| 4 | MEDIUM | Missing indexes for new filter columns (line height, text density, material) | Codex only but valid |
+| 5 | MEDIUM | Desktop session persistence path — plan says QSettings but app uses _save_session() | Codex only but valid |
+
+### Divergent Views
+
+| Topic | Gemini | Codex |
+|-------|--------|-------|
+| Overall readiness | GO (all concerns are executor-level) | BLOCK on UI (web rerender integration), CONDITIONAL GO on backend |
+| Severity of web rerender gap | Not flagged as blocking | Flagged as HIGH/BLOCK — multiple code paths skip measurement filters |
+| Row factory resilience | Not mentioned | MEDIUM — dict(row) insufficient if row is tuple |
+
+### Remaining Action Items for Planner
+
+1. **Web rerender integration (HIGH)** — Plan 54-04 Task 1 must specify that ALL result-rendering code paths (domain exclusion toggle, printed filter toggle, history restore, staged enrichment completion) compose measurement post-filters from `search_state.post_filter_*`. Not just `apply_filters()`.
+2. **Material IN clause (MEDIUM)** — Plan 54-03 Task 2 already has `IN ({ph})` in the action block. Verify this is reflected in tests (test_filter_measurement_material should test multi-value).
+3. **Backend min>max normalization (MEDIUM)** — Add guard clause in `get_filter_sys_ids` or add explicit test that reversed bounds still work.
+4. **New column indexes (MEDIUM)** — Add indexes for `avg_line_height_mm`, `avg_text_density`, `material` in import script.
+5. **Desktop session persistence (MEDIUM)** — Plan 54-04 Task 2 should reference `_save_session()` / `session_persistence.py`, not QSettings.
+
+---
+
 ## Round 3: Codex Review (Plan 54-03 — Dimension Filtering)
+
+<details>
+<summary>Expand Round 3 review (superseded by Round 4)</summary>
 
 ### Summary
 
@@ -29,31 +157,17 @@ The plan is directionally strong: it extends the shared filtering contract in sh
 | 9 | LOW | Batch lookup should deduplicate sys_ids | Executor: dedupe before query |
 | 10 | LOW | No UI-state tests (chip removal, clear, session restore, Enter-to-apply) | Consider adding |
 
-### Suggestions
-
-- Split pre-search and post-search measurement state explicitly in both apps
-- Normalize material options from DB values or shared canonical list
-- Integrate web measurement post-filters into persistent render pipeline
-- Make sidecar schema update a hard prerequisite or graceful no-op
-- Cache measurement summaries per search generation
-- Add UI-state tests for clear/reset/session restore
-
-### Risk Assessment
-
-**HIGH** — Core architecture sound but desktop DIM-03 and web post-filter state need tightening before execution.
-
 ### Execution Readiness
+**CONDITIONAL GO** — Ready with clarifications addressed by executor
 
-**CONDITIONAL GO** — Ready with these clarifications addressed by executor:
-1. Separate pre/post measurement state in both apps
-2. Desktop post-search: explicit controls or clear reuse contract
-3. Web post-filters survive re-renders
-4. Material options from DB, not hardcoded
-5. Graceful no-op for missing avg_line_height_mm column
+</details>
 
 ---
 
 ## Round 2: Codex Review (Revised Plans 54-01, 54-02)
+
+<details>
+<summary>Expand Round 2 review (superseded by Round 3)</summary>
 
 ### Concern Resolution Audit
 
@@ -77,25 +191,10 @@ The plan is directionally strong: it extends the shared filtering contract in sh
 
 **Score: 11/15 RESOLVED, 4/15 PARTIALLY RESOLVED, 0/15 UNRESOLVED**
 
-### New Concerns (Round 2)
-
-- **HIGH:** Import writes directly into fjms_enrichment.db in place. No temp-DB build-and-swap or rollback plan — interrupted import could leave sidecar half-migrated.
-- **MEDIUM:** No sidecar meta version/build metadata update after adding measurement tables. Harder to detect stale sidecars.
-- **MEDIUM:** Desktop implementation details skew toward reading-desk controls (btn_rd_measurements, btn_compact_measurements). Browse-tab button should be named just as concretely.
-- **MEDIUM:** AlmaId validation (10-row sample, "0/10 fail" threshold) gives limited confidence for a large migration.
-
-### Risk Assessment
-
-**MEDIUM** (down from MEDIUM-HIGH in Round 1)
-
-Major architectural and UX gaps are mostly closed. Remaining risk is operational: migration safety, sidecar versioning, one desktop browse ambiguity.
-
 ### Execution Readiness
+**CONDITIONAL GO** — Ready with 3 clarifications
 
-**CONDITIONAL GO** — Ready with 3 clarifications:
-1. Make import safe: build to temp tables and swap on success
-2. Update meta/sidecar versioning for measurement-capable build
-3. Explicitly name desktop browse-surface button wiring
+</details>
 
 ---
 
@@ -104,45 +203,14 @@ Major architectural and UX gaps are mostly closed. Remaining risk is operational
 <details>
 <summary>Expand Round 1 review (superseded by Round 2)</summary>
 
-### Plan 54-01 Concerns (Round 1)
-
-- **HIGH:** Build path — two scripts with undefined ordering
-- **HIGH:** Summary table MAX creates phantom dimensions
-- **HIGH:** Flag exclusion described as display-only rule
-- **HIGH:** Catalog_Sizes shelfmark→AlmaId needs audit plan
-- **MEDIUM:** str(int()) may not catch rounded floats
-- **MEDIUM:** No explicit performance design for 1.5M rows
-- **MEDIUM:** InnerSizeX backward compat unclear
-- **MEDIUM:** No old-sidecar graceful degradation
-- **LOW:** blank_images inconsistency
-
-### Plan 54-02 Concerns (Round 1)
-
-- **HIGH:** DIM-01 coverage incomplete — no search result surfaces
-- **HIGH:** Desktop scope internally inconsistent
-- **HIGH:** Lazy loading not explicit
-- **MEDIUM:** Blank_Images not in dialog
-- **MEDIUM:** has_measurements() semantics undefined
-- **MEDIUM:** Empty/error states underspecified
-- **MEDIUM:** Dialog scroll/performance for large datasets
-- **MEDIUM:** Desktop translations not mentioned
-- **LOW:** HTML escaping discipline
-
 ### Round 1 Risk: MEDIUM-HIGH
+
+Plan 54-01: 9 concerns (4 HIGH, 4 MEDIUM, 1 LOW)
+Plan 54-02: 8 concerns (3 HIGH, 4 MEDIUM, 1 LOW)
 
 </details>
 
 ---
 
-## Consensus Summary
-
-### Resolution Progress
-
-Round 1 → Round 2: 15 concerns raised, 11 fully resolved, 4 partially resolved, 4 new (lower severity).
-
-### Remaining Action Items for Executor
-
-1. **Import safety** (HIGH) — Use DROP TABLE IF EXISTS + CREATE TABLE pattern (already implied by plan). Consider wrapping all 5 table imports in a single outer transaction.
-2. **Catalog summary phantom sizes** (MEDIUM) — Document that catalog_width_cm/catalog_height_cm are MAX across catalogers, not from a single source. Acceptable for Phase 55 filtering (ranges are still valid bounds).
-3. **Sidecar versioning** (MEDIUM) — Add a version comment or meta row after measurement import completes.
-4. **Desktop browse clarity** (MEDIUM) — The btn_rd_measurements IS the browse-tab button (reading desk = browse tab in desktop architecture). Reviewer may not know this.
+*Phase: 54-dimensions-display-filtering*
+*Review rounds: 4 (R1: codex original, R2: codex revised 01/02, R3: codex 03, R4: gemini+codex revised 03/04)*
