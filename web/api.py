@@ -944,6 +944,27 @@ def init_api_routes():
             ]
         }
 
+    @app.get('/api/search_debug')
+    def search_debug():
+        """Temporary debug: test the live searcher object."""
+        if not state.searcher or not state.searcher.index:
+            return {"error": "No searcher/index"}
+        se = state.searcher
+        tq = '("בלי"^5) AND ("ירח"^5)'
+        try:
+            q = se.index.parse_query(tq, ['content'])
+            r = se.searcher.search(q, 50000)
+            return {
+                "num_docs": se.searcher.num_docs,
+                "num_segments": se.searcher.num_segments,
+                "query": tq,
+                "hits": len(r.hits),
+                "index_type": str(type(se.index)),
+                "searcher_type": str(type(se.searcher)),
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     @app.get('/api/oxford_debug')
     def oxford_debug():
         """
