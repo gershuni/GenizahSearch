@@ -556,11 +556,35 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     slider_refs = {}  # References for UI controls to allow updates from code
     enrichment_refs = {}  # Containers for PGP link, version selector, joins button
     _load_generation = {'value': 0}  # Guard against stale enrichment updates
+    _initial_highlight = highlight  # Preserve for URL sync across page turns
 
     if initial_sys_id:
         state.sys_id = initial_sys_id
     if highlight:
         state.highlight_terms = highlight
+
+    def _update_browser_url():
+        """Sync the browser URL bar with the current manuscript/page for sharing."""
+        page = state.current_page
+        if not page or not state.sys_id:
+            return
+        from urllib.parse import urlencode
+        params = {'sys_id': state.sys_id}
+        if page.p_num and page.p_num > 0:
+            params['page'] = page.p_num
+        if _initial_highlight:
+            params['highlight'] = _initial_highlight
+        qs = urlencode(params)
+        new_url = f'/browse?{qs}'
+        shelfmark = page.shelfmark or state.sys_id
+        import json
+        safe_title = json.dumps(f'{shelfmark} — Manuscript | Dicta Genizah Search')
+        ui.run_javascript(f'''
+            try {{
+                history.replaceState(null, '', '{new_url}');
+                document.title = {safe_title};
+            }} catch(e) {{ }}
+        ''')
     # If a shelfmark was passed via URL (not already resolved to sys_id), set it for auto-search on load
     _pending_shelfmark = initial_shelfmark
 
@@ -791,6 +815,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     'page_num': page.p_num,
                 })
 
+                # Sync browser URL bar for sharing/bookmarking
+                _update_browser_url()
+
                 # Track recently viewed item
                 if state.sys_id and service.is_ready:
                     try:
@@ -812,6 +839,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.current_page = meta_page
                     state.page_input_value = 0
                     state.error = None
+                    _update_browser_url()
                 else:
                     if fl_id:
                         state.error = tr('No text available') + f" (fl_id: {fl_id})"
@@ -2050,6 +2078,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 icon='extension',
                                 on_click=add_to_puzzle
                             ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Add to Puzzle'))
+
+                        # Share / Copy Link button
+                        def _copy_share_link():
+                            ui.run_javascript('''
+                                navigator.clipboard.writeText(window.location.href).then(() => {
+                                    // Brief visual feedback via a toast-like notification
+                                    const t = document.createElement('div');
+                                    t.textContent = ''' + repr(tr('Link copied!')) + ''';
+                                    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#059669;color:#fff;padding:8px 16px;border-radius:6px;z-index:9999;font-size:14px;';
+                                    document.body.appendChild(t);
+                                    setTimeout(() => t.remove(), 2000);
+                                });
+                            ''')
+                        ui.button(
+                            icon='share',
+                            on_click=_copy_share_link
+                        ).props('flat round dense').style('color: #ffffff !important;').tooltip(tr('Copy Link'))
 
                     # Next Shelfmark Button
                     ui.button(
