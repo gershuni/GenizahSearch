@@ -515,6 +515,7 @@ def step5_manuscript_measurements(conn):
             min_num_lines INTEGER,
             max_num_lines INTEGER,
             avg_text_density REAL,
+            avg_line_height_mm REAL,
             computed_image_count INTEGER,
             -- From extra_info
             material TEXT,
@@ -546,6 +547,7 @@ def step5_manuscript_measurements(conn):
             comp_agg.min_num_lines,
             comp_agg.max_num_lines,
             comp_agg.avg_text_density,
+            comp_agg.avg_line_height_mm,
             comp_agg.computed_image_count,
             -- extra_info
             ei_agg.material,
@@ -587,6 +589,7 @@ def step5_manuscript_measurements(conn):
                 MIN(Num_Lines) as min_num_lines,
                 MAX(Num_Lines) as max_num_lines,
                 AVG(Text_Density_per10cm) as avg_text_density,
+                AVG(Avg_Line_Height_Text_mm) as avg_line_height_mm,
                 COUNT(*) as computed_image_count
             FROM computed_measurements
             WHERE Flag_DPI_High = 0 AND Flag_DPI_Low = 0
@@ -625,6 +628,11 @@ def step5_manuscript_measurements(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_cat_height ON manuscript_measurements(catalog_height_cm)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_comp_max_width ON manuscript_measurements(max_computed_width_cm)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_comp_max_height ON manuscript_measurements(max_computed_height_cm)")
+    # Indexes for measurement filtering (review concern #4)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_avg_num_lines ON manuscript_measurements(avg_num_lines)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_line_height ON manuscript_measurements(avg_line_height_mm)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_text_density ON manuscript_measurements(avg_text_density)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_material ON manuscript_measurements(material)")
 
     row_count = conn.execute("SELECT COUNT(*) FROM manuscript_measurements").fetchone()[0]
     has_catalog = conn.execute("SELECT COUNT(*) FROM manuscript_measurements WHERE catalog_width_cm IS NOT NULL").fetchone()[0]
@@ -658,6 +666,33 @@ def step6_versioning_and_summary(conn):
         except Exception:
             distinct = "N/A"
         print(f"    {tbl}: {count:,} rows ({distinct} distinct AlmaIds)")
+
+
+def migrate_add_line_height(conn):
+    """Add avg_line_height_mm column if missing (for existing DBs without re-import).
+
+    Idempotent: safe to call multiple times. Populates from computed_measurements
+    excluding flagged rows (all 4 flags = 0).
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(manuscript_measurements)")}
+    if 'avg_line_height_mm' in cols:
+        return  # Already present -- idempotent
+    conn.execute("ALTER TABLE manuscript_measurements ADD COLUMN avg_line_height_mm REAL")
+    conn.execute("""
+        UPDATE manuscript_measurements SET avg_line_height_mm = (
+            SELECT AVG(cm.Avg_Line_Height_Text_mm)
+            FROM computed_measurements cm
+            WHERE cm.AlmaId = manuscript_measurements.AlmaId
+              AND cm.Flag_DPI_High = 0 AND cm.Flag_DPI_Low = 0
+              AND cm.Flag_Negative_Margin = 0 AND cm.Flag_BifolioLoc_Error = 0
+              AND cm.Avg_Line_Height_Text_mm IS NOT NULL
+              AND cm.Avg_Line_Height_Text_mm > 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_line_height ON manuscript_measurements(avg_line_height_mm)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_text_density ON manuscript_measurements(avg_text_density)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ms_material ON manuscript_measurements(material)")
+    conn.commit()
 
 
 def main():
@@ -746,6 +781,9 @@ def main():
 
         # Step 5: Build manuscript_measurements summary
         step5_manuscript_measurements(conn)
+
+        # Step 5b: Migration for existing DBs (idempotent -- no-op after fresh step5)
+        migrate_add_line_height(conn)
 
         # Step 6: Versioning and summary
         step6_versioning_and_summary(conn)

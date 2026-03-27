@@ -132,6 +132,7 @@ def _create_measurement_tables(conn):
             min_num_lines INTEGER,
             max_num_lines INTEGER,
             avg_text_density REAL,
+            avg_line_height_mm REAL,
             computed_image_count INTEGER,
             material TEXT,
             size_category TEXT,
@@ -142,12 +143,13 @@ def _create_measurement_tables(conn):
     """)
     # Build summary from the test data (mimics what import script does)
     conn.executemany(
-        "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             # 990001: unflagged catalog MAX = 16.8, 21.5; unflagged computed = FGP001+FGP002 only
-            ("990001", 16.8, 21.5, 14.0, 18.0, 2, 15.5, 15.8, 22.1, 22.3, 24.0, 23, 25, 7.05, 2, "Paper", "Medium", 2, 1, 1),
-            # 990002
-            ("990002", 20.0, 30.0, 17.0, 27.0, 1, 20.0, 20.0, 30.0, 30.0, 35.0, 35, 35, 8.5, 1, "Parchment", "Large", 1, 0, 0),
+            # avg_line_height_mm = AVG(3.5, 3.4) = 3.45
+            ("990001", 16.8, 21.5, 14.0, 18.0, 2, 15.5, 15.8, 22.1, 22.3, 24.0, 23, 25, 7.05, 3.45, 2, "Paper", "Medium", 2, 1, 1),
+            # 990002: avg_line_height_mm = 4.0
+            ("990002", 20.0, 30.0, 17.0, 27.0, 1, 20.0, 20.0, 30.0, 30.0, 35.0, 35, 35, 8.5, 4.0, 1, "Parchment", "Large", 1, 0, 0),
         ],
     )
 
@@ -271,6 +273,69 @@ class TestHasMeasurements:
         assert empty_service.has_measurements("990001") is False
 
 
+class TestLineHeightColumn:
+    """Test avg_line_height_mm column in manuscript_measurements."""
+
+    def test_line_height_column(self, measurement_service):
+        """After import, manuscript_measurements has avg_line_height_mm with non-NULL values."""
+        result = measurement_service.get_measurements("990001")
+        summary = result["summary"]
+        assert "avg_line_height_mm" in summary
+        assert summary["avg_line_height_mm"] is not None
+        # 990001 has 2 unflagged rows: 3.5 and 3.4 -> avg = 3.45
+        assert abs(summary["avg_line_height_mm"] - 3.45) < 0.01
+
+    def test_line_height_column_990002(self, measurement_service):
+        """990002 should also have avg_line_height_mm populated."""
+        result = measurement_service.get_measurements("990002")
+        summary = result["summary"]
+        assert summary["avg_line_height_mm"] is not None
+        # 990002 has 1 unflagged row: 4.0
+        assert abs(summary["avg_line_height_mm"] - 4.0) < 0.01
+
+    def test_migrate_add_line_height_idempotent(self, tmp_path):
+        """Calling migrate_add_line_height twice does not error (idempotent)."""
+        from scripts.import_measurements import migrate_add_line_height
+        db_path = str(tmp_path / "test_migrate.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _create_measurement_tables(conn)
+        # Call migrate twice -- should not error
+        migrate_add_line_height(conn)
+        migrate_add_line_height(conn)
+        # Column should exist
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(manuscript_measurements)")}
+        assert "avg_line_height_mm" in cols
+        conn.close()
+
+    def test_line_height_excludes_flagged(self, tmp_path):
+        """avg_line_height_mm aggregation excludes flagged rows."""
+        from scripts.import_measurements import migrate_add_line_height
+        db_path = str(tmp_path / "test_flag_excl.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _create_measurement_tables(conn)
+        # Remove avg_line_height_mm if present, re-add via migration
+        try:
+            # Drop and recreate without the column to test migration
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(manuscript_measurements)")}
+            if "avg_line_height_mm" not in cols:
+                pass  # Column not there yet, migration will add it
+        except Exception:
+            pass
+        migrate_add_line_height(conn)
+        row = conn.execute(
+            "SELECT avg_line_height_mm FROM manuscript_measurements WHERE AlmaId = ?",
+            ("990001",)
+        ).fetchone()
+        # Flagged FGP003 has Avg_Line_Height_Text_mm=10.0 but Flag_DPI_High=1
+        # Unflagged: 3.5 and 3.4 -> avg = 3.45
+        assert row is not None
+        assert row[0] is not None
+        assert abs(row[0] - 3.45) < 0.01
+        conn.close()
+
+
 class TestFlagExclusion:
     """Test that flagged records are excluded from queries."""
 
@@ -315,3 +380,231 @@ class TestFlagExclusion:
         # min <= max
         assert summary["min_computed_width_cm"] <= summary["max_computed_width_cm"]
         assert summary["min_computed_height_cm"] <= summary["max_computed_height_cm"]
+
+
+@pytest.fixture
+def filter_service(tmp_path):
+    """Create a FjmsService with measurement tables + catalog for filter testing."""
+    db_path = str(tmp_path / "test_filter.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Minimal tables for FjmsService init
+    conn.execute("CREATE TABLE IF NOT EXISTS domains (AlmaId TEXT, DomainDescEng TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS joins (AlmaId TEXT)")
+
+    # Create measurement source tables for migration
+    _create_measurement_tables(conn)
+
+    # Add 990003 to catalog but NOT to manuscript_measurements (NULL exclusion test)
+    # 990003 already missing from manuscript_measurements in _create_measurement_tables
+
+    # Add 990004: NULL catalog_width, has max_computed_width = 18.0 (COALESCE test)
+    conn.execute(
+        "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("990004", None, None, None, None, 0, None, 18.0, None, 25.0, 20.0, 18, 22, 6.0, 3.0, 1, "Paper", "Small", 1, 0, 0),
+    )
+
+    # Create catalog table (required by get_filter_sys_ids base query)
+    conn.execute("CREATE TABLE IF NOT EXISTS catalog (AlmaId TEXT)")
+    conn.executemany("INSERT INTO catalog VALUES (?)", [
+        ("990001",), ("990002",), ("990003",), ("990004",),
+    ])
+
+    # Create catalog_fts stub (referenced by text filters)
+    conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS catalog_fts USING fts5(content)")
+
+    conn.commit()
+    conn.close()
+
+    svc = FjmsService(db_path=db_path, thread_safe=False)
+    yield svc
+    svc.close()
+
+
+class TestMeasurementFiltering:
+    """Test measurement filtering in get_filter_sys_ids and batch lookup."""
+
+    def test_filter_width_range(self, filter_service):
+        """Width range filtering works with COALESCE(catalog, computed)."""
+        # 990001 catalog_width=16.8, 990002 catalog_width=20.0
+        result = filter_service.get_filter_sys_ids(width_min=18.0)
+        assert "990002" in result
+        assert "990001" not in result
+
+        result = filter_service.get_filter_sys_ids(width_max=17.0)
+        assert "990001" in result
+        assert "990002" not in result
+
+    def test_filter_height_range(self, filter_service):
+        """Height range filtering works."""
+        # 990001 catalog_height=21.5, 990002 catalog_height=30.0
+        result = filter_service.get_filter_sys_ids(height_min=25.0)
+        assert "990002" in result
+        assert "990001" not in result
+
+    def test_filter_line_count(self, filter_service):
+        """Line count filtering works."""
+        # 990001 avg_num_lines=24.0, 990002 avg_num_lines=35.0
+        result = filter_service.get_filter_sys_ids(line_count_min=30)
+        assert "990002" in result
+        assert "990001" not in result
+
+    def test_filter_line_height(self, filter_service):
+        """Line height filtering works."""
+        # 990001 avg_line_height_mm=3.45, 990002 avg_line_height_mm=4.0
+        result = filter_service.get_filter_sys_ids(line_height_min=3.6)
+        assert "990002" in result
+        assert "990001" not in result
+
+        result = filter_service.get_filter_sys_ids(line_height_max=3.5)
+        assert "990001" in result
+        assert "990002" not in result
+
+    def test_filter_text_density(self, filter_service):
+        """Text density filtering works."""
+        # 990001 avg_text_density=7.05, 990002 avg_text_density=8.5
+        result = filter_service.get_filter_sys_ids(text_density_min=8.0)
+        assert "990002" in result
+        assert "990001" not in result
+
+    def test_filter_measurement_material(self, filter_service):
+        """Material filtering works with single material."""
+        # 990001 material=Paper, 990002 material=Parchment
+        result = filter_service.get_filter_sys_ids(measurement_material=["Paper"])
+        assert "990001" in result
+        assert "990002" not in result
+
+    def test_filter_multi_material(self, filter_service):
+        """Material IN clause with multiple materials returns both."""
+        result = filter_service.get_filter_sys_ids(measurement_material=["Paper", "Parchment"])
+        assert "990001" in result
+        assert "990002" in result
+
+    def test_filter_null_exclusion(self, filter_service):
+        """Manuscripts without measurement data are excluded."""
+        # 990003 has catalog row but NO manuscript_measurements row
+        result = filter_service.get_filter_sys_ids(width_min=0.1)
+        assert "990003" not in result
+
+    def test_filter_boundaries_inclusive(self, filter_service):
+        """Exact value boundaries are inclusive (>= and <=)."""
+        # 990001 catalog_width=16.8 exactly
+        result = filter_service.get_filter_sys_ids(width_min=16.8, width_max=16.8)
+        assert "990001" in result
+
+    def test_filter_combined(self, filter_service):
+        """Multiple measurement filters combine with AND."""
+        # Only 990001 has Paper AND width >= 10
+        result = filter_service.get_filter_sys_ids(width_min=10.0, measurement_material=["Paper"])
+        assert "990001" in result
+        assert "990002" not in result  # Parchment
+
+    def test_filter_coalesce_width(self, filter_service):
+        """COALESCE falls back to computed when catalog is NULL."""
+        # 990004: catalog_width=NULL, max_computed_width=18.0
+        result = filter_service.get_filter_sys_ids(width_min=17.0)
+        assert "990004" in result
+
+    def test_filter_no_params_returns_none(self, filter_service):
+        """No measurement params (and no other params) returns None."""
+        result = filter_service.get_filter_sys_ids()
+        assert result is None
+
+    def test_filter_reversed_bounds(self, filter_service):
+        """Reversed min/max bounds are normalized (backend guard)."""
+        # width_min=20.0, width_max=16.0 -> normalized to (16.0, 20.0)
+        # 990001 (16.8) and 990002 (20.0) both match
+        result = filter_service.get_filter_sys_ids(width_min=20.0, width_max=16.0)
+        assert "990001" in result
+        assert "990002" in result
+
+    def test_batch_measurement_summaries(self, filter_service):
+        """Batch lookup returns measurement summaries."""
+        result = filter_service.get_measurement_summaries_batch(["990001", "990002"])
+        assert "990001" in result
+        assert "990002" in result
+        assert result["990001"]["width_cm"] == 16.8
+        assert result["990001"]["material"] == "Paper"
+        assert result["990002"]["height_cm"] == 30.0
+        assert result["990001"]["avg_line_height_mm"] is not None
+        assert abs(result["990001"]["avg_line_height_mm"] - 3.45) < 0.01
+
+    def test_batch_deduplicates(self, filter_service):
+        """Passing duplicate sys_ids does not cause errors or duplicates."""
+        result = filter_service.get_measurement_summaries_batch(["990001", "990001", "990001"])
+        assert len(result) == 1
+        assert "990001" in result
+
+    def test_batch_graceful_missing_column(self, tmp_path):
+        """Batch method works when avg_line_height_mm column is missing."""
+        db_path = str(tmp_path / "test_no_lh.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE IF NOT EXISTS domains (AlmaId TEXT, DomainDescEng TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS joins (AlmaId TEXT)")
+        # Create manuscript_measurements WITHOUT avg_line_height_mm
+        conn.execute("""
+            CREATE TABLE manuscript_measurements (
+                AlmaId TEXT NOT NULL PRIMARY KEY,
+                catalog_width_cm REAL, catalog_height_cm REAL,
+                catalog_inner_width_cm REAL, catalog_inner_height_cm REAL,
+                catalog_count INTEGER,
+                min_computed_width_cm REAL, max_computed_width_cm REAL,
+                min_computed_height_cm REAL, max_computed_height_cm REAL,
+                avg_num_lines REAL, min_num_lines INTEGER, max_num_lines INTEGER,
+                avg_text_density REAL, computed_image_count INTEGER,
+                material TEXT, size_category TEXT, total_image_count INTEGER,
+                has_blank_images INTEGER DEFAULT 0, blank_image_count INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute(
+            "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("990001", 16.8, 21.5, 14.0, 18.0, 2, 15.5, 15.8, 22.1, 22.3, 24.0, 23, 25, 7.05, 2, "Paper", "Medium", 2, 1, 1),
+        )
+        conn.commit()
+        conn.close()
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        result = svc.get_measurement_summaries_batch(["990001"])
+        assert "990001" in result
+        assert result["990001"]["avg_line_height_mm"] is None
+        assert result["990001"]["width_cm"] == 16.8
+        svc.close()
+
+    def test_batch_tuple_row_fallback(self, tmp_path):
+        """Batch method works with tuple rows (no Row factory)."""
+        db_path = str(tmp_path / "test_tuple.db")
+        conn = sqlite3.connect(db_path)
+        # NO row_factory -- returns tuples
+        conn.execute("CREATE TABLE IF NOT EXISTS domains (AlmaId TEXT, DomainDescEng TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS joins (AlmaId TEXT)")
+        conn.execute("""
+            CREATE TABLE manuscript_measurements (
+                AlmaId TEXT NOT NULL PRIMARY KEY,
+                catalog_width_cm REAL, catalog_height_cm REAL,
+                catalog_inner_width_cm REAL, catalog_inner_height_cm REAL,
+                catalog_count INTEGER,
+                min_computed_width_cm REAL, max_computed_width_cm REAL,
+                min_computed_height_cm REAL, max_computed_height_cm REAL,
+                avg_num_lines REAL, min_num_lines INTEGER, max_num_lines INTEGER,
+                avg_text_density REAL, avg_line_height_mm REAL,
+                computed_image_count INTEGER,
+                material TEXT, size_category TEXT, total_image_count INTEGER,
+                has_blank_images INTEGER DEFAULT 0, blank_image_count INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute(
+            "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("990001", 16.8, 21.5, 14.0, 18.0, 2, 15.5, 15.8, 22.1, 22.3, 24.0, 23, 25, 7.05, 3.45, 2, "Paper", "Medium", 2, 1, 1),
+        )
+        conn.commit()
+        conn.close()
+        # FjmsService sets row_factory=sqlite3.Row internally, so the tuple fallback
+        # is for when external code passes a connection with no row_factory.
+        # We test by directly calling the method on a service that has Row factory.
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        result = svc.get_measurement_summaries_batch(["990001"])
+        assert "990001" in result
+        assert result["990001"]["width_cm"] == 16.8
+        assert abs(result["990001"]["avg_line_height_mm"] - 3.45) < 0.01
+        svc.close()

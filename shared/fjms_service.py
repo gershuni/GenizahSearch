@@ -433,6 +433,16 @@ def _is_int(value) -> bool:
     return False
 
 
+def _normalize_range(vmin, vmax):
+    """Normalize reversed min/max bounds. Returns (min, max) tuple.
+    If min > max, swaps them. Handles None values gracefully.
+    Review concern #3/#9: backend guard for reversed bounds (D-19).
+    """
+    if vmin is not None and vmax is not None and vmin > vmax:
+        return vmax, vmin
+    return vmin, vmax
+
+
 # Canonical FJMS domain ordering (matches Friedberg classification system, not by count)
 _FJMS_PARENT_ORDER = [
     # 'Unknown',  # Not present in enrichment DB
@@ -865,6 +875,13 @@ class FjmsService:
         text_all: list[str] = None,
         text_any: list[str] = None,
         text_not: list[str] = None,
+        # Measurement filters (D-15, D-21)
+        width_min: float = None, width_max: float = None,
+        height_min: float = None, height_max: float = None,
+        line_count_min: int = None, line_count_max: int = None,
+        line_height_min: float = None, line_height_max: float = None,
+        text_density_min: float = None, text_density_max: float = None,
+        measurement_material: list[str] = None,
     ) -> Optional[set]:
         """Return the set of sys_ids matching all provided filter criteria (intersection).
 
@@ -923,6 +940,12 @@ class FjmsService:
             or text_all
             or text_any
             or text_not
+            or width_min is not None or width_max is not None
+            or height_min is not None or height_max is not None
+            or line_count_min is not None or line_count_max is not None
+            or line_height_min is not None or line_height_max is not None
+            or text_density_min is not None or text_density_max is not None
+            or measurement_material
         )
         if not has_any:
             return None
@@ -1160,6 +1183,75 @@ class FjmsService:
                         conditions.append(_TEXT_NOT_MATCH)
                         like_pat = f"%{term}%"
                         params.extend([_fts_escape(term), like_pat, like_pat])
+
+            # Measurement filters (D-15, D-21) — subquery on manuscript_measurements
+            _has_measurement_filter = any([
+                width_min is not None, width_max is not None,
+                height_min is not None, height_max is not None,
+                line_count_min is not None, line_count_max is not None,
+                line_height_min is not None, line_height_max is not None,
+                text_density_min is not None, text_density_max is not None,
+                bool(measurement_material),
+            ])
+            if _has_measurement_filter:
+                # Backend guard: normalize reversed min/max per D-19 (review concern #3)
+                width_min, width_max = _normalize_range(width_min, width_max)
+                height_min, height_max = _normalize_range(height_min, height_max)
+                line_count_min, line_count_max = _normalize_range(line_count_min, line_count_max)
+                line_height_min, line_height_max = _normalize_range(line_height_min, line_height_max)
+                text_density_min, text_density_max = _normalize_range(text_density_min, text_density_max)
+
+                mm_conds = []
+                mm_params = []
+                # Width: COALESCE prefers catalog, falls back to computed (review concern #10)
+                # catalog_width_cm = MAX across catalogers from Catalog_Sizes sheet
+                # max_computed_width_cm = MAX across image-derived measurements from Computed_Measurements sheet
+                if width_min is not None:
+                    mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) >= ?")
+                    mm_params.append(width_min)
+                if width_max is not None:
+                    mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) <= ?")
+                    mm_params.append(width_max)
+                # Height: same COALESCE strategy as width
+                # catalog_height_cm = MAX across catalogers; max_computed_height_cm = MAX across images
+                if height_min is not None:
+                    mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) >= ?")
+                    mm_params.append(height_min)
+                if height_max is not None:
+                    mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) <= ?")
+                    mm_params.append(height_max)
+                # Line count: avg_num_lines = AVG across unflagged image measurements
+                if line_count_min is not None:
+                    mm_conds.append("m.avg_num_lines >= ?")
+                    mm_params.append(line_count_min)
+                if line_count_max is not None:
+                    mm_conds.append("m.avg_num_lines <= ?")
+                    mm_params.append(line_count_max)
+                # Line height (mm): avg_line_height_mm = AVG of Avg_Line_Height_Text_mm (unflagged)
+                if line_height_min is not None:
+                    mm_conds.append("m.avg_line_height_mm >= ?")
+                    mm_params.append(line_height_min)
+                if line_height_max is not None:
+                    mm_conds.append("m.avg_line_height_mm <= ?")
+                    mm_params.append(line_height_max)
+                # Text density: avg_text_density = AVG of Text_Density_per10cm (per 10cm^2)
+                if text_density_min is not None:
+                    mm_conds.append("m.avg_text_density >= ?")
+                    mm_params.append(text_density_min)
+                if text_density_max is not None:
+                    mm_conds.append("m.avg_text_density <= ?")
+                    mm_params.append(text_density_max)
+                # Material: IN clause for multi-value list (review concern #2)
+                if measurement_material:
+                    ph = ','.join('?' * len(measurement_material))
+                    mm_conds.append(f"m.material IN ({ph})")
+                    mm_params.extend(measurement_material)
+
+                mm_where = " AND ".join(mm_conds)
+                conditions.append(
+                    f"c.AlmaId IN (SELECT m.AlmaId FROM manuscript_measurements m WHERE {mm_where})"
+                )
+                params.extend(mm_params)
 
             where = " WHERE " + " AND ".join(conditions) if conditions else ""
             sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"
@@ -2653,6 +2745,63 @@ class FjmsService:
         except Exception:
             pass
 
+        return result
+
+    def get_measurement_summaries_batch(self, sys_ids: list[str]) -> dict[str, dict]:
+        """Batch fetch measurement summaries for post-search filtering.
+
+        Returns {AlmaId: {width_cm, height_cm, avg_num_lines, avg_line_height_mm, avg_text_density, material}}.
+        Deduplicates sys_ids. Graceful when avg_line_height_mm column missing.
+        Robust to both Row objects and plain tuples (review concern #6).
+        """
+        if not sys_ids or self._conn is None:
+            return {}
+        # Deduplicate (review concern #9)
+        unique_ids = list(set(sys_ids))
+        result = {}
+        # Check if avg_line_height_mm column exists (review concern #7)
+        try:
+            cols_info = self._conn.execute("PRAGMA table_info(manuscript_measurements)").fetchall()
+            cols = {row[1] if isinstance(row, (tuple, list)) else row['name'] for row in cols_info}
+        except Exception:
+            return {}
+        has_line_height = 'avg_line_height_mm' in cols
+        lh_col = ", avg_line_height_mm" if has_line_height else ""
+
+        # Define column names for positional fallback (review concern #6)
+        col_names = ['AlmaId', 'width_cm', 'height_cm', 'avg_num_lines', 'avg_text_density', 'material']
+        if has_line_height:
+            col_names.append('avg_line_height_mm')
+
+        try:
+            for i in range(0, len(unique_ids), 500):
+                chunk = unique_ids[i:i+500]
+                ph = ','.join('?' * len(chunk))
+                cursor = self._conn.execute(f"""
+                    SELECT AlmaId,
+                           COALESCE(catalog_width_cm, max_computed_width_cm) as width_cm,
+                           COALESCE(catalog_height_cm, max_computed_height_cm) as height_cm,
+                           avg_num_lines, avg_text_density, material{lh_col}
+                    FROM manuscript_measurements
+                    WHERE AlmaId IN ({ph})
+                """, chunk)
+                for row in cursor:
+                    # Robust row access: try dict-like first, fall back to positional (review concern #6)
+                    try:
+                        r = dict(row)
+                    except (TypeError, ValueError):
+                        # Row is a plain tuple -- use col_names for mapping
+                        r = dict(zip(col_names, row))
+                    result[str(r.get('AlmaId', ''))] = {
+                        'width_cm': r.get('width_cm'),
+                        'height_cm': r.get('height_cm'),
+                        'avg_num_lines': r.get('avg_num_lines'),
+                        'avg_line_height_mm': r.get('avg_line_height_mm') if has_line_height else None,
+                        'avg_text_density': r.get('avg_text_density'),
+                        'material': r.get('material'),
+                    }
+        except Exception as e:
+            logger.error(f"FjmsService.get_measurement_summaries_batch error: {e}")
         return result
 
     def has_measurements(self, sys_id: str) -> bool:
