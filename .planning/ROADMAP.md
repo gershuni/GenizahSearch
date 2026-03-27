@@ -192,7 +192,7 @@ Plans:
   3. Multiple fragments (3+) can coexist on the canvas simultaneously without performance degradation
   4. Background-removed fragments overlay correctly, showing parchment shapes rather than overlapping rectangles
   5. The desktop puzzle is accessible from the app's main navigation
-**Plans**: 3 plans
+**Plans**: 4 plans
 Plans:
 - [x] 48-01-PLAN.md — Core canvas building blocks (PuzzleFragmentItem, PuzzleCanvasView, PuzzleImageLoaderThread)
 - [x] 48-02-PLAN.md — PuzzleCanvasWindow with toolbar, shelfmark autocomplete, and singleton pattern
@@ -222,7 +222,7 @@ Plans:
   2. User can maintain multiple saved join documents and switch between them
   3. User can export a composite PNG image of the assembled join (background-removed fragments composited at full resolution)
   4. User can add and edit metadata on a join document: title, free-text notes, and fragment identifiers
-**Plans**: 3 plans
+**Plans**: 4 plans
 Plans:
 - [x] 50-01-PLAN.md — Shared layer: model cleanup, schema v2 migration, composite export service
 - [x] 50-02-PLAN.md — Desktop UI: QDockWidget side panel, save/load/export, auto-save
@@ -248,7 +248,7 @@ Plans:
   2. Join documents are saved to a personal workspace by default (private, only visible to the creator)
   3. User can publish a join document for community review, making it visible to all users
   4. Published join documents are browsable by other users with fragment identifiers, join type, and notes visible
-**Plans**: 3 plans
+**Plans**: 4 plans
 Plans:
 - [x] 52-01-PLAN.md — Shared publish service + Supabase schema + tests
 - [x] 52-02-PLAN.md — Web publish UI + Discoveries feed + joins panel community section
@@ -281,11 +281,12 @@ Plans:
   3. (DIM-02) User can filter search by dimension/measurement ranges (width, height, line count, line height, text density, material) as a pre-search filter (both apps)
   4. (DIM-03) User can filter within results by the same measurement ranges as a post-search filter (both apps)
   5. fjms_enrichment.db contains computed_measurements (~434K rows), extra_info (~743K rows), blank_images (~165K rows), and updated catalog_sizes with normalized cm values
-**Plans**: 3 plans
+**Plans**: 4 plans
 Plans:
 - [x] 54-01-PLAN.md — Import script + FjmsService.get_measurements() + catalog_sizes migration + tests
 - [x] 54-02-PLAN.md — Web + desktop measurements dialog + browse button wiring + visual checkpoint
-- [ ] 54-03-PLAN.md — Measurement filtering: backend service + web UI + desktop UI (DIM-02, DIM-03)
+- [ ] 54-03-PLAN.md — Measurement filtering backend: service extensions + batch lookup + tests (DIM-02, DIM-03)
+- [ ] 54-04-PLAN.md — Measurement filtering UI: web + desktop pre-search and post-search panels (DIM-02, DIM-03)
 
 ### Phase 55: Search Within Results
 **Goal**: Researchers can progressively refine their search by running a second query restricted to the manuscripts from their current result set
@@ -338,11 +339,11 @@ Plans:
 | 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
-| 54. Dimensions Display & Filtering | 2/3 | In progress | - |
+| 54. Dimensions Display & Filtering | 2/4 | In progress | - |
 | 55. Search Within Results | 0/? | Not started | - |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-27 after Phase 54 plan 03 added (measurement filtering)*
+*Last updated: 2026-03-27 after Phase 54 plans 03-04 replanned from review feedback*
