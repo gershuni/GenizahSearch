@@ -165,7 +165,7 @@ def create_layout():
     resolved_lang = _resolve_ui_language()
     set_language(resolved_lang)
 
-    current_page = app.storage.user.get('current_page', '/')
+    current_page = _safe_user_storage_get('current_page', '/')
     rtl_mode = resolved_lang == 'he'
 
     # Page loading progress bar element (CSS in COMMON_STYLES)
@@ -339,7 +339,7 @@ def create_layout():
     # Sidebar (Drawer)
     # Use stored state, default to True (open) on desktop
     # On mobile (< 768px), we will close it after page load via JavaScript
-    drawer_open = app.storage.user.get('drawer_open', True)
+    drawer_open = _safe_user_storage_get('drawer_open', True)
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
@@ -371,7 +371,7 @@ def create_layout():
     content_col.props('id=main-content')
 
     # === "What's New" Banner (dismissible, compact single-line) ===
-    if app.storage.user.get('whats_new_dismissed') != WHATS_NEW_VERSION:
+    if _safe_user_storage_get('whats_new_dismissed') != WHATS_NEW_VERSION:
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
             with ui.element('div').classes('w-full mx-auto max-w-5xl px-4 py-2 flex items-center gap-3 mt-2').style(
@@ -489,7 +489,7 @@ def create_layout():
                             document.querySelector(".theme-btn-{theme_name}").classList.add("active");
                         ''')
 
-                    current_theme = app.storage.user.get('theme', 'light')
+                    current_theme = _safe_user_storage_get('theme', 'light')
 
                     with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props('flat round size=sm').classes(f'theme-btn theme-btn-light {"active" if current_theme == "light" else ""}'): pass
                     with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('flat round size=sm').classes(f'theme-btn theme-btn-parchment {"active" if current_theme == "parchment" else ""}'): pass
@@ -729,6 +729,14 @@ def apply_theme_immediately():
             }}, {{ once: true }});
         }})();
     </script>'''
+
+def _safe_user_storage_get(key: str, default=None):
+    """Safely read from app.storage.user, returning default if session not ready."""
+    try:
+        return app.storage.user.get(key, default)
+    except (AssertionError, KeyError, Exception):
+        return default
+
 
 def set_current_page(page_path: str):
     """Safely set the current page in user storage."""
