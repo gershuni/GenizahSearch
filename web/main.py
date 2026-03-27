@@ -740,7 +740,10 @@ def set_current_page(page_path: str):
 @ui.page('/', title='Dicta Genizah Search | חיפוש גניזת קהיר')
 def dashboard_page():
     set_current_page('/')
-    current_theme = app.storage.user.get('theme', 'light') if hasattr(app.storage, 'user') else 'light'
+    try:
+        current_theme = app.storage.user.get('theme', 'light')
+    except (AssertionError, KeyError, Exception):
+        current_theme = 'light'
     ui.add_head_html(page_meta('/'))
     # Structured data: WebSite schema for homepage
     ui.add_head_html('''
