@@ -132,6 +132,7 @@ def _create_measurement_tables(conn):
             min_num_lines INTEGER,
             max_num_lines INTEGER,
             avg_text_density REAL,
+            avg_line_height_mm REAL,
             computed_image_count INTEGER,
             material TEXT,
             size_category TEXT,
@@ -142,12 +143,13 @@ def _create_measurement_tables(conn):
     """)
     # Build summary from the test data (mimics what import script does)
     conn.executemany(
-        "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             # 990001: unflagged catalog MAX = 16.8, 21.5; unflagged computed = FGP001+FGP002 only
-            ("990001", 16.8, 21.5, 14.0, 18.0, 2, 15.5, 15.8, 22.1, 22.3, 24.0, 23, 25, 7.05, 2, "Paper", "Medium", 2, 1, 1),
-            # 990002
-            ("990002", 20.0, 30.0, 17.0, 27.0, 1, 20.0, 20.0, 30.0, 30.0, 35.0, 35, 35, 8.5, 1, "Parchment", "Large", 1, 0, 0),
+            # avg_line_height_mm = AVG(3.5, 3.4) = 3.45
+            ("990001", 16.8, 21.5, 14.0, 18.0, 2, 15.5, 15.8, 22.1, 22.3, 24.0, 23, 25, 7.05, 3.45, 2, "Paper", "Medium", 2, 1, 1),
+            # 990002: avg_line_height_mm = 4.0
+            ("990002", 20.0, 30.0, 17.0, 27.0, 1, 20.0, 20.0, 30.0, 30.0, 35.0, 35, 35, 8.5, 4.0, 1, "Parchment", "Large", 1, 0, 0),
         ],
     )
 
