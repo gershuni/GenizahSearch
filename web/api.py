@@ -179,33 +179,80 @@ def init_api_routes():
     # ── SEO: robots.txt and sitemap.xml ──────────────────────────────
     @app.get('/robots.txt')
     def robots_txt():
+        # /search and /parallels are crawlable (not disallowed) so bots can
+        # see their <meta name="robots" content="noindex"> tags.  Blocking
+        # them here would prevent Google from ever reading the noindex directive.
         content = (
             "User-agent: *\n"
             "Allow: /\n"
+            "\n"
             "Disallow: /admin\n"
             "Disallow: /auth/\n"
             "Disallow: /profile\n"
             "Disallow: /settings\n"
+            "Disallow: /corrections\n"
+            "Disallow: /lists\n"
+            "Disallow: /reset-hints\n"
             "Disallow: /api/\n"
             "\n"
             "Sitemap: https://genizahsearch.com/sitemap.xml\n"
         )
         return Response(content=content, media_type="text/plain")
 
+    # -- Sitemap index (split into static pages + manuscript chunks) --
+    # Cache sorted sys_ids to avoid re-sorting on every request
+    _sitemap_sys_ids_cache = {'ids': None}
+
+    def _get_sitemap_sys_ids():
+        if _sitemap_sys_ids_cache['ids'] is not None:
+            return _sitemap_sys_ids_cache['ids']
+        try:
+            mm = state.meta_mgr
+            if mm and hasattr(mm, 'csv_bank') and mm.csv_bank:
+                _sitemap_sys_ids_cache['ids'] = sorted(mm.csv_bank.keys())
+                return _sitemap_sys_ids_cache['ids']
+        except Exception:
+            pass
+        # csv_bank not ready yet — return empty without caching so we retry next request
+        return []
+
     @app.get('/sitemap.xml')
-    def sitemap_xml():
+    def sitemap_index():
+        """Sitemap index pointing to sub-sitemaps."""
+        sitemaps = [
+            'https://genizahsearch.com/sitemap-static.xml',
+        ]
+        total = len(_get_sitemap_sys_ids())
+        if total > 0:
+            chunk_size = 40000
+            num_chunks = (total + chunk_size - 1) // chunk_size
+            for i in range(num_chunks):
+                sitemaps.append(f'https://genizahsearch.com/sitemap-manuscripts-{i}.xml')
+        entries = '\n'.join(
+            f'  <sitemap>\n    <loc>{s}</loc>\n  </sitemap>'
+            for s in sitemaps
+        )
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f'{entries}\n'
+            '</sitemapindex>\n'
+        )
+        return Response(content=xml, media_type="application/xml")
+
+    @app.get('/sitemap-static.xml')
+    def sitemap_static():
+        """Static/editorial pages sitemap."""
         pages = [
             ('/', '1.0', 'weekly'),
-            ('/search', '0.9', 'daily'),
-            ('/parallels', '0.8', 'weekly'),
             ('/catalog-browse', '0.8', 'weekly'),
             ('/discoveries', '0.7', 'weekly'),
-            ('/browse', '0.7', 'daily'),
+            ('/browse', '0.6', 'daily'),
+            ('/puzzle', '0.6', 'weekly'),
             ('/about', '0.6', 'monthly'),
             ('/help', '0.5', 'monthly'),
             ('/download', '0.5', 'monthly'),
             ('/accessibility', '0.3', 'yearly'),
-            ('/privacy-extension', '0.2', 'yearly'),
         ]
         urls = []
         for path, priority, freq in pages:
@@ -214,6 +261,36 @@ def init_api_routes():
                 f'    <loc>https://genizahsearch.com{path}</loc>\n'
                 f'    <changefreq>{freq}</changefreq>\n'
                 f'    <priority>{priority}</priority>\n'
+                f'  </url>'
+            )
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            + '\n'.join(urls) + '\n'
+            '</urlset>\n'
+        )
+        return Response(content=xml, media_type="application/xml")
+
+    @app.get('/sitemap-manuscripts-{chunk}.xml')
+    def sitemap_manuscripts(chunk: int):
+        """Dynamic manuscript sitemap chunk (up to 40K URLs per file)."""
+        chunk_size = 40000
+        all_sys_ids = _get_sitemap_sys_ids()
+        start = chunk * chunk_size
+        end = start + chunk_size
+        page_ids = all_sys_ids[start:end]
+        if not page_ids:
+            return Response(
+                content='<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n</urlset>\n',
+                media_type="application/xml",
+            )
+        urls = []
+        for sys_id in page_ids:
+            urls.append(
+                f'  <url>\n'
+                f'    <loc>https://genizahsearch.com/browse?sys_id={sys_id}</loc>\n'
+                f'    <changefreq>monthly</changefreq>\n'
+                f'    <priority>0.5</priority>\n'
                 f'  </url>'
             )
         xml = (
