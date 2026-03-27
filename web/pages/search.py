@@ -27,6 +27,7 @@ from web.services import (
     get_oxford_direct_image_url,
     is_oxford_manuscript,
 )
+from web.search_bootstrap import resolve_search_bootstrap
 from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from urllib.parse import quote
@@ -148,12 +149,38 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Measurement material options (used in both pre-search and post-search panels)
     MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
 
-    # Restore domain exclusions from storage
-    _de = app.storage.user.get('domain_exclusions')
-    search_state.domain_exclusions = set(_de) if _de is not None else set()
+    # Resolve which persisted search state, if any, should be reused for this request.
+    raw_saved_mode = app.storage.user.get('search_mode', 'exact')
+    raw_saved_query = app.storage.user.get('search_query', '')
+    saved_preset = app.storage.user.get('search_preset', 30)
+    saved_max_changes = app.storage.user.get('search_max_changes', 2)
+    saved_gap = app.storage.user.get('search_gap', 0)
 
-    # Restore printed_filter from storage
-    search_state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
+    use_slider = False
+    if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
+        use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
+
+    bootstrap_state = resolve_search_bootstrap(
+        initial_query=initial_query,
+        initial_tag=initial_tag,
+        initial_mode=initial_mode,
+        initial_domain=initial_domain,
+        from_browse=from_browse,
+        saved_mode=raw_saved_mode,
+        saved_query=raw_saved_query,
+        use_slider=use_slider,
+    )
+    saved_mode = bootstrap_state['mode']
+    saved_query = bootstrap_state['query']
+    restore_saved_results = bootstrap_state['restore_saved_results']
+    restore_saved_filters = bootstrap_state['restore_saved_filters']
+    restore_saved_exclusions = bootstrap_state['restore_saved_exclusions']
+
+    # Restore domain exclusions / printed filter from storage only for session restores
+    if restore_saved_exclusions:
+        _de = app.storage.user.get('domain_exclusions')
+        search_state.domain_exclusions = set(_de) if _de is not None else set()
+        search_state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
 
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:
@@ -165,13 +192,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     if from_browse:
         _filters_from_browse = consume_incoming_filters(search_state, 'search', require_from_browse=False)
 
-    # Restore filter state from session (only if NOT from browse, browse takes priority)
-    if not _filters_from_browse:
+    # Restore filter state from session only when the request itself is not explicit
+    if restore_saved_filters and not _filters_from_browse:
         load_filter_state(search_state, 'search')
 
     # Restore word search excluded ids from session
-    _wse = app.storage.user.get('word_search_excluded_ids')
-    search_state.word_search_excluded_ids = set(_wse) if _wse is not None else set()
+    if restore_saved_exclusions:
+        _wse = app.storage.user.get('word_search_excluded_ids')
+        search_state.word_search_excluded_ids = set(_wse) if _wse is not None else set()
 
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
@@ -294,28 +322,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     '''
 
     # Restore previous results (transcription lookup deferred to after UI renders)
-    if 'search_results' in app.storage.user:
+    if restore_saved_results and 'search_results' in app.storage.user:
         try:
             _sr = app.storage.user.get('search_results')
             search_state.results = _sr if _sr is not None else []
         except Exception:
             pass
-
-    # Restore search settings from storage
-    saved_mode = app.storage.user.get('search_mode', 'exact')
-    saved_query = app.storage.user.get('search_query', '')
-    saved_preset = app.storage.user.get('search_preset', 30)
-    saved_max_changes = app.storage.user.get('search_max_changes', 2)
-    saved_gap = app.storage.user.get('search_gap', 0)
-
-    # Check if user prefers slider or presets (default: presets/dropdown)
-    use_slider = False
-    if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
-        use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
-
-    # In slider mode, convert extended variant modes to 'variants'
-    if use_slider and saved_mode in ('variants_extended', 'variants_maximum'):
-        saved_mode = 'variants'
 
 
     # === UI Layout ===
@@ -430,7 +442,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         query_label = h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         query_input = ui.input(
                             placeholder=tr('Enter Hebrew text to search'),
-                            value=initial_query or saved_query
+                            value=saved_query
                         ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
 

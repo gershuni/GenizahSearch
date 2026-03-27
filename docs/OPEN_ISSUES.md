@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-27 (SEO fixes deployed; reviewed browse URL-sync regression)
+> **Last Updated:** 2026-03-27 (SEO fixes deployed; fixed stale `/search?q=` session-state recall bug)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 10 | 48 | 58 |
+| P2 Medium Bugs | 10 | 49 | 59 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **16** | **90** | **106** |
+| **Total** | **16** | **91** | **107** |
 
 ---
 
@@ -83,6 +83,7 @@ Move to "Completed Issues" section at bottom with date
 | **Sitemap advertises only 11 static URLs and omits manuscript/category inventory** | `web/api.py` | ✅ Fixed (2026-03-27) | Sitemap index architecture: `sitemap-static.xml` (editorial pages) + `sitemap-manuscripts-{chunk}.xml` (40K per file, ~255K total from csv_bank). Cache only persists non-empty results to avoid warmup poisoning. |
 | **Browse/catalog raw HTML is mostly an app shell, with little indexable content before hydration** | `web/pages/browse.py`, `web/pages/catalog_browse.py` | ❌ Open | Head tags (title, meta, canonical, OG) are now correct and manuscript-specific, but body content still loads via WebSocket after initial render. Verify via Search Console URL Inspection whether Google renders enough content before investing in prerendering. |
 | **Browse shareable URL sync runs from detached tasks and often never reaches the active client** | `web/pages/browse.py` | ❌ Open | Review of the 2026-03-27 browse URL feature found `_update_browser_url()` relies on `ui.run_javascript(...)`, but most browse navigations launch `load_page()` via `asyncio.ensure_future(...)` (prev/next page buttons, initial auto-load, correction refresh, shelfmark auto-search). Those detached tasks can lose NiceGUI client context, so the server logs the generated `/browse?...` URL while the browser location bar stays unchanged. Fix path: keep browse navigation in client-bound async handlers or capture/use the page client explicitly for JS dispatch before calling `history.replaceState`. |
+| **Direct `/search?q=` requests inherit stale saved mode/filters/results from prior sessions** | `web/pages/search.py`, `web/search_bootstrap.py` | ✅ Fixed (2026-03-27) | Route-driven searches now bootstrap from a clean deterministic state: URL query/tag/mode/browse requests no longer restore old `search_mode`, hidden filters, exclusions, or cached results from NiceGUI user storage unless the route explicitly requests that context. This prevents live-site quick searches from unexpectedly collapsing to a tiny result set because of stale per-origin browser state. |
 | **Desktop What's New dialog: RTL text alignment not fully right-aligned in Hebrew** | `genizah_app.py` | ❌ Open | The QLabel HTML rendering doesn't perfectly right-align `<p dir='rtl'>` bullet text in the WhatsNewDialog. Content is readable but left-edge aligned despite RTL direction. Low priority cosmetic issue. |
 | **Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses** | `genizah_core.py` | ❌ Open | Review of the 2026-03-25 wildcard fixes found that `build_tantivy_query()` and `_execute_line_break_search()` now expand each suffix/prefix wildcard into ~25 real grammatical forms for Tantivy recall, but `_count_expanded_terms()` / `_apply_explosion_guard()` still counts wildcard components as a single base word unless explicit grammatical prefix/suffix modifiers are set. Wildcard-heavy queries can therefore slip past the 500-term guard and generate much larger Tantivy queries than the system estimates, risking slower searches or query-parser failures. |
 | **Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches** | `genizah_core.py` | ❌ Open | Follow-up review on 2026-03-25 confirmed the line-break path now reuses expanded terms for non-wildcards and fixes suffix wildcard recall, but pattern wildcards (`*a*b*`) still cannot be meaningfully prefiltered from Tantivy using the current stem-based strategy. This matches the normal Responsa limitation: regex is correct, but candidate recall may still miss some pattern-only hits before post-filtering. |
