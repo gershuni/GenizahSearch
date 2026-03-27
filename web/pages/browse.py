@@ -567,8 +567,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """Sync the browser URL bar with the current manuscript/page for sharing."""
         page = state.current_page
         if not page or not state.sys_id:
+            logger.debug('_update_browser_url: skipped (no page or sys_id)')
             return
         from urllib.parse import urlencode
+        import json as _json
         params = {'sys_id': state.sys_id}
         if page.p_num and page.p_num > 0:
             params['page'] = page.p_num
@@ -577,14 +579,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         qs = urlencode(params)
         new_url = f'/browse?{qs}'
         shelfmark = page.shelfmark or state.sys_id
-        import json
-        safe_title = json.dumps(f'{shelfmark} — Manuscript | Dicta Genizah Search')
-        ui.run_javascript(f'''
-            try {{
-                history.replaceState(null, '', '{new_url}');
-                document.title = {safe_title};
-            }} catch(e) {{ }}
-        ''')
+        safe_url = _json.dumps(new_url)
+        safe_title = _json.dumps(f'{shelfmark} — Manuscript | Dicta Genizah Search')
+        js = f'try {{ history.replaceState(null, "", {safe_url}); document.title = {safe_title}; }} catch(e) {{ console.error("URL update failed", e); }}'
+        logger.info('_update_browser_url: %s', new_url)
+        ui.run_javascript(js)
     # If a shelfmark was passed via URL (not already resolved to sys_id), set it for auto-search on load
     _pending_shelfmark = initial_shelfmark
 
