@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v7.3
 milestone_name: Search Refinement & Scholarly Joins
 status: Executing Phase 54
-stopped_at: Completed 54-03, executing Wave 2
-last_updated: "2026-03-27T10:30:00.000Z"
+stopped_at: All plans complete, pending verification
+last_updated: "2026-03-27T10:44:38.870Z"
 progress:
   total_phases: 11
   completed_phases: 6
@@ -80,6 +80,7 @@ Recent decisions affecting current work:
 - [Phase 54]: Web async dialog fetch via run.io_bound; desktop lazy-fetch on first click
 - [Phase 54]: COALESCE(catalog, computed) for width/height filtering maximizes coverage
 - [Phase 54]: _normalize_range backend guard swaps reversed min/max bounds
+- [Phase 54]: Material labeled 'Material (measured)' to distinguish from printed filter; post-search state separate from pre-search; shared _apply_measurement_post_filters helper in web; _measurement_fetch_complete race guard in desktop
 
 ### Pending Todos
 
@@ -139,9 +140,10 @@ Recent decisions affecting current work:
 | Phase 54 P02 | 6min | 2 tasks | 4 files |
 | 260326-u9e | Reorganize docs/ folder: archive 28 completed/stale docs, update indexes | 2026-03-26 | 3927e257 | [260326-u9e-reorganize-docs-folder-archive-outdated-](./quick/260326-u9e-reorganize-docs-folder-archive-outdated-/) |
 | Phase 54 P03 | 12min | 2 tasks | 3 files |
+| Phase 54 P04 | 25min | 2 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-03-27T10:16:29.298Z
-Stopped at: Completed 54-03-PLAN.md
+Last session: 2026-03-27T10:44:38.866Z
+Stopped at: All Phase 54 plans complete
 Resume file: None

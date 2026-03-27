@@ -286,7 +286,7 @@ Plans:
 - [x] 54-01-PLAN.md — Import script + FjmsService.get_measurements() + catalog_sizes migration + tests
 - [x] 54-02-PLAN.md — Web + desktop measurements dialog + browse button wiring + visual checkpoint
 - [x] 54-03-PLAN.md — Measurement filtering backend: service extensions + batch lookup + tests (DIM-02, DIM-03)
-- [ ] 54-04-PLAN.md — Measurement filtering UI: web + desktop pre-search and post-search panels (DIM-02, DIM-03)
+- [x] 54-04-PLAN.md — Measurement filtering UI: web + desktop pre-search and post-search panels (DIM-02, DIM-03)
 
 ### Phase 55: Search Within Results
 **Goal**: Researchers can progressively refine their search by running a second query restricted to the manuscripts from their current result set

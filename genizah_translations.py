@@ -2527,6 +2527,13 @@ TRANSLATIONS = {
     "total": "סה״כ",
     "with text": "עם טקסט",
     "blank": "ריק",
+    # Phase 54: Measurement filter labels
+    "Material (measured)": "חומר (מדידה)",
+    "Density": "צפיפות",
+    "Min": "מינימום",
+    "Width (cm)": 'רוחב (ס"מ)',
+    "Height (cm)": 'גובה (ס"מ)',
+    "Line Height (mm)": 'גובה שורה (מ"מ)',
 
     # --- Phase 33: Metadata Enrichment ---
     "Bibliography References": "הפניות ביבליוגרפיות",

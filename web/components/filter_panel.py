@@ -202,6 +202,18 @@ def has_active_filters(state) -> bool:
         state.filter_text_all,
         state.filter_text_any,
         state.filter_text_not,
+        # Measurement filters (Phase 54)
+        getattr(state, 'filter_width_min', None) is not None,
+        getattr(state, 'filter_width_max', None) is not None,
+        getattr(state, 'filter_height_min', None) is not None,
+        getattr(state, 'filter_height_max', None) is not None,
+        getattr(state, 'filter_line_count_min', None) is not None,
+        getattr(state, 'filter_line_count_max', None) is not None,
+        getattr(state, 'filter_line_height_min', None) is not None,
+        getattr(state, 'filter_line_height_max', None) is not None,
+        getattr(state, 'filter_text_density_min', None) is not None,
+        getattr(state, 'filter_text_density_max', None) is not None,
+        bool(getattr(state, 'filter_measurement_material', None)),
     ])
 
 
@@ -244,6 +256,19 @@ def load_filter_state(state, storage_prefix: str):
     state.filter_text_any = _ftany if _ftany is not None else []
     _ftn = app.storage.user.get(f'{pfx}_filter_text_not')
     state.filter_text_not = _ftn if _ftn is not None else []
+    # Measurement filters (Phase 54)
+    state.filter_width_min = app.storage.user.get(f'{pfx}_filter_width_min', None)
+    state.filter_width_max = app.storage.user.get(f'{pfx}_filter_width_max', None)
+    state.filter_height_min = app.storage.user.get(f'{pfx}_filter_height_min', None)
+    state.filter_height_max = app.storage.user.get(f'{pfx}_filter_height_max', None)
+    state.filter_line_count_min = app.storage.user.get(f'{pfx}_filter_line_count_min', None)
+    state.filter_line_count_max = app.storage.user.get(f'{pfx}_filter_line_count_max', None)
+    state.filter_line_height_min = app.storage.user.get(f'{pfx}_filter_line_height_min', None)
+    state.filter_line_height_max = app.storage.user.get(f'{pfx}_filter_line_height_max', None)
+    state.filter_text_density_min = app.storage.user.get(f'{pfx}_filter_text_density_min', None)
+    state.filter_text_density_max = app.storage.user.get(f'{pfx}_filter_text_density_max', None)
+    _fmm = app.storage.user.get(f'{pfx}_filter_measurement_material')
+    state.filter_measurement_material = _fmm if _fmm is not None else []
 
 
 def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bool = False) -> bool:
@@ -337,6 +362,18 @@ async def recompute_filter_count(state, update_chip_bar_fn):
     _text_all = state.filter_text_all or None
     _text_any = state.filter_text_any or None
     _text_not = state.filter_text_not or None
+    # Measurement filter snapshots (Phase 54)
+    _width_min = getattr(state, 'filter_width_min', None)
+    _width_max = getattr(state, 'filter_width_max', None)
+    _height_min = getattr(state, 'filter_height_min', None)
+    _height_max = getattr(state, 'filter_height_max', None)
+    _line_count_min = getattr(state, 'filter_line_count_min', None)
+    _line_count_max = getattr(state, 'filter_line_count_max', None)
+    _line_height_min = getattr(state, 'filter_line_height_min', None)
+    _line_height_max = getattr(state, 'filter_line_height_max', None)
+    _text_density_min = getattr(state, 'filter_text_density_min', None)
+    _text_density_max = getattr(state, 'filter_text_density_max', None)
+    _measurement_material = getattr(state, 'filter_measurement_material', None) or None
 
     def _compute():
         fjms = get_fjms_service(thread_safe=True)
@@ -349,6 +386,12 @@ async def recompute_filter_count(state, update_chip_bar_fn):
             text_all=_text_all,
             text_any=_text_any,
             text_not=_text_not,
+            width_min=_width_min, width_max=_width_max,
+            height_min=_height_min, height_max=_height_max,
+            line_count_min=_line_count_min, line_count_max=_line_count_max,
+            line_height_min=_line_height_min, line_height_max=_line_height_max,
+            text_density_min=_text_density_min, text_density_max=_text_density_max,
+            measurement_material=_measurement_material,
         )
         if include_mode:
             kwargs['domains'] = _domains

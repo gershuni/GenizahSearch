@@ -97,6 +97,31 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.filter_text_not: list = []     # FTS5 text: exclude these words
             self.word_search_excluded_ids: set = set()  # Per-manuscript exclusions for word search mode
             self.word_search_excluded_results: list = []  # Results hidden by word search exclusion
+            # Pre-search measurement filter state (DIM-02, Phase 54)
+            self.filter_width_min = None
+            self.filter_width_max = None
+            self.filter_height_min = None
+            self.filter_height_max = None
+            self.filter_line_count_min = None
+            self.filter_line_count_max = None
+            self.filter_line_height_min = None
+            self.filter_line_height_max = None
+            self.filter_text_density_min = None
+            self.filter_text_density_max = None
+            self.filter_measurement_material: list = []
+            # Post-search measurement filter state (DIM-03, Phase 54) -- SEPARATE from pre-search
+            self.post_filter_width_min = None
+            self.post_filter_width_max = None
+            self.post_filter_height_min = None
+            self.post_filter_height_max = None
+            self.post_filter_line_count_min = None
+            self.post_filter_line_count_max = None
+            self.post_filter_line_height_min = None
+            self.post_filter_line_height_max = None
+            self.post_filter_text_density_min = None
+            self.post_filter_text_density_max = None
+            self.post_filter_measurement_material: list = []
+            self._measurement_cache: dict = {}  # {sys_id: summary_dict}
             # Translation enrichment (Phase 46)
             self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
             self.title_translations: dict = {}  # sys_id -> {original_title, english_title, hebrew_title, source}
@@ -851,6 +876,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             app.storage.user['search_filter_text_all'] = []
                             app.storage.user['search_filter_text_any'] = []
                             app.storage.user['search_filter_text_not'] = []
+                            # Clear measurement filters (Phase 54)
+                            search_state.filter_width_min = None
+                            search_state.filter_width_max = None
+                            search_state.filter_height_min = None
+                            search_state.filter_height_max = None
+                            search_state.filter_line_count_min = None
+                            search_state.filter_line_count_max = None
+                            search_state.filter_line_height_min = None
+                            search_state.filter_line_height_max = None
+                            search_state.filter_text_density_min = None
+                            search_state.filter_text_density_max = None
+                            search_state.filter_measurement_material = []
+                            for _mk in ['width_min', 'width_max', 'height_min', 'height_max',
+                                        'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
+                                        'text_density_min', 'text_density_max', 'measurement_material']:
+                                app.storage.user[f'search_filter_{_mk}'] = None
+                            app.storage.user['search_filter_measurement_material'] = []
                             _update_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',
@@ -939,6 +981,82 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 # Initialize text chips on page load
                 _rebuild_text_chips()
+
+                # --- Measurement filters (Phase 54, DIM-02) ---
+                with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
+                    'dense default-closed header-class="text-sm"'
+                ):
+                    with ui.column().classes('gap-2 w-full'):
+                        def _make_meas_range_row(label, suffix=''):
+                            with ui.row().classes('gap-1 items-center w-full'):
+                                ui.label(label).classes('text-xs w-28 shrink-0')
+                                min_inp = ui.number(placeholder='Min', format='%.1f').props(
+                                    'outlined dense type=number step=0.1'
+                                ).classes('w-20')
+                                ui.label('\u2013').classes('text-xs')
+                                max_inp = ui.number(placeholder='Max', format='%.1f').props(
+                                    'outlined dense type=number step=0.1'
+                                ).classes('w-20')
+                                if suffix:
+                                    ui.label(suffix).classes('text-xs text-gray-500')
+                            return min_inp, max_inp
+
+                        meas_width_min_inp, meas_width_max_inp = _make_meas_range_row(tr('Width'), 'cm')
+                        meas_height_min_inp, meas_height_max_inp = _make_meas_range_row(tr('Height'), 'cm')
+                        meas_lc_min_inp, meas_lc_max_inp = _make_meas_range_row(tr('Lines'))
+                        meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), 'mm')
+                        meas_td_min_inp, meas_td_max_inp = _make_meas_range_row(tr('Text Density'), '/10cm\u00b2')
+
+                        meas_material_select = ui.select(
+                            options=MEASUREMENT_MATERIALS,
+                            label=tr('Material (measured)'),
+                            multiple=True,
+                        ).props('outlined dense clearable use-chips').classes('w-full')
+
+                        # Restore values from state
+                        meas_width_min_inp.value = search_state.filter_width_min
+                        meas_width_max_inp.value = search_state.filter_width_max
+                        meas_height_min_inp.value = search_state.filter_height_min
+                        meas_height_max_inp.value = search_state.filter_height_max
+                        meas_lc_min_inp.value = search_state.filter_line_count_min
+                        meas_lc_max_inp.value = search_state.filter_line_count_max
+                        meas_lh_min_inp.value = search_state.filter_line_height_min
+                        meas_lh_max_inp.value = search_state.filter_line_height_max
+                        meas_td_min_inp.value = search_state.filter_text_density_min
+                        meas_td_max_inp.value = search_state.filter_text_density_max
+                        meas_material_select.value = search_state.filter_measurement_material
+
+                        # Change handlers -- fire on blur for debounced recompute
+                        def _on_meas_blur(attr_name, inp_widget, is_int=False):
+                            def handler(e=None):
+                                val = inp_widget.value
+                                if val is not None and val != '':
+                                    val = int(val) if is_int else float(val)
+                                else:
+                                    val = None
+                                setattr(search_state, f'filter_{attr_name}', val)
+                                persist_value(f'search_filter_{attr_name}', val)
+                                asyncio.ensure_future(_recompute_filter_count())
+                                _update_chip_bar()
+                            return handler
+
+                        meas_width_min_inp.on('blur', _on_meas_blur('width_min', meas_width_min_inp))
+                        meas_width_max_inp.on('blur', _on_meas_blur('width_max', meas_width_max_inp))
+                        meas_height_min_inp.on('blur', _on_meas_blur('height_min', meas_height_min_inp))
+                        meas_height_max_inp.on('blur', _on_meas_blur('height_max', meas_height_max_inp))
+                        meas_lc_min_inp.on('blur', _on_meas_blur('line_count_min', meas_lc_min_inp, is_int=True))
+                        meas_lc_max_inp.on('blur', _on_meas_blur('line_count_max', meas_lc_max_inp, is_int=True))
+                        meas_lh_min_inp.on('blur', _on_meas_blur('line_height_min', meas_lh_min_inp))
+                        meas_lh_max_inp.on('blur', _on_meas_blur('line_height_max', meas_lh_max_inp))
+                        meas_td_min_inp.on('blur', _on_meas_blur('text_density_min', meas_td_min_inp))
+                        meas_td_max_inp.on('blur', _on_meas_blur('text_density_max', meas_td_max_inp))
+
+                        def _on_meas_material_change(e=None):
+                            search_state.filter_measurement_material = meas_material_select.value or []
+                            persist_value('search_filter_measurement_material', search_state.filter_measurement_material)
+                            asyncio.ensure_future(_recompute_filter_count())
+                            _update_chip_bar()
+                        meas_material_select.on('update:model-value', _on_meas_material_change)
 
         # --- Filter chip bar (always visible, even when panel is collapsed) ---
         chip_bar_container = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
@@ -1029,6 +1147,28 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.chip(f"- {t}", icon='block', removable=True,
                             color='red-2', on_click=lambda: None,
                     ).on('remove', lambda _t=t: _remove_text_term('not', _t))
+
+                # Measurement filter chips (Phase 54, teal color)
+                def _fmt_range_chip(prefix, vmin, vmax, unit=''):
+                    u = f' {unit}' if unit else ''
+                    if vmin is not None and vmax is not None:
+                        return f"{prefix}: {vmin}-{vmax}{u}"
+                    elif vmin is not None:
+                        return f"{prefix}: \u2265{vmin}{u}"
+                    elif vmax is not None:
+                        return f"{prefix}: \u2264{vmax}{u}"
+                    return None
+                for _chip_text in [
+                    _fmt_range_chip('W', search_state.filter_width_min, search_state.filter_width_max, 'cm'),
+                    _fmt_range_chip('H', search_state.filter_height_min, search_state.filter_height_max, 'cm'),
+                    _fmt_range_chip(tr('Lines'), search_state.filter_line_count_min, search_state.filter_line_count_max),
+                    _fmt_range_chip('LH', search_state.filter_line_height_min, search_state.filter_line_height_max, 'mm'),
+                    _fmt_range_chip(tr('Density'), search_state.filter_text_density_min, search_state.filter_text_density_max),
+                ]:
+                    if _chip_text:
+                        ui.chip(_chip_text, icon='straighten', color='teal-2')
+                for _mat in (search_state.filter_measurement_material or []):
+                    ui.chip(_mat, icon='layers', color='teal-2')
 
                 # Manuscript count badge
                 if search_state.filter_manuscript_count is not None:
@@ -1257,6 +1397,63 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         placeholder=tr('Filter by text')
                     ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
+                # Post-search measurement filters (Phase 54, DIM-03)
+                with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
+                    'dense default-closed header-class="text-sm"'
+                ):
+                    with ui.column().classes('gap-2 w-full'):
+                        def _make_post_meas_row(label, suffix=''):
+                            with ui.row().classes('gap-1 items-center w-full'):
+                                ui.label(label).classes('text-xs w-28 shrink-0')
+                                min_inp = ui.number(placeholder='Min', format='%.1f').props(
+                                    'outlined dense type=number step=0.1'
+                                ).classes('w-20')
+                                ui.label('\u2013').classes('text-xs')
+                                max_inp = ui.number(placeholder='Max', format='%.1f').props(
+                                    'outlined dense type=number step=0.1'
+                                ).classes('w-20')
+                                if suffix:
+                                    ui.label(suffix).classes('text-xs text-gray-500')
+                            return min_inp, max_inp
+
+                        post_w_min, post_w_max = _make_post_meas_row(tr('Width'), 'cm')
+                        post_h_min, post_h_max = _make_post_meas_row(tr('Height'), 'cm')
+                        post_lc_min, post_lc_max = _make_post_meas_row(tr('Lines'))
+                        post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), 'mm')
+                        post_td_min, post_td_max = _make_post_meas_row(tr('Text Density'), '/10cm\u00b2')
+
+                        post_mat_select = ui.select(
+                            options=MEASUREMENT_MATERIALS,
+                            label=tr('Material (measured)'),
+                            multiple=True,
+                        ).props('outlined dense clearable use-chips').classes('w-full')
+
+                        # Wire blur handlers for post-search measurement inputs
+                        def _on_post_meas_blur(attr_name, inp_widget, is_int=False):
+                            def handler(e=None):
+                                val = inp_widget.value
+                                if val is not None and val != '':
+                                    val = int(val) if is_int else float(val)
+                                else:
+                                    val = None
+                                setattr(search_state, f'post_filter_{attr_name}', val)
+                            return handler
+
+                        post_w_min.on('blur', _on_post_meas_blur('width_min', post_w_min))
+                        post_w_max.on('blur', _on_post_meas_blur('width_max', post_w_max))
+                        post_h_min.on('blur', _on_post_meas_blur('height_min', post_h_min))
+                        post_h_max.on('blur', _on_post_meas_blur('height_max', post_h_max))
+                        post_lc_min.on('blur', _on_post_meas_blur('line_count_min', post_lc_min, is_int=True))
+                        post_lc_max.on('blur', _on_post_meas_blur('line_count_max', post_lc_max, is_int=True))
+                        post_lh_min.on('blur', _on_post_meas_blur('line_height_min', post_lh_min))
+                        post_lh_max.on('blur', _on_post_meas_blur('line_height_max', post_lh_max))
+                        post_td_min.on('blur', _on_post_meas_blur('text_density_min', post_td_min))
+                        post_td_max.on('blur', _on_post_meas_blur('text_density_max', post_td_max))
+
+                        def _on_post_mat_change(e=None):
+                            search_state.post_filter_measurement_material = post_mat_select.value or []
+                        post_mat_select.on('update:model-value', _on_post_mat_change)
+
                 with ui.row().classes('gap-2'):
                     ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
                         'flat dense color=green size=sm'
@@ -1438,6 +1635,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             filtered.append(res)
 
+        # Apply measurement post-filters (Phase 54, review concern #1)
+        filtered = _apply_measurement_post_filters(filtered, search_state)
+
         render_results(filtered, page=0)
         shown = len(filtered)
         results_count.text = f"{shown} / {len(search_state.results)} {tr('Results')}"
@@ -1448,6 +1648,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filter_shelfmark.value = ''
         filter_title.value = ''
         filter_snippet.value = ''
+        # Clear post-search measurement state (Phase 54)
+        search_state.post_filter_width_min = None
+        search_state.post_filter_width_max = None
+        search_state.post_filter_height_min = None
+        search_state.post_filter_height_max = None
+        search_state.post_filter_line_count_min = None
+        search_state.post_filter_line_count_max = None
+        search_state.post_filter_line_height_min = None
+        search_state.post_filter_line_height_max = None
+        search_state.post_filter_text_density_min = None
+        search_state.post_filter_text_density_max = None
+        search_state.post_filter_measurement_material = []
+        search_state._measurement_cache = {}
 
         if search_state.results:
             render_results(search_state.results, page=0)
@@ -2501,6 +2714,81 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         dialog.open()
 
+    # --- Measurement post-filter helpers (Phase 54, review concern #1) ---
+    MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
+
+    def _has_any_post_measurement_filter(state) -> bool:
+        """Check if any post-search measurement filters are active."""
+        return any([
+            getattr(state, 'post_filter_width_min', None) is not None,
+            getattr(state, 'post_filter_width_max', None) is not None,
+            getattr(state, 'post_filter_height_min', None) is not None,
+            getattr(state, 'post_filter_height_max', None) is not None,
+            getattr(state, 'post_filter_line_count_min', None) is not None,
+            getattr(state, 'post_filter_line_count_max', None) is not None,
+            getattr(state, 'post_filter_line_height_min', None) is not None,
+            getattr(state, 'post_filter_line_height_max', None) is not None,
+            getattr(state, 'post_filter_text_density_min', None) is not None,
+            getattr(state, 'post_filter_text_density_max', None) is not None,
+            bool(getattr(state, 'post_filter_measurement_material', None)),
+        ])
+
+    def _apply_measurement_post_filters(results: list, state) -> list:
+        """Apply measurement post-filters to a results list.
+        Reads from state.post_filter_* and state._measurement_cache.
+        Returns filtered list. Called from ALL rerender paths.
+        (Review concern #1: domain exclusion, printed toggle, history restore, enrichment all call this.)
+        """
+        _pw_min = state.post_filter_width_min
+        _pw_max = state.post_filter_width_max
+        _ph_min = state.post_filter_height_min
+        _ph_max = state.post_filter_height_max
+        _plc_min = state.post_filter_line_count_min
+        _plc_max = state.post_filter_line_count_max
+        _plh_min = state.post_filter_line_height_min
+        _plh_max = state.post_filter_line_height_max
+        _ptd_min = state.post_filter_text_density_min
+        _ptd_max = state.post_filter_text_density_max
+        _pm_mat = state.post_filter_measurement_material or []
+
+        _has_meas_filter = any([
+            _pw_min is not None, _pw_max is not None,
+            _ph_min is not None, _ph_max is not None,
+            _plc_min is not None, _plc_max is not None,
+            _plh_min is not None, _plh_max is not None,
+            _ptd_min is not None, _ptd_max is not None,
+            _pm_mat,
+        ])
+
+        if not _has_meas_filter:
+            return results
+
+        cache = getattr(state, '_measurement_cache', {})
+
+        def _in_range(val, vmin, vmax):
+            if val is None and (vmin is not None or vmax is not None):
+                return False
+            if vmin is not None and val < vmin:
+                return False
+            if vmax is not None and val > vmax:
+                return False
+            return True
+
+        filtered = []
+        for res in results:
+            sid = res.get('sys_id') or res.get('display', {}).get('id', '')
+            md = cache.get(sid)
+            if md is None:
+                continue  # D-26: exclude without data
+            if not _in_range(md.get('width_cm'), _pw_min, _pw_max): continue
+            if not _in_range(md.get('height_cm'), _ph_min, _ph_max): continue
+            if not _in_range(md.get('avg_num_lines'), _plc_min, _plc_max): continue
+            if not _in_range(md.get('avg_line_height_mm'), _plh_min, _plh_max): continue
+            if not _in_range(md.get('avg_text_density'), _ptd_min, _ptd_max): continue
+            if _pm_mat and (md.get('material') is None or md.get('material') not in _pm_mat): continue
+            filtered.append(res)
+        return filtered
+
     def _apply_printed_filter(results_list):
         """Apply printed material filter to a results list and return filtered list."""
         if search_state.printed_filter == 'all' or not search_state.printed_ids:
@@ -2519,6 +2807,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def _apply_printed_filter_and_render(results_list, reset_expansion=True):
         """Apply printed filter to results and re-render (used when no domain exclusions active)."""
         filtered = _apply_printed_filter(results_list)
+        # Apply measurement post-filters (Phase 54, review concern #1)
+        filtered = _apply_measurement_post_filters(filtered, search_state)
         total = len(search_state.results)
         showing = len(filtered)
         if search_state.printed_filter != 'all':
@@ -2611,6 +2901,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Apply printed filter on top of domain-filtered results
         filtered = _apply_printed_filter(filtered)
+        # Apply measurement post-filters (Phase 54, review concern #1)
+        filtered = _apply_measurement_post_filters(filtered, search_state)
 
         # Update count display
         total = len(search_state.results)
@@ -2751,7 +3043,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             elif search_state.printed_filter != 'all' and search_state.printed_ids:
                 _apply_printed_filter_and_render(search_state.results)
             else:
-                render_results(search_state.results, page=0)
+                # Apply measurement post-filters on history restore (Phase 54)
+                _restored = _apply_measurement_post_filters(search_state.results, search_state)
+                render_results(_restored, page=0)
 
         ui.notify(tr('Search restored from history'), type='info', timeout=2000)
         history_menu.close()
@@ -2879,8 +3173,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     kwargs['domains_exclude'] = search_state.filter_domains or None
                     kwargs['authors_exclude'] = search_state.filter_authors or None
                     kwargs['works_exclude'] = search_state.filter_works or None
-                return fjms.get_filter_sys_ids(**kwargs
-                )
+                # Measurement filter params (Phase 54)
+                kwargs.update(dict(
+                    width_min=search_state.filter_width_min,
+                    width_max=search_state.filter_width_max,
+                    height_min=search_state.filter_height_min,
+                    height_max=search_state.filter_height_max,
+                    line_count_min=search_state.filter_line_count_min,
+                    line_count_max=search_state.filter_line_count_max,
+                    line_height_min=search_state.filter_line_height_min,
+                    line_height_max=search_state.filter_line_height_max,
+                    text_density_min=search_state.filter_text_density_min,
+                    text_density_max=search_state.filter_text_density_max,
+                    measurement_material=search_state.filter_measurement_material or None,
+                ))
+                return fjms.get_filter_sys_ids(**kwargs)
 
             restrict_sys_ids = await run.io_bound(_compute_restrict)
             search_state.restrict_sys_ids = restrict_sys_ids
@@ -3015,6 +3322,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.catalog_source_counts = {}
         search_state.printed_ids = set()
         search_state.translation_data = {}
+        search_state._measurement_cache = {}  # Phase 54: reset on new search
         search_state.domain_excluded_results = []
         search_state.word_search_excluded_results = []
 
@@ -3152,11 +3460,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=True)
             if not fjms.is_available():
-                return {}, {}, set()
+                return {}, {}, set(), {}
             return (
                 fjms.get_domains_for_sys_ids(sys_ids),
                 fjms.get_catalog_source_counts(sys_ids),
                 fjms.get_printed_sys_ids(sys_ids),
+                fjms.get_measurement_summaries_batch(sys_ids),  # Phase 54: measurement cache
             )
 
         _show_trans_for_enrich = False
@@ -3227,6 +3536,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_printed_filter_and_render(display_results, reset_expansion=reset_expansion)
             else:
                 search_state.domain_excluded_results = []
+                # Apply measurement post-filters (Phase 54, review concern #1)
+                display_results = _apply_measurement_post_filters(display_results, search_state)
                 render_results(display_results, page=0, reset_expansion=reset_expansion)
 
         # --- STAGE 1: Enrich visible page (first PAGE_SIZE sys_ids) ---
@@ -3240,7 +3551,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
             # Check generation before applying (user may have started a new search)
             if search_state.search_generation == this_generation:
-                raw_domains, catalog_counts, printed_ids = fjms_tuple
+                raw_domains, catalog_counts, printed_ids, meas_batch = fjms_tuple
+                search_state._measurement_cache.update(meas_batch)  # Phase 54
                 _process_domain_data(raw_domains)
                 search_state.transcription_sys_ids = transcription_ids
                 search_state.catalog_source_counts = catalog_counts
@@ -3279,7 +3591,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 )
                 if search_state.search_generation != this_generation:
                     break
-                bg_domains, bg_counts, bg_printed = bg_fjms_tuple
+                bg_domains, bg_counts, bg_printed, bg_meas = bg_fjms_tuple
+                search_state._measurement_cache.update(bg_meas)  # Phase 54
                 _process_domain_data(bg_domains)
                 search_state.transcription_sys_ids |= bg_trans_ids
                 search_state.catalog_source_counts.update(bg_counts)
