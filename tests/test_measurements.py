@@ -29,7 +29,7 @@ def _create_measurement_tables(conn):
     conn.executemany("INSERT INTO extra_info VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
         ("FGP001", "990001", "T-S 12.1", "Paper", "Medium", 2, 0, 3000, 4000, "recto", 0.0),
         ("FGP002", "990001", "T-S 12.1", "Paper", "Medium", 2, 0, 3000, 4000, "verso", 0.0),
-        ("FGP003", "990002", "T-S 13.1", "Parchment", "Large", 4, 2, 5000, 6000, "recto", 0.0),
+        ("FGP003", "990002", "T-S 13.1", "Vellum", "Large", 4, 2, 5000, 6000, "recto", 0.0),
     ])
 
     # computed_measurements
@@ -149,7 +149,7 @@ def _create_measurement_tables(conn):
             # avg_line_height_mm = AVG(3.5, 3.4) = 3.45
             ("990001", 16.8, 21.5, 14.0, 18.0, 2, 15.5, 15.8, 22.1, 22.3, 24.0, 23, 25, 7.05, 3.45, 2, "Paper", "Medium", 2, 1, 1),
             # 990002: avg_line_height_mm = 4.0
-            ("990002", 20.0, 30.0, 17.0, 27.0, 1, 20.0, 20.0, 30.0, 30.0, 35.0, 35, 35, 8.5, 4.0, 1, "Parchment", "Large", 1, 0, 0),
+            ("990002", 20.0, 30.0, 17.0, 27.0, 1, 20.0, 20.0, 30.0, 30.0, 35.0, 35, 35, 8.5, 4.0, 1, "Vellum", "Large", 1, 0, 0),
         ],
     )
 
@@ -470,14 +470,14 @@ class TestMeasurementFiltering:
 
     def test_filter_measurement_material(self, filter_service):
         """Material filtering works with single material."""
-        # 990001 material=Paper, 990002 material=Parchment
+        # 990001 material=Paper, 990002 material=Vellum
         result = filter_service.get_filter_sys_ids(measurement_material=["Paper"])
         assert "990001" in result
         assert "990002" not in result
 
     def test_filter_multi_material(self, filter_service):
         """Material IN clause with multiple materials returns both."""
-        result = filter_service.get_filter_sys_ids(measurement_material=["Paper", "Parchment"])
+        result = filter_service.get_filter_sys_ids(measurement_material=["Paper", "Vellum"])
         assert "990001" in result
         assert "990002" in result
 
@@ -498,7 +498,7 @@ class TestMeasurementFiltering:
         # Only 990001 has Paper AND width >= 10
         result = filter_service.get_filter_sys_ids(width_min=10.0, measurement_material=["Paper"])
         assert "990001" in result
-        assert "990002" not in result  # Parchment
+        assert "990002" not in result  # Vellum
 
     def test_filter_coalesce_width(self, filter_service):
         """COALESCE falls back to computed when catalog is NULL."""

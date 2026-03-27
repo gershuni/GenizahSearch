@@ -146,8 +146,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception as e:
             logger.error("_after_delay error in %s: %s", coro_func.__name__, e, exc_info=True)
 
-    # Measurement material options (used in both pre-search and post-search panels)
-    MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
+    # Measurement material options (value -> translated label)
+    MEASUREMENT_MATERIALS = {
+        'Paper': tr('Paper'),
+        'Vellum': tr('Vellum'),
+        'Papyrus': tr('Papyrus'),
+        'Mix': tr('Mix'),
+        'Wood': tr('Wood'),
+    }
 
     # Resolve which persisted search state, if any, should be reused for this request.
     raw_saved_mode = app.storage.user.get('search_mode', 'exact')
@@ -1005,22 +1011,33 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         def _make_meas_range_row(label, suffix=''):
                             with ui.row().classes('gap-1 items-center w-full'):
                                 ui.label(label).classes('text-xs w-28 shrink-0')
-                                min_inp = ui.number(placeholder='Min', format='%.1f').props(
+                                min_inp = ui.number(placeholder=tr('Min'), format='%.1f').props(
                                     'outlined dense type=number step=0.1'
                                 ).classes('w-20')
                                 ui.label('\u2013').classes('text-xs')
-                                max_inp = ui.number(placeholder='Max', format='%.1f').props(
+                                max_inp = ui.number(placeholder=tr('Max'), format='%.1f').props(
                                     'outlined dense type=number step=0.1'
                                 ).classes('w-20')
                                 if suffix:
                                     ui.label(suffix).classes('text-xs text-gray-500')
                             return min_inp, max_inp
 
-                        meas_width_min_inp, meas_width_max_inp = _make_meas_range_row(tr('Width'), 'cm')
-                        meas_height_min_inp, meas_height_max_inp = _make_meas_range_row(tr('Height'), 'cm')
-                        meas_lc_min_inp, meas_lc_max_inp = _make_meas_range_row(tr('Lines'))
-                        meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), 'mm')
-                        meas_td_min_inp, meas_td_max_inp = _make_meas_range_row(tr('Text Density'), '/10cm\u00b2')
+                        meas_width_min_inp, meas_width_max_inp = _make_meas_range_row(tr('Width'), tr('cm'))
+                        meas_height_min_inp, meas_height_max_inp = _make_meas_range_row(tr('Height'), tr('cm'))
+
+                        # Line count: integer inputs (no decimals)
+                        with ui.row().classes('gap-1 items-center w-full'):
+                            ui.label(tr('Lines')).classes('text-xs w-28 shrink-0')
+                            meas_lc_min_inp = ui.number(placeholder=tr('Min'), format='%d').props(
+                                'outlined dense type=number step=1'
+                            ).classes('w-20')
+                            ui.label('\u2013').classes('text-xs')
+                            meas_lc_max_inp = ui.number(placeholder=tr('Max'), format='%d').props(
+                                'outlined dense type=number step=1'
+                            ).classes('w-20')
+
+                        meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), tr('mm'))
+                        meas_td_min_inp, meas_td_max_inp = _make_meas_range_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
 
                         meas_material_select = ui.select(
                             options=MEASUREMENT_MATERIALS,
@@ -1163,27 +1180,54 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             color='red-2', on_click=lambda: None,
                     ).on('remove', lambda _t=t: _remove_text_term('not', _t))
 
-                # Measurement filter chips (Phase 54, teal color)
+                # Measurement filter chips (Phase 54, teal color, removable)
                 def _fmt_range_chip(prefix, vmin, vmax, unit=''):
-                    u = f' {unit}' if unit else ''
+                    u = f' {tr(unit)}' if unit else ''
                     if vmin is not None and vmax is not None:
-                        return f"{prefix}: {vmin}-{vmax}{u}"
+                        return f"{prefix}: {vmin}\u2013{vmax}{u}"
                     elif vmin is not None:
                         return f"{prefix}: \u2265{vmin}{u}"
                     elif vmax is not None:
                         return f"{prefix}: \u2264{vmax}{u}"
                     return None
-                for _chip_text in [
-                    _fmt_range_chip('W', search_state.filter_width_min, search_state.filter_width_max, 'cm'),
-                    _fmt_range_chip('H', search_state.filter_height_min, search_state.filter_height_max, 'cm'),
-                    _fmt_range_chip(tr('Lines'), search_state.filter_line_count_min, search_state.filter_line_count_max),
-                    _fmt_range_chip('LH', search_state.filter_line_height_min, search_state.filter_line_height_max, 'mm'),
-                    _fmt_range_chip(tr('Density'), search_state.filter_text_density_min, search_state.filter_text_density_max),
-                ]:
+                _meas_chips = [
+                    (_fmt_range_chip(tr('Width'), search_state.filter_width_min, search_state.filter_width_max, 'cm'),
+                     ['width_min', 'width_max'], [meas_width_min_inp, meas_width_max_inp]),
+                    (_fmt_range_chip(tr('Height'), search_state.filter_height_min, search_state.filter_height_max, 'cm'),
+                     ['height_min', 'height_max'], [meas_height_min_inp, meas_height_max_inp]),
+                    (_fmt_range_chip(tr('Lines'), search_state.filter_line_count_min, search_state.filter_line_count_max),
+                     ['line_count_min', 'line_count_max'], [meas_lc_min_inp, meas_lc_max_inp]),
+                    (_fmt_range_chip(tr('Line Height'), search_state.filter_line_height_min, search_state.filter_line_height_max, 'mm'),
+                     ['line_height_min', 'line_height_max'], [meas_lh_min_inp, meas_lh_max_inp]),
+                    (_fmt_range_chip(tr('Text Density'), search_state.filter_text_density_min, search_state.filter_text_density_max),
+                     ['text_density_min', 'text_density_max'], [meas_td_min_inp, meas_td_max_inp]),
+                ]
+                for _chip_text, _attrs, _widgets in _meas_chips:
                     if _chip_text:
-                        ui.chip(_chip_text, icon='straighten', color='teal-2')
+                        def _clear_meas(attrs=_attrs, widgets=_widgets):
+                            for a in attrs:
+                                setattr(search_state, f'filter_{a}', None)
+                                persist_value(f'search_filter_{a}', None)
+                            for w in widgets:
+                                w.value = None
+                            _update_chip_bar()
+                            asyncio.ensure_future(_recompute_filter_count())
+                        ui.chip(
+                            _chip_text, icon='straighten', removable=True,
+                            on_click=lambda: None, color='teal-2',
+                        ).on('remove', _clear_meas)
                 for _mat in (search_state.filter_measurement_material or []):
-                    ui.chip(_mat, icon='layers', color='teal-2')
+                    def _clear_mat(m=_mat):
+                        if m in search_state.filter_measurement_material:
+                            search_state.filter_measurement_material.remove(m)
+                        meas_material_select.value = search_state.filter_measurement_material
+                        persist_value('search_filter_measurement_material', search_state.filter_measurement_material)
+                        _update_chip_bar()
+                        asyncio.ensure_future(_recompute_filter_count())
+                    ui.chip(
+                        tr(_mat), icon='layers', removable=True,
+                        on_click=lambda: None, color='teal-2',
+                    ).on('remove', _clear_mat)
 
                 # Manuscript count badge
                 if search_state.filter_manuscript_count is not None:
@@ -1420,22 +1464,33 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         def _make_post_meas_row(label, suffix=''):
                             with ui.row().classes('gap-1 items-center w-full'):
                                 ui.label(label).classes('text-xs w-28 shrink-0')
-                                min_inp = ui.number(placeholder='Min', format='%.1f').props(
+                                min_inp = ui.number(placeholder=tr('Min'), format='%.1f').props(
                                     'outlined dense type=number step=0.1'
                                 ).classes('w-20')
                                 ui.label('\u2013').classes('text-xs')
-                                max_inp = ui.number(placeholder='Max', format='%.1f').props(
+                                max_inp = ui.number(placeholder=tr('Max'), format='%.1f').props(
                                     'outlined dense type=number step=0.1'
                                 ).classes('w-20')
                                 if suffix:
                                     ui.label(suffix).classes('text-xs text-gray-500')
                             return min_inp, max_inp
 
-                        post_w_min, post_w_max = _make_post_meas_row(tr('Width'), 'cm')
-                        post_h_min, post_h_max = _make_post_meas_row(tr('Height'), 'cm')
-                        post_lc_min, post_lc_max = _make_post_meas_row(tr('Lines'))
-                        post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), 'mm')
-                        post_td_min, post_td_max = _make_post_meas_row(tr('Text Density'), '/10cm\u00b2')
+                        post_w_min, post_w_max = _make_post_meas_row(tr('Width'), tr('cm'))
+                        post_h_min, post_h_max = _make_post_meas_row(tr('Height'), tr('cm'))
+
+                        # Line count: integer inputs
+                        with ui.row().classes('gap-1 items-center w-full'):
+                            ui.label(tr('Lines')).classes('text-xs w-28 shrink-0')
+                            post_lc_min = ui.number(placeholder=tr('Min'), format='%d').props(
+                                'outlined dense type=number step=1'
+                            ).classes('w-20')
+                            ui.label('\u2013').classes('text-xs')
+                            post_lc_max = ui.number(placeholder=tr('Max'), format='%d').props(
+                                'outlined dense type=number step=1'
+                            ).classes('w-20')
+
+                        post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), tr('mm'))
+                        post_td_min, post_td_max = _make_post_meas_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
 
                         post_mat_select = ui.select(
                             options=MEASUREMENT_MATERIALS,
@@ -1675,7 +1730,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.post_filter_text_density_min = None
         search_state.post_filter_text_density_max = None
         search_state.post_filter_measurement_material = []
-        search_state._measurement_cache = {}
+        # Note: do NOT clear _measurement_cache here — it's enrichment data,
+        # not filter state. Clearing it would break reapplying filters later.
 
         if search_state.results:
             render_results(search_state.results, page=0)
@@ -1749,7 +1805,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.selected_indices.clear()
 
         # Re-render to update checkboxes (keeps current page)
-        render_results(search_state.results)
+        _display = _apply_measurement_post_filters(search_state.results, search_state)
+        render_results(_display)
         update_selection_ui()
 
     def update_selection_ui():
@@ -2837,7 +2894,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if not search_state.word_search_excluded_ids or not search_state.results:
             search_state.word_search_excluded_results = []
             if search_state.results:
-                render_results(search_state.results, page=0)
+                _display = _apply_measurement_post_filters(search_state.results, search_state)
+                render_results(_display, page=0)
             return
 
         filtered = []
@@ -2862,12 +2920,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = original_results
         elif search_state.printed_filter != 'all' and search_state.printed_ids:
             filtered = _apply_printed_filter(filtered)
+            filtered = _apply_measurement_post_filters(filtered, search_state)
             total = len(search_state.results)
             showing = len(filtered)
             n_excl = len(excluded_items)
             results_count.text = f"{showing} {tr('Results')} ({n_excl} {tr('excluded')})"
             render_results(filtered, page=0)
         else:
+            filtered = _apply_measurement_post_filters(filtered, search_state)
             total = len(search_state.results)
             showing = len(filtered)
             n_excl = len(excluded_items)

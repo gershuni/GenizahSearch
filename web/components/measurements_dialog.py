@@ -53,13 +53,11 @@ async def show_measurements_dialog(sys_id: str, shelfmark: str, fjms_service=Non
                 extra_info = data.get("extra_info", [])
                 blank_images = data.get("blank_images", [])
 
-                # Filter per-image data to current side when specified
+                # Filter per-image computed data to current side when specified
+                # Note: blank_images don't have Image_Side in the DB, so don't filter them
                 if image_side and computed:
                     side_lower = image_side.lower()
                     computed = [r for r in computed if side_lower in str(r.get("Image_Side", "")).lower()]
-                if image_side and blank_images:
-                    side_lower = image_side.lower()
-                    blank_images = [r for r in blank_images if side_lower in str(r.get("Image_Side", "")).lower()]
 
                 if not summary and not catalog_sizes and not computed and not blank_images:
                     with ui.column().classes('w-full items-center justify-center p-8'):
@@ -177,7 +175,7 @@ def _render_summary_section(summary: dict, is_heb: bool):
     # Material (only if not None per D-12)
     material = summary.get("material")
     if material:
-        _kv_row(tr("Material"), str(material), is_heb)
+        _kv_row(tr("Material"), tr(str(material)), is_heb)
 
     # Size category (only if not None)
     size_cat = summary.get("size_category")
@@ -353,7 +351,7 @@ def _render_computed_row(row: dict, ei_map: dict, is_heb: bool):
     ei = ei_map.get(fgp, {})
     material = ei.get("Material")
     if material:
-        _kv_row(tr("Material"), str(material), is_heb)
+        _kv_row(tr("Material"), tr(str(material)), is_heb)
 
 
 def _render_blank_images_section(blank_images: list, is_heb: bool):
