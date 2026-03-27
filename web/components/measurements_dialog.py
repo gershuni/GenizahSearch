@@ -13,9 +13,11 @@ from nicegui import ui, run
 from web.translations import tr, get_language
 
 
-async def show_measurements_dialog(sys_id: str, shelfmark: str, fjms_service=None):
+async def show_measurements_dialog(sys_id: str, shelfmark: str, fjms_service=None, image_side: str = None):
     """Show measurements dialog with catalog + computed measurement data.
 
+    Args:
+        image_side: Optional 'recto' or 'verso' to filter per-image data to current side.
     Async to avoid blocking UI thread during data fetch (run.io_bound).
     """
     if fjms_service is None:
@@ -50,6 +52,14 @@ async def show_measurements_dialog(sys_id: str, shelfmark: str, fjms_service=Non
                 computed = data.get("computed", [])
                 extra_info = data.get("extra_info", [])
                 blank_images = data.get("blank_images", [])
+
+                # Filter per-image data to current side when specified
+                if image_side and computed:
+                    side_lower = image_side.lower()
+                    computed = [r for r in computed if side_lower in str(r.get("Image_Side", "")).lower()]
+                if image_side and blank_images:
+                    side_lower = image_side.lower()
+                    blank_images = [r for r in blank_images if side_lower in str(r.get("Image_Side", "")).lower()]
 
                 if not summary and not catalog_sizes and not computed and not blank_images:
                     with ui.column().classes('w-full items-center justify-center p-8'):

@@ -145,6 +145,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception as e:
             logger.error("_after_delay error in %s: %s", coro_func.__name__, e, exc_info=True)
 
+    # Measurement material options (used in both pre-search and post-search panels)
+    MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
+
     # Restore domain exclusions from storage
     _de = app.storage.user.get('domain_exclusions')
     search_state.domain_exclusions = set(_de) if _de is not None else set()
@@ -2715,7 +2718,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         dialog.open()
 
     # --- Measurement post-filter helpers (Phase 54, review concern #1) ---
-    MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
 
     def _has_any_post_measurement_filter(state) -> bool:
         """Check if any post-search measurement filters are active."""

@@ -8129,11 +8129,13 @@ class ResultDialog(QDialog):
 
         if self._rd_measurements_data:
             shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
+            _side = 'recto' if (self.current_p_num or 1) == 1 else 'verso'
             dlg = FjmsMeasurementsDialog(
                 self._rd_measurements_data,
                 sys_id=self.current_sys_id or '',
                 shelfmark=shelf,
                 parent=self,
+                image_side=_side,
             )
             dlg.exec()
 
@@ -10815,9 +10817,10 @@ class FjmsMeasurementsDialog(QDialog):
     margins, line count, text density), and blank image fragment dimensions.
     """
 
-    def __init__(self, data: dict, sys_id: str = '', shelfmark: str = '', parent=None):
+    def __init__(self, data: dict, sys_id: str = '', shelfmark: str = '', parent=None, image_side: str = None):
         import html as html_module
         super().__init__(parent)
+        self._image_side = image_side
         self.setWindowTitle(f'{tr("Measurements")} \u2014 {shelfmark}' if shelfmark else tr('Measurements'))
         self.setMinimumSize(700, 450)
         self.resize(800, 600)
@@ -10877,6 +10880,14 @@ class FjmsMeasurementsDialog(QDialog):
         computed = data.get("computed", [])
         extra_info = data.get("extra_info", [])
         blank_images = data.get("blank_images", [])
+
+        # Filter per-image data to current side when specified
+        if self._image_side and computed:
+            side_lower = self._image_side.lower()
+            computed = [r for r in computed if side_lower in str(r.get("Image_Side", "")).lower()]
+        if self._image_side and blank_images:
+            side_lower = self._image_side.lower()
+            blank_images = [r for r in blank_images if side_lower in str(r.get("Image_Side", "")).lower()]
 
         parts = [css]
 
@@ -16611,11 +16622,13 @@ class GenizahGUI(QMainWindow):
 
         if self._browse_measurements_data:
             shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
+            _side = 'recto' if (self.current_browse_p or 1) == 1 else 'verso'
             dlg = FjmsMeasurementsDialog(
                 self._browse_measurements_data,
                 sys_id=self.current_browse_sid or '',
                 shelfmark=shelf,
                 parent=self,
+                image_side=_side,
             )
             dlg.exec()
 

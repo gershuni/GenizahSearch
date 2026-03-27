@@ -1111,7 +1111,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         catalog_source_count = len(fjms_data.get('source_names', []))
 
-        if not fjms_bib and not marc_bib and catalog_source_count == 0:
+        has_meas = fjms_data.get('has_measurements', False)
+        if not fjms_bib and not marc_bib and catalog_source_count == 0 and not has_meas:
             return
 
         from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
@@ -1146,13 +1147,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(catalog_chip_style)
 
             # Measurements button (teal chip, distinct from catalog indigo and bib purple)
-            has_meas = fjms_data.get('has_measurements', False) if fjms_data else False
             if has_meas:
                 from web.components.measurements_dialog import show_measurements_dialog
                 measurements_chip_style = 'border: 1.5px solid #00897b; border-radius: 12px; min-height: 22px; color: #00897b; font-weight: 600;'
+                _meas_side = 'recto' if page.p_num == 1 else 'verso'
                 ui.button(
                     f'{tr("Measurements")}',
-                    on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_measurements_dialog(s, sm),
+                    on_click=lambda s=page.sys_id, sm=page.shelfmark or '', side=_meas_side: show_measurements_dialog(s, sm, image_side=side),
                 ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(measurements_chip_style)
 
     async def go_to_page(new_page: int):
