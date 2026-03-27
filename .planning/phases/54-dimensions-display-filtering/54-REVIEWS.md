@@ -1,14 +1,59 @@
 ---
 phase: 54
 reviewers: [codex]
-reviewed_at: 2026-03-26T21:00:00Z
-plans_reviewed: [54-01-PLAN.md, 54-02-PLAN.md]
-rounds: 2
+reviewed_at: 2026-03-27T10:30:00Z
+plans_reviewed: [54-01-PLAN.md, 54-02-PLAN.md, 54-03-PLAN.md]
+rounds: 3
 ---
 
 # Cross-AI Plan Review — Phase 54
 
-## Round 2: Codex Review (Revised Plans)
+## Round 3: Codex Review (Plan 54-03 — Dimension Filtering)
+
+### Summary
+
+The plan is directionally strong: it extends the shared filtering contract in shared/fjms_service.py, keeps pre-search filtering in the service layer, and uses batch lookup for post-search filtering instead of row-by-row queries. That architecture is the right shape for DIM-02 and DIM-03. The main problem is that the plan is more complete for backend and web than for desktop post-search, and a few state/performance details are underspecified enough that the implementation could ship with parity gaps or filters that silently disappear after re-render.
+
+### Concerns
+
+| # | Severity | Concern | Action |
+|---|----------|---------|--------|
+| 1 | HIGH | Desktop DIM-03 underspecified — reuses pre-search values for post-search instead of separate post-search UI | Executor: add explicit desktop post-search measurement state, separate from pre_search_filters |
+| 2 | HIGH | Web post-search filters may be lost on re-render (enrichment/pagination) — only applied inside apply_filters() | Executor: persist post-filter state and fold into normal render path |
+| 3 | HIGH | Desktop uses shared pre_search_filters for post-search, coupling two concepts | Executor: split pre/post measurement state |
+| 4 | MEDIUM | Material parity gap — web multi-select vs desktop single QComboBox; hardcoded "Vellum" may not match DB "Parchment" | Executor: use multi-select in both, source options from DB or shared list |
+| 5 | MEDIUM | Tasks called autonomous but Task 2/3 depend on Task 1's API | Executor: execute Task 1 first, then Task 2/3 |
+| 6 | MEDIUM | Pre-search count recomputation on every numeric input change — DB churn with 10 inputs | Executor: debounce or apply on blur/Enter |
+| 7 | MEDIUM | Migration ordering risk — UI ships before avg_line_height_mm exists | Executor: graceful no-op when column missing |
+| 8 | MEDIUM | Row factory instability in fjms_service.py may affect batch method | Executor: defensive dict(row) access |
+| 9 | LOW | Batch lookup should deduplicate sys_ids | Executor: dedupe before query |
+| 10 | LOW | No UI-state tests (chip removal, clear, session restore, Enter-to-apply) | Consider adding |
+
+### Suggestions
+
+- Split pre-search and post-search measurement state explicitly in both apps
+- Normalize material options from DB values or shared canonical list
+- Integrate web measurement post-filters into persistent render pipeline
+- Make sidecar schema update a hard prerequisite or graceful no-op
+- Cache measurement summaries per search generation
+- Add UI-state tests for clear/reset/session restore
+
+### Risk Assessment
+
+**HIGH** — Core architecture sound but desktop DIM-03 and web post-filter state need tightening before execution.
+
+### Execution Readiness
+
+**CONDITIONAL GO** — Ready with these clarifications addressed by executor:
+1. Separate pre/post measurement state in both apps
+2. Desktop post-search: explicit controls or clear reuse contract
+3. Web post-filters survive re-renders
+4. Material options from DB, not hardcoded
+5. Graceful no-op for missing avg_line_height_mm column
+
+---
+
+## Round 2: Codex Review (Revised Plans 54-01, 54-02)
 
 ### Concern Resolution Audit
 
