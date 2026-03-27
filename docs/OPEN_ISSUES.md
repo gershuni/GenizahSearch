@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-27 (SEO fixes deployed: per-page metadata, manuscript sitemap, indexability policy)
+> **Last Updated:** 2026-03-27 (SEO fixes deployed; reviewed browse URL-sync regression)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 9 | 48 | 57 |
+| P2 Medium Bugs | 10 | 48 | 58 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **15** | **90** | **105** |
+| **Total** | **16** | **90** | **106** |
 
 ---
 
@@ -82,6 +82,7 @@ Move to "Completed Issues" section at bottom with date
 | **Most indexable web routes share the same title/description/OG metadata** | `web/main.py` | ✅ Fixed (2026-03-27) | Every `@ui.page()` route now has a `title=` param. Dynamic pages (`/browse` with sys_id, `/catalog-browse` with filters) override via `ui.page_title()`. Browse resolves real shelfmark from csv_bank. |
 | **Sitemap advertises only 11 static URLs and omits manuscript/category inventory** | `web/api.py` | ✅ Fixed (2026-03-27) | Sitemap index architecture: `sitemap-static.xml` (editorial pages) + `sitemap-manuscripts-{chunk}.xml` (40K per file, ~255K total from csv_bank). Cache only persists non-empty results to avoid warmup poisoning. |
 | **Browse/catalog raw HTML is mostly an app shell, with little indexable content before hydration** | `web/pages/browse.py`, `web/pages/catalog_browse.py` | ❌ Open | Head tags (title, meta, canonical, OG) are now correct and manuscript-specific, but body content still loads via WebSocket after initial render. Verify via Search Console URL Inspection whether Google renders enough content before investing in prerendering. |
+| **Browse shareable URL sync runs from detached tasks and often never reaches the active client** | `web/pages/browse.py` | ❌ Open | Review of the 2026-03-27 browse URL feature found `_update_browser_url()` relies on `ui.run_javascript(...)`, but most browse navigations launch `load_page()` via `asyncio.ensure_future(...)` (prev/next page buttons, initial auto-load, correction refresh, shelfmark auto-search). Those detached tasks can lose NiceGUI client context, so the server logs the generated `/browse?...` URL while the browser location bar stays unchanged. Fix path: keep browse navigation in client-bound async handlers or capture/use the page client explicitly for JS dispatch before calling `history.replaceState`. |
 | **Desktop What's New dialog: RTL text alignment not fully right-aligned in Hebrew** | `genizah_app.py` | ❌ Open | The QLabel HTML rendering doesn't perfectly right-align `<p dir='rtl'>` bullet text in the WhatsNewDialog. Content is readable but left-edge aligned despite RTL direction. Low priority cosmetic issue. |
 | **Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses** | `genizah_core.py` | ❌ Open | Review of the 2026-03-25 wildcard fixes found that `build_tantivy_query()` and `_execute_line_break_search()` now expand each suffix/prefix wildcard into ~25 real grammatical forms for Tantivy recall, but `_count_expanded_terms()` / `_apply_explosion_guard()` still counts wildcard components as a single base word unless explicit grammatical prefix/suffix modifiers are set. Wildcard-heavy queries can therefore slip past the 500-term guard and generate much larger Tantivy queries than the system estimates, risking slower searches or query-parser failures. |
 | **Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches** | `genizah_core.py` | ❌ Open | Follow-up review on 2026-03-25 confirmed the line-break path now reuses expanded terms for non-wildcards and fixes suffix wildcard recall, but pattern wildcards (`*a*b*`) still cannot be meaningfully prefiltered from Tantivy using the current stem-based strategy. This matches the normal Responsa limitation: regex is correct, but candidate recall may still miss some pattern-only hits before post-filtering. |
@@ -272,6 +273,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-27 | Reviewed the new browse shareable-URL feature (`c4b3e5b3` / `dab1185a`) after a user report that links still do not change during navigation. Added 1 new open P2 issue: `_update_browser_url()` dispatches `ui.run_javascript(...)` from `load_page()`, but most browse navigations reach that code through detached `asyncio.ensure_future(...)` tasks, so the JS can miss the active client and the location bar stays on the entry URL. | Codex |
 | 2026-03-26 | Fixed P1 QThread lifecycle issue in `ManuscriptViewerWidget`: added `_retire_thread()` + `_inflight_threads` list to keep canceled threads alive until `finished`. Persistent `QTimer(self)` for debounce. Same pattern for `_preload()`, `cancel_browse_image_thread()`, `closeEvent`. | Claude |
 | 2026-03-26 | Re-reviewed follow-up commit `0c291bbd`. Confirmed the remaining `ResultDialog` teardown finding is fixed: `cancel_image_thread()` now uses `_wait_or_terminate_thread()` for `img_thread` and `ext_img_thread`, and `closeEvent()` does the same for `browse_img_thread`. No new review findings in this pass. | Codex |
 | 2026-03-26 | Re-reviewed follow-up commit `d27335d1`. Confirmed the original browse-tab teardown finding is fixed: `ManuscriptViewerWidget.stop_threads()` and the main-window `_browse_inflight` close path now use `_wait_or_terminate(...)`, so those retained loaders are no longer dropped alive. Added 1 new open P1 issue in narrower scope: `ResultDialog` still tears down `img_thread`, `ext_img_thread`, and `browse_img_thread` with only `wait(500)`, so closing the dialog during a slow image fetch can still destroy a running `QThread`. | Codex |
