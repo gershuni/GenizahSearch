@@ -4,7 +4,11 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [7.3.1] - SEO Foundation - 2026-03-27
+## [7.3.1] - SEO Foundation & Shareable Browse URLs - 2026-03-27
+
+### New Features
+- **Shareable browse URLs**: Browser URL bar now updates to reflect the current manuscript and page (e.g., `/browse?sys_id=...&page=2`) as you navigate, so links can be copied and shared. Preserves highlight terms within the same manuscript, clears them on manuscript change
+- **Share button**: New share icon in the manuscript header toolbar copies the current URL to clipboard with visual toast feedback
 
 ### Improvements
 - **Per-page metadata**: Every web route now has a unique title, description, canonical URL, and OG/Twitter tags (replaced global META_TAGS that pointed every page's canonical at the homepage)
