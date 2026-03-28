@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v7.3
 milestone_name: Search Refinement & Scholarly Joins
 status: Phase complete — ready for verification
-stopped_at: Completed 55-03-PLAN.md (Tasks 1-2; Task 3 human-verify checkpoint pending)
-last_updated: "2026-03-28T19:18:40.598Z"
+stopped_at: "Completed 55-02-PLAN.md (checkpoint:human-verify pending)"
+last_updated: "2026-03-28T19:18:47.764Z"
 progress:
   total_phases: 11
   completed_phases: 8
@@ -83,6 +83,7 @@ Recent decisions affecting current work:
 - [Phase 54]: Material labeled 'Material (measured)' to distinguish from printed filter; post-search state separate from pre-search; shared _apply_measurement_post_filters helper in web; _measurement_fetch_complete race guard in desktop
 - [Phase 55]: Explicit None vs empty-set contract in compute_effective_restrict for search restrict merging
 - [Phase 55]: Desktop refinement chain: mode mapping reads actual combo index, zero-result back button pre-created, strip inside table_container
+- [Phase 55]: Refinement scope = RAW results (all_sys_ids before post-filters); stale detection via centralized _recompute_filter_count
 
 ### Pending Todos
 
@@ -145,9 +146,10 @@ Recent decisions affecting current work:
 | Phase 54 P04 | 25min | 2 tasks | 4 files |
 | Phase 55 P01 | 2min | 1 tasks | 2 files |
 | Phase 55 P03 | 6min | 2 tasks | 1 files |
+| Phase 55 P02 | 8min | 2 tasks | 1 files |
 
 ## Session Continuity
 
-Last session: 2026-03-28T19:18:34.539Z
-Stopped at: Completed 55-03-PLAN.md (Tasks 1-2; Task 3 human-verify checkpoint pending)
+Last session: 2026-03-28T19:18:47.759Z
+Stopped at: Completed 55-02-PLAN.md (checkpoint:human-verify pending)
 Resume file: None
