@@ -29,6 +29,7 @@ from web.services import (
 )
 from web.search_bootstrap import resolve_search_bootstrap
 from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
@@ -127,6 +128,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
             self.title_translations: dict = {}  # sys_id -> {original_title, english_title, hebrew_title, source}
             self.search_generation: int = 0  # Monotonic counter to discard stale background enrichment
+            # Refinement chain state (Phase 55 -- search within results)
+            self.refinement_chain: list = []               # list of RefinementStep (the chain)
+            self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results, not post-filtered)
+            self._refine_mode: bool = False                # True when user clicked "Search within" and is entering query
+            self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)
+            self._refinement_scope_sig: str = ''           # scope_signature at time of last chain step creation
+            self._zero_result_refine: bool = False         # True when last refine returned 0 results (D-14a)
 
     search_state = SearchUIState()
 
@@ -206,6 +214,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     if restore_saved_exclusions:
         _wse = app.storage.user.get('word_search_excluded_ids')
         search_state.word_search_excluded_ids = set(_wse) if _wse is not None else set()
+
+    # Phase 55: Restore refinement chain from session (D-14)
+    _saved_refinement_chain = app.storage.user.get('search_refinement_chain', [])
+    if _saved_refinement_chain and restore_saved_results:
+        try:
+            search_state.refinement_chain = [RefinementStep.from_dict(d) for d in _saved_refinement_chain]
+        except Exception:
+            search_state.refinement_chain = []
 
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
@@ -1311,6 +1327,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         async def _recompute_filter_count():
             """Recompute manuscript count for current filters (background)."""
             await recompute_filter_count(search_state, _update_chip_bar)
+            # D-16: Detect scope change during active refinement chain
+            if search_state.refinement_chain:
+                new_sig = scope_signature(search_state.restrict_sys_ids)
+                if new_sig != search_state._refinement_scope_sig:
+                    search_state._refinement_stale = True
 
         # --- Filter change handlers (via shared factory) ---
         _handlers = create_filter_handlers(
@@ -1339,6 +1360,52 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     progress_bar, 'value', backward=lambda v: f'{round(v * 100)}%' if v > 0 else ''
                 )
             status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary); display: none;')
+
+        # === Phase 55: Refinement replay helpers ===
+        async def _deferred_chain_replay():
+            """Replay saved refinement chain on session restore (D-14). Shows feedback."""
+            if not search_state.refinement_chain:
+                return
+            status_label.text = tr('Restoring refinement chain...')
+            status_label.style('display: block;')
+            try:
+                def _do_replay():
+                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids)
+                result = await run.io_bound(_do_replay)
+                search_state.refinement_restrict_sys_ids = result
+                search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
+            except Exception as e:
+                logger.error(f"Refinement chain replay failed: {e}")
+                search_state.refinement_chain = []
+                search_state.refinement_restrict_sys_ids = None
+                persist_value('search_refinement_chain', [])
+            finally:
+                status_label.text = ''
+                status_label.style('display: none;')
+            # Update UI (breadcrumb strip etc.) -- called after UI widgets exist
+            try:
+                _update_refinement_strip()
+                _update_search_within_btn()
+            except Exception:
+                pass  # UI widgets may not exist yet on first load
+
+        async def _replay_refinement_chain_and_search():
+            """Re-execute chain after chip removal (D-13). Shows 'Re-evaluating...' feedback."""
+            status_label.text = tr('Re-evaluating refinement...')
+            status_label.style('display: block;')
+            try:
+                def _do_replay():
+                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids)
+                result = await run.io_bound(_do_replay)
+                search_state.refinement_restrict_sys_ids = result
+                persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
+            except Exception as e:
+                logger.error(f"Refinement replay failed: {e}")
+            finally:
+                status_label.text = ''
+                status_label.style('display: none;')
+            # Re-run final step's search to show updated results
+            await execute_search()
 
         # === Main Content Area (full-width, no splitter) ===
         # Accordion expansion state
@@ -3265,16 +3332,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             restrict_sys_ids = await run.io_bound(_compute_restrict)
             search_state.restrict_sys_ids = restrict_sys_ids
-            # If filters are active but match nothing, show message and return
-            if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
-                ui.notify(tr("No manuscripts match the current filters."), type='warning')
-                search_state.is_running = False
-                search_state.is_cancelled = False
-                search_btn.style('display: inline-flex;')
-                stop_btn.style('display: none;')
-                progress_bar.classes('opacity-0')
-                render_results([])
-                return
+
+        # Phase 55: compute effective restrict = intersection of filter restrict + refinement restrict
+        effective_restrict = compute_effective_restrict(restrict_sys_ids, search_state.refinement_restrict_sys_ids)
+
+        # If effective restriction matches nothing, show message and return
+        if effective_restrict is not None and len(effective_restrict) == 0:
+            ui.notify(tr("No manuscripts match the current filters."), type='warning')
+            search_state.is_running = False
+            search_state.is_cancelled = False
+            search_btn.style('display: inline-flex;')
+            stop_btn.style('display: none;')
+            progress_bar.classes('opacity-0')
+            render_results([])
+            return
 
         def run_core_search():
             try:
@@ -3296,7 +3367,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         progress_callback=progress_cb,
                         exclude_words=not_words,
                         responsa_options=responsa_options,
-                        restrict_sys_ids=restrict_sys_ids,
+                        restrict_sys_ids=effective_restrict,
                         text_position=tp if tp != 'anywhere' else None,
                     )
             except ValueError as e:
@@ -3387,6 +3458,33 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.is_cancelled = False
         search_state.progress = 1.0
         search_state.results = results
+
+        # --- Phase 55: Refinement chain update ---
+        if search_state._refine_mode:
+            # Use RAW result sys_ids (before domain/printed/measurement post-filters)
+            raw_result_sys_ids = set(all_sys_ids)  # all_sys_ids computed above
+            if len(raw_result_sys_ids) == 0:
+                # Zero-result refinement (D-14a) -- don't commit step, show recovery UI
+                search_state._zero_result_refine = True
+            else:
+                step = RefinementStep(
+                    query=clean_query,
+                    mode=mode,
+                    gap=int(gap_input.value),
+                    exclude_words=not_words if not_words else [],
+                    text_position=text_position_select.value if text_position_select.value != 'anywhere' else None,
+                    responsa_options=responsa_options,
+                    result_count=len(raw_result_sys_ids),
+                )
+                search_state.refinement_chain.append(step)
+                search_state.refinement_restrict_sys_ids = raw_result_sys_ids
+                search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
+                search_state._zero_result_refine = False
+                # Persist chain metadata only (D-14) -- no sys_id lists stored
+                persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
+            search_state._refine_mode = False
+            search_state._refinement_stale = False
+
         # Initialize enrichment fields to empty (will be populated progressively)
         search_state.transcription_sys_ids = set()
         search_state.all_result_domains = {}
@@ -3480,48 +3578,49 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass
 
-        # Search history
-        try:
-            hist_results = []
-            for r in results[:500]:
-                hr = dict(r)
-                hr.pop('full_text', None)
-                d = hr.get('display')
-                if d and isinstance(d, dict):
-                    d = dict(d)
-                    d.pop('full_text', None)
-                    hr['display'] = d
-                hist_results.append(hr)
-            _add_to_search_history(
-                query=query_input.value or '',
-                result_count=len(results),
-                mode=mode_select.value or 'exact',
-                params={
-                    'mode': mode_select.value,
-                    'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
-                    'gap': int(gap_input.value or 0),
-                    'text_position': text_position_select.value,
-                    'filters': {
-                        'domains': search_state.filter_domains,
-                        'authors': search_state.filter_authors,
-                        'works': search_state.filter_works,
-                        'include_mode': search_state.filter_include_mode,
-                        'date_from': search_state.filter_date_from,
-                        'date_to': search_state.filter_date_to,
-                        'material_exclude': search_state.filter_material_exclude,
-                        'text_all': search_state.filter_text_all,
-                        'text_any': search_state.filter_text_any,
-                        'text_not': search_state.filter_text_not,
-                    } if _has_active_filters() else None,
-                },
-                state_snapshot={
-                    'results': hist_results,
-                    'domain_exclusions': sorted(search_state.domain_exclusions),
-                    'printed_filter': search_state.printed_filter,
-                },
-            )
-        except Exception:
-            pass
+        # Search history -- D-15: Refined searches don't enter history
+        if not search_state.refinement_chain:
+            try:
+                hist_results = []
+                for r in results[:500]:
+                    hr = dict(r)
+                    hr.pop('full_text', None)
+                    d = hr.get('display')
+                    if d and isinstance(d, dict):
+                        d = dict(d)
+                        d.pop('full_text', None)
+                        hr['display'] = d
+                    hist_results.append(hr)
+                _add_to_search_history(
+                    query=query_input.value or '',
+                    result_count=len(results),
+                    mode=mode_select.value or 'exact',
+                    params={
+                        'mode': mode_select.value,
+                        'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
+                        'gap': int(gap_input.value or 0),
+                        'text_position': text_position_select.value,
+                        'filters': {
+                            'domains': search_state.filter_domains,
+                            'authors': search_state.filter_authors,
+                            'works': search_state.filter_works,
+                            'include_mode': search_state.filter_include_mode,
+                            'date_from': search_state.filter_date_from,
+                            'date_to': search_state.filter_date_to,
+                            'material_exclude': search_state.filter_material_exclude,
+                            'text_all': search_state.filter_text_all,
+                            'text_any': search_state.filter_text_any,
+                            'text_not': search_state.filter_text_not,
+                        } if _has_active_filters() else None,
+                    },
+                    state_snapshot={
+                        'results': hist_results,
+                        'domain_exclusions': sorted(search_state.domain_exclusions),
+                        'printed_filter': search_state.printed_filter,
+                    },
+                )
+            except Exception:
+                pass
 
         # IMMEDIATE RENDER — user sees results with title translations only
         render_results(results, page=0)
