@@ -1515,7 +1515,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).tooltip(tr('Export Excel'))
 
             # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
-            refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center bg-blue-1 dark:bg-blue-grey-9').style(
+            refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
+                'background: var(--bg-secondary, #f0f4ff); '
                 'border-bottom: 1px solid rgba(128,128,128,0.3); '
                 'overflow-x: auto; white-space: nowrap; min-height: 0; display: none;'
             )
@@ -1701,7 +1702,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     tr('Only results with all terms'),
                     value=search_state._all_terms_filter,
                     on_change=lambda e: _toggle_all_terms_filter(e.value),
-                ).classes('text-xs').props('dark')
+                ).classes('text-xs').style('color: var(--text-primary);')
             # Clear all (D-11)
             ui.button(tr('Clear all'), icon='clear_all',
                       on_click=_clear_refinement_chain
