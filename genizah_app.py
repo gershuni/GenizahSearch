@@ -54,6 +54,7 @@ from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature
 
 # NLI crossref service for folio labels and source indicators (Phase 31)
 try:
@@ -12220,6 +12221,13 @@ class GenizahGUI(QMainWindow):
         # Pre-search filter state (Phase 45-03)
         self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
         self.pre_search_restrict_sys_ids = None  # computed set or None
+        # Phase 55: Refinement chain state (search within results)
+        self.refinement_chain: list = []               # list[RefinementStep]
+        self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results)
+        self._refine_mode: bool = False                # True when refine mode active on search bar
+        self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)
+        self._refinement_scope_sig: str = ''           # scope_signature at chain creation time
+        self._zero_result_refine: bool = False         # True when last refine got 0 results (D-14a)
         self.word_excluded_sys_ids = set()  # per-result exclusions for word search mode
         self.filter_sources = {}  # dict of {ref: cleaned_text}
         self.filter_enabled_sources = set()  # set of enabled source refs
@@ -23406,6 +23414,13 @@ class GenizahGUI(QMainWindow):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.pre_search_filters = dlg.get_filters()
             self.pre_search_restrict_sys_ids = dlg.get_restrict_sys_ids()
+            # Phase 55: Stale detection (D-16)
+            if self.refinement_chain:
+                new_sig = scope_signature(self.pre_search_restrict_sys_ids)
+                if new_sig != self._refinement_scope_sig:
+                    self._refinement_stale = True
+                    if hasattr(self, '_update_refinement_strip'):
+                        self._update_refinement_strip()
             self._update_filter_chip_bar()
             self._schedule_session_save()
 
@@ -23568,6 +23583,13 @@ class GenizahGUI(QMainWindow):
     def _on_filter_recompute_finished(self, result_set):
         """Handle recomputed filter set after chip removal."""
         self.pre_search_restrict_sys_ids = result_set
+        # Phase 55: Stale detection (D-16)
+        if self.refinement_chain:
+            new_sig = scope_signature(self.pre_search_restrict_sys_ids)
+            if new_sig != self._refinement_scope_sig:
+                self._refinement_stale = True
+                if hasattr(self, '_update_refinement_strip'):
+                    self._update_refinement_strip()
         self._update_filter_chip_bar()
         self._schedule_session_save()
 
@@ -23944,7 +23966,7 @@ class GenizahGUI(QMainWindow):
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
             text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()]
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None), text_position=text_position)
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(self._on_search_progress)
@@ -24042,6 +24064,22 @@ class GenizahGUI(QMainWindow):
         self.pre_search_filters = {}
         self.pre_search_restrict_sys_ids = None
         self._update_filter_chip_bar()
+
+        # 9a. Phase 55: Clear refinement chain state
+        self.refinement_chain = []
+        self.refinement_restrict_sys_ids = None
+        self._refine_mode = False
+        self._refinement_stale = False
+        self._refinement_scope_sig = ''
+        self._zero_result_refine = False
+        if hasattr(self, 'refine_badge'):
+            self.refine_badge.setVisible(False)
+        if hasattr(self, 'refine_cancel_btn'):
+            self.refine_cancel_btn.setVisible(False)
+        if hasattr(self, '_update_refinement_strip'):
+            self._update_refinement_strip()
+        if hasattr(self, '_update_search_within_btn'):
+            self._update_search_within_btn()
 
         # 10. Clear manuscript exclusions (shared with composition)
         self.excluded_sys_ids = set()
@@ -24312,9 +24350,58 @@ class GenizahGUI(QMainWindow):
             self._result_domain_counts = {}
             self._result_domain_map = {}
             self._printed_sys_ids = set()
+            # Phase 55: Zero-result refinement -- don't commit step (D-14a)
+            if self._refine_mode:
+                self._zero_result_refine = True
+                self._refine_mode = False
+                if hasattr(self, 'refine_badge'):
+                    self.refine_badge.setVisible(False)
+                if hasattr(self, 'refine_cancel_btn'):
+                    self.refine_cancel_btn.setVisible(False)
+                self.status_label.setText(tr('0 results within current scope'))
+                if hasattr(self, '_update_refinement_strip'):
+                    self._update_refinement_strip()
+            if hasattr(self, '_update_search_within_btn'):
+                self._update_search_within_btn()
             return
 
         self.last_results = results
+
+        # Phase 55: Refinement chain update (uses RAW results before post-filters)
+        if self._refine_mode:
+            raw_result_sys_ids = {r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')}
+            # Build step from current search bar state
+            mode_idx = self.mode_combo.currentIndex()
+            if mode_idx == self.MODE_RESPONSA:
+                mode_val = 'responsa'
+            else:
+                _modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+                mode_val = _modes[mode_idx] if mode_idx < len(_modes) else 'literal'
+            text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()] if hasattr(self, 'text_position_combo') else None
+            step = RefinementStep(
+                query=self.query_input.text().strip(),
+                mode=mode_val or 'exact',
+                gap=int(self.gap_input.text()) if hasattr(self, 'gap_input') and self.gap_input.text().isdigit() else 0,
+                exclude_words=[],
+                text_position=text_position,
+                responsa_options=getattr(self, '_last_responsa_options', None),
+                result_count=len(raw_result_sys_ids),
+            )
+            self.refinement_chain.append(step)
+            self.refinement_restrict_sys_ids = raw_result_sys_ids
+            self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
+            self._zero_result_refine = False
+            self._refine_mode = False
+            self._refinement_stale = False
+            if hasattr(self, 'refine_badge'):
+                self.refine_badge.setVisible(False)
+            if hasattr(self, 'refine_cancel_btn'):
+                self.refine_cancel_btn.setVisible(False)
+            if hasattr(self, '_update_refinement_strip'):
+                self._update_refinement_strip()
+        if hasattr(self, '_update_search_within_btn'):
+            self._update_search_within_btn()
+
         self.results_loaded = 0
         self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
@@ -24368,8 +24455,8 @@ class GenizahGUI(QMainWindow):
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
-        # Add to search history (skip during session restore)
-        if not getattr(self, '_restoring_session', False):
+        # Add to search history (skip during session restore and refinement -- D-15)
+        if not getattr(self, '_restoring_session', False) and not self.refinement_chain:
             self._add_regular_search_to_history()
 
         # Toast notification when app is not focused
@@ -24384,6 +24471,47 @@ class GenizahGUI(QMainWindow):
             self.statusBar().showMessage(
                 f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
             )
+
+    # ---- Phase 55: Refinement chain methods ----
+
+    def _replay_refinement_chain(self):
+        """D-13: Re-execute chain to rebuild restrict sets. Shows 'Re-evaluating...' feedback."""
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(tr('Re-evaluating refinement...'))
+            QApplication.processEvents()
+        try:
+            result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids)
+            self.refinement_restrict_sys_ids = result
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+        finally:
+            if hasattr(self, 'status_label'):
+                self.status_label.setText('')
+        if hasattr(self, '_update_refinement_strip'):
+            self._update_refinement_strip()
+        self._schedule_session_save()
+        # Trigger search with updated restrict set to show results
+        self.toggle_search()
+
+    def _replay_for_restore(self):
+        """Replay chain during session restore. Shows 'Restoring refinement chain...' feedback."""
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(tr('Restoring refinement chain...'))
+            QApplication.processEvents()
+        try:
+            result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids)
+            self.refinement_restrict_sys_ids = result
+            self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # Replay failed -- clear chain rather than leave stale state
+            self.refinement_chain = []
+            self.refinement_restrict_sys_ids = None
+        finally:
+            if hasattr(self, 'status_label'):
+                self.status_label.setText('')
 
     def _launch_enrichment_workers(self, results, defer=False):
         """Launch domain, PGP badge, printed badge, and measurement enrichment workers."""
@@ -30038,6 +30166,7 @@ class GenizahGUI(QMainWindow):
                     'results_filters': getattr(self, 'results_filters', {}),
                     'filter_sources': getattr(self, 'filter_sources', {}),
                     'filter_enabled_sources': sorted(getattr(self, 'filter_enabled_sources', set())),
+                    'refinement_chain': [s.to_dict() for s in getattr(self, 'refinement_chain', [])],
                 },
                 'composition_search': {
                     'source_text': self.comp_text_area.toPlainText() if hasattr(self, 'comp_text_area') else '',
@@ -30194,6 +30323,15 @@ class GenizahGUI(QMainWindow):
                 self.on_search_finished(self.last_results)
                 self.search_progress.setValue(n_reg)
                 QApplication.processEvents()  # Let UI paint before composition restore
+
+            # Phase 55: Restore refinement chain (replay to rebuild restrict sets)
+            saved_chain = reg.get('refinement_chain', [])
+            if saved_chain:
+                self.refinement_chain = [RefinementStep.from_dict(d) for d in saved_chain]
+                # Replay chain to rebuild restrict sets (blocking but fast -- sub-second per step)
+                self._replay_for_restore()
+                if hasattr(self, '_update_refinement_strip'):
+                    self._update_refinement_strip()
 
             # Restore composition state
             comp = state.get('composition_search', {})
