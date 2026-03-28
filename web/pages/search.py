@@ -29,7 +29,7 @@ from web.services import (
 )
 from web.search_bootstrap import resolve_search_bootstrap
 from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
@@ -135,6 +135,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)
             self._refinement_scope_sig: str = ''           # scope_signature at time of last chain step creation
             self._zero_result_refine: bool = False         # True when last refine returned 0 results (D-14a)
+            self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
 
     search_state = SearchUIState()
 
@@ -1412,8 +1413,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             finally:
                 status_label.text = ''
                 status_label.style('display: none;')
-            # Re-run final step's search to show updated results
-            await execute_search()
+            _update_refinement_strip()
+            _update_search_within_btn()
 
         # === Main Content Area (full-width, no splitter) ===
         # Accordion expansion state
@@ -1514,8 +1515,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).tooltip(tr('Export Excel'))
 
             # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
-            refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
-                'background: #f0f4ff; border-bottom: 1px solid var(--border-light); '
+            refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center bg-blue-1 dark:bg-blue-grey-9').style(
+                'border-bottom: 1px solid rgba(128,128,128,0.3); '
                 'overflow-x: auto; white-space: nowrap; min-height: 0; display: none;'
             )
 
@@ -1630,10 +1631,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """D-02: Activate refine mode -- scroll to search bar, show badge."""
         if search_state.is_running:
             return
-        n = len(search_state.results)
+        # Capture current RAW result sys_ids as the refinement scope BEFORE the user searches
+        raw_ids = {r.get('display', {}).get('id') for r in search_state.results if r.get('display', {}).get('id')}
+        if not raw_ids:
+            return
+        search_state.refinement_restrict_sys_ids = raw_ids
+        search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
+        # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
+        if not search_state.refinement_chain and query_input.value:
+            step0 = RefinementStep(
+                query=query_input.value.strip(),
+                mode=mode_select.value,
+                gap=int(gap_input.value),
+                result_count=len(search_state.results),
+            )
+            # Capture page-level uids for "all terms" filter
+            step0._result_uids = {
+                r.get('uid') or r.get('display', {}).get('id')
+                for r in search_state.results
+                if r.get('uid') or r.get('display', {}).get('id')
+            }
+            search_state.refinement_chain.append(step0)
+            _update_refinement_strip()
+        ms_count = len(raw_ids)  # unique manuscript count
         search_state._refine_mode = True
         search_state._zero_result_refine = False
-        refine_badge.text = f"{tr('Refining within')} {n:,} {tr('results')}"
+        refine_badge.text = f"{tr('Searching within')} {ms_count:,} {tr('manuscripts')}"
         refine_badge.set_visibility(True)
         refine_cancel_btn.set_visibility(True)
         # Scroll to search bar and focus (D-02)
@@ -1663,14 +1686,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         with refinement_strip:
             for i, step in enumerate(chain):
                 if i > 0:
-                    ui.label('\u203a').classes('text-lg mx-1').style('color: #999;')
+                    ui.label('\u2039' if is_rtl() else '\u203a').classes('text-lg mx-1').style('color: var(--text-secondary, #999);')
                 label = step.display_label
                 if show_modes:
                     label = f"{step.query} ({step.mode})"
-                chip = ui.chip(label, removable=True, color='indigo-2').classes('text-sm')
+                chip = ui.chip(label, removable=True, color='blue-grey-3').classes('text-sm dark:bg-blue-grey-7')
                 chip.on('remove', lambda _idx=i: _remove_refinement_step(_idx))
             # Result count for final step only (D-06)
-            ui.label(f'{chain[-1].result_count:,}').classes('text-sm font-bold ml-2').style('color: var(--primary-600);')
+            ui.label(f'{chain[-1].result_count:,}').classes('text-sm font-bold ml-2 text-primary')
+            # "Only results with all terms" checkbox (visible when 2+ steps)
+            if len(chain) >= 2:
+                ui.separator().props('vertical').classes('mx-2')
+                all_terms_cb = ui.checkbox(
+                    tr('Only results with all terms'),
+                    value=search_state._all_terms_filter,
+                    on_change=lambda e: _toggle_all_terms_filter(e.value),
+                ).classes('text-xs').props('dark')
             # Clear all (D-11)
             ui.button(tr('Clear all'), icon='clear_all',
                       on_click=_clear_refinement_chain
@@ -1687,6 +1718,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             _clear_refinement_chain()
 
+    def _toggle_all_terms_filter(checked):
+        """Toggle 'Only results with all terms' post-filter and re-render."""
+        search_state._all_terms_filter = checked
+        persist_value('search_all_terms_filter', checked)
+        # Re-render with filter applied
+        if search_state.results:
+            render_results(search_state.results, page=0)
+
     def _clear_refinement_chain():
         """D-11: Remove entire chain, return to unrestricted search."""
         search_state.refinement_chain = []
@@ -1694,9 +1733,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state._refine_mode = False
         search_state._refinement_stale = False
         search_state._refinement_scope_sig = ''
+        search_state._all_terms_filter = False
         refine_badge.set_visibility(False)
         refine_cancel_btn.set_visibility(False)
         persist_value('search_refinement_chain', [])
+        persist_value('search_all_terms_filter', False)
         _update_refinement_strip()
         _update_search_within_btn()
 
@@ -1704,10 +1745,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """D-01: Show/hide search within button based on result availability."""
         has_results = len(search_state.results) > 0
         is_searching = search_state.is_running
-        search_within_btn.set_visibility(has_results and not is_searching)
+        # Compute unique manuscript count for the button
         if has_results:
-            n = len(search_state.results)
-            search_within_btn.text = f"{tr('Search within')} {n:,}"
+            ms_ids = {r.get('display', {}).get('id') for r in search_state.results if r.get('display', {}).get('id')}
+            ms_count = len(ms_ids)
+        else:
+            ms_count = 0
+        search_within_btn.set_visibility(ms_count > 0 and not is_searching)
+        if ms_count > 0:
+            search_within_btn.text = f"{tr('Search within')} {ms_count:,} {tr('manuscripts')}"
 
     def _undo_zero_result_refine():
         """D-14a: Recover from zero-result refinement."""
@@ -3371,6 +3417,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_btn.style('display: none;')
         stop_btn.style('display: inline-flex;')
         progress_bar.classes(remove='opacity-0')
+        search_within_btn.set_visibility(False)  # Hide during search
         progress_bar.value = 0
         # Collapse filter panel — chips summarize active filters
         adv_filters_panel.value = False
@@ -3404,6 +3451,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'bidirectional': bidirectional_cb.value,
                 'variant_mode': 'variants' if responsa_variants_cb.value else 'exact',
             }
+
+        # Phase 55: If not in refine mode, clear any stale refinement chain
+        # A normal search should NOT be restricted by a previous refinement
+        if not search_state._refine_mode and search_state.refinement_chain:
+            search_state.refinement_chain = []
+            search_state.refinement_restrict_sys_ids = None
+            search_state._refinement_stale = False
+            search_state._refinement_scope_sig = ''
+            persist_value('search_refinement_chain', [])
+            _update_refinement_strip()
 
         # Compute pre-search filter set from active filters
         restrict_sys_ids = None
@@ -3591,8 +3648,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     exclude_words=not_words if not_words else [],
                     text_position=text_position_select.value if text_position_select.value != 'anywhere' else None,
                     responsa_options=responsa_options,
-                    result_count=len(raw_result_sys_ids),
+                    result_count=len(results),  # total results (matches display count)
                 )
+                # Capture page-level uids for "all terms" filter
+                step._result_uids = {
+                    r.get('uid') or r.get('display', {}).get('id')
+                    for r in results
+                    if r.get('uid') or r.get('display', {}).get('id')
+                }
                 search_state.refinement_chain.append(step)
                 search_state.refinement_restrict_sys_ids = raw_result_sys_ids
                 search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
@@ -3925,6 +3988,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     def render_results(results, page=None, scroll_to_top=False, reset_expansion=True):
         results_container.clear()
+        # Phase 55: Apply "all terms" post-filter if active
+        if search_state._all_terms_filter and search_state.refinement_chain:
+            common_uids = compute_all_terms_filter(search_state.refinement_chain)
+            if common_uids is not None:
+                results = [r for r in results if (r.get('uid') or r.get('display', {}).get('id')) in common_uids]
         search_state.displayed_results = results  # Track full filtered set for Advanced View navigation
 
         # Handle expansion state
@@ -4324,8 +4392,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     if cat_count == 0:
                         cat_btn.disable()
 
-            # Snippet
+            # Snippet — enrich with earlier chain terms if refinement is active
             if snippet:
+                if search_state.refinement_chain:
+                    snippet = enrich_snippet_with_chain_terms(snippet, search_state.refinement_chain, query_input.value)
                 snippet_html = SearchEngine.format_snippet(snippet)
                 with ui.element('div').classes('mt-3 p-3 rounded-lg text-sm').style(
                     'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'

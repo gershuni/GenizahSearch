@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-27 (SEO fixes deployed; fixed stale `/search?q=` session-state recall bug)
+> **Last Updated:** 2026-03-29 (plan review found refinement count-unit inconsistency between live searches and replay/session restore)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 10 | 49 | 59 |
+| P2 Medium Bugs | 11 | 55 | 66 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **16** | **91** | **107** |
+| **Total** | **17** | **97** | **114** |
 
 ---
 
@@ -78,6 +78,13 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **FjmsService batch queries intermittently fail with "bad parameter or other API misuse" / "tuple index out of range"** | `shared/fjms_service.py` | ❌ Open | `get_printed_sys_ids()` and `get_domains_for_sys_ids()` use `row["AlmaId"]` dict access which requires `conn.row_factory = sqlite3.Row`. Under concurrent access or connection recycling, row_factory may be lost, causing "bad parameter" (SQLite API error) or "tuple index out of range" (fallback to tuple row). Pre-existing, intermittent, fails gracefully (returns empty set/dict). |
+| **Refinement counts switch units after replay/session restore** | `shared/refinement.py`, `web/pages/search.py`, `genizah_app.py` | ❌ Open | Live refinement steps store `result_count=len(results)` (page-level), but `replay_chain()` rewrites `step.result_count` as `len(result_sys_ids)` (manuscript-level). Result: breadcrumb/search-within counts can silently change from pages to manuscripts after chip removal, stale-chain replay, or session restore, which reinforces the current UX confusion around search-within scope. |
+| **Phase 54 desktop post-search measurement filters run before fresh summaries arrive, so rows can be filtered against stale prior-search data and are not re-applied after the new batch fetch completes** | `genizah_app.py` | ✅ Fixed (2026-03-27) | Re-review confirmed `_launch_enrichment_workers()` now reapplies `_apply_results_table_filters()` after `get_measurement_summaries_batch()` completes, so active post-search measurement filters are reevaluated against fresh data. |
+| **Phase 54 desktop session-restored post-search measurement filters are overwritten from pre-search filters when enrichment workers start** | `genizah_app.py` | ✅ Fixed (2026-03-27) | Re-review confirmed post-search filters are only initialized from pre-search when `_post_measurement_filters` is empty, preserving session-restored post-search state. |
+| **Phase 54 web rerender helpers still bypass measurement post-filters in several paths, so hidden results can reappear** | `web/pages/search.py` | ✅ Fixed (2026-03-27) | Re-review confirmed the previously missed rerender paths (`toggle_select_all()` and the relevant `_apply_word_search_exclusions_and_render()` branches) now run `_apply_measurement_post_filters()` before rendering. |
+| **Phase 54 web "Clear Filters" clears the measurement cache, making re-applied measurement filters exclude everything until a new search reruns enrichment** | `web/pages/search.py` | ✅ Fixed (2026-03-27) | Re-review confirmed `clear_filters()` now clears only post-search measurement state and leaves `_measurement_cache` intact for future filtering. |
+| **Phase 54 measurements dialogs always hide blank-image rows when opened for a specific recto/verso side** | `shared/fjms_service.py`, `web/components/measurements_dialog.py`, `genizah_app.py` | ✅ Fixed (2026-03-27) | Re-review confirmed blank-image side filtering was removed from both dialogs; only computed rows are side-filtered now. |
+| **Phase 54 measurement material UI misses `Parchment` and still shows raw English material labels in Hebrew-facing measurement views** | `web/pages/search.py`, `genizah_app.py`, `web/components/measurements_dialog.py` | ✅ Fixed (2026-03-27) | Re-review confirmed measurement dialogs now render material values via `tr(material)`, and the tests/data were aligned to the real sidecar vocabulary (`Vellum`). |
 | **Site-wide canonical points almost every route at the homepage** | `web/main.py` | ✅ Fixed (2026-03-27) | Replaced global `META_TAGS` with per-page `page_meta()` builder. Each route now has correct canonical, OG, and Twitter metadata. `/about` double-injection eliminated. |
 | **Most indexable web routes share the same title/description/OG metadata** | `web/main.py` | ✅ Fixed (2026-03-27) | Every `@ui.page()` route now has a `title=` param. Dynamic pages (`/browse` with sys_id, `/catalog-browse` with filters) override via `ui.page_title()`. Browse resolves real shelfmark from csv_bank. |
 | **Sitemap advertises only 11 static URLs and omits manuscript/category inventory** | `web/api.py` | ✅ Fixed (2026-03-27) | Sitemap index architecture: `sitemap-static.xml` (editorial pages) + `sitemap-manuscripts-{chunk}.xml` (40K per file, ~255K total from csv_bank). Cache only persists non-empty results to avoid warmup poisoning. |

@@ -3031,6 +3031,17 @@ TRANSLATIONS = {
     "Reset Image": "איפוס תמונה",
     "Image adjustment controls — brightness, contrast, gamma & invert on all image viewers. Better reading of difficult manuscripts.": "בקרות התאמת תמונה — בהירות, ניגודיות, גמא והיפוך צבעים בכל מציגי התמונות. קריאה טובה יותר של כתבי יד קשים.",
     "Manuscript measurements — physical dimensions, margins, line counts & material now visible via Measurements button in browse. Plus 400K bibliography duplicates removed.": "מידות כתבי יד — מידות פיזיות, שוליים, מספר שורות וחומר זמינים כעת בלחצן מידות בעיון. בנוסף הוסרו 400 אלף כפילויות ביבליוגרפיות.",
+    # Phase 55: Search within results
+    "Search within": "חפש בתוך",
+    "Searching within": "מחפש בתוך",
+    "manuscripts": "כתבי יד",
+    "Re-evaluating refinement...": "מעריך מחדש צמצום...",
+    "Restoring refinement chain...": "משחזר שרשרת צמצום...",
+    "Back to previous step": "חזרה לשלב הקודם",
+    "Scope changed \u2014 results will update on next search": "הטווח השתנה \u2014 התוצאות יתעדכנו בחיפוש הבא",
+    "0 results within current scope": "0 תוצאות בטווח הנוכחי",
+    "Only results with all terms": "רק תוצאות עם כל המונחים",
+    "0 results \u2014 no manuscripts match all terms": "0 תוצאות \u2014 אין כתבי יד התואמים לכל המונחים",
 }
 
 # Hebrew library display names (keyed by library_code)

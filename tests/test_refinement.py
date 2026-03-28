@@ -9,6 +9,8 @@ from shared.refinement import (
     truncate_chain,
     replay_chain,
     scope_signature,
+    enrich_snippet_with_chain_terms,
+    compute_all_terms_filter,
 )
 
 
@@ -32,7 +34,7 @@ class MockSearcher:
 
 def _make_results(*sys_ids):
     """Helper: create mock result list from sys_id strings."""
-    return [{'display': {'id': sid}} for sid in sys_ids]
+    return [{'display': {'id': sid}, 'uid': f'uid_{sid}'} for sid in sys_ids]
 
 
 # ---------------------------------------------------------------------------
@@ -258,3 +260,122 @@ class TestChainRoundtrip:
             assert orig.text_position == rest.text_position
             assert orig.responsa_options == rest.responsa_options
             assert orig.result_count == rest.result_count
+
+
+class TestEnrichSnippet:
+    def test_enrich_marks_earlier_terms(self):
+        chain = [RefinementStep('שלום', 'exact'), RefinementStep('רמבם', 'exact')]
+        snippet = 'בשם שלום ורמבם *כמא* בתורה'
+        result = enrich_snippet_with_chain_terms(snippet, chain, 'כמא')
+        assert '*שלום*' in result
+        assert '*רמבם*' in result
+        assert '*כמא*' in result
+
+    def test_enrich_no_double_mark(self):
+        chain = [RefinementStep('abc', 'exact')]
+        snippet = 'x *abc* y abc z'
+        result = enrich_snippet_with_chain_terms(snippet, chain, 'abc')
+        # The already-marked *abc* should stay, the unmarked one should be skipped (same as current query)
+        assert result.count('*abc*') == 1  # only the original one
+
+    def test_enrich_empty_chain(self):
+        result = enrich_snippet_with_chain_terms('hello *world*', [], 'world')
+        assert result == 'hello *world*'
+
+    def test_enrich_skips_current_query(self):
+        chain = [RefinementStep('old', 'exact'), RefinementStep('current', 'exact')]
+        snippet = 'old text *current* here'
+        result = enrich_snippet_with_chain_terms(snippet, chain, 'current')
+        assert '*old*' in result
+        # 'current' is already marked and also the current query — no double
+
+
+# ---------------------------------------------------------------------------
+# _result_uids and compute_all_terms_filter
+# ---------------------------------------------------------------------------
+
+class TestResultUids:
+    def test_to_dict_excludes_result_uids(self):
+        step = RefinementStep('q', 'exact', result_count=5)
+        step._result_uids = {'uid_a', 'uid_b'}
+        d = step.to_dict()
+        assert '_result_uids' not in d
+        assert d['query'] == 'q'
+
+    def test_from_dict_ignores_result_uids(self):
+        d = {'query': 'q', 'mode': 'exact', '_result_uids': {'a', 'b'}}
+        step = RefinementStep.from_dict(d)
+        assert step._result_uids == set()  # default, not from dict
+
+    def test_replay_populates_result_uids(self):
+        results1 = _make_results('a', 'b', 'c')
+        results2 = _make_results('a')
+        searcher = MockSearcher([results1, results2])
+        step1 = RefinementStep('q1', 'exact')
+        step2 = RefinementStep('q2', 'exact')
+        replay_chain([step1, step2], searcher, None)
+        assert step1._result_uids == {'uid_a', 'uid_b', 'uid_c'}
+        assert step2._result_uids == {'uid_a'}
+
+    def test_replay_result_count_is_page_level(self):
+        # 3 results, 2 unique sys_ids — count should be 3 (pages), not 2 (manuscripts)
+        results = [
+            {'display': {'id': 'ms1'}, 'uid': 'uid_ms1_p1'},
+            {'display': {'id': 'ms1'}, 'uid': 'uid_ms1_p2'},
+            {'display': {'id': 'ms2'}, 'uid': 'uid_ms2_p1'},
+        ]
+        searcher = MockSearcher([results])
+        step = RefinementStep('q', 'exact')
+        replay_chain([step], searcher, None)
+        assert step.result_count == 3  # pages, not 2 manuscripts
+
+
+class TestComputeAllTermsFilter:
+    def test_single_step_returns_none(self):
+        step = RefinementStep('q', 'exact')
+        step._result_uids = {'a', 'b'}
+        assert compute_all_terms_filter([step]) is None
+
+    def test_two_steps_intersection(self):
+        s1 = RefinementStep('q1', 'exact')
+        s1._result_uids = {'a', 'b', 'c'}
+        s2 = RefinementStep('q2', 'exact')
+        s2._result_uids = {'b', 'c', 'd'}
+        result = compute_all_terms_filter([s1, s2])
+        assert result == {'b', 'c'}
+
+    def test_skips_metadata_modes(self):
+        s1 = RefinementStep('T-S', 'Shelfmark')
+        s1._result_uids = {'a', 'b'}
+        s2 = RefinementStep('q', 'exact')
+        s2._result_uids = {'b', 'c'}
+        # Only one text-search step (s2), Shelfmark skipped → needs 2+ text steps
+        assert compute_all_terms_filter([s1, s2]) is None
+
+    def test_three_steps_intersection(self):
+        s1 = RefinementStep('q1', 'exact')
+        s1._result_uids = {'a', 'b', 'c', 'd'}
+        s2 = RefinementStep('q2', 'exact')
+        s2._result_uids = {'b', 'c', 'd', 'e'}
+        s3 = RefinementStep('q3', 'exact')
+        s3._result_uids = {'c', 'd', 'e', 'f'}
+        result = compute_all_terms_filter([s1, s2, s3])
+        assert result == {'c', 'd'}
+
+    def test_empty_intersection(self):
+        s1 = RefinementStep('q1', 'exact')
+        s1._result_uids = {'a', 'b'}
+        s2 = RefinementStep('q2', 'exact')
+        s2._result_uids = {'c', 'd'}
+        result = compute_all_terms_filter([s1, s2])
+        assert result == set()
+
+    def test_mixed_modes_only_intersects_text(self):
+        s1 = RefinementStep('term1', 'exact')
+        s1._result_uids = {'a', 'b', 'c'}
+        s2 = RefinementStep('title', 'Title')
+        s2._result_uids = {'b', 'c', 'd'}  # skipped (metadata)
+        s3 = RefinementStep('term2', 'exact')
+        s3._result_uids = {'b', 'c', 'e'}
+        result = compute_all_terms_filter([s1, s2, s3])
+        assert result == {'b', 'c'}  # intersection of s1 and s3 only

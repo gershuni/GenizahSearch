@@ -54,7 +54,7 @@ from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
 
 # NLI crossref service for folio labels and source indicators (Phase 31)
 try:
@@ -12228,6 +12228,7 @@ class GenizahGUI(QMainWindow):
         self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)
         self._refinement_scope_sig: str = ''           # scope_signature at chain creation time
         self._zero_result_refine: bool = False         # True when last refine got 0 results (D-14a)
+        self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
         self.word_excluded_sys_ids = set()  # per-result exclusions for word search mode
         self.filter_sources = {}  # dict of {ref: cleaned_text}
         self.filter_enabled_sources = set()  # set of enabled source refs
@@ -14179,15 +14180,15 @@ class GenizahGUI(QMainWindow):
         # Phase 55: Refine mode badge (D-02) + cancel (D-02a)
         self.refine_badge = QLabel()
         self.refine_badge.setStyleSheet(
-            "QLabel { background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; "
-            "padding: 2px 8px; font-size: 11px; color: #e65100; }"
+            "QLabel { border: 1px solid palette(mid); border-radius: 4px; "
+            "padding: 2px 8px; font-size: 11px; color: #e67e22; }"
         )
         self.refine_badge.setVisible(False)
         row1.addWidget(self.refine_badge)
 
         self.refine_cancel_btn = QPushButton(tr("Cancel"))
         self.refine_cancel_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #e65100; "
+            "QPushButton { background: transparent; border: none; color: #e67e22; "
             "font-size: 11px; text-decoration: underline; }"
         )
         self.refine_cancel_btn.setVisible(False)
@@ -14431,6 +14432,17 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.btn_measurement_filter)
         row2.addWidget(self.btn_search_translations)
 
+        # Phase 55: "Search within N" button (D-01) in toolbar
+        self.search_within_btn = QPushButton()
+        self.search_within_btn.setStyleSheet(
+            "QPushButton { border: 1px solid palette(mid); border-radius: 4px; "
+            "padding: 3px 10px; font-size: 12px; }"
+            "QPushButton:hover { background: palette(midlight); }"
+        )
+        self.search_within_btn.setVisible(False)
+        self.search_within_btn.clicked.connect(self._enter_refine_mode)
+        row2.addWidget(self.search_within_btn)
+
         row2.addStretch()
         row2.addWidget(btn_help)
 
@@ -14581,7 +14593,7 @@ class GenizahGUI(QMainWindow):
         # Phase 55: Refinement breadcrumb strip (D-03, D-04) -- dedicated strip above results table
         self.refinement_strip = QFrame()
         self.refinement_strip.setStyleSheet(
-            "QFrame { background: #f0f4ff; border-bottom: 1px solid #ddd; padding: 2px 8px; }"
+            "QFrame { background: palette(midlight); border-bottom: 1px solid palette(mid); padding: 2px 8px; }"
         )
         refinement_strip_layout = QHBoxLayout(self.refinement_strip)
         refinement_strip_layout.setContentsMargins(8, 2, 8, 2)
@@ -14625,22 +14637,12 @@ class GenizahGUI(QMainWindow):
         self.export_buttons = [self.btn_exp_xlsx, self.btn_exp_csv, self.btn_exp_txt, self.btn_exp_docx]
         for b in self.export_buttons: b.setEnabled(False)
 
-        # Phase 55: "Search within N" button (D-01) in status row
-        self.search_within_btn = QPushButton()
-        self.search_within_btn.setStyleSheet(
-            "QPushButton { background: #e8eaf6; border: 1px solid #c5cae9; border-radius: 4px; "
-            "padding: 3px 10px; font-size: 12px; }"
-            "QPushButton:hover { background: #c5cae9; }"
-        )
-        self.search_within_btn.setVisible(False)
-        self.search_within_btn.clicked.connect(self._enter_refine_mode)
-
         # Phase 55: Zero-result recovery "Back to previous step" button (D-14a)
         self._zero_result_back_btn = QPushButton(tr('Back to previous step'))
         self._zero_result_back_btn.setStyleSheet(
-            "QPushButton { background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; "
-            "padding: 4px 12px; font-size: 12px; color: #e65100; }"
-            "QPushButton:hover { background: #ffe0b2; }"
+            "QPushButton { border: 1px solid palette(mid); border-radius: 4px; "
+            "padding: 4px 12px; font-size: 12px; color: #e67e22; }"
+            "QPushButton:hover { background: palette(midlight); }"
         )
         self._zero_result_back_btn.setVisible(False)
         self._zero_result_back_btn.clicked.connect(self._undo_zero_result_refine)
@@ -14648,7 +14650,6 @@ class GenizahGUI(QMainWindow):
         # Add controls to status row
         bot.addWidget(self.status_label, 1)
         bot.addWidget(self._zero_result_back_btn)
-        bot.addWidget(self.search_within_btn)
 
         # Add to List button
         self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
@@ -23967,7 +23968,17 @@ class GenizahGUI(QMainWindow):
 
         self.last_search_query = query
 
+        # Phase 55: If not in refine mode, clear any stale refinement chain
+        # A normal search should NOT be restricted by a previous refinement
+        if not self._refine_mode and self.refinement_chain:
+            self.refinement_chain = []
+            self.refinement_restrict_sys_ids = None
+            self._refinement_stale = False
+            self._refinement_scope_sig = ''
+            self._update_refinement_strip()
+
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
+        self.search_within_btn.setVisible(False)  # Hide during search
         self.search_start_time = time.time()
         self._search_was_cancelled = False
         self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setFormat("%p%"); self.search_progress.setVisible(True)
@@ -24274,8 +24285,11 @@ class GenizahGUI(QMainWindow):
             self.title_items_by_sid[sid] = item_title
             self.result_row_by_sys_id[sid] = row_idx
 
-            # Snippet
-            html_snippet = self.render_asterisks_to_html(res.get('snippet', ''))
+            # Snippet — enrich with earlier chain terms if refinement is active
+            _snip = res.get('snippet', '')
+            if self.refinement_chain and _snip:
+                _snip = enrich_snippet_with_chain_terms(_snip, self.refinement_chain, self.query_input.text())
+            html_snippet = self.render_asterisks_to_html(_snip)
             lbl = QLabel(html_snippet)
             lbl.setProperty("filter_text", res.get('snippet', ''))
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -24438,8 +24452,13 @@ class GenizahGUI(QMainWindow):
                 exclude_words=[],
                 text_position=text_position,
                 responsa_options=getattr(self, '_last_responsa_options', None),
-                result_count=len(raw_result_sys_ids),
+                result_count=len(results),  # total results (matches display count)
             )
+            step._result_uids = {
+                r.get('uid') or r.get('display', {}).get('id')
+                for r in results
+                if r.get('uid') or r.get('display', {}).get('id')
+            }
             self.refinement_chain.append(step)
             self.refinement_restrict_sys_ids = raw_result_sys_ids
             self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
@@ -24452,8 +24471,6 @@ class GenizahGUI(QMainWindow):
                 self.refine_cancel_btn.setVisible(False)
             if hasattr(self, '_update_refinement_strip'):
                 self._update_refinement_strip()
-        if hasattr(self, '_update_search_within_btn'):
-            self._update_search_within_btn()
         # Phase 55: Hide zero-result recovery button on successful search
         if hasattr(self, '_zero_result_back_btn'):
             self._zero_result_back_btn.setVisible(self._zero_result_refine)
@@ -24520,6 +24537,8 @@ class GenizahGUI(QMainWindow):
 
         # Final: hide progress, compute total elapsed including rendering
         self.reset_ui()
+        # Phase 55: Update search-within button AFTER reset_ui clears is_searching
+        self._update_search_within_btn()
         search_elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
         elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
         partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
@@ -24544,11 +24563,9 @@ class GenizahGUI(QMainWindow):
         finally:
             if hasattr(self, 'status_label'):
                 self.status_label.setText('')
-        if hasattr(self, '_update_refinement_strip'):
-            self._update_refinement_strip()
+        self._update_refinement_strip()
+        self._update_search_within_btn()
         self._schedule_session_save()
-        # Trigger search with updated restrict set to show results
-        self.toggle_search()
 
     def _replay_for_restore(self):
         """Replay chain during session restore. Shows 'Restoring refinement chain...' feedback."""
@@ -24573,12 +24590,37 @@ class GenizahGUI(QMainWindow):
         """D-02, D-03: Activate refine mode on desktop search bar."""
         if getattr(self, 'is_searching', False):
             return
-        # Use RAW result count (before post-filters)
-        n = len(getattr(self, 'last_results', []))
+        # Capture current RAW result sys_ids as the refinement scope BEFORE the user searches
+        raw_ids = {r.get('display', {}).get('id') for r in getattr(self, 'last_results', []) if r.get('display', {}).get('id')}
+        if not raw_ids:
+            return
+        self.refinement_restrict_sys_ids = raw_ids
+        self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
+        # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
+        if not self.refinement_chain and self.query_input.text().strip():
+            mode_idx = self.mode_combo.currentIndex()
+            if mode_idx == self.MODE_RESPONSA:
+                mode_val = 'responsa'
+            else:
+                _modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
+                mode_val = _modes[mode_idx] if mode_idx < len(_modes) else 'literal'
+            step0 = RefinementStep(
+                query=self.query_input.text().strip(),
+                mode=mode_val or 'exact',
+                result_count=len(getattr(self, 'last_results', [])),
+            )
+            step0._result_uids = {
+                r.get('uid') or r.get('display', {}).get('id')
+                for r in getattr(self, 'last_results', [])
+                if r.get('uid') or r.get('display', {}).get('id')
+            }
+            self.refinement_chain.append(step0)
+            self._update_refinement_strip()
+        ms_count = len(raw_ids)  # unique manuscript count
         self._refine_mode = True
         self._zero_result_refine = False
         self._zero_result_back_btn.setVisible(False)
-        self.refine_badge.setText(f"{tr('Refining within')} {n:,} {tr('results')}")
+        self.refine_badge.setText(f"{tr('Searching within')} {ms_count:,} {tr('manuscripts')}")
         self.refine_badge.setVisible(True)
         self.refine_cancel_btn.setVisible(True)
         self.query_input.setFocus()
@@ -24611,8 +24653,8 @@ class GenizahGUI(QMainWindow):
 
         for i, step in enumerate(chain):
             if i > 0:
-                sep = QLabel('\u203a')
-                sep.setStyleSheet('color: #999; font-size: 14px; margin: 0 2px;')
+                sep = QLabel('\u2039' if CURRENT_LANG == 'he' else '\u203a')
+                sep.setStyleSheet('color: palette(text); font-size: 14px; margin: 0 2px;')
                 strip_layout.addWidget(sep)
 
             label = step.display_label
@@ -24622,7 +24664,7 @@ class GenizahGUI(QMainWindow):
             # Chip frame (rounded pill with remove button)
             chip_frame = QFrame()
             chip_frame.setStyleSheet(
-                "QFrame { background: #e8eaf6; border: 1px solid #c5cae9; border-radius: 12px; padding: 1px 6px; }"
+                "QFrame { background: palette(button); border: 1px solid palette(mid); border-radius: 12px; padding: 1px 6px; }"
             )
             chip_layout = QHBoxLayout(chip_frame)
             chip_layout.setContentsMargins(6, 1, 2, 1)
@@ -24634,8 +24676,8 @@ class GenizahGUI(QMainWindow):
             remove_btn = QPushButton('\u00d7')
             remove_btn.setFixedSize(16, 16)
             remove_btn.setStyleSheet(
-                'QPushButton { border: none; font-size: 12px; color: #666; padding: 0; }'
-                'QPushButton:hover { color: #c62828; }'
+                'QPushButton { border: none; font-size: 12px; color: palette(text); padding: 0; }'
+                'QPushButton:hover { color: #e53935; }'
             )
             remove_btn.clicked.connect(lambda checked=False, idx=i: self._remove_refinement_step(idx))
             chip_layout.addWidget(remove_btn)
@@ -24643,13 +24685,24 @@ class GenizahGUI(QMainWindow):
 
         # Result count for final step only (D-06)
         count_label = QLabel(f'{chain[-1].result_count:,}')
-        count_label.setStyleSheet('font-size: 12px; font-weight: bold; color: #1565c0; margin-left: 4px;')
+        count_label.setStyleSheet('font-size: 12px; font-weight: bold; color: palette(highlight); margin-left: 4px;')
         strip_layout.addWidget(count_label)
+
+        # "Only results with all terms" checkbox (visible when 2+ steps)
+        if len(chain) >= 2:
+            sep = QLabel('|')
+            sep.setStyleSheet('color: palette(mid); margin: 0 4px;')
+            strip_layout.addWidget(sep)
+            all_terms_cb = QCheckBox(tr('Only results with all terms'))
+            all_terms_cb.setStyleSheet('font-size: 11px;')
+            all_terms_cb.setChecked(self._all_terms_filter)
+            all_terms_cb.toggled.connect(self._toggle_all_terms_filter)
+            strip_layout.addWidget(all_terms_cb)
 
         # Clear all button (D-11)
         clear_btn = QPushButton(tr('Clear all'))
         clear_btn.setStyleSheet(
-            'QPushButton { border: none; color: #1565c0; font-size: 11px; text-decoration: underline; margin-left: 8px; }'
+            'QPushButton { border: none; color: palette(highlight); font-size: 11px; text-decoration: underline; margin-left: 8px; }'
         )
         clear_btn.clicked.connect(self._clear_refinement_chain)
         strip_layout.addWidget(clear_btn)
@@ -24670,6 +24723,38 @@ class GenizahGUI(QMainWindow):
         else:
             self._clear_refinement_chain()
 
+    def _toggle_all_terms_filter(self, checked):
+        """Toggle 'Only results with all terms' post-filter and re-render results."""
+        self._all_terms_filter = checked
+        if hasattr(self, 'last_results') and self.last_results:
+            self._apply_all_terms_filter_and_rerender()
+
+    def _apply_all_terms_filter_and_rerender(self):
+        """Re-render results table applying the all-terms filter."""
+        if not self.last_results:
+            return
+        common_uids = None
+        if self._all_terms_filter and self.refinement_chain:
+            common_uids = compute_all_terms_filter(self.refinement_chain)
+        if common_uids is not None:
+            filtered = [r for r in self.last_results if (r.get('uid') or r.get('display', {}).get('id')) in common_uids]
+        else:
+            filtered = self.last_results
+        # Swap last_results, re-render, then restore
+        original = self.last_results
+        self.last_results = filtered
+        self.results_table.setRowCount(0)
+        self.results_loaded = 0
+        self.result_row_by_sys_id = {}
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
+        self.load_next_batch()
+        self.last_results = original  # restore full set for future operations
+        n_shown = len(filtered)
+        n_total = len(original)
+        if n_shown < n_total:
+            self.status_label.setText(f"{n_shown:,} {tr('of')} {n_total:,} ({tr('Only results with all terms')})")
+
     def _clear_refinement_chain(self):
         """D-11: Remove entire chain, return to unrestricted search."""
         self.refinement_chain = []
@@ -24678,6 +24763,7 @@ class GenizahGUI(QMainWindow):
         self._refinement_stale = False
         self._refinement_scope_sig = ''
         self._zero_result_refine = False
+        self._all_terms_filter = False
         self.refine_badge.setVisible(False)
         self.refine_cancel_btn.setVisible(False)
         self._zero_result_back_btn.setVisible(False)
@@ -24687,12 +24773,16 @@ class GenizahGUI(QMainWindow):
 
     def _update_search_within_btn(self):
         """D-01: Show/hide search within button based on result availability."""
-        has_results = len(getattr(self, 'last_results', [])) > 0
         is_searching = getattr(self, 'is_searching', False)
-        self.search_within_btn.setVisible(has_results and not is_searching)
-        if has_results:
-            n = len(self.last_results)  # RAW result count
-            self.search_within_btn.setText(f"{tr('Search within')} {n:,}")
+        results = getattr(self, 'last_results', [])
+        if results:
+            ms_ids = {r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')}
+            ms_count = len(ms_ids)
+        else:
+            ms_count = 0
+        self.search_within_btn.setVisible(ms_count > 0 and not is_searching)
+        if ms_count > 0:
+            self.search_within_btn.setText(f"🔍 {tr('Search within')} {ms_count:,} {tr('manuscripts')}")
 
     def _undo_zero_result_refine(self):
         """D-14a: Recover from zero-result refinement -- replay chain to restore previous results."""

@@ -34,16 +34,23 @@ class RefinementStep:
     exclude_words: list = field(default_factory=list)
     text_position: Optional[str] = None
     responsa_options: Optional[dict] = None
-    result_count: int = 0  # updated on replay, not authoritative
+    result_count: int = 0  # total page-level results (matches display count)
+
+    # Runtime-only fields (not serialized, rebuilt on replay)
+    _result_uids: set = field(default_factory=set, repr=False, compare=False)
 
     def to_dict(self) -> dict:
-        """Serialize to a plain dict (JSON-safe for session persistence)."""
-        return dataclasses.asdict(self)
+        """Serialize to a plain dict (JSON-safe for session persistence).
+        Excludes runtime-only _result_uids."""
+        d = dataclasses.asdict(self)
+        d.pop('_result_uids', None)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> RefinementStep:
-        """Construct from dict, ignoring unknown keys (forward-compat)."""
-        known = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        """Construct from dict, ignoring unknown keys and runtime fields."""
+        _skip = {'_result_uids'}
+        known = {k: v for k, v in d.items() if k in cls.__dataclass_fields__ and k not in _skip}
         return cls(**known)
 
     @property
@@ -133,10 +140,75 @@ def replay_chain(
             if r.get('display', {}).get('id')
         }
 
-        step.result_count = len(result_sys_ids)
+        # Capture page-level uids for "all terms" filter
+        step._result_uids = {
+            r.get('uid') or r.get('display', {}).get('id')
+            for r in results
+            if r.get('uid') or r.get('display', {}).get('id')
+        }
+
+        step.result_count = len(results)  # page-level count (matches display)
         accumulated_restrict = result_sys_ids if result_sys_ids else set()
 
     return accumulated_restrict
+
+
+def enrich_snippet_with_chain_terms(snippet: str, chain: list[RefinementStep], current_query: str) -> str:
+    """Add *highlight* markers for earlier chain queries in a snippet.
+
+    The search engine already marks the CURRENT query's matches with *...*
+    markers. This function adds markers for all earlier chain queries so
+    the user can see which terms from previous refinement steps also appear.
+
+    Only processes the raw text between existing markers, never double-marks.
+    """
+    if not snippet or not chain:
+        return snippet
+    import re
+
+    # Collect queries from earlier chain steps (not the current search query)
+    earlier_queries = []
+    current_lower = current_query.lower().strip() if current_query else ''
+    for step in chain:
+        q = step.query.strip()
+        if q and q.lower() != current_lower:
+            earlier_queries.append(q)
+    if not earlier_queries:
+        return snippet
+
+    # Build regex: match any earlier query term NOT already inside *...*
+    # Split on existing *markers* first, only process non-marked segments
+    parts = re.split(r'(\*[^*]+\*)', snippet)
+    pattern = '|'.join(re.escape(q) for q in earlier_queries)
+    term_re = re.compile(f'({pattern})', re.IGNORECASE)
+
+    result = []
+    for part in parts:
+        if part.startswith('*') and part.endswith('*'):
+            result.append(part)  # Already marked, keep as-is
+        else:
+            result.append(term_re.sub(r'*\1*', part))
+    return ''.join(result)
+
+
+def compute_all_terms_filter(chain: list[RefinementStep]) -> set | None:
+    """Return sys_ids that appear in ALL text-search steps' result sets.
+
+    Used for the "Only results with all terms" checkbox. Intersects
+    _result_uids across all text-search steps (skips metadata modes
+    like Title/Shelfmark where page-level filtering doesn't apply).
+
+    Returns None if chain has fewer than 2 steps or no valid sets.
+    """
+    if len(chain) < 2:
+        return None
+    # Metadata modes operate at manuscript level, not page level
+    _metadata_modes = {'Title', 'Shelfmark'}
+    sets = [s._result_uids for s in chain
+            if s._result_uids and s.mode not in _metadata_modes]
+    if len(sets) < 2:
+        return None
+    return set.intersection(*sets)
 
 
 def scope_signature(restrict_set: set | None) -> str:
