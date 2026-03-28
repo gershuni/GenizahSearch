@@ -14176,6 +14176,24 @@ class GenizahGUI(QMainWindow):
         self.MODE_PGP_TAGS = 7
         row1.addWidget(self.mode_combo)
 
+        # Phase 55: Refine mode badge (D-02) + cancel (D-02a)
+        self.refine_badge = QLabel()
+        self.refine_badge.setStyleSheet(
+            "QLabel { background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; "
+            "padding: 2px 8px; font-size: 11px; color: #e65100; }"
+        )
+        self.refine_badge.setVisible(False)
+        row1.addWidget(self.refine_badge)
+
+        self.refine_cancel_btn = QPushButton(tr("Cancel"))
+        self.refine_cancel_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #e65100; "
+            "font-size: 11px; text-decoration: underline; }"
+        )
+        self.refine_cancel_btn.setVisible(False)
+        self.refine_cancel_btn.clicked.connect(self._exit_refine_mode)
+        row1.addWidget(self.refine_cancel_btn)
+
         row1.addWidget(self.btn_search)
 
         # "New" button to reset/clear search state
@@ -14560,6 +14578,17 @@ class GenizahGUI(QMainWindow):
         table_layout = QVBoxLayout(self.table_container)
         table_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Phase 55: Refinement breadcrumb strip (D-03, D-04) -- dedicated strip above results table
+        self.refinement_strip = QFrame()
+        self.refinement_strip.setStyleSheet(
+            "QFrame { background: #f0f4ff; border-bottom: 1px solid #ddd; padding: 2px 8px; }"
+        )
+        refinement_strip_layout = QHBoxLayout(self.refinement_strip)
+        refinement_strip_layout.setContentsMargins(8, 2, 8, 2)
+        refinement_strip_layout.setSpacing(4)
+        self.refinement_strip.setVisible(False)
+        table_layout.addWidget(self.refinement_strip)
+
         table_layout.addWidget(self.results_table)
 
         self.results_stack = QStackedLayout()
@@ -14596,8 +14625,30 @@ class GenizahGUI(QMainWindow):
         self.export_buttons = [self.btn_exp_xlsx, self.btn_exp_csv, self.btn_exp_txt, self.btn_exp_docx]
         for b in self.export_buttons: b.setEnabled(False)
 
+        # Phase 55: "Search within N" button (D-01) in status row
+        self.search_within_btn = QPushButton()
+        self.search_within_btn.setStyleSheet(
+            "QPushButton { background: #e8eaf6; border: 1px solid #c5cae9; border-radius: 4px; "
+            "padding: 3px 10px; font-size: 12px; }"
+            "QPushButton:hover { background: #c5cae9; }"
+        )
+        self.search_within_btn.setVisible(False)
+        self.search_within_btn.clicked.connect(self._enter_refine_mode)
+
+        # Phase 55: Zero-result recovery "Back to previous step" button (D-14a)
+        self._zero_result_back_btn = QPushButton(tr('Back to previous step'))
+        self._zero_result_back_btn.setStyleSheet(
+            "QPushButton { background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; "
+            "padding: 4px 12px; font-size: 12px; color: #e65100; }"
+            "QPushButton:hover { background: #ffe0b2; }"
+        )
+        self._zero_result_back_btn.setVisible(False)
+        self._zero_result_back_btn.clicked.connect(self._undo_zero_result_refine)
+
         # Add controls to status row
         bot.addWidget(self.status_label, 1)
+        bot.addWidget(self._zero_result_back_btn)
+        bot.addWidget(self.search_within_btn)
 
         # Add to List button
         self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
@@ -24361,6 +24412,8 @@ class GenizahGUI(QMainWindow):
                 self.status_label.setText(tr('0 results within current scope'))
                 if hasattr(self, '_update_refinement_strip'):
                     self._update_refinement_strip()
+                if hasattr(self, '_zero_result_back_btn'):
+                    self._zero_result_back_btn.setVisible(True)
             if hasattr(self, '_update_search_within_btn'):
                 self._update_search_within_btn()
             return
@@ -24401,6 +24454,9 @@ class GenizahGUI(QMainWindow):
                 self._update_refinement_strip()
         if hasattr(self, '_update_search_within_btn'):
             self._update_search_within_btn()
+        # Phase 55: Hide zero-result recovery button on successful search
+        if hasattr(self, '_zero_result_back_btn'):
+            self._zero_result_back_btn.setVisible(self._zero_result_refine)
 
         self.results_loaded = 0
         self.results_table.setRowCount(0)
@@ -24512,6 +24568,145 @@ class GenizahGUI(QMainWindow):
         finally:
             if hasattr(self, 'status_label'):
                 self.status_label.setText('')
+
+    def _enter_refine_mode(self):
+        """D-02, D-03: Activate refine mode on desktop search bar."""
+        if getattr(self, 'is_searching', False):
+            return
+        # Use RAW result count (before post-filters)
+        n = len(getattr(self, 'last_results', []))
+        self._refine_mode = True
+        self._zero_result_refine = False
+        self._zero_result_back_btn.setVisible(False)
+        self.refine_badge.setText(f"{tr('Refining within')} {n:,} {tr('results')}")
+        self.refine_badge.setVisible(True)
+        self.refine_cancel_btn.setVisible(True)
+        self.query_input.setFocus()
+        self.query_input.selectAll()
+        # Ensure search tab is active
+        if hasattr(self, 'tabs'):
+            self.tabs.setCurrentIndex(0)
+
+    def _exit_refine_mode(self):
+        """D-02a: Cancel refine mode without search."""
+        self._refine_mode = False
+        self.refine_badge.setVisible(False)
+        self.refine_cancel_btn.setVisible(False)
+
+    def _update_refinement_strip(self):
+        """D-04, D-05, D-06, D-07, D-10: Rebuild breadcrumb chip widgets."""
+        strip_layout = self.refinement_strip.layout()
+        # Clear existing widgets
+        while strip_layout.count():
+            child = strip_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        chain = self.refinement_chain
+        if not chain:
+            self.refinement_strip.setVisible(False)
+            return
+        self.refinement_strip.setVisible(True)
+        show_modes = needs_mode_labels(chain)
+
+        for i, step in enumerate(chain):
+            if i > 0:
+                sep = QLabel('\u203a')
+                sep.setStyleSheet('color: #999; font-size: 14px; margin: 0 2px;')
+                strip_layout.addWidget(sep)
+
+            label = step.display_label
+            if show_modes:
+                label = f"{step.query} ({step.mode})"
+
+            # Chip frame (rounded pill with remove button)
+            chip_frame = QFrame()
+            chip_frame.setStyleSheet(
+                "QFrame { background: #e8eaf6; border: 1px solid #c5cae9; border-radius: 12px; padding: 1px 6px; }"
+            )
+            chip_layout = QHBoxLayout(chip_frame)
+            chip_layout.setContentsMargins(6, 1, 2, 1)
+            chip_layout.setSpacing(2)
+            chip_label = QLabel(label)
+            chip_label.setStyleSheet('font-size: 12px;')
+            chip_layout.addWidget(chip_label)
+            # Remove button (x) (D-12)
+            remove_btn = QPushButton('\u00d7')
+            remove_btn.setFixedSize(16, 16)
+            remove_btn.setStyleSheet(
+                'QPushButton { border: none; font-size: 12px; color: #666; padding: 0; }'
+                'QPushButton:hover { color: #c62828; }'
+            )
+            remove_btn.clicked.connect(lambda checked=False, idx=i: self._remove_refinement_step(idx))
+            chip_layout.addWidget(remove_btn)
+            strip_layout.addWidget(chip_frame)
+
+        # Result count for final step only (D-06)
+        count_label = QLabel(f'{chain[-1].result_count:,}')
+        count_label.setStyleSheet('font-size: 12px; font-weight: bold; color: #1565c0; margin-left: 4px;')
+        strip_layout.addWidget(count_label)
+
+        # Clear all button (D-11)
+        clear_btn = QPushButton(tr('Clear all'))
+        clear_btn.setStyleSheet(
+            'QPushButton { border: none; color: #1565c0; font-size: 11px; text-decoration: underline; margin-left: 8px; }'
+        )
+        clear_btn.clicked.connect(self._clear_refinement_chain)
+        strip_layout.addWidget(clear_btn)
+
+        # Stale indicator (D-16)
+        if self._refinement_stale:
+            stale_label = QLabel(tr('Scope changed \u2014 results will update on next search'))
+            stale_label.setStyleSheet('font-size: 10px; color: #e67e22; font-style: italic; margin-left: 8px;')
+            strip_layout.addWidget(stale_label)
+
+        strip_layout.addStretch()
+
+    def _remove_refinement_step(self, index):
+        """D-12: Remove chip at index and all subsequent, re-execute with feedback."""
+        self.refinement_chain = truncate_chain(self.refinement_chain, index)
+        if self.refinement_chain:
+            self._replay_refinement_chain()  # Shows "Re-evaluating..." feedback
+        else:
+            self._clear_refinement_chain()
+
+    def _clear_refinement_chain(self):
+        """D-11: Remove entire chain, return to unrestricted search."""
+        self.refinement_chain = []
+        self.refinement_restrict_sys_ids = None
+        self._refine_mode = False
+        self._refinement_stale = False
+        self._refinement_scope_sig = ''
+        self._zero_result_refine = False
+        self.refine_badge.setVisible(False)
+        self.refine_cancel_btn.setVisible(False)
+        self._zero_result_back_btn.setVisible(False)
+        self._update_refinement_strip()
+        self._update_search_within_btn()
+        self._schedule_session_save()
+
+    def _update_search_within_btn(self):
+        """D-01: Show/hide search within button based on result availability."""
+        has_results = len(getattr(self, 'last_results', [])) > 0
+        is_searching = getattr(self, 'is_searching', False)
+        self.search_within_btn.setVisible(has_results and not is_searching)
+        if has_results:
+            n = len(self.last_results)  # RAW result count
+            self.search_within_btn.setText(f"{tr('Search within')} {n:,}")
+
+    def _undo_zero_result_refine(self):
+        """D-14a: Recover from zero-result refinement -- replay chain to restore previous results."""
+        self._zero_result_refine = False
+        self._refine_mode = False
+        self.refine_badge.setVisible(False)
+        self.refine_cancel_btn.setVisible(False)
+        self._zero_result_back_btn.setVisible(False)
+        if self.refinement_chain:
+            # Replay chain to get back to the previous state
+            self._replay_refinement_chain()
+        else:
+            # No chain -- just update UI
+            self._update_search_within_btn()
 
     def _launch_enrichment_workers(self, results, defer=False):
         """Launch domain, PGP badge, printed badge, and measurement enrichment workers."""
