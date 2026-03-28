@@ -159,7 +159,7 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 
 **v7.3 Search Refinement & Scholarly Joins (Phases 54-57):**
 - [x] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse, dimension/measurement filtering in search (both apps). (completed 2026-03-27)
-- [ ] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps)
+- [x] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps) (completed 2026-03-28)
 - [ ] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps)
 - [ ] **Phase 57: FIST Joins Browse & Search Mode** - Clickable join partners in browse, "Has joins" search filter, post-search join partner enrichment with group capping (both apps)
 
@@ -300,8 +300,8 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 55-01-PLAN.md — Shared RefinementStep dataclass + chain helpers + tests
-- [ ] 55-02-PLAN.md — Web refinement UI: refine mode, breadcrumb strip, session persistence
-- [ ] 55-03-PLAN.md — Desktop refinement UI: refine mode, breadcrumb strip, session persistence
+- [x] 55-02-PLAN.md — Web refinement UI: refine mode, breadcrumb strip, session persistence
+- [x] 55-03-PLAN.md — Desktop refinement UI: refine mode, breadcrumb strip, session persistence
 
 ### Phase 56: Exclude Known Manuscripts
 **Goal**: Researchers can hide manuscripts they have already reviewed from search results, using either a saved cloud list or an imported shelfmark file
@@ -343,7 +343,7 @@ Plans:
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
 | 54. Dimensions Display & Filtering | 3/4 | Complete    | 2026-03-27 |
-| 55. Search Within Results | 1/3 | In Progress|  |
+| 55. Search Within Results | 3/3 | Complete   | 2026-03-28 |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
