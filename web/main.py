@@ -25,6 +25,42 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nicegui import ui, app, run
 
+# ---------------------------------------------------------------------------
+# Monkey-patch: NiceGUI _get_esm missing is_file() guard (affects <= 3.8.0)
+#
+# NiceGUI's ESM route handler checks filepath.exists() but not filepath.is_file().
+# When a browser or bot requests the bare directory URL (e.g. /_nicegui/.../esm/{key}/)
+# the path resolves to the dist/ directory itself, passes exists(), and then
+# Starlette's FileResponse crashes with:
+#   RuntimeError: File at path .../aggrid/dist is not a file.
+#
+# Fix: override the route to add an is_file() check, returning 404 for directories.
+# ---------------------------------------------------------------------------
+def _patch_nicegui_esm_handler() -> None:
+    import mimetypes
+    from starlette.responses import FileResponse
+    from fastapi import HTTPException
+    from nicegui import __version__ as _nv
+    from nicegui.dependencies import esm_modules
+
+    route_path = f'/_nicegui/{_nv}/esm/{{key}}/{{path:path}}'
+
+    # Remove the existing route so we can replace it
+    app.routes[:] = [r for r in app.routes if getattr(r, 'path', None) != route_path]
+
+    @app.get(route_path)
+    def _get_esm_patched(key: str, path: str) -> FileResponse:
+        if key in esm_modules:
+            filepath = esm_modules[key].path / path
+            if not filepath.resolve().is_relative_to(esm_modules[key].path.resolve()):
+                raise HTTPException(status_code=403, detail='forbidden')
+            if filepath.exists() and filepath.is_file():
+                media_type, _ = mimetypes.guess_type(filepath)
+                return FileResponse(filepath, media_type=media_type)
+        raise HTTPException(status_code=404, detail=f'ESM module "{key}" not found')
+
+_patch_nicegui_esm_handler()
+
 logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
