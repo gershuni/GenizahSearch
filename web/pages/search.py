@@ -508,6 +508,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             app.storage.user['search_query'] = query_input.value or ''
                         query_input.on('blur', save_query)
 
+                    # Phase 55: Refine mode badge (D-02) + cancel (D-02a)
+                    refine_badge = ui.chip('', icon='filter_list', color='amber-3').classes('text-sm')
+                    refine_badge.set_visibility(False)
+                    refine_cancel_btn = ui.button(tr('Cancel'), icon='close',
+                        on_click=lambda: _exit_refine_mode()
+                    ).classes('text-xs').props('flat dense no-caps')
+                    refine_cancel_btn.set_visibility(False)
+
                     # Tag Select (for PGP Tags mode) — hidden by default
                     with ui.column().classes('flex-grow min-w-80 gap-1') as tag_column:
                         h2(tr('PGP Tags'), classes='text-sm font-medium', style='color: var(--success-600);')
@@ -1475,6 +1483,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).classes('text-sm').props('outline dense no-caps')
                     _set_btn_visible(printed_filter_btn, False)
 
+                    # Phase 55: "Search within" button (D-01)
+                    search_within_btn = ui.button(
+                        '', icon='filter_list',
+                        on_click=lambda: _enter_refine_mode()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    search_within_btn.set_visibility(False)
+
                 with ui.row().classes('gap-2'):
                     # Bulk actions (initially hidden)
                     bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
@@ -1497,6 +1512,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
                         'flat round dense size=sm'
                     ).tooltip(tr('Export Excel'))
+
+            # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
+            refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
+                'background: #f0f4ff; border-bottom: 1px solid var(--border-light); '
+                'overflow-x: auto; white-space: nowrap; min-height: 0; display: none;'
+            )
 
             # Filters Panel (initially hidden)
             filters_visible = {'value': False}
@@ -1602,6 +1623,102 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
                 'background: var(--bg-secondary); min-height: 300px;'
             )
+
+    # === Phase 55: Refinement UI helper functions ===
+
+    def _enter_refine_mode():
+        """D-02: Activate refine mode -- scroll to search bar, show badge."""
+        if search_state.is_running:
+            return
+        n = len(search_state.results)
+        search_state._refine_mode = True
+        search_state._zero_result_refine = False
+        refine_badge.text = f"{tr('Refining within')} {n:,} {tr('results')}"
+        refine_badge.set_visibility(True)
+        refine_cancel_btn.set_visibility(True)
+        # Scroll to search bar and focus (D-02)
+        ui.run_javascript(f'''
+            document.getElementById("c{query_input.id}").scrollIntoView({{behavior: "smooth", block: "center"}});
+            setTimeout(() => {{
+                var el = document.getElementById("c{query_input.id}");
+                if (el) {{ var inp = el.querySelector("input"); if (inp) inp.focus(); }}
+            }}, 500);
+        ''')
+
+    def _exit_refine_mode():
+        """D-02a: Cancel refine mode without running search."""
+        search_state._refine_mode = False
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
+
+    def _update_refinement_strip():
+        """Rebuild the breadcrumb chip chain (D-04, D-05, D-06, D-07, D-10)."""
+        refinement_strip.clear()
+        chain = search_state.refinement_chain
+        if not chain:
+            refinement_strip.style('display: none;')
+            return
+        refinement_strip.style('display: flex;')
+        show_modes = needs_mode_labels(chain)
+        with refinement_strip:
+            for i, step in enumerate(chain):
+                if i > 0:
+                    ui.label('\u203a').classes('text-lg mx-1').style('color: #999;')
+                label = step.display_label
+                if show_modes:
+                    label = f"{step.query} ({step.mode})"
+                chip = ui.chip(label, removable=True, color='indigo-2').classes('text-sm')
+                chip.on('remove', lambda _idx=i: _remove_refinement_step(_idx))
+            # Result count for final step only (D-06)
+            ui.label(f'{chain[-1].result_count:,}').classes('text-sm font-bold ml-2').style('color: var(--primary-600);')
+            # Clear all (D-11)
+            ui.button(tr('Clear all'), icon='clear_all',
+                      on_click=_clear_refinement_chain
+            ).classes('text-xs ml-2').props('flat dense no-caps')
+            # Stale indicator (D-16)
+            if search_state._refinement_stale:
+                ui.label(tr('Scope changed \u2014 results will update on next search')).classes('text-xs ml-2').style('color: #e67e22; font-style: italic;')
+
+    def _remove_refinement_step(index):
+        """D-12: Remove chip at index and all subsequent, then re-execute with feedback."""
+        search_state.refinement_chain = truncate_chain(search_state.refinement_chain, index)
+        if search_state.refinement_chain:
+            asyncio.ensure_future(_replay_refinement_chain_and_search())
+        else:
+            _clear_refinement_chain()
+
+    def _clear_refinement_chain():
+        """D-11: Remove entire chain, return to unrestricted search."""
+        search_state.refinement_chain = []
+        search_state.refinement_restrict_sys_ids = None
+        search_state._refine_mode = False
+        search_state._refinement_stale = False
+        search_state._refinement_scope_sig = ''
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
+        persist_value('search_refinement_chain', [])
+        _update_refinement_strip()
+        _update_search_within_btn()
+
+    def _update_search_within_btn():
+        """D-01: Show/hide search within button based on result availability."""
+        has_results = len(search_state.results) > 0
+        is_searching = search_state.is_running
+        search_within_btn.set_visibility(has_results and not is_searching)
+        if has_results:
+            n = len(search_state.results)
+            search_within_btn.text = f"{tr('Search within')} {n:,}"
+
+    def _undo_zero_result_refine():
+        """D-14a: Recover from zero-result refinement."""
+        search_state._zero_result_refine = False
+        search_state._refine_mode = False
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
+        if search_state.refinement_chain:
+            asyncio.ensure_future(_replay_refinement_chain_and_search())
+        else:
+            render_results(search_state.results, page=0)
 
     # === Panel Toggle Functions ===
 
@@ -3839,9 +3956,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         if not results:
             with results_container:
-                with ui.column().classes('w-full h-64 items-center justify-center'):
-                    ui.icon('search').classes('text-5xl').style('color: var(--text-muted);')
-                    ui.label(tr("Ready to search.")).classes('mt-4').style('color: var(--text-muted);')
+                # Phase 55: Zero-result refinement recovery (D-14a)
+                if getattr(search_state, '_zero_result_refine', False):
+                    with ui.column().classes('w-full h-64 items-center justify-center'):
+                        ui.label(tr('0 results within current scope')).classes('text-lg py-4 text-center w-full')
+                        ui.button(
+                            tr('Back to previous step'), icon='undo',
+                            on_click=lambda: _undo_zero_result_refine()
+                        ).classes('mx-auto')
+                else:
+                    with ui.column().classes('w-full h-64 items-center justify-center'):
+                        ui.icon('search').classes('text-5xl').style('color: var(--text-muted);')
+                        ui.label(tr("Ready to search.")).classes('mt-4').style('color: var(--text-muted);')
+            _update_search_within_btn()
+            _update_refinement_strip()
             return
 
         # Calculate page slice
@@ -3972,6 +4100,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             _apply_word_search_exclusions_and_render()
                         ui.button(tr('Clear All Exclusions'), icon='clear_all',
                                   on_click=_clear_word_exclusions).props('flat dense no-caps size=sm')
+
+        # Phase 55: Update refinement UI after rendering results
+        _update_search_within_btn()
+        _update_refinement_strip()
 
         # Scroll to top of results after page change
         if scroll_to_top:
@@ -5777,3 +5909,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 render_results(search_state.results, page=search_state.current_page)
 
     asyncio.ensure_future(_after_delay(0.2, _deferred_transcription_restore))
+
+    # Phase 55: Deferred refinement chain replay on session restore
+    if search_state.refinement_chain:
+        asyncio.ensure_future(_after_delay(0.3, _deferred_chain_replay))
