@@ -158,7 +158,7 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 **Milestone Goal:** Search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments -- dimensions display and filtering, search within results, exclude known manuscripts, and FIST joins enrichment with a dedicated search mode. Both web (NiceGUI) and desktop (PyQt6).
 
 **v7.3 Search Refinement & Scholarly Joins (Phases 54-57):**
-- [x] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse, dimension/measurement filtering in search (both apps). (completed 2026-03-27)
+- [x] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse, dimension/measurement filtering in search (both apps). (completed 2026-03-27)
 - [ ] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps)
 - [ ] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps)
 - [ ] **Phase 57: FIST Joins Browse & Search Mode** - Clickable join partners in browse, "Has joins" search filter, post-search join partner enrichment with group capping (both apps)
@@ -297,8 +297,11 @@ Plans:
   2. A breadcrumb or chip displays the refinement chain showing the original query, making the active scope visible at all times (both apps)
   3. User can click a clear button on the breadcrumb to return to unrestricted search, removing the restrict set in one action (both apps)
   4. Search-within correctly intersects with any active pre-search filters (domain, dimensions, etc.) -- the restrict set narrows further, never replaces existing filters
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 3 plans
+Plans:
+- [ ] 55-01-PLAN.md — Shared RefinementStep dataclass + chain helpers + tests
+- [ ] 55-02-PLAN.md — Web refinement UI: refine mode, breadcrumb strip, session persistence
+- [ ] 55-03-PLAN.md — Desktop refinement UI: refine mode, breadcrumb strip, session persistence
 
 ### Phase 56: Exclude Known Manuscripts
 **Goal**: Researchers can hide manuscripts they have already reviewed from search results, using either a saved cloud list or an imported shelfmark file
@@ -340,10 +343,10 @@ Plans:
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
 | 54. Dimensions Display & Filtering | 3/4 | Complete    | 2026-03-27 |
-| 55. Search Within Results | 0/? | Not started | - |
+| 55. Search Within Results | 0/3 | Not started | - |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-27 after Phase 54 plans 03-04 replanned from review feedback*
+*Last updated: 2026-03-28 after Phase 55 planning (3 plans)*
