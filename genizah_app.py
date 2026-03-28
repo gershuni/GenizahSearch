@@ -24653,7 +24653,7 @@ class GenizahGUI(QMainWindow):
 
         for i, step in enumerate(chain):
             if i > 0:
-                sep = QLabel('\u2039' if CURRENT_LANG == 'he' else '\u203a')
+                sep = QLabel('\u203a' if CURRENT_LANG == 'he' else '\u2039')
                 sep.setStyleSheet('color: palette(text); font-size: 14px; margin: 0 2px;')
                 strip_layout.addWidget(sep)
 

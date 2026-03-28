@@ -1687,7 +1687,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         with refinement_strip:
             for i, step in enumerate(chain):
                 if i > 0:
-                    ui.label('\u2039' if is_rtl() else '\u203a').classes('text-lg mx-1').style('color: var(--text-secondary, #999);')
+                    ui.label('\u203a' if is_rtl() else '\u2039').classes('text-lg mx-1').style('color: var(--text-secondary, #999);')
                 label = step.display_label
                 if show_modes:
                     label = f"{step.query} ({step.mode})"
