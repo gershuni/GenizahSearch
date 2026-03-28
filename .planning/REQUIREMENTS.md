@@ -9,9 +9,9 @@
 
 ### Search Within Results
 
-- [ ] **SRCH-01**: User can run a second search query restricted to the current result set's sys_ids (web + desktop)
-- [ ] **SRCH-02**: User can see a refinement breadcrumb showing the search chain (web + desktop)
-- [ ] **SRCH-03**: User can clear refinement to return to full search (web + desktop)
+- [x] **SRCH-01**: User can run a second search query restricted to the current result set's sys_ids (web + desktop)
+- [x] **SRCH-02**: User can see a refinement breadcrumb showing the search chain (web + desktop)
+- [x] **SRCH-03**: User can clear refinement to return to full search (web + desktop)
 
 ### Exclude Known Manuscripts
 
@@ -66,9 +66,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIM-02 | Phase 54 | Complete |
 | DIM-03 | Phase 54 | Complete |
 | DIM-04 | Phase 54 | Complete |
-| SRCH-01 | Phase 55 | Pending |
-| SRCH-02 | Phase 55 | Pending |
-| SRCH-03 | Phase 55 | Pending |
+| SRCH-01 | Phase 55 | Complete |
+| SRCH-02 | Phase 55 | Complete |
+| SRCH-03 | Phase 55 | Complete |
 | EXCL-01 | Phase 56 | Pending |
 | EXCL-02 | Phase 56 | Pending |
 | EXCL-03 | Phase 56 | Pending |

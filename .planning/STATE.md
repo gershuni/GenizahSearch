@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v7.3
 milestone_name: Search Refinement & Scholarly Joins
-status: Ready to plan
-stopped_at: Phase 55 context gathered
-last_updated: "2026-03-28T17:28:29.122Z"
+status: Ready to execute
+stopped_at: Completed 55-01-PLAN.md
+last_updated: "2026-03-28T19:10:41.350Z"
 progress:
   total_phases: 11
   completed_phases: 7
-  total_plans: 21
-  completed_plans: 21
+  total_plans: 24
+  completed_plans: 22
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 54 — dimensions-display-filtering
+**Current focus:** Phase 55 — search-within-results
 
 ## Current Position
 
-Phase: 55
-Plan: Not started
+Phase: 55 (search-within-results) — EXECUTING
+Plan: 2 of 3
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Recent decisions affecting current work:
 - [Phase 54]: COALESCE(catalog, computed) for width/height filtering maximizes coverage
 - [Phase 54]: _normalize_range backend guard swaps reversed min/max bounds
 - [Phase 54]: Material labeled 'Material (measured)' to distinguish from printed filter; post-search state separate from pre-search; shared _apply_measurement_post_filters helper in web; _measurement_fetch_complete race guard in desktop
+- [Phase 55]: Explicit None vs empty-set contract in compute_effective_restrict for search restrict merging
 
 ### Pending Todos
 
@@ -141,9 +142,10 @@ Recent decisions affecting current work:
 | 260326-u9e | Reorganize docs/ folder: archive 28 completed/stale docs, update indexes | 2026-03-26 | 3927e257 | [260326-u9e-reorganize-docs-folder-archive-outdated-](./quick/260326-u9e-reorganize-docs-folder-archive-outdated-/) |
 | Phase 54 P03 | 12min | 2 tasks | 3 files |
 | Phase 54 P04 | 25min | 2 tasks | 4 files |
+| Phase 55 P01 | 2min | 1 tasks | 2 files |
 
 ## Session Continuity
 
-Last session: 2026-03-28T17:28:29.105Z
-Stopped at: Phase 55 context gathered
-Resume file: .planning/phases/55-search-within-results/55-CONTEXT.md
+Last session: 2026-03-28T19:10:41.344Z
+Stopped at: Completed 55-01-PLAN.md
+Resume file: None

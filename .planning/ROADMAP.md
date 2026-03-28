@@ -299,7 +299,7 @@ Plans:
   4. Search-within correctly intersects with any active pre-search filters (domain, dimensions, etc.) -- the restrict set narrows further, never replaces existing filters
 **Plans**: 3 plans
 Plans:
-- [ ] 55-01-PLAN.md — Shared RefinementStep dataclass + chain helpers + tests
+- [x] 55-01-PLAN.md — Shared RefinementStep dataclass + chain helpers + tests
 - [ ] 55-02-PLAN.md — Web refinement UI: refine mode, breadcrumb strip, session persistence
 - [ ] 55-03-PLAN.md — Desktop refinement UI: refine mode, breadcrumb strip, session persistence
 
@@ -343,7 +343,7 @@ Plans:
 | 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
 | 54. Dimensions Display & Filtering | 3/4 | Complete    | 2026-03-27 |
-| 55. Search Within Results | 0/3 | Not started | - |
+| 55. Search Within Results | 1/3 | In Progress|  |
 | 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
