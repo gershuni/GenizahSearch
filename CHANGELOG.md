@@ -8,6 +8,7 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ### New Features
 - **Search within results**: Progressive refinement — run a second query restricted to manuscripts from your current result set. Breadcrumb chip chain shows refinement history with per-chip removal, cross-mode support (text, Responsa, Title, Shelfmark), "Only results with all terms" page-level filter, and chain-aware snippet highlighting
+- **Lightweight browse first-render**: Browse page first paint now uses only Tantivy + csv_bank (zero SQLite calls). Crossref, Oxford, Cambridge, and attribution data load asynchronously in Phase B enrichment — faster first content for users and 255K sitemap URLs for crawlers
 
 ### Improvements
 - **Thread-safe SQLite services**: All shared services (FJMS, NLI, PGP, Translation) now use per-thread connections for safer concurrent access
@@ -15,6 +16,8 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ### Bug Fixes
 - **csv_bank race condition**: Fixed `dictionary changed size during iteration` error in metadata search under concurrent access
+- **Browse stale enrichment guard**: Generation counter re-checked after deferred Oxford translation fetch to prevent stale state on rapid navigation
+- **Metadata-only page state**: Records without transcription text now correctly show page 1 with folio label after enrichment (was stuck at page 0)
 
 ---
 
