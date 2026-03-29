@@ -162,7 +162,7 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 - [x] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps) (completed 2026-03-28)
 - [x] **Phase 55.1: Lightweight Browse First-Render** - Split browse page data into fast (Tantivy + csv_bank) and deferred (SQLite enrichment) tiers so first paint requires zero SQLite calls (web only, performance) (completed 2026-03-29)
 - [x] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps) (completed 2026-03-29)
-- [ ] **Phase 57: FIST Joins Browse & Search Mode** - Clickable join partners in browse, "Has joins" search filter, post-search join partner enrichment with group capping (both apps)
+- [ ] **Phase 57: FIST Visual Similarity Browse & Search** - Visual similarity suggestions from FJMS SVM image analysis (~15.5M pairs), dedicated dialog in browse, "Search in visual suggestions" with union/intersection modes, server-only sidecar with desktop on-demand fetch + cache (both apps)
 
 ## Phase Details
 
@@ -335,16 +335,21 @@ Plans:
 - [x] 56-03-PLAN.md — Desktop exclusion UI: enhanced ExcludeDialog with list tab, multi-source tracking, session persistence
 **Directory**: `.planning/phases/56-exclude-known-manuscripts/`
 
-### Phase 57: FIST Joins Browse & Search Mode
-**Goal**: Researchers can discover scholarly join relationships while browsing and can restrict searches to only manuscripts with known FIST joins, seeing join partners alongside their search results
-**Depends on**: Phase 54 (dimensions can appear for join partners); Phase 56 (exclude can filter join group members)
+### Phase 57: FIST Visual Similarity Browse & Search
+**Goal**: Researchers can discover visual similarity suggestions from FJMS SVM image analysis while browsing, and use those suggestions to restrict text searches via union/intersection of partner pools
+**Depends on**: Phase 55 (reuses restrict_sys_ids mechanism); Phase 54 (dimensions can appear for suggestion partners)
 **Requirements**: JOIN-01, JOIN-02, JOIN-03
 **Success Criteria** (what must be TRUE):
-  1. User can see FIST join group partners in the browse enrichment panel with clickable shelfmarks that navigate to the partner manuscript's browse view (both apps)
-  2. User can enable a "Has joins" toggle in the search filter panel that restricts results to the ~20K manuscripts with FIST join records, and the toggle shows the available manuscript count before searching (both apps)
-  3. Search results for manuscripts with joins display an expandable join partners section showing up to 10 partners inline with "and N more..." for larger groups, including join type and scholar attribution (both apps)
-  4. Join partner enrichment uses batch lookup (single SQL query for all result sys_ids) rather than per-result queries, keeping search performance comparable to unfiltered search
-**Plans**: TBD
+  1. (JOIN-01) User can see FIST visual similarity suggestions in a dedicated browse dialog with ranked partners, clickable shelfmarks, domain/library metadata, and Browse/Puzzle action buttons (both apps)
+  2. (JOIN-02) User can trigger "Search in visual suggestions" from browse to restrict a text search to the suggestion partner pool, with union/intersection modes for multi-manuscript selection (both apps)
+  3. (JOIN-03) Desktop fetches suggestions on-demand from server API and caches locally; optional full DB download available in settings for offline use (both apps)
+  4. Visual similarity data stored in separate visual_similarity.db sidecar (~500-700MB), server-only by default, with batch queries for performance
+**Plans**: 3 plans
+Plans:
+- [ ] 57-01-PLAN.md — Import script + VisualSimilarityService + tests + API endpoint
+- [ ] 57-02-PLAN.md — Web browse dialog + "Search in Visual Suggestions" action + translations
+- [ ] 57-03-PLAN.md — Desktop browse dialog + on-demand cache + search integration + settings download
+**Directory**: `.planning/phases/57-fist-joins-browse-search-mode/`
 
 ## Progress
 
@@ -365,8 +370,8 @@ Plans:
 | 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
 | 55.1. Lightweight Browse First-Render | 1/1 | Complete    | 2026-03-29 |
 | 56. Exclude Known Manuscripts | 3/3 | Complete    | 2026-03-29 |
-| 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
+| 57. FIST Visual Similarity Browse & Search | 0/3 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-29 after Phase 56 planning (3 plans, 2 waves)*
+*Last updated: 2026-03-29 after Phase 57 planning (3 plans, 2 waves)*
