@@ -8,7 +8,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.3 Search Refinement & Scholarly Joins
+## Current Milestone: v7.5 Search Refinement & Scholarly Joins
 
 **Goal:** Add search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments.
 
@@ -135,16 +135,18 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Join document creation: composite image + metadata saved to local joins.db, publishable for community review -- v7.0.0
 - Recto/verso support: auto-generated verso from recto arrangement with correct verso images -- v7.0.0
 - Community publishing: publish/fork/browse puzzle joins via Supabase with RLS -- v7.0.0
+- Manuscript dimensions display in browse/results with summary, catalog, computed, blank image sizes (both apps) -- v7.3.0
+- Pre-search dimension range filter (min/max width/height/line height) across all search modes (both apps) -- v7.3.0
+- Post-search dimension filtering within results via expandable panel (both apps) -- v7.3.0
+- Search within results: progressive refinement restricting queries to current result set, breadcrumb chain, per-chip removal (both apps) -- v7.4.0
+- Lightweight browse first-render: zero SQLite calls in hot path, deferred enrichment in Phase B (web) -- v7.4.0
+- Bracket-aware search: scholarly notation brackets preserved through search pipeline (both apps) -- v7.4.0
 
 ### Active
 
-- [ ] Search within results: restrict second query to current result set sys_ids (both apps)
 - [ ] Exclude known manuscripts from search: via saved lists or imported shelfmark file (both apps)
 - [ ] FIST join group suggestions in browse enrichment (both apps)
 - [ ] Search within FIST join groups: dedicated search mode (both apps)
-- [ ] Manuscript dimensions display in browse/results (both apps)
-- [ ] Pre-search dimension range filter (min/max width/height) (both apps)
-- [ ] Post-search dimension filtering within results (both apps)
 
 ### Out of Scope
 

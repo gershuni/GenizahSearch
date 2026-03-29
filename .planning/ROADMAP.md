@@ -160,8 +160,8 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 **v7.3 Search Refinement & Scholarly Joins (Phases 54-57):**
 - [x] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse, dimension/measurement filtering in search (both apps). (completed 2026-03-27)
 - [x] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps) (completed 2026-03-28)
-- [ ] **Phase 55.1: Lightweight Browse First-Render** - Split browse page data into fast (Tantivy + csv_bank) and deferred (SQLite enrichment) tiers so first paint requires zero SQLite calls (web only, performance)
-- [x] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps) (completed 2026-03-29)
+- [x] **Phase 55.1: Lightweight Browse First-Render** - Split browse page data into fast (Tantivy + csv_bank) and deferred (SQLite enrichment) tiers so first paint requires zero SQLite calls (web only, performance) (completed 2026-03-29)
+- [ ] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps)
 - [ ] **Phase 57: FIST Joins Browse & Search Mode** - Clickable join partners in browse, "Has joins" search filter, post-search join partner enrichment with group capping (both apps)
 
 ## Phase Details
@@ -330,6 +330,7 @@ Plans:
   5. Exclusion state persists within the session (web: SearchUIState; desktop: session state JSON) so that switching between searches does not lose the active exclude set
 **Plans**: TBD
 **UI hint**: yes
+**Directory**: `.planning/phases/56-exclude-known-manuscripts/`
 
 ### Phase 57: FIST Joins Browse & Search Mode
 **Goal**: Researchers can discover scholarly join relationships while browsing and can restrict searches to only manuscripts with known FIST joins, seeing join partners alongside their search results
@@ -359,7 +360,8 @@ Plans:
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
 | 54. Dimensions Display & Filtering | 3/4 | Complete    | 2026-03-27 |
 | 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
-| 56. Exclude Known Manuscripts | 1/1 | Complete    | 2026-03-29 |
+| 55.1. Lightweight Browse First-Render | 1/1 | Complete    | 2026-03-29 |
+| 56. Exclude Known Manuscripts | 0/? | Not started | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
 ---
