@@ -3437,10 +3437,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                         cb.set_value(val)
                                                 return toggle
                                             hdr_cb = ui.checkbox(
-                                                tr('Select all'), value=False
-                                            ).props('dense').classes('text-xs font-bold mb-1').on(
-                                                'update:model-value', _make_hdr_toggle()
-                                            )
+                                                tr('Select all'), value=False,
+                                                on_change=_make_hdr_toggle()
+                                            ).props('dense').classes('text-xs font-bold mb-1')
                                             _excl_hdr_cbs[list_id] = hdr_cb
 
                                             # Individual items
@@ -3450,10 +3449,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                         _excl_selections[lid][sid] = e.value
                                                     return toggle
                                                 item_cb = ui.checkbox(
-                                                    r['shelfmark'], value=False
-                                                ).props('dense').classes('text-xs ml-6').on(
-                                                    'update:model-value', _make_item_toggle()
-                                                )
+                                                    r['shelfmark'], value=False,
+                                                    on_change=_make_item_toggle()
+                                                ).props('dense').classes('text-xs ml-6')
                                                 _excl_item_cbs[list_id].append(item_cb)
 
                             async def _apply_list_exclusion():
