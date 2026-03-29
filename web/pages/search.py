@@ -6235,8 +6235,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 on_click=lambda t=text_to_copy: copy_result_text(t)
                             ).props('outline')
 
-        # Initial load
-        load_result(index)
+        # Initial load (use current_result_idx which handles standalone mode)
+        load_result(adv_state.current_result_idx)
         dialog.open()
 
     def copy_result_text(text):

@@ -3031,6 +3031,10 @@ class ExcludeDialog(QDialog):
 
         # Bottom buttons
         btn_row = QHBoxLayout()
+        btn_clear_all = QPushButton(tr("Clear All"))
+        btn_clear_all.setToolTip(tr("Remove all exclusions"))
+        btn_clear_all.clicked.connect(self._clear_all)
+        btn_row.addWidget(btn_clear_all)
         btn_row.addStretch()
         btn_apply = QPushButton(tr("Apply"))
         btn_apply.clicked.connect(self.accept)
@@ -3041,6 +3045,22 @@ class ExcludeDialog(QDialog):
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
+
+    def _clear_all(self):
+        """Clear all entries from the editor and accept (removes all exclusions)."""
+        self._syncing = True
+        self.sys_text_area.clear()
+        self.shelf_text_area.clear()
+        self.title_text_area.clear()
+        self._syncing = False
+        self._full_titles = []
+        self._display_titles = []
+        self._resolved_entries = []
+        self._resolved_ids = set()
+        self._resolved_unresolved = []
+        self._report_table.setVisible(False)
+        self._report_label.setText("")
+        self.accept()
 
     def _load_list_to_editor(self):
         """Load selected list items into the editor tab (sys_ids + shelfmarks)."""
@@ -27341,21 +27361,20 @@ class GenizahGUI(QMainWindow):
         )
         if dlg.exec():
             new_sources = dlg.get_exclusion_sources()
-            if new_sources:
-                # Replace all sources with what the dialog editor contains
-                self.exclusion_sources = new_sources
-                self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
-                all_unresolved = []
-                for s in self.exclusion_sources:
-                    all_unresolved.extend(s.unresolved)
-                self.excluded_shelfmarks = {normalize_shelfmark(u) for u in all_unresolved if u}
-                self._update_exclusion_display()
-                if hasattr(self, 'last_results') and self.last_results:
-                    self._apply_manual_exclusions(self.last_results, getattr(self, 'comp_raw_items', []))
-                self._schedule_session_save()
-            else:
-                # Legacy fallback: use text-based entries
-                self.set_excluded_entries(dlg.get_entries_text())
+            # Replace all sources with what the dialog editor contains (may be empty = clear all)
+            self.exclusion_sources = new_sources
+            self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+            all_unresolved = []
+            for s in self.exclusion_sources:
+                all_unresolved.extend(s.unresolved)
+            self.excluded_shelfmarks = {normalize_shelfmark(u) for u in all_unresolved if u}
+            # Also update legacy raw entries for backward compat
+            self.excluded_raw_entries = sorted(self.excluded_sys_ids) if self.excluded_sys_ids else []
+            self._update_exclusion_display()
+            # Re-render results with exclusions applied
+            if hasattr(self, 'last_results') and self.last_results:
+                self.on_search_finished(self.last_results)
+            self._schedule_session_save()
 
     def set_excluded_entries(self, entries_text: str):
         entries = [e.strip() for e in entries_text.splitlines() if e.strip()]
@@ -27385,10 +27404,9 @@ class GenizahGUI(QMainWindow):
     def _update_exclusion_display(self):
         """Update exclusion status labels with per-source breakdown (D-07)."""
         if not self.exclusion_sources:
-            status_text = tr("Excluded: {}").format(0)
-            self.lbl_exclude_status.setText(status_text)
+            self.lbl_exclude_status.setText("")
             if hasattr(self, 'lbl_main_exclude_status'):
-                self.lbl_main_exclude_status.setText(status_text)
+                self.lbl_main_exclude_status.setText("")
             return
         total = sum(len(s.sys_ids) for s in self.exclusion_sources)
         if len(self.exclusion_sources) == 1:
@@ -27407,7 +27425,7 @@ class GenizahGUI(QMainWindow):
         self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
         self._update_exclusion_display()
         if hasattr(self, 'last_results') and self.last_results:
-            self._apply_manual_exclusions(self.last_results, getattr(self, 'comp_raw_items', []))
+            self.on_search_finished(self.last_results)
         self._schedule_session_save()
 
     def _ensure_shelf_map(self):

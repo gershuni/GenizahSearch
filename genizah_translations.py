@@ -3180,6 +3180,9 @@ LIBRARY_CODES_HE = {
     'No shelfmarks to resolve': 'אין מספרי מדף לאיתור',
     'Exclude specific manuscripts by shelfmark or system ID': 'החרג כתבי יד ספציפיים לפי מספר מדף או מספר מערכת',
     'Excluded: {}': 'הוחרגו: {}',
+    'Clear All': 'נקה הכל',
+    'Remove all exclusions': 'הסר את כל ההחרגות',
+    'items': 'פריטים',
 
     # --- Pesach 2026 Easter Eggs ---
     'Browse Collection': 'דפדוף באוסף',
