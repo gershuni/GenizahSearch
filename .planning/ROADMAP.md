@@ -328,8 +328,11 @@ Plans:
   3. Shelfmark resolution handles variant conventions (CUL T-S vs T-S, full library names, Yevr/EVR aliases) using the existing normalize_shelfmark pipeline (both apps)
   4. Search results show the exclusion count (e.g., "3 excluded") with a breakdown by source (list name vs. imported file) and per-source clear buttons (both apps)
   5. Exclusion state persists within the session (web: SearchUIState; desktop: session state JSON) so that switching between searches does not lose the active exclude set
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 3 plans
+Plans:
+- [ ] 56-01-PLAN.md — Shared exclusion service: ExclusionSource model, file parsing, shelfmark resolution, tests
+- [ ] 56-02-PLAN.md — Web exclusion UI: picker dialog, post-search filter, per-source clear, session persistence
+- [ ] 56-03-PLAN.md — Desktop exclusion UI: enhanced ExcludeDialog with list tab, multi-source tracking, session persistence
 **Directory**: `.planning/phases/56-exclude-known-manuscripts/`
 
 ### Phase 57: FIST Joins Browse & Search Mode
@@ -361,9 +364,9 @@ Plans:
 | 54. Dimensions Display & Filtering | 3/4 | Complete    | 2026-03-27 |
 | 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
 | 55.1. Lightweight Browse First-Render | 1/1 | Complete    | 2026-03-29 |
-| 56. Exclude Known Manuscripts | 0/? | Not started | - |
+| 56. Exclude Known Manuscripts | 0/3 | Planned | - |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-28 after Phase 55 replan with review feedback (3 plans, tasks split per review)*
+*Last updated: 2026-03-29 after Phase 56 planning (3 plans, 2 waves)*
