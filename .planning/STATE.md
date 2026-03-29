@@ -149,9 +149,10 @@ Recent decisions affecting current work:
 | Phase 55 P03 | 6min | 2 tasks | 1 files |
 | Phase 55 P02 | 8min | 2 tasks | 1 files |
 | Phase 56 P01 | 15min | 2 tasks | 2 files |
+| 260329-egp | Strip brackets from search matching so bracket-free queries ignore brackets but bracket-containing queries match literally | 2026-03-29 | 5300bbe4 | [260329-egp-strip-brackets-from-search-matching-so-b](./quick/260329-egp-strip-brackets-from-search-matching-so-b/) |
 
 ## Session Continuity
 
-Last session: 2026-03-29T07:04:03.066Z
-Stopped at: Completed 56-01-PLAN.md
+Last session: 2026-03-29
+Stopped at: Completed quick task 260329-egp: bracket-aware search matching
 Resume file: None
