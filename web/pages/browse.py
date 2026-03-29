@@ -858,28 +858,24 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 return
             state.error = f"{tr('Error')}: {str(e)}"
 
-        # Title + Oxford translations: fast SQLite queries (~1ms), safe for Phase A
+        # Title translations: fast SQLite query (~1ms), safe for Phase A
+        # Note: Oxford translations moved to Phase B (oxford_part_metadata is deferred)
         if state.current_page and state.current_page.sys_id:
             _title_sys_id = state.current_page.sys_id
-            _ox_meta = state.current_page.oxford_part_metadata if hasattr(state.current_page, 'oxford_part_metadata') else None
-            def _fetch_title_and_oxford():
+            def _fetch_title_translations():
                 title_result = None
-                oxford_result = {}
                 try:
                     from shared.translation_service import TranslationService
                     svc = TranslationService(thread_safe=True)
                     if svc.titles_available():
                         title_result = svc.get_title_translations_batch([_title_sys_id]).get(_title_sys_id)
-                    if svc.oxford_available() and _ox_meta:
-                        texts = [_ox_meta.get(f, '').strip() for f in ('title', 'contents', 'provenance') if _ox_meta.get(f, '').strip()]
-                        if texts:
-                            oxford_result = svc.get_oxford_translations_batch(texts)
                     svc.close()
                 except Exception:
                     pass
-                return title_result, oxford_result
+                return title_result
             try:
-                state.title_translation, state.oxford_translations = await run.io_bound(_fetch_title_and_oxford)
+                state.title_translation = await run.io_bound(_fetch_title_translations)
+                state.oxford_translations = {}  # Will be populated in Phase B
             except Exception:
                 pass
 
@@ -953,9 +949,112 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 logger.error(f"Failed to fetch crossref data: {e}")
                 return {}
 
+        async def fetch_browse_enrichment():
+            """Fetch crossref + Oxford + Cambridge + attribution data deferred from Phase A."""
+            _page = page
+            _sys_id = _page.sys_id
+            _shelfmark = _page.shelfmark
+            _library_code = _page.library_code
+            _is_oxford = _page.is_oxford
+            _p_num = _page.p_num
+            _total_pages = _page.total_pages
+
+            def _browse_enrich_sync():
+                from web.services import ATTRIBUTION_BY_LIBRARY, _get_library_attribution
+                from web.state import state as state_mod
+                result = {}
+
+                # Attribution cascade
+                attribution = ''
+                if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
+                    cached_meta = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                    attribution = cached_meta.get('attribution', '')
+                if _library_code in ATTRIBUTION_BY_LIBRARY:
+                    lib_attr = _get_library_attribution(_library_code)
+                    if lib_attr is not None:
+                        attribution = lib_attr
+                elif _is_oxford:
+                    attribution = 'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0'
+                if attribution:
+                    result['attribution'] = attribution
+
+                # Oxford codicological
+                if _is_oxford and _sys_id:
+                    if hasattr(state_mod.meta_mgr, 'get_part_for_folio'):
+                        part_id = state_mod.meta_mgr.get_part_for_folio(_sys_id)
+                        if part_id:
+                            result['oxford_part_id'] = part_id
+                            if hasattr(state_mod.meta_mgr.codico_mgr, 'get_part_display_name'):
+                                result['oxford_part_display'] = state_mod.meta_mgr.codico_mgr.get_part_display_name(part_id)
+                            part_meta = state_mod.meta_mgr.get_part_metadata(part_id)
+                            if part_meta:
+                                ox_meta = {}
+                                for key in ['title', 'contents', 'provenance']:
+                                    if part_meta.get(key):
+                                        ox_meta[key] = part_meta[key]
+                                result['oxford_part_metadata'] = ox_meta
+                                if part_meta.get('direct_link'):
+                                    result['external_url'] = part_meta['direct_link']
+
+                # Cambridge MARC
+                if 'external_url' not in result:
+                    marc_data = {}
+                    if hasattr(state_mod.meta_mgr, 'nli_cache') and _sys_id in state_mod.meta_mgr.nli_cache:
+                        marc_data = state_mod.meta_mgr.nli_cache[_sys_id].get('marc', {})
+                    ext_link = marc_data.get('external_iiif_link')
+                    if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
+                        result['is_cambridge'] = True
+                        result['external_url'] = ext_link.replace("/iiif/", "/view/")
+
+                # NLI crossref queries
+                try:
+                    from shared.nli_crossref_service import get_nli_crossref_service
+                    crossref_svc = get_nli_crossref_service(thread_safe=True)
+                    if crossref_svc.is_available() and _sys_id:
+                        from genizah_core import normalize_shelfmark
+                        norm_shelf = normalize_shelfmark(_shelfmark) if _shelfmark else None
+                        result['image_source_info'] = crossref_svc.get_image_sources(
+                            _sys_id, normalized_shelfmark=norm_shelf
+                        )
+                        if not result.get('is_cambridge') and result['image_source_info'].get('cambridge'):
+                            result['is_cambridge'] = True
+                        folio_images = crossref_svc.get_folio_images(_sys_id)
+                        result['folio_images'] = folio_images
+                        if (folio_images
+                                and len(folio_images) == _total_pages
+                                and 0 < _p_num <= len(folio_images)):
+                            result['folio_label'] = folio_images[_p_num - 1].get('folio_label', '')
+
+                        # Skip get_physical_metadata here -- fetch_crossref already gets it
+                        # via get_crossref_metadata. We read it from crossref_data after gather.
+
+                        result['library_viewer_url'] = crossref_svc.get_library_viewer_url(_sys_id)
+
+                        # Derive fl_id for metadata-only records (no Tantivy fl_id)
+                        if not _page.fl_id and folio_images:
+                            first_fl = folio_images[0].get('fl_id')
+                            if first_fl:
+                                result['derived_fl_id'] = first_fl
+                except Exception as e:
+                    logger.error("Browse enrichment crossref error: %s", e)
+
+                # External images from nli_cache
+                if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
+                    cached = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                    result['cambridge_images'] = cached.get('images_ext', [])
+                    result['external_provider'] = cached.get('external_provider', '')
+
+                return result
+
+            try:
+                return await run.io_bound(_browse_enrich_sync)
+            except Exception as e:
+                logger.error(f"Failed to fetch browse enrichment: {e}")
+                return {}
+
         try:
-            (all_sources, pgp_doc), fjms_data, crossref_data = await asyncio.gather(
-                fetch_pgp(), fetch_fjms(), fetch_crossref()
+            (all_sources, pgp_doc), fjms_data, crossref_data, browse_enrich = await asyncio.gather(
+                fetch_pgp(), fetch_fjms(), fetch_crossref(), fetch_browse_enrichment()
             )
         except Exception as e:
             logger.error(f"Enrichment fetch failed: {e}")
@@ -1021,10 +1120,74 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         state.fjms_data = fjms_data
         state.crossref_data = crossref_data
+
+        # Apply browse enrichment (crossref + Oxford + Cambridge + attribution) to page
+        if browse_enrich and state.current_page:
+            pg = state.current_page
+            if browse_enrich.get('attribution'):
+                pg.attribution = browse_enrich['attribution']
+            if browse_enrich.get('oxford_part_id'):
+                pg.oxford_part_id = browse_enrich['oxford_part_id']
+                pg.oxford_part_display = browse_enrich.get('oxford_part_display', '')
+                pg.oxford_part_metadata = browse_enrich.get('oxford_part_metadata', {})
+            if browse_enrich.get('external_url'):
+                pg.external_url = browse_enrich['external_url']
+            if browse_enrich.get('is_cambridge'):
+                pg.is_cambridge = True
+            if browse_enrich.get('image_source_info'):
+                pg.image_source_info = browse_enrich['image_source_info']
+            if browse_enrich.get('folio_images'):
+                pg.folio_images = browse_enrich['folio_images']
+            if browse_enrich.get('folio_label'):
+                pg.folio_label = browse_enrich['folio_label']
+            # Physical metadata from crossref_data (deduplicate -- fetch_crossref already gets it)
+            if crossref_data and crossref_data.get('physical_metadata'):
+                pg.physical_metadata = crossref_data['physical_metadata']
+            if browse_enrich.get('library_viewer_url'):
+                pg.library_viewer_url = browse_enrich['library_viewer_url']
+            if browse_enrich.get('cambridge_images'):
+                pg.cambridge_images = browse_enrich['cambridge_images']
+            if browse_enrich.get('external_provider'):
+                pg.external_provider = browse_enrich['external_provider']
+            # Derived fl_id for metadata-only records
+            if browse_enrich.get('derived_fl_id') and not pg.fl_id:
+                from web.services import get_thumbnail_url, get_full_image_url
+                pg.fl_id = browse_enrich['derived_fl_id']
+                pg.thumb_url = get_thumbnail_url(pg.fl_id)
+                pg.image_url = get_full_image_url(pg.fl_id)
+                # Update total_pages from folio count for metadata-only records
+                if browse_enrich.get('folio_images'):
+                    pg.total_pages = len(browse_enrich['folio_images'])
+                    pg.current_idx = 1
+
+            # Oxford translations (deferred from Phase A since oxford_part_metadata was empty)
+            if pg.oxford_part_metadata:
+                _ox_meta = pg.oxford_part_metadata
+                _ox_sys_id = pg.sys_id
+                def _fetch_oxford_translations():
+                    try:
+                        from shared.translation_service import TranslationService
+                        svc = TranslationService(thread_safe=True)
+                        result = {}
+                        if svc.oxford_available():
+                            texts = [_ox_meta.get(f, '').strip() for f in ('title', 'contents', 'provenance') if _ox_meta.get(f, '').strip()]
+                            if texts:
+                                result = svc.get_oxford_translations_batch(texts)
+                        svc.close()
+                        return result
+                    except Exception:
+                        return {}
+                try:
+                    state.oxford_translations = await run.io_bound(_fetch_oxford_translations)
+                except Exception:
+                    pass
+
         state.enrichment_loaded = True
         state.enrichment_loading = False
 
-        # Update enrichment placeholders without full re-render
+        # Re-render with full enrichment data (attribution, source badges, folio labels,
+        # external links, Oxford part, physical metadata) then update PGP/FJMS containers
+        update_content()
         _update_enrichment_sections()
 
     def _update_enrichment_sections():
