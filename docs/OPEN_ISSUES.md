@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-29 (plan review found refinement count-unit inconsistency between live searches and replay/session restore)
+> **Last Updated:** 2026-03-29 (browse Phase B follow-up fixes: stale Oxford translations, metadata-only page-0 promotion, and physical-metadata fallback)
 > **Status:** Active working document
 
 ---
@@ -281,6 +281,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-03-29 | Fixed the browse Phase B follow-up issues from the two-phase optimization review: `_load_enrichment()` now re-checks generation after deferred Oxford translation fetches and before final rerender, metadata-only records promoted from derived folio data now switch cleanly from page 0 to page 1 with the first folio label, and crossref physical metadata is applied even when `fetch_browse_enrichment()` falls back to an empty dict. | Codex |
 | 2026-03-27 | Reviewed the new browse shareable-URL feature (`c4b3e5b3` / `dab1185a`) after a user report that links still do not change during navigation. Added 1 new open P2 issue: `_update_browser_url()` dispatches `ui.run_javascript(...)` from `load_page()`, but most browse navigations reach that code through detached `asyncio.ensure_future(...)` tasks, so the JS can miss the active client and the location bar stays on the entry URL. | Codex |
 | 2026-03-26 | Fixed P1 QThread lifecycle issue in `ManuscriptViewerWidget`: added `_retire_thread()` + `_inflight_threads` list to keep canceled threads alive until `finished`. Persistent `QTimer(self)` for debounce. Same pattern for `_preload()`, `cancel_browse_image_thread()`, `closeEvent`. | Claude |
 | 2026-03-26 | Re-reviewed follow-up commit `0c291bbd`. Confirmed the remaining `ResultDialog` teardown finding is fixed: `cancel_image_thread()` now uses `_wait_or_terminate_thread()` for `img_thread` and `ext_img_thread`, and `closeEvent()` does the same for `browse_img_thread`. No new review findings in this pass. | Codex |

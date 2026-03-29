@@ -1122,48 +1122,51 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.crossref_data = crossref_data
 
         # Apply browse enrichment (crossref + Oxford + Cambridge + attribution) to page
-        if browse_enrich and state.current_page:
+        if state.current_page:
             pg = state.current_page
-            if browse_enrich.get('attribution'):
-                pg.attribution = browse_enrich['attribution']
-            if browse_enrich.get('oxford_part_id'):
-                pg.oxford_part_id = browse_enrich['oxford_part_id']
-                pg.oxford_part_display = browse_enrich.get('oxford_part_display', '')
-                pg.oxford_part_metadata = browse_enrich.get('oxford_part_metadata', {})
-            if browse_enrich.get('external_url'):
-                pg.external_url = browse_enrich['external_url']
-            if browse_enrich.get('is_cambridge'):
-                pg.is_cambridge = True
-            if browse_enrich.get('image_source_info'):
-                pg.image_source_info = browse_enrich['image_source_info']
-            if browse_enrich.get('folio_images'):
-                pg.folio_images = browse_enrich['folio_images']
-            if browse_enrich.get('folio_label'):
-                pg.folio_label = browse_enrich['folio_label']
-            # Physical metadata from crossref_data (deduplicate -- fetch_crossref already gets it)
+            if browse_enrich:
+                if browse_enrich.get('attribution'):
+                    pg.attribution = browse_enrich['attribution']
+                if browse_enrich.get('oxford_part_id'):
+                    pg.oxford_part_id = browse_enrich['oxford_part_id']
+                    pg.oxford_part_display = browse_enrich.get('oxford_part_display', '')
+                    pg.oxford_part_metadata = browse_enrich.get('oxford_part_metadata', {})
+                if browse_enrich.get('external_url'):
+                    pg.external_url = browse_enrich['external_url']
+                if browse_enrich.get('is_cambridge'):
+                    pg.is_cambridge = True
+                if browse_enrich.get('image_source_info'):
+                    pg.image_source_info = browse_enrich['image_source_info']
+                if browse_enrich.get('folio_images'):
+                    pg.folio_images = browse_enrich['folio_images']
+                if browse_enrich.get('folio_label'):
+                    pg.folio_label = browse_enrich['folio_label']
+                if browse_enrich.get('library_viewer_url'):
+                    pg.library_viewer_url = browse_enrich['library_viewer_url']
+                if browse_enrich.get('cambridge_images'):
+                    pg.cambridge_images = browse_enrich['cambridge_images']
+                if browse_enrich.get('external_provider'):
+                    pg.external_provider = browse_enrich['external_provider']
+                # Derived fl_id for metadata-only records
+                if browse_enrich.get('derived_fl_id') and not pg.fl_id:
+                    from web.services import get_thumbnail_url, get_full_image_url
+                    pg.fl_id = browse_enrich['derived_fl_id']
+                    pg.thumb_url = get_thumbnail_url(pg.fl_id)
+                    pg.image_url = get_full_image_url(pg.fl_id)
+                    pg.p_num = 1
+                    state.page_input_value = 1
+                    if browse_enrich.get('folio_images'):
+                        pg.folio_label = browse_enrich['folio_images'][0].get('folio_label', '')
+                        pg.total_pages = len(browse_enrich['folio_images'])
+                        pg.current_idx = 1
+
+            # Physical metadata from crossref_data (independent of browse_enrich success)
             if crossref_data and crossref_data.get('physical_metadata'):
                 pg.physical_metadata = crossref_data['physical_metadata']
-            if browse_enrich.get('library_viewer_url'):
-                pg.library_viewer_url = browse_enrich['library_viewer_url']
-            if browse_enrich.get('cambridge_images'):
-                pg.cambridge_images = browse_enrich['cambridge_images']
-            if browse_enrich.get('external_provider'):
-                pg.external_provider = browse_enrich['external_provider']
-            # Derived fl_id for metadata-only records
-            if browse_enrich.get('derived_fl_id') and not pg.fl_id:
-                from web.services import get_thumbnail_url, get_full_image_url
-                pg.fl_id = browse_enrich['derived_fl_id']
-                pg.thumb_url = get_thumbnail_url(pg.fl_id)
-                pg.image_url = get_full_image_url(pg.fl_id)
-                # Update total_pages from folio count for metadata-only records
-                if browse_enrich.get('folio_images'):
-                    pg.total_pages = len(browse_enrich['folio_images'])
-                    pg.current_idx = 1
 
             # Oxford translations (deferred from Phase A since oxford_part_metadata was empty)
             if pg.oxford_part_metadata:
                 _ox_meta = pg.oxford_part_metadata
-                _ox_sys_id = pg.sys_id
                 def _fetch_oxford_translations():
                     try:
                         from shared.translation_service import TranslationService
@@ -1178,9 +1181,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     except Exception:
                         return {}
                 try:
-                    state.oxford_translations = await run.io_bound(_fetch_oxford_translations)
+                    ox_result = await run.io_bound(_fetch_oxford_translations)
+                    # Re-check generation after await to avoid stale state on rapid navigation
+                    if generation == _load_generation['value']:
+                        state.oxford_translations = ox_result
                 except Exception:
                     pass
+
+        # Re-check generation before committing final state (guards Oxford await above)
+        if generation != _load_generation['value']:
+            return
 
         state.enrichment_loaded = True
         state.enrichment_loading = False
