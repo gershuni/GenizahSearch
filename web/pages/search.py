@@ -3388,13 +3388,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.label(tr('No lists found')).classes('text-gray-500')
                         else:
                             selected_list_id = {'value': None}
+                            list_rows = {}
                             for lst in all_lists:
                                 list_id = lst.get('id', '')
                                 list_name = lst.get('name', list_id)
-                                item_count = lst.get('item_count', '?')
-                                with ui.row().classes(
-                                    'w-full items-center gap-2 py-2 px-3 rounded cursor-pointer hover:bg-gray-100'
-                                ).on('click', lambda lid=list_id: _select_list_for_exclusion(lid, selected_list_id)):
+                                item_count = lst.get('count', 0)
+                                row = ui.row().classes(
+                                    'w-full items-center gap-2 py-2 px-3 rounded cursor-pointer'
+                                ).style('transition: background 0.15s;')
+                                list_rows[list_id] = row
+                                with row.on('click', lambda lid=list_id: _select_list_for_exclusion(lid)):
                                     ui.icon('list').classes('text-gray-400')
                                     ui.label(list_name).classes('flex-grow')
                                     ui.badge(str(item_count)).props('outline')
@@ -3423,8 +3426,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 _apply_manuscript_exclusions()
                                 _update_exclude_btn()
 
-                            def _select_list_for_exclusion(lid, ref):
-                                ref['value'] = lid
+                            def _select_list_for_exclusion(lid):
+                                selected_list_id['value'] = lid
+                                for rid, row in list_rows.items():
+                                    if rid == lid:
+                                        row.style('background: rgba(185, 28, 28, 0.15);')
+                                    else:
+                                        row.style('background: transparent;')
 
                             ui.button(tr('Apply'), icon='check', on_click=_apply_list_exclusion).props(
                                 'color=red no-caps'
