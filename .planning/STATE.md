@@ -4,12 +4,12 @@ milestone: v7.3
 milestone_name: Search Refinement & Scholarly Joins
 status: Ready to plan
 stopped_at: Phase 56 context gathered
-last_updated: "2026-03-29T09:18:17.377Z"
+last_updated: "2026-03-29T10:47:59.921Z"
 progress:
   total_phases: 12
-  completed_phases: 8
-  total_plans: 26
-  completed_plans: 25
+  completed_phases: 9
+  total_plans: 29
+  completed_plans: 28
 ---
 
 # Project State
@@ -19,7 +19,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 56 — lightweight-browse-first-render
+**Current focus:** Phase 56 — exclude-known-manuscripts
 
 ## Current Position
 
