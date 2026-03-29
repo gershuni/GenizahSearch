@@ -4186,16 +4186,22 @@ class Indexer:
         }
 
     @staticmethod
-    def _validate_position_match(content, match_obj, text_position, line_constraints=None):
+    def _validate_position_match(content, match_obj, text_position, line_constraints=None, strip_brackets=True):
         """Post-filter: validate that a regex match occurs at the expected text position.
 
         Tantivy uses broad fields (e.g. first 10 words) for speed; this validates
         the exact position (e.g. match is literally the first/last words).
 
         line_constraints: {line_num: word} for per-line validation (L3:שלום syntax).
+        strip_brackets: when True (bracket-free query), ignore brackets in
+            prefix/suffix.  When False (bracket-containing query), enforce
+            exact position against un-stripped content.
         """
         if not text_position:
             return True
+
+        def _clean(s):
+            return _strip_brackets(s).strip() if strip_brackets else s.strip()
 
         # Per-line constraints: validate each L{n}:word against specific lines
         if line_constraints:
@@ -4216,19 +4222,19 @@ class Indexer:
 
         start, end = match_obj.start(), match_obj.end()
         if text_position == 'start':
-            return not _strip_brackets(content[:start]).strip()
+            return not _clean(content[:start])
         elif text_position == 'end':
-            return not _strip_brackets(content[end:]).strip()
+            return not _clean(content[end:])
         elif text_position == 'line_start':
             before = content[:start]
             last_nl = before.rfind('\n')
             line_prefix = before[last_nl + 1:] if last_nl >= 0 else before
-            return not _strip_brackets(line_prefix).strip()
+            return not _clean(line_prefix)
         elif text_position == 'line_end':
             after = content[end:]
             next_nl = after.find('\n')
             line_suffix = after[:next_nl] if next_nl >= 0 else after
-            return not _strip_brackets(line_suffix).strip()
+            return not _clean(line_suffix)
         return True
 
     @staticmethod
@@ -6518,15 +6524,18 @@ class SearchEngine:
                             match_obj = orig_match
 
                     # Text position filter — strip brackets from
-                    # prefix/suffix so leading ]word still counts as "start"
+                    # prefix/suffix only for bracket-free queries
+                    _brackets_in_query = _query_has_brackets(query_str)
                     if text_position == 'start' and match_obj.start() > 0:
                         prefix = content[:match_obj.start()]
-                        if _strip_brackets(prefix).strip():
+                        cleaned = prefix.strip() if _brackets_in_query else _strip_brackets(prefix).strip()
+                        if cleaned:
                             regex_filtered += 1
                             continue
                     elif text_position == 'end' and match_obj.end() < len(content):
                         suffix = content[match_obj.end():]
-                        if _strip_brackets(suffix).strip():
+                        cleaned = suffix.strip() if _brackets_in_query else _strip_brackets(suffix).strip()
+                        if cleaned:
                             regex_filtered += 1
                             continue
 
@@ -6976,7 +6985,7 @@ class SearchEngine:
 
                     # Position post-filter: Tantivy uses broad fields (10-word head/tail),
                     # validate exact position (first word, last word, line boundary)
-                    if text_position and not Indexer._validate_position_match(match_content, match_obj, text_position, _line_constraints or None):
+                    if text_position and not Indexer._validate_position_match(match_content, match_obj, text_position, _line_constraints or None, strip_brackets=not _query_has_brackets(query_str)):
                         regex_filtered_count += 1
                         continue
 
@@ -7177,9 +7186,10 @@ class SearchEngine:
 
                         content = doc['content'][0]
 
-                        # Bracket handling: composition chunks come from user
-                        # text (no brackets), so always strip from index content.
-                        match_content = _strip_brackets(content)
+                        # Bracket handling: strip brackets for bracket-free
+                        # queries; preserve for bracket-containing queries
+                        # (user pasted text with literal brackets).
+                        match_content = content if _query_has_brackets(' '.join(chunk)) else _strip_brackets(content)
 
                         # Verify exact Regex match
                         if regex.search(match_content):
