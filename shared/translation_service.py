@@ -12,7 +12,7 @@ This service is read-only -- it never calls the Dicta API.
 Follows the same pattern as FjmsService and PgpService:
 - Constructor auto-finds sidecars or accepts explicit paths
 - Graceful degradation when databases/tables are missing
-- Thread-safe mode for NiceGUI web app (check_same_thread=False)
+- Thread-safe: per-thread connections via ThreadLocalConnection
 
 Schema creation helpers (ensure_pgp_translations_table, ensure_fjms_translations_table)
 are provided for use by batch translation scripts.
@@ -23,6 +23,8 @@ import os
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +138,11 @@ class TranslationService:
         Args:
             pgp_db_path: Explicit path to pgp.db. If None, auto-detect.
             fjms_db_path: Explicit path to fjms_enrichment.db. If None, auto-detect.
-            thread_safe: If True, use check_same_thread=False for NiceGUI web app.
+            thread_safe: If True, use per-thread connections for NiceGUI web app.
         """
-        self._pgp_conn: Optional[sqlite3.Connection] = None
-        self._fjms_conn: Optional[sqlite3.Connection] = None
-        self._titles_conn: Optional[sqlite3.Connection] = None
+        self._pgp_conn = None
+        self._fjms_conn = None
+        self._titles_conn = None
         self._pgp_has_translations = False
         self._fjms_has_translations = False
         self._titles_has_translations = False
@@ -151,10 +153,16 @@ class TranslationService:
             pgp_db_path = self._find_pgp_db()
         if pgp_db_path and os.path.isfile(pgp_db_path):
             try:
-                self._pgp_conn = sqlite3.connect(
-                    pgp_db_path, check_same_thread=not thread_safe
-                )
-                self._pgp_conn.row_factory = sqlite3.Row
+                uri = f"file:{pgp_db_path}?mode=ro"
+                if thread_safe:
+                    self._pgp_conn = ThreadLocalConnection(
+                        uri, row_factory=sqlite3.Row
+                    )
+                else:
+                    self._pgp_conn = sqlite3.connect(
+                        uri, uri=True, check_same_thread=True
+                    )
+                    self._pgp_conn.row_factory = sqlite3.Row
                 self._pgp_has_translations = self._table_exists(
                     self._pgp_conn, "pgp_translations"
                 )
@@ -166,10 +174,16 @@ class TranslationService:
             fjms_db_path = self._find_fjms_db()
         if fjms_db_path and os.path.isfile(fjms_db_path):
             try:
-                self._fjms_conn = sqlite3.connect(
-                    fjms_db_path, check_same_thread=not thread_safe
-                )
-                self._fjms_conn.row_factory = sqlite3.Row
+                uri = f"file:{fjms_db_path}?mode=ro"
+                if thread_safe:
+                    self._fjms_conn = ThreadLocalConnection(
+                        uri, row_factory=sqlite3.Row
+                    )
+                else:
+                    self._fjms_conn = sqlite3.connect(
+                        uri, uri=True, check_same_thread=True
+                    )
+                    self._fjms_conn.row_factory = sqlite3.Row
                 self._fjms_has_translations = self._table_exists(
                     self._fjms_conn, "fjms_translations"
                 )
@@ -180,10 +194,16 @@ class TranslationService:
         titles_db_path = self._find_titles_db()
         if titles_db_path and os.path.isfile(titles_db_path):
             try:
-                self._titles_conn = sqlite3.connect(
-                    titles_db_path, check_same_thread=not thread_safe
-                )
-                self._titles_conn.row_factory = sqlite3.Row
+                uri = f"file:{titles_db_path}?mode=ro"
+                if thread_safe:
+                    self._titles_conn = ThreadLocalConnection(
+                        uri, row_factory=sqlite3.Row
+                    )
+                else:
+                    self._titles_conn = sqlite3.connect(
+                        uri, uri=True, check_same_thread=True
+                    )
+                    self._titles_conn.row_factory = sqlite3.Row
                 self._titles_has_translations = self._table_exists(
                     self._titles_conn, "title_translations"
                 )

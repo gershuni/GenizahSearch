@@ -10,8 +10,8 @@ All methods handle errors gracefully, returning empty results rather than
 raising exceptions. When the sidecar database is missing, the service
 degrades gracefully (is_available() returns False, all queries return empty).
 
-Thread-safe mode (check_same_thread=False) is available for the NiceGUI
-web app which serves concurrent requests from multiple threads.
+Thread-safe: uses per-thread SQLite connections via ThreadLocalConnection
+so concurrent NiceGUI run.io_bound() calls each get their own connection.
 """
 
 import json
@@ -22,6 +22,8 @@ import sqlite3
 import threading
 from pathlib import Path
 from typing import Optional
+
+from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
 
@@ -620,12 +622,11 @@ class FjmsService:
 
         Args:
             db_path: Path to fjms_enrichment.db. If None, auto-detect from project root.
-            thread_safe: If True, use check_same_thread=False. Default True because
+            thread_safe: If True, use per-thread connections. Default True because
                         both the web app (concurrent requests) and desktop app
                         (QThread workers for catalog browse) need cross-thread access.
-                        Safe since the connection is read-only (?mode=ro).
         """
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn = None  # ThreadLocalConnection or sqlite3.Connection
         self._db_path: Optional[str] = None
         self._hierarchy_cache: Optional[dict] = None
         self._hierarchy_lock = threading.Lock()
@@ -665,15 +666,16 @@ class FjmsService:
             return
 
         try:
-            # Open read-only connection using URI mode
             uri = f"file:{db_path}?mode=ro"
-            self._conn = sqlite3.connect(
-                uri,
-                uri=True,
-                check_same_thread=not thread_safe,
-                timeout=10.0,
-            )
-            self._conn.row_factory = sqlite3.Row
+            if thread_safe:
+                self._conn = ThreadLocalConnection(
+                    uri, row_factory=sqlite3.Row, timeout=10.0
+                )
+            else:
+                self._conn = sqlite3.connect(
+                    uri, uri=True, check_same_thread=True, timeout=10.0
+                )
+                self._conn.row_factory = sqlite3.Row
             logger.info(f"FjmsService: Connected to {db_path}")
 
             # Note: performance indexes are created lazily in pre_warm_caches()

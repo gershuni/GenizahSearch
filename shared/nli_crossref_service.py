@@ -10,8 +10,8 @@ All methods handle errors gracefully, returning empty results rather than
 raising exceptions. When the sidecar database is missing, the service
 degrades gracefully (is_available() returns False, all queries return empty).
 
-Thread-safe mode (check_same_thread=False) is available for the NiceGUI
-web app which serves concurrent requests from multiple threads.
+Thread-safe: uses per-thread SQLite connections via ThreadLocalConnection
+so concurrent NiceGUI run.io_bound() calls each get their own connection.
 """
 
 import logging
@@ -20,6 +20,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote as url_quote
+
+from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +85,10 @@ class NliCrossrefService:
 
         Args:
             db_path: Path to nli_crossref.db. If None, auto-detect from project root.
-            thread_safe: If True, use check_same_thread=False for NiceGUI web app.
+            thread_safe: If True, use per-thread connections for NiceGUI web app.
                         Desktop app should leave this False (single-threaded).
         """
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn = None  # ThreadLocalConnection or sqlite3.Connection
         self._db_path: Optional[str] = None
 
         # Resolve db_path
@@ -116,15 +118,16 @@ class NliCrossrefService:
             return
 
         try:
-            # Open read-only connection using URI mode
             uri = f"file:{db_path}?mode=ro"
-            self._conn = sqlite3.connect(
-                uri,
-                uri=True,
-                check_same_thread=not thread_safe,
-                timeout=10.0,
-            )
-            self._conn.row_factory = sqlite3.Row
+            if thread_safe:
+                self._conn = ThreadLocalConnection(
+                    uri, row_factory=sqlite3.Row, timeout=10.0
+                )
+            else:
+                self._conn = sqlite3.connect(
+                    uri, uri=True, check_same_thread=True, timeout=10.0
+                )
+                self._conn.row_factory = sqlite3.Row
             logger.info(f"NliCrossrefService: Connected to {db_path}")
         except Exception as e:
             logger.error(f"NliCrossrefService: Failed to connect to {db_path}: {e}")
