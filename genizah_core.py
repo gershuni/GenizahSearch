@@ -4216,19 +4216,19 @@ class Indexer:
 
         start, end = match_obj.start(), match_obj.end()
         if text_position == 'start':
-            return not content[:start].strip()
+            return not _strip_brackets(content[:start]).strip()
         elif text_position == 'end':
-            return not content[end:].strip()
+            return not _strip_brackets(content[end:]).strip()
         elif text_position == 'line_start':
             before = content[:start]
             last_nl = before.rfind('\n')
             line_prefix = before[last_nl + 1:] if last_nl >= 0 else before
-            return not line_prefix.strip()
+            return not _strip_brackets(line_prefix).strip()
         elif text_position == 'line_end':
             after = content[end:]
             next_nl = after.find('\n')
             line_suffix = after[:next_nl] if next_nl >= 0 else after
-            return not line_suffix.strip()
+            return not _strip_brackets(line_suffix).strip()
         return True
 
     @staticmethod
@@ -5228,8 +5228,13 @@ def _add_bracket_variants(term: str) -> list:
 
 
 def _query_has_brackets(query_str: str) -> bool:
-    """Return True if *query_str* contains literal square brackets."""
-    return '[' in query_str or ']' in query_str
+    """Return True if *query_str* contains literal square brackets.
+
+    Responsa gap operators like ``[3]`` and ``[|2]`` are NOT literal
+    bracket searches — strip them before checking.
+    """
+    stripped = re.sub(r'\[\|?\d+\]', '', query_str)
+    return '[' in stripped or ']' in stripped
 
 
 def _strip_brackets(text: str) -> str:
@@ -6512,13 +6517,16 @@ class SearchEngine:
                         if orig_match:
                             match_obj = orig_match
 
-                    # Text position filter
+                    # Text position filter — strip brackets from
+                    # prefix/suffix so leading ]word still counts as "start"
                     if text_position == 'start' and match_obj.start() > 0:
-                        if content[:match_obj.start()].strip():
+                        prefix = content[:match_obj.start()]
+                        if _strip_brackets(prefix).strip():
                             regex_filtered += 1
                             continue
                     elif text_position == 'end' and match_obj.end() < len(content):
-                        if content[match_obj.end():].strip():
+                        suffix = content[match_obj.end():]
+                        if _strip_brackets(suffix).strip():
                             regex_filtered += 1
                             continue
 

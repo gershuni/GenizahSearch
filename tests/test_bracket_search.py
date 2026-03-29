@@ -63,6 +63,21 @@ class TestQueryHasBrackets:
     def test_hebrew_without_bracket(self):
         assert _query_has_brackets("\u05d4\u05e0\u05ea\u05e9\u05e0") is False
 
+    def test_responsa_gap_operator_ignored(self):
+        """Responsa [N] gap syntax should NOT be treated as literal brackets."""
+        assert _query_has_brackets("\u05e9\u05dc\u05d5\u05dd [3] \u05d3\u05dc\u05da") is False
+
+    def test_responsa_line_gap_operator_ignored(self):
+        """Responsa [|N] line-gap syntax should NOT be treated as literal brackets."""
+        assert _query_has_brackets("\u05e9\u05dc\u05d5\u05dd [|2] \u05d3\u05dc\u05da") is False
+
+    def test_responsa_gap_with_real_bracket(self):
+        """If query has BOTH a gap operator and a literal bracket, detect it."""
+        assert _query_has_brackets("]\u05e9\u05dc\u05d5\u05dd [3] \u05d3\u05dc\u05da") is True
+
+    def test_multiple_gap_operators(self):
+        assert _query_has_brackets("a [3] b [|5] c") is False
+
 
 class TestStripBrackets:
     """Test _strip_brackets helper."""
