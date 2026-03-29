@@ -14667,7 +14667,7 @@ class GenizahGUI(QMainWindow):
         self.btn_main_exclude.setStyleSheet("padding: 2px 8px;")
         self.btn_main_exclude.clicked.connect(self.open_exclude_dialog)
         
-        self.lbl_main_exclude_status = QLabel(tr("Excluded: {}").format(0))
+        self.lbl_main_exclude_status = QLabel("")
         self.lbl_main_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold; font-size: 11px;")
 
         # Insert pre-search filter button in row1, right before the Search button
@@ -14975,7 +14975,7 @@ class GenizahGUI(QMainWindow):
         # 1. Exclude & Filter (Moved to top row)
         btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
         btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
-        self.lbl_exclude_status = QLabel(tr("Excluded: {}").format(0))
+        self.lbl_exclude_status = QLabel("")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
         self.lbl_comp_status = QLabel("")
 
@@ -24697,6 +24697,8 @@ class GenizahGUI(QMainWindow):
             return
 
         self.last_results = results
+        # Phase 56: Store unfiltered results for exclusion re-rendering
+        self._unfiltered_last_results = results
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -27372,8 +27374,7 @@ class GenizahGUI(QMainWindow):
             self.excluded_raw_entries = sorted(self.excluded_sys_ids) if self.excluded_sys_ids else []
             self._update_exclusion_display()
             # Re-render results with exclusions applied
-            if hasattr(self, 'last_results') and self.last_results:
-                self.on_search_finished(self.last_results)
+            self._rerender_with_exclusions()
             self._schedule_session_save()
 
     def set_excluded_entries(self, entries_text: str):
@@ -27401,6 +27402,26 @@ class GenizahGUI(QMainWindow):
         """Normalize shelfmarks using the canonical function from genizah_core."""
         return normalize_shelfmark(shelfmark)
 
+    def _rerender_with_exclusions(self):
+        """Re-render regular search results with current exclusion state applied."""
+        if not hasattr(self, 'last_results') or not self.last_results:
+            return
+        # Store the unfiltered results if not already stored
+        if not hasattr(self, '_unfiltered_last_results'):
+            self._unfiltered_last_results = self.last_results
+        # Always start from unfiltered
+        unfiltered = self._unfiltered_last_results
+        if self.excluded_sys_ids:
+            filtered = []
+            for r in unfiltered:
+                sid = r.get('display', {}).get('id')
+                if sid and sid in self.excluded_sys_ids:
+                    continue
+                filtered.append(r)
+            self.on_search_finished(filtered)
+        else:
+            self.on_search_finished(unfiltered)
+
     def _update_exclusion_display(self):
         """Update exclusion status labels with per-source breakdown (D-07)."""
         if not self.exclusion_sources:
@@ -27424,8 +27445,7 @@ class GenizahGUI(QMainWindow):
         self.exclusion_sources = [s for s in self.exclusion_sources if s.source_id != source_id]
         self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
         self._update_exclusion_display()
-        if hasattr(self, 'last_results') and self.last_results:
-            self.on_search_finished(self.last_results)
+        self._rerender_with_exclusions()
         self._schedule_session_save()
 
     def _ensure_shelf_map(self):
@@ -27615,7 +27635,7 @@ class GenizahGUI(QMainWindow):
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
         self.exclusion_sources = []
-        self.lbl_exclude_status.setText(tr("Excluded: {}").format(0))
+        self.lbl_exclude_status.setText("")
 
         # 8. Clear composition domain exclusions
         self._comp_domain_exclusions = set()

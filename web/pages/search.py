@@ -3274,16 +3274,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             exclude_btn.text = f"{tr('Exclude manuscripts')} ({n_total})"
             exclude_btn.props('outline dense no-caps color=red')
             _set_btn_visible(exclude_btn, True)
-            exclusion_chips_row.set_visibility(True)
-            exclusion_chips_row.clear()
-            with exclusion_chips_row:
-                for src in search_state.exclusion_sources:
-                    def _make_remove(s=src):
-                        return lambda: _remove_exclusion_source(s)
-                    ui.chip(
-                        f"{src.label} ({len(src.sys_ids)})", icon='close',
-                        on_click=_make_remove()
-                    ).props('outline dense removable color=red')
+            # Only show per-source chips when multiple sources (single source count is on button)
+            if len(search_state.exclusion_sources) > 1:
+                exclusion_chips_row.set_visibility(True)
+                exclusion_chips_row.clear()
+                with exclusion_chips_row:
+                    for src in search_state.exclusion_sources:
+                        def _make_remove(s=src):
+                            return lambda: _remove_exclusion_source(s)
+                        ui.chip(
+                            f"{src.label} ({len(src.sys_ids)})", icon='close',
+                            on_click=_make_remove()
+                        ).props('outline dense removable color=red')
+            else:
+                exclusion_chips_row.set_visibility(False)
+                exclusion_chips_row.clear()
         else:
             exclude_btn.text = tr('Exclude manuscripts')
             exclude_btn.props(remove='color')
@@ -4587,41 +4592,41 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.button(tr('Clear All Exclusions'), icon='clear_all',
                                   on_click=_clear_word_exclusions).props('flat dense no-caps size=sm')
 
-        # Phase 56: Collapsible manuscript excluded results section
-        ms_excluded = search_state.manuscript_excluded_results
-        if ms_excluded:
-            with ui.expansion(
-                text=f"{tr('Excluded manuscripts')} ({len(ms_excluded)})",
-                icon='person_remove',
-                value=False
-            ).classes('w-full').style(
-                'border: 1px solid var(--accent-red, #ef4444); border-radius: 8px; margin-top: 8px; overflow: hidden;'
-            ).props('dense header-class="text-red-8 text-subtitle1 text-weight-medium"'):
-                MS_EXCL_LIMIT = 50
-                for i, excl_item in enumerate(ms_excluded[:MS_EXCL_LIMIT]):
-                    excl_result = excl_item['result']
-                    excl_reason = excl_item.get('reason', '')
-                    excl_display = excl_result.get('display', {})
-                    excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
-                    excl_title = excl_display.get('title', '')
-                    with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
-                        'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
-                    ).on('click', lambda r=excl_result: open_advanced_dialog(None, r)):
-                        ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
-                            'color: var(--text-secondary); max-width: 200px;'
-                        )
-                        if excl_title:
-                            title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
-                            ui.label(title_short).classes('text-xs truncate').style(
-                                'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
+            # Phase 56: Collapsible manuscript excluded results section
+            ms_excluded = search_state.manuscript_excluded_results
+            if ms_excluded:
+                with ui.expansion(
+                    text=f"{tr('Excluded manuscripts')} ({len(ms_excluded)})",
+                    icon='person_remove',
+                    value=False
+                ).classes('w-full').style(
+                    'border: 1px solid var(--accent-red, #ef4444); border-radius: 8px; margin-top: 8px; overflow: hidden;'
+                ).props('dense header-class="text-red-8 text-subtitle1 text-weight-medium"'):
+                    MS_EXCL_LIMIT = 50
+                    for i, excl_item in enumerate(ms_excluded[:MS_EXCL_LIMIT]):
+                        excl_result = excl_item['result']
+                        excl_reason = excl_item.get('reason', '')
+                        excl_display = excl_result.get('display', {})
+                        excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
+                        excl_title = excl_display.get('title', '')
+                        with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
+                            'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
+                        ).on('click', lambda r=excl_result: open_advanced_dialog(None, r)):
+                            ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
+                                'color: var(--text-secondary); max-width: 200px;'
                             )
-                        ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
-                            'background: #fecaca; color: #991b1b; white-space: nowrap;'
-                        )
-                if len(ms_excluded) > MS_EXCL_LIMIT:
-                    ui.label(
-                        f"... {tr('and')} {len(ms_excluded) - MS_EXCL_LIMIT} {tr('more')}"
-                    ).classes('text-sm py-2 px-2').style('color: var(--text-muted);')
+                            if excl_title:
+                                title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
+                                ui.label(title_short).classes('text-xs truncate').style(
+                                    'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
+                                )
+                            ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                                'background: #fecaca; color: #991b1b; white-space: nowrap;'
+                            )
+                    if len(ms_excluded) > MS_EXCL_LIMIT:
+                        ui.label(
+                            f"... {tr('and')} {len(ms_excluded) - MS_EXCL_LIMIT} {tr('more')}"
+                        ).classes('text-sm py-2 px-2').style('color: var(--text-muted);')
 
         # Phase 55: Update refinement UI after rendering results
         _update_search_within_btn()
