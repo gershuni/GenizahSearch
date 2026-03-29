@@ -2322,7 +2322,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         async def do_auto_save():
             await asyncio.sleep(1.5)
             if doc_state['current_doc_id'] and not doc_state.get('loading'):
-                fragments = await build_fragments_list()
+                try:
+                    fragments = await build_fragments_list()
+                except RuntimeError:
+                    return  # slot context lost — skip this auto-save cycle
                 svc = get_puzzle_service(thread_safe=True)
                 doc = await run.io_bound(svc.load_document, doc_state['current_doc_id'])
                 if doc:

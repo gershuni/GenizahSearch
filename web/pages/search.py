@@ -3451,8 +3451,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         progress_bar.value = 0
         # Collapse filter panel — chips summarize active filters
         adv_filters_panel.value = False
-        # Scroll progress into view
-        ui.run_javascript(f'document.getElementById("c{progress_container.id}").scrollIntoView({{behavior: "smooth", block: "start"}})')
+        # Scroll progress into view (may fail if called from background task — non-essential)
+        try:
+            ui.run_javascript(f'document.getElementById("c{progress_container.id}").scrollIntoView({{behavior: "smooth", block: "start"}})')
+        except RuntimeError:
+            pass
 
         # Show loading spinner immediately
         render_results([])
