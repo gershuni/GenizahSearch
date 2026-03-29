@@ -24697,10 +24697,6 @@ class GenizahGUI(QMainWindow):
             return
 
         self.last_results = results
-        # Phase 56: Store unfiltered results for exclusion re-rendering
-        # (don't overwrite when re-rendering with exclusions applied)
-        if not getattr(self, '_rerendering_exclusions', False):
-            self._unfiltered_last_results = results
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -27405,27 +27401,32 @@ class GenizahGUI(QMainWindow):
         return normalize_shelfmark(shelfmark)
 
     def _rerender_with_exclusions(self):
-        """Re-render regular search results with current exclusion state applied."""
-        unfiltered = getattr(self, '_unfiltered_last_results', None) or getattr(self, 'last_results', None)
-        if not unfiltered:
+        """Hide/show table rows based on current exclusion state (Approach C).
+
+        Iterates existing QTableWidget rows and toggles visibility.
+        Preserves enrichment state (domain badges, printed indicators, etc.)
+        without re-rendering or re-calling on_search_finished.
+        """
+        if not hasattr(self, 'results_table') or self.results_table.rowCount() == 0:
             return
-        # Always preserve the unfiltered copy
-        self._unfiltered_last_results = unfiltered
-        if self.excluded_sys_ids:
-            filtered = []
-            for r in unfiltered:
-                sid = r.get('display', {}).get('id')
-                if sid and sid in self.excluded_sys_ids:
-                    continue
-                filtered.append(r)
-            # Temporarily disable _unfiltered overwrite in on_search_finished
-            self._rerendering_exclusions = True
-            self.on_search_finished(filtered)
-            self._rerendering_exclusions = False
-        else:
-            self._rerendering_exclusions = True
-            self.on_search_finished(unfiltered)
-            self._rerendering_exclusions = False
+        hidden_count = 0
+        for row in range(self.results_table.rowCount()):
+            item = self.results_table.item(row, self.COL_CHECKBOX)
+            if not item:
+                continue
+            result = item.data(Qt.ItemDataRole.UserRole)
+            sid = result.get('display', {}).get('id') if result else None
+            should_hide = bool(sid and sid in self.excluded_sys_ids)
+            self.results_table.setRowHidden(row, should_hide)
+            if should_hide:
+                hidden_count += 1
+        # Update status label
+        total = self.results_table.rowCount()
+        visible = total - hidden_count
+        if hidden_count > 0:
+            self.status_label.setText(
+                f"{visible} / {total} {tr('Results')} ({hidden_count} {tr('excluded')})"
+            )
 
     def _update_exclusion_display(self):
         """Update exclusion status labels with per-source breakdown (D-07)."""
