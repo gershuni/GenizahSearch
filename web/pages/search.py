@@ -1133,6 +1133,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             _update_chip_bar()
                         meas_material_select.on('update:model-value', _on_meas_material_change)
 
+                # Phase 56: Exclude manuscripts shortcut in pre-search panel
+                ui.separator()
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.button(
+                        tr('Exclude known manuscripts'), icon='person_remove',
+                        on_click=lambda: _show_exclusion_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    # Show active exclusion count
+                    pre_excl_label = ui.label('')
+                    pre_excl_label.set_visibility(False)
+                    if search_state.exclusion_sources:
+                        n_total = sum(len(s.sys_ids) for s in search_state.exclusion_sources)
+                        pre_excl_label.text = f"{n_total} {tr('manuscripts excluded')}"
+                        pre_excl_label.set_visibility(True)
+                        pre_excl_label.classes('text-xs text-red-600 font-medium')
+
         # --- Filter chip bar (always visible, even when panel is collapsed) ---
         chip_bar_container = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
             'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0; margin-bottom: 16px; position: relative; z-index: 1;'
@@ -3294,10 +3310,58 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
 
             with ui.tabs().classes('w-full') as tabs:
+                tab_paste = ui.tab(tr('Paste Shelfmarks'), icon='content_paste')
                 tab_list = ui.tab(tr('From List'), icon='list')
                 tab_file = ui.tab(tr('From File'), icon='upload_file')
 
             with ui.tab_panels(tabs).classes('w-full'):
+                # Tab 0: Paste Shelfmarks
+                with ui.tab_panel(tab_paste):
+                    ui.label(tr('Paste shelfmarks, one per line. Lines starting with # are ignored.')).classes('text-xs text-gray-500')
+                    paste_area = ui.textarea(
+                        placeholder='T-S 12.123\nMS Heb a.1\nEVR II B 1011',
+                    ).classes('w-full').props('outlined rows=8')
+                    paste_report = ui.column().classes('w-full gap-2')
+
+                    async def _apply_paste_exclusion():
+                        text = paste_area.value or ''
+                        lines = parse_shelfmark_file(text)
+                        if not lines:
+                            ui.notify(tr('No shelfmarks entered'), type='warning')
+                            return
+                        # Build shelf_map lazily (async)
+                        if search_state._exclusion_shelf_map is None:
+                            search_state._exclusion_shelf_map = await run.io_bound(
+                                build_shelf_map, state.meta_mgr.csv_bank
+                            )
+                        ids, unresolved, entries = await run.io_bound(
+                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map
+                        )
+                        if not ids:
+                            paste_report.clear()
+                            with paste_report:
+                                ui.label(f"0/{len(lines)} {tr('resolved')} — {tr('no matches found')}").classes('text-red-500 text-sm')
+                            return
+                        n_found = sum(1 for e in entries if e.status == 'found')
+                        source = ExclusionSource(
+                            label=tr('Pasted shelfmarks'),
+                            source_type='file',
+                            source_id='paste',
+                            sys_ids=ids,
+                            unresolved=unresolved,
+                            resolved_entries=entries,
+                        )
+                        search_state.exclusion_sources.append(source)
+                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        dlg.close()
+                        _apply_manuscript_exclusions()
+                        _update_exclude_btn()
+                        ui.notify(f"{n_found}/{len(lines)} {tr('resolved')}", type='positive')
+
+                    ui.button(tr('Apply'), icon='check', on_click=_apply_paste_exclusion).props(
+                        'color=red no-caps'
+                    ).classes('mt-2')
+
                 # Tab 1: From List
                 with ui.tab_panel(tab_list):
                     from web.auth_state import GlobalAuthState
