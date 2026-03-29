@@ -3387,7 +3387,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.icon('list_alt', size='3rem').classes('text-gray-300')
                                 ui.label(tr('No lists found')).classes('text-gray-500')
                         else:
-                            selected_list_id = {'value': None}
+                            selected_list_ids = set()
                             list_rows = {}
                             for lst in all_lists:
                                 list_id = lst.get('id', '')
@@ -3397,39 +3397,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     'w-full items-center gap-2 py-2 px-3 rounded cursor-pointer'
                                 ).style('transition: background 0.15s;')
                                 list_rows[list_id] = row
-                                with row.on('click', lambda lid=list_id: _select_list_for_exclusion(lid)):
+                                with row.on('click', lambda lid=list_id: _toggle_list_selection(lid)):
                                     ui.icon('list').classes('text-gray-400')
                                     ui.label(list_name).classes('flex-grow')
                                     ui.badge(str(item_count)).props('outline')
 
                             async def _apply_list_exclusion():
-                                lid = selected_list_id['value']
-                                if not lid:
+                                if not selected_list_ids:
                                     ui.notify(tr('Select a list first'), type='warning')
                                     return
-                                try:
-                                    items = await run.io_bound(lists_mgr.get_items_in_list_sync, lid)
-                                except Exception:
-                                    items = []
-                                sys_ids = {item.get('sys_id') for item in items if item.get('sys_id')}
-                                list_name = next((l.get('name', lid) for l in all_lists if l.get('id') == lid), lid)
-                                source = ExclusionSource(
-                                    label=list_name,
-                                    source_type='list',
-                                    source_id=lid,
-                                    sys_ids=sys_ids,
-                                    unresolved=[],
-                                )
-                                search_state.exclusion_sources.append(source)
+                                for lid in selected_list_ids:
+                                    try:
+                                        items = await run.io_bound(lists_mgr.get_items_in_list_sync, lid)
+                                    except Exception:
+                                        items = []
+                                    sys_ids = {item.get('sys_id') for item in items if item.get('sys_id')}
+                                    list_name = next((l.get('name', lid) for l in all_lists if l.get('id') == lid), lid)
+                                    if sys_ids:
+                                        search_state.exclusion_sources.append(ExclusionSource(
+                                            label=list_name,
+                                            source_type='list',
+                                            source_id=lid,
+                                            sys_ids=sys_ids,
+                                            unresolved=[],
+                                        ))
                                 persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
                                 dlg.close()
                                 _apply_manuscript_exclusions()
                                 _update_exclude_btn()
 
-                            def _select_list_for_exclusion(lid):
-                                selected_list_id['value'] = lid
+                            def _toggle_list_selection(lid):
+                                if lid in selected_list_ids:
+                                    selected_list_ids.discard(lid)
+                                else:
+                                    selected_list_ids.add(lid)
                                 for rid, row in list_rows.items():
-                                    if rid == lid:
+                                    if rid in selected_list_ids:
                                         row.style('background: rgba(185, 28, 28, 0.15);')
                                     else:
                                         row.style('background: transparent;')
