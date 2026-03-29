@@ -35,6 +35,7 @@ def create_page():
                     app.storage.user['ocr_disclaimer_dismissed'] = True
                     ocr_banner.delete()
                 ui.button(icon='close', on_click=dismiss_banner).props('flat dense round size=xs')
+                ui.timer(10.0, dismiss_banner, once=True)
 
         # === Hero Section (compact) ===
         with ui.element('div').classes('w-full px-6 py-3').style(

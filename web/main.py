@@ -420,6 +420,7 @@ def create_layout():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()
                 ui.button(icon='close', on_click=dismiss_whats_new).props('flat dense round size=xs')
+                ui.timer(10.0, dismiss_whats_new, once=True)
 
     def toggle_drawer():
         """Toggle drawer and save state."""
