@@ -3421,23 +3421,27 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         _excl_selections[list_id] = {r['sys_id']: False for r in resolved}
                                         _excl_item_cbs[list_id] = []
 
-                                        with ui.expansion().classes('w-full').props(
+                                        exp = ui.expansion(
+                                            text=f"{list_name} ({len(resolved)})"
+                                        ).classes('w-full').props(
                                             'dense header-class="text-weight-medium"'
-                                        ):
-                                            # Header: checkbox + list name
-                                            with ui.row().classes('items-center gap-2').slot('header'):
-                                                def _make_hdr_toggle(lid=list_id, res=resolved):
-                                                    def toggle(e):
-                                                        val = e.value
-                                                        for r in res:
-                                                            _excl_selections[lid][r['sys_id']] = val
-                                                        for cb in _excl_item_cbs.get(lid, []):
-                                                            cb.set_value(val)
-                                                    return toggle
-                                                hdr_cb = ui.checkbox(
-                                                    f"{list_name} ({len(resolved)})", value=False
-                                                ).props('dense').on('update:model-value', _make_hdr_toggle())
-                                                _excl_hdr_cbs[list_id] = hdr_cb
+                                        )
+                                        with exp:
+                                            # Header checkbox above items: select/deselect all
+                                            def _make_hdr_toggle(lid=list_id, res=resolved):
+                                                def toggle(e):
+                                                    val = e.value
+                                                    for r in res:
+                                                        _excl_selections[lid][r['sys_id']] = val
+                                                    for cb in _excl_item_cbs.get(lid, []):
+                                                        cb.set_value(val)
+                                                return toggle
+                                            hdr_cb = ui.checkbox(
+                                                tr('Select all'), value=False
+                                            ).props('dense').classes('text-xs font-bold mb-1').on(
+                                                'update:model-value', _make_hdr_toggle()
+                                            )
+                                            _excl_hdr_cbs[list_id] = hdr_cb
 
                                             # Individual items
                                             for r in resolved:

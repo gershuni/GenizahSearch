@@ -3087,6 +3087,7 @@ TRANSLATIONS = {
     'No shelfmarks to resolve': 'אין מספרי מדף לאיתור',
     'Exclude specific manuscripts by shelfmark or system ID': 'החרג כתבי יד ספציפיים לפי מספר מדף או מספר מערכת',
     'Remove all exclusions': 'הסר את כל ההחרגות',
+    'Select all': 'בחר הכל',
     'items': 'פריטים',
 }
 
