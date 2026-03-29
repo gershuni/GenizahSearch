@@ -3379,7 +3379,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     else:
                         lists_mgr = state.lists_mgr
                         try:
-                            all_lists = await run.io_bound(lists_mgr.get_all_lists, False)
+                            all_lists = lists_mgr.get_all_lists(include_recent=False)
                         except Exception:
                             all_lists = []
                         if not all_lists:
@@ -3400,7 +3400,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                                         # Fetch items
                                         try:
-                                            list_items = await run.io_bound(lists_mgr.get_items_in_list_sync, list_id)
+                                            list_items = lists_mgr.get_items_in_list_sync(list_id)
                                         except Exception:
                                             list_items = []
                                         resolved = []
