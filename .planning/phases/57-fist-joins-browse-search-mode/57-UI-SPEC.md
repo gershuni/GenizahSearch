@@ -48,9 +48,11 @@ Exceptions: none
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
 | Body | 14px (text-sm / 0.875rem) | 400 (regular) | 1.5 |
-| Label | 12px (text-xs / 0.75rem) | 600 (semibold) | 1.4 |
+| Label | 12px (text-xs / 0.75rem) | 400 (regular) | 1.4 |
 | Heading | 18px (text-lg / 1.125rem) | 700 (bold) | 1.2 |
 | Display | 20px (text-xl / 1.25rem) | 700 (bold) | 1.2 |
+
+Two weights only: 400 (regular) for Body and Label, 700 (bold) for Heading and Display. Label is distinguished from Body by its smaller size (12px vs 14px), not by weight.
 
 Source: matches existing dialog typography (measurements_dialog.py, catalog_dialog.py).
 
@@ -125,6 +127,8 @@ Accent reserved for: primary CTA buttons, navigation active states, border-focus
 | Library | 80px | Library code badge |
 | Actions | 120px | "Browse" icon button + "Puzzle" icon button |
 
+**Accessibility for icon-only action buttons:** The "Browse" and "Puzzle" icon buttons in the Actions column render without visible text labels. Each button MUST carry an accessible label: on web, set both `title` attribute and `aria-label` ("Browse manuscript" / "Add to puzzle"); on desktop, call `setToolTip("Browse manuscript")` / `setToolTip("Add to puzzle")` on each QPushButton. Hebrew equivalents: "עיין בכתב יד" / "הוסף לפאזל".
+
 **Interactions:**
 - Click shelfmark -> navigate to that manuscript's browse page (closes dialog)
 - "Browse" button -> same navigation
@@ -146,7 +150,7 @@ Accent reserved for: primary CTA buttons, navigation active states, border-focus
 [Bibliography (3)] [Catalog] [Measurements] [Visual Similarity (20)]
 ```
 
-**Style:** `border: 1.5px solid #ef6c00; border-radius: 12px; min-height: 22px; color: #ef6c00; font-weight: 600;`
+**Style:** `border: 1.5px solid #ef6c00; border-radius: 12px; min-height: 22px; color: #ef6c00; font-weight: 400;`
 **Props:** `flat dense size=sm no-caps`
 **Classes:** `text-xs px-2 py-0`
 **Count:** Show suggestion count in parentheses, e.g., "Visual Similarity (20)"
@@ -223,6 +227,8 @@ Accent reserved for: primary CTA buttons, navigation active states, border-focus
 | Download toggle | "Download full visual similarity database" | "הורד מסד נתוני דמיון חזותי מלא" |
 | Download progress | "Downloading... {percent}%" | "מוריד... {percent}%" |
 | Download complete | "Downloaded ({size})" | "הורד ({size})" |
+| Browse button tooltip | "Browse manuscript" | "עיין בכתב יד" |
+| Puzzle button tooltip | "Add to puzzle" | "הוסף לפאזל" |
 
 **Labeling rule (D-13):** Always "Visual Similarity" -- never "joins", "matches", or "connections". These are algorithmic suggestions, not confirmed scholarly joins.
 
