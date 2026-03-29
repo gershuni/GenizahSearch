@@ -55,6 +55,11 @@ from list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
+from shared.exclusion_service import (
+    ExclusionSource, ResolvedEntry, parse_shelfmark_file, parse_csv_shelfmarks,
+    resolve_shelfmarks, build_shelf_map, compute_excluded_ids,
+    serialize_sources, deserialize_sources,
+)
 
 # NLI crossref service for folio labels and source indicators (Phase 31)
 try:
@@ -2889,22 +2894,37 @@ class HelpDialog(QDialog):
 
 class ExcludeDialog(QDialog):
     """Collect system IDs or shelfmarks that should be excluded from searches."""
-    def __init__(self, parent, existing_entries=None):
+    def __init__(self, parent, existing_entries=None, lists_mgr=None, shelf_map=None):
         super().__init__(parent)
         self.setWindowTitle(tr("Exclude Manuscripts"))
-        self.resize(500, 400)
+        self.resize(600, 500)
         layout = QVBoxLayout()
 
-        help_lbl = QLabel(tr("Enter system IDs or shelfmarks to exclude (one per line). Matching values are filled automatically."))
-        help_lbl.setWordWrap(True)
-        layout.addWidget(help_lbl)
-
         self._syncing = False
-        self._shelf_to_sys = None
+        self._shelf_to_sys = shelf_map
         self._last_edited = None
         self._full_titles = []
         self._display_titles = []
         self.meta_mgr = getattr(parent, "meta_mgr", None)
+        self._lists_mgr = lists_mgr
+        self._resolved_entries: list = []  # ResolvedEntry list from file resolution
+        self._resolved_ids: set = set()
+        self._resolved_unresolved: list = []
+        self._loaded_filename: str = ''
+        self._selected_list_sources: list = []  # ExclusionSource from list tab
+
+        # Tabbed interface (Phase 56)
+        from PyQt6.QtWidgets import QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QListWidget, QListWidgetItem, QAbstractItemView
+        self._tab_widget = QTabWidget()
+        layout.addWidget(self._tab_widget)
+
+        # === Tab 1: From File / Manual ===
+        tab1 = QWidget()
+        tab1_layout = QVBoxLayout(tab1)
+
+        help_lbl = QLabel(tr("Enter system IDs or shelfmarks to exclude (one per line). Matching values are filled automatically."))
+        help_lbl.setWordWrap(True)
+        tab1_layout.addWidget(help_lbl)
 
         grid = QGridLayout()
         grid.addWidget(QLabel(tr("System IDs")), 0, 0)
@@ -2931,7 +2951,7 @@ class ExcludeDialog(QDialog):
         grid.addWidget(self.sys_text_area, 1, 0)
         grid.addWidget(self.shelf_text_area, 1, 1)
         grid.addWidget(self.title_text_area, 1, 2)
-        layout.addLayout(grid)
+        tab1_layout.addLayout(grid)
 
         if existing_entries:
             sys_entries, shelf_entries = self._split_existing_entries(existing_entries)
@@ -2948,11 +2968,56 @@ class ExcludeDialog(QDialog):
             elif sys_entries:
                 self._set_titles(self._resolve_titles_from_sys(sys_entries))
 
-        btn_row = QHBoxLayout()
+        # Resolution report table (D-04)
+        self._report_label = QLabel("")
+        tab1_layout.addWidget(self._report_label)
+        self._report_table = QTableWidget(0, 4)
+        self._report_table.setHorizontalHeaderLabels([tr("Shelfmark"), tr("Normalized"), "sys_id", tr("Status")])
+        self._report_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._report_table.setVisible(False)
+        tab1_layout.addWidget(self._report_table)
+
+        file_row = QHBoxLayout()
         self.btn_load = QPushButton(tr("Load from File"))
         self.btn_load.clicked.connect(self.load_file)
-        btn_row.addWidget(self.btn_load)
+        file_row.addWidget(self.btn_load)
 
+        btn_resolve = QPushButton(tr("Resolve Shelfmarks"))
+        btn_resolve.setToolTip(tr("Resolve entered shelfmarks and show per-row status report"))
+        btn_resolve.clicked.connect(self._resolve_and_show_report)
+        file_row.addWidget(btn_resolve)
+        file_row.addStretch()
+        tab1_layout.addLayout(file_row)
+
+        self._tab_widget.addTab(tab1, tr("From File / Manual"))
+
+        # === Tab 2: From List ===
+        tab2 = QWidget()
+        tab2_layout = QVBoxLayout(tab2)
+
+        if self._lists_mgr:
+            tab2_layout.addWidget(QLabel(tr("Select lists to exclude their manuscripts:")))
+            self._list_widget = QListWidget()
+            self._list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+            all_lists = self._lists_mgr.get_all_lists(include_recent=False)
+            self._list_data = {}
+            for lst in all_lists:
+                list_id = lst.get('id', '')
+                list_name = lst.get('name', list_id)
+                count = lst.get('count', 0)
+                item = QListWidgetItem(f"{list_name} ({count} items)")
+                item.setData(Qt.ItemDataRole.UserRole, list_id)
+                self._list_widget.addItem(item)
+                self._list_data[list_id] = lst
+            tab2_layout.addWidget(self._list_widget)
+        else:
+            tab2_layout.addWidget(QLabel(tr("Lists not available (not logged in)")))
+            self._list_widget = None
+
+        self._tab_widget.addTab(tab2, tr("From List"))
+
+        # Bottom buttons
+        btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_apply = QPushButton(tr("Apply"))
         btn_apply.clicked.connect(self.accept)
@@ -2963,6 +3028,108 @@ class ExcludeDialog(QDialog):
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
+
+    def _resolve_and_show_report(self):
+        """Resolve shelfmarks from the text areas and show resolution report table."""
+        from PyQt6.QtWidgets import QTableWidgetItem
+        shelf_lines = [l.strip() for l in self.shelf_text_area.toPlainText().splitlines() if l.strip()]
+        if not shelf_lines:
+            self._report_label.setText(tr("No shelfmarks to resolve"))
+            return
+        self._ensure_shelf_map()
+        if not self._shelf_to_sys:
+            self._report_label.setText(tr("Shelf map not available"))
+            return
+        ids, unresolved, entries = resolve_shelfmarks(shelf_lines, self._shelf_to_sys)
+        self._resolved_entries = entries
+        self._resolved_ids = ids
+        self._resolved_unresolved = unresolved
+
+        n_found = sum(1 for e in entries if e.status == 'found')
+        n_notfound = sum(1 for e in entries if e.status == 'not_found')
+        n_dup = sum(1 for e in entries if e.status == 'duplicate')
+        self._report_label.setText(f"{tr('Resolved')} {n_found}/{len(entries)} | {n_notfound} {tr('not found')} | {n_dup} {tr('duplicates')}")
+
+        self._report_table.setRowCount(min(len(entries), 200))
+        self._report_table.setVisible(True)
+        for i, e in enumerate(entries[:200]):
+            self._report_table.setItem(i, 0, QTableWidgetItem(e.original))
+            self._report_table.setItem(i, 1, QTableWidgetItem(e.normalized))
+            self._report_table.setItem(i, 2, QTableWidgetItem(e.sys_id or '--'))
+            status_item = QTableWidgetItem(e.status)
+            if e.status == 'found':
+                status_item.setBackground(QColor(200, 255, 200))
+            elif e.status == 'not_found':
+                status_item.setBackground(QColor(255, 200, 200))
+            elif e.status == 'duplicate':
+                status_item.setBackground(QColor(255, 255, 200))
+            self._report_table.setItem(i, 3, status_item)
+
+    def get_exclusion_sources(self) -> list:
+        """Return ExclusionSource objects from the active tab."""
+        sources = []
+        current_tab = self._tab_widget.currentIndex()
+
+        if current_tab == 0:
+            # Tab 1: From File / Manual
+            # If resolution was done, use resolved entries
+            if self._resolved_ids:
+                label = self._loaded_filename or tr('Manual entry')
+                sources.append(ExclusionSource(
+                    label=label,
+                    source_type='file',
+                    source_id=self._loaded_filename or 'manual',
+                    sys_ids=set(self._resolved_ids),
+                    unresolved=list(self._resolved_unresolved),
+                    resolved_entries=list(self._resolved_entries),
+                ))
+            else:
+                # Fall back to legacy text-based extraction
+                entries_text = self.get_entries_text()
+                if entries_text.strip():
+                    entries = [e.strip() for e in entries_text.splitlines() if e.strip()]
+                    sys_ids = set()
+                    for e in entries:
+                        cleaned = re.sub(r"\s+", "", e)
+                        digits_only = re.sub(r"\D", "", cleaned)
+                        if digits_only and digits_only == cleaned:
+                            sys_ids.add(cleaned)
+                        else:
+                            self._ensure_shelf_map()
+                            norm = normalize_shelfmark(e)
+                            sid = self._shelf_to_sys.get(norm) if self._shelf_to_sys else None
+                            if sid:
+                                sys_ids.add(sid)
+                    if sys_ids:
+                        sources.append(ExclusionSource(
+                            label=self._loaded_filename or tr('Manual entry'),
+                            source_type='file',
+                            source_id=self._loaded_filename or 'manual',
+                            sys_ids=sys_ids,
+                            unresolved=[],
+                        ))
+
+        elif current_tab == 1 and self._list_widget:
+            # Tab 2: From List
+            for item in self._list_widget.selectedItems():
+                list_id = item.data(Qt.ItemDataRole.UserRole)
+                list_info = self._list_data.get(list_id, {})
+                list_name = list_info.get('name', list_id)
+                try:
+                    items = self._lists_mgr.get_items_in_list(list_id)
+                    sys_ids = {it.get('sys_id') for it in items if it.get('sys_id')}
+                except Exception:
+                    sys_ids = set()
+                if sys_ids:
+                    sources.append(ExclusionSource(
+                        label=list_name,
+                        source_type='list',
+                        source_id=list_id,
+                        sys_ids=sys_ids,
+                        unresolved=[],
+                    ))
+
+        return sources
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.FocusIn:
@@ -3108,10 +3275,24 @@ class ExcludeDialog(QDialog):
         return cleaned
 
     def load_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load", "", "Text (*.txt)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load", "", "Text/CSV (*.txt *.csv)")
         if path:
-            with open(path, 'r', encoding='utf-8') as f:
+            import os
+            self._loaded_filename = os.path.basename(path)
+            with open(path, 'r', encoding='utf-8-sig') as f:
                 content = f.read()
+            # Use shared parsing for CSV files
+            if path.lower().endswith('.csv'):
+                lines = parse_csv_shelfmarks(content)
+                self._syncing = True
+                self.shelf_text_area.setPlainText("\n".join(lines))
+                self._syncing = False
+                self._last_edited = "shelf"
+                self._sync_from_shelf()
+                # Auto-resolve
+                self._resolve_and_show_report()
+                return
+
             entries = [line for line in content.splitlines() if line.strip()]
             sys_entries, shelf_entries = self._split_existing_entries(entries)
             self._syncing = True
@@ -3126,6 +3307,9 @@ class ExcludeDialog(QDialog):
                 self._sync_from_shelf()
             elif sys_entries:
                 self._set_titles(self._resolve_titles_from_sys(sys_entries))
+            # Auto-resolve for file imports
+            if shelf_entries:
+                self._resolve_and_show_report()
 
     def get_entries_text(self):
         entries = []
@@ -12218,6 +12402,7 @@ class GenizahGUI(QMainWindow):
         self.excluded_raw_entries = []
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
+        self.exclusion_sources: list = []  # list of ExclusionSource objects (Phase 56)
         # Pre-search filter state (Phase 45-03)
         self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
         self.pre_search_restrict_sys_ids = None  # computed set or None
@@ -24147,6 +24332,7 @@ class GenizahGUI(QMainWindow):
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
         self.excluded_raw_entries = []
+        self.exclusion_sources = []
 
         # 11. Clear list filter state
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
@@ -27087,9 +27273,31 @@ class GenizahGUI(QMainWindow):
             with open(path, 'r', encoding='utf-8') as f: self.comp_text_area.setPlainText(f.read())
 
     def open_exclude_dialog(self):
-        dlg = ExcludeDialog(self, existing_entries=self.excluded_raw_entries)
+        self._ensure_shelf_map()
+        dlg = ExcludeDialog(
+            self,
+            existing_entries=self.excluded_raw_entries,
+            lists_mgr=getattr(self, 'lists_mgr', None),
+            shelf_map=getattr(self, '_shelf_to_sys', None),
+        )
         if dlg.exec():
-            self.set_excluded_entries(dlg.get_entries_text())
+            new_sources = dlg.get_exclusion_sources()
+            if new_sources:
+                self.exclusion_sources.extend(new_sources)
+                self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+                # Also keep legacy shelfmarks set for backward compat with _item_matches_exclusion
+                all_unresolved = []
+                for s in self.exclusion_sources:
+                    all_unresolved.extend(s.unresolved)
+                self.excluded_shelfmarks = {normalize_shelfmark(u) for u in all_unresolved if u}
+                self._update_exclusion_display()
+                # Re-apply exclusions to current results
+                if hasattr(self, 'last_results') and self.last_results:
+                    self._apply_manual_exclusions(self.last_results, getattr(self, 'comp_raw_items', []))
+                self._schedule_session_save()
+            else:
+                # Legacy fallback: use text-based entries
+                self.set_excluded_entries(dlg.get_entries_text())
 
     def set_excluded_entries(self, entries_text: str):
         entries = [e.strip() for e in entries_text.splitlines() if e.strip()]
@@ -27115,6 +27323,32 @@ class GenizahGUI(QMainWindow):
     def _normalize_shelfmark(self, shelfmark: str) -> str:
         """Normalize shelfmarks using the canonical function from genizah_core."""
         return normalize_shelfmark(shelfmark)
+
+    def _update_exclusion_display(self):
+        """Update exclusion status label with per-source breakdown (D-07)."""
+        if not self.exclusion_sources:
+            self.lbl_exclude_status.setText(tr("Excluded: {}").format(0))
+            return
+        total = sum(len(s.sys_ids) for s in self.exclusion_sources)
+        if len(self.exclusion_sources) == 1:
+            src = self.exclusion_sources[0]
+            self.lbl_exclude_status.setText(
+                tr("Excluded: {}").format(f"{total} ({src.label})")
+            )
+        else:
+            parts = [f"{len(s.sys_ids)} {s.label}" for s in self.exclusion_sources]
+            self.lbl_exclude_status.setText(
+                tr("Excluded: {}").format(f"{total} ({', '.join(parts)})")
+            )
+
+    def _remove_exclusion_source(self, source_id: str):
+        """Remove a single exclusion source by source_id (D-06 per-source clear)."""
+        self.exclusion_sources = [s for s in self.exclusion_sources if s.source_id != source_id]
+        self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+        self._update_exclusion_display()
+        if hasattr(self, 'last_results') and self.last_results:
+            self._apply_manual_exclusions(self.last_results, getattr(self, 'comp_raw_items', []))
+        self._schedule_session_save()
 
     def _ensure_shelf_map(self):
         """Build a mapping from normalized shelfmark to sys_id for quick lookups."""
@@ -27302,6 +27536,7 @@ class GenizahGUI(QMainWindow):
         self.excluded_raw_entries = []
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
+        self.exclusion_sources = []
         self.lbl_exclude_status.setText(tr("Excluded: {}").format(0))
 
         # 8. Clear composition domain exclusions
@@ -30455,6 +30690,7 @@ class GenizahGUI(QMainWindow):
                     'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
                     'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
                     'excluded_raw_entries': getattr(self, 'excluded_raw_entries', []),
+                    'exclusion_sources': serialize_sources(getattr(self, 'exclusion_sources', [])),
                     'results_filters': getattr(self, 'results_filters', {}),
                     'filter_sources': getattr(self, 'filter_sources', {}),
                     'filter_enabled_sources': sorted(getattr(self, 'filter_enabled_sources', set())),
@@ -30599,12 +30835,27 @@ class GenizahGUI(QMainWindow):
             self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
             self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
             self.excluded_raw_entries = reg.get('excluded_raw_entries', [])
+            # Phase 56: Restore multi-source exclusion state
+            if reg.get('exclusion_sources'):
+                self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])
+                self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+            elif self.excluded_sys_ids:
+                # Backward compat: wrap old flat set into ExclusionSource
+                self.exclusion_sources = [ExclusionSource(
+                    label=tr('Previous session'),
+                    source_type='file',
+                    source_id='legacy',
+                    sys_ids=set(self.excluded_sys_ids),
+                    unresolved=list(self.excluded_shelfmarks),
+                )]
             self.results_filters = reg.get('results_filters', {})
             self.filter_sources = reg.get('filter_sources', {})
             self.filter_enabled_sources = set(reg.get('filter_enabled_sources', []))
 
             # Update exclusion status label
-            if self.excluded_raw_entries:
+            if self.exclusion_sources:
+                self._update_exclusion_display()
+            elif self.excluded_raw_entries:
                 self.lbl_exclude_status.setText(
                     tr("Excluded: {}").format(len(self.excluded_raw_entries))
                 )
