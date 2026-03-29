@@ -5205,6 +5205,38 @@ def strip_search_diacritics(text: str) -> str:
     return COMBINING_DIACRITICALS_PATTERN.sub('', text)
 
 
+# ---------------------------------------------------------------------------
+# Bracket-aware search helpers
+# Genizah transcriptions use [] for uncertain/reconstructed text (e.g., [ד]ל[ך]).
+# These helpers let bracket-free queries find bracketed content.
+# ---------------------------------------------------------------------------
+
+def _add_bracket_variants(term: str) -> list:
+    """Return bracket-adorned variants of *term* for Tantivy OR expansion.
+
+    The whitespace tokenizer stores bracketed words as single tokens
+    (e.g., ``]הנתשנ``), so we need to query for all plausible bracket
+    positions so Tantivy returns them as candidates.
+    """
+    variants = [term]
+    if not term:
+        return variants
+    for v in (f'[{term}', f'{term}]', f'[{term}]', f']{term}', f'{term}['):
+        if v not in variants:
+            variants.append(v)
+    return variants
+
+
+def _query_has_brackets(query_str: str) -> bool:
+    """Return True if *query_str* contains literal square brackets."""
+    return '[' in query_str or ']' in query_str
+
+
+def _strip_brackets(text: str) -> str:
+    """Remove all square brackets from *text*."""
+    return text.replace('[', '').replace(']', '')
+
+
 # Inserted between regex tokens to allow optional combining marks and apostrophe variants in source text
 MARK_TOLERANT_INSERTER = '[\u0300-\u036F\u0027\u05F3\u05F4\u2018\u2019]*'
 
@@ -5811,6 +5843,14 @@ class SearchEngine:
                                 seen.add(pfx)
                                 clean_vars.append(f'"{pfx}"')
 
+                # Bracket variants: add bracket-adorned forms of each
+                # original word so Tantivy returns bracketed tokens.
+                for w in comp.get('original_words', []):
+                    for bv in _add_bracket_variants(w):
+                        if bv != w and bv not in seen:
+                            seen.add(bv)
+                            clean_vars.append(f'"{bv}"')
+
                 # Flex spacing: add split alternatives so Tantivy finds
                 # documents where a word appears with spaces (e.g., "בן דוד"
                 # for query "בןדוד"). Each split produces an AND pair;
@@ -5853,6 +5893,7 @@ class SearchEngine:
 
                 # 2. Prepare list
                 clean_vars = []
+                seen_vars = set()
 
                 # Add EXACT term with BOOST (^5)
                 # This tells Tantivy: "If you find the exact word, it's 5x more important"
@@ -5874,6 +5915,14 @@ class SearchEngine:
                             clean_vars.append(f'"{v_clean}"^3')
                         else:
                             clean_vars.append(f'"{v_clean}"')
+
+                # Bracket variants: add bracket-adorned forms so Tantivy
+                # returns documents where the term appears with scholarly
+                # brackets (e.g., ]הנתשנ for query הנתשנ).
+                for bv in _add_bracket_variants(term):
+                    if bv != term and bv not in seen_vars:
+                        clean_vars.append(f'"{bv}"')
+                        seen_vars.add(bv)
 
                 parts.append(f'({" OR ".join(clean_vars)})')
 
@@ -6448,11 +6497,20 @@ class SearchEngine:
 
                     content = self._get_field(doc, 'content', [""])[0]
 
+                    # Bracket handling: strip brackets for bracket-free queries
+                    match_content = content if _query_has_brackets(query_str) else _strip_brackets(content)
+
                     # Regex match — fast filter + provides highlight span
-                    match_obj = regex.search(content)
+                    match_obj = regex.search(match_content)
                     if not match_obj:
                         regex_filtered += 1
                         continue
+
+                    # Re-search on original content for highlighting
+                    if match_content is not content:
+                        orig_match = regex.search(content)
+                        if orig_match:
+                            match_obj = orig_match
 
                     # Text position filter
                     if text_position == 'start' and match_obj.start() > 0:
@@ -6898,17 +6956,30 @@ class SearchEngine:
                     scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
                     scope = scope_list[0]
 
+                    # Bracket handling: strip brackets from content for
+                    # bracket-free queries so e.g. הנתשנ matches ]הנתשנ
+                    match_content = content if _query_has_brackets(query_str) else _strip_brackets(content)
+
                     # Check for match before any heavy parsing
-                    match_obj = regex.search(content)
+                    match_obj = regex.search(match_content)
                     if not match_obj:
                         regex_filtered_count += 1
                         continue
 
                     # Position post-filter: Tantivy uses broad fields (10-word head/tail),
                     # validate exact position (first word, last word, line boundary)
-                    if text_position and not Indexer._validate_position_match(content, match_obj, text_position, _line_constraints or None):
+                    if text_position and not Indexer._validate_position_match(match_content, match_obj, text_position, _line_constraints or None):
                         regex_filtered_count += 1
                         continue
+
+                    # For highlighting, re-search on original content to
+                    # preserve scholarly bracket notation in snippets.
+                    if match_content is not content:
+                        orig_match = regex.search(content)
+                        if orig_match:
+                            match_obj = orig_match
+                        # else: keep match_obj from stripped content; highlight
+                        # may be slightly offset but still useful
 
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
                     span = match_obj.span()
@@ -7098,8 +7169,12 @@ class SearchEngine:
 
                         content = doc['content'][0]
 
+                        # Bracket handling: composition chunks come from user
+                        # text (no brackets), so always strip from index content.
+                        match_content = _strip_brackets(content)
+
                         # Verify exact Regex match
-                        if regex.search(content):
+                        if regex.search(match_content):
                             uid = doc['unique_id'][0]
 
                             # Always use single map - accumulate all matches for same uid
@@ -7117,7 +7192,9 @@ class SearchEngine:
                             rec['head'] = doc['full_header'][0]
                             rec['src'] = doc['source'][0]
                             rec['content'] = content
-                            rec['matches'].append(regex.search(content).span())
+                            # Use original content span if possible, fall back to stripped
+                            _orig_m = regex.search(content)
+                            rec['matches'].append((_orig_m or regex.search(match_content)).span())
                             # Save indices of found words in *source* text
                             rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
                             rec['patterns'].add(regex.pattern)
