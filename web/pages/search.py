@@ -3550,7 +3550,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     ui.upload(
                         auto_upload=True, on_upload=_on_file_upload
-                    ).props('accept=".txt,.csv" flat bordered').classes('w-full')
+                    ).props('accept=".txt,.csv" flat bordered color=red-9').classes('w-full').style(
+                        'background: var(--bg-tertiary); border-color: var(--border-light);'
+                    )
 
                     async def _apply_file_exclusion():
                         if not file_source_ref['ids']:
