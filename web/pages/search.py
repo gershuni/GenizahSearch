@@ -3305,7 +3305,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     async def _show_exclusion_dialog():
         """Show the exclusion picker dialog with List and File tabs (Phase 56)."""
-        with ui.dialog().props('maximized=false') as dlg, ui.card().classes('w-full max-w-xl'):
+        with ui.dialog().props('maximized=false') as dlg, ui.card().classes('w-full max-w-xl').style('background: var(--bg-secondary);'):
             with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
                 'background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);'
             ):
@@ -4673,7 +4673,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
                                 )
                             ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
-                                'background: #fecaca; color: #991b1b; white-space: nowrap;'
+                                'background: var(--accent-red, #fecaca); color: var(--text-on-accent, #991b1b); white-space: nowrap;'
                             )
                     if len(ms_excluded) > MS_EXCL_LIMIT:
                         ui.label(
