@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.3.0
+# Genizah Search Pro 7.4.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,17 +8,16 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.3.0?
+## What's New in Version 7.4.0?
 
-### v7.3.0: Manuscript Measurements, Bibliography Cleanup & Desktop Stability
+### v7.4.0: Search Within Results
 
-**Manuscript Measurements** — A new Measurements button in the browse page opens a detailed dialog showing physical dimensions, margins, writing area, line counts, text density, and material for manuscripts with measurement data (231K manuscripts covered). Data sourced from FJMS computed measurements, thanks to Ephraim Meiri's invaluable work.
+Researchers can now **progressively narrow search results** by searching within their current result set. After any search, click "Search within N manuscripts" to restrict a follow-up query to only those manuscripts. A breadcrumb chip chain tracks each refinement step — click × to remove a step, or "Clear all" to start fresh. Cross-mode refinement is fully supported: search by text, then refine by Title, then narrow further with Responsa syntax.
 
-**Bibliography Cleanup** — Removed over 400,000 duplicate bibliography entries (48% reduction), providing cleaner scholarly references across the corpus.
-
-**55,000 New Hebrew Translations** — English catalog free descriptions now available in Hebrew using Dicta Translation, with quality-filtered output.
-
-**Desktop Stability** — Fixed a crash when rapidly navigating between manuscripts in the browse tab, along with image thread lifecycle improvements preventing orphaned workers.
+- **"Only results with all terms" filter** — checkbox on the refinement strip filters displayed results to only show pages from manuscripts matching all chain queries
+- **Chain-aware snippet highlighting** — snippets highlight terms from all refinement steps, not just the last query
+- **Manuscript-level clarity** — button and badge show unique manuscript count, original query appears as first breadcrumb chip
+- **Dark mode & RTL** — full support for dark theme and Hebrew right-to-left interface
 
 ### v7.2.3: Chrome Extension Live + Puzzle Enabled
 

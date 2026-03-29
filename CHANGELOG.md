@@ -4,6 +4,20 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.4.0] - Search Within Results - 2026-03-29
+
+### New Features
+- **Search within results**: Progressive refinement — run a second query restricted to manuscripts from your current result set. Breadcrumb chip chain shows refinement history with per-chip removal, cross-mode support (text, Responsa, Title, Shelfmark), "Only results with all terms" page-level filter, and chain-aware snippet highlighting
+
+### Improvements
+- **Thread-safe SQLite services**: All shared services (FJMS, NLI, PGP, Translation) now use per-thread connections for safer concurrent access
+- **NiceGUI ESM handler hardening**: Patched ESM static file handler to reject directory path traversal
+
+### Bug Fixes
+- **csv_bank race condition**: Fixed `dictionary changed size during iteration` error in metadata search under concurrent access
+
+---
+
 ## [7.3.1] - SEO Foundation & Shareable Browse URLs - 2026-03-27
 
 ### New Features

@@ -328,7 +328,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Manuscript measurements — dimensions, margins, line counts & material via Measurements button in browse. 400K bibliography duplicates removed."))
+        self.lbl_msg.setText(tr("New: Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set."))
         self.show()
 
     def on_learn_more(self):
@@ -362,10 +362,10 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr('Manuscript measurements — new Measurements button in browse shows physical dimensions, margins, writing area, line counts, text density and material for 231K manuscripts.'),
-            tr('Bibliography cleanup — removed over 400,000 duplicate entries (48% reduction) for cleaner scholarly references.'),
-            tr('55,000 new Hebrew translations — English catalog free descriptions now available in Hebrew via Dicta Translation.'),
-            tr('Desktop stability — fixed crash when rapidly navigating between manuscripts in the browse tab.'),
+            tr('Search within results — click "Search within N manuscripts" to restrict your next search to the manuscripts found. Works with all search modes.'),
+            tr('Refinement chain — a tag strip shows all refinement steps. Click × to remove a step, or "Clear all" to reset.'),
+            tr('"Only results with all terms" filter — a checkbox that shows only pages from manuscripts that appeared in all search steps.'),
+            tr('All chain terms highlighted — text snippets highlight terms from all refinement steps, not just the last one.'),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "dir='rtl'" if is_heb else ""

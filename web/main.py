@@ -415,7 +415,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Manuscript measurements — physical dimensions, margins, line counts & material now visible via Measurements button in browse. Plus 400K bibliography duplicates removed.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()

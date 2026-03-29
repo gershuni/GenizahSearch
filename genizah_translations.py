@@ -3031,6 +3031,7 @@ TRANSLATIONS = {
     "Reset Image": "איפוס תמונה",
     "Image adjustment controls — brightness, contrast, gamma & invert on all image viewers. Better reading of difficult manuscripts.": "בקרות התאמת תמונה — בהירות, ניגודיות, גמא והיפוך צבעים בכל מציגי התמונות. קריאה טובה יותר של כתבי יד קשים.",
     "Manuscript measurements — physical dimensions, margins, line counts & material now visible via Measurements button in browse. Plus 400K bibliography duplicates removed.": "מידות כתבי יד — מידות פיזיות, שוליים, מספר שורות וחומר זמינים כעת בלחצן מידות בעיון. בנוסף הוסרו 400 אלף כפילויות ביבליוגרפיות.",
+    "Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set.": "חיפוש בתוך תוצאות — צמצום הדרגתי של תוצאות חיפוש על ידי הגבלת שאילתות המשך לכתבי היד שנמצאו.",
     # Phase 55: Search within results
     "Search within": "חפש בתוך",
     "Searching within": "מחפש בתוך",
@@ -3042,6 +3043,11 @@ TRANSLATIONS = {
     "0 results within current scope": "0 תוצאות בטווח הנוכחי",
     "Only results with all terms": "רק תוצאות עם כל המונחים",
     "0 results \u2014 no manuscripts match all terms": "0 תוצאות \u2014 אין כתבי יד התואמים לכל המונחים",
+    "New: Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set.": "חדש: חיפוש בתוך תוצאות — צמצום הדרגתי של תוצאות חיפוש על ידי הגבלת שאילתות המשך לכתבי היד שנמצאו.",
+    'Search within results — click "Search within N manuscripts" to restrict your next search to the manuscripts found. Works with all search modes.': 'חיפוש בתוך תוצאות — לחצו "חפש בתוך N כתבי יד" כדי לצמצם חיפוש לכתבי היד שנמצאו. תומך בכל מצבי החיפוש.',
+    'Refinement chain — a tag strip shows all refinement steps. Click × to remove a step, or "Clear all" to reset.': 'שרשרת צמצום — פס תגיות מציג את כל שלבי הצמצום. לחצו × להסרת שלב, או "נקה הכל" לאיפוס.',
+    '"Only results with all terms" filter — a checkbox that shows only pages from manuscripts that appeared in all search steps.': 'מסנן "רק תוצאות עם כל המונחים" — תיבת סימון המציגה רק דפים מכתבי יד שהופיעו בכל שלבי החיפוש.',
+    'All chain terms highlighted — text snippets highlight terms from all refinement steps, not just the last one.': 'הדגשת כל מונחי השרשרת — קטעי טקסט מדגישים מונחים מכל שלבי הצמצום, לא רק מהאחרון.',
 }
 
 # Hebrew library display names (keyed by library_code)

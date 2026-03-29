@@ -47,6 +47,7 @@ def _create_english_content():
                 ('search', 'Search'),
                 ('responsa', 'Responsa-Style Search'),
                 ('filters', 'Focused Search (Advanced Filters)'),
+                ('search-within', 'Search Within Results'),
                 ('translations', 'Catalog & Metadata Translations'),
                 ('parallels', 'Parallels Search'),
                 ('pgp', 'Princeton Geniza Project (PGP) Data'),
@@ -222,6 +223,31 @@ Use the **Advanced Filters** panel (available on both Search and Parallels pages
 - Active filters appear as removable **chips** above the results
 - Filters apply to all search modes (Exact, Variants, Responsa, etc.)
 - On the Browse page, domain and author labels link directly to a filtered search
+        ''').style('color: var(--text-secondary);')
+
+    # === Search Within Results ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-search-within"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('filter_list').classes('text-2xl text-primary')
+            h2('Search Within Results', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+After running a search, click **"Search within N manuscripts"** in the results header to restrict your next query to only the manuscripts found in the current result set. This lets you progressively narrow results through multiple refinement steps.
+
+**How it works:**
+- Search for a term (e.g., "חנוכה") — results show all matching manuscripts
+- Click "Search within N manuscripts" — a badge appears on the search bar
+- Type a second term (e.g., "נרות") and search — results are restricted to manuscripts from the first search
+- A tag strip shows your refinement chain: [חנוכה] › [נרות]
+- Click × on any tag to remove that step and all subsequent steps
+- Click "Clear all" to return to unrestricted search
+
+**"Only results with all terms" checkbox:** When your chain has two or more steps, a checkbox appears on the tag strip. Checking it filters the display to show only pages from manuscripts that appeared in every step's results.
+
+**Cross-mode refinement:** You can mix search modes freely — for example, search by Shelfmark, then refine with a text search, then narrow further with Responsa syntax. The restriction always operates at the manuscript level regardless of mode.
+
+**Note:** The restriction works at the manuscript level — if a manuscript contains "חנוכה" on page 1 and "נרות" on page 5, both pages may appear in refined results. Use the "Only results with all terms" checkbox to see only pages from manuscripts that matched all queries.
         ''').style('color: var(--text-secondary);')
 
     # === Translations ===
@@ -556,6 +582,7 @@ def _create_hebrew_content():
                 ('search', 'חיפוש'),
                 ('responsa', 'חיפוש בסגנון פרויקט השו"ת'),
                 ('filters', 'חיפוש ממוקד (סינון מתקדם)'),
+                ('search-within', 'חיפוש בתוך תוצאות'),
                 ('translations', 'תרגומי קטלוג ומטא-נתונים'),
                 ('parallels', 'חיפוש מקבילות'),
                 ('pgp', 'מידע מפרויקט הגניזה של פרינסטון (PGP)'),
@@ -718,6 +745,31 @@ def _create_hebrew_content():
 - מסננים פעילים מופיעים כ**צ'יפים** ניתנים להסרה מעל התוצאות
 - המסננים חלים על כל מצבי החיפוש (מדויק, וריאנטים, רספונסה וכו')
 - בדף העיון, תוויות תחום ומחבר מקשרות ישירות לחיפוש מסונן
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Search Within Results ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-search-within"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('filter_list').classes('text-2xl text-primary')
+            h2('חיפוש בתוך תוצאות', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
+
+        ui.markdown('''
+לאחר חיפוש, לחצו על **"חפש בתוך N כתבי יד"** בכותרת התוצאות כדי להגביל את השאילתה הבאה לכתבי היד שנמצאו בתוצאות הנוכחיות. כך ניתן לצמצם תוצאות בהדרגה דרך מספר שלבי חיפוש.
+
+**איך זה עובד:**
+- חפשו מונח (למשל "חנוכה") — התוצאות מציגות את כל כתבי היד התואמים
+- לחצו "חפש בתוך N כתבי יד" — תג מופיע על שורת החיפוש
+- הקלידו מונח שני (למשל "נרות") וחפשו — התוצאות מוגבלות לכתבי היד מהחיפוש הראשון
+- פס תגיות מציג את שרשרת הצמצום: [חנוכה] ‹ [נרות]
+- לחצו × על תגית כדי להסיר אותה ואת כל השלבים שאחריה
+- לחצו "נקה הכל" לחזרה לחיפוש ללא הגבלות
+
+**תיבת סימון "רק תוצאות עם כל המונחים":** כאשר יש שני שלבים או יותר בשרשרת, מופיעה תיבת סימון בפס התגיות. סימון שלה מסנן את התצוגה ומציג רק דפים מכתבי יד שהופיעו בתוצאות של כל שלב.
+
+**צמצום חוצה מצבים:** ניתן לשלב מצבי חיפוש בחופשיות — למשל חיפוש לפי מספר מדף, ואז צמצום בחיפוש טקסט, ואז צמצום נוסף בתחביר פרויקט השו"ת. ההגבלה פועלת תמיד ברמת כתב היד ללא קשר למצב.
+
+**הערה:** ההגבלה פועלת ברמת כתב היד — אם כתב יד א׳ מכיל "חנוכה" בדף 1 ו"נרות" בדף 5, שני הדפים עשויים להופיע בתוצאות המצומצמות. השתמשו בתיבת הסימון "רק תוצאות עם כל המונחים" כדי לראות רק דפים מכתבי יד שתאמו לכל השאילתות.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Translations ===
