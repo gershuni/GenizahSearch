@@ -25857,6 +25857,8 @@ class GenizahGUI(QMainWindow):
         sorted_results = []
         rows = self.results_table.rowCount()
         for i in range(rows):
+            if self.results_table.isRowHidden(i):
+                continue
             item = self.results_table.item(i, self.COL_SYS_ID)
             if item:
                 res = item.data(Qt.ItemDataRole.UserRole)
