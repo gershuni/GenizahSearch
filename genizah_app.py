@@ -24698,7 +24698,9 @@ class GenizahGUI(QMainWindow):
 
         self.last_results = results
         # Phase 56: Store unfiltered results for exclusion re-rendering
-        self._unfiltered_last_results = results
+        # (don't overwrite when re-rendering with exclusions applied)
+        if not getattr(self, '_rerendering_exclusions', False):
+            self._unfiltered_last_results = results
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -27404,13 +27406,11 @@ class GenizahGUI(QMainWindow):
 
     def _rerender_with_exclusions(self):
         """Re-render regular search results with current exclusion state applied."""
-        if not hasattr(self, 'last_results') or not self.last_results:
+        unfiltered = getattr(self, '_unfiltered_last_results', None) or getattr(self, 'last_results', None)
+        if not unfiltered:
             return
-        # Store the unfiltered results if not already stored
-        if not hasattr(self, '_unfiltered_last_results'):
-            self._unfiltered_last_results = self.last_results
-        # Always start from unfiltered
-        unfiltered = self._unfiltered_last_results
+        # Always preserve the unfiltered copy
+        self._unfiltered_last_results = unfiltered
         if self.excluded_sys_ids:
             filtered = []
             for r in unfiltered:
@@ -27418,9 +27418,14 @@ class GenizahGUI(QMainWindow):
                 if sid and sid in self.excluded_sys_ids:
                     continue
                 filtered.append(r)
+            # Temporarily disable _unfiltered overwrite in on_search_finished
+            self._rerendering_exclusions = True
             self.on_search_finished(filtered)
+            self._rerendering_exclusions = False
         else:
+            self._rerendering_exclusions = True
             self.on_search_finished(unfiltered)
+            self._rerendering_exclusions = False
 
     def _update_exclusion_display(self):
         """Update exclusion status labels with per-source breakdown (D-07)."""
