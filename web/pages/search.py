@@ -4468,6 +4468,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if common_uids is not None:
                 results = [r for r in results if (r.get('uid') or r.get('display', {}).get('id')) in common_uids]
         search_state.displayed_results = results  # Track full filtered set for Advanced View navigation
+        state.last_results = results  # Keep export in sync with displayed (post-filter) results
 
         # Handle expansion state
         _was_expanded = None

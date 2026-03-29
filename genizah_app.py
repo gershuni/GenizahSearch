@@ -25942,10 +25942,12 @@ class GenizahGUI(QMainWindow):
         self.open_result_in_browse(res, shelfmark=shelf, title=title, fl_id=fl_id)
 
     def on_search_select_all_toggled(self, checked):
-        """Handle Select All checkbox toggle."""
+        """Handle Select All checkbox toggle (skips hidden/excluded rows)."""
         state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
         self.results_table.blockSignals(True)
         for i in range(self.results_table.rowCount()):
+            if self.results_table.isRowHidden(i):
+                continue
             item = self.results_table.item(i, self.COL_CHECKBOX)
             if item:
                 item.setCheckState(state)
@@ -25965,6 +25967,8 @@ class GenizahGUI(QMainWindow):
         rows = self.results_table.rowCount()
         # To optimize, we just iterate. Rows are usually < 500.
         for i in range(rows):
+            if self.results_table.isRowHidden(i):
+                continue
             it = self.results_table.item(i, self.COL_CHECKBOX)
             if it:
                 if it.checkState() == Qt.CheckState.Unchecked:
@@ -25984,9 +25988,11 @@ class GenizahGUI(QMainWindow):
 
     def _update_search_export_label(self, has_selection=None):
         if has_selection is None:
-            # Check if any selected
+            # Check if any visible row is selected
             has_selection = False
             for i in range(self.results_table.rowCount()):
+                if self.results_table.isRowHidden(i):
+                    continue
                 it = self.results_table.item(i, self.COL_CHECKBOX)
                 if it and it.checkState() == Qt.CheckState.Checked:
                     has_selection = True
@@ -26006,9 +26012,11 @@ class GenizahGUI(QMainWindow):
         if not self.lists_mgr:
             return
 
-        # Collect selected items
+        # Collect selected visible items (skip hidden/excluded rows)
         items = []
         for i in range(self.results_table.rowCount()):
+            if self.results_table.isRowHidden(i):
+                continue
             chk = self.results_table.item(i, self.COL_CHECKBOX)
             if chk and chk.checkState() == Qt.CheckState.Checked:
                 res = chk.data(Qt.ItemDataRole.UserRole)
@@ -26251,9 +26259,11 @@ class GenizahGUI(QMainWindow):
         has_selection = False
         selected_rows_data = []
 
-        # Iterate table to respect user selection and visual order
+        # Iterate visible table rows to respect user selection and exclusion state
         rows = self.results_table.rowCount()
         for i in range(rows):
+            if self.results_table.isRowHidden(i):
+                continue
             chk_item = self.results_table.item(i, self.COL_CHECKBOX)
             if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
                 has_selection = True
@@ -26264,8 +26274,8 @@ class GenizahGUI(QMainWindow):
         if has_selection:
             results_to_export = selected_rows_data
         else:
-            # Fallback to last_results (original order) if nothing selected
-            results_to_export = self.last_results
+            # Fallback to visible results (excludes hidden/excluded rows)
+            results_to_export = self._collect_sorted_results()
 
         for r in results_to_export:
             d = r['display']
