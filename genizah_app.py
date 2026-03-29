@@ -333,7 +333,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set."))
+        self.lbl_msg.setText(tr("New: Search within results to narrow your search. Exclude known manuscripts from results via lists, files, or pasted shelfmarks."))
         self.show()
 
     def on_learn_more(self):
@@ -368,9 +368,9 @@ class WhatsNewDialog(QDialog):
         is_heb = CURRENT_LANG == 'he'
         items = [
             tr('Search within results — click "Search within N manuscripts" to restrict your next search to the manuscripts found. Works with all search modes.'),
-            tr('Refinement chain — a tag strip shows all refinement steps. Click × to remove a step, or "Clear all" to reset.'),
-            tr('"Only results with all terms" filter — a checkbox that shows only pages from manuscripts that appeared in all search steps.'),
-            tr('All chain terms highlighted — text snippets highlight terms from all refinement steps, not just the last one.'),
+            tr('Exclude known manuscripts — hide manuscripts you already reviewed from results. Choose from saved lists, upload a file, or paste shelfmarks.'),
+            tr('Resolution report — before applying exclusions, see per-row status: found, not found, or duplicate.'),
+            tr('WYSIWYG export — Excel, CSV, and Word exports include only visible (non-excluded) manuscripts.'),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "dir='rtl'" if is_heb else ""

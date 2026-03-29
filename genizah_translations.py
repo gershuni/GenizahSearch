@@ -3088,6 +3088,10 @@ TRANSLATIONS = {
     'Exclude specific manuscripts by shelfmark or system ID': 'החרג כתבי יד ספציפיים לפי מספר מדף או מספר מערכת',
     'Remove all exclusions': 'הסר את כל ההחרגות',
     'Select all': 'בחר הכל',
+    'New: Search within results to narrow your search. Exclude known manuscripts from results via lists, files, or pasted shelfmarks.': 'חדש: חיפוש בתוך תוצאות לצמצום החיפוש. החרגת כתבי יד מוכרים מתוצאות באמצעות רשימות, קבצים או מספרי מדף.',
+    'Exclude known manuscripts — hide manuscripts you already reviewed from results. Choose from saved lists, upload a file, or paste shelfmarks.': 'החרגת כתבי יד — הסתירו כתבי יד שכבר סקרתם מתוצאות החיפוש. בחרו מרשימות שמורות, העלו קובץ או הדביקו מספרי מדף.',
+    'Resolution report — before applying exclusions, see per-row status: found, not found, or duplicate.': 'דו"ח איתור — לפני ההחרגה, צפו בסטטוס לכל שורה: נמצא, לא נמצא, כפול.',
+    'WYSIWYG export — Excel, CSV, and Word exports include only visible (non-excluded) manuscripts.': 'ייצוא WYSIWYG — ייצוא לאקסל, CSV או Word כולל רק כתבי יד גלויים.',
     'items': 'פריטים',
 }
 

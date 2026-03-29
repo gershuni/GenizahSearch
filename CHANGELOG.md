@@ -4,6 +4,24 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.5.0] - Exclude Known Manuscripts - 2026-03-29
+
+### New Features
+- **Exclude known manuscripts**: Hide already-reviewed manuscripts from search results using saved lists, imported shelfmark files (TXT/CSV), or pasted shelfmarks. Multi-source tracking with per-source clear, collapsible excluded section showing what was hidden and why, resolution report table with per-row status (found/not found/duplicate). Available in both web and desktop apps
+- **Web exclusion dialog**: Tabbed picker with "Paste Shelfmarks" (default), "From List" (expandable with per-manuscript checkboxes), and "From File" (upload with resolution preview). Three entry points: results header button, post-search filter panel, and "Search only in..." pre-search panel
+- **Desktop exclusion dialog**: Enhanced ExcludeDialog with QTabWidget — "From File / Manual" tab with resolution report table and "From List" tab with "Load to Editor" workflow for review before applying
+
+### Improvements
+- **Desktop exclusion by row hiding**: Uses QTableWidget `setRowHidden()` to instantly toggle visibility without re-rendering — preserves enrichment state (domain badges, printed indicators, scroll position)
+- **Export respects exclusions**: Both desktop and web exports (Excel/CSV/Word) now only include visible (non-excluded) manuscripts (WYSIWYG export)
+- **Session persistence**: Exclusion sources survive page navigation and session restore, with backward compatibility for legacy exclusion state
+- **38 Hebrew translations**: Full bilingual coverage for all exclusion UI strings
+
+### Bug Fixes
+- **Bracket-aware search**: Searching `נשתנה` now finds `]נשתנה` (bracket-transparent matching)
+
+---
+
 ## [7.4.0] - Search Within Results - 2026-03-29
 
 ### New Features

@@ -415,7 +415,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('Search within results — progressively narrow your search by restricting follow-up queries to manuscripts from your current result set.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('New: Search within results to narrow your search. Exclude known manuscripts from results via lists, files, or pasted shelfmarks.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()

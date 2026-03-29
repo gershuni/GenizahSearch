@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.4.0
+# Genizah Search Pro 7.5.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,16 +8,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.4.0?
+## What's New in Version 7.5.0?
+
+### v7.5.0: Exclude Known Manuscripts
+
+Researchers can now **hide already-reviewed manuscripts** from search results using their saved lists, imported shelfmark files (TXT/CSV), or pasted shelfmarks. Multiple exclusion sources can be active simultaneously — each tracked independently with per-source clear buttons. A collapsible "Excluded manuscripts" section shows exactly what was hidden and why.
+
+- **Three ways to exclude** — paste shelfmarks directly, select from your saved lists (with per-manuscript checkboxes), or upload a TXT/CSV file with automatic column detection
+- **Resolution report** — see per-row status (found, not found, duplicate) before applying, so you know exactly what matched
+- **WYSIWYG export** — Excel, CSV, and Word exports only include visible manuscripts, respecting all active exclusions
+- **Both apps** — full feature parity across web and desktop, with session persistence
 
 ### v7.4.0: Search Within Results
 
-Researchers can now **progressively narrow search results** by searching within their current result set. After any search, click "Search within N manuscripts" to restrict a follow-up query to only those manuscripts. A breadcrumb chip chain tracks each refinement step — click × to remove a step, or "Clear all" to start fresh. Cross-mode refinement is fully supported: search by text, then refine by Title, then narrow further with Responsa syntax.
-
-- **"Only results with all terms" filter** — checkbox on the refinement strip filters displayed results to only show pages from manuscripts matching all chain queries
-- **Chain-aware snippet highlighting** — snippets highlight terms from all refinement steps, not just the last query
-- **Manuscript-level clarity** — button and badge show unique manuscript count, original query appears as first breadcrumb chip
-- **Dark mode & RTL** — full support for dark theme and Hebrew right-to-left interface
+Researchers can now **progressively narrow search results** by searching within their current result set. After any search, click "Search within N manuscripts" to restrict a follow-up query to only those manuscripts. A breadcrumb chip chain tracks each refinement step — click × to remove a step, or "Clear all" to start fresh.
 
 ### v7.2.3: Chrome Extension Live + Puzzle Enabled
 

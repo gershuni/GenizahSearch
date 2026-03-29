@@ -48,6 +48,7 @@ def _create_english_content():
                 ('responsa', 'Responsa-Style Search'),
                 ('filters', 'Focused Search (Advanced Filters)'),
                 ('search-within', 'Search Within Results'),
+                ('exclude-manuscripts', 'Exclude Known Manuscripts'),
                 ('translations', 'Catalog & Metadata Translations'),
                 ('parallels', 'Parallels Search'),
                 ('pgp', 'Princeton Geniza Project (PGP) Data'),
@@ -248,6 +249,31 @@ After running a search, click **"Search within N manuscripts"** in the results h
 **Cross-mode refinement:** You can mix search modes freely — for example, search by Shelfmark, then refine with a text search, then narrow further with Responsa syntax. The restriction always operates at the manuscript level regardless of mode.
 
 **Note:** The restriction works at the manuscript level — if a manuscript contains "חנוכה" on page 1 and "נרות" on page 5, both pages may appear in refined results. Use the "Only results with all terms" checkbox to see only pages from manuscripts that matched all queries.
+        ''').style('color: var(--text-secondary);')
+
+    # === Exclude Known Manuscripts ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-exclude-manuscripts"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('person_remove').classes('text-2xl text-primary')
+            h2('Exclude Known Manuscripts', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+Click **"Exclude manuscripts"** in the results header, filter panel, or "Search only in..." panel to hide specific manuscripts from search results. Three methods are available:
+
+**Paste shelfmarks:** The default tab — paste a list of shelfmarks (one per line). Lines starting with # are ignored. Click Apply to resolve and exclude.
+
+**From List:** Expand any saved list to see individual manuscripts with checkboxes. Check entire lists or specific items. Multiple lists can be selected simultaneously.
+
+**From File:** Upload a TXT file (one shelfmark per line) or CSV file (shelfmark column auto-detected). A resolution report shows per-row status — found, not found, or duplicate — before you apply.
+
+**Managing exclusions:**
+- Active exclusions show as a red count on the "Exclude manuscripts" button
+- When multiple sources are active, per-source chips let you clear individual sources
+- A collapsible "Excluded manuscripts" section at the bottom of results shows what was hidden and why
+- Exclusions persist across searches and page navigation within your session
+- Exports (Excel/Word) only include visible manuscripts — excluded items are never exported
+- Exclusions are independent of "Search within results" refinement — they don't affect each other
         ''').style('color: var(--text-secondary);')
 
     # === Translations ===
@@ -770,6 +796,31 @@ def _create_hebrew_content():
 **צמצום חוצה מצבים:** ניתן לשלב מצבי חיפוש בחופשיות — למשל חיפוש לפי מספר מדף, ואז צמצום בחיפוש טקסט, ואז צמצום נוסף בתחביר פרויקט השו"ת. ההגבלה פועלת תמיד ברמת כתב היד ללא קשר למצב.
 
 **הערה:** ההגבלה פועלת ברמת כתב היד — אם כתב יד א׳ מכיל "חנוכה" בדף 1 ו"נרות" בדף 5, שני הדפים עשויים להופיע בתוצאות המצומצמות. השתמשו בתיבת הסימון "רק תוצאות עם כל המונחים" כדי לראות רק דפים מכתבי יד שתאמו לכל השאילתות.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Exclude Known Manuscripts (Hebrew) ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-exclude-manuscripts"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('person_remove').classes('text-2xl text-primary')
+            h2('החרגת כתבי יד מוכרים', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
+
+        ui.markdown('''
+לחצו על **"החרג כתבי יד"** בכותרת התוצאות, בפאנל הסינון או בפאנל "חפש רק ב..." כדי להסתיר כתבי יד ספציפיים מתוצאות החיפוש. שלוש שיטות זמינות:
+
+**הדבקת מספרי מדף:** הלשונית הראשונית — הדביקו רשימת מספרי מדף (אחד בכל שורה). התוכנה תתעלם משורות המתחילות ב-#. לחצו "החל" לאיתור והחרגה.
+
+**מרשימה:** הרחיבו כל רשימה שמורה כדי לראות כתבי יד בודדים עם תיבות סימון. סמנו רשימות שלמות או פריטים ספציפיים. ניתן לבחור ממספר רשימות בו-זמנית.
+
+**מקובץ:** העלו קובץ TXT (מספר מדף אחד בכל שורה) או CSV (עמודת מספרי מדף מזוהה אוטומטית). דו"ח איתור מציג סטטוס לכל שורה — נמצא, לא נמצא, כפול — לפני ההחלה.
+
+**ניהול החרגות:**
+- החרגות פעילות מוצגות כמספר אדום על כפתור "החרג כתבי יד"
+- כאשר מספר מקורות פעילים, צ'יפים נפרדים מאפשרים ניקוי מקור בודד
+- קטע מתקפל "כתבי יד שהוחרגו" בתחתית התוצאות מראה מה הוסתר ולמה
+- ההחרגות נשמרות בין חיפושים וניווט בדפים במהלך הסשן
+- ייצוא (אקסל/וורד) כולל רק כתבי יד גלויים — פריטים מוחרגים לא מיוצאים
+- ההחרגות בלתי תלויות ב"חיפוש בתוך תוצאות" — הן לא משפיעות זו על זו
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Translations ===
