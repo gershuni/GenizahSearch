@@ -359,7 +359,7 @@ Plans:
 | 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
 | 54. Dimensions Display & Filtering | 3/4 | Complete    | 2026-03-27 |
 | 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
-| 56. Exclude Known Manuscripts | 1/1 | Complete   | 2026-03-29 |
+| 56. Exclude Known Manuscripts | 1/1 | Complete    | 2026-03-29 |
 | 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
 
 ---
