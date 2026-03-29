@@ -8,7 +8,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.5 Search Refinement & Scholarly Joins
+## Current Milestone: v7.6 Search Refinement & Scholarly Joins
 
 **Goal:** Add search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments.
 

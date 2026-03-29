@@ -14,7 +14,7 @@
 - **v6.5.0 Search UX & Filtered Search** -- Phases 42-46 (shipped 2026-03-14)
 - **v7.0.0 Fragment Puzzle** -- Phases 47-52 (shipped 2026-03-17)
 - **v7.1.0 FIST Gap Fill** -- Phase 53 (shipped 2026-03-19)
-- **v7.5 Search Refinement & Scholarly Joins** -- Phases 54-57 (in progress, v7.3.0-v7.5.0 shipped)
+- **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (in progress, v7.3.0-v7.5.0 shipped)
 
 ## Phases
 
@@ -153,11 +153,11 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 
 </details>
 
-### v7.5 Search Refinement & Scholarly Joins
+### v7.6 Search Refinement & Scholarly Joins
 
 **Milestone Goal:** Search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments -- dimensions display and filtering, search within results, exclude known manuscripts, and FIST joins enrichment with a dedicated search mode. Both web (NiceGUI) and desktop (PyQt6).
 
-**v7.5 Search Refinement & Scholarly Joins (Phases 54-57):**
+**v7.6 Search Refinement & Scholarly Joins (Phases 54-57):**
 - [x] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse, dimension/measurement filtering in search (both apps). (completed 2026-03-27)
 - [x] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps) (completed 2026-03-28)
 - [x] **Phase 55.1: Lightweight Browse First-Render** - Split browse page data into fast (Tantivy + csv_bank) and deferred (SQLite enrichment) tiers so first paint requires zero SQLite calls (web only, performance) (completed 2026-03-29)
