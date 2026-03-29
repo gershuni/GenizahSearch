@@ -105,7 +105,7 @@ def build_shelf_map(csv_bank: dict) -> dict[str, str]:
             if norm and norm not in shelf_map:
                 shelf_map[norm] = sys_id
         # Variant shelfmarks
-        for variant in entry.get('call_numbers_raw', []):
+        for variant in (entry.get('call_numbers_raw') or []):
             if variant:
                 norm = normalize_shelfmark(variant)
                 if norm and norm not in shelf_map:

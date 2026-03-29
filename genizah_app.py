@@ -2894,7 +2894,7 @@ class HelpDialog(QDialog):
 
 class ExcludeDialog(QDialog):
     """Collect system IDs or shelfmarks that should be excluded from searches."""
-    def __init__(self, parent, existing_entries=None, lists_mgr=None, shelf_map=None):
+    def __init__(self, parent, existing_entries=None, lists_mgr=None, shelf_map=None, exclusion_sources=None):
         super().__init__(parent)
         self.setWindowTitle(tr("Exclude Manuscripts"))
         self.resize(600, 500)
@@ -2911,7 +2911,6 @@ class ExcludeDialog(QDialog):
         self._resolved_ids: set = set()
         self._resolved_unresolved: list = []
         self._loaded_filename: str = ''
-        self._selected_list_sources: list = []  # ExclusionSource from list tab
 
         # Tabbed interface (Phase 56)
         from PyQt6.QtWidgets import QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QListWidget, QListWidgetItem, QAbstractItemView
@@ -2953,20 +2952,29 @@ class ExcludeDialog(QDialog):
         grid.addWidget(self.title_text_area, 1, 2)
         tab1_layout.addLayout(grid)
 
-        if existing_entries:
-            sys_entries, shelf_entries = self._split_existing_entries(existing_entries)
-            if sys_entries:
-                self.sys_text_area.setPlainText("\n".join(sys_entries))
-            if shelf_entries:
-                self.shelf_text_area.setPlainText("\n".join(shelf_entries))
-            if sys_entries and not shelf_entries:
-                self._last_edited = "sys"
-                self._sync_from_sys()
-            elif shelf_entries and not sys_entries:
-                self._last_edited = "shelf"
-                self._sync_from_shelf()
-            elif sys_entries:
-                self._set_titles(self._resolve_titles_from_sys(sys_entries))
+        # Populate editor from existing exclusion sources (remembers what was chosen)
+        _initial_sys = []
+        _initial_shelf = []
+        if exclusion_sources:
+            for src in exclusion_sources:
+                _initial_sys.extend(sorted(src.sys_ids))
+        elif existing_entries:
+            _init_sys, _init_shelf = self._split_existing_entries(existing_entries)
+            _initial_sys = _init_sys
+            _initial_shelf = _init_shelf
+
+        if _initial_sys:
+            self.sys_text_area.setPlainText("\n".join(_initial_sys))
+        if _initial_shelf:
+            self.shelf_text_area.setPlainText("\n".join(_initial_shelf))
+        if _initial_sys and not _initial_shelf:
+            self._last_edited = "sys"
+            self._sync_from_sys()
+        elif _initial_shelf and not _initial_sys:
+            self._last_edited = "shelf"
+            self._sync_from_shelf()
+        elif _initial_sys:
+            self._set_titles(self._resolve_titles_from_sys(_initial_sys))
 
         # Resolution report table (D-04)
         self._report_label = QLabel("")
@@ -2996,7 +3004,7 @@ class ExcludeDialog(QDialog):
         tab2_layout = QVBoxLayout(tab2)
 
         if self._lists_mgr:
-            tab2_layout.addWidget(QLabel(tr("Select lists to exclude their manuscripts:")))
+            tab2_layout.addWidget(QLabel(tr("Select a list and click 'Load to Editor' to add its manuscripts to the exclusion list.")))
             self._list_widget = QListWidget()
             self._list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
             all_lists = self._lists_mgr.get_all_lists(include_recent=False)
@@ -3005,11 +3013,16 @@ class ExcludeDialog(QDialog):
                 list_id = lst.get('id', '')
                 list_name = lst.get('name', list_id)
                 count = lst.get('count', 0)
-                item = QListWidgetItem(f"{list_name} ({count} items)")
+                item = QListWidgetItem(f"{list_name} ({count} {tr('items')})")
                 item.setData(Qt.ItemDataRole.UserRole, list_id)
                 self._list_widget.addItem(item)
                 self._list_data[list_id] = lst
             tab2_layout.addWidget(self._list_widget)
+
+            btn_load_to_editor = QPushButton(tr("Load to Editor"))
+            btn_load_to_editor.setToolTip(tr("Load selected list items into the editor tab so you can review and modify them"))
+            btn_load_to_editor.clicked.connect(self._load_list_to_editor)
+            tab2_layout.addWidget(btn_load_to_editor)
         else:
             tab2_layout.addWidget(QLabel(tr("Lists not available (not logged in)")))
             self._list_widget = None
@@ -3028,6 +3041,40 @@ class ExcludeDialog(QDialog):
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
+
+    def _load_list_to_editor(self):
+        """Load selected list items into the editor tab (sys_ids + shelfmarks)."""
+        if not self._list_widget or not self._lists_mgr:
+            return
+        selected = self._list_widget.selectedItems()
+        if not selected:
+            return
+        new_sys_ids = []
+        for sel_item in selected:
+            list_id = sel_item.data(Qt.ItemDataRole.UserRole)
+            try:
+                items = self._lists_mgr.get_items_in_list(list_id)
+                for it in items:
+                    sid = it.get('sys_id')
+                    if sid and sid not in new_sys_ids:
+                        new_sys_ids.append(sid)
+            except Exception:
+                pass
+        if not new_sys_ids:
+            return
+        # Append to existing sys_id text area
+        existing = self.sys_text_area.toPlainText().strip()
+        existing_lines = set(existing.splitlines()) if existing else set()
+        to_add = [sid for sid in new_sys_ids if sid not in existing_lines]
+        if to_add:
+            combined = (existing + "\n" if existing else "") + "\n".join(to_add)
+            self._syncing = True
+            self.sys_text_area.setPlainText(combined)
+            self._syncing = False
+            self._last_edited = "sys"
+            self._sync_from_sys()
+        # Switch to editor tab
+        self._tab_widget.setCurrentIndex(0)
 
     def _resolve_and_show_report(self):
         """Resolve shelfmarks from the text areas and show resolution report table."""
@@ -14594,7 +14641,16 @@ class GenizahGUI(QMainWindow):
         self.btn_pre_search_filters.setStyleSheet("padding: 2px 8px;")
         self.btn_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
 
-        # Insert Focus Search button in row1, right before the Search button
+        # Phase 56: Exclude Manuscripts button for main search
+        self.btn_main_exclude = QPushButton(tr("Exclude Manuscripts"))
+        self.btn_main_exclude.setToolTip(tr("Exclude specific manuscripts by shelfmark or system ID"))
+        self.btn_main_exclude.setStyleSheet("padding: 2px 8px;")
+        self.btn_main_exclude.clicked.connect(self.open_exclude_dialog)
+        
+        self.lbl_main_exclude_status = QLabel(tr("Excluded: {}").format(0))
+        self.lbl_main_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold; font-size: 11px;")
+
+        # Insert pre-search filter button in row1, right before the Search button
         row1.insertWidget(row1.indexOf(self.btn_search), self.btn_pre_search_filters)
 
         # Translation toggle button (search tab)
@@ -14614,6 +14670,8 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.search_params_container)
         row2.addWidget(self.btn_domain_filter)
         row2.addWidget(self.lbl_domain_filter)
+        row2.addWidget(self.btn_main_exclude)
+        row2.addWidget(self.lbl_main_exclude_status)
         row2.addWidget(self.btn_measurement_filter)
         row2.addWidget(self.btn_search_translations)
 
@@ -27279,19 +27337,19 @@ class GenizahGUI(QMainWindow):
             existing_entries=self.excluded_raw_entries,
             lists_mgr=getattr(self, 'lists_mgr', None),
             shelf_map=getattr(self, '_shelf_to_sys', None),
+            exclusion_sources=self.exclusion_sources,
         )
         if dlg.exec():
             new_sources = dlg.get_exclusion_sources()
             if new_sources:
-                self.exclusion_sources.extend(new_sources)
+                # Replace all sources with what the dialog editor contains
+                self.exclusion_sources = new_sources
                 self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
-                # Also keep legacy shelfmarks set for backward compat with _item_matches_exclusion
                 all_unresolved = []
                 for s in self.exclusion_sources:
                     all_unresolved.extend(s.unresolved)
                 self.excluded_shelfmarks = {normalize_shelfmark(u) for u in all_unresolved if u}
                 self._update_exclusion_display()
-                # Re-apply exclusions to current results
                 if hasattr(self, 'last_results') and self.last_results:
                     self._apply_manual_exclusions(self.last_results, getattr(self, 'comp_raw_items', []))
                 self._schedule_session_save()
@@ -27325,21 +27383,23 @@ class GenizahGUI(QMainWindow):
         return normalize_shelfmark(shelfmark)
 
     def _update_exclusion_display(self):
-        """Update exclusion status label with per-source breakdown (D-07)."""
+        """Update exclusion status labels with per-source breakdown (D-07)."""
         if not self.exclusion_sources:
-            self.lbl_exclude_status.setText(tr("Excluded: {}").format(0))
+            status_text = tr("Excluded: {}").format(0)
+            self.lbl_exclude_status.setText(status_text)
+            if hasattr(self, 'lbl_main_exclude_status'):
+                self.lbl_main_exclude_status.setText(status_text)
             return
         total = sum(len(s.sys_ids) for s in self.exclusion_sources)
         if len(self.exclusion_sources) == 1:
             src = self.exclusion_sources[0]
-            self.lbl_exclude_status.setText(
-                tr("Excluded: {}").format(f"{total} ({src.label})")
-            )
+            status_text = tr("Excluded: {}").format(f"{total} ({src.label})")
         else:
             parts = [f"{len(s.sys_ids)} {s.label}" for s in self.exclusion_sources]
-            self.lbl_exclude_status.setText(
-                tr("Excluded: {}").format(f"{total} ({', '.join(parts)})")
-            )
+            status_text = tr("Excluded: {}").format(f"{total} ({', '.join(parts)})")
+        self.lbl_exclude_status.setText(status_text)
+        if hasattr(self, 'lbl_main_exclude_status'):
+            self.lbl_main_exclude_status.setText(status_text)
 
     def _remove_exclusion_source(self, source_id: str):
         """Remove a single exclusion source by source_id (D-06 per-source clear)."""
