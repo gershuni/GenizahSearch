@@ -30,6 +30,11 @@ from web.services import (
 from web.search_bootstrap import resolve_search_bootstrap
 from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
+from shared.exclusion_service import (
+    ExclusionSource, ResolvedEntry, parse_shelfmark_file, parse_csv_shelfmarks,
+    resolve_shelfmarks, build_shelf_map, compute_excluded_ids,
+    serialize_sources, deserialize_sources,
+)
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from urllib.parse import quote
 from typing import Optional, List, Dict, Any, Set
@@ -136,6 +141,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self._refinement_scope_sig: str = ''           # scope_signature at time of last chain step creation
             self._zero_result_refine: bool = False         # True when last refine returned 0 results (D-14a)
             self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
+            # Manuscript exclusion state (Phase 56 -- exclude known manuscripts)
+            self.exclusion_sources: list = []                    # list of ExclusionSource objects
+            self.manuscript_excluded_results: list = []          # Results hidden by manuscript exclusion [{result, reason}]
+            self._exclusion_shelf_map: dict | None = None        # Lazy-built norm->sys_id map for file resolution
 
     search_state = SearchUIState()
 
@@ -215,6 +224,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     if restore_saved_exclusions:
         _wse = app.storage.user.get('word_search_excluded_ids')
         search_state.word_search_excluded_ids = set(_wse) if _wse is not None else set()
+
+    # Phase 56: Restore manuscript exclusion sources from session
+    if restore_saved_exclusions:
+        _saved_excl = app.storage.user.get('search_exclusion_sources', [])
+        if _saved_excl:
+            try:
+                search_state.exclusion_sources = deserialize_sources(_saved_excl)
+            except Exception:
+                search_state.exclusion_sources = []
 
     # Phase 55: Restore refinement chain from session (D-14)
     _saved_refinement_chain = app.storage.user.get('search_refinement_chain', [])
@@ -1458,8 +1476,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         search_state.printed_filter = states[(current_idx + 1) % 3]
                         persist_value('search_printed_filter', search_state.printed_filter)
                         _update_printed_filter_btn()
-                        # Re-apply domain exclusions + printed filter and re-render
-                        if search_state.domain_exclusions and search_state.has_domain_data:
+                        # Re-apply filters and re-render (manuscript exclusions first if active)
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
                             _apply_domain_exclusions()
                         elif search_state.results:
                             _apply_printed_filter_and_render(search_state.results)
@@ -1490,6 +1510,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         on_click=lambda: _enter_refine_mode()
                     ).classes('text-sm').props('outline dense no-caps')
                     search_within_btn.set_visibility(False)
+
+                    # Phase 56: Exclude manuscripts button (D-01 entry point 1: results area)
+                    exclude_btn = ui.button(
+                        tr('Exclude manuscripts'), icon='person_remove',
+                        on_click=lambda: _show_exclusion_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    _set_btn_visible(exclude_btn, False)
+
+                    # Restore visibility if stored exclusion sources exist
+                    if search_state.exclusion_sources:
+                        _set_btn_visible(exclude_btn, True)
+                        n_src = len(search_state.exclusion_sources)
+                        n_total = sum(len(s.sys_ids) for s in search_state.exclusion_sources)
+                        exclude_btn.text = f"{tr('Exclude manuscripts')} ({n_total})"
+                        exclude_btn.props('outline dense no-caps color=red')
+
+                    # Phase 56: Per-source exclusion chips (rendered inline)
+                    exclusion_chips_row = ui.row().classes('gap-1 items-center')
+                    exclusion_chips_row.set_visibility(bool(search_state.exclusion_sources))
 
                 with ui.row().classes('gap-2'):
                     # Bulk actions (initially hidden)
@@ -1613,6 +1652,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         def _on_post_mat_change(e=None):
                             search_state.post_filter_measurement_material = post_mat_select.value or []
                         post_mat_select.on('update:model-value', _on_post_mat_change)
+
+                # Phase 56: Exclude manuscripts (D-01 entry point 2: filter panel)
+                ui.separator()
+                with ui.row().classes('items-center gap-2 flex-wrap'):
+                    ui.button(
+                        tr('Exclude known manuscripts'), icon='person_remove',
+                        on_click=lambda: _show_exclusion_dialog()
+                    ).classes('text-sm').props('outline dense no-caps')
+                    # Show active exclusion sources as chips
+                    filter_excl_chips = ui.row().classes('gap-1 items-center flex-wrap')
 
                 with ui.row().classes('gap-2'):
                     ui.button(tr('Apply Filters'), icon='check', on_click=lambda: apply_filters()).props(
@@ -3037,7 +3086,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             excluded = set(excluded_list) if excluded_list else set()
                             search_state.domain_exclusions = excluded
                             app.storage.user['domain_exclusions'] = list(excluded)
-                            _apply_domain_exclusions()
+                            if search_state.exclusion_sources:
+                                _apply_manuscript_exclusions()
+                            else:
+                                _apply_domain_exclusions()
                             _update_domain_filter_btn()
                             dialog.close()
 
@@ -3148,6 +3200,261 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             results_count.text = f"{total} {tr('Results')}"
         render_results(filtered, page=0, reset_expansion=reset_expansion)
+
+    def _apply_manuscript_exclusions(reset_expansion=True):
+        """Filter displayed results based on manuscript exclusion sources (Phase 56).
+        Post-search only. This is the FIRST filter in the chain --
+        all other re-render paths call this when exclusion sources are active."""
+        all_excluded_ids = compute_excluded_ids(search_state.exclusion_sources)
+        if not all_excluded_ids:
+            search_state.manuscript_excluded_results = []
+            # Pass through to existing filter pipeline (unchanged)
+            if search_state.word_search_excluded_ids:
+                _apply_word_search_exclusions_and_render()
+            elif search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions(reset_expansion=reset_expansion)
+            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+                _apply_printed_filter_and_render(search_state.results, reset_expansion=reset_expansion)
+            elif search_state.results:
+                filtered = _apply_measurement_post_filters(search_state.results, search_state)
+                render_results(filtered, page=0, reset_expansion=reset_expansion)
+            return
+
+        # Filter out excluded manuscripts
+        filtered = []
+        excluded_items = []
+        for r in search_state.results:
+            sys_id = r.get('display', {}).get('id')
+            if sys_id and sys_id in all_excluded_ids:
+                sources = [s.label for s in search_state.exclusion_sources if sys_id in s.sys_ids]
+                excluded_items.append({'result': r, 'reason': ', '.join(sources)})
+            else:
+                filtered.append(r)
+        search_state.manuscript_excluded_results = excluded_items
+
+        # Continue pipeline with filtered results (temporarily swap for downstream filters)
+        original_results = search_state.results
+        search_state.results = filtered
+        try:
+            if search_state.word_search_excluded_ids:
+                _apply_word_search_exclusions_and_render()
+            elif search_state.domain_exclusions and search_state.has_domain_data:
+                _apply_domain_exclusions(reset_expansion=reset_expansion)
+            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+                _apply_printed_filter_and_render(filtered, reset_expansion=reset_expansion)
+            else:
+                filtered2 = _apply_measurement_post_filters(filtered, search_state)
+                render_results(filtered2, page=0, reset_expansion=reset_expansion)
+        finally:
+            search_state.results = original_results
+
+        # Update exclusion count in button
+        _update_exclude_btn()
+
+    def _update_exclude_btn():
+        """Update exclude button text/color and chips based on active exclusion sources."""
+        if search_state.exclusion_sources:
+            n_total = sum(len(s.sys_ids) for s in search_state.exclusion_sources)
+            exclude_btn.text = f"{tr('Exclude manuscripts')} ({n_total})"
+            exclude_btn.props('outline dense no-caps color=red')
+            _set_btn_visible(exclude_btn, True)
+            exclusion_chips_row.set_visibility(True)
+            exclusion_chips_row.clear()
+            with exclusion_chips_row:
+                for src in search_state.exclusion_sources:
+                    def _make_remove(s=src):
+                        return lambda: _remove_exclusion_source(s)
+                    ui.chip(
+                        f"{src.label} ({len(src.sys_ids)})", icon='close',
+                        on_click=_make_remove()
+                    ).props('outline dense removable color=red')
+        else:
+            exclude_btn.text = tr('Exclude manuscripts')
+            exclude_btn.props(remove='color')
+            exclude_btn.props('outline dense no-caps')
+            exclusion_chips_row.set_visibility(False)
+            exclusion_chips_row.clear()
+
+    def _remove_exclusion_source(source):
+        """Remove a single exclusion source (D-06 per-source clear)."""
+        search_state.exclusion_sources = [s for s in search_state.exclusion_sources if s.source_id != source.source_id]
+        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+        _apply_manuscript_exclusions()
+        _update_exclude_btn()
+
+    async def _show_exclusion_dialog():
+        """Show the exclusion picker dialog with List and File tabs (Phase 56)."""
+        with ui.dialog().props('maximized=false') as dlg, ui.card().classes('w-full max-w-xl'):
+            with ui.row().classes('w-full items-center justify-between p-4 border-b').style(
+                'background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);'
+            ):
+                with ui.row().classes('items-center gap-2'):
+                    ui.icon('person_remove').classes('text-xl').style('color: white !important;')
+                    ui.label(tr('Exclude manuscripts')).classes('text-lg font-bold').style('color: white !important;')
+                ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
+
+            with ui.tabs().classes('w-full') as tabs:
+                tab_list = ui.tab(tr('From List'), icon='list')
+                tab_file = ui.tab(tr('From File'), icon='upload_file')
+
+            with ui.tab_panels(tabs).classes('w-full'):
+                # Tab 1: From List
+                with ui.tab_panel(tab_list):
+                    from web.auth_state import GlobalAuthState
+                    if not GlobalAuthState.is_logged_in():
+                        with ui.column().classes('items-center py-6'):
+                            ui.icon('lock', size='3rem').classes('text-gray-300')
+                            ui.label(tr('Log in to use saved lists')).classes('text-gray-500')
+                    elif not state.lists_mgr:
+                        ui.label(tr('Lists not available')).classes('text-gray-500')
+                    else:
+                        lists_mgr = state.lists_mgr
+                        try:
+                            all_lists = await run.io_bound(lists_mgr.get_all_lists, False)
+                        except Exception:
+                            all_lists = []
+                        if not all_lists:
+                            with ui.column().classes('items-center py-6'):
+                                ui.icon('list_alt', size='3rem').classes('text-gray-300')
+                                ui.label(tr('No lists found')).classes('text-gray-500')
+                        else:
+                            selected_list_id = {'value': None}
+                            for lst in all_lists:
+                                list_id = lst.get('id', '')
+                                list_name = lst.get('name', list_id)
+                                item_count = lst.get('item_count', '?')
+                                with ui.row().classes(
+                                    'w-full items-center gap-2 py-2 px-3 rounded cursor-pointer hover:bg-gray-100'
+                                ).on('click', lambda lid=list_id: _select_list_for_exclusion(lid, selected_list_id)):
+                                    ui.icon('list').classes('text-gray-400')
+                                    ui.label(list_name).classes('flex-grow')
+                                    ui.badge(str(item_count)).props('outline')
+
+                            async def _apply_list_exclusion():
+                                lid = selected_list_id['value']
+                                if not lid:
+                                    ui.notify(tr('Select a list first'), type='warning')
+                                    return
+                                try:
+                                    items = await run.io_bound(lists_mgr.get_items_in_list_sync, lid)
+                                except Exception:
+                                    items = []
+                                sys_ids = {item.get('sys_id') for item in items if item.get('sys_id')}
+                                list_name = next((l.get('name', lid) for l in all_lists if l.get('id') == lid), lid)
+                                source = ExclusionSource(
+                                    label=list_name,
+                                    source_type='list',
+                                    source_id=lid,
+                                    sys_ids=sys_ids,
+                                    unresolved=[],
+                                )
+                                search_state.exclusion_sources.append(source)
+                                persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                                dlg.close()
+                                _apply_manuscript_exclusions()
+                                _update_exclude_btn()
+
+                            def _select_list_for_exclusion(lid, ref):
+                                ref['value'] = lid
+
+                            ui.button(tr('Apply'), icon='check', on_click=_apply_list_exclusion).props(
+                                'color=red no-caps'
+                            ).classes('mt-4')
+
+                # Tab 2: From File
+                with ui.tab_panel(tab_file):
+                    report_container = ui.column().classes('w-full gap-2')
+                    file_source_ref = {'entries': None, 'ids': None, 'unresolved': None, 'filename': None}
+
+                    async def _on_file_upload(e):
+                        content = e.content.read().decode('utf-8-sig')
+                        filename = e.name or 'uploaded_file'
+                        file_source_ref['filename'] = filename
+
+                        # Parse based on extension
+                        if filename.lower().endswith('.csv'):
+                            lines = parse_csv_shelfmarks(content)
+                        else:
+                            lines = parse_shelfmark_file(content)
+
+                        if not lines:
+                            with report_container:
+                                report_container.clear()
+                                ui.label(tr('No shelfmarks found in file')).classes('text-red-500')
+                            return
+
+                        # Build shelf_map lazily (async)
+                        if search_state._exclusion_shelf_map is None:
+                            search_state._exclusion_shelf_map = await run.io_bound(
+                                build_shelf_map, state.meta_mgr.csv_bank
+                            )
+
+                        ids, unresolved, entries = await run.io_bound(
+                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map
+                        )
+                        file_source_ref['entries'] = entries
+                        file_source_ref['ids'] = ids
+                        file_source_ref['unresolved'] = unresolved
+
+                        # Show resolution report (D-04)
+                        report_container.clear()
+                        with report_container:
+                            n_found = sum(1 for e in entries if e.status == 'found')
+                            n_notfound = sum(1 for e in entries if e.status == 'not_found')
+                            n_dup = sum(1 for e in entries if e.status == 'duplicate')
+                            ui.label(
+                                f"{tr('Resolved')} {n_found}/{len(entries)} | "
+                                f"{n_notfound} {tr('not found')} | {n_dup} {tr('duplicates')}"
+                            ).classes('text-sm font-medium')
+
+                            columns = [
+                                {'name': 'original', 'label': tr('Shelfmark'), 'field': 'original', 'align': 'left'},
+                                {'name': 'normalized', 'label': tr('Normalized'), 'field': 'normalized', 'align': 'left'},
+                                {'name': 'sys_id', 'label': 'sys_id', 'field': 'sys_id', 'align': 'left'},
+                                {'name': 'status', 'label': tr('Status'), 'field': 'status', 'align': 'left'},
+                            ]
+                            rows = [
+                                {
+                                    'original': e.original,
+                                    'normalized': e.normalized,
+                                    'sys_id': e.sys_id or '--',
+                                    'status': e.status,
+                                }
+                                for e in entries[:200]  # Cap display at 200 rows
+                            ]
+                            ui.table(columns=columns, rows=rows).classes('w-full').props(
+                                'dense flat bordered separator=cell virtual-scroll'
+                            ).style('max-height: 300px;')
+                            if len(entries) > 200:
+                                ui.label(f"... {tr('and')} {len(entries) - 200} {tr('more')}").classes('text-xs text-gray-400')
+
+                    ui.upload(
+                        auto_upload=True, on_upload=_on_file_upload
+                    ).props('accept=".txt,.csv" flat bordered').classes('w-full')
+
+                    async def _apply_file_exclusion():
+                        if not file_source_ref['ids']:
+                            ui.notify(tr('Upload a file first'), type='warning')
+                            return
+                        source = ExclusionSource(
+                            label=file_source_ref['filename'] or 'file',
+                            source_type='file',
+                            source_id=file_source_ref['filename'] or 'file',
+                            sys_ids=file_source_ref['ids'],
+                            unresolved=file_source_ref['unresolved'] or [],
+                            resolved_entries=file_source_ref['entries'] or [],
+                        )
+                        search_state.exclusion_sources.append(source)
+                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        dlg.close()
+                        _apply_manuscript_exclusions()
+                        _update_exclude_btn()
+
+                    ui.button(tr('Apply'), icon='check', on_click=_apply_file_exclusion).props(
+                        'color=red no-caps'
+                    ).classes('mt-4')
+
+        dlg.open()
 
     def _apply_word_search_exclusions_and_render():
         """Apply word search per-result exclusions and re-render."""
@@ -3371,8 +3678,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
             # Update count display
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
-            # Re-render with restored exclusions
-            if search_state.domain_exclusions and search_state.has_domain_data:
+            # Re-render with restored exclusions (manuscript exclusions first if active)
+            if search_state.exclusion_sources:
+                _apply_manuscript_exclusions()
+            elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions()
             elif search_state.printed_filter != 'all' and search_state.printed_ids:
                 _apply_printed_filter_and_render(search_state.results)
@@ -3901,9 +4210,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
             _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
             _update_domain_filter_btn()
+            # Phase 56: Show exclude button when results exist
+            _set_btn_visible(exclude_btn, True)
+            _update_exclude_btn()
 
         def _render_with_filters(reset_expansion=True):
             """Re-render applying exclusions and filters."""
+            # Phase 56: Manuscript exclusions run first in the chain
+            if search_state.exclusion_sources:
+                _apply_manuscript_exclusions(reset_expansion=reset_expansion)
+                return
+
             display_results = results
             if search_state.word_search_excluded_ids:
                 ws_filtered = []
@@ -4205,6 +4522,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             _apply_word_search_exclusions_and_render()
                         ui.button(tr('Clear All Exclusions'), icon='clear_all',
                                   on_click=_clear_word_exclusions).props('flat dense no-caps size=sm')
+
+        # Phase 56: Collapsible manuscript excluded results section
+        ms_excluded = search_state.manuscript_excluded_results
+        if ms_excluded:
+            with ui.expansion(
+                text=f"{tr('Excluded manuscripts')} ({len(ms_excluded)})",
+                icon='person_remove',
+                value=False
+            ).classes('w-full').style(
+                'border: 1px solid var(--accent-red, #ef4444); border-radius: 8px; margin-top: 8px; overflow: hidden;'
+            ).props('dense header-class="text-red-8 text-subtitle1 text-weight-medium"'):
+                MS_EXCL_LIMIT = 50
+                for i, excl_item in enumerate(ms_excluded[:MS_EXCL_LIMIT]):
+                    excl_result = excl_item['result']
+                    excl_reason = excl_item.get('reason', '')
+                    excl_display = excl_result.get('display', {})
+                    excl_shelfmark = excl_display.get('shelfmark', 'Unknown')
+                    excl_title = excl_display.get('title', '')
+                    with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
+                        'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
+                    ).on('click', lambda r=excl_result: open_advanced_dialog(None, r)):
+                        ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
+                            'color: var(--text-secondary); max-width: 200px;'
+                        )
+                        if excl_title:
+                            title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
+                            ui.label(title_short).classes('text-xs truncate').style(
+                                'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
+                            )
+                        ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                            'background: #fecaca; color: #991b1b; white-space: nowrap;'
+                        )
+                if len(ms_excluded) > MS_EXCL_LIMIT:
+                    ui.label(
+                        f"... {tr('and')} {len(ms_excluded) - MS_EXCL_LIMIT} {tr('more')}"
+                    ).classes('text-sm py-2 px-2').style('color: var(--text-muted);')
 
         # Phase 55: Update refinement UI after rendering results
         _update_search_within_btn()
