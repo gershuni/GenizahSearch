@@ -3993,8 +3993,8 @@ class MetadataManager:
 
             return False
 
-        # 1. Search in CSV Bank (Fastest)
-        for sys_id, data in self.csv_bank.items():
+        # 1. Search in CSV Bank (Fastest) — snapshot to avoid concurrent modification
+        for sys_id, data in list(self.csv_bank.items()):
             val = data.get(field, '')
             if val and matches(val, q_norm):
                 results.add(sys_id)

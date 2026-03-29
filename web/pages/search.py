@@ -1690,7 +1690,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.label('\u203a' if is_rtl() else '\u2039').classes('text-lg mx-1').style('color: var(--text-secondary, #999);')
                 label = step.display_label
                 if show_modes:
-                    label = f"{step.query} ({step.mode})"
+                    _mode_labels = {'exact': tr('Exact'), 'literal': tr('Exact'), 'variants': tr('Variants'),
+                                    'variants_extended': tr('Variants'), 'variants_maximum': tr('Variants'),
+                                    'responsa': tr('Responsa'), 'fuzzy': tr('Fuzzy'), 'Regex': tr('Regex'),
+                                    'Title': tr('Title'), 'Shelfmark': tr('Shelfmark')}
+                    label = f"{step.query} ({_mode_labels.get(step.mode, step.mode)})"
                 chip = ui.chip(label, removable=True, color='blue-grey-3').classes('text-sm dark:bg-blue-grey-7')
                 chip.on('remove', lambda _idx=i: _remove_refinement_step(_idx))
             # Result count for final step only (D-06)
@@ -1714,6 +1718,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def _remove_refinement_step(index):
         """D-12: Remove chip at index and all subsequent, then re-execute with feedback."""
         search_state.refinement_chain = truncate_chain(search_state.refinement_chain, index)
+        # Always clear refine mode badge after chip removal
+        refine_badge.set_visibility(False)
+        refine_cancel_btn.set_visibility(False)
         if search_state.refinement_chain:
             asyncio.ensure_future(_replay_refinement_chain_and_search())
         else:
@@ -1757,15 +1764,34 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_within_btn.text = f"{tr('Search within')} {ms_count:,} {tr('manuscripts')}"
 
     def _undo_zero_result_refine():
-        """D-14a: Recover from zero-result refinement."""
+        """D-14a: Recover from zero-result refinement — re-run previous chain step's query."""
         search_state._zero_result_refine = False
         search_state._refine_mode = False
         refine_badge.set_visibility(False)
         refine_cancel_btn.set_visibility(False)
         if search_state.refinement_chain:
-            asyncio.ensure_future(_replay_refinement_chain_and_search())
-        else:
-            render_results(search_state.results, page=0)
+            # Restore the last chain step's query and re-execute it
+            last_step = search_state.refinement_chain[-1]
+            query_input.value = last_step.query
+            mode_select.value = last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark') else 'exact'
+            # Remove the last step so re-search in refine mode re-adds it
+            search_state.refinement_chain = search_state.refinement_chain[:-1]
+            if search_state.refinement_chain:
+                # Replay to rebuild restrict from remaining chain
+                async def _replay_and_search():
+                    try:
+                        def _do_replay():
+                            return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids)
+                        result = await run.io_bound(_do_replay)
+                        search_state.refinement_restrict_sys_ids = result
+                    except Exception:
+                        pass
+                    search_state._refine_mode = True
+                    await execute_search()
+                asyncio.ensure_future(_replay_and_search())
+            else:
+                # No chain left — just re-run as normal search
+                asyncio.ensure_future(execute_search())
 
     # === Panel Toggle Functions ===
 
@@ -2014,6 +2040,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Hide domain filter and printed filter buttons
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)
+        # Phase 55: Clear refinement chain
+        _clear_refinement_chain()
+        search_within_btn.set_visibility(False)
         # Reset persistent storage to clean defaults (use explicit values, not None or pop)
         app.storage.user['search_results'] = []
         app.storage.user['search_query'] = ''
@@ -3455,12 +3484,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Phase 55: If not in refine mode, clear any stale refinement chain
         # A normal search should NOT be restricted by a previous refinement
-        if not search_state._refine_mode and search_state.refinement_chain:
+        if not search_state._refine_mode and (search_state.refinement_chain or search_state.refinement_restrict_sys_ids):
             search_state.refinement_chain = []
             search_state.refinement_restrict_sys_ids = None
             search_state._refinement_stale = False
             search_state._refinement_scope_sig = ''
+            search_state._all_terms_filter = False
             persist_value('search_refinement_chain', [])
+            persist_value('search_all_terms_filter', False)
+            refine_badge.set_visibility(False)
+            refine_cancel_btn.set_visibility(False)
             _update_refinement_strip()
 
         # Compute pre-search filter set from active filters

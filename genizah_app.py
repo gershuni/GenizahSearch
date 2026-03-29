@@ -24539,6 +24539,9 @@ class GenizahGUI(QMainWindow):
         self.reset_ui()
         # Phase 55: Update search-within button AFTER reset_ui clears is_searching
         self._update_search_within_btn()
+        # Phase 55: Reapply "all terms" filter if checkbox is checked
+        if self._all_terms_filter and self.refinement_chain:
+            self._apply_all_terms_filter_and_rerender()
         search_elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
         elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
         partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
@@ -24659,7 +24662,11 @@ class GenizahGUI(QMainWindow):
 
             label = step.display_label
             if show_modes:
-                label = f"{step.query} ({step.mode})"
+                _mode_labels = {'exact': tr('Exact'), 'literal': tr('Exact'), 'variants': tr('Variants'),
+                                'variants_extended': tr('Variants'), 'variants_maximum': tr('Variants'),
+                                'responsa': tr('Responsa'), 'fuzzy': tr('Fuzzy'), 'Regex': tr('Regex'),
+                                'Title': tr('Title'), 'Shelfmark': tr('Shelfmark')}
+                label = f"{step.query} ({_mode_labels.get(step.mode, step.mode)})"
 
             # Chip frame (rounded pill with remove button)
             chip_frame = QFrame()
