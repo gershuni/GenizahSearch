@@ -15,6 +15,7 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **NiceGUI ESM handler hardening**: Patched ESM static file handler to reject directory path traversal
 
 ### Bug Fixes
+- **Bracket-aware search**: Searching `נשתנה` now finds `]נשתנה` (bracket-transparent matching). Searching `]נשתנה` still matches only the bracketed form (literal match). Two-layer fix: Tantivy OR-expansion with bracket variants for candidate recall, plus conditional bracket stripping in regex phase. Correctly handles Responsa `[N]`/`[|N]` gap operators, position filters (start/end/line), and composition search
 - **csv_bank race condition**: Fixed `dictionary changed size during iteration` error in metadata search under concurrent access
 - **Browse stale enrichment guard**: Generation counter re-checked after deferred Oxford translation fetch to prevent stale state on rapid navigation
 - **Metadata-only page state**: Records without transcription text now correctly show page 1 with folio label after enrichment (was stuck at page 0)

@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-29 (browse Phase B follow-up fixes: stale Oxford translations, metadata-only page-0 promotion, and physical-metadata fallback)
+> **Last Updated:** 2026-03-29 (bracket-aware search complete: all paths conditional strict/flexible, internal-bracket issue confirmed non-applicable to OCR data)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 11 | 55 | 66 |
+| P2 Medium Bugs | 11 | 57 | 68 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **17** | **97** | **114** |
+| **Total** | **17** | **99** | **116** |
 
 ---
 
@@ -94,6 +94,8 @@ Move to "Completed Issues" section at bottom with date
 | **Desktop What's New dialog: RTL text alignment not fully right-aligned in Hebrew** | `genizah_app.py` | ❌ Open | The QLabel HTML rendering doesn't perfectly right-align `<p dir='rtl'>` bullet text in the WhatsNewDialog. Content is readable but left-edge aligned despite RTL direction. Low priority cosmetic issue. |
 | **Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses** | `genizah_core.py` | ❌ Open | Review of the 2026-03-25 wildcard fixes found that `build_tantivy_query()` and `_execute_line_break_search()` now expand each suffix/prefix wildcard into ~25 real grammatical forms for Tantivy recall, but `_count_expanded_terms()` / `_apply_explosion_guard()` still counts wildcard components as a single base word unless explicit grammatical prefix/suffix modifiers are set. Wildcard-heavy queries can therefore slip past the 500-term guard and generate much larger Tantivy queries than the system estimates, risking slower searches or query-parser failures. |
 | **Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches** | `genizah_core.py` | ❌ Open | Follow-up review on 2026-03-25 confirmed the line-break path now reuses expanded terms for non-wildcards and fixes suffix wildcard recall, but pattern wildcards (`*a*b*`) still cannot be meaningfully prefiltered from Tantivy using the current stem-based strategy. This matches the normal Responsa limitation: regex is correct, but candidate recall may still miss some pattern-only hits before post-filtering. |
+| **Bracket-aware search treats Responsa gap syntax `[N]` / `[|N]` as a literal-bracket query and disables bracket stripping** | `genizah_core.py` | ✅ Fixed (2026-03-29) | Follow-up review confirmed `_query_has_brackets()` now strips Responsa gap operators like `[3]` and `[|2]` before checking for literal brackets, so Responsa/line-break queries no longer disable bracket-stripping just because they use gap syntax. |
+| **Bracket-stripped matches: internal-bracket highlight spans theoretically wrong** | `genizah_core.py` | ✅ Non-issue (2026-03-29) | Our Genizah OCR data only has leading/trailing brackets (`]נשתנה`, `שלום[`) — never internal reconstruction brackets (`[ד]ל[ך]`). The current implementation handles all real data patterns correctly. Internal-bracket highlight mismatch is theoretical only. |
 | **Join finder v7/v8 is not app-ready: left-only vertical search, mixed scope duplicates, and 80-100s runtime** | `scripts/join_finder_v7.py`, `scripts/join_finder_v8.py`, `genizah_core.py` | ❌ Open | Research review on 2026-03-15 found 3 concrete gaps before manuscript-view integration: (1) v7/v8 only processes `]` torn lines, so it supports LEFT→RIGHT but not RIGHT→LEFT; (2) the scripts search mixed `page`/`system`/`part` scopes, producing duplicate candidates for the same manuscript; (3) Phase 3 fan-out over continuation words searched against `content` takes ~83-101s on the two benchmark cases. Recommended fix path: route by direction, restrict to/dedupe at `scope="system"`, use existing `line_starts` / `line_ends` / `L{n}:word` positional fields, and treat FIST-only visual hits as a separate bucket/fallback. See `docs/JOIN_FINDER_REPORT.md` and `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`. |
 | **Shared filter recompute generation guard still allows stale results after clearing the last active filter** | `web/components/filter_panel.py` | ✅ Fixed (2026-03-21) | Follow-up review confirmed `c2734168` increments `_filter_recompute_gen` before the empty-filter early return, so older in-flight recomputes now discard their stale results instead of repopulating cleared filters. |
 | **Shared filter option builders still read UI language inside `run.io_bound()` wrappers** | `web/pages/search.py`, `web/pages/parallels.py`, `web/components/filter_panel.py` | ✅ Fixed (2026-03-21) | Follow-up review confirmed both pages now capture `lang = get_language()` in client context and pass the shared `build_*_options` functions directly into `run.io_bound()`, removing the worker-thread language lookup. |
