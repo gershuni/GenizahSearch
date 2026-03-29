@@ -3387,55 +3387,93 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.icon('list_alt', size='3rem').classes('text-gray-300')
                                 ui.label(tr('No lists found')).classes('text-gray-500')
                         else:
-                            selected_list_ids = set()
-                            list_rows = {}
-                            for lst in all_lists:
-                                list_id = lst.get('id', '')
-                                list_name = lst.get('name', list_id)
-                                item_count = lst.get('count', 0)
-                                row = ui.row().classes(
-                                    'w-full items-center gap-2 py-2 px-3 rounded cursor-pointer'
-                                ).style('transition: background 0.15s;')
-                                list_rows[list_id] = row
-                                with row.on('click', lambda lid=list_id: _toggle_list_selection(lid)):
-                                    ui.icon('list').classes('text-gray-400')
-                                    ui.label(list_name).classes('flex-grow')
-                                    ui.badge(str(item_count)).props('outline')
+                            # {list_id: {sys_id: True/False}} tracks per-item selection
+                            _excl_selections = {}
+                            _excl_item_cbs = {}  # {list_id: [checkbox, ...]}
+                            _excl_hdr_cbs = {}   # {list_id: checkbox}
+
+                            with ui.scroll_area().classes('w-full').style('max-height: 350px;'):
+                                with ui.column().classes('w-full gap-0'):
+                                    for lst in all_lists:
+                                        list_id = lst.get('id', '')
+                                        list_name = lst.get('name', list_id)
+
+                                        # Fetch items
+                                        try:
+                                            list_items = await run.io_bound(lists_mgr.get_items_in_list_sync, list_id)
+                                        except Exception:
+                                            list_items = []
+                                        resolved = []
+                                        for it in list_items:
+                                            sid = it.get('sys_id', '')
+                                            if not sid:
+                                                continue
+                                            sm = it.get('shelfmark', '')
+                                            if not sm and state.meta_mgr:
+                                                try:
+                                                    sm, _ = state.meta_mgr.get_meta_for_id(sid)
+                                                except Exception:
+                                                    pass
+                                            resolved.append({'sys_id': sid, 'shelfmark': sm or sid})
+                                        if not resolved:
+                                            continue
+
+                                        _excl_selections[list_id] = {r['sys_id']: False for r in resolved}
+                                        _excl_item_cbs[list_id] = []
+
+                                        with ui.expansion().classes('w-full').props(
+                                            'dense header-class="text-weight-medium"'
+                                        ):
+                                            # Header: checkbox + list name
+                                            with ui.row().classes('items-center gap-2').slot('header'):
+                                                def _make_hdr_toggle(lid=list_id, res=resolved):
+                                                    def toggle(e):
+                                                        val = e.value
+                                                        for r in res:
+                                                            _excl_selections[lid][r['sys_id']] = val
+                                                        for cb in _excl_item_cbs.get(lid, []):
+                                                            cb.set_value(val)
+                                                    return toggle
+                                                hdr_cb = ui.checkbox(
+                                                    f"{list_name} ({len(resolved)})", value=False
+                                                ).props('dense').on('update:model-value', _make_hdr_toggle())
+                                                _excl_hdr_cbs[list_id] = hdr_cb
+
+                                            # Individual items
+                                            for r in resolved:
+                                                def _make_item_toggle(lid=list_id, sid=r['sys_id']):
+                                                    def toggle(e):
+                                                        _excl_selections[lid][sid] = e.value
+                                                    return toggle
+                                                item_cb = ui.checkbox(
+                                                    r['shelfmark'], value=False
+                                                ).props('dense').classes('text-xs ml-6').on(
+                                                    'update:model-value', _make_item_toggle()
+                                                )
+                                                _excl_item_cbs[list_id].append(item_cb)
 
                             async def _apply_list_exclusion():
-                                if not selected_list_ids:
+                                any_selected = False
+                                for lid, sids_map in _excl_selections.items():
+                                    selected_sids = {sid for sid, checked in sids_map.items() if checked}
+                                    if not selected_sids:
+                                        continue
+                                    any_selected = True
+                                    list_name = next((l.get('name', lid) for l in all_lists if l.get('id') == lid), lid)
+                                    search_state.exclusion_sources.append(ExclusionSource(
+                                        label=list_name,
+                                        source_type='list',
+                                        source_id=lid,
+                                        sys_ids=selected_sids,
+                                        unresolved=[],
+                                    ))
+                                if not any_selected:
                                     ui.notify(tr('Select a list first'), type='warning')
                                     return
-                                for lid in selected_list_ids:
-                                    try:
-                                        items = await run.io_bound(lists_mgr.get_items_in_list_sync, lid)
-                                    except Exception:
-                                        items = []
-                                    sys_ids = {item.get('sys_id') for item in items if item.get('sys_id')}
-                                    list_name = next((l.get('name', lid) for l in all_lists if l.get('id') == lid), lid)
-                                    if sys_ids:
-                                        search_state.exclusion_sources.append(ExclusionSource(
-                                            label=list_name,
-                                            source_type='list',
-                                            source_id=lid,
-                                            sys_ids=sys_ids,
-                                            unresolved=[],
-                                        ))
                                 persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
                                 dlg.close()
                                 _apply_manuscript_exclusions()
                                 _update_exclude_btn()
-
-                            def _toggle_list_selection(lid):
-                                if lid in selected_list_ids:
-                                    selected_list_ids.discard(lid)
-                                else:
-                                    selected_list_ids.add(lid)
-                                for rid, row in list_rows.items():
-                                    if rid in selected_list_ids:
-                                        row.style('background: rgba(185, 28, 28, 0.15);')
-                                    else:
-                                        row.style('background: transparent;')
 
                             ui.button(tr('Apply'), icon='check', on_click=_apply_list_exclusion).props(
                                 'color=red no-caps'
