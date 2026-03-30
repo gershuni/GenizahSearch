@@ -6318,7 +6318,7 @@ class ResultDialog(QDialog):
         self.btn_rd_visual_sim = QPushButton(f"🔍 {tr('Visual Similarity')}")
         self.btn_rd_visual_sim.setToolTip(tr("Visual Similarity"))
         self.btn_rd_visual_sim.setStyleSheet(
-            "QPushButton { background-color: #e65100; color: white; border-radius: 4px; padding: 2px 8px; }"
+            "QPushButton { border-radius: 4px; padding: 2px 8px; }"
         )
         self.btn_rd_visual_sim.setVisible(False)  # Shown when VS data available
         self.btn_rd_visual_sim.clicked.connect(self._rd_search_visual_similarity)
@@ -16665,13 +16665,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_joins.setMenu(self.joins_menu)
         community_bar.addWidget(self.btn_b_joins)
 
-        # Visual Similarity button (orange theme)
+        # Visual Similarity button
         self.btn_b_visual_sim = QToolButton()
         self.btn_b_visual_sim.setText("🔍")
         self.btn_b_visual_sim.setToolTip(tr("Visual Similarity") + " / דמיון חזותי")
         self.btn_b_visual_sim.setEnabled(False)
         self.btn_b_visual_sim.setFixedSize(40, 32)
-        self.btn_b_visual_sim.setStyleSheet("background-color: #e65100; color: white; border-radius: 4px;")
+        self.btn_b_visual_sim.setStyleSheet("border-radius: 4px;")
         self.btn_b_visual_sim.clicked.connect(self._browse_view_visual_similarity)
         community_bar.addWidget(self.btn_b_visual_sim)
 
