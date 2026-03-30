@@ -14269,7 +14269,9 @@ class GenizahGUI(QMainWindow):
         """Show Visual Similarity suggestions dialog for current browse manuscript."""
         sys_id = self.current_browse_sid
         if not sys_id:
+            print(f"[VS] No current_browse_sid")
             return
+        print(f"[VS] Opening dialog for sys_id={sys_id}")
 
         shelfmark = None
         if self.meta_mgr:
@@ -14290,7 +14292,10 @@ class GenizahGUI(QMainWindow):
                 self._show_vs_dialog(sys_id, shelfmark, data)
                 return
         except Exception as e:
-            logging.warning(f"VS local service error: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.warning(self, tr("Visual Similarity"), f"Error loading data: {e}")
+            return
 
         # Try cache
         if not hasattr(self, '_vs_cache'):
