@@ -224,7 +224,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                             if info.get('image_url'):
                                 ui.image(info['image_url']).classes(
                                     'w-full max-h-[200px] object-contain rounded'
-                                ).style('background: #f5f5f5;')
+                                )
                             else:
                                 ui.icon('hide_image').classes('text-2xl').style('color: var(--text-muted);')
 
@@ -332,7 +332,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                 ui.button(
                     tr('Search in visual suggestions'), icon='search',
                     on_click=lambda: (
-                        ui.navigate.to(f'/search?vs_sys_id={sys_id}'),
+                        ui.navigate.to(f'/search?vs_src={sys_id}'),
                         dialog.close(),
                     ),
                 ).props('flat dense no-caps').style('color: #e65100;')
@@ -374,14 +374,14 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb):
         dc.clear()
         with dc:
             with ui.row().classes('w-full gap-4 items-start').style(
-                'background: #fff3e0; border-radius: 6px; padding: 8px;'
+                'background: rgba(230, 81, 0, 0.08); border-radius: 6px; padding: 8px;'
             ):
                 # Image thumbnail
                 with ui.column().classes('shrink-0 items-center').style('width: 180px;'):
                     img_url = f"/api/nli_image_by_sysid/{aid}?page=0"
                     ui.image(img_url).classes(
                         'w-full max-h-[160px] object-contain rounded'
-                    ).style('background: #f5f5f5;')
+                    )
 
                 # Text snippet (lazy loaded)
                 with ui.column().classes('flex-1 gap-1'):
