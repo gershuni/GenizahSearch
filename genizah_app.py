@@ -6314,10 +6314,20 @@ class ResultDialog(QDialog):
         )
         self.btn_rd_translations.toggled.connect(self._rd_toggle_translations)
 
+        # Visual Similarity action button (D-10: ResultDialog context)
+        self.btn_rd_visual_sim = QPushButton(f"🔍 {tr('Visual Similarity')}")
+        self.btn_rd_visual_sim.setToolTip(tr("Search in visual suggestions"))
+        self.btn_rd_visual_sim.setStyleSheet(
+            "QPushButton { background-color: #e65100; color: white; border-radius: 4px; padding: 2px 8px; }"
+        )
+        self.btn_rd_visual_sim.setVisible(False)  # Shown when VS data available
+        self.btn_rd_visual_sim.clicked.connect(self._rd_search_visual_similarity)
+
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_add_to_list)
         action_row.addWidget(self.btn_add_to_puzzle)
+        action_row.addWidget(self.btn_rd_visual_sim)
         action_row.addWidget(self.btn_ext_info)
         action_row.addWidget(self.btn_rd_bib_fjms)
         action_row.addWidget(self.btn_rd_bib_nli)
@@ -6613,6 +6623,23 @@ class ResultDialog(QDialog):
                     folio_label = current_img.get('label', '1r')
         parent.add_to_puzzle(sys_id, shelfmark, folio_label, fl_id)
         self.close()
+
+    def _rd_search_visual_similarity(self):
+        """D-10: Search in visual suggestions from ResultDialog context."""
+        parent = self.parent()
+        if not parent or not hasattr(parent, '_search_in_visual_suggestions'):
+            return
+        sys_id = self.current_sys_id
+        if not sys_id:
+            return
+        shelfmark = str(sys_id)
+        if self.all_results and 0 <= self.current_result_idx < len(self.all_results):
+            result = self.all_results[self.current_result_idx]
+            shelfmark = (result.get('display', {}).get('shelfmark')
+                         or result.get('shelfmark')
+                         or str(sys_id))
+        self.close()
+        parent._search_in_visual_suggestions(sys_id, shelfmark)
 
     def _update_add_to_list_button(self):
         parent = self.parent()
@@ -8549,6 +8576,12 @@ class ResultDialog(QDialog):
             self.btn_rd_measurements.setVisible(False)
             if hasattr(self, 'btn_compact_measurements'):
                 self.btn_compact_measurements.setVisible(False)
+
+        # 3b. Visual Similarity button (D-10: ResultDialog context)
+        try:
+            self.btn_rd_visual_sim.setVisible(True)  # Always show; on-demand fetch if clicked
+        except Exception:
+            pass
 
         # 4. Build Extended Info HTML (Text)
         # Store enrichment meta for translate badge rebuild
@@ -12682,6 +12715,9 @@ class GenizahGUI(QMainWindow):
         # Pre-search filter state (Phase 45-03)
         self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
         self.pre_search_restrict_sys_ids = None  # computed set or None
+        # Phase 57: Visual Similarity restriction state
+        self._vs_restrict_sys_ids = None
+        self._vs_restrict_label = ''
         # Phase 55: Refinement chain state (search within results)
         self.refinement_chain: list = []               # list[RefinementStep]
         self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results)
@@ -14385,6 +14421,108 @@ class GenizahGUI(QMainWindow):
             return {s['alma_id'] for s in data}
         except Exception:
             return set()
+
+    def _search_in_visual_suggestions(self, sys_id=None, shelfmark=None):
+        """Restrict search to visual similarity partner pool ('Search in VS' action)."""
+        if sys_id is None:
+            sys_id = self.current_browse_sid
+        if not sys_id:
+            return
+        if shelfmark is None and self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+            except Exception:
+                pass
+        shelfmark = shelfmark or sys_id
+
+        partners = self._vs_get_partners(sys_id)
+        if not partners:
+            QMessageBox.information(self, tr("Visual Similarity"), tr("No visual suggestions found for this manuscript."))
+            return
+
+        # Set VS restriction on pre-search restrict
+        self._vs_restrict_sys_ids = partners
+        self._vs_restrict_label = f'{tr("Visual suggestions for")} {shelfmark}'
+
+        # Merge into pre_search_restrict_sys_ids
+        if self.pre_search_restrict_sys_ids is not None:
+            self.pre_search_restrict_sys_ids = self.pre_search_restrict_sys_ids & partners
+        else:
+            self.pre_search_restrict_sys_ids = partners
+
+        # Switch to search tab
+        self.tabs.setCurrentIndex(0)
+
+        # Show VS breadcrumb
+        self._update_vs_breadcrumb()
+
+    def _browse_visual_suggestions(self, sys_id=None, shelfmark=None):
+        """Show VS partner pool as a result set by running a wildcard search restricted to partners."""
+        if sys_id is None:
+            sys_id = self.current_browse_sid
+        if not sys_id:
+            return
+        if shelfmark is None and self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+            except Exception:
+                pass
+        shelfmark = shelfmark or sys_id
+
+        partners = self._vs_get_partners(sys_id)
+        if not partners:
+            QMessageBox.information(self, tr("Visual Similarity"), tr("No visual suggestions found for this manuscript."))
+            return
+
+        # Set VS restriction and run a shelfmark-mode search with wildcard to show all partners
+        self._vs_restrict_sys_ids = partners
+        self._vs_restrict_label = f'{tr("Visual suggestions for")} {shelfmark}'
+        self.pre_search_restrict_sys_ids = partners
+
+        # Switch to search tab, set shelfmark mode with wildcard
+        self.tabs.setCurrentIndex(0)
+        self.search_input.setText('*')
+        self.search_mode_combo.setCurrentText(tr("Shelfmark"))
+        self._update_vs_breadcrumb()
+        self.run_search()
+
+    def _clear_vs_restriction(self):
+        """Clear the visual similarity search restriction."""
+        self._vs_restrict_sys_ids = None
+        self._vs_restrict_label = ''
+        # Recalculate pre_search_restrict_sys_ids without VS component
+        # For simplicity, clear the VS portion; keep other filters if present
+        self.pre_search_restrict_sys_ids = None
+        self._update_vs_breadcrumb()
+
+    def _update_vs_breadcrumb(self):
+        """Show or hide the VS restriction breadcrumb in the search area."""
+        if not hasattr(self, '_vs_breadcrumb_widget'):
+            # Create the breadcrumb widget (once, lazily)
+            self._vs_breadcrumb_widget = QWidget()
+            bc_layout = QHBoxLayout(self._vs_breadcrumb_widget)
+            bc_layout.setContentsMargins(4, 2, 4, 2)
+            self._vs_breadcrumb_label = QLabel()
+            self._vs_breadcrumb_label.setStyleSheet("color: #e65100; font-weight: bold; font-size: 12px;")
+            bc_layout.addWidget(self._vs_breadcrumb_label)
+            self._vs_breadcrumb_clear = QPushButton("✕")
+            self._vs_breadcrumb_clear.setFixedSize(20, 20)
+            self._vs_breadcrumb_clear.setToolTip(tr("Clear VS restriction"))
+            self._vs_breadcrumb_clear.setStyleSheet("background-color: #e65100; color: white; border-radius: 10px; font-size: 11px;")
+            self._vs_breadcrumb_clear.clicked.connect(self._clear_vs_restriction)
+            bc_layout.addWidget(self._vs_breadcrumb_clear)
+            bc_layout.addStretch()
+            # Insert into the search area layout (above results)
+            search_layout = self.results_table.parent().layout()
+            if search_layout:
+                search_layout.insertWidget(0, self._vs_breadcrumb_widget)
+
+        label = getattr(self, '_vs_restrict_label', '')
+        if label:
+            self._vs_breadcrumb_label.setText(f"🔍 {label}")
+            self._vs_breadcrumb_widget.setVisible(True)
+        else:
+            self._vs_breadcrumb_widget.setVisible(False)
 
     def _update_joins_dropdown(self):
         """Update the joins dropdown menu with connected fragments."""
