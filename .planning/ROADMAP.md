@@ -348,7 +348,7 @@ Plans:
 Plans:
 - [x] 57-01-PLAN.md — Import script + VisualSimilarityService + tests + API endpoint
 - [x] 57-02-PLAN.md — Web browse dialog + "Search in Visual Suggestions" action + translations
-- [ ] 57-03-PLAN.md — Desktop browse dialog + on-demand cache + search integration + settings download
+- [x] 57-03-PLAN.md — Desktop browse dialog + on-demand cache + search integration + settings download
 **Directory**: `.planning/phases/57-fist-joins-browse-search-mode/`
 
 ## Progress

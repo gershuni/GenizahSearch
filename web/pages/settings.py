@@ -361,6 +361,24 @@ def create_settings_page():
 
                     ui.separator().classes('my-2')
 
+                    # Visual Similarity Database section
+                    with ui.row().classes('items-center gap-4'):
+                        ui.label(tr('Visual Similarity Database')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                        try:
+                            from shared.visual_similarity_service import get_vs_service
+                            vs_svc = get_vs_service(thread_safe=True)
+                            if vs_svc.is_available():
+                                vs_meta = vs_svc.get_db_version()
+                                pair_count = vs_meta.get('pair_count', '?')
+                                ms_count = vs_meta.get('manuscript_count', '?')
+                                ui.badge(f'{pair_count} pairs / {ms_count} manuscripts', color='green')
+                            else:
+                                ui.badge(tr('Not loaded'), color='gray')
+                        except Exception:
+                            ui.badge(tr('Not loaded'), color='gray')
+
+                    ui.separator().classes('my-2')
+
                     ui.markdown('''
                     **Dicta Genizah Search** · *Data: MiDRASH Project (Friedberg Genizah Project)*
                     ''').classes('text-xs').style('color: var(--text-muted);')
