@@ -22,9 +22,9 @@
 
 ### FIST Joins
 
-- [ ] **JOIN-01**: User can see FIST join group suggestions in browse enrichment alongside existing FJMS scientific joins (web + desktop)
+- [x] **JOIN-01**: User can see FIST join group suggestions in browse enrichment alongside existing FJMS scientific joins (web + desktop)
 - [ ] **JOIN-02**: User can search within FIST join groups as a dedicated search mode (web + desktop)
-- [ ] **JOIN-03**: Search results show join partners for matched fragments with visual distinction between matched and partner fragments (web + desktop)
+- [x] **JOIN-03**: Search results show join partners for matched fragments with visual distinction between matched and partner fragments (web + desktop)
 
 ### Dimensions
 
@@ -73,9 +73,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXCL-02 | Phase 56 | Pending |
 | EXCL-03 | Phase 56 | Pending |
 | EXCL-04 | Phase 56 | Pending |
-| JOIN-01 | Phase 57 | Pending |
+| JOIN-01 | Phase 57 | Complete |
 | JOIN-02 | Phase 57 | Pending |
-| JOIN-03 | Phase 57 | Pending |
+| JOIN-03 | Phase 57 | Complete |
 
 **Coverage:**
 - v7.3 requirements: 14 total
