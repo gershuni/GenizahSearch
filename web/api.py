@@ -1624,7 +1624,7 @@ def init_api_routes():
             return []
 
         # Enrich with shelfmark and library_code from csv_bank
-        from genizah_core import csv_bank
+        csv_bank = state.meta_mgr.csv_bank if state.meta_mgr else None
         if csv_bank:
             for s in suggestions:
                 meta = csv_bank.get(s['alma_id'])

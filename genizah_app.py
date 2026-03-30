@@ -14547,10 +14547,10 @@ class GenizahGUI(QMainWindow):
 
         # Switch to search tab, set shelfmark mode with wildcard
         self.tabs.setCurrentIndex(0)
-        self.search_input.setText('*')
-        self.search_mode_combo.setCurrentText(tr("Shelfmark"))
+        self.query_input.setText('*')
+        self.mode_combo.setCurrentText(tr("Shelfmark (#)"))
         self._update_vs_breadcrumb()
-        self.run_search()
+        self.start_search()
 
     def _clear_vs_restriction(self):
         """Clear the visual similarity search restriction."""

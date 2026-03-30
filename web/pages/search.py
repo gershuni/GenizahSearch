@@ -284,10 +284,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         if _vs_sys_ids:
             # Resolve shelfmarks for display label
-            from genizah_core import csv_bank
+            _csv_bank = state.meta_mgr.csv_bank if state.meta_mgr else None
             _vs_shelfmarks = []
             for _sid in _vs_source_ids:
-                _meta = csv_bank.get(_sid) if csv_bank else None
+                _meta = _csv_bank.get(_sid) if _csv_bank else None
                 _vs_shelfmarks.append(_meta.get('shelfmark', _sid) if _meta else _sid)
             search_state.vs_restrict_sys_ids = _vs_sys_ids
             search_state.vs_restrict_label = f'{tr("Visual Similarity")} \u2014 {", ".join(_vs_shelfmarks)}'
@@ -4890,7 +4890,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                             with container:
                                                 ui.label(tr('Visual similarity partners')).classes('text-xs font-semibold').style('color: #ef6c00;')
                                                 for _p in _top3:
-                                                    from genizah_core import csv_bank as _cb
+                                                    _cb = state.meta_mgr.csv_bank if state.meta_mgr else None
                                                     _p_meta = _cb.get(_p['alma_id']) if _cb else None
                                                     _p_sm = _p_meta.get('shelfmark', _p['alma_id']) if _p_meta else _p['alma_id']
                                                     with ui.row().classes('items-center gap-1'):
@@ -6601,6 +6601,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         asyncio.ensure_future(_after_delay(0.1, load_tag_results))
 
     # Initialize with restored results or initial query
+    elif search_state.vs_browse_mode and search_state.vs_restrict_sys_ids:
+        # VS Browse mode: auto-search with wildcard restricted to suggestion pool
+        query_input.value = '*'
+        mode_select.value = 'shelfmark'
+        asyncio.ensure_future(_after_delay(0.5, execute_search))
     elif initial_query:
         asyncio.ensure_future(_after_delay(0.5, execute_search))
     elif search_state.results:

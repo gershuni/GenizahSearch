@@ -35,7 +35,8 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
     # Enrich each suggestion with shelfmark, library_code, domain
     if data:
         def _enrich(suggestions):
-            from genizah_core import csv_bank
+            from web.state import state
+            csv_bank = state.meta_mgr.csv_bank if state.meta_mgr else None
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=True)
             for s in suggestions:
