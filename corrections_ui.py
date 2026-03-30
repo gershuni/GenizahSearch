@@ -4776,10 +4776,9 @@ class JoinsDialog(QDialog):
         except Exception:
             return
 
-        # Show VS dialog — when user clicks a shelfmark, fill fragment B
+        # Show the full VS dialog with on_pick callback — "Add as Join" fills frag_b
         shelf_a = self.frag_a_input.text() or self.shelfmark or self.document_id
-        # Use a custom pick mode: pass a callback that fills frag_b_input
-        parent_app._show_vs_dialog_for_pick(
+        parent_app._show_vs_dialog(
             self.document_id, shelf_a, data,
             on_pick=self._on_vs_pick,
         )

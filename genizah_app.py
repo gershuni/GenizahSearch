@@ -14348,7 +14348,7 @@ class GenizahGUI(QMainWindow):
         self._vs_cache.store(sys_id, data)
         self._show_vs_dialog(sys_id, shelfmark, data)
 
-    def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None):
+    def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None, on_pick=None):
         """Create and show the enriched Visual Similarity workbench dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
@@ -14668,10 +14668,16 @@ class GenizahGUI(QMainWindow):
             btn_add_join.setFixedHeight(26)
             btn_add_join.setStyleSheet("background-color: #388e3c; color: white; border-radius: 3px; padding: 2px 8px; border: none;")
             def _add_as_join(_pid=partner_id, _shelf=shelf, _dlg=dlg):
-                _dlg.accept()
-                if parent_dialog:
-                    parent_dialog.close()
-                self._vs_open_joins_with_partner(sys_id, shelfmark, _pid, _shelf)
+                if on_pick:
+                    # Pick mode: fill fragment B in the calling JoinsDialog
+                    on_pick(_pid, _shelf)
+                    _dlg.accept()
+                else:
+                    # Normal mode: open JoinsDialog with partner pre-filled
+                    _dlg.accept()
+                    if parent_dialog:
+                        parent_dialog.close()
+                    self._vs_open_joins_with_partner(sys_id, shelfmark, _pid, _shelf)
             btn_add_join.clicked.connect(_add_as_join)
             actions_row.addWidget(btn_add_join)
 
@@ -14829,60 +14835,6 @@ class GenizahGUI(QMainWindow):
         # Pre-fill fragment B with the partner shelfmark
         dialog.frag_b_input.setText(partner_shelfmark)
         dialog.exec()
-
-    def _show_vs_dialog_for_pick(self, sys_id, shelfmark, data, on_pick=None):
-        """Show VS dialog in 'pick' mode — clicking a suggestion calls on_pick instead of navigating."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f'{tr("Visual Similarity")} — {tr("Pick from visual suggestions")}')
-        dlg.resize(700, 500)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        header = QLabel(f'  {tr("Visual Similarity")} — {shelfmark}  |  {tr("Pick from visual suggestions")}')
-        header.setStyleSheet("background-color: #e65100; color: white; font-size: 16px; font-weight: bold; padding: 10px;")
-        layout.addWidget(header)
-
-        from PyQt6.QtWidgets import QListWidget, QListWidgetItem
-        list_widget = QListWidget()
-        list_widget.setAlternatingRowColors(True)
-        for item in data:
-            partner_id = item.get('alma_id', '')
-            shelf = item.get('shelfmark', partner_id)
-            domain = item.get('domain', '--')
-            lib = item.get('library_code', '')
-            rank = item.get('rank', 0)
-            display_text = f"#{rank}  {shelf}  |  {domain}  |  {lib}"
-            li = QListWidgetItem(display_text)
-            li.setData(Qt.ItemDataRole.UserRole, {'sys_id': partner_id, 'shelfmark': shelf})
-            list_widget.addItem(li)
-        layout.addWidget(list_widget, 1)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(8, 4, 8, 8)
-        btn_layout.addStretch()
-        btn_cancel = QPushButton(tr("Cancel"))
-        btn_cancel.clicked.connect(dlg.reject)
-        btn_layout.addWidget(btn_cancel)
-        btn_select = QPushButton(tr("Select"))
-        btn_select.setStyleSheet("background-color: #e65100; color: white; padding: 6px 16px;")
-        btn_select.setEnabled(False)
-        btn_layout.addWidget(btn_select)
-        layout.addLayout(btn_layout)
-
-        list_widget.itemSelectionChanged.connect(
-            lambda: btn_select.setEnabled(bool(list_widget.selectedItems()))
-        )
-        list_widget.itemDoubleClicked.connect(lambda: btn_select.click())
-
-        def _do_pick():
-            selected = list_widget.selectedItems()
-            if selected and on_pick:
-                d = selected[0].data(Qt.ItemDataRole.UserRole)
-                on_pick(d['sys_id'], d['shelfmark'])
-                dlg.accept()
-
-        btn_select.clicked.connect(_do_pick)
-        dlg.exec()
 
     def _vs_add_to_puzzle(self, partner_sys_id):
         """Add a VS partner to the Fragment Puzzle."""
