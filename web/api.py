@@ -1545,6 +1545,87 @@ def init_api_routes():
             logger.error(f"Proxy error for {url}: {e}")
             return Response(status_code=500)
 
+    # ── Visual Similarity Suggestions ─────────────────────────────
+    # NOTE: /version route MUST come before /{sys_id} to avoid wildcard capture
+
+    @app.get('/api/visual_suggestions/version')
+    def visual_suggestions_version():
+        """Return VS database version metadata for cache staleness detection.
+
+        FROZEN CONTRACT (Wave 2 depends on this):
+        Returns {version: str, import_date: str, pair_count: str, manuscript_count: str}
+        """
+        from shared.visual_similarity_service import get_vs_service
+        svc = get_vs_service(thread_safe=True)
+        if not svc.is_available():
+            return {'version': '', 'import_date': '', 'pair_count': '0', 'manuscript_count': '0'}
+        return svc.get_db_version()
+
+    @app.post('/api/visual_suggestions/batch_check')
+    async def visual_suggestions_batch_check(request: Request):
+        """Check which sys_ids have visual suggestions.
+        Body: {"sys_ids": [...]} -- max 500 IDs per request.
+
+        FROZEN CONTRACT: Returns {sys_id: bool, ...}
+        """
+        from shared.visual_similarity_service import get_vs_service
+        body = await request.body()
+        data = json.loads(body)
+        sys_ids = data.get('sys_ids', [])[:500]  # Enforce limit per review feedback
+        svc = get_vs_service(thread_safe=True)
+        if not svc.is_available():
+            return {sid: False for sid in sys_ids}
+        return svc.batch_has_suggestions(sys_ids)
+
+    @app.get('/api/visual_suggestions/{sys_id}')
+    def visual_suggestions_api(sys_id: str, limit: int = 200):
+        """Return ranked visual similarity suggestions for a manuscript.
+
+        FROZEN CONTRACT (Wave 2 depends on this):
+        Returns list of dicts: {alma_id: str, rank: int, svm_score: float,
+                                shelfmark: str, library_code: str, domain: str}
+        """
+        from shared.visual_similarity_service import get_vs_service
+        svc = get_vs_service(thread_safe=True)
+        if not svc.is_available():
+            return []
+        suggestions = svc.get_suggestions(sys_id, limit=limit)
+        if not suggestions:
+            return []
+
+        # Enrich with shelfmark and library_code from csv_bank
+        from genizah_core import csv_bank
+        if csv_bank:
+            for s in suggestions:
+                meta = csv_bank.get(s['alma_id'])
+                if meta:
+                    s['shelfmark'] = meta.get('shelfmark', '')
+                    s['library_code'] = meta.get('library_code', '')
+                else:
+                    s['shelfmark'] = ''
+                    s['library_code'] = ''
+        else:
+            for s in suggestions:
+                s['shelfmark'] = ''
+                s['library_code'] = ''
+
+        # Enrich with domain from FJMS
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            if fjms.is_available():
+                for s in suggestions:
+                    domains = fjms.get_domains(s['alma_id'])
+                    s['domain'] = domains[0]['name'] if domains else ''
+            else:
+                for s in suggestions:
+                    s['domain'] = ''
+        except Exception:
+            for s in suggestions:
+                s.setdefault('domain', '')
+
+        return suggestions
+
     @app.get('/api/export/excel')
     def export_excel():
         """Export search results to Excel format using unified export service."""
