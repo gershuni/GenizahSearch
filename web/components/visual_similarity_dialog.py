@@ -325,6 +325,14 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             # Initial render
             _render_rows()
 
+            # Preload text snippets for first batch in background
+            async def _preload_texts():
+                for s in data[:_PAGE_SIZE]:
+                    aid = s['alma_id']
+                    if aid not in text_cache:
+                        text_cache[aid] = await _fetch_suggestion_text(aid)
+            asyncio.ensure_future(_preload_texts())
+
         # Bottom bar
         with ui.row().classes('w-full justify-between items-center p-2'):
             if data:
