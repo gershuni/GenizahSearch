@@ -14390,13 +14390,13 @@ class GenizahGUI(QMainWindow):
         lbl_orig_image = QLabel(tr("Loading..."))
         lbl_orig_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_orig_image.setMinimumHeight(200)
-        lbl_orig_image.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;")
+        lbl_orig_image.setStyleSheet("background-color: palette(base); border: 1px solid palette(mid); border-radius: 4px;")
         left_layout.addWidget(lbl_orig_image, stretch=3)
 
         # Text snippet
         txt_orig_text = QLabel(tr("Loading..."))
         txt_orig_text.setWordWrap(True)
-        txt_orig_text.setStyleSheet("font-size: 12px; padding: 6px; background-color: #fafafa; border: 1px solid #eee; border-radius: 4px;")
+        txt_orig_text.setStyleSheet("font-size: 12px; padding: 6px; background-color: palette(base); border: 1px solid palette(mid); border-radius: 4px;")
         txt_orig_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         txt_orig_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         txt_orig_text.setMaximumHeight(120)
@@ -14451,50 +14451,61 @@ class GenizahGUI(QMainWindow):
             'threads': [],  # keep references to prevent GC
         }
 
-        def _get_first_fl_id(target_sys_id):
-            """Get the first NLI FL ID for a sys_id from crossref sidecar."""
+        def _get_thumb_url_for_sys_id(target_sys_id):
+            """Get the NLI thumbnail URL for a sys_id via meta_mgr (uses real IIIF FL IDs)."""
             try:
-                from shared.nli_crossref_service import get_nli_crossref_service
-                svc = get_nli_crossref_service(thread_safe=True)
-                if svc and svc.is_available():
-                    images = svc.get_images(target_sys_id)
-                    if images:
-                        for img in images:
-                            fgp = img.get('fgp_image_number_id', '')
-                            if fgp:
-                                digits = re.sub(r"\D", "", str(fgp))
-                                if digits and len(digits) >= 4:
-                                    return digits
+                if self.meta_mgr:
+                    return self.meta_mgr.get_thumbnail(target_sys_id)
             except Exception:
                 pass
             return None
 
         def _load_image_for_label(lbl, target_sys_id, max_width=350, max_height=300):
             """Load a thumbnail image into a QLabel via background thread."""
-            fl_digits = _get_first_fl_id(target_sys_id)
-            if not fl_digits:
-                lbl.setText(tr("No image available"))
-                return
-            thumb_url = f"{Config.NLI_IIIF_BASE}/FL{fl_digits}/full/400,/0/default.jpg"
-            thread = ImageLoaderThread(thumb_url)
+            class _ImageFetchWorker(QThread):
+                url_ready = pyqtSignal(str)
+                def __init__(self, app_ref, sid):
+                    super().__init__()
+                    self._app = app_ref
+                    self._sid = sid
+                def run(self):
+                    try:
+                        url = _get_thumb_url_for_sys_id(self._sid) or ''
+                        self.url_ready.emit(url)
+                    except Exception:
+                        self.url_ready.emit('')
 
-            def _on_loaded(img, _lbl=lbl, _mw=max_width, _mh=max_height):
-                if _lbl.parent() is None:
-                    return  # Widget was destroyed
-                pix = QPixmap.fromImage(img)
-                scaled = pix.scaled(_mw, _mh, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                _lbl.setPixmap(scaled)
-                _lbl.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 2px;")
+            fetch_worker = _ImageFetchWorker(self, target_sys_id)
 
-            def _on_failed(_lbl=lbl):
+            def _on_url_ready(thumb_url, _lbl=lbl, _mw=max_width, _mh=max_height):
                 if _lbl.parent() is None:
                     return
-                _lbl.setText(tr("No image available"))
+                if not thumb_url:
+                    _lbl.setText(tr("No image available"))
+                    return
+                thread = ImageLoaderThread(thumb_url)
 
-            thread.image_loaded.connect(_on_loaded)
-            thread.load_failed.connect(_on_failed)
-            thread.start()
-            _vs_state['threads'].append(thread)
+                def _on_loaded(img, _lbl2=_lbl, _mw2=_mw, _mh2=_mh):
+                    if _lbl2.parent() is None:
+                        return
+                    pix = QPixmap.fromImage(img)
+                    scaled = pix.scaled(_mw2, _mh2, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    _lbl2.setPixmap(scaled)
+                    _lbl2.setStyleSheet("background-color: palette(base); border: 1px solid palette(mid); border-radius: 4px; padding: 2px;")
+
+                def _on_failed(_lbl2=_lbl):
+                    if _lbl2.parent() is None:
+                        return
+                    _lbl2.setText(tr("No image available"))
+
+                thread.image_loaded.connect(_on_loaded)
+                thread.load_failed.connect(_on_failed)
+                thread.start()
+                _vs_state['threads'].append(thread)
+
+            fetch_worker.url_ready.connect(_on_url_ready)
+            fetch_worker.start()
+            _vs_state['threads'].append(fetch_worker)
 
         def _load_text_for_label(lbl, target_sys_id, max_chars=200):
             """Load text snippet for a sys_id in background."""
@@ -14507,7 +14518,11 @@ class GenizahGUI(QMainWindow):
                     self._mc = mc
                 def run(self):
                     try:
-                        text, head, src, uid = self._app._get_best_text_for_id(self._sid)
+                        searcher = getattr(self._app, 'searcher', None)
+                        if not searcher:
+                            self.text_ready.emit('')
+                            return
+                        text, head, src, uid = searcher._get_best_text_for_id(self._sid)
                         snippet = text[:self._mc].strip() if text else ''
                         if text and len(text) > self._mc:
                             snippet += '...'
@@ -14552,7 +14567,7 @@ class GenizahGUI(QMainWindow):
             # Container widget
             container = QWidget()
             container.setStyleSheet("""
-                QWidget { background-color: white; border: 1px solid #e0e0e0; border-radius: 4px; }
+                QWidget { background-color: palette(base); border: 1px solid palette(mid); border-radius: 4px; }
                 QWidget:hover { border-color: #ff9800; }
             """)
             container_layout = QVBoxLayout(container)
@@ -14612,13 +14627,13 @@ class GenizahGUI(QMainWindow):
             detail_image_lbl = QLabel(tr("Loading..."))
             detail_image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             detail_image_lbl.setMinimumHeight(150)
-            detail_image_lbl.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;")
+            detail_image_lbl.setStyleSheet("background-color: palette(base); border: 1px solid palette(mid); border-radius: 4px;")
             detail_layout.addWidget(detail_image_lbl)
 
             # Longer text in detail
             detail_text_lbl = QLabel("")
             detail_text_lbl.setWordWrap(True)
-            detail_text_lbl.setStyleSheet("font-size: 12px; padding: 4px; background-color: #fafafa; border: 1px solid #eee; border-radius: 4px;")
+            detail_text_lbl.setStyleSheet("font-size: 12px; padding: 4px; background-color: palette(base); border: 1px solid palette(mid); border-radius: 4px;")
             detail_text_lbl.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             detail_text_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             detail_text_lbl.setMaximumHeight(100)
@@ -14703,7 +14718,7 @@ class GenizahGUI(QMainWindow):
             # Add "Show more" button if more items remain
             if end < len(sd):
                 btn_more = QPushButton(f"▼ {tr('Show more')} ({len(sd) - end} {tr('remaining')})")
-                btn_more.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold; padding: 8px; border: 1px solid #ff9800; border-radius: 4px;")
+                btn_more.setStyleSheet("background-color: rgba(230, 81, 0, 0.08); color: #e65100; font-weight: bold; padding: 8px; border: 1px solid #ff9800; border-radius: 4px;")
                 btn_more.clicked.connect(_load_batch)
                 scroll_vbox.addWidget(btn_more)
                 _load_batch._show_more_btn = btn_more
