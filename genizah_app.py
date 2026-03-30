@@ -12376,8 +12376,74 @@ class SettingsDialog(QDialog):
             row.addStretch()
             layout.addLayout(row)
 
+        # — Visual Similarity Download —
+        layout.addSpacing(12)
+        layout.addWidget(self._section_label(tr("Download full visual similarity database")))
+        layout.addSpacing(4)
+
+        vs_download_row = QHBoxLayout()
+        vs_download_row.setSpacing(8)
+        self._vs_download_btn = QPushButton(tr("Download full visual similarity database"))
+        self._vs_download_btn.setStyleSheet("background-color: #e65100; color: white; padding: 4px 12px; border-radius: 4px;")
+        self._vs_download_btn.clicked.connect(self._start_vs_download)
+        vs_download_row.addWidget(self._vs_download_btn)
+        self._vs_download_progress = QProgressBar()
+        self._vs_download_progress.setVisible(False)
+        self._vs_download_progress.setFixedWidth(200)
+        vs_download_row.addWidget(self._vs_download_progress)
+        self._vs_download_status = QLabel()
+        self._vs_download_status.setStyleSheet(f"color: {self._muted}; font-size: 11px;")
+        vs_download_row.addWidget(self._vs_download_status)
+        vs_download_row.addStretch()
+        layout.addLayout(vs_download_row)
+
         layout.addStretch()
         return page
+
+    def _start_vs_download(self):
+        """Start downloading the full visual_similarity.db with robustness checks."""
+        dest_dir = os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+            'GenizahSearchPro', 'data'
+        )
+        server_url = "https://genizahsearch.com"
+        self._vs_download_btn.setEnabled(False)
+        self._vs_download_btn.setText(tr("Downloading..."))
+        self._vs_download_progress.setVisible(True)
+        self._vs_download_progress.setRange(0, 100)
+        self._vs_download_progress.setValue(0)
+        self._vs_download_status.setText(tr("Downloading..."))
+
+        self._vs_dl_thread = VSDownloadThread(server_url, dest_dir, self)
+        self._vs_dl_thread.progress.connect(self._on_vs_download_progress)
+        self._vs_dl_thread.finished.connect(self._on_vs_download_complete)
+        self._vs_dl_thread.error.connect(self._on_vs_download_error)
+        self._vs_dl_thread.start()
+
+    def _on_vs_download_progress(self, downloaded, total):
+        if total > 0:
+            pct = int(downloaded * 100 / total)
+            self._vs_download_progress.setValue(pct)
+            mb_done = downloaded / (1024 * 1024)
+            mb_total = total / (1024 * 1024)
+            self._vs_download_status.setText(f"{mb_done:.0f} / {mb_total:.0f} MB ({pct}%)")
+
+    def _on_vs_download_complete(self, path):
+        self._vs_download_btn.setEnabled(True)
+        self._vs_download_btn.setText(tr("Download complete"))
+        self._vs_download_progress.setValue(100)
+        self._vs_download_status.setText(f"\u2713 {tr('Download complete')}")
+        self._vs_download_status.setStyleSheet("color: #27ae60; font-size: 11px;")
+        # Reset service singleton to pick up new local DB
+        from shared.visual_similarity_service import reset_vs_service
+        reset_vs_service()
+
+    def _on_vs_download_error(self, error_msg):
+        self._vs_download_btn.setEnabled(True)
+        self._vs_download_btn.setText(tr("Download full visual similarity database"))
+        self._vs_download_progress.setVisible(False)
+        self._vs_download_status.setText(f"\u2717 {tr('Download failed')}: {error_msg}")
+        self._vs_download_status.setStyleSheet("color: #e74c3c; font-size: 11px;")
 
     # ── About Tab ────────────────────────────────────────────────
     def _build_about_tab(self):

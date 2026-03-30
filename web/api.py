@@ -1561,6 +1561,36 @@ def init_api_routes():
             return {'version': '', 'import_date': '', 'pair_count': '0', 'manuscript_count': '0'}
         return svc.get_db_version()
 
+    @app.get('/api/visual_similarity_db')
+    def visual_similarity_db_download():
+        """Serve the full visual_similarity.db for optional download (D-03).
+        Includes Content-Length and X-Checksum-SHA256 headers for client validation."""
+        import hashlib
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'fist_data', 'visual_similarity.db')
+        if not os.path.exists(db_path):
+            from starlette.responses import JSONResponse
+            return JSONResponse({'error': 'Database not available'}, status_code=404)
+
+        # Compute SHA256 checksum
+        sha256 = hashlib.sha256()
+        with open(db_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(8192), b''):
+                sha256.update(chunk)
+        checksum = sha256.hexdigest()
+        file_size = os.path.getsize(db_path)
+
+        from starlette.responses import FileResponse
+        return FileResponse(
+            db_path,
+            media_type='application/octet-stream',
+            filename='visual_similarity.db',
+            headers={
+                'Content-Length': str(file_size),
+                'X-Checksum-SHA256': checksum,
+                'X-File-Size-MB': str(round(file_size / 1024 / 1024, 1)),
+            }
+        )
+
     @app.post('/api/visual_suggestions/batch_check')
     async def visual_suggestions_batch_check(request: Request):
         """Check which sys_ids have visual suggestions.
