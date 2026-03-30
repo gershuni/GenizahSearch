@@ -221,21 +221,47 @@ class VisualSimilarityService:
         if not self._conn or not sys_ids:
             return set()
 
-        partner_sets = []
+        # Convert to ints, filtering invalid
+        int_ids = []
+        id_map = {}  # int -> str
         for sid in sys_ids:
             try:
                 alma_id = int(sid)
+                int_ids.append(alma_id)
+                id_map[alma_id] = sid
             except (ValueError, TypeError):
                 continue
+
+        if not int_ids:
+            return set()
+
+        # Batch query with IN (...) for union mode; per-source for intersection
+        partner_sets = []
+        if mode == 'union' and len(int_ids) > 1:
+            # Single batched query for union
             try:
+                placeholders = ','.join('?' * len(int_ids))
                 cursor = self._conn.execute(
-                    'SELECT alma_id_b FROM visual_suggestions WHERE alma_id_a = ?',
-                    (alma_id,)
+                    f'SELECT DISTINCT alma_id_b FROM visual_suggestions '
+                    f'WHERE alma_id_a IN ({placeholders})',
+                    int_ids
                 )
-                partners = {str(row[0]) for row in cursor.fetchall()}
-                partner_sets.append(partners)
+                return {str(row[0]) for row in cursor.fetchall()}
             except Exception as e:
-                logger.error(f"get_suggestion_partners error for {sid}: {e}")
+                logger.error(f"get_suggestion_partners batch error: {e}")
+                return set()
+        else:
+            # Per-source queries needed for intersection
+            for alma_id in int_ids:
+                try:
+                    cursor = self._conn.execute(
+                        'SELECT alma_id_b FROM visual_suggestions WHERE alma_id_a = ?',
+                        (alma_id,)
+                    )
+                    partners = {str(row[0]) for row in cursor.fetchall()}
+                    partner_sets.append(partners)
+                except Exception as e:
+                    logger.error(f"get_suggestion_partners error for {alma_id}: {e}")
 
         if not partner_sets:
             return set()

@@ -109,15 +109,20 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             csv_bank = state.meta_mgr.csv_bank if state.meta_mgr else None
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=True)
+            # Batch domain lookup (one SQL query instead of N+1)
+            all_ids = [s['alma_id'] for s in suggestions]
+            domain_map = {}
+            try:
+                if fjms.is_available():
+                    domain_map = fjms.get_domains_for_sys_ids(all_ids)
+            except Exception:
+                pass
             for s in suggestions:
                 meta = csv_bank.get(s['alma_id']) if csv_bank else None
                 s['shelfmark'] = meta.get('shelfmark', s['alma_id']) if meta else s['alma_id']
                 s['library_code'] = meta.get('library_code', '') if meta else ''
-                try:
-                    domains = fjms.get_domains(s['alma_id']) if fjms.is_available() else []
-                    s['domain'] = domains[0]['domain'] if domains else '--'
-                except Exception:
-                    s['domain'] = '--'
+                domains = domain_map.get(s['alma_id'], [])
+                s['domain'] = domains[0]['domain'] if domains else '--'
             return suggestions
 
         data = await run.io_bound(_enrich, data)
@@ -325,13 +330,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             # Initial render
             _render_rows()
 
-            # Preload text snippets for first batch in background
-            async def _preload_texts():
-                for s in data[:_PAGE_SIZE]:
-                    aid = s['alma_id']
-                    if aid not in text_cache:
-                        text_cache[aid] = await _fetch_suggestion_text(aid)
-            asyncio.ensure_future(_preload_texts())
+            # Text snippets load on-demand when rows are expanded (no eager preload)
 
         # Bottom bar
         with ui.row().classes('w-full justify-between items-center p-2'):

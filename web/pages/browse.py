@@ -925,8 +925,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         from shared.visual_similarity_service import get_vs_service
                         vs_svc = get_vs_service(thread_safe=True)
                         if vs_svc.is_available():
-                            result['has_visual_suggestions'] = vs_svc.has_suggestions(_page_sys_id)
-                            result['visual_suggestion_count'] = vs_svc.get_suggestion_count(_page_sys_id) if result['has_visual_suggestions'] else 0
+                            _vs_count = vs_svc.get_suggestion_count(_page_sys_id)
+                            result['has_visual_suggestions'] = _vs_count > 0
+                            result['visual_suggestion_count'] = _vs_count
                         else:
                             result['has_visual_suggestions'] = False
                             result['visual_suggestion_count'] = 0
