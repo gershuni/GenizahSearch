@@ -126,8 +126,8 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
     is_heb = lang == 'he'
 
     dialog = ui.dialog().props('maximized=false full-width')
-    with dialog, ui.card().classes('w-full max-w-[1100px] max-h-[90vh]').style(
-        'overflow: hidden; display: flex; flex-direction: column;'
+    with dialog, ui.card().classes('w-full max-w-[1100px]').style(
+        'height: 85vh; overflow: hidden; display: flex; flex-direction: column;'
     ):
         # Header with orange gradient
         with ui.row().classes('w-full items-center justify-between p-3 rounded-t').style(
@@ -194,14 +194,14 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                 ).props('dense outlined use-chips').classes('w-36') if all_domains else None
 
             # Main content: side pane (left) + suggestion list (right)
-            with ui.row().classes('w-full').style(
-                'flex: 1; overflow: hidden; min-height: 300px; max-height: calc(90vh - 180px);'
+            with ui.element('div').classes('w-full').style(
+                'flex: 1 1 0; overflow: hidden; display: flex; flex-direction: row; min-height: 0;'
             ):
                 # ── Left pane: Original manuscript ──
-                with ui.column().classes('shrink-0 gap-2 p-3').style(
-                    'width: 260px; overflow-y: auto; height: 100%; '
+                with ui.scroll_area().classes('shrink-0').style(
+                    'width: 260px; '
                     'border-right: 2px solid var(--border-light, #e5e7eb);'
-                ):
+                ), ui.column().classes('gap-2 p-3'):
                     ui.label(tr('Original')).classes('text-xs font-bold uppercase').style(
                         'color: #e65100; letter-spacing: 0.05em;'
                     )
@@ -247,9 +247,8 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                     asyncio.ensure_future(_load_original())
 
                 # ── Right pane: Suggestion list ──
-                rows_container = ui.element('div').classes('w-full').style(
-                    'flex: 1; overflow-y: auto; height: 100%;'
-                )
+                with ui.scroll_area().style('flex: 1 1 0; min-width: 0;'):
+                    rows_container = ui.column().classes('w-full gap-0 p-0')
 
             # Track expanded rows and their text-loading state
             expanded_rows = set()
