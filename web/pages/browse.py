@@ -912,7 +912,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 from shared.fjms_service import get_fjms_service
                 fjms = get_fjms_service(thread_safe=True)
                 if fjms.is_available():
-                    return {
+                    result = {
                         'catalog_records': fjms.get_catalog_records(_page_sys_id),
                         'domains': fjms.get_domains(_page_sys_id),
                         'bibliography': fjms.get_bibliography(_page_sys_id),
@@ -920,6 +920,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         'catalog_refs': fjms.get_catalog_refs(_page_sys_id),
                         'has_measurements': fjms.has_measurements(_page_sys_id),
                     }
+                    # Phase 57: Visual Similarity availability check
+                    try:
+                        from shared.visual_similarity_service import get_vs_service
+                        vs_svc = get_vs_service(thread_safe=True)
+                        if vs_svc.is_available():
+                            result['has_visual_suggestions'] = vs_svc.has_suggestions(_page_sys_id)
+                            result['visual_suggestion_count'] = vs_svc.get_suggestion_count(_page_sys_id) if result['has_visual_suggestions'] else 0
+                        else:
+                            result['has_visual_suggestions'] = False
+                            result['visual_suggestion_count'] = 0
+                    except Exception:
+                        result['has_visual_suggestions'] = False
+                        result['visual_suggestion_count'] = 0
+                    return result
                 return None
 
             try:
@@ -1285,7 +1299,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         catalog_source_count = len(fjms_data.get('source_names', []))
 
         has_meas = fjms_data.get('has_measurements', False)
-        if not fjms_bib and not marc_bib and catalog_source_count == 0 and not has_meas:
+        has_vs = fjms_data.get('has_visual_suggestions', False)
+        if not fjms_bib and not marc_bib and catalog_source_count == 0 and not has_meas and not has_vs:
             return
 
         from web.components.bibliography_dialog import create_fjms_bibliography_dialog, create_nli_bibliography_dialog
@@ -1328,6 +1343,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     f'{tr("Measurements")}',
                     on_click=lambda s=page.sys_id, sm=page.shelfmark or '', side=_meas_side: show_measurements_dialog(s, sm, image_side=side),
                 ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(measurements_chip_style)
+
+            # Phase 57: Visual Similarity chip (orange, distinct from other enrichment colors)
+            has_vs = fjms_data.get('has_visual_suggestions', False)
+            if has_vs:
+                from web.components.visual_similarity_dialog import show_visual_similarity_dialog
+                vs_chip_style = 'border: 1.5px solid #ef6c00; border-radius: 12px; min-height: 22px; color: #ef6c00;'
+                vs_count = fjms_data.get('visual_suggestion_count', 0)
+                ui.button(
+                    f'{tr("Visual Similarity")} ({vs_count})',
+                    on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_visual_similarity_dialog(s, sm),
+                ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(vs_chip_style)
 
     async def go_to_page(new_page: int):
         """Navigate to a specific page number."""
