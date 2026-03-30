@@ -347,7 +347,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 57-01-PLAN.md — Import script + VisualSimilarityService + tests + API endpoint
-- [ ] 57-02-PLAN.md — Web browse dialog + "Search in Visual Suggestions" action + translations
+- [x] 57-02-PLAN.md — Web browse dialog + "Search in Visual Suggestions" action + translations
 - [ ] 57-03-PLAN.md — Desktop browse dialog + on-demand cache + search integration + settings download
 **Directory**: `.planning/phases/57-fist-joins-browse-search-mode/`
 
@@ -370,7 +370,7 @@ Plans:
 | 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
 | 55.1. Lightweight Browse First-Render | 1/1 | Complete    | 2026-03-29 |
 | 56. Exclude Known Manuscripts | 3/3 | Complete    | 2026-03-29 |
-| 57. FIST Visual Similarity Browse & Search | 1/3 | In progress | - |
+| 57. FIST Visual Similarity Browse & Search | 2/3 | In Progress|  |
 
 ---
 *Roadmap created: 2026-02-09*
