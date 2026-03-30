@@ -14806,7 +14806,7 @@ class GenizahGUI(QMainWindow):
                     shelf, _ = self.meta_mgr.get_meta_for_id(partner_sys_id)
                 except Exception:
                     pass
-            self._open_puzzle_with_fragment(partner_sys_id, shelf or partner_sys_id)
+            self.add_to_puzzle(partner_sys_id, shelf or partner_sys_id)
         except Exception as e:
             logger.debug(f"VS add to puzzle error: {e}")
 
