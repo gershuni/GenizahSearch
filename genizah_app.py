@@ -14279,16 +14279,18 @@ class GenizahGUI(QMainWindow):
                 pass
         shelfmark = shelfmark or sys_id
 
-        # Try local DB first
+        # Try local DB first (enrich with shelfmark/domain from csv_bank/fjms)
         try:
             from shared.visual_similarity_service import get_vs_service
             vs_svc = get_vs_service(thread_safe=False)
             if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
                 data = vs_svc.get_suggestions(sys_id, 200)
+                # Enrich raw suggestions with shelfmark, library_code, domain
+                self._enrich_vs_suggestions(data)
                 self._show_vs_dialog(sys_id, shelfmark, data)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"VS local service error: {e}")
 
         # Try cache
         if not hasattr(self, '_vs_cache'):
@@ -14298,15 +14300,32 @@ class GenizahGUI(QMainWindow):
             self._show_vs_dialog(sys_id, shelfmark, cached)
             return
 
-        # Fetch from server
-        self._vs_fetch_thread = VSFetchThread(sys_id, self._VS_SERVER_URL, self)
-        self._vs_fetch_thread.finished.connect(
-            lambda data, s=sys_id, sm=shelfmark: self._on_vs_fetch_complete(s, sm, data)
+        # No local data and no cache — show message (server not deployed yet)
+        QMessageBox.information(
+            self, tr("Visual Similarity"),
+            tr("Visual similarity data is not available locally. Please download the database from Settings.")
         )
-        self._vs_fetch_thread.error.connect(
-            lambda err: QMessageBox.warning(self, tr("Visual Similarity"), f'{tr("Could not load data")}: {err}')
-        )
-        self._vs_fetch_thread.start()
+
+    def _enrich_vs_suggestions(self, data):
+        """Enrich raw VS suggestions with shelfmark, library_code, domain from csv_bank/fjms."""
+        csv_bank = self.meta_mgr.csv_bank if self.meta_mgr else {}
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=False)
+        except Exception:
+            fjms = None
+        for s in data:
+            meta = csv_bank.get(s.get('alma_id', ''))
+            s['shelfmark'] = meta.get('shelfmark', s.get('alma_id', '')) if meta else s.get('alma_id', '')
+            s['library_code'] = meta.get('library_code', '') if meta else ''
+            try:
+                if fjms and fjms.is_available():
+                    domains = fjms.get_domains(s.get('alma_id', ''))
+                    s['domain'] = domains[0]['domain'] if domains else '--'
+                else:
+                    s['domain'] = '--'
+            except Exception:
+                s['domain'] = '--'
 
     def _on_vs_fetch_complete(self, sys_id, shelfmark, data):
         if not hasattr(self, '_vs_cache'):
