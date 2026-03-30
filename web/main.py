@@ -826,7 +826,8 @@ def search_page_route(
     mode: str = None, variants: int = None,
     ja: int = None, flex_spaces: int = None,
     bidirectional: int = None, domain: str = None,
-    from_browse: int = None
+    from_browse: int = None,
+    vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
 ):
     set_current_page('/search')
     ui.add_head_html(page_meta(
@@ -848,7 +849,8 @@ def search_page_route(
             initial_mode=mode, initial_variants=variants,
             initial_ja=ja, initial_flex_spaces=flex_spaces,
             initial_bidirectional=bidirectional, initial_domain=domain,
-            from_browse=from_browse
+            from_browse=from_browse,
+            vs_src=vs_src, vs_mode=vs_mode, vs_browse=vs_browse,
         )
 
 @ui.page('/parallels', title='Textual Parallels | מקבילות טקסטואליות — Dicta Genizah Search')

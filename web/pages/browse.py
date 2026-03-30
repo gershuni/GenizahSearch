@@ -1355,6 +1355,42 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_visual_similarity_dialog(s, sm),
                 ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(vs_chip_style)
 
+                # "Browse suggestions" button -- shows suggestion pool as result set (D-12 mode 1)
+                async def _browse_vs_suggestions(sys_id_arg, shelfmark_arg):
+                    from shared.visual_similarity_service import get_vs_service
+                    svc = get_vs_service(thread_safe=True)
+                    partners = await run.io_bound(svc.get_suggestion_partners, [sys_id_arg], 'union')
+                    if not partners:
+                        ui.notify(tr('No visual similarity suggestions'), type='warning')
+                        return
+                    import json
+                    app.storage.tab['vs_partner_cache'] = json.dumps(list(partners))
+                    ui.navigate.to(f'/search?vs_src={sys_id_arg}&vs_mode=union&vs_browse=1')
+
+                ui.button(
+                    tr('Browse suggestions'),
+                    icon='view_list',
+                    on_click=lambda s=page.sys_id, sm=page.shelfmark or '': _browse_vs_suggestions(s, sm),
+                ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(vs_chip_style)
+
+                # "Search in VS" button -- navigates to search with restrict set (D-12 mode 2)
+                async def _search_in_vs(sys_id_arg, shelfmark_arg):
+                    from shared.visual_similarity_service import get_vs_service
+                    svc = get_vs_service(thread_safe=True)
+                    partners = await run.io_bound(svc.get_suggestion_partners, [sys_id_arg], 'union')
+                    if not partners:
+                        ui.notify(tr('No visual similarity suggestions'), type='warning')
+                        return
+                    import json
+                    app.storage.tab['vs_partner_cache'] = json.dumps(list(partners))
+                    ui.navigate.to(f'/search?vs_src={sys_id_arg}&vs_mode=union')
+
+                ui.button(
+                    tr('Search in visual suggestions'),
+                    icon='search',
+                    on_click=lambda s=page.sys_id, sm=page.shelfmark or '': _search_in_vs(s, sm),
+                ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(vs_chip_style)
+
     async def go_to_page(new_page: int):
         """Navigate to a specific page number."""
         if new_page < 1:

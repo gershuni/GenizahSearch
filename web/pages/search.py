@@ -53,7 +53,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                        initial_mode: str = None, initial_variants: int = None,
                        initial_ja: int = None, initial_flex_spaces: int = None,
                        initial_bidirectional: int = None, initial_domain: str = None,
-                       from_browse: int = None):
+                       from_browse: int = None,
+                       vs_src: str = None, vs_mode: str = None, vs_browse: int = None):
     """Create the advanced search page."""
 
 
@@ -141,6 +142,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             self._refinement_scope_sig: str = ''           # scope_signature at time of last chain step creation
             self._zero_result_refine: bool = False         # True when last refine returned 0 results (D-14a)
             self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
+            # Visual Similarity restriction state (Phase 57)
+            self.vs_restrict_sys_ids: set = None   # Partner sys_ids from visual suggestions
+            self.vs_restrict_label: str = None     # Display label for VS breadcrumb
+            self.vs_restrict_source_ids: list = [] # Source manuscript sys_ids that generated the restrict set
+            self.vs_restrict_mode: str = 'union'   # 'union' or 'intersection'
+            self.vs_availability: dict = {}        # sys_id -> bool, batch VS availability for current results
+            self.vs_browse_mode: bool = False      # True = show pool as results without text query
             # Manuscript exclusion state (Phase 56 -- exclude known manuscripts)
             self.exclusion_sources: list = []                    # list of ExclusionSource objects
             self.manuscript_excluded_results: list = []          # Results hidden by manuscript exclusion [{result, reason}]
@@ -241,6 +249,51 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.refinement_chain = [RefinementStep.from_dict(d) for d in _saved_refinement_chain]
         except Exception:
             search_state.refinement_chain = []
+
+    # Phase 57: Visual Similarity URL param initialization
+    if vs_src:
+        _vs_source_ids = [s.strip() for s in vs_src.split(',') if s.strip()]
+        _vs_mode_val = vs_mode or 'union'
+        _vs_browse_val = vs_browse == 1
+
+        # Try tab storage cache first (fast, set by browse page), else recompute
+        _vs_cached = None
+        try:
+            _vs_cached = app.storage.tab.get('vs_partner_cache')
+        except Exception:
+            pass
+
+        if _vs_cached:
+            import json as _json_vs
+            try:
+                _vs_sys_ids = set(_json_vs.loads(_vs_cached))
+                del app.storage.tab['vs_partner_cache']  # One-time use
+            except Exception:
+                _vs_sys_ids = None
+        else:
+            _vs_sys_ids = None
+
+        if _vs_sys_ids is None and _vs_source_ids:
+            # Recompute from source IDs (handles refresh/new tab/shared link)
+            try:
+                from shared.visual_similarity_service import get_vs_service
+                _vs_svc = get_vs_service(thread_safe=True)
+                _vs_sys_ids = _vs_svc.get_suggestion_partners(_vs_source_ids, _vs_mode_val)
+            except Exception:
+                _vs_sys_ids = set()
+
+        if _vs_sys_ids:
+            # Resolve shelfmarks for display label
+            from genizah_core import csv_bank
+            _vs_shelfmarks = []
+            for _sid in _vs_source_ids:
+                _meta = csv_bank.get(_sid) if csv_bank else None
+                _vs_shelfmarks.append(_meta.get('shelfmark', _sid) if _meta else _sid)
+            search_state.vs_restrict_sys_ids = _vs_sys_ids
+            search_state.vs_restrict_label = f'{tr("Visual Similarity")} \u2014 {", ".join(_vs_shelfmarks)}'
+            search_state.vs_restrict_source_ids = _vs_source_ids
+            search_state.vs_restrict_mode = _vs_mode_val
+            search_state.vs_browse_mode = _vs_browse_val
 
     def _has_active_filters() -> bool:
         """Check if any pre-search filters are active."""
@@ -1575,6 +1628,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'border-bottom: 1px solid rgba(128,128,128,0.3); '
                 'overflow-x: auto; white-space: nowrap; min-height: 0; display: none;'
             )
+
+            # Phase 57: Visual Similarity restriction strip (orange-themed)
+            vs_restrict_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
+                'background: #fff3e0; '
+                'border-bottom: 1px solid #ffe0b2; '
+                'min-height: 0; display: none;'
+            )
+
+            def _update_vs_strip():
+                """Update Visual Similarity restriction indicator."""
+                vs_restrict_strip.clear()
+                if not search_state.vs_restrict_label:
+                    vs_restrict_strip.style('display: none;')
+                    return
+                vs_restrict_strip.style('display: flex;')
+                with vs_restrict_strip:
+                    ui.icon('compare').classes('text-sm').style('color: #ef6c00;')
+                    ui.label(search_state.vs_restrict_label).classes('text-xs font-semibold').style('color: #ef6c00;')
+                    if search_state.vs_restrict_sys_ids:
+                        ui.label(f'({len(search_state.vs_restrict_sys_ids):,} {tr("manuscripts")})').classes('text-xs').style('color: #e65100;')
+                    def _clear_vs():
+                        search_state.vs_restrict_sys_ids = None
+                        search_state.vs_restrict_label = None
+                        search_state.vs_restrict_source_ids = []
+                        search_state.vs_restrict_mode = 'union'
+                        search_state.vs_browse_mode = False
+                        _update_vs_strip()
+                    ui.button(icon='close', on_click=_clear_vs).props('flat dense round size=xs').style('color: #ef6c00;')
+
+            _update_vs_strip()
 
             # Filters Panel (initially hidden)
             filters_visible = {'value': False}
@@ -3978,6 +4061,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Phase 55: compute effective restrict = intersection of filter restrict + refinement restrict
         effective_restrict = compute_effective_restrict(restrict_sys_ids, search_state.refinement_restrict_sys_ids)
 
+        # Phase 57: merge Visual Similarity restriction (intersect with existing effective restrict)
+        if search_state.vs_restrict_sys_ids:
+            effective_restrict = compute_effective_restrict(effective_restrict, search_state.vs_restrict_sys_ids)
+
         # If effective restriction matches nothing, show message and return
         if effective_restrict is not None and len(effective_restrict) == 0:
             ui.notify(tr("No manuscripts match the current filters."), type='warning')
@@ -4308,6 +4395,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 logger.warning("Translation batch lookup failed: %s", e)
                 return {}
 
+        def collect_vs_availability(sys_ids):
+            """Phase 57: Batch check which sys_ids have visual similarity suggestions."""
+            try:
+                from shared.visual_similarity_service import get_vs_service
+                svc = get_vs_service(thread_safe=True)
+                if svc.is_available():
+                    return svc.batch_has_suggestions(sys_ids)
+            except Exception as e:
+                logger.warning("VS batch check failed: %s", e)
+            return {}
+
         def _process_domain_data(raw_domains):
             """Process raw domain data into search_state fields."""
             from shared.fjms_service import qualify_domain_name
@@ -4373,10 +4471,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _t_stage1 = time.perf_counter()
         visible_ids = all_sys_ids[:PAGE_SIZE]
         if visible_ids and search_state.search_generation == this_generation:
-            fjms_tuple, transcription_ids, trans_data = await asyncio.gather(
+            fjms_tuple, transcription_ids, trans_data, vs_avail = await asyncio.gather(
                 run.io_bound(collect_fjms_enrichment, visible_ids),
                 run.io_bound(get_sys_ids_with_transcriptions, visible_ids),
                 run.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
+                run.io_bound(collect_vs_availability, visible_ids),
             )
             # Check generation before applying (user may have started a new search)
             if search_state.search_generation == this_generation:
@@ -4387,6 +4486,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.catalog_source_counts = catalog_counts
                 search_state.printed_ids = printed_ids
                 search_state.translation_data = trans_data
+                search_state.vs_availability.update(vs_avail)  # Phase 57
                 # Pre-cache domain hierarchy
                 if search_state.all_result_domains:
                     def fetch_hierarchy():
@@ -4413,10 +4513,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if search_state.search_generation != this_generation:
                     break  # New search started, abandon background enrichment
                 chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
-                bg_fjms_tuple, bg_trans_ids, bg_trans_data = await asyncio.gather(
+                bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs = await asyncio.gather(
                     run.io_bound(collect_fjms_enrichment, chunk_ids),
                     run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
                     run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
+                    run.io_bound(collect_vs_availability, chunk_ids),
                 )
                 if search_state.search_generation != this_generation:
                     break
@@ -4427,6 +4528,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.catalog_source_counts.update(bg_counts)
                 search_state.printed_ids |= bg_printed
                 search_state.translation_data.update(bg_trans_data)
+                search_state.vs_availability.update(bg_vs)  # Phase 57
             # Final UI update + re-render after all background chunks complete
             # (P2 fix: apply filters/exclusions to newly discovered domains/printed IDs)
             if search_state.search_generation == this_generation:
@@ -4765,7 +4867,54 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             ui.label(_plabel).classes('text-xs px-2 py-0.5 rounded shrink-0 font-medium').style(
                                 f'background: {_bg}; color: {_fg};'
                             )
+                        # Phase 57 JOIN-03: Visual Similarity icon in badge row
+                        _has_vs = sys_id and search_state.vs_availability.get(sys_id)
+                        if _has_vs:
+                            _vs_expanded_state = {'value': False, 'loaded': False}
+                            # Define toggle function -- container will be set below
+                            _vs_container_ref = [None]
+
+                            async def _toggle_vs_partners(s_id=sys_id, exp=_vs_expanded_state, cref=_vs_container_ref):
+                                container = cref[0]
+                                if container is None:
+                                    return
+                                exp['value'] = not exp['value']
+                                if exp['value']:
+                                    container.classes(remove='hidden')
+                                    if not exp['loaded']:
+                                        exp['loaded'] = True
+                                        try:
+                                            from shared.visual_similarity_service import get_vs_service
+                                            _svc = get_vs_service(thread_safe=True)
+                                            _top3 = await run.io_bound(_svc.get_suggestions, s_id, 3)
+                                            with container:
+                                                ui.label(tr('Visual similarity partners')).classes('text-xs font-semibold').style('color: #ef6c00;')
+                                                for _p in _top3:
+                                                    from genizah_core import csv_bank as _cb
+                                                    _p_meta = _cb.get(_p['alma_id']) if _cb else None
+                                                    _p_sm = _p_meta.get('shelfmark', _p['alma_id']) if _p_meta else _p['alma_id']
+                                                    with ui.row().classes('items-center gap-1'):
+                                                        ui.badge(f'#{_p["rank"]}').props('color=deep-orange-1 text-color=deep-orange-9').classes('text-xs')
+                                                        ui.link(_p_sm, f'/browse?sys_id={_p["alma_id"]}').classes('text-xs')
+                                        except Exception:
+                                            with container:
+                                                ui.label(tr('Could not load visual similarity data. Try again later.')).classes('text-xs').style('color: var(--text-muted);')
+                                else:
+                                    container.classes(add='hidden')
+
+                            ui.button(icon='compare', on_click=_toggle_vs_partners).props(
+                                'flat dense round size=xs'
+                            ).style('color: #ef6c00;').tooltip(tr('Visual similarity partners'))
+
                         ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
+
+                    # Phase 57 JOIN-03: Partner container placed outside badge row, inside content column
+                    if _has_vs:
+                        _vs_partner_container = ui.column().classes('hidden w-full gap-0 py-1 px-2').style(
+                            'background: #fff3e0; border-radius: 6px; margin-top: 4px;'
+                        )
+                        _vs_container_ref[0] = _vs_partner_container
+
                     # Title and optional translated description (Phase 46)
                     _show_trans = False
                     try:
