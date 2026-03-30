@@ -344,7 +344,11 @@ Plans:
   2. User can enable a "Has joins" toggle in the search filter panel that restricts results to the ~20K manuscripts with FIST join records, and the toggle shows the available manuscript count before searching (both apps)
   3. Search results for manuscripts with joins display an expandable join partners section showing up to 10 partners inline with "and N more..." for larger groups, including join type and scholar attribution (both apps)
   4. Join partner enrichment uses batch lookup (single SQL query for all result sys_ids) rather than per-result queries, keeping search performance comparable to unfiltered search
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [x] 57-01-PLAN.md -- Visual similarity data pipeline: import script + service + frozen API
+- [ ] 57-02-PLAN.md -- Web browse dialog + search integration
+- [ ] 57-03-PLAN.md -- Desktop browse dialog + search integration
 
 ## Progress
 
@@ -365,7 +369,7 @@ Plans:
 | 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
 | 55.1. Lightweight Browse First-Render | 1/1 | Complete    | 2026-03-29 |
 | 56. Exclude Known Manuscripts | 3/3 | Complete    | 2026-03-29 |
-| 57. FIST Joins Browse & Search Mode | 0/? | Not started | - |
+| 57. FIST Joins Browse & Search Mode | 1/3 | In progress | - |
 
 ---
 *Roadmap created: 2026-02-09*
