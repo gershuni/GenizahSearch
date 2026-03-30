@@ -16847,7 +16847,7 @@ class GenizahGUI(QMainWindow):
             pass
         if not _vs_has and hasattr(self, '_vs_cache'):
             _vs_has = self._vs_cache.has_cached(sid)
-        self.btn_b_visual_sim.setEnabled(True)  # Always enable; fetches on-demand from server if no local data
+        self.btn_b_visual_sim.setEnabled(_vs_has)
 
         # Populate external library link button
         self._browse_external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
