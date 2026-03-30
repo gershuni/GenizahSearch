@@ -162,7 +162,7 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 - [x] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps) (completed 2026-03-28)
 - [x] **Phase 55.1: Lightweight Browse First-Render** - Split browse page data into fast (Tantivy + csv_bank) and deferred (SQLite enrichment) tiers so first paint requires zero SQLite calls (web only, performance) (completed 2026-03-29)
 - [x] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps) (completed 2026-03-29)
-- [ ] **Phase 57: FIST Visual Similarity Browse & Search** - Visual similarity suggestions from FJMS SVM image analysis (~15.5M pairs), dedicated dialog in browse, "Search in visual suggestions" with union/intersection modes, server-only sidecar with desktop on-demand fetch + cache (both apps)
+- [x] **Phase 57: FIST Visual Similarity Browse & Search** - Visual similarity suggestions from FJMS SVM image analysis (~15.5M pairs), dedicated dialog in browse, "Search in visual suggestions" with union/intersection modes, server-only sidecar with desktop on-demand fetch + cache (both apps) (completed 2026-03-30)
 
 ## Phase Details
 
@@ -370,7 +370,7 @@ Plans:
 | 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
 | 55.1. Lightweight Browse First-Render | 1/1 | Complete    | 2026-03-29 |
 | 56. Exclude Known Manuscripts | 3/3 | Complete    | 2026-03-29 |
-| 57. FIST Visual Similarity Browse & Search | 2/3 | In Progress|  |
+| 57. FIST Visual Similarity Browse & Search | 2/3 | Complete    | 2026-03-30 |
 
 ---
 *Roadmap created: 2026-02-09*
