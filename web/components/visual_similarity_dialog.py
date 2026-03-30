@@ -195,11 +195,11 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
 
             # Main content: side pane (left) + suggestion list (right)
             with ui.row().classes('w-full').style(
-                'flex: 1; overflow: hidden; min-height: 300px;'
+                'flex: 1; overflow: hidden; min-height: 300px; max-height: calc(90vh - 180px);'
             ):
                 # ── Left pane: Original manuscript ──
                 with ui.column().classes('shrink-0 gap-2 p-3').style(
-                    'width: 260px; overflow-y: auto; '
+                    'width: 260px; overflow-y: auto; height: 100%; '
                     'border-right: 2px solid var(--border-light, #e5e7eb);'
                 ):
                     ui.label(tr('Original')).classes('text-xs font-bold uppercase').style(
@@ -248,7 +248,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
 
                 # ── Right pane: Suggestion list ──
                 rows_container = ui.element('div').classes('w-full').style(
-                    'flex: 1; overflow-y: auto; min-height: 200px;'
+                    'flex: 1; overflow-y: auto; height: 100%;'
                 )
 
             # Track expanded rows and their text-loading state
