@@ -3441,6 +3441,13 @@ class JoinsDialog(QDialog):
             self.btn_from_list.clicked.connect(self._show_list_picker)
             frag_b_layout.addWidget(self.btn_from_list)
 
+        # "Visual Suggestions" button — pick fragment B from VS dialog
+        self.btn_vs_pick = QPushButton("🔍")
+        self.btn_vs_pick.setFixedWidth(30)
+        self.btn_vs_pick.setToolTip(tr("Visual Similarity") + " — " + tr("Pick from visual suggestions"))
+        self.btn_vs_pick.clicked.connect(self._show_vs_picker)
+        frag_b_layout.addWidget(self.btn_vs_pick)
+
         frag_b_widget = QWidget()
         frag_b_widget.setLayout(frag_b_layout)
         frag_b_layout.setContentsMargins(0, 0, 0, 0)
@@ -4747,6 +4754,40 @@ class JoinsDialog(QDialog):
         btn_select.clicked.connect(do_select)
 
         dialog.exec()
+
+    def _show_vs_picker(self):
+        """Open Visual Similarity dialog to pick fragment B from suggestions."""
+        parent_app = self.parent()
+        if not parent_app or not hasattr(parent_app, '_show_vs_dialog'):
+            return
+        if not self.document_id:
+            return
+
+        # Get VS suggestions for fragment A
+        try:
+            from shared.visual_similarity_service import get_vs_service
+            vs_svc = get_vs_service(thread_safe=False)
+            if not vs_svc.is_available() or not vs_svc.has_suggestions(self.document_id):
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
+                return
+            data = vs_svc.get_suggestions(self.document_id, 200)
+            parent_app._enrich_vs_suggestions(data)
+        except Exception:
+            return
+
+        # Show VS dialog — when user clicks a shelfmark, fill fragment B
+        shelf_a = self.frag_a_input.text() or self.shelfmark or self.document_id
+        # Use a custom pick mode: pass a callback that fills frag_b_input
+        parent_app._show_vs_dialog_for_pick(
+            self.document_id, shelf_a, data,
+            on_pick=self._on_vs_pick,
+        )
+
+    def _on_vs_pick(self, partner_sys_id, partner_shelfmark):
+        """Callback when user picks a suggestion from VS dialog."""
+        self._selected_doc_id_b = partner_sys_id
+        self.frag_b_input.setText(partner_shelfmark)
 
     def on_fragment_double_click(self, item):
         """Navigate to fragment on double-click"""

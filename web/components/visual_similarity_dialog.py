@@ -285,7 +285,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                         return
 
                     for s in display:
-                        _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb)
+                        _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, original_sys_id=sys_id, original_shelfmark=shelfmark)
 
                     remaining = len(filtered) - filter_state['visible_count']
                     if remaining > 0:
@@ -350,7 +350,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
     return dialog
 
 
-def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb):
+def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, original_sys_id=None, original_shelfmark=None):
     """Render a single suggestion row with expandable detail section."""
     alma_id = s['alma_id']
 
@@ -501,6 +501,23 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb):
                 icon='star_border',
                 on_click=_add_to_list,
             ).props('flat dense round size=sm').tooltip(tr('Add to List'))
+
+            # Add as Join button
+            if original_sys_id:
+                def _add_as_join(aid=alma_id, sm=s['shelfmark'], orig_id=original_sys_id, orig_sm=original_shelfmark):
+                    from web.components.joins_panel import show_add_join_form
+                    dialog.close()
+                    show_add_join_form(
+                        current_shelfmark=orig_sm or '',
+                        document_id=orig_id,
+                        prefill_shelfmark=sm,
+                        prefill_sys_id=aid,
+                    )
+
+                ui.button(
+                    icon='add_link',
+                    on_click=_add_as_join,
+                ).props('flat dense round size=sm').style('color: #388e3c;').tooltip(tr('Add as Join'))
 
         # Expandable detail section (below the main row)
         detail_container = ui.column().classes('w-full gap-2 px-4 pb-3')

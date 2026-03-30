@@ -3126,6 +3126,8 @@ TRANSLATIONS = {
     'Visual suggestions for': 'הצעות חזותיות עבור',
     'Visual similarity data is not available locally. Please download the database from Settings.': 'נתוני דמיון חזותי אינם זמינים מקומית. אנא הורד את מסד הנתונים מההגדרות.',
     'No visual suggestions found for this manuscript.': 'לא נמצאו הצעות דמיון חזותי לכתב יד זה.',
+    'Add as Join': 'הוסף כצירוף',
+    'Pick from visual suggestions': 'בחר מהצעות דמיון חזותי',
     # Phase 57: Visual Similarity dialog enrichment (web)
     'Original manuscript': 'כתב יד מקורי',
     'Show details': 'הצג פרטים',

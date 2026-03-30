@@ -769,7 +769,9 @@ def create_joins_dialog(
 def show_add_join_form(
     current_shelfmark: str,
     document_id: str = None,
-    on_refresh: Optional[Callable] = None
+    on_refresh: Optional[Callable] = None,
+    prefill_shelfmark: str = None,
+    prefill_sys_id: str = None,
 ):
     """
     Show a dialog to add a new join using lists/recent picker.
@@ -778,6 +780,8 @@ def show_add_join_form(
         current_shelfmark: The current fragment shelfmark
         document_id: System ID of current document
         on_refresh: Callback to refresh the joins list
+        prefill_shelfmark: Optional shelfmark to pre-select as fragment B
+        prefill_sys_id: Optional sys_id for pre-selected fragment B
     """
     dialog = ui.dialog()
 
@@ -805,10 +809,11 @@ def show_add_join_form(
                 with selection_container:
                     ui.label(tr('Select fragment to join:')).classes('text-sm font-medium text-gray-700 mb-2')
 
-                    # Tabs for Recent Activity and Lists
+                    # Tabs for Recent Activity, Lists, and Visual Suggestions
                     with ui.tabs().classes('w-full') as tabs:
                         recent_tab = ui.tab('recent', label=tr('Recent Activity'))
                         lists_tab = ui.tab('lists', label=tr('My Lists'))
+                        vs_tab = ui.tab('vs', label=tr('Visual Similarity'))
 
                     with ui.tab_panels(tabs, value='recent').classes('w-full').style('min-height: 200px;'):
                         with ui.tab_panel('recent'):
@@ -936,6 +941,52 @@ def show_add_join_form(
 
                             load_lists()
 
+                        with ui.tab_panel('vs'):
+                            vs_container = ui.column().classes('w-full gap-1')
+
+                            def load_vs_suggestions():
+                                vs_container.clear()
+                                with vs_container:
+                                    try:
+                                        from shared.visual_similarity_service import get_vs_service
+                                        svc = get_vs_service(thread_safe=True)
+                                        if not svc.is_available() or not svc.has_suggestions(document_id or ''):
+                                            ui.label(tr('No visual similarity suggestions')).classes('text-sm').style('color: var(--text-muted);')
+                                            return
+                                        suggestions = svc.get_suggestions(document_id or '', 50)
+                                        if not suggestions:
+                                            ui.label(tr('No visual similarity suggestions')).classes('text-sm').style('color: var(--text-muted);')
+                                            return
+                                        # Enrich with shelfmarks
+                                        csv_bank = state.meta_mgr.csv_bank if state.meta_mgr else None
+                                        for s in suggestions:
+                                            meta = csv_bank.get(s['alma_id']) if csv_bank else None
+                                            s['shelfmark'] = meta.get('shelfmark', s['alma_id']) if meta else s['alma_id']
+
+                                        with ui.scroll_area().classes('w-full').style('max-height: 200px;'):
+                                            for s in suggestions:
+                                                s_shelf = s['shelfmark']
+                                                s_id = s['alma_id']
+                                                s_rank = s.get('rank', 0)
+                                                if s_shelf.upper() == current_shelfmark.upper():
+                                                    continue
+
+                                                def make_vs_select(sm=s_shelf, sid=s_id):
+                                                    def select():
+                                                        selected_fragment['shelfmark'] = sm
+                                                        selected_fragment['sys_id'] = sid
+                                                        show_selected()
+                                                    return select
+
+                                                with ui.card().classes('w-full p-2 cursor-pointer hover:bg-orange-50 border').on('click', make_vs_select()):
+                                                    with ui.row().classes('items-center gap-2'):
+                                                        ui.badge(f'#{s_rank}').props('color=deep-orange-1 text-color=deep-orange-9').classes('text-xs')
+                                                        ui.label(s_shelf).classes('font-medium text-sm')
+                                    except Exception as e:
+                                        ui.label(tr('Could not load visual similarity data. Try again later.')).classes('text-sm').style('color: var(--text-muted);')
+
+                            load_vs_suggestions()
+
             def show_selected():
                 """Show the selected fragment and relationship options."""
                 selection_container.clear()
@@ -1019,8 +1070,13 @@ def show_add_join_form(
                             on_click=submit_join
                         ).props('color=green')
 
-            # Initially show the picker
-            show_picker()
+            # If prefill provided, go straight to selected state
+            if prefill_shelfmark:
+                selected_fragment['shelfmark'] = prefill_shelfmark
+                selected_fragment['sys_id'] = prefill_sys_id or ''
+                show_selected()
+            else:
+                show_picker()
 
     dialog.open()
     return dialog
