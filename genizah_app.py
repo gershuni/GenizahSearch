@@ -6645,7 +6645,7 @@ class ResultDialog(QDialog):
             if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
                 data = vs_svc.get_suggestions(sys_id, 200)
                 parent._enrich_vs_suggestions(data)
-                parent._show_vs_dialog(sys_id, shelfmark, data)
+                parent._show_vs_dialog(sys_id, shelfmark, data, parent_dialog=self)
                 return
         except Exception:
             pass
@@ -14348,7 +14348,7 @@ class GenizahGUI(QMainWindow):
         self._vs_cache.store(sys_id, data)
         self._show_vs_dialog(sys_id, shelfmark, data)
 
-    def _show_vs_dialog(self, sys_id, shelfmark, data):
+    def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None):
         """Create and show the Visual Similarity dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
@@ -14448,11 +14448,21 @@ class GenizahGUI(QMainWindow):
         bottom_bar.setContentsMargins(8, 4, 8, 8)
         btn_search_vs = QPushButton(f"🔍 {tr('Search in visual suggestions')}")
         btn_search_vs.setStyleSheet("background-color: #e65100; color: white; padding: 6px 12px; border-radius: 4px;")
-        btn_search_vs.clicked.connect(lambda: (dlg.accept(), self._search_in_visual_suggestions(sys_id, shelfmark)))
+        def _close_and_search():
+            dlg.accept()
+            if parent_dialog:
+                parent_dialog.close()
+            self._search_in_visual_suggestions(sys_id, shelfmark)
+        btn_search_vs.clicked.connect(_close_and_search)
         bottom_bar.addWidget(btn_search_vs)
         btn_browse_vs = QPushButton(f"📋 {tr('Browse suggestions')}")
         btn_browse_vs.setStyleSheet("background-color: #f57c00; color: white; padding: 6px 12px; border-radius: 4px;")
-        btn_browse_vs.clicked.connect(lambda: (dlg.accept(), self._browse_visual_suggestions(sys_id, shelfmark)))
+        def _close_and_browse():
+            dlg.accept()
+            if parent_dialog:
+                parent_dialog.close()
+            self._browse_visual_suggestions(sys_id, shelfmark)
+        btn_browse_vs.clicked.connect(_close_and_browse)
         bottom_bar.addWidget(btn_browse_vs)
         bottom_bar.addStretch()
         btn_close = QPushButton(tr("Close"))
