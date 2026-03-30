@@ -376,6 +376,10 @@ def create_settings_page():
                                 ui.badge(tr('Not loaded'), color='gray')
                         except Exception:
                             ui.badge(tr('Not loaded'), color='gray')
+                        ui.button(
+                            tr('Download full visual similarity database'), icon='download',
+                            on_click=lambda: ui.download('/api/visual_similarity_db', 'visual_similarity.db'),
+                        ).props('flat dense size=sm no-caps').classes('text-xs')
 
                     ui.separator().classes('my-2')
 
