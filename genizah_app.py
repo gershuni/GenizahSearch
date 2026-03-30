@@ -14559,17 +14559,42 @@ class GenizahGUI(QMainWindow):
             QMessageBox.information(self, tr("Visual Similarity"), tr("No visual suggestions found for this manuscript."))
             return
 
-        # Set VS restriction and run a shelfmark-mode search with wildcard to show all partners
+        # Set VS restriction and run a Title-mode search that returns all partners
         self._vs_restrict_sys_ids = partners
         self._vs_restrict_label = f'{tr("Visual suggestions for")} {shelfmark}'
         self.pre_search_restrict_sys_ids = partners
 
-        # Switch to search tab, set shelfmark mode with wildcard
+        # Switch to search tab — use Title mode which matches all when query is empty-ish
         self.tabs.setCurrentIndex(0)
-        self.query_input.setText('*')
-        self.mode_combo.setCurrentText(tr("Shelfmark (#)"))
+        self.query_input.setText('')
         self._update_vs_breadcrumb()
-        self.start_search()
+        # Directly build and display results from the partner set
+        self._vs_show_partner_results(partners)
+
+    def _vs_show_partner_results(self, partners):
+        """Build metadata results from partner sys_ids and display them directly."""
+        results = []
+        for sid in sorted(partners):
+            try:
+                sm, title = self.meta_mgr.get_meta_for_id(sid)
+                lib_code = self.meta_mgr.get_library_for_id(sid)
+            except Exception:
+                sm, title, lib_code = sid, '', ''
+            results.append({
+                'display': {'shelfmark': sm, 'title': title, 'library_code': lib_code, 'id': sid, 'img': '', 'source': ''},
+                'snippet': '',
+                'full_text': '',
+                'uid': '',
+                'raw_header': '',
+                'raw_file_hl': '',
+                'highlight_pattern': None,
+                'metadata_only': True,
+            })
+        # Set search state so the results table processes them correctly
+        self.is_searching = False
+        self.search_start_time = time.time()
+        self.last_search_query = f'[VS Browse: {len(partners)} partners]'
+        self.on_search_finished(results)
 
     def _clear_vs_restriction(self):
         """Clear the visual similarity search restriction."""
@@ -16847,7 +16872,7 @@ class GenizahGUI(QMainWindow):
             pass
         if not _vs_has and hasattr(self, '_vs_cache'):
             _vs_has = self._vs_cache.has_cached(sid)
-        self.btn_b_visual_sim.setEnabled(_vs_has)
+        self.btn_b_visual_sim.setVisible(_vs_has)
 
         # Populate external library link button
         self._browse_external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')

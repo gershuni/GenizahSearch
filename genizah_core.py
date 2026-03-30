@@ -6613,9 +6613,14 @@ class SearchEngine:
         field_map = {'Title': 'title', 'Shelfmark': 'shelfmark'}
         target_field = field_map.get(mode)
 
-        sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
-        if restrict_sys_ids is not None:
-            sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
+        # Wildcard or empty query with restrict set: return all restricted IDs
+        stripped = query_str.strip()
+        if (stripped == '*' or stripped == '') and restrict_sys_ids:
+            sys_ids = sorted(restrict_sys_ids)
+        else:
+            sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
+            if restrict_sys_ids is not None:
+                sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
         results = []
         total_ids = len(sys_ids)
 
