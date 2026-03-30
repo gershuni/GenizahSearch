@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v7.6
 milestone_name: Search Refinement & Scholarly Joins
-status: Executing
-stopped_at: Completed 57-01-PLAN.md
-last_updated: "2026-03-30T04:19:21Z"
+status: Ready to execute
+stopped_at: Completed 57-03-PLAN.md (Task 3 checkpoint pending)
+last_updated: "2026-03-30T04:35:47.389Z"
 progress:
   total_phases: 12
   completed_phases: 9
   total_plans: 33
-  completed_plans: 29
+  completed_plans: 31
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 ## Current Position
 
 Phase: 57
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 
 ## Performance Metrics
 
@@ -85,6 +85,8 @@ Recent decisions affecting current work:
 - [Phase 55]: Desktop refinement chain: mode mapping reads actual combo index, zero-result back button pre-created, strip inside table_container
 - [Phase 55]: Refinement scope = RAW results (all_sys_ids before post-filters); stale detection via centralized _recompute_filter_count
 - [Phase 56]: Re-render update_content() after Phase B instead of per-field enrichment_refs -- simpler, guarantees no visual regression
+- [Phase 57]: VS restriction via pre_search_restrict_sys_ids reuses existing pipeline
+- [Phase 57]: Browse VS uses restricted wildcard search rather than custom display
 
 ### Pending Todos
 
@@ -150,9 +152,10 @@ Recent decisions affecting current work:
 | Phase 55 P02 | 8min | 2 tasks | 1 files |
 | Phase 56 P01 | 15min | 2 tasks | 2 files |
 | 260329-egp | Strip brackets from search matching so bracket-free queries ignore brackets but bracket-containing queries match literally | 2026-03-29 | 5300bbe4 | [260329-egp-strip-brackets-from-search-matching-so-b](./quick/260329-egp-strip-brackets-from-search-matching-so-b/) |
+| Phase 57 P03 | 11min | 3 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-03-30T04:19:21Z
-Stopped at: Completed 57-01-PLAN.md
-Resume file: .planning/phases/57-fist-joins-browse-search-mode/57-02-PLAN.md
+Last session: 2026-03-30T04:35:47.385Z
+Stopped at: Completed 57-03-PLAN.md (Task 3 checkpoint pending)
+Resume file: None
