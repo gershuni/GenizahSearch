@@ -6316,7 +6316,7 @@ class ResultDialog(QDialog):
 
         # Visual Similarity action button (D-10: ResultDialog context)
         self.btn_rd_visual_sim = QPushButton(f"🔍 {tr('Visual Similarity')}")
-        self.btn_rd_visual_sim.setToolTip(tr("Search in visual suggestions"))
+        self.btn_rd_visual_sim.setToolTip(tr("Visual Similarity"))
         self.btn_rd_visual_sim.setStyleSheet(
             "QPushButton { background-color: #e65100; color: white; border-radius: 4px; padding: 2px 8px; }"
         )
@@ -6625,9 +6625,9 @@ class ResultDialog(QDialog):
         self.close()
 
     def _rd_search_visual_similarity(self):
-        """D-10: Search in visual suggestions from ResultDialog context."""
+        """D-10: Show visual similarity dialog from ResultDialog context."""
         parent = self.parent()
-        if not parent or not hasattr(parent, '_search_in_visual_suggestions'):
+        if not parent or not hasattr(parent, '_show_vs_dialog'):
             return
         sys_id = self.current_sys_id
         if not sys_id:
@@ -6638,8 +6638,18 @@ class ResultDialog(QDialog):
             shelfmark = (result.get('display', {}).get('shelfmark')
                          or result.get('shelfmark')
                          or str(sys_id))
-        self.close()
-        parent._search_in_visual_suggestions(sys_id, shelfmark)
+        # Fetch and show VS dialog (same as browse button)
+        try:
+            from shared.visual_similarity_service import get_vs_service
+            vs_svc = get_vs_service(thread_safe=False)
+            if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
+                data = vs_svc.get_suggestions(sys_id, 200)
+                parent._enrich_vs_suggestions(data)
+                parent._show_vs_dialog(sys_id, shelfmark, data)
+                return
+        except Exception:
+            pass
+        QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
 
     def _update_add_to_list_button(self):
         parent = self.parent()
