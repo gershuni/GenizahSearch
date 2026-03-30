@@ -12415,6 +12415,215 @@ class SettingsDialog(QDialog):
         return lbl
 
 
+# ── Visual Similarity Desktop Cache + Fetch Thread ────────────────────────
+
+class DesktopVSCache:
+    """Local SQLite cache for visual similarity suggestions fetched from server.
+    Tracks server version for staleness detection."""
+
+    def __init__(self):
+        import sqlite3 as _sqlite3
+        cache_dir = os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+            'GenizahSearchPro', 'data'
+        )
+        os.makedirs(cache_dir, exist_ok=True)
+        self._db_path = os.path.join(cache_dir, 'vs_cache.db')
+        self._conn = _sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn.execute('''CREATE TABLE IF NOT EXISTS cached_suggestions (
+            sys_id TEXT NOT NULL, partner_sys_id TEXT NOT NULL, svm_score REAL NOT NULL,
+            rank INTEGER NOT NULL, shelfmark TEXT DEFAULT '', library_code TEXT DEFAULT '',
+            domain TEXT DEFAULT '', fetched_at TEXT NOT NULL,
+            PRIMARY KEY (sys_id, partner_sys_id)
+        )''')
+        self._conn.execute('''CREATE TABLE IF NOT EXISTS cache_manifest (
+            sys_id TEXT PRIMARY KEY, fetched_at TEXT NOT NULL, partner_count INTEGER NOT NULL
+        )''')
+        self._conn.execute('''CREATE TABLE IF NOT EXISTS cache_metadata (
+            key TEXT PRIMARY KEY, value TEXT
+        )''')
+        self._conn.commit()
+
+    def get_server_version(self) -> str:
+        row = self._conn.execute("SELECT value FROM cache_metadata WHERE key = 'server_version'").fetchone()
+        return row[0] if row else ''
+
+    def set_server_version(self, version: str):
+        current = self.get_server_version()
+        if current and current != version:
+            self._conn.execute('DELETE FROM cached_suggestions')
+            self._conn.execute('DELETE FROM cache_manifest')
+        self._conn.execute("INSERT OR REPLACE INTO cache_metadata VALUES ('server_version', ?)", (version,))
+        self._conn.commit()
+
+    def check_and_update_version(self, server_url: str):
+        """Check server version and invalidate cache if stale. Called on app startup."""
+        try:
+            import urllib.request
+            url = f'{server_url}/api/visual_suggestions/version'
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                version = data.get('version', '')
+                if version:
+                    self.set_server_version(version)
+        except Exception:
+            pass  # Offline -- keep existing cache
+
+    def get_cached(self, sys_id: str):
+        row = self._conn.execute('SELECT 1 FROM cache_manifest WHERE sys_id = ?', (sys_id,)).fetchone()
+        if not row:
+            return None
+        rows = self._conn.execute(
+            'SELECT partner_sys_id, svm_score, rank, shelfmark, library_code, domain '
+            'FROM cached_suggestions WHERE sys_id = ? ORDER BY rank', (sys_id,)
+        ).fetchall()
+        return [{'alma_id': r[0], 'svm_score': r[1], 'rank': r[2],
+                 'shelfmark': r[3], 'library_code': r[4], 'domain': r[5]} for r in rows]
+
+    def store(self, sys_id: str, suggestions: list):
+        from datetime import datetime
+        now = datetime.utcnow().isoformat()
+        self._conn.execute('DELETE FROM cached_suggestions WHERE sys_id = ?', (sys_id,))
+        for s in suggestions:
+            self._conn.execute(
+                'INSERT OR REPLACE INTO cached_suggestions VALUES (?,?,?,?,?,?,?,?)',
+                (sys_id, s.get('alma_id', ''), s.get('svm_score', 0), s.get('rank', 0),
+                 s.get('shelfmark', ''), s.get('library_code', ''), s.get('domain', ''), now)
+            )
+        self._conn.execute(
+            'INSERT OR REPLACE INTO cache_manifest VALUES (?,?,?)',
+            (sys_id, now, len(suggestions))
+        )
+        self._conn.commit()
+
+    def has_cached(self, sys_id: str) -> bool:
+        return self._conn.execute('SELECT 1 FROM cache_manifest WHERE sys_id = ?', (sys_id,)).fetchone() is not None
+
+    def get_cached_partners(self, sys_ids: list, mode: str = 'union') -> set:
+        partner_sets = []
+        for sid in sys_ids:
+            rows = self._conn.execute(
+                'SELECT partner_sys_id FROM cached_suggestions WHERE sys_id = ?', (sid,)
+            ).fetchall()
+            partner_sets.append({r[0] for r in rows})
+        if not partner_sets:
+            return set()
+        if mode == 'intersection':
+            return set.intersection(*partner_sets) if partner_sets else set()
+        return set.union(*partner_sets)
+
+
+class VSFetchThread(QThread):
+    """Fetch visual similarity suggestions from server for a single manuscript."""
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, sys_id: str, server_url: str, parent=None):
+        super().__init__(parent)
+        self.sys_id = sys_id
+        self.server_url = server_url
+
+    def run(self):
+        try:
+            import urllib.request
+            url = f'{self.server_url}/api/visual_suggestions/{self.sys_id}?limit=200'
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+            self.finished.emit(data)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class VSDownloadThread(QThread):
+    """Download full visual_similarity.db with checksum, disk-space, and corruption checks."""
+    progress = pyqtSignal(int, int)  # bytes_downloaded, total_bytes
+    finished = pyqtSignal(str)  # local file path
+    error = pyqtSignal(str)
+
+    def __init__(self, server_url: str, dest_dir: str, parent=None):
+        super().__init__(parent)
+        self.server_url = server_url
+        self.dest_dir = dest_dir
+
+    def run(self):
+        import urllib.request, hashlib, shutil
+        import sqlite3 as _sqlite3
+        url = f'{self.server_url}/api/visual_similarity_db'
+        try:
+            # Step 1: HEAD request to get size and checksum
+            req = urllib.request.Request(url, method='HEAD')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                total_size = int(resp.headers.get('Content-Length', 0))
+                expected_checksum = resp.headers.get('X-Checksum-SHA256', '')
+
+            # Step 2: Disk-space pre-check
+            dest_path = os.path.join(self.dest_dir, 'fist_data', 'visual_similarity.db')
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            free_space = shutil.disk_usage(self.dest_dir).free
+            required = total_size * 2
+            if free_space < required:
+                self.error.emit(
+                    f'Insufficient disk space. Need {required // (1024*1024)} MB, '
+                    f'have {free_space // (1024*1024)} MB free.'
+                )
+                return
+
+            # Step 3: Download to temp file with progress
+            tmp_path = dest_path + '.downloading'
+            sha256 = hashlib.sha256()
+            downloaded = 0
+            with urllib.request.urlopen(url, timeout=300) as resp:
+                with open(tmp_path, 'wb') as f:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        sha256.update(chunk)
+                        downloaded += len(chunk)
+                        self.progress.emit(downloaded, total_size)
+
+            # Step 4: Checksum verification
+            actual_checksum = sha256.hexdigest()
+            if expected_checksum and actual_checksum != expected_checksum:
+                os.remove(tmp_path)
+                self.error.emit(
+                    f'Checksum mismatch. Expected {expected_checksum[:12]}..., '
+                    f'got {actual_checksum[:12]}... Download may be corrupted.'
+                )
+                return
+
+            # Step 5: SQLite integrity check (corruption detection)
+            try:
+                test_conn = _sqlite3.connect(tmp_path)
+                result = test_conn.execute('PRAGMA integrity_check').fetchone()
+                test_conn.close()
+                if result[0] != 'ok':
+                    os.remove(tmp_path)
+                    self.error.emit(f'Downloaded file failed integrity check: {result[0]}')
+                    return
+            except Exception as e:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                self.error.emit(f'Downloaded file is not a valid SQLite database: {e}')
+                return
+
+            # Step 6: Atomic rename
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            os.rename(tmp_path, dest_path)
+
+            self.finished.emit(dest_path)
+        except Exception as e:
+            tmp_path = os.path.join(self.dest_dir, 'fist_data', 'visual_similarity.db.downloading')
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+            self.error.emit(str(e))
+
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -12613,6 +12822,13 @@ class GenizahGUI(QMainWindow):
             self.shelf_init_timer.start(500)
             # Automatic Update Check
             self.check_updates_auto()
+
+            # Check VS cache version against server (non-blocking)
+            def _check_vs_cache_version():
+                if not hasattr(self, '_vs_cache'):
+                    self._vs_cache = DesktopVSCache()
+                self._vs_cache.check_and_update_version(self._VS_SERVER_URL)
+            threading.Thread(target=_check_vs_cache_version, daemon=True).start()
 
             # Show What's New bar if version is new
             cfg = load_app_config()
@@ -13942,6 +14158,233 @@ class GenizahGUI(QMainWindow):
             meta_mgr=getattr(self, 'meta_mgr', None)
         )
         dialog.exec()
+
+    # ── Visual Similarity ────────────────────────────────────────────
+
+    _VS_SERVER_URL = "https://genizahsearch.com"
+
+    def _browse_view_visual_similarity(self):
+        """Show Visual Similarity suggestions dialog for current browse manuscript."""
+        sys_id = self.current_browse_sid
+        if not sys_id:
+            return
+
+        shelfmark = None
+        if self.meta_mgr:
+            try:
+                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
+            except (KeyError, AttributeError, IndexError):
+                pass
+        shelfmark = shelfmark or sys_id
+
+        # Try local DB first
+        try:
+            from shared.visual_similarity_service import get_vs_service
+            vs_svc = get_vs_service(thread_safe=False)
+            if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
+                data = vs_svc.get_suggestions(sys_id, 200)
+                self._show_vs_dialog(sys_id, shelfmark, data)
+                return
+        except Exception:
+            pass
+
+        # Try cache
+        if not hasattr(self, '_vs_cache'):
+            self._vs_cache = DesktopVSCache()
+        cached = self._vs_cache.get_cached(sys_id)
+        if cached is not None:
+            self._show_vs_dialog(sys_id, shelfmark, cached)
+            return
+
+        # Fetch from server
+        self._vs_fetch_thread = VSFetchThread(sys_id, self._VS_SERVER_URL, self)
+        self._vs_fetch_thread.finished.connect(
+            lambda data, s=sys_id, sm=shelfmark: self._on_vs_fetch_complete(s, sm, data)
+        )
+        self._vs_fetch_thread.error.connect(
+            lambda err: QMessageBox.warning(self, tr("Visual Similarity"), f'{tr("Could not load data")}: {err}')
+        )
+        self._vs_fetch_thread.start()
+
+    def _on_vs_fetch_complete(self, sys_id, shelfmark, data):
+        if not hasattr(self, '_vs_cache'):
+            self._vs_cache = DesktopVSCache()
+        self._vs_cache.store(sys_id, data)
+        self._show_vs_dialog(sys_id, shelfmark, data)
+
+    def _show_vs_dialog(self, sys_id, shelfmark, data):
+        """Create and show the Visual Similarity dialog."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
+        dlg.resize(800, 600)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Orange header
+        header = QLabel(f'  {tr("Visual Similarity")} -- {shelfmark}  |  דמיון חזותי')
+        header.setStyleSheet("background-color: #e65100; color: white; font-size: 18px; font-weight: bold; padding: 12px;")
+        layout.addWidget(header)
+
+        # Sort combo + count label
+        ctrl_bar = QHBoxLayout()
+        ctrl_bar.setContentsMargins(8, 4, 8, 4)
+        ctrl_bar.addWidget(QLabel(tr("Sort by:")))
+        sort_combo = QComboBox()
+        sort_combo.addItems([tr("Rank"), tr("Library"), tr("Domain")])
+        ctrl_bar.addWidget(sort_combo)
+        ctrl_bar.addStretch()
+        count_lbl = QLabel(f'{len(data)} {tr("suggestions")}')
+        count_lbl.setStyleSheet("color: #666; font-size: 12px;")
+        ctrl_bar.addWidget(count_lbl)
+        layout.addLayout(ctrl_bar)
+
+        # Table
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels([tr("Rank"), tr("Shelfmark"), tr("Domain"), tr("Library"), tr("Actions")])
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.verticalHeader().setVisible(False)
+
+        def _populate_table(sorted_data):
+            table.setRowCount(len(sorted_data))
+            for i, item in enumerate(sorted_data):
+                # Rank
+                rank_item = QTableWidgetItem(f"#{item.get('rank', i+1)}")
+                rank_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                table.setItem(i, 0, rank_item)
+
+                # Shelfmark (resolve from meta_mgr if not present)
+                partner_id = item.get('alma_id', '')
+                shelf = item.get('shelfmark', '')
+                if not shelf and self.meta_mgr:
+                    try:
+                        shelf, _ = self.meta_mgr.get_meta_for_id(partner_id)
+                    except Exception:
+                        shelf = partner_id
+                shelf = shelf or partner_id
+                shelf_item = QTableWidgetItem(shelf)
+                shelf_item.setData(Qt.ItemDataRole.UserRole, partner_id)
+                table.setItem(i, 1, shelf_item)
+
+                # Domain
+                domain = item.get('domain', '')
+                table.setItem(i, 2, QTableWidgetItem(domain))
+
+                # Library
+                lib_code = item.get('library_code', '')
+                lib_name = get_library_display(lib_code, short=False) if lib_code else ''
+                table.setItem(i, 3, QTableWidgetItem(lib_name or lib_code))
+
+                # Actions: Browse + Puzzle buttons
+                actions_widget = QWidget()
+                actions_layout = QHBoxLayout(actions_widget)
+                actions_layout.setContentsMargins(2, 0, 2, 0)
+                actions_layout.setSpacing(4)
+                btn_browse = QPushButton(f"📖 {tr('Browse')}")
+                btn_browse.setFixedHeight(24)
+                btn_browse.clicked.connect(partial(self._vs_navigate_to, partner_id, dlg))
+                actions_layout.addWidget(btn_browse)
+                btn_puzzle = QPushButton(f"\U0001f9e9 {tr('Puzzle')}")
+                btn_puzzle.setFixedHeight(24)
+                btn_puzzle.clicked.connect(partial(self._vs_add_to_puzzle, partner_id))
+                actions_layout.addWidget(btn_puzzle)
+                table.setCellWidget(i, 4, actions_widget)
+
+        # Initial populate
+        _populate_table(data)
+
+        def _sort_changed(idx):
+            if idx == 0:
+                sorted_data = sorted(data, key=lambda x: x.get('rank', 0))
+            elif idx == 1:
+                sorted_data = sorted(data, key=lambda x: x.get('library_code', ''))
+            else:
+                sorted_data = sorted(data, key=lambda x: x.get('domain', ''))
+            _populate_table(sorted_data)
+
+        sort_combo.currentIndexChanged.connect(_sort_changed)
+        layout.addWidget(table)
+
+        # Bottom action bar
+        bottom_bar = QHBoxLayout()
+        bottom_bar.setContentsMargins(8, 4, 8, 8)
+        btn_search_vs = QPushButton(f"🔍 {tr('Search in visual suggestions')}")
+        btn_search_vs.setStyleSheet("background-color: #e65100; color: white; padding: 6px 12px; border-radius: 4px;")
+        btn_search_vs.clicked.connect(lambda: (dlg.accept(), self._search_in_visual_suggestions(sys_id, shelfmark)))
+        bottom_bar.addWidget(btn_search_vs)
+        btn_browse_vs = QPushButton(f"📋 {tr('Browse suggestions')}")
+        btn_browse_vs.setStyleSheet("background-color: #f57c00; color: white; padding: 6px 12px; border-radius: 4px;")
+        btn_browse_vs.clicked.connect(lambda: (dlg.accept(), self._browse_visual_suggestions(sys_id, shelfmark)))
+        bottom_bar.addWidget(btn_browse_vs)
+        bottom_bar.addStretch()
+        btn_close = QPushButton(tr("Close"))
+        btn_close.clicked.connect(dlg.reject)
+        bottom_bar.addWidget(btn_close)
+        layout.addLayout(bottom_bar)
+
+        dlg.exec()
+
+    def _vs_navigate_to(self, partner_sys_id, dlg=None):
+        """Navigate browse to a VS partner manuscript."""
+        if dlg:
+            dlg.accept()
+        shelf = None
+        if self.meta_mgr:
+            try:
+                shelf, _ = self.meta_mgr.get_meta_for_id(partner_sys_id)
+            except Exception:
+                pass
+        if shelf:
+            self.browse_shelf_input.setText(shelf)
+            self._set_last_browse_field("shelf")
+            self.browse_load()
+        else:
+            # Fall back to direct sys_id browse
+            self.browse_sys_input.setText(partner_sys_id)
+            self._set_last_browse_field("sys")
+            self.browse_load()
+
+    def _vs_add_to_puzzle(self, partner_sys_id):
+        """Add a VS partner to the Fragment Puzzle."""
+        try:
+            shelf = None
+            if self.meta_mgr:
+                try:
+                    shelf, _ = self.meta_mgr.get_meta_for_id(partner_sys_id)
+                except Exception:
+                    pass
+            self._open_puzzle_with_fragment(partner_sys_id, shelf or partner_sys_id)
+        except Exception as e:
+            logger.debug(f"VS add to puzzle error: {e}")
+
+    def _vs_get_partners(self, sys_id):
+        """Get VS partner sys_ids from local DB, cache, or server (synchronous)."""
+        # Try local DB
+        try:
+            from shared.visual_similarity_service import get_vs_service
+            vs_svc = get_vs_service(thread_safe=False)
+            if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
+                return {s['alma_id'] for s in vs_svc.get_suggestions(sys_id, 200)}
+        except Exception:
+            pass
+        # Try cache
+        if not hasattr(self, '_vs_cache'):
+            self._vs_cache = DesktopVSCache()
+        cached = self._vs_cache.get_cached(sys_id)
+        if cached is not None:
+            return {s['alma_id'] for s in cached}
+        # Try server (synchronous fallback)
+        try:
+            import urllib.request
+            url = f'{self._VS_SERVER_URL}/api/visual_suggestions/{sys_id}?limit=200'
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+            self._vs_cache.store(sys_id, data)
+            return {s['alma_id'] for s in data}
+        except Exception:
+            return set()
 
     def _update_joins_dropdown(self):
         """Update the joins dropdown menu with connected fragments."""
@@ -15630,6 +16073,16 @@ class GenizahGUI(QMainWindow):
         self.btn_b_joins.setMenu(self.joins_menu)
         community_bar.addWidget(self.btn_b_joins)
 
+        # Visual Similarity button (orange theme)
+        self.btn_b_visual_sim = QToolButton()
+        self.btn_b_visual_sim.setText("🔍")
+        self.btn_b_visual_sim.setToolTip(tr("Visual Similarity") + " / דמיון חזותי")
+        self.btn_b_visual_sim.setEnabled(False)
+        self.btn_b_visual_sim.setFixedSize(40, 32)
+        self.btn_b_visual_sim.setStyleSheet("background-color: #e65100; color: white; border-radius: 4px;")
+        self.btn_b_visual_sim.clicked.connect(self._browse_view_visual_similarity)
+        community_bar.addWidget(self.btn_b_visual_sim)
+
         community_bar.addStretch()
         text_layout.addWidget(_make_scrollable_row(community_bar))
 
@@ -16160,6 +16613,18 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.setEnabled(True)
         self.btn_b_add_to_view.setEnabled(True)
         self.btn_b_add_to_puzzle.setEnabled(True)
+
+        # Enable Visual Similarity button if data available
+        _vs_has = False
+        try:
+            from shared.visual_similarity_service import get_vs_service
+            _vs_svc = get_vs_service(thread_safe=False)
+            _vs_has = _vs_svc.is_available() and _vs_svc.has_suggestions(sid)
+        except Exception:
+            pass
+        if not _vs_has and hasattr(self, '_vs_cache'):
+            _vs_has = self._vs_cache.has_cached(sid)
+        self.btn_b_visual_sim.setEnabled(True)  # Always enable; fetches on-demand from server if no local data
 
         # Populate external library link button
         self._browse_external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
