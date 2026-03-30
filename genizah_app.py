@@ -14349,21 +14349,72 @@ class GenizahGUI(QMainWindow):
         self._show_vs_dialog(sys_id, shelfmark, data)
 
     def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None):
-        """Create and show the Visual Similarity dialog."""
+        """Create and show the enriched Visual Similarity workbench dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
-        dlg.resize(800, 600)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(0, 0, 0, 0)
+        dlg.resize(1000, 700)
+        dlg.setMinimumSize(800, 500)
+        main_layout = QVBoxLayout(dlg)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
         # Orange header
         header = QLabel(f'  {tr("Visual Similarity")} -- {shelfmark}  |  דמיון חזותי')
         header.setStyleSheet("background-color: #e65100; color: white; font-size: 18px; font-weight: bold; padding: 12px;")
-        layout.addWidget(header)
+        main_layout.addWidget(header)
 
-        # Sort combo + count label
+        # ── Splitter: Left (original MS) | Right (suggestions) ──
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
+
+        # ════════════════════════════════════════════════════════════
+        # LEFT PANE — Original manuscript
+        # ════════════════════════════════════════════════════════════
+        left_pane = QWidget()
+        left_layout = QVBoxLayout(left_pane)
+        left_layout.setContentsMargins(8, 8, 4, 8)
+        left_layout.setSpacing(6)
+
+        # Shelfmark header
+        lbl_orig_shelf = QLabel(shelfmark)
+        lbl_orig_shelf.setStyleSheet("color: #e65100; font-size: 16px; font-weight: bold;")
+        lbl_orig_shelf.setWordWrap(True)
+        lbl_orig_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        left_layout.addWidget(lbl_orig_shelf)
+
+        lbl_orig_subtitle = QLabel(tr("Original manuscript"))
+        lbl_orig_subtitle.setStyleSheet("color: #888; font-size: 11px;")
+        left_layout.addWidget(lbl_orig_subtitle)
+
+        # Image placeholder
+        lbl_orig_image = QLabel(tr("Loading..."))
+        lbl_orig_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_orig_image.setMinimumHeight(200)
+        lbl_orig_image.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;")
+        left_layout.addWidget(lbl_orig_image, stretch=3)
+
+        # Text snippet
+        txt_orig_text = QLabel(tr("Loading..."))
+        txt_orig_text.setWordWrap(True)
+        txt_orig_text.setStyleSheet("font-size: 12px; padding: 6px; background-color: #fafafa; border: 1px solid #eee; border-radius: 4px;")
+        txt_orig_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        txt_orig_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        txt_orig_text.setMaximumHeight(120)
+        left_layout.addWidget(txt_orig_text, stretch=1)
+
+        splitter.addWidget(left_pane)
+
+        # ════════════════════════════════════════════════════════════
+        # RIGHT PANE — Suggestion list
+        # ════════════════════════════════════════════════════════════
+        right_pane = QWidget()
+        right_layout = QVBoxLayout(right_pane)
+        right_layout.setContentsMargins(4, 8, 8, 8)
+        right_layout.setSpacing(4)
+
+        # Sort combo + count
         ctrl_bar = QHBoxLayout()
-        ctrl_bar.setContentsMargins(8, 4, 8, 4)
+        ctrl_bar.setContentsMargins(0, 0, 0, 4)
         ctrl_bar.addWidget(QLabel(tr("Sort by:")))
         sort_combo = QComboBox()
         sort_combo.addItems([tr("Rank"), tr("Library"), tr("Domain")])
@@ -14372,78 +14423,326 @@ class GenizahGUI(QMainWindow):
         count_lbl = QLabel(f'{len(data)} {tr("suggestions")}')
         count_lbl.setStyleSheet("color: #666; font-size: 12px;")
         ctrl_bar.addWidget(count_lbl)
-        layout.addLayout(ctrl_bar)
+        right_layout.addLayout(ctrl_bar)
 
-        # Table
-        table = QTableWidget()
-        table.setColumnCount(5)
-        table.setHorizontalHeaderLabels([tr("Rank"), tr("Shelfmark"), tr("Domain"), tr("Library"), tr("Actions")])
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        table.verticalHeader().setVisible(False)
+        # Scrollable suggestion list
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_content = QWidget()
+        scroll_vbox = QVBoxLayout(scroll_content)
+        scroll_vbox.setContentsMargins(0, 0, 0, 0)
+        scroll_vbox.setSpacing(2)
+        scroll_area.setWidget(scroll_content)
+        right_layout.addWidget(scroll_area)
 
-        def _populate_table(sorted_data):
-            table.setRowCount(len(sorted_data))
-            for i, item in enumerate(sorted_data):
-                # Rank
-                rank_item = QTableWidgetItem(f"#{item.get('rank', i+1)}")
-                rank_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                table.setItem(i, 0, rank_item)
+        splitter.addWidget(right_pane)
+        splitter.setStretchFactor(0, 35)
+        splitter.setStretchFactor(1, 65)
 
-                # Shelfmark (resolve from meta_mgr if not present)
-                partner_id = item.get('alma_id', '')
-                shelf = item.get('shelfmark', '')
-                if not shelf and self.meta_mgr:
+        main_layout.addWidget(splitter, stretch=1)
+
+        # ── State for lazy loading and thread management ──
+        _vs_state = {
+            'sorted_data': sorted(data, key=lambda x: x.get('rank', 0)),
+            'shown_count': 0,
+            'batch_size': 20,
+            'item_widgets': [],  # list of (widget, detail_container, partner_id, loaded)
+            'threads': [],  # keep references to prevent GC
+        }
+
+        def _get_first_fl_id(target_sys_id):
+            """Get the first NLI FL ID for a sys_id from crossref sidecar."""
+            try:
+                from shared.nli_crossref_service import get_nli_crossref_service
+                svc = get_nli_crossref_service(thread_safe=True)
+                if svc and svc.is_available():
+                    images = svc.get_images(target_sys_id)
+                    if images:
+                        for img in images:
+                            fgp = img.get('fgp_image_number_id', '')
+                            if fgp:
+                                digits = re.sub(r"\D", "", str(fgp))
+                                if digits and len(digits) >= 4:
+                                    return digits
+            except Exception:
+                pass
+            return None
+
+        def _load_image_for_label(lbl, target_sys_id, max_width=350, max_height=300):
+            """Load a thumbnail image into a QLabel via background thread."""
+            fl_digits = _get_first_fl_id(target_sys_id)
+            if not fl_digits:
+                lbl.setText(tr("No image available"))
+                return
+            thumb_url = f"{Config.NLI_IIIF_BASE}/FL{fl_digits}/full/400,/0/default.jpg"
+            thread = ImageLoaderThread(thumb_url)
+
+            def _on_loaded(img, _lbl=lbl, _mw=max_width, _mh=max_height):
+                if _lbl.parent() is None:
+                    return  # Widget was destroyed
+                pix = QPixmap.fromImage(img)
+                scaled = pix.scaled(_mw, _mh, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                _lbl.setPixmap(scaled)
+                _lbl.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 2px;")
+
+            def _on_failed(_lbl=lbl):
+                if _lbl.parent() is None:
+                    return
+                _lbl.setText(tr("No image available"))
+
+            thread.image_loaded.connect(_on_loaded)
+            thread.load_failed.connect(_on_failed)
+            thread.start()
+            _vs_state['threads'].append(thread)
+
+        def _load_text_for_label(lbl, target_sys_id, max_chars=200):
+            """Load text snippet for a sys_id in background."""
+            class _TextWorker(QThread):
+                text_ready = pyqtSignal(str)
+                def __init__(self, app_ref, sid, mc):
+                    super().__init__()
+                    self._app = app_ref
+                    self._sid = sid
+                    self._mc = mc
+                def run(self):
                     try:
-                        shelf, _ = self.meta_mgr.get_meta_for_id(partner_id)
+                        text, head, src, uid = self._app._get_best_text_for_id(self._sid)
+                        snippet = text[:self._mc].strip() if text else ''
+                        if text and len(text) > self._mc:
+                            snippet += '...'
+                        self.text_ready.emit(snippet)
                     except Exception:
-                        shelf = partner_id
-                shelf = shelf or partner_id
-                shelf_item = QTableWidgetItem(shelf)
-                shelf_item.setData(Qt.ItemDataRole.UserRole, partner_id)
-                table.setItem(i, 1, shelf_item)
+                        self.text_ready.emit('')
 
-                # Domain
-                domain = item.get('domain', '')
-                table.setItem(i, 2, QTableWidgetItem(domain))
+            worker = _TextWorker(self, target_sys_id, max_chars)
 
-                # Library
-                lib_code = item.get('library_code', '')
-                lib_name = get_library_display(lib_code, short=False) if lib_code else ''
-                table.setItem(i, 3, QTableWidgetItem(lib_name or lib_code))
+            def _on_text(snippet, _lbl=lbl):
+                if _lbl.parent() is None:
+                    return
+                if snippet:
+                    _lbl.setText(snippet)
+                else:
+                    _lbl.setText(tr("No text available"))
+                    _lbl.setStyleSheet(_lbl.styleSheet() + " color: #999;")
 
-                # Actions: Browse + Puzzle buttons
-                actions_widget = QWidget()
-                actions_layout = QHBoxLayout(actions_widget)
-                actions_layout.setContentsMargins(2, 0, 2, 0)
-                actions_layout.setSpacing(4)
-                btn_browse = QPushButton(f"📖 {tr('Browse')}")
-                btn_browse.setFixedHeight(24)
-                btn_browse.clicked.connect(partial(self._vs_navigate_to, partner_id, dlg))
-                actions_layout.addWidget(btn_browse)
-                btn_puzzle = QPushButton(f"\U0001f9e9 {tr('Puzzle')}")
-                btn_puzzle.setFixedHeight(24)
-                btn_puzzle.clicked.connect(partial(self._vs_add_to_puzzle, partner_id))
-                actions_layout.addWidget(btn_puzzle)
-                table.setCellWidget(i, 4, actions_widget)
+            worker.text_ready.connect(_on_text)
+            worker.start()
+            _vs_state['threads'].append(worker)
 
-        # Initial populate
-        _populate_table(data)
+        # Load original manuscript image and text
+        _load_image_for_label(lbl_orig_image, sys_id)
+        _load_text_for_label(txt_orig_text, sys_id)
+
+        def _create_suggestion_item(item, index):
+            """Create a suggestion item widget with expandable detail."""
+            partner_id = item.get('alma_id', '')
+            shelf = item.get('shelfmark', '')
+            if not shelf and self.meta_mgr:
+                try:
+                    shelf, _ = self.meta_mgr.get_meta_for_id(partner_id)
+                except Exception:
+                    shelf = partner_id
+            shelf = shelf or partner_id
+            domain = item.get('domain', '--')
+            lib_code = item.get('library_code', '')
+            lib_name = get_library_display(lib_code, short=False) if lib_code else lib_code
+            rank = item.get('rank', index + 1)
+
+            # Container widget
+            container = QWidget()
+            container.setStyleSheet("""
+                QWidget { background-color: white; border: 1px solid #e0e0e0; border-radius: 4px; }
+                QWidget:hover { border-color: #ff9800; }
+            """)
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(8, 6, 8, 6)
+            container_layout.setSpacing(4)
+
+            # ── Header row (always visible) ──
+            header_row = QHBoxLayout()
+            header_row.setSpacing(8)
+
+            # Rank badge
+            rank_badge = QLabel(f"#{rank}")
+            rank_badge.setFixedWidth(40)
+            rank_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            rank_badge.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold; font-size: 12px; border-radius: 12px; padding: 2px 6px; border: none;")
+            header_row.addWidget(rank_badge)
+
+            # Shelfmark (clickable-style)
+            shelf_lbl = QLabel(shelf)
+            shelf_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #e65100; border: none;")
+            shelf_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            header_row.addWidget(shelf_lbl)
+
+            # Domain + Library
+            meta_lbl = QLabel(f"{domain}  |  {lib_name or lib_code}")
+            meta_lbl.setStyleSheet("color: #666; font-size: 11px; border: none;")
+            header_row.addWidget(meta_lbl)
+
+            header_row.addStretch()
+
+            # Expand/collapse chevron
+            btn_expand = QPushButton("▶")
+            btn_expand.setFixedSize(24, 24)
+            btn_expand.setStyleSheet("border: none; font-size: 14px; color: #888;")
+            btn_expand.setToolTip(tr("Show details"))
+            header_row.addWidget(btn_expand)
+
+            container_layout.addLayout(header_row)
+
+            # ── Text snippet row (always visible, loaded lazily) ──
+            text_snippet_lbl = QLabel("")
+            text_snippet_lbl.setWordWrap(True)
+            text_snippet_lbl.setStyleSheet("font-size: 11px; color: #444; border: none; padding: 0 4px;")
+            text_snippet_lbl.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            text_snippet_lbl.setMaximumHeight(40)
+            text_snippet_lbl.setVisible(False)
+            container_layout.addWidget(text_snippet_lbl)
+
+            # ── Detail area (hidden by default, expanded on click) ──
+            detail_container = QWidget()
+            detail_container.setVisible(False)
+            detail_layout = QVBoxLayout(detail_container)
+            detail_layout.setContentsMargins(4, 4, 4, 4)
+            detail_layout.setSpacing(4)
+
+            # Image placeholder in detail
+            detail_image_lbl = QLabel(tr("Loading..."))
+            detail_image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            detail_image_lbl.setMinimumHeight(150)
+            detail_image_lbl.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;")
+            detail_layout.addWidget(detail_image_lbl)
+
+            # Longer text in detail
+            detail_text_lbl = QLabel("")
+            detail_text_lbl.setWordWrap(True)
+            detail_text_lbl.setStyleSheet("font-size: 12px; padding: 4px; background-color: #fafafa; border: 1px solid #eee; border-radius: 4px;")
+            detail_text_lbl.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            detail_text_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            detail_text_lbl.setMaximumHeight(100)
+            detail_layout.addWidget(detail_text_lbl)
+
+            # Action buttons row
+            actions_row = QHBoxLayout()
+            actions_row.setSpacing(6)
+            btn_browse = QPushButton(f"📖 {tr('Browse')}")
+            btn_browse.setFixedHeight(26)
+            btn_browse.setStyleSheet("background-color: #e65100; color: white; border-radius: 3px; padding: 2px 8px; border: none;")
+            btn_browse.clicked.connect(partial(self._vs_navigate_to, partner_id, dlg))
+            actions_row.addWidget(btn_browse)
+
+            btn_puzzle = QPushButton(f"\U0001f9e9 {tr('Puzzle')}")
+            btn_puzzle.setFixedHeight(26)
+            btn_puzzle.setStyleSheet("background-color: #f57c00; color: white; border-radius: 3px; padding: 2px 8px; border: none;")
+            btn_puzzle.clicked.connect(partial(self._vs_add_to_puzzle, partner_id))
+            actions_row.addWidget(btn_puzzle)
+
+            btn_add_list = QPushButton(f"📋 {tr('Add to List')}")
+            btn_add_list.setFixedHeight(26)
+            btn_add_list.setStyleSheet("background-color: #1976d2; color: white; border-radius: 3px; padding: 2px 8px; border: none;")
+            def _add_to_list(_pid=partner_id, _shelf=shelf, _btn=btn_add_list):
+                if hasattr(self, 'lists_mgr') and self.lists_mgr:
+                    items = [{'sys_id': _pid, 'fl_id': '', 'img': ''}]
+                    self.show_add_to_list_menu(items, source=tr("from visual similarity"), anchor_widget=_btn)
+            btn_add_list.clicked.connect(_add_to_list)
+            actions_row.addWidget(btn_add_list)
+
+            actions_row.addStretch()
+            detail_layout.addLayout(actions_row)
+            container_layout.addWidget(detail_container)
+
+            # ── Expand/collapse logic with lazy loading ──
+            _item_state = {'expanded': False, 'detail_loaded': False, 'text_loaded': False}
+
+            def _toggle_expand():
+                _item_state['expanded'] = not _item_state['expanded']
+                detail_container.setVisible(_item_state['expanded'])
+                btn_expand.setText("▼" if _item_state['expanded'] else "▶")
+                # Lazy load text snippet on first reveal
+                if not _item_state['text_loaded']:
+                    _item_state['text_loaded'] = True
+                    _load_text_for_label(text_snippet_lbl, partner_id, max_chars=150)
+                    text_snippet_lbl.setVisible(True)
+                # Lazy load detail image + text on first expand
+                if _item_state['expanded'] and not _item_state['detail_loaded']:
+                    _item_state['detail_loaded'] = True
+                    _load_image_for_label(detail_image_lbl, partner_id, max_width=500, max_height=250)
+                    _load_text_for_label(detail_text_lbl, partner_id, max_chars=500)
+
+            btn_expand.clicked.connect(_toggle_expand)
+            # Also toggle on click anywhere in header row (except buttons)
+            shelf_lbl.mousePressEvent = lambda e: _toggle_expand()
+            meta_lbl.mousePressEvent = lambda e: _toggle_expand()
+            rank_badge.mousePressEvent = lambda e: _toggle_expand()
+
+            return container, partner_id, _item_state
+
+        def _load_batch():
+            """Load next batch of suggestion items."""
+            sd = _vs_state['sorted_data']
+            start = _vs_state['shown_count']
+            end = min(start + _vs_state['batch_size'], len(sd))
+            if start >= len(sd):
+                return
+
+            for i in range(start, end):
+                widget, pid, state = _create_suggestion_item(sd[i], i)
+                scroll_vbox.addWidget(widget)
+                _vs_state['item_widgets'].append((widget, pid, state))
+
+            _vs_state['shown_count'] = end
+
+            # Remove old "Show more" button if exists
+            if hasattr(_load_batch, '_show_more_btn') and _load_batch._show_more_btn:
+                _load_batch._show_more_btn.setParent(None)
+                _load_batch._show_more_btn.deleteLater()
+                _load_batch._show_more_btn = None
+
+            # Add "Show more" button if more items remain
+            if end < len(sd):
+                btn_more = QPushButton(f"▼ {tr('Show more')} ({len(sd) - end} {tr('remaining')})")
+                btn_more.setStyleSheet("background-color: #fff3e0; color: #e65100; font-weight: bold; padding: 8px; border: 1px solid #ff9800; border-radius: 4px;")
+                btn_more.clicked.connect(_load_batch)
+                scroll_vbox.addWidget(btn_more)
+                _load_batch._show_more_btn = btn_more
+            else:
+                _load_batch._show_more_btn = None
+
+            # Add stretch at the bottom
+            scroll_vbox.addStretch()
+
+        _load_batch._show_more_btn = None
+
+        def _rebuild_list():
+            """Clear and rebuild the suggestion list after sorting."""
+            # Remove all current items
+            while scroll_vbox.count():
+                item = scroll_vbox.takeAt(0)
+                if item.widget():
+                    item.widget().setParent(None)
+                    item.widget().deleteLater()
+            _vs_state['shown_count'] = 0
+            _vs_state['item_widgets'] = []
+            _load_batch._show_more_btn = None
+            _load_batch()
 
         def _sort_changed(idx):
             if idx == 0:
-                sorted_data = sorted(data, key=lambda x: x.get('rank', 0))
+                _vs_state['sorted_data'] = sorted(data, key=lambda x: x.get('rank', 0))
             elif idx == 1:
-                sorted_data = sorted(data, key=lambda x: x.get('library_code', ''))
+                _vs_state['sorted_data'] = sorted(data, key=lambda x: x.get('library_code', ''))
             else:
-                sorted_data = sorted(data, key=lambda x: x.get('domain', ''))
-            _populate_table(sorted_data)
+                _vs_state['sorted_data'] = sorted(data, key=lambda x: x.get('domain', ''))
+            _rebuild_list()
 
         sort_combo.currentIndexChanged.connect(_sort_changed)
-        layout.addWidget(table)
 
-        # Bottom action bar
+        # Initial batch load
+        _load_batch()
+
+        # ── Bottom action bar ──
         bottom_bar = QHBoxLayout()
         bottom_bar.setContentsMargins(8, 4, 8, 8)
         btn_search_vs = QPushButton(f"🔍 {tr('Search in visual suggestions')}")
@@ -14455,20 +14754,11 @@ class GenizahGUI(QMainWindow):
             self._search_in_visual_suggestions(sys_id, shelfmark)
         btn_search_vs.clicked.connect(_close_and_search)
         bottom_bar.addWidget(btn_search_vs)
-        btn_browse_vs = QPushButton(f"📋 {tr('Browse suggestions')}")
-        btn_browse_vs.setStyleSheet("background-color: #f57c00; color: white; padding: 6px 12px; border-radius: 4px;")
-        def _close_and_browse():
-            dlg.accept()
-            if parent_dialog:
-                parent_dialog.close()
-            self._browse_visual_suggestions(sys_id, shelfmark)
-        btn_browse_vs.clicked.connect(_close_and_browse)
-        bottom_bar.addWidget(btn_browse_vs)
         bottom_bar.addStretch()
         btn_close = QPushButton(tr("Close"))
         btn_close.clicked.connect(dlg.reject)
         bottom_bar.addWidget(btn_close)
-        layout.addLayout(bottom_bar)
+        main_layout.addLayout(bottom_bar)
 
         dlg.exec()
 

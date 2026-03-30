@@ -3219,4 +3219,13 @@ LIBRARY_CODES_HE = {
     'Visual suggestions for': 'הצעות חזותיות עבור',
     'Visual similarity data is not available locally. Please download the database from Settings.': 'נתוני דמיון חזותי אינם זמינים מקומית. אנא הורד את מסד הנתונים מההגדרות.',
     'No visual suggestions found for this manuscript.': 'לא נמצאו הצעות דמיון חזותי לכתב יד זה.',
+    # Phase 57: Visual Similarity dialog enrichment
+    'Original manuscript': 'כתב יד מקורי',
+    'Show details': 'הצג פרטים',
+    'No image available': 'אין תמונה זמינה',
+    'No text available': 'אין טקסט זמין',
+    'Show more': 'הצג עוד',
+    'remaining': 'נותרו',
+    'Add to List': 'הוסף לרשימה',
+    'from visual similarity': 'מדמיון חזותי',
 }
