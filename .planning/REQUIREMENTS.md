@@ -7,36 +7,36 @@
 
 ### Data Infrastructure
 
-- [ ] **DATA-01**: IE-to-IIIF-suffix mapping exists for all 3,193 multi-IE manuscripts (derived from MARC 907 field order)
-- [ ] **DATA-02**: `browse_map` stores per-IE page lists (no cross-IE dedup) so each IE's pages are independently addressable
-- [ ] **DATA-03**: Single-IE manuscripts (98.5%) are structurally unchanged in browse_map — zero regression
+- [x] **DATA-01**: IE-to-IIIF-suffix mapping exists for all 3,193 multi-IE manuscripts (derived from MARC 907 field order)
+- [x] **DATA-02**: `browse_map` stores per-IE page lists (no cross-IE dedup) so each IE's pages are independently addressable
+- [x] **DATA-03**: Single-IE manuscripts (98.5%) are structurally unchanged in browse_map — zero regression
 
 ### Search → Browse Navigation
 
-- [ ] **NAV-01**: When a search result comes from IE X, clicking "browse" opens IE X (not the primary IE)
-- [ ] **NAV-02**: The IE is determined from the search result's `full_header` (already contains IE identifier)
-- [ ] **NAV-03**: If IE cannot be determined (edge case), fall back to primary IE with no crash
+- [x] **NAV-01**: When a search result comes from IE X, clicking "browse" opens IE X (not the primary IE)
+- [x] **NAV-02**: The IE is determined from the search result's `full_header` (already contains IE identifier)
+- [x] **NAV-03**: If IE cannot be determined (edge case), fall back to primary IE with no crash
 
 ### Image Loading
 
-- [ ] **IMG-01**: Browse page loads images from the IIIF manifest matching the active IE's suffix (not always `-1`)
-- [ ] **IMG-02**: `fetch_fl_ids_from_nli()` accepts a suffix parameter to fetch the correct manifest
-- [ ] **IMG-03**: Image and displayed text always belong to the same IE — the core invariant
+- [x] **IMG-01**: Browse page loads images from the IIIF manifest matching the active IE's suffix (not always `-1`)
+- [x] **IMG-02**: `fetch_fl_ids_from_nli()` accepts a suffix parameter to fetch the correct manifest
+- [x] **IMG-03**: Image and displayed text always belong to the same IE — the core invariant
 
 ### Browse Paging
 
-- [ ] **PAG-01**: Prev/next navigation stays within the active IE's page range
-- [ ] **PAG-02**: Page count and page index reflect the active IE only (not all IEs combined)
-- [ ] **PAG-03**: Volume selector UI allows switching between IEs for multi-IE manuscripts
-- [ ] **PAG-04**: Volume selector shows IE label and page count per volume
-- [ ] **PAG-05**: Single-IE manuscripts show no volume selector — completely unchanged UX
+- [x] **PAG-01**: Prev/next navigation stays within the active IE's page range
+- [x] **PAG-02**: Page count and page index reflect the active IE only (not all IEs combined)
+- [x] **PAG-03**: Volume selector UI allows switching between IEs for multi-IE manuscripts
+- [x] **PAG-04**: Volume selector shows IE label and page count per volume
+- [x] **PAG-05**: Single-IE manuscripts show no volume selector — completely unchanged UX
 
 ### Regression Safety
 
-- [ ] **REG-01**: All existing single-IE browse, search, URL, and session behaviors unchanged
-- [ ] **REG-02**: Tantivy search index unchanged — all IEs remain searchable
-- [ ] **REG-03**: Community features (corrections, comments, discoveries) unaffected
-- [ ] **REG-04**: Desktop app continues to work with existing index (no desktop changes in v1)
+- [x] **REG-01**: All existing single-IE browse, search, URL, and session behaviors unchanged
+- [x] **REG-02**: Tantivy search index unchanged — all IEs remain searchable
+- [x] **REG-03**: Community features (corrections, comments, discoveries) unaffected
+- [x] **REG-04**: Desktop app continues to work with existing index (no desktop changes in v1)
 
 ## v2 Requirements (Deferred)
 
@@ -74,24 +74,24 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | 58 | Pending |
-| DATA-02 | 58 | Pending |
-| DATA-03 | 58 | Pending |
-| REG-02 | 58 | Pending |
-| REG-04 | 58 | Pending |
-| NAV-01 | 59 | Pending |
-| NAV-02 | 59 | Pending |
-| NAV-03 | 59 | Pending |
-| IMG-01 | 59 | Pending |
-| IMG-02 | 59 | Pending |
-| IMG-03 | 59 | Pending |
-| PAG-01 | 59 | Pending |
-| PAG-02 | 59 | Pending |
-| PAG-03 | 59 | Pending |
-| PAG-04 | 59 | Pending |
-| PAG-05 | 59 | Pending |
-| REG-01 | 59 | Pending |
-| REG-03 | 59 | Pending |
+| DATA-01 | 58 | Complete |
+| DATA-02 | 58 | Complete |
+| DATA-03 | 58 | Complete |
+| REG-02 | 58 | Complete |
+| REG-04 | 58 | Complete |
+| NAV-01 | 59 | Complete |
+| NAV-02 | 59 | Complete |
+| NAV-03 | 59 | Complete |
+| IMG-01 | 59 | Complete |
+| IMG-02 | 59 | Complete |
+| IMG-03 | 59 | Complete |
+| PAG-01 | 59 | Complete |
+| PAG-02 | 59 | Complete |
+| PAG-03 | 59 | Complete |
+| PAG-04 | 59 | Complete |
+| PAG-05 | 59 | Complete |
+| REG-01 | 59 | Complete |
+| REG-03 | 59 | Complete |
 
 **Coverage:**
 - v1 requirements: 18 total
@@ -100,4 +100,4 @@
 
 ---
 *Requirements defined: 2026-03-31*
-*Last updated: 2026-03-31 after initial definition*
+*Last updated: 2026-03-31 after Phase 58-59 completion (18/18 requirements satisfied)*
