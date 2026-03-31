@@ -760,7 +760,7 @@ def delete_project(project_id: int) -> Dict:
 # CORRECTIONS OPERATIONS
 # ============================================================================
 
-def get_corrections(sys_id: str = None, author_id: str = None, status: str = None) -> List[Dict]:
+def get_corrections(sys_id: str = None, author_id: str = None, status: str = None, ie_id: str = None) -> List[Dict]:
     """Get corrections with optional filters, including author profile data."""
     try:
         client = get_client()
@@ -773,6 +773,8 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
             query = query.eq('author_id', author_id)
         if status:
             query = query.eq('status', status)
+        if ie_id:
+            query = query.or_(f"ie_id.eq.{ie_id},ie_id.is.null")
 
         response = query.order('created_at', desc=True).execute()
         corrections = response.data or []
@@ -862,7 +864,7 @@ def _enrich_with_profiles(client, rows: List[Dict], id_field: str = 'author_id')
     return rows
 
 
-def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = True) -> List[Dict]:
+def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = True, ie_id: str = None) -> List[Dict]:
     """Get comments with optional filters."""
     try:
         client = get_client()
@@ -874,6 +876,8 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
             query = query.eq('author_id', author_id)
         if is_public is not None:
             query = query.eq('is_public', is_public)
+        if ie_id:
+            query = query.or_(f"ie_id.eq.{ie_id},ie_id.is.null")
 
         response = query.order('created_at', desc=True).execute()
         comments = response.data or []
@@ -891,6 +895,8 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
                     query = query.eq('author_id', author_id)
                 if is_public is not None:
                     query = query.eq('is_public', is_public)
+                if ie_id:
+                    query = query.or_(f"ie_id.eq.{ie_id},ie_id.is.null")
                 comments = query.order('created_at', desc=True).execute().data or []
                 return _enrich_with_profiles(client, comments)
             except Exception as e2:

@@ -1968,7 +1968,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if user_id:
                     try:
                         # Fetch corrections for this document
-                        all_corrections = get_corrections(sys_id=state.current_page.sys_id, author_id=user_id)
+                        all_corrections = get_corrections(sys_id=state.current_page.sys_id, author_id=user_id, ie_id=state.volume_ie)
                         # Filter for THIS page
                         current_p_num = state.current_page.p_num
                         my_corrections = [

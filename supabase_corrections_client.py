@@ -831,7 +831,8 @@ class SupabaseCorrectionsClient:
     def get_corrections_for_document(
         self,
         document_id: str,
-        include_drafts: bool = False
+        include_drafts: bool = False,
+        ie_id: str = None
     ) -> List[Correction]:
         """Get all corrections for a document."""
         client = self._get_client()
@@ -843,6 +844,8 @@ class SupabaseCorrectionsClient:
 
             if not include_drafts:
                 query = query.neq('status', 'draft')
+            if ie_id:
+                query = query.or_(f"ie_id.eq.{ie_id},ie_id.is.null")
 
             response = query.order('created_at', desc=True).execute()
             corrections_data = response.data or []
@@ -1074,7 +1077,8 @@ class SupabaseCorrectionsClient:
         self,
         document_id: str,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
+        ie_id: str = None
     ) -> List[Comment]:
         """Get comments for a document."""
         client = self._get_client()
@@ -1083,9 +1087,12 @@ class SupabaseCorrectionsClient:
 
         try:
             offset = (page - 1) * page_size
-            response = client.table('comments').select('*').eq('sys_id', document_id).eq(
+            query = client.table('comments').select('*').eq('sys_id', document_id).eq(
                 'is_public', True
-            ).order('created_at', desc=True).range(offset, offset + page_size - 1).execute()
+            )
+            if ie_id:
+                query = query.or_(f"ie_id.eq.{ie_id},ie_id.is.null")
+            response = query.order('created_at', desc=True).range(offset, offset + page_size - 1).execute()
 
             return [self._parse_comment(c) for c in response.data or []]
 
@@ -1093,9 +1100,9 @@ class SupabaseCorrectionsClient:
             logger.warning(f"Failed to get comments: {e}")
             return []
 
-    def get_comments_for_document(self, document_id: str, page: int = 1, page_size: int = 50) -> List[Comment]:
+    def get_comments_for_document(self, document_id: str, page: int = 1, page_size: int = 50, ie_id: str = None) -> List[Comment]:
         """Alias for get_document_comments."""
-        return self.get_document_comments(document_id, page, page_size)
+        return self.get_document_comments(document_id, page, page_size, ie_id=ie_id)
 
     def get_my_comments(self, page: int = 1, page_size: int = 20) -> Tuple[List[Comment], int]:
         """Get current user's comments."""

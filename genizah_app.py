@@ -6958,7 +6958,7 @@ class ResultDialog(QDialog):
 
         # Check for comments
         try:
-            comments = client.get_comments_for_document(doc_id, page_size=1)
+            comments = client.get_comments_for_document(doc_id, page_size=1, ie_id=getattr(self, 'current_volume_ie', None))
             if comments and len(comments) > 0:
                 self.btn_view_comments.setVisible(True)
             else:
@@ -7075,7 +7075,7 @@ class ResultDialog(QDialog):
         # Also fetch corrections from corrections API (separate from versions)
         # Only add corrections for users who don't already have a version entry
         try:
-            corrections = client.get_corrections_for_document(doc_id, include_drafts=True)
+            corrections = client.get_corrections_for_document(doc_id, include_drafts=True, ie_id=getattr(self, 'current_volume_ie', None))
             # Filter corrections by page number
             page_corrections = [c for c in corrections if c.page_number == page_num or c.page_number is None]
             logger.debug("_rd_refresh_versions: corrections=%s, page_corrections=%s", len(corrections), len(page_corrections))
@@ -14042,7 +14042,7 @@ class GenizahGUI(QMainWindow):
 
         # Check for comments
         try:
-            comments = self.corrections_client.get_comments_for_document(doc_id, page_size=1)
+            comments = self.corrections_client.get_comments_for_document(doc_id, page_size=1, ie_id=self.current_browse_volume_ie)
             if comments and len(comments) > 0:
                 self.btn_b_view_comments.setVisible(True)
                 self.btn_b_view_comments.setEnabled(True)
@@ -14096,7 +14096,7 @@ class GenizahGUI(QMainWindow):
 
             # Also fetch corrections (including drafts) for current user
             try:
-                corrections = self.corrections_client.get_corrections_for_document(doc_id, include_drafts=True)
+                corrections = self.corrections_client.get_corrections_for_document(doc_id, include_drafts=True, ie_id=self.current_browse_volume_ie)
                 # Filter corrections by page number
                 page_corrections = [c for c in corrections if c.page_number == page_num or c.page_number is None]
 
