@@ -778,7 +778,8 @@ class SupabaseCorrectionsClient:
         context_before: str = None,
         context_after: str = None,
         status: str = None,
-        save_as_draft: bool = False
+        save_as_draft: bool = False,
+        ie_id: str = None
     ) -> Tuple[Optional[Correction], str]:
         """Create a new correction."""
         client = self._get_client()
@@ -799,6 +800,8 @@ class SupabaseCorrectionsClient:
                 'notes': notes or '',
                 'status': 'draft' if save_as_draft else (status or 'pending')
             }
+            if ie_id:
+                data['ie_id'] = ie_id
 
             response = client.table('corrections').insert(data).execute()
 

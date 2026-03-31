@@ -802,7 +802,7 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
 
 def create_correction(author_id: str, sys_id: str, shelfmark: str, page_number: int,
                       original_text: str, corrected_text: str, notes: str = '',
-                      status: str = 'pending') -> Dict:
+                      status: str = 'pending', ie_id: str = None) -> Dict:
     """Create a new correction."""
     try:
         client = get_user_client()
@@ -816,6 +816,8 @@ def create_correction(author_id: str, sys_id: str, shelfmark: str, page_number: 
             'notes': notes,
             'status': status
         }
+        if ie_id:
+            data['ie_id'] = ie_id
         response = client.table('corrections').insert(data).execute()
         if response.data:
             return {'success': True, 'correction': response.data[0]}
@@ -900,7 +902,7 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
 
 def create_comment(author_id: str, sys_id: str, content: str, shelfmark: str = None,
                    page_number: int = None, scope: str = 'page', is_public: bool = True,
-                   parent_id: int = None) -> Dict:
+                   parent_id: int = None, ie_id: str = None) -> Dict:
     """Create a new comment."""
     try:
         client = get_user_client()
@@ -914,6 +916,8 @@ def create_comment(author_id: str, sys_id: str, content: str, shelfmark: str = N
             'is_public': is_public,
             'parent_id': parent_id
         }
+        if ie_id:
+            data['ie_id'] = ie_id
         response = client.table('comments').insert(data).execute()
         if response.data:
             return {'success': True, 'comment': response.data[0]}

@@ -139,6 +139,7 @@ Transcription corrections:
 | `votes_down` | int | Downvote count |
 | `reviewed_by` | uuid | Reviewer (if reviewed) |
 | `reviewed_at` | timestamp | Review date |
+| `ie_id` | text | IE identifier for multi-volume manuscripts. NULL = primary IE or pre-volume-awareness |
 
 ### documents (PGP Data)
 
@@ -360,6 +361,7 @@ WITH CHECK (auth.uid() = author_id);
 - Anyone can read public comments
 - Users can only see their own private comments
 - Users can CRUD their own comments
+- `ie_id` (text, nullable): IE identifier for multi-volume manuscripts. NULL = primary IE or pre-volume-awareness
 
 ### Detailed Policy SQL Examples
 
@@ -815,6 +817,19 @@ USING (bucket_id = 'puzzle-images');
 ```
 
 ---
+
+## Pending Migrations
+
+### Phase 61: Add ie_id columns (volume-aware community data)
+
+Run in Supabase SQL Editor before testing multi-IE corrections/comments:
+
+```sql
+ALTER TABLE corrections ADD COLUMN IF NOT EXISTS ie_id TEXT;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS ie_id TEXT;
+COMMENT ON COLUMN corrections.ie_id IS 'IE identifier for multi-volume manuscripts. NULL = primary IE or pre-volume-awareness.';
+COMMENT ON COLUMN comments.ie_id IS 'IE identifier for multi-volume manuscripts. NULL = primary IE or pre-volume-awareness.';
+```
 
 ## Resources
 
