@@ -824,7 +824,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     app.storage.user['browse_position'] = {
                         'sys_id': state.sys_id,
                         'p_num': page.p_num,
-                        'shelfmark': page.shelfmark
+                        'shelfmark': page.shelfmark,
+                        'volume_ie': state.volume_ie,  # persist volume across refresh
                     }
                 except Exception:
                     pass
@@ -4998,6 +4999,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if saved_position and saved_position.get('sys_id'):
                     state.sys_id = saved_position['sys_id']
                     state.shelfmark_query = saved_position.get('shelfmark', '')
+                    # Restore volume_ie with validation (D-12: invalid falls back to None)
+                    restored_vie = saved_position.get('volume_ie')
+                    if restored_vie:
+                        from genizah_core import get_volumes_for_sys_id
+                        volumes = get_volumes_for_sys_id(saved_position['sys_id'])
+                        if any(v['ie_id'] == restored_vie for v in volumes):
+                            state.volume_ie = restored_vie
+                        # else: silently fall back to None (primary IE)
                     state.is_loading = True
                     update_content()
                     asyncio.ensure_future(load_page(p_num=saved_position.get('p_num', 1)))

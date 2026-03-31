@@ -32074,6 +32074,7 @@ class GenizahGUI(QMainWindow):
                     'shelfmark': self.browse_shelf_input.text().strip() if hasattr(self, 'browse_shelf_input') else '',
                     'fl_id': self.browse_fl_input.text().strip() if hasattr(self, 'browse_fl_input') else '',
                     'last_field': getattr(self, 'last_browse_field', 'shelf'),
+                    'volume_ie': getattr(self, 'current_browse_volume_ie', None),  # persist volume across restart
                 },
                 'browse_catalog': {
                     'domain': getattr(self, '_catalog_current_domain', None),
@@ -32303,6 +32304,15 @@ class GenizahGUI(QMainWindow):
                         return
                     if not self.searcher:
                         return
+                    # Restore volume_ie before loading (D-11, D-12)
+                    restored_vie = browse.get('volume_ie')
+                    if restored_vie:
+                        from genizah_core import get_volumes_for_sys_id
+                        volumes = get_volumes_for_sys_id(sid)
+                        if any(v['ie_id'] == restored_vie for v in volumes):
+                            self.current_browse_volume_ie = restored_vie
+                        else:
+                            self.current_browse_volume_ie = None  # invalid IE, fall back to primary
                     self.current_browse_sid = sid
                     self.current_browse_p = None
                     # Start enrichment (images, metadata)
