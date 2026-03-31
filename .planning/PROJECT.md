@@ -8,35 +8,29 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.6 Search Refinement & Scholarly Joins
+## Current State (after v7.6 shipped)
 
-**Goal:** Add search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments.
-
-**Target features:**
-- Search within results: re-run a second query restricted to current result set's sys_ids
-- Exclude known manuscripts: hide manuscripts from results via saved lists or imported shelfmark file
-- FIST joins suggestions: browse enrichment + dedicated search mode for FIST join groups (48K records / 15K groups)
-- Dimensions display & filtering: show manuscript dimensions in browse/results, pre-search and post-search range filtering (178K size records / 105K AlmaIds)
-
-## Current State (after v7.0.0 shipped)
-
-**Shipped:** v7.0.0 Fragment Puzzle & Community Publishing (2026-03-17)
-- Fragment Puzzle: visual canvas for arranging manuscript fragments with background removal, zoom/rotate/crop, folio navigation, layer ordering, multiple background modes (both apps)
-- Join document persistence in local joins.db with auto-save, composite PNG export with metadata banner, thumbnail previews
-- Community publishing: publish/unpublish/fork puzzle joins via Supabase, Discoveries Center integration, All/My Puzzles tabs, clickable shelfmark badges, admin soft-delete, auto-unpublish on local delete
-- Recto/verso auto-generation from recto arrangement
-- Fragment selector combobox with Browse button (both apps)
-- Bilingual help sections for all new features
-- 50+ Hebrew translations
+**Shipped:** v7.6 Search Refinement & Scholarly Joins (2026-03-31)
+- Manuscript dimensions display in browse with measurements dialog (summary, catalog, computed, blank image sizes) (both apps)
+- Pre-search and post-search dimension range filtering (width/height/line height/material) (both apps)
+- Search within results: progressive refinement restricting queries to current result set, breadcrumb chain with per-chip removal (both apps)
+- Exclude known manuscripts from search via saved lists, imported shelfmark files, or pasted shelfmarks with resolution report (both apps)
+- FIST visual similarity suggestions from FJMS SVM image analysis (~15.5M pairs) in browse dialog with ranked partners (both apps)
+- "Search in visual suggestions" with union/intersection modes for multi-manuscript selection (both apps)
+- Lightweight browse first-render: zero SQLite calls in hot path, deferred enrichment in Phase B (web)
+- 38,673 FIST gap manuscripts merged into libraries.csv (216K→255K) with 7 new library codes
+- 206 commits, 151 files changed, +28K/-3.7K lines
 
 **Architecture:**
-- Web: NiceGUI -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI + libraries_translations.db) + Supabase (community features only)
-- Desktop: PyQt6 -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI) + Supabase (community features only)
+- Web: NiceGUI -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI + libraries_translations.db + visual_similarity.db) + Supabase (community features only)
+- Desktop: PyQt6 -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI + optional visual_similarity.db cache) + Supabase (community features only)
 - Shared: genizah_core.py (~8,300 lines -- search engine, metadata, variants, Responsa, filtered search)
 - Shared: shared/document_service.py (PGP data from pgp.db SQLite)
 - Shared: shared/corrections_service.py (corrections data access)
-- Shared: shared/fjms_service.py (FJMS domain, join, catalog, bibliography queries from fjms_enrichment.db)
+- Shared: shared/fjms_service.py (FJMS domain, join, catalog, bibliography, measurements from fjms_enrichment.db)
 - Shared: shared/nli_crossref_service.py (NLI crossref, images, metadata, library URLs from nli_crossref.db)
+- Shared: shared/visual_similarity_service.py (FIST SVM image similarity from visual_similarity.db)
+- Shared: shared/exclusion_service.py (manuscript exclusion from lists/files/paste with shelfmark resolution)
 - Shared: shared/translation_service.py (Dicta translations from pgp.db, fjms_enrichment.db, libraries_translations.db)
 - Shared: shared/dicta_client.py (Dicta Translate API client with few-shot scholarly prompts)
 - Shared: shared/translation_qc.py (translation QC heuristics)
@@ -48,10 +42,11 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Data:**
 - pgp.db: 35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments, 34,954 translations (v1.0.0)
-- manuscripts (libraries.csv): ~217,000 records
+- manuscripts (libraries.csv): ~255,615 records (including 38K FIST gap fill)
 - libraries_translations.db: 184,514 title translations (76MB)
-- fjms_enrichment.db: 390K domains, 48K joins, 685K catalog (37 cols), 542K bib, 64K catalog_refs, ~260K translations (v5.0.0)
-- nli_crossref.db: 815K NLI images, 141K Cambridge manifests, 28K Manchester LUNA, 453 JTS DPUL (v1.2.0)
+- fjms_enrichment.db: 390K domains, 48K joins, 685K catalog (37 cols), 427K bib (deduped), 64K catalog_refs, ~260K translations, 1.5M computed measurements (v5.0.0)
+- nli_crossref.db: 815K NLI images, 141K Cambridge manifests, 28K Manchester LUNA, 36,283 JTS DPUL (v2.0.0)
+- visual_similarity.db: ~15.5M pairs from FJMS SVM image analysis (server-only, ~500-700MB)
 
 ## Requirements
 
@@ -142,11 +137,13 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Lightweight browse first-render: zero SQLite calls in hot path, deferred enrichment in Phase B (web) -- v7.4.0
 - Bracket-aware search: scholarly notation brackets preserved through search pipeline (both apps) -- v7.4.0
 
+- Exclude known manuscripts from search via saved lists, imported files, or pasted shelfmarks with resolution report (both apps) -- v7.5.0
+- FIST visual similarity suggestions in browse with ranked partners and action buttons (both apps) -- v7.5.0
+- Search within FIST visual suggestion partner pools with union/intersection modes (both apps) -- v7.5.0
+
 ### Active
 
-- [ ] Exclude known manuscripts from search: via saved lists or imported shelfmark file (both apps)
-- [ ] FIST join group suggestions in browse enrichment (both apps)
-- [ ] Search within FIST join groups: dedicated search mode (both apps)
+(None yet -- next milestone TBD)
 
 ### Out of Scope
 
@@ -213,6 +210,11 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Translation QA with heuristic checks | Catch hallucinations, script mismatches, length anomalies before display | Good — found and fixed 12,827 issues |
 | Transcription deferred to v7.0.0 | v6.5.0 focuses on UX + filtering; transcription is separate milestone | ⚠️ Revisit — v7.0.0 now Fragment Puzzle; transcription deferred further |
 | Fragment Puzzle as v7.0.0 | Visual join assembly tool is a unique research capability; transcription search deferred | — Pending |
+| Manuscript-level search restriction (not page-level) | Broader scholarly relevance -- manuscripts where both terms appear anywhere | Good |
+| COALESCE(catalog, computed) for dimension filtering | Maximizes coverage across data sources | Good |
+| visual_similarity.db as separate sidecar (server-only default) | 500-700MB too large for desktop bundle; on-demand download option | Good |
+| Browse Phase A/B split (zero SQLite hot path) | First paint renders instantly; enrichment loads async | Good |
+| ExclusionSource model with per-source tracking | Users can see and clear individual exclusion sources | Good |
 
 ## Evolution
 
@@ -232,4 +234,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-26 after v7.3 Search Refinement & Scholarly Joins milestone started*
+*Last updated: 2026-03-31 after v7.6 Search Refinement & Scholarly Joins milestone shipped*

@@ -14,7 +14,7 @@
 - **v6.5.0 Search UX & Filtered Search** -- Phases 42-46 (shipped 2026-03-14)
 - **v7.0.0 Fragment Puzzle** -- Phases 47-52 (shipped 2026-03-17)
 - **v7.1.0 FIST Gap Fill** -- Phase 53 (shipped 2026-03-19)
-- **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (in progress, v7.3.0-v7.5.0 shipped)
+- **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (shipped 2026-03-31)
 
 ## Phases
 
@@ -153,225 +153,24 @@ Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new libr
 
 </details>
 
-### v7.6 Search Refinement & Scholarly Joins
+<details>
+<summary>v7.6 Search Refinement & Scholarly Joins (Phases 54-57) -- SHIPPED 2026-03-31</summary>
 
-**Milestone Goal:** Search refinement tools and scholarly join discovery to help researchers narrow results and find related fragments -- dimensions display and filtering, search within results, exclude known manuscripts, and FIST joins enrichment with a dedicated search mode. Both web (NiceGUI) and desktop (PyQt6).
+See: .planning/milestones/v7.6-ROADMAP.md
 
-**v7.6 Search Refinement & Scholarly Joins (Phases 54-57):**
-- [x] **Phase 54: Dimensions Display & Filtering** - Import FIST computed measurements (~1.5M rows, 4 sheets) into fjms_enrichment.db, measurements dialog in browse, dimension/measurement filtering in search (both apps). (completed 2026-03-27)
-- [x] **Phase 55: Search Within Results** - Restrict second query to current result sys_ids, breadcrumb chain display, one-click clear, intersection with existing filters (both apps) (completed 2026-03-28)
-- [x] **Phase 55.1: Lightweight Browse First-Render** - Split browse page data into fast (Tantivy + csv_bank) and deferred (SQLite enrichment) tiers so first paint requires zero SQLite calls (web only, performance) (completed 2026-03-29)
-- [x] **Phase 56: Exclude Known Manuscripts** - Supabase list picker, shelfmark file import with resolution report, post-search exclusion filter, count display with source breakdown (both apps) (completed 2026-03-29)
-- [x] **Phase 57: FIST Visual Similarity Browse & Search** - Visual similarity suggestions from FJMS SVM image analysis (~15.5M pairs), dedicated dialog in browse, "Search in visual suggestions" with union/intersection modes, server-only sidecar with desktop on-demand fetch + cache (both apps) (completed 2026-03-30)
+5 phases (+ 55.1 inserted), 17 plans, 206 commits, 151 files changed (+28K/-3.7K lines).
+Manuscript dimensions display + filtering, search within results with breadcrumb chain,
+exclude known manuscripts (lists/files/paste), FIST visual similarity browse + search mode,
+lightweight browse first-render. 14/14 requirements satisfied.
 
-## Phase Details
-
-### Phase 47: Foundation + Background Removal
-**Goal**: Researchers have a shared data model for puzzle state and a working background removal engine that isolates parchment from solid-color library scanning backgrounds
-**Depends on**: Nothing (first phase of milestone)
-**Requirements**: BGRM-01, BGRM-02, BGRM-03
-**Success Criteria** (what must be TRUE):
-  1. A fragment image from NLI/Cambridge/Manchester can be loaded and its solid-color background removed, revealing the parchment shape with transparent surroundings — including low-saturation (gray/cream) backgrounds
-  2. Background removal module exposes toggle (original vs stripped) and adjustable threshold that Phases 48-49 will wire into app UI
-  3. A shared image resolver/cache resolves fragment images by (sys_id, folio, size, threshold) with cache invalidation on threshold change — usable by both web and desktop
-  4. PuzzleDocument/PuzzleFragment data model serializes and deserializes correctly with proper nested dataclass rehydration (roundtrip test)
-  5. joins.db SQLite sidecar is created with WAL mode and an explicit concurrency model for NiceGUI multi-request safety
-**Plans**: 4 plans
-Plans:
-- [x] 47-01-PLAN.md — Data model + joins.db sidecar with concurrency and fragment index
-- [x] 47-02-PLAN.md — Background removal engine with low-saturation fallback
-- [x] 47-03-PLAN.md — Shared image resolver/cache service
-- [x] 47-04-PLAN.md — Visual preview tool + quality checkpoint
-
-### Phase 48: Desktop Canvas
-**Goal**: Researchers can visually arrange manuscript fragment images on a desktop canvas with full spatial manipulation
-**Depends on**: Phase 47
-**Requirements**: CANV-01, CANV-03, CANV-04, CANV-05, CANV-06, PLAT-02
-**Success Criteria** (what must be TRUE):
-  1. User can type a shelfmark and add that fragment's image to the puzzle canvas in the desktop app
-  2. User can drag a fragment to any position, rotate it to any angle, flip it horizontally or vertically, and resize it independently -- all with smooth visual feedback
-  3. Multiple fragments (3+) can coexist on the canvas simultaneously without performance degradation
-  4. Background-removed fragments overlay correctly, showing parchment shapes rather than overlapping rectangles
-  5. The desktop puzzle is accessible from the app's main navigation
-**Plans**: 4 plans
-Plans:
-- [x] 48-01-PLAN.md — Core canvas building blocks (PuzzleFragmentItem, PuzzleCanvasView, PuzzleImageLoaderThread)
-- [x] 48-02-PLAN.md — PuzzleCanvasWindow with toolbar, shelfmark autocomplete, and singleton pattern
-- [x] 48-03-PLAN.md — Integration buttons (Browse, ResultDialog, Lists) + visual checkpoint
-
-### Phase 49: Web Canvas
-**Goal**: Researchers can perform the same fragment assembly in the web app using Fabric.js, with full manipulation parity to desktop
-**Depends on**: Phase 47, Phase 48 (validated interaction model)
-**Requirements**: CANV-07, CANV-08, PLAT-01
-**Success Criteria** (what must be TRUE):
-  1. The web puzzle canvas provides the same drag, rotate, flip, and resize manipulation as the desktop version
-  2. User can navigate folios (next/prev image) within a fragment's shelfmark on the canvas
-  3. Snap guides appear when dragging a fragment near the edge or center of another fragment
-  4. All IIIF images load correctly through the server proxy without CORS errors
-  5. The web puzzle is accessible from the app's main navigation
-**Plans**: 2 plans
-Plans:
-- [x] 49-01-PLAN.md — API endpoints + Fabric.js canvas page with full manipulation
-- [x] 49-02-PLAN.md — Folio navigation, snap guides, entry points + visual checkpoint
-
-### Phase 50: Join Documents
-**Goal**: Researchers can save their puzzle arrangements as persistent join documents and export composite images for publication
-**Depends on**: Phase 48, Phase 49
-**Requirements**: JDOC-01, JDOC-02, JDOC-03, JDOC-04, JDOC-05
-**Success Criteria** (what must be TRUE):
-  1. User can save the current puzzle arrangement and reload it later with all fragment positions, rotations, scales, and flip states preserved exactly
-  2. User can maintain multiple saved join documents and switch between them
-  3. User can export a composite PNG image of the assembled join (background-removed fragments composited at full resolution)
-  4. User can add and edit metadata on a join document: title, free-text notes, and fragment identifiers
-**Plans**: 4 plans
-Plans:
-- [x] 50-01-PLAN.md — Shared layer: model cleanup, schema v2 migration, composite export service
-- [x] 50-02-PLAN.md — Desktop UI: QDockWidget side panel, save/load/export, auto-save
-- [x] 50-03-PLAN.md — Web UI: left drawer, API endpoints, save/load/export, auto-save
-
-### Phase 51: Recto/Verso (COMPLETE — pre-built)
-**Goal**: Researchers can view both sides of an assembled join, with verso auto-generated from the recto arrangement
-**Depends on**: Phase 50
-**Requirements**: RVRS-01, RVRS-02
-**Status**: Already implemented during Phases 48-49. Recto/verso toggle and folio navigation were built into both desktop and web canvas from the start. No separate plans needed.
-**Success Criteria** (what must be TRUE):
-  1. ~~User can toggle between recto and verso views of the assembled join~~ Folio navigation in both apps
-  2. ~~Verso view is auto-generated by mirroring the recto fragment arrangement (horizontal flip of positions)~~ Flip all + per-fragment flip
-  3. ~~Each fragment in verso view displays the correct verso image~~ Folio nav loads correct verso image
-**Plans**: None needed (0/0)
-
-### Phase 52: Community + Integration
-**Goal**: Researchers can manage a personal puzzle workspace and share join documents with the community; puzzle is accessible from existing browse/search workflows
-**Depends on**: Phase 50
-**Requirements**: CANV-02, COMM-01, COMM-02, COMM-03
-**Success Criteria** (what must be TRUE):
-  1. User can add fragments to the puzzle directly from personal lists, browse results, or search results (not just by typing a shelfmark)
-  2. Join documents are saved to a personal workspace by default (private, only visible to the creator)
-  3. User can publish a join document for community review, making it visible to all users
-  4. Published join documents are browsable by other users with fragment identifiers, join type, and notes visible
-**Plans**: 4 plans
-Plans:
-- [x] 52-01-PLAN.md — Shared publish service + Supabase schema + tests
-- [x] 52-02-PLAN.md — Web publish UI + Discoveries feed + joins panel community section
-- [x] 52-03-PLAN.md — Desktop publish + Discoveries feed + JoinsDialog community section
-
-### Phase 53: Fill Missing Genizah Manuscripts from FIST
-**Goal**: All 38,673 Genizah manuscripts in FIST.db that are missing from libraries.csv become browsable in GenizahSearch with images, FJMS enrichment, and metadata search — without requiring Tantivy index changes
-**Depends on**: Nothing (standalone data phase)
-**Requirements**: [GAP-01, GAP-02, GAP-03, GAP-04, GAP-05, GAP-06, GAP-07]
-**Success Criteria** (what must be TRUE):
-  1. (GAP-01) libraries.csv grows from 216,942 to ~255,615 records with correctly formatted rows for all FIST-only manuscripts
-  2. (GAP-02) New records appear in catalog browse with correct library codes, domain facets, and FJMS enrichment
-  3. (GAP-03) NLI images load correctly for new records (100% have images in nli_crossref.db)
-  4. (GAP-04) Shelfmark/title metadata search returns new records (execute_search metadata guard adjusted)
-  5. (GAP-05) Text search (Responsa, word search) correctly excludes metadata-only records (no transcription text)
-  6. (GAP-06) 12 new library codes registered in LIBRARY_CODES for small FIST-only collections
-  7. (GAP-07) Shelfmark normalization handles Yevr->EVR and Halper->Genizah aliases
-**Plans**: 2 plans
-Plans:
-- [x] 53-01-PLAN.md -- CSV generation from FIST.db + library codes + shelfmark normalization
-- [x] 53-02-PLAN.md -- Metadata search guard fix + validation tests + visual verification
-
-### Phase 54: Dimensions Display & Filtering
-**Goal**: Researchers can see manuscript physical dimensions, margins, line counts, material, and text density via a measurements dialog in the browse page, AND filter search results by dimension/measurement ranges — backed by FIST computed measurement data imported into fjms_enrichment.db
-**Depends on**: Nothing (first phase of v7.3 milestone)
-**Requirements**: DIM-01, DIM-02, DIM-03, DIM-04
-**Success Criteria** (what must be TRUE):
-  1. (DIM-01) User can click a "Measurements" button in the browse page to see a dialog showing page dimensions, margins, written area, line counts, text density, and material for manuscripts with measurement data (both apps)
-  2. (DIM-04) Dimensions displayed in normalized centimeters using pre-computed values from FIST xlsx
-  3. (DIM-02) User can filter search by dimension/measurement ranges (width, height, line count, line height, text density, material) as a pre-search filter (both apps)
-  4. (DIM-03) User can filter within results by the same measurement ranges as a post-search filter (both apps)
-  5. fjms_enrichment.db contains computed_measurements (~434K rows), extra_info (~743K rows), blank_images (~165K rows), and updated catalog_sizes with normalized cm values
-**Plans**: 4 plans
-Plans:
-- [x] 54-01-PLAN.md — Import script + FjmsService.get_measurements() + catalog_sizes migration + tests
-- [x] 54-02-PLAN.md — Web + desktop measurements dialog + browse button wiring + visual checkpoint
-- [x] 54-03-PLAN.md — Measurement filtering backend: service extensions + batch lookup + tests (DIM-02, DIM-03)
-- [x] 54-04-PLAN.md — Measurement filtering UI: web + desktop pre-search and post-search panels (DIM-02, DIM-03)
-
-### Phase 55: Search Within Results
-**Goal**: Researchers can progressively refine their search by running a second query restricted to the manuscripts from their current result set
-**Depends on**: Phase 54 (dimensions visible when refining enriches the combined experience; not a hard dependency)
-**Requirements**: SRCH-01, SRCH-02, SRCH-03
-**Success Criteria** (what must be TRUE):
-  1. User can click "Search within these N results" in the search results header, enter a new query, and see results restricted to only the sys_ids from the previous result set (both apps)
-  2. A breadcrumb or chip displays the refinement chain showing the original query, making the active scope visible at all times (both apps)
-  3. User can click a clear button on the breadcrumb to return to unrestricted search, removing the restrict set in one action (both apps)
-  4. Search-within correctly intersects with any active pre-search filters (domain, dimensions, etc.) -- the restrict set narrows further, never replaces existing filters
-**Plans**: 3 plans
-Plans:
-- [x] 55-01-PLAN.md — Shared RefinementStep dataclass + chain helpers + tests
-- [x] 55-02-PLAN.md — Web refinement UI: refine mode, breadcrumb strip, session persistence
-- [x] 55-03-PLAN.md — Desktop refinement UI: refine mode, breadcrumb strip, session persistence
-
-### Phase 55.1: Lightweight Browse First-Render
-**Goal**: Make /browse?sys_id=X cheap on first render by deferring all SQLite enrichment to Phase B (async after first paint)
-**Depends on**: Nothing (performance refactor, web-only)
-**Requirements**: BROWSE-PERF-01, BROWSE-PERF-02, BROWSE-PERF-03, BROWSE-PERF-04, BROWSE-PERF-05
-**Success Criteria** (what must be TRUE):
-  1. get_browse_page(), get_metadata_only_browse_page(), and get_browse_page_by_fl() make zero SQLite calls (only Tantivy + csv_bank)
-  2. Browse page renders image + shelfmark + title within Phase A (no enrichment delay)
-  3. Crossref, Oxford, Cambridge, attribution data loads in Phase B and updates UI
-  4. Folio navigation works with Tantivy-only page count before enrichment
-  5. No visual regression once enrichment completes
-**Plans**: 1 plan
-Plans:
-- [x] 56-01-PLAN.md — Slim service layer hot path + expand Phase B enrichment with UI graceful degradation
-
-### Phase 56: Exclude Known Manuscripts
-**Goal**: Researchers can hide manuscripts they have already reviewed from search results, using either a saved cloud list or an imported shelfmark file
-**Depends on**: Phase 55 (reuses breadcrumb/chip UX patterns for exclusion display; not a hard dependency)
-**Requirements**: EXCL-01, EXCL-02, EXCL-03, EXCL-04
-**Success Criteria** (what must be TRUE):
-  1. User can select a saved Supabase list from a picker dialog and all manuscripts in that list are hidden from subsequent search results (both apps)
-  2. User can import a text or CSV file of shelfmarks, and after resolution a report shows how many resolved vs. failed (e.g., "Resolved 80/100 shelfmarks. 20 not found: [list]") (both apps)
-  3. Shelfmark resolution handles variant conventions (CUL T-S vs T-S, full library names, Yevr/EVR aliases) using the existing normalize_shelfmark pipeline (both apps)
-  4. Search results show the exclusion count (e.g., "3 excluded") with a breakdown by source (list name vs. imported file) and per-source clear buttons (both apps)
-  5. Exclusion state persists within the session (web: SearchUIState; desktop: session state JSON) so that switching between searches does not lose the active exclude set
-**Plans**: 3 plans
-Plans:
-- [x] 56-01-PLAN.md — Shared exclusion service: ExclusionSource model, file parsing, shelfmark resolution, tests
-- [x] 56-02-PLAN.md — Web exclusion UI: picker dialog, post-search filter, per-source clear, session persistence
-- [x] 56-03-PLAN.md — Desktop exclusion UI: enhanced ExcludeDialog with list tab, multi-source tracking, session persistence
-**Directory**: `.planning/phases/56-exclude-known-manuscripts/`
-
-### Phase 57: FIST Visual Similarity Browse & Search
-**Goal**: Researchers can discover visual similarity suggestions from FJMS SVM image analysis while browsing, and use those suggestions to restrict text searches via union/intersection of partner pools
-**Depends on**: Phase 55 (reuses restrict_sys_ids mechanism); Phase 54 (dimensions can appear for suggestion partners)
-**Requirements**: JOIN-01, JOIN-02, JOIN-03
-**Success Criteria** (what must be TRUE):
-  1. (JOIN-01) User can see FIST visual similarity suggestions in a dedicated browse dialog with ranked partners, clickable shelfmarks, domain/library metadata, and Browse/Puzzle action buttons (both apps)
-  2. (JOIN-02) User can trigger "Search in visual suggestions" from browse to restrict a text search to the suggestion partner pool, with union/intersection modes for multi-manuscript selection (both apps)
-  3. (JOIN-03) Desktop fetches suggestions on-demand from server API and caches locally; optional full DB download available in settings for offline use (both apps)
-  4. Visual similarity data stored in separate visual_similarity.db sidecar (~500-700MB), server-only by default, with batch queries for performance
-**Plans**: 3 plans
-Plans:
-- [x] 57-01-PLAN.md — Import script + VisualSimilarityService + tests + API endpoint
-- [x] 57-02-PLAN.md — Web browse dialog + "Search in Visual Suggestions" action + translations
-- [x] 57-03-PLAN.md — Desktop browse dialog + on-demand cache + search integration + settings download
-**Directory**: `.planning/phases/57-fist-joins-browse-search-mode/`
+</details>
 
 ## Progress
 
-**Total milestones shipped:** 12 (through v7.1.0)
-**Total phases completed:** 53 (Phases 1-53)
-**Total plans completed:** ~175
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 47. Foundation + Background Removal | 4/4 | Complete    | 2026-03-16 |
-| 48. Desktop Canvas | 3/3 | Complete    | 2026-03-16 |
-| 49. Web Canvas | 2/2 | Complete    | 2026-03-16 |
-| 50. Join Documents | 3/3 | Complete    | 2026-03-16 |
-| 51. Recto/Verso | 0/0 | Complete (pre-built) | 2026-03-17 |
-| 52. Community + Integration | 3/3 | Complete   | 2026-03-17 |
-| 53. Fill Missing Genizah MSS from FIST | 2/2 | Complete    | 2026-03-19 |
-| 54. Dimensions Display & Filtering | 3/4 | Complete    | 2026-03-27 |
-| 55. Search Within Results | 3/3 | Complete    | 2026-03-29 |
-| 55.1. Lightweight Browse First-Render | 1/1 | Complete    | 2026-03-29 |
-| 56. Exclude Known Manuscripts | 3/3 | Complete    | 2026-03-29 |
-| 57. FIST Visual Similarity Browse & Search | 2/3 | Complete    | 2026-03-30 |
+**Total milestones shipped:** 13 (through v7.6)
+**Total phases completed:** 57 (Phases 1-57)
+**Total plans completed:** ~192
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-29 after Phase 57 planning (3 plans, 2 waves)*
+*Last updated: 2026-03-31 after v7.6 milestone shipped*
