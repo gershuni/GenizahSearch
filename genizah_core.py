@@ -2045,6 +2045,26 @@ def get_volumes_for_sys_id(sys_id):
     entry = ie_volume_map.get(sys_id, {})
     return entry.get("volumes", [])
 
+
+def resolve_volume_suffix(sys_id, ie_id):
+    """Map an IE identifier to its IIIF manifest suffix for a given sys_id.
+
+    Args:
+        sys_id: NLI system ID
+        ie_id: IE identifier (e.g. 'IE89040977')
+
+    Returns:
+        int: The suffix (1-based) for the IIIF manifest URL, or 1 if not found.
+    """
+    if not ie_id:
+        return 1
+    volumes = get_volumes_for_sys_id(sys_id)
+    for v in volumes:
+        if v['ie_id'] == ie_id:
+            return v['suffix']
+    return 1
+
+
 # ==============================================================================
 #  LOGGING
 # ==============================================================================
@@ -3346,9 +3366,22 @@ class MetadataManager:
         self.nli_cache[system_id] = meta
         return meta
 
-    def fetch_iiif_manifest(self, system_id):
-        """Fetch and parse IIIF manifest for physical description, attribution, and image labels."""
-        url = f"{Config.NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
+    # Separate manifest cache keyed by (sys_id, suffix) — does NOT touch nli_cache
+    _iiif_manifest_cache = {}
+
+    def fetch_iiif_manifest(self, system_id, suffix=1):
+        """Fetch and parse IIIF manifest for physical description, attribution, and image labels.
+
+        Args:
+            system_id: NLI system ID
+            suffix: IE suffix for multi-volume manuscripts (1=primary, 2=second IE, etc.)
+        """
+        # Check manifest-only cache first
+        cache_key = (system_id, suffix)
+        if cache_key in self._iiif_manifest_cache:
+            return self._iiif_manifest_cache[cache_key]
+
+        url = f"{Config.NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
         headers = Config.HTTP_HEADERS
 
         result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
@@ -3384,9 +3417,10 @@ class MetadataManager:
                                 fl_digits = fl_match.group(1)
                                 result['canvas_map'][fl_digits] = label
 
+            self._iiif_manifest_cache[cache_key] = result
             return result
         except Exception as e:
-            LOGGER.warning(f"IIIF fetch failed for {system_id}: {e}")
+            LOGGER.warning(f"IIIF fetch failed for {system_id} (suffix={suffix}): {e}")
             return result
 
     def fetch_marc_data(self, system_id):
@@ -3494,8 +3528,15 @@ class MetadataManager:
             LOGGER.warning(f"MARC fetch failed for {system_id}: {e}")
             return result
 
-    def enrich_metadata(self, system_id):
-        """Fetch extended metadata (IIIF/MARC), build Image List, and merge into cache."""
+    def enrich_metadata(self, system_id, suffix=1):
+        """Fetch extended metadata (IIIF/MARC), build Image List, and merge into cache.
+
+        Args:
+            system_id: NLI system ID
+            suffix: IIIF manifest suffix (1=primary IE, 2+=secondary). When suffix != 1,
+                    only the NLI images change; MARC, external images, and metadata stay
+                    the same. The nli_cache is only updated for suffix=1 (primary).
+        """
         if not system_id: return {}
 
         # Ensure basic meta exists
@@ -3513,7 +3554,7 @@ class MetadataManager:
         # await IIIF results later — allowing IIIF fetch to overlap with external IIIF logic.
         _executor = ThreadPoolExecutor(max_workers=2)
         marc_future = _executor.submit(self.fetch_marc_data, system_id)
-        iiif_future = _executor.submit(self.fetch_iiif_manifest, system_id)
+        iiif_future = _executor.submit(self.fetch_iiif_manifest, system_id, suffix)
         _executor.shutdown(wait=False)  # Don't block; futures continue in background threads
 
         # Await MARC result first (needed for external IIIF logic below)
@@ -3729,6 +3770,21 @@ class MetadataManager:
 
         self.nli_cache[system_id] = current_meta
         return current_meta
+
+    def fetch_volume_manifest(self, system_id, suffix):
+        """Lightweight manifest-only fetch for volume switches (no MARC, no FJMS, no crossref).
+
+        Returns a dict with 'images_nli' list for the requested suffix, suitable for
+        updating ManuscriptViewerWidget without re-running full enrichment.
+        """
+        iiif_data = self.fetch_iiif_manifest(system_id, suffix=suffix)
+        images_nli = []
+        if iiif_data.get('canvas_map'):
+            sorted_map = sorted(iiif_data['canvas_map'].items(), key=lambda x: x[0])
+            for fl_id, label in sorted_map:
+                url = f"{Config.NLI_IIIF_BASE}/FL{fl_id}"
+                images_nli.append({'label': label, 'url': url, 'fl_id': fl_id})
+        return {'images_nli': images_nli, 'suffix': suffix}
 
     def fetch_external_iiif_data(self, view_url):
         """

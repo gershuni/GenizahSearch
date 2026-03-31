@@ -358,19 +358,39 @@ class EnrichMetadataThread(QThread):
     """Fetch extended metadata (IIIF/MARC) in the background."""
     finished_signal = pyqtSignal(str, dict)
 
-    def __init__(self, meta_mgr, system_id):
+    def __init__(self, meta_mgr, system_id, suffix=1):
         super().__init__()
         self.meta_mgr = meta_mgr
         self.system_id = system_id
+        self.suffix = suffix
 
     def run(self):
         try:
             # This method (in genizah_core.py) handles network errors gracefully
-            data = self.meta_mgr.enrich_metadata(self.system_id)
+            data = self.meta_mgr.enrich_metadata(self.system_id, suffix=self.suffix)
             self.finished_signal.emit(self.system_id, data)
         except Exception:
             # If something unexpected happens, just emit empty to avoid hanging
             self.finished_signal.emit(self.system_id, {})
+
+
+class VolumeManifestThread(QThread):
+    """Lightweight manifest-only fetch for volume switches (no full enrichment)."""
+    finished_signal = pyqtSignal(str, str, dict)  # sys_id, ie_id, {images_nli, suffix}
+
+    def __init__(self, meta_mgr, system_id, ie_id, suffix):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.system_id = system_id
+        self.ie_id = ie_id
+        self.suffix = suffix
+
+    def run(self):
+        try:
+            data = self.meta_mgr.fetch_volume_manifest(self.system_id, self.suffix)
+            self.finished_signal.emit(self.system_id, self.ie_id, data)
+        except Exception:
+            self.finished_signal.emit(self.system_id, self.ie_id, {})
 
 
 class ExternalResourceThread(QThread):

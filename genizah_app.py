@@ -333,7 +333,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Search within results to narrow your search. Exclude known manuscripts from results via lists, files, or pasted shelfmarks."))
+        self.lbl_msg.setText(tr("New: Search within results, exclude known manuscripts from search, and Visual Similarity — browse and search similar manuscripts using FJMS visual analysis."))
         self.show()
 
     def on_learn_more(self):
@@ -367,10 +367,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
+            tr('Visual Similarity — a new button in Browse shows similar manuscripts from the Friedberg Project visual algorithm, with similarity score, domain, and library. You can search within the suggestions or add to puzzle.'),
             tr('Search within results — click "Search within N manuscripts" to restrict your next search to the manuscripts found. Works with all search modes.'),
-            tr('Exclude known manuscripts — hide manuscripts you already reviewed from results. Choose from saved lists, upload a file, or paste shelfmarks.'),
-            tr('Resolution report — before applying exclusions, see per-row status: found, not found, or duplicate.'),
-            tr('WYSIWYG export — Excel, CSV, and Word exports include only visible (non-excluded) manuscripts.'),
+            tr('Exclude known manuscripts — hide known manuscripts from search results. Choose from saved lists, upload a file, or paste shelfmarks.'),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "dir='rtl'" if is_heb else ""
@@ -6066,7 +6065,8 @@ class ResultDialog(QDialog):
         self.current_page_text = None
         self.current_page_uid = None
         self.current_internal_idx = None
-        
+        self.current_volume_ie = None  # Active IE for multi-volume manuscripts
+
         self.current_meta_request = 0
         self.extended_info_visible = False
         self.external_url = None
@@ -6314,20 +6314,10 @@ class ResultDialog(QDialog):
         )
         self.btn_rd_translations.toggled.connect(self._rd_toggle_translations)
 
-        # Visual Similarity action button (D-10: ResultDialog context)
-        self.btn_rd_visual_sim = QPushButton(f"🔍 {tr('Visual Similarity')}")
-        self.btn_rd_visual_sim.setToolTip(tr("Visual Similarity"))
-        self.btn_rd_visual_sim.setStyleSheet(
-            "QPushButton { border-radius: 4px; padding: 2px 8px; }"
-        )
-        self.btn_rd_visual_sim.setVisible(False)  # Shown when VS data available
-        self.btn_rd_visual_sim.clicked.connect(self._rd_search_visual_similarity)
-
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_add_to_list)
         action_row.addWidget(self.btn_add_to_puzzle)
-        action_row.addWidget(self.btn_rd_visual_sim)
         action_row.addWidget(self.btn_ext_info)
         action_row.addWidget(self.btn_rd_bib_fjms)
         action_row.addWidget(self.btn_rd_bib_nli)
@@ -6415,6 +6405,15 @@ class ResultDialog(QDialog):
         self.rd_joins_menu.aboutToShow.connect(self._rd_on_joins_menu_show)
         self.btn_joins.setMenu(self.rd_joins_menu)
         community_row.addWidget(self.btn_joins)
+
+        # Visual Similarity button — gentle orange, next to joins
+        self.btn_rd_visual_sim = QPushButton("🔬")
+        self.btn_rd_visual_sim.setToolTip(tr("Visual Similarity"))
+        self.btn_rd_visual_sim.setFixedSize(40, 32)
+        self.btn_rd_visual_sim.setStyleSheet("")
+        self.btn_rd_visual_sim.setVisible(False)
+        self.btn_rd_visual_sim.clicked.connect(self._rd_search_visual_similarity)
+        community_row.addWidget(self.btn_rd_visual_sim)
 
         community_row.addStretch()
 
@@ -6638,12 +6637,33 @@ class ResultDialog(QDialog):
             shelfmark = (result.get('display', {}).get('shelfmark')
                          or result.get('shelfmark')
                          or str(sys_id))
-        # Fetch and show VS dialog (same as browse button)
+        # Fetch and show VS dialog — local DB first, then cache, then server
         try:
             from shared.visual_similarity_service import get_vs_service
             vs_svc = get_vs_service(thread_safe=False)
             if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
                 data = vs_svc.get_suggestions(sys_id, 200)
+                parent._enrich_vs_suggestions(data)
+                parent._show_vs_dialog(sys_id, shelfmark, data, parent_dialog=self)
+                return
+        except Exception:
+            pass
+        # Try cache
+        if not hasattr(parent, '_vs_cache'):
+            parent._vs_cache = DesktopVSCache()
+        cached = parent._vs_cache.get_cached(sys_id)
+        if cached is not None:
+            parent._enrich_vs_suggestions(cached)
+            parent._show_vs_dialog(sys_id, shelfmark, cached, parent_dialog=self)
+            return
+        # Fetch from server
+        try:
+            import urllib.request
+            url = f'{parent._VS_SERVER_URL}/api/visual_suggestions/{sys_id}?limit=200'
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+            if data:
+                parent._vs_cache.store(sys_id, data)
                 parent._enrich_vs_suggestions(data)
                 parent._show_vs_dialog(sys_id, shelfmark, data, parent_dialog=self)
                 return
@@ -7839,6 +7859,7 @@ class ResultDialog(QDialog):
         
         # Parse Meta
         ids = self.meta_mgr.parse_full_id_components(data.get('raw_header', ''))
+        prev_sys_id = self.current_sys_id
         self.current_sys_id = ids['sys_id']
         if not self.current_sys_id:
             # Fallback for tag search results: get sys_id from display dict
@@ -7846,6 +7867,17 @@ class ResultDialog(QDialog):
         self.current_fl_id = ids.get('fl_id')
         try: p = int(ids['p_num'])
         except (ValueError, TypeError, KeyError): p = 1
+
+        # Extract volume_ie from result header for multi-IE manuscripts (Phase 60)
+        ie_from_header = ids.get('ie_id')
+        if self.current_sys_id != prev_sys_id:
+            # New manuscript — reset and re-extract
+            self.current_volume_ie = None
+        if ie_from_header and self.current_sys_id:
+            from genizah_core import get_volumes_for_sys_id
+            volumes = get_volumes_for_sys_id(self.current_sys_id)
+            if len(volumes) > 1:
+                self.current_volume_ie = ie_from_header
 
         # Add to Recently Viewed
         parent = self.parent()
@@ -7930,7 +7962,8 @@ class ResultDialog(QDialog):
                 QMessageBox.warning(self, tr("Error"), tr("Document not found: {}").format(shelfmark))
                 return False
 
-            # Get page data
+            # Get page data (volume_ie reset since navigating by shelfmark)
+            self.current_volume_ie = None
             page_data = self.searcher.get_browse_page(sys_id, p_num=page_num)
             if not page_data:
                 QMessageBox.warning(self, tr("View Error"), tr("Could not load manuscript data."))
@@ -7982,19 +8015,20 @@ class ResultDialog(QDialog):
             # Jump by number (user typed in box)
             try: p = int(target)
             except (ValueError, TypeError): p = 1
-            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0, allow_cross=True)
+            page_data = self.searcher.get_browse_page(self.current_sys_id, p_num=p, next_prev=0, allow_cross=True, volume_ie=self.current_volume_ie)
         else:
             # Relative Navigation (Next/Prev)
             # Use internal index if we have it, otherwise rely on p_num
-            idx_arg = self.current_internal_idx 
+            idx_arg = self.current_internal_idx
             p_arg = int(self.current_p_num) if self.current_p_num is not None else None
-            
+
             page_data = self.searcher.get_browse_page(
-                self.current_sys_id, 
-                p_num=p_arg, 
+                self.current_sys_id,
+                p_num=p_arg,
                 next_prev=offset,
                 absolute_index=idx_arg, # <--- THIS FIXES THE BUG
-                allow_cross=True
+                allow_cross=True,
+                volume_ie=self.current_volume_ie
             )
             
         if not page_data: return
@@ -8002,6 +8036,7 @@ class ResultDialog(QDialog):
         # --- UPDATE STATE ---
         new_sys = page_data.get('sys_id', self.current_sys_id)
         if new_sys and new_sys != self.current_sys_id:
+            self.current_volume_ie = None  # Reset volume on cross-manuscript nav
             self.current_sys_id = new_sys
 
         self.current_p_num = page_data['p_num']
@@ -8588,10 +8623,10 @@ class ResultDialog(QDialog):
                 self.btn_compact_measurements.setVisible(False)
 
         # 3b. Visual Similarity button (D-10: ResultDialog context)
-        try:
-            self.btn_rd_visual_sim.setVisible(True)  # Always show; on-demand fetch if clicked
-        except Exception:
-            pass
+        _parent = self.parent()
+        _vs_has_rd = bool(_parent and hasattr(_parent, 'meta_mgr') and _parent.meta_mgr
+                          and _parent.meta_mgr.csv_bank.get(sid, {}).get('has_vs'))
+        self.btn_rd_visual_sim.setVisible(_vs_has_rd)
 
         # 4. Build Extended Info HTML (Text)
         # Store enrichment meta for translate badge rebuild
@@ -12386,26 +12421,8 @@ class SettingsDialog(QDialog):
             row.addStretch()
             layout.addLayout(row)
 
-        # — Visual Similarity Download —
-        layout.addSpacing(12)
-        layout.addWidget(self._section_label(tr("Download full visual similarity database")))
-        layout.addSpacing(4)
-
-        vs_download_row = QHBoxLayout()
-        vs_download_row.setSpacing(8)
-        self._vs_download_btn = QPushButton(tr("Download full visual similarity database"))
-        self._vs_download_btn.setStyleSheet("background-color: #e65100; color: white; padding: 4px 12px; border-radius: 4px;")
-        self._vs_download_btn.clicked.connect(self._start_vs_download)
-        vs_download_row.addWidget(self._vs_download_btn)
-        self._vs_download_progress = QProgressBar()
-        self._vs_download_progress.setVisible(False)
-        self._vs_download_progress.setFixedWidth(200)
-        vs_download_row.addWidget(self._vs_download_progress)
-        self._vs_download_status = QLabel()
-        self._vs_download_status.setStyleSheet(f"color: {self._muted}; font-size: 11px;")
-        vs_download_row.addWidget(self._vs_download_status)
-        vs_download_row.addStretch()
-        layout.addLayout(vs_download_row)
+        # — Visual Similarity Download — deferred (nginx proxy_max_temp_file_size blocks 1.3GB)
+        # TODO: re-enable after fixing nginx config for large file downloads
 
         layout.addStretch()
         return page
@@ -12824,6 +12841,7 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = None
         self.current_browse_p = None
         self.current_browse_internal_idx = None
+        self.current_browse_volume_ie = None  # Active IE for multi-volume manuscripts (None = default/all)
         self.browse_highlight_data = []
         self.browse_highlight_pattern = None
         # Codicological Parts (Neubauer) browsing state
@@ -14297,29 +14315,36 @@ class GenizahGUI(QMainWindow):
             vs_svc = get_vs_service(thread_safe=False)
             if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
                 data = vs_svc.get_suggestions(sys_id, 200)
-                # Enrich raw suggestions with shelfmark, library_code, domain
                 self._enrich_vs_suggestions(data)
                 self._show_vs_dialog(sys_id, shelfmark, data)
                 return
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            QMessageBox.warning(self, tr("Visual Similarity"), f"Error loading data: {e}")
-            return
+        except Exception:
+            pass
 
         # Try cache
         if not hasattr(self, '_vs_cache'):
             self._vs_cache = DesktopVSCache()
         cached = self._vs_cache.get_cached(sys_id)
         if cached is not None:
+            self._enrich_vs_suggestions(cached)
             self._show_vs_dialog(sys_id, shelfmark, cached)
             return
 
-        # No local data and no cache — show message (server not deployed yet)
-        QMessageBox.information(
-            self, tr("Visual Similarity"),
-            tr("Visual similarity data is not available locally. Please download the database from Settings.")
-        )
+        # Fetch from server (on-demand fallback)
+        try:
+            import urllib.request
+            url = f'{self._VS_SERVER_URL}/api/visual_suggestions/{sys_id}?limit=200'
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+            if data:
+                self._vs_cache.store(sys_id, data)
+                self._enrich_vs_suggestions(data)
+                self._show_vs_dialog(sys_id, shelfmark, data)
+                return
+        except Exception:
+            pass
+
+        QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
 
     def _enrich_vs_suggestions(self, data):
         """Enrich raw VS suggestions with shelfmark, library_code, domain from csv_bank/fjms."""
@@ -16573,6 +16598,13 @@ class GenizahGUI(QMainWindow):
         # Folio images cache for the current manuscript
         self._browse_folio_images = []
 
+        # Volume selector (multi-IE manuscripts)
+        self.combo_browse_volume = QComboBox()
+        self.combo_browse_volume.setEditable(False)
+        self.combo_browse_volume.setFixedWidth(170)
+        self.combo_browse_volume.setVisible(False)
+        self.combo_browse_volume.currentIndexChanged.connect(self._on_browse_volume_changed)
+
         # Image Toggle
         self.btn_b_toggle_img = QPushButton()
         self.btn_b_toggle_img.setText("🖼️")
@@ -16582,12 +16614,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_toggle_img.clicked.connect(self.toggle_browse_image)
         self.btn_b_toggle_img.setEnabled(False)
 
-        # Layout: [< Prev] [Folio Label] [Page Combo] [of N pages] [Next >] [View All] [Save] [Image Toggle]
+        # Layout: [< Prev] [Folio Label] [Page Combo] [of N pages] [Next >] [Volume] [View All] [Save] [Image Toggle]
         nav_bar.addWidget(self.btn_b_prev)
         nav_bar.addWidget(self.lbl_browse_folio)
         nav_bar.addWidget(self.combo_browse_page)
         nav_bar.addWidget(self.lbl_browse_page_count)
         nav_bar.addWidget(self.btn_b_next)
+        nav_bar.addWidget(self.combo_browse_volume)
         nav_bar.addWidget(self.btn_b_all)
         nav_bar.addWidget(self.btn_b_save)
         nav_bar.addWidget(self.btn_b_toggle_img)
@@ -16665,13 +16698,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_joins.setMenu(self.joins_menu)
         community_bar.addWidget(self.btn_b_joins)
 
-        # Visual Similarity button
+        # Visual Similarity button — gentle orange, icon-only like joins button
         self.btn_b_visual_sim = QToolButton()
-        self.btn_b_visual_sim.setText("🔍")
-        self.btn_b_visual_sim.setToolTip(tr("Visual Similarity") + " / דמיון חזותי")
+        self.btn_b_visual_sim.setText("🔬")
+        self.btn_b_visual_sim.setToolTip(tr("Visual Similarity"))
         self.btn_b_visual_sim.setEnabled(False)
         self.btn_b_visual_sim.setFixedSize(40, 32)
-        self.btn_b_visual_sim.setStyleSheet("border-radius: 4px;")
+        self.btn_b_visual_sim.setStyleSheet("")
         self.btn_b_visual_sim.clicked.connect(self._browse_view_visual_similarity)
         community_bar.addWidget(self.btn_b_visual_sim)
 
@@ -17067,16 +17100,22 @@ class GenizahGUI(QMainWindow):
                 except (TypeError, RuntimeError):
                     pass
         gen = self._browse_enrich_gen
-        self._browse_enrich_slot = lambda s, m, g=gen: self.on_browse_enriched_loaded(s, m, g)
-        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid)
+        vol_ie = self.current_browse_volume_ie  # capture at launch time
+        self._browse_enrich_slot = lambda s, m, g=gen, v=vol_ie: self.on_browse_enriched_loaded(s, m, g, v)
+        # Resolve IIIF suffix from volume_ie (1 for primary/single-IE)
+        from genizah_core import resolve_volume_suffix
+        suffix = resolve_volume_suffix(sid, vol_ie) if vol_ie else 1
+        self.enrich_browse_worker = EnrichMetadataThread(self.meta_mgr, sid, suffix=suffix)
         self.enrich_browse_worker.finished_signal.connect(self._browse_enrich_slot)
         self.enrich_browse_worker.start()
 
-    def on_browse_enriched_loaded(self, sid, meta, gen=None):
+    def on_browse_enriched_loaded(self, sid, meta, gen=None, expected_vol_ie=None):
         if not meta: return
         # Generation guard: reject stale enrichment from a previous browse action
         if gen is not None and gen != self._browse_enrich_gen: return
         if sid != self.current_browse_sid: return
+        # Volume guard: if volume_ie changed while enrichment was in flight, drop result
+        if expected_vol_ie is not None and expected_vol_ie != self.current_browse_volume_ie: return
         if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
         # Clear field translation cache for new manuscript
@@ -17190,6 +17229,16 @@ class GenizahGUI(QMainWindow):
             idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_browse_p)
             self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
 
+            # Auto-switch to NLI source when volume_ie is active and external images exist
+            # External images are per-shelfmark (same for all IEs), only NLI varies per volume
+            if self.current_browse_volume_ie and meta.get('images_ext') and meta.get('images_nli'):
+                combo_src = getattr(self.browse_viewer, 'combo_source', None)
+                if combo_src:
+                    for i in range(combo_src.count()):
+                        if 'NLI' in combo_src.itemText(i):
+                            combo_src.setCurrentIndex(i)
+                            break
+
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
         self.btn_b_save.setEnabled(True)
@@ -17208,14 +17257,7 @@ class GenizahGUI(QMainWindow):
 
         # Enable Visual Similarity button if data available
         _vs_has = False
-        try:
-            from shared.visual_similarity_service import get_vs_service
-            _vs_svc = get_vs_service(thread_safe=False)
-            _vs_has = _vs_svc.is_available() and _vs_svc.has_suggestions(sid)
-        except Exception:
-            pass
-        if not _vs_has and hasattr(self, '_vs_cache'):
-            _vs_has = self._vs_cache.has_cached(sid)
+        _vs_has = bool(self.meta_mgr and self.meta_mgr.csv_bank.get(sid, {}).get('has_vs'))
         self.btn_b_visual_sim.setVisible(_vs_has)
         self.btn_b_visual_sim.setEnabled(_vs_has)
 
@@ -19247,6 +19289,7 @@ class GenizahGUI(QMainWindow):
         if checked:
             self.browse_viewer.setVisible(False)
             self.btn_b_toggle_img.setEnabled(False)
+            self.combo_browse_volume.setVisible(False)  # Hide volume selector in View All
             self.browse_load_all()
         else:
             self.btn_b_toggle_img.setEnabled(True)
@@ -19261,13 +19304,98 @@ class GenizahGUI(QMainWindow):
         page_data = self.searcher.get_browse_page(
             self.current_browse_sid,
             absolute_index=index,
-            next_prev=0
+            next_prev=0,
+            volume_ie=self.current_browse_volume_ie
         )
 
         if page_data:
             self.browse_render_page(page_data)
             # Re-fetch PGP sources for the new page (recto/verso may differ)
             self._browse_refresh_pgp_for_page()
+
+    def _on_browse_volume_changed(self, index):
+        """Handle volume selector change — switch to a different IE's pages and images."""
+        if index < 0:
+            return
+        ie_id = self.combo_browse_volume.itemData(index)
+        if not ie_id or ie_id == self.current_browse_volume_ie:
+            return
+        self.current_browse_volume_ie = ie_id
+        # Reload page 1 for the new volume
+        page_data = self.searcher.get_browse_page(
+            self.current_browse_sid, p_num=1, volume_ie=ie_id
+        )
+        if page_data:
+            self.browse_render_page(page_data)
+        # Trigger async image refresh for the new volume (lightweight, no full enrichment)
+        self._refresh_browse_images_for_volume(ie_id)
+
+    def _refresh_browse_images_for_volume(self, ie_id):
+        """Launch lightweight manifest-only worker for volume switch (no full enrichment)."""
+        from genizah_core import resolve_volume_suffix
+        from gui_threads import VolumeManifestThread
+        sid = self.current_browse_sid
+        if not sid:
+            return
+        suffix = resolve_volume_suffix(sid, ie_id)
+        # Bump generation to cancel stale workers
+        self._browse_enrich_gen += 1
+        gen = self._browse_enrich_gen
+        vol_ie = ie_id
+
+        # Disconnect old volume worker if any
+        if hasattr(self, '_volume_manifest_worker') and self._volume_manifest_worker is not None:
+            if hasattr(self, '_volume_manifest_slot') and self._volume_manifest_slot is not None:
+                try:
+                    self._volume_manifest_worker.finished_signal.disconnect(self._volume_manifest_slot)
+                except (TypeError, RuntimeError):
+                    pass
+
+        self._volume_manifest_slot = lambda s, ie, data, g=gen, v=vol_ie: self._on_volume_manifest_loaded(s, ie, data, g, v)
+        self._volume_manifest_worker = VolumeManifestThread(self.meta_mgr, sid, ie_id, suffix)
+        self._volume_manifest_worker.finished_signal.connect(self._volume_manifest_slot)
+        self._volume_manifest_worker.start()
+
+    def _on_volume_manifest_loaded(self, sid, ie_id, data, gen, expected_vol_ie):
+        """Handle volume manifest fetch result — update image viewer with new NLI images."""
+        # Guard: reject stale results
+        if gen != self._browse_enrich_gen:
+            return
+        if sid != self.current_browse_sid:
+            return
+        if expected_vol_ie != self.current_browse_volume_ie:
+            return
+        if not data or not data.get('images_nli'):
+            return
+
+        # Update the cached metadata's NLI images with the new volume's images
+        meta = self.meta_mgr.nli_cache.get(sid, {})
+        if not meta:
+            return
+
+        # Create a copy to avoid polluting the canonical cache for non-primary volumes
+        import copy
+        display_meta = copy.copy(meta)
+        display_meta['images_nli'] = data['images_nli']
+        # If no external images, also update 'images' key
+        if not display_meta.get('images_ext'):
+            display_meta['images'] = data['images_nli']
+
+        # Reload images in viewer
+        if hasattr(self, 'browse_viewer') and not self.browse_reading_desk_active:
+            shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+            folio_num = _get_folio_number_from_shelfmark(shelfmark)
+            idx = _get_initial_image_index(display_meta, folio_num if folio_num is not None else self.current_browse_p)
+            self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
+
+            # Auto-switch to NLI source when volume_ie is active and both sources exist
+            if display_meta.get('images_ext') and display_meta.get('images_nli'):
+                combo_src = getattr(self.browse_viewer, 'combo_source', None)
+                if combo_src:
+                    for i in range(combo_src.count()):
+                        if 'NLI' in combo_src.itemText(i):
+                            combo_src.setCurrentIndex(i)
+                            break
 
     def toggle_browse_image(self):
         visible = self.btn_b_toggle_img.isChecked()
@@ -19296,7 +19424,7 @@ class GenizahGUI(QMainWindow):
         else:
              # Current Page
              if self.current_browse_internal_idx is not None:
-                 pd = self.searcher.get_browse_page(self.current_browse_sid, absolute_index=self.current_browse_internal_idx)
+                 pd = self.searcher.get_browse_page(self.current_browse_sid, absolute_index=self.current_browse_internal_idx, volume_ie=self.current_browse_volume_ie)
                  if pd: text_content = pd['text']
 
         if text_content:
@@ -19328,7 +19456,7 @@ class GenizahGUI(QMainWindow):
         if not self.current_browse_sid: return
 
         p = self.current_browse_p or 1
-        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p)
+        page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p, volume_ie=self.current_browse_volume_ie)
 
         if not page_data:
             self.browse_text.setText(tr("Page not found."))
@@ -27196,6 +27324,17 @@ class GenizahGUI(QMainWindow):
             if title:
                 info_text += f"<br>{title}"
             self.browse_info_lbl.setText(info_text)
+        # Extract IE from raw_header for volume-aware browse (Phase 60)
+        raw_header = res.get('raw_header') or res.get('full_header', '') if isinstance(res, dict) else ''
+        if raw_header and sid:
+            parsed_components = self.meta_mgr.parse_full_id_components(raw_header)
+            ie_from_header = parsed_components.get('ie_id')
+            if ie_from_header:
+                from genizah_core import get_volumes_for_sys_id
+                volumes = get_volumes_for_sys_id(sid)
+                if len(volumes) > 1:
+                    self.current_browse_volume_ie = ie_from_header
+
         if derived_fl_id:
             fl_digits = re.sub(r"\\D", "", str(derived_fl_id))
             self.browse_fl_input.setText(f"FL{fl_digits}" if fl_digits else str(derived_fl_id))
@@ -30706,6 +30845,7 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = sid
         self.current_browse_p = page_data['p_num'] if page_data else None
         self.current_browse_internal_idx = None
+        self.current_browse_volume_ie = None  # Reset volume on new manuscript
 
         # Add to Recently Viewed
         if self.lists_mgr:
@@ -30775,6 +30915,7 @@ class GenizahGUI(QMainWindow):
         self.current_browse_sid = target_sid
         self.current_browse_p = None
         self.current_browse_internal_idx = None
+        self.current_browse_volume_ie = None  # Reset volume for Part navigation
 
         # Update UI fields
         self.browse_sys_input.setText(target_sid)
@@ -30880,11 +31021,12 @@ class GenizahGUI(QMainWindow):
             except (ValueError, TypeError): p_arg = 0
 
         page_data = self.searcher.get_browse_page(
-            self.current_browse_sid, 
-            p_num=p_arg, 
+            self.current_browse_sid,
+            p_num=p_arg,
             next_prev=d,
             absolute_index=idx_arg,
-            allow_cross=True
+            allow_cross=True,
+            volume_ie=self.current_browse_volume_ie
         )
 
         if not page_data:
@@ -30894,6 +31036,7 @@ class GenizahGUI(QMainWindow):
         new_sid = page_data.get('sys_id', self.current_browse_sid)
         is_new_manuscript = new_sid != self.current_browse_sid
         if is_new_manuscript:
+            self.current_browse_volume_ie = None  # Reset volume on cross-manuscript nav
             self.current_browse_sid = new_sid
             self.browse_sys_input.setText(new_sid)
             shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
@@ -30918,11 +31061,20 @@ class GenizahGUI(QMainWindow):
             self.current_browse_sid = pd['sys_id']
 
         self.current_browse_p = pd['p_num']
-        
+
         if 'internal_index' in pd:
             self.current_browse_internal_idx = pd['internal_index']
         else:
             self.current_browse_internal_idx = pd.get('current_idx', 1) - 1
+
+        # Absorb volume_ie from page data (auto-detect IE from page header)
+        page_ie = pd.get('volume_ie') or pd.get('ie_id')
+        if page_ie and not self.current_browse_volume_ie:
+            # Auto-detect on first page load (only set if not already explicitly chosen)
+            from genizah_core import get_volumes_for_sys_id
+            volumes = get_volumes_for_sys_id(self.current_browse_sid or pd.get('sys_id', ''))
+            if len(volumes) > 1:
+                self.current_browse_volume_ie = page_ie
 
         # If we are rendering a page, we are not in View All mode
         if self.btn_b_all.isChecked():
@@ -31079,6 +31231,26 @@ class GenizahGUI(QMainWindow):
             self.lbl_browse_page_count.setVisible(True)
         else:
             self.lbl_browse_page_count.setVisible(False)
+
+        # Update volume selector for multi-IE manuscripts
+        from genizah_core import get_volumes_for_sys_id
+        volumes = get_volumes_for_sys_id(self.current_browse_sid or '')
+        if len(volumes) > 1 and not self.btn_b_all.isChecked():
+            self.combo_browse_volume.blockSignals(True)
+            self.combo_browse_volume.clear()
+            for v in volumes:
+                label = f"\u05DB\u05E8\u05DA {v['suffix']} ({v['page_count']} {tr('pages')})"
+                self.combo_browse_volume.addItem(label, v['ie_id'])
+            # Select current volume
+            active_ie = self.current_browse_volume_ie
+            for i, v in enumerate(volumes):
+                if v['ie_id'] == active_ie:
+                    self.combo_browse_volume.setCurrentIndex(i)
+                    break
+            self.combo_browse_volume.blockSignals(False)
+            self.combo_browse_volume.setVisible(True)
+        else:
+            self.combo_browse_volume.setVisible(False)
 
         # Keep prev/next always enabled for cross-shelfmark navigation
         # browse_navigate already uses allow_cross=True
