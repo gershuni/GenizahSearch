@@ -1,30 +1,32 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.6
-milestone_name: Search Refinement & Scholarly Joins
-status: v7.6 milestone complete
-stopped_at: Completed 57-02 and 57-03 (Task 3 checkpoint pending)
-last_updated: "2026-03-31T04:03:21.754Z"
+milestone: v7.7
+milestone_name: Volume-Aware Browse
+status: Defining requirements
+stopped_at: null
+last_updated: "2026-03-31T08:30:00.000Z"
 progress:
-  total_phases: 12
-  completed_phases: 10
-  total_plans: 33
-  completed_plans: 32
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-15)
+See: .planning/PROJECT.md (updated 2026-03-31)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 57 — FIST joins browse & search mode
+**Current focus:** v7.7 Volume-Aware Browse — defining requirements
 
 ## Current Position
 
-Phase: 57
-Plan: Not started
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-31 — Milestone v7.7 started
 
 ## Performance Metrics
 

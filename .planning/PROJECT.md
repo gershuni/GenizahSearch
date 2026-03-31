@@ -8,6 +8,18 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current Milestone: v7.7 Volume-Aware Browse
+
+**Goal:** Fix multi-IE image/text mismatch by making search→browse→paging IE-aware, so users always see the correct images for the transcription they found.
+
+**Target features:**
+- Search result from any IE → browse opens that specific IE/volume
+- Image and text always match within browse (per-volume IIIF manifest loading)
+- Prev/next navigation stays within the same volume
+- Volume selector ("כרך 1/3") for multi-IE manuscripts
+- No silent fallback to wrong IE when correct IE is known
+- Desktop parity (Phase 2, ships after web)
+
 ## Current State (after v7.6 shipped)
 
 **Shipped:** v7.6 Search Refinement & Scholarly Joins (2026-03-31)
@@ -143,7 +155,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-(None yet -- next milestone TBD)
+(Defined in REQUIREMENTS.md for v7.7 Volume-Aware Browse)
 
 ### Out of Scope
 
@@ -234,4 +246,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-31 after v7.6 Search Refinement & Scholarly Joins milestone shipped*
+*Last updated: 2026-03-31 — v7.7 Volume-Aware Browse milestone started*
