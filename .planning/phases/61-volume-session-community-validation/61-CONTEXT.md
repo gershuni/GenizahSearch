@@ -6,39 +6,47 @@
 <domain>
 ## Phase Boundary
 
-Phase 61 completes the v7.7 milestone with three polish tasks:
-1. Session persistence for volume state (web + desktop)
-2. Community writes (corrections, comments) include IE context
-3. Automated validation of the 907-to-suffix IIIF mapping
+Phase 61 completes the v7.7 milestone. It has two tiers:
 
-All are infrastructure/plumbing — no new UI surfaces or user-facing design decisions.
+**Correctness (must-do):** Community writes (corrections, comments) must include `ie_id` because different volumes contain different text — a correction without IE context can be semantically wrong. Corpus validation must confirm the 907→suffix mapping is reliable.
+
+**Polish (nice-to-have):** Session restore for active volume across refresh/restart.
 
 </domain>
 
 <decisions>
 ## Implementation Decisions
 
-### Session Persistence (URL-02)
-- **D-01:** Web browse session restore should save/restore `volume_ie` alongside existing `sys_id`, `page`, `fl_id` state in NiceGUI user storage
-- **D-02:** Desktop session restore should save/restore `current_browse_volume_ie` in the existing session persistence mechanism (QSettings or JSON)
-- **D-03:** If a restored volume_ie refers to an IE that no longer exists in ie_volume_map, silently fall back to primary IE (no error)
+### Community Writes — Correctness Tier (CW-01, CW-02)
+- **D-01:** Store `ie_id` (stable IE identifier), NOT volume index number. Volume index is display-only and derived from the map.
+- **D-02:** Add nullable `ie_id` TEXT column to corrections and comments tables in Supabase. NULL = primary IE or pre-volume-awareness data.
+- **D-03:** Pass active `volume_ie` from browse/search state through all correction and comment creation functions (web + desktop).
+- **D-04:** Existing corrections/comments without `ie_id` remain valid — no migration needed for old data.
+- **D-05:** If a user submits a correction on a multi-IE manuscript without `ie_id` (edge case), accept it but log a warning — never block the user.
 
-### Community Writes (CW-01, CW-02)
-- **D-04:** Add `ie_id` column to corrections table in Supabase (nullable TEXT, NULL = primary/unknown IE)
-- **D-05:** Pass active `volume_ie` from browse/search state through correction and comment creation functions
-- **D-06:** Desktop corrections client gets same `ie_id` parameter
-- **D-07:** Existing corrections/comments without `ie_id` remain valid — nullable column, no migration needed for old data
+### Corpus Validation — Correctness Tier (VAL-01)
+- **D-06:** Validation script is standalone `scripts/validate_ie_volume_map.py`.
+- **D-07:** Stratified sampling, NOT purely random. Must include:
+  - All 16 heuristic-edge-case manuscripts (if any)
+  - All known problematic cases
+  - Separate strata for: 2-volume, 3-volume, 4+ volume manuscripts
+  - Cases with large page-count gaps between volumes
+- **D-08:** Sample size: ~200-300 manuscripts (larger than originally proposed 100).
+- **D-09:** Output is a structured report (pass/fail per manuscript + summary statistics).
 
-### Corpus Validation (VAL-01)
-- **D-08:** Validation script is a standalone `scripts/validate_ie_volume_map.py` that samples N manuscripts and checks live IIIF manifests
-- **D-09:** Sample size: ~100 multi-IE manuscripts (stratified by library code) — not all 3,193 (would overwhelm NLI API)
-- **D-10:** Validation output is a report file, not a pass/fail gate — informational for manual review
+### Session Restore — Polish Tier (URL-02)
+- **D-10:** Web browse session saves/restores `volume_ie` alongside existing state in NiceGUI user storage.
+- **D-11:** Desktop session saves/restores `current_browse_volume_ie` in existing QSettings mechanism.
+- **D-12:** If restored `volume_ie` is no longer valid (IE removed from map), silently fall back to primary IE.
+- **D-13:** This is lowest priority — implement only if time permits after correctness items.
+
+### Priority Order
+- **D-14:** Correctness first: CW-01/CW-02 (ie_id in writes) → VAL-01 (validation) → URL-02 (session polish).
 
 ### Claude's Discretion
-- Schema details for ie_id column (exact name, constraints)
-- Validation script output format (JSON, CSV, or markdown report)
-- Sampling strategy details (random vs stratified, seed)
-- Whether to add ie_id display to corrections admin view
+- Exact Supabase column name and constraints for ie_id
+- Validation report format (JSON, CSV, or markdown)
+- Whether to surface ie_id in corrections admin view
 
 </decisions>
 
@@ -49,22 +57,22 @@ All are infrastructure/plumbing — no new UI surfaces or user-facing design dec
 
 ### Volume Infrastructure
 - `.planning/REQUIREMENTS.md` — URL-02, CW-01, CW-02, VAL-01 definitions
-- `.planning/phases/60-desktop-volume-aware-browse/60-01-PLAN.md` — Desktop volume implementation
+- `.planning/phases/60-desktop-volume-aware-browse/60-01-PLAN.md` — Desktop volume implementation (resolve_volume_suffix, VolumeManifestThread)
 - `ie_volume_map.json` — The mapping being validated (3,193 entries)
 
-### Session Persistence Patterns
-- `web/pages/browse.py` — Web browse state (BrowseState class, volume_ie field already exists)
-- `genizah_app.py` — Desktop session save/restore (search for `session` and `QSettings`)
-
-### Corrections/Comments
+### Corrections & Comments
 - `web/supabase_client.py:803` — `create_correction()` function signature
 - `shared/corrections_service.py` — Shared corrections service
 - `supabase_corrections_client.py:763` — Desktop `create_correction()`
 - `docs/guides/SUPABASE_GUIDE.md` — Supabase schema documentation
 
+### Session Persistence
+- `web/pages/browse.py` — BrowseState class with `volume_ie` field
+- `genizah_app.py` — Desktop session save/restore (QSettings)
+
 ### Validation
-- `scripts/build_ie_volume_map.py` — Script that built the mapping (understands data structure)
-- `genizah_core.py` — `fetch_iiif_manifest()` with suffix parameter (Task 1 of Phase 60)
+- `scripts/build_ie_volume_map.py` — Script that built the mapping
+- `genizah_core.py` — `fetch_iiif_manifest(sys_id, suffix=N)` for live manifest checks
 
 </canonical_refs>
 
@@ -72,27 +80,28 @@ All are infrastructure/plumbing — no new UI surfaces or user-facing design dec
 ## Existing Code Insights
 
 ### Reusable Assets
-- `BrowseState.volume_ie` already exists in web browse — just needs session persistence wiring
-- `self.current_browse_volume_ie` already exists in desktop browse — needs QSettings save/restore
-- `create_correction()` in both web and desktop already has clear parameter signatures — just add `ie_id`
-- `fetch_iiif_manifest(sys_id, suffix=N)` already works — validation script can reuse it
+- `BrowseState.volume_ie` already exists in web browse — needs session persistence wiring
+- `self.current_browse_volume_ie` exists in desktop — needs QSettings save/restore
+- `create_correction()` in both web and desktop has clear signatures — add `ie_id` param
+- `fetch_iiif_manifest(sys_id, suffix=N)` works — validation script can reuse it
+- `resolve_volume_suffix(sys_id, ie_id)` centralized helper from Phase 60
 
 ### Established Patterns
 - Web session: NiceGUI `app.storage.user` for per-user persistent state
-- Desktop session: QSettings-based save/restore in `save_session()` / `restore_session()`
-- Supabase schema: nullable columns for optional metadata fields (standard pattern)
+- Desktop session: QSettings-based save/restore
+- Supabase schema: nullable columns for optional metadata (standard pattern)
 
 ### Integration Points
-- Web browse `create_browse_page()` — session restore entry point
-- `browse_render_page()` in desktop — where volume state is applied after restore
 - All correction submission paths (web browse, web search, desktop browse, desktop ResultDialog)
+- Comment creation in browse and discoveries
+- Session save/restore entry points in both apps
 
 </code_context>
 
 <specifics>
 ## Specific Ideas
 
-No specific requirements — all three tasks are straightforward infrastructure wiring with clear existing patterns.
+Key insight from external review (Codex): "Different volume = different text. A correction without IE context can be semantically wrong." This elevates CW-01/CW-02 from polish to correctness requirement.
 
 </specifics>
 
