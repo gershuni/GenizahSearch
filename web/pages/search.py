@@ -385,6 +385,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Enrichment data (FJMS + crossref)
             self.fjms_data: Optional[dict] = None
             self.crossref_data: Optional[dict] = None
+            # Volume-aware browse (multi-IE manuscripts)
+            self.volume_ie: Optional[str] = None
             # Highlighted search terms for re-application on version change
             self.highlight_terms: List[str] = []
             # UI element references for in-place updates
@@ -5112,7 +5114,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _img_url = None
             if sys_id:
                 page_idx = max(0, int(display.get('img', '1')) - 1) if display.get('img') else 0
-                _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300"
+                # Add volume suffix for multi-IE manuscripts
+                _thumb_suffix = ''
+                if _card_ie_id:
+                    from genizah_core import get_volumes_for_sys_id as _get_vols
+                    _tvols = _get_vols(sys_id)
+                    if _tvols:
+                        for _tv in _tvols:
+                            if _tv['ie_id'] == _card_ie_id:
+                                if _tv['suffix'] > 1:
+                                    _thumb_suffix = f'&suffix={_tv["suffix"]}'
+                                break
+                _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300{_thumb_suffix}"
                 is_oxford = False
                 try:
                     from web.pages.browse import is_oxford_manuscript
@@ -5348,11 +5361,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             adv_state.current_p_num = initial_p_num
 
+            # Extract volume IE from result header for multi-IE manuscripts
+            adv_state.volume_ie = None
+            if 'raw_header' in result and state.meta_mgr:
+                try:
+                    _parsed_hdr = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                    adv_state.volume_ie = _parsed_hdr.get('ie_id')
+                except Exception:
+                    pass
+
             # Fetch page data asynchronously
             async def fetch_and_render():
                 if adv_state.current_sys_id:
                     page = await run.io_bound(lambda: service.get_browse_page(
-                        adv_state.current_sys_id, p_num=adv_state.current_p_num
+                        adv_state.current_sys_id, p_num=adv_state.current_p_num,
+                        volume_ie=adv_state.volume_ie
                     ))
                     adv_state.current_page = page
                     if page:
@@ -5399,7 +5422,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             target_p_num = p_num if p_num is not None else adv_state.current_p_num
             page = await run.io_bound(lambda: service.get_browse_page(
-                adv_state.current_sys_id, p_num=target_p_num, direction=direction
+                adv_state.current_sys_id, p_num=target_p_num, direction=direction,
+                volume_ie=adv_state.volume_ie
             ))
 
             if page:
@@ -5625,15 +5649,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Determine if Oxford manuscript
             is_oxford = is_oxford_manuscript(shelfmark, library_code)
 
-            # Compute image URL
+            # Compute image URL (with volume suffix for multi-IE manuscripts)
             has_image = bool(sys_id)
             page_idx = max(0, current_p_num - 1)
+            _vol_suffix = 1
+            if ie_id and sys_id:
+                from genizah_core import get_volumes_for_sys_id
+                _vols = get_volumes_for_sys_id(sys_id)
+                if _vols:
+                    for _v in _vols:
+                        if _v['ie_id'] == ie_id:
+                            _vol_suffix = _v['suffix']
+                            break
             if is_oxford and sys_id:
                 img_url = get_oxford_direct_image_url(shelfmark, page_idx)
                 if not img_url:
                     img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
             elif sys_id:
-                img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}"
+                _suffix_param = f'&suffix={_vol_suffix}' if _vol_suffix > 1 else ''
+                img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}{_suffix_param}"
             else:
                 img_url = None
 

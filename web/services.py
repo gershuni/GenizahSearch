@@ -435,6 +435,17 @@ class GenizahService:
             # Default NLI attribution (Phase B will refine if needed)
             attribution = _NLI_HE if get_language() == 'he' else _NLI_EN
 
+            # Volume info for multi-IE manuscripts
+            from genizah_core import get_volumes_for_sys_id, _extract_ie_from_header
+            volumes = get_volumes_for_sys_id(actual_sys_id)
+            active_ie = result.get('volume_ie') or _extract_ie_from_header(result.get('full_header', ''))
+            volume_suffix = 1
+            if volumes and active_ie:
+                for v in volumes:
+                    if v['ie_id'] == active_ie:
+                        volume_suffix = v['suffix']
+                        break
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -453,6 +464,10 @@ class GenizahService:
                 is_oxford=is_oxford,
                 library_code=library_code,
                 library_name=library_name,
+                volume_ie=active_ie,
+                volume_suffix=volume_suffix,
+                volume_count=len(volumes) if volumes else 1,
+                volumes=volumes,
             )
         except Exception as e:
             logger.error("Browse page by FL error: %s", e)

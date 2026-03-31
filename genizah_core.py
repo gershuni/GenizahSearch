@@ -7844,6 +7844,39 @@ class SearchEngine:
         if not fl_digits:
             return None
 
+        def _build_fl_result(sid, all_pages, page, idx):
+            """Build result dict with volume-aware page count and IE info."""
+            text = self.get_full_text_by_id(page['uid'])
+            ie_id = page.get('ie_id') or _extract_ie_from_header(page.get('full_header', ''))
+            # For multi-IE manuscripts, filter to the page's IE for correct page count
+            if ie_id:
+                volume_pages = get_volume_pages(all_pages, ie_id)
+                if volume_pages:
+                    # Recompute index within the volume's pages
+                    vol_idx = next((i for i, p in enumerate(volume_pages) if p['uid'] == page['uid']), 0)
+                    return {
+                        'uid': page['uid'],
+                        'p_num': page['p_num'],
+                        'full_header': page['full_header'],
+                        'text': text,
+                        'total_pages': len(volume_pages),
+                        'current_idx': vol_idx + 1,
+                        'sys_id': sid,
+                        'fl_id': fl_digits,
+                        'volume_ie': ie_id,
+                    }
+            return {
+                'uid': page['uid'],
+                'p_num': page['p_num'],
+                'full_header': page['full_header'],
+                'text': text,
+                'total_pages': len(all_pages),
+                'current_idx': idx + 1,
+                'sys_id': sid,
+                'fl_id': fl_digits,
+                'volume_ie': ie_id,
+            }
+
         # Try O(1) index lookup first
         if self._fl_id_index is not None:
             candidates = self._fl_id_index.get(fl_digits, [])
@@ -7854,17 +7887,7 @@ class SearchEngine:
                 sid, idx = candidates[0]
                 if sid in browse_map and idx < len(browse_map[sid]):
                     page = browse_map[sid][idx]
-                    text = self.get_full_text_by_id(page['uid'])
-                    return {
-                        'uid': page['uid'],
-                        'p_num': page['p_num'],
-                        'full_header': page['full_header'],
-                        'text': text,
-                        'total_pages': len(browse_map[sid]),
-                        'current_idx': idx + 1,
-                        'sys_id': sid,
-                        'fl_id': fl_digits
-                    }
+                    return _build_fl_result(sid, browse_map[sid], page, idx)
 
         # Fallback: linear scan (index not yet ready or FL ID not found in index)
         sys_candidates = [sys_id] if sys_id else list(browse_map.keys())
@@ -7877,17 +7900,7 @@ class SearchEngine:
                 parsed = self.meta_mgr.parse_full_id_components(page.get('full_header', ''))
                 page_fl = re.sub(r"\D", "", str(parsed.get('fl_id') or ""))
                 if page_fl and page_fl == fl_digits:
-                    text = self.get_full_text_by_id(page['uid'])
-                    return {
-                        'uid': page['uid'],
-                        'p_num': page['p_num'],
-                        'full_header': page['full_header'],
-                        'text': text,
-                        'total_pages': len(pages),
-                        'current_idx': idx + 1,
-                        'sys_id': sid,
-                        'fl_id': fl_digits
-                    }
+                    return _build_fl_result(sid, pages, page, idx)
         return None
 
     def get_adjacent_sys_id_by_file_order(self, current_sys_id, offset):
