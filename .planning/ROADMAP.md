@@ -15,6 +15,7 @@
 - **v7.0.0 Fragment Puzzle** -- Phases 47-52 (shipped 2026-03-17)
 - **v7.1.0 FIST Gap Fill** -- Phase 53 (shipped 2026-03-19)
 - **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (shipped 2026-03-31)
+- **v7.7 Volume-Aware Browse** -- Phases 58-59
 
 ## Phases
 
@@ -165,6 +166,41 @@ lightweight browse first-render. 14/14 requirements satisfied.
 
 </details>
 
+### v7.7 Volume-Aware Browse (Phases 58-59)
+
+**Goal:** Fix multi-IE image/text mismatch by making search→browse→paging IE-aware.
+
+**Scope:** Web only (desktop deferred to v2). 3,193 affected manuscripts (1.5%).
+
+#### Phase 58 — IE Volume Data Infrastructure
+
+**Goal:** Per-IE page data exists so browse can address each IE independently.
+
+**Requirements:** DATA-01, DATA-02, DATA-03, REG-02, REG-04
+
+**Success Criteria:**
+1. `ie_volume_map.json` contains IE-to-IIIF-suffix mapping for all 3,193 multi-IE manuscripts (from MARC 907 field order)
+2. `browse_map` provides per-IE page lists — no cross-IE dedup — so each IE's pages are independently addressable
+3. Single-IE manuscripts produce identical browse_map output as before (zero regression)
+4. Tantivy index and desktop app are completely untouched
+
+**Key files:** `scripts/build_primary_ie_map.py`, `genizah_core.py:1906` (`dedupe_browse_map`), `primary_ie_map.json`
+
+#### Phase 59 — Volume-Aware Web Browse
+
+**Goal:** Users always see matching text and images for multi-IE manuscripts.
+
+**Requirements:** NAV-01, NAV-02, NAV-03, IMG-01, IMG-02, IMG-03, PAG-01–PAG-05, REG-01, REG-03
+
+**Success Criteria:**
+1. Clicking a search result from IE X opens browse showing IE X's images and text
+2. Image and displayed text always belong to the same IE — no mismatch
+3. Prev/next stays within active IE; page count reflects that IE only
+4. Multi-IE manuscripts show a simple volume dropdown (IE label + page count); single-IE show no selector
+5. All single-IE browse/search/URL/session and community features unchanged
+
+**Key files:** `web/api.py:322` (`fetch_fl_ids_from_nli`), `web/pages/browse.py:481` (`BrowseState`), `web/services.py:97` (`BrowsePage`), `genizah_core.py:7682` (`get_browse_page`)
+
 ## Progress
 
 **Total milestones shipped:** 13 (through v7.6)
@@ -173,4 +209,4 @@ lightweight browse first-render. 14/14 requirements satisfied.
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-31 after v7.6 milestone shipped*
+*Last updated: 2026-03-31 after v7.7 milestone roadmap added*
