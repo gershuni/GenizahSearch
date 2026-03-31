@@ -7729,7 +7729,8 @@ class ResultDialog(QDialog):
                         notes=notes,
                         shelfmark=self.lbl_shelf.text(),
                         system_id=self.current_sys_id,
-                        status='pending'
+                        status='pending',
+                        ie_id=getattr(self, 'current_volume_ie', None)
                     )
                     if correction:
                         QMessageBox.information(self, tr("Correction Submitted"),
@@ -7752,7 +7753,8 @@ class ResultDialog(QDialog):
                     shelfmark=self.lbl_shelf.text(),
                     system_id=self.current_sys_id,
                     status='pending' if submit else 'draft',
-                    save_as_draft=not submit  # Don't auto-submit when saving as draft
+                    save_as_draft=not submit,  # Don't auto-submit when saving as draft
+                    ie_id=getattr(self, 'current_volume_ie', None)
                 )
                 if correction:
                     if submit:
@@ -13741,7 +13743,8 @@ class GenizahGUI(QMainWindow):
                         notes=notes,
                         shelfmark=shelfmark,
                         system_id=doc_id,
-                        status='pending'
+                        status='pending',
+                        ie_id=self.current_browse_volume_ie
                     )
                     if correction:
                         QMessageBox.information(
@@ -13766,7 +13769,8 @@ class GenizahGUI(QMainWindow):
                     shelfmark=shelfmark,
                     system_id=doc_id,
                     status='pending' if submit else 'draft',
-                    save_as_draft=not submit  # Don't auto-submit when saving as draft
+                    save_as_draft=not submit,  # Don't auto-submit when saving as draft
+                    ie_id=self.current_browse_volume_ie
                 )
                 if correction:
                     if submit:

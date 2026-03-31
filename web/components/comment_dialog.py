@@ -24,7 +24,8 @@ def create_comment_dialog(
     document_id: str,
     page_number: Optional[int] = None,
     shelfmark: str = "",
-    on_submit: Optional[Callable] = None
+    on_submit: Optional[Callable] = None,
+    ie_id: str = None
 ):
     """
     Create a comment submission dialog.
@@ -217,7 +218,8 @@ def create_comment_dialog(
                         content=comment_text.value.strip(),
                         page_number=comment_page,
                         scope=scope_select.value,
-                        is_public=not private_check.value
+                        is_public=not private_check.value,
+                        ie_id=ie_id
                     )
 
                     if "error" in result:
@@ -247,7 +249,8 @@ def create_comment_button(
     page_number: Optional[int] = None,
     shelfmark: str = "",
     on_submit: Optional[Callable] = None,
-    size: str = "sm"
+    size: str = "sm",
+    ie_id: str = None
 ):
     """
     Create a comment button that opens the comment dialog.
@@ -267,7 +270,8 @@ def create_comment_button(
             document_id=document_id,
             page_number=page_number,
             shelfmark=shelfmark,
-            on_submit=on_submit
+            on_submit=on_submit,
+            ie_id=ie_id
         )
         dialog.open()
 

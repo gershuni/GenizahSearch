@@ -1878,7 +1878,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     original_text=state.original_edit_text,
                     corrected_text=state.edit_text,
                     notes=state.edit_notes if state.edit_notes else '',
-                    status=status
+                    status=status,
+                    ie_id=state.volume_ie
                 )
         except Exception as e:
             ui.notify(f'{tr("Error")}: {e}', type='negative')
@@ -1929,7 +1930,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 original_text=state.original_edit_text,
                 corrected_text=state.edit_text,
                 notes=state.edit_notes if state.edit_notes else '',
-                status='draft'
+                status='draft',
+                ie_id=state.volume_ie
             )
 
         if "error" in result:
@@ -4294,7 +4296,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
                                     shelfmark=page.shelfmark or page.sys_id,
-                                    on_submit=refresh_notes_after_comment
+                                    on_submit=refresh_notes_after_comment,
+                                    ie_id=state.volume_ie
                                 )
                                 create_notes_button(
                                     document_id=page.sys_id,
