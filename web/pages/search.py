@@ -2191,6 +2191,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Phase 55: Clear refinement chain
         _clear_refinement_chain()
         search_within_btn.set_visibility(False)
+        # Phase 56: Clear exclusion sources
+        search_state.exclusion_sources = []
+        _update_exclude_btn()
+        _set_btn_visible(exclude_btn, False)
         # Reset persistent storage to clean defaults (use explicit values, not None or pop)
         app.storage.user['search_results'] = []
         app.storage.user['search_query'] = ''
@@ -2198,6 +2202,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         app.storage.user['domain_exclusions'] = []
         app.storage.user['search_printed_filter'] = 'all'
         app.storage.user['word_search_excluded_ids'] = []
+        app.storage.user['search_exclusion_sources'] = []
         ui.notify(tr('Search reset'), type='info', timeout=2000)
 
     # === Bulk Operations ===
@@ -3396,6 +3401,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.icon('person_remove').classes('text-xl').style('color: white !important;')
                     ui.label(tr('Exclude manuscripts')).classes('text-lg font-bold').style('color: white !important;')
                 ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
+
+            # Show currently active exclusion sources with remove buttons
+            if search_state.exclusion_sources:
+                active_container = ui.column().classes('w-full px-4 pt-3 pb-1 gap-1')
+                with active_container:
+                    ui.label(tr('Active exclusions')).classes('text-xs font-bold text-red-600')
+                    for src in list(search_state.exclusion_sources):
+                        with ui.row().classes('w-full items-center gap-2'):
+                            ui.icon('block', size='xs').classes('text-red-400')
+                            ui.label(f"{src.label} ({len(src.sys_ids)})").classes('text-sm flex-grow')
+                            def _make_dlg_remove(s=src):
+                                def _remove():
+                                    _remove_exclusion_source(s)
+                                    dlg.close()
+                                    ui.notify(f"{tr('Removed')}: {s.label}", type='info')
+                                return _remove
+                            ui.button(icon='delete', on_click=_make_dlg_remove()).props(
+                                'flat round dense size=sm color=red'
+                            ).tooltip(tr('Remove'))
+                    def _clear_all_exclusions():
+                        search_state.exclusion_sources = []
+                        persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        _apply_manuscript_exclusions()
+                        _update_exclude_btn()
+                        dlg.close()
+                        ui.notify(tr('All exclusions cleared'), type='info')
+                    ui.button(tr('Clear all'), icon='delete_sweep', on_click=_clear_all_exclusions).props(
+                        'flat dense no-caps color=red size=sm'
+                    ).classes('self-end')
+                ui.separator()
 
             with ui.tabs().classes('w-full') as tabs:
                 tab_paste = ui.tab(tr('Paste Shelfmarks'), icon='content_paste')
@@ -5014,14 +5049,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Browse
                 if sys_id:
                     _card_fl_id = None
+                    _card_ie_id = None
                     if 'raw_header' in result and state.meta_mgr:
                         try:
-                            _card_fl_id = state.meta_mgr.parse_full_id_components(result['raw_header']).get('fl_id')
+                            _parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                            _card_fl_id = _parsed.get('fl_id')
+                            _card_ie_id = _parsed.get('ie_id')
                         except Exception:
                             pass
                     _card_browse_url = f'/browse?sys_id={sys_id}'
                     if _card_fl_id:
                         _card_browse_url += f'&fl_id={_card_fl_id}'
+                    if _card_ie_id:
+                        _card_browse_url += f'&volume_ie={_card_ie_id}'
                     with ui.link(target=_card_browse_url).classes('no-underline'):
                         ui.button(icon='menu_book').props('flat round dense size=sm color=green').tooltip(tr('Browse Full Manuscript'))
 
@@ -5570,12 +5610,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 except Exception as pgp_err:
                     logger.error(f"Advanced View: Failed to fetch PGP transcription: {pgp_err}")
 
-            # Extract FL ID
+            # Extract FL ID and IE ID from header
             fl_id = adv_state.current_fl_id
-            if not fl_id and 'raw_header' in result and state.meta_mgr:
+            ie_id = None
+            if 'raw_header' in result and state.meta_mgr:
                 try:
                     parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
-                    fl_id = parsed.get('fl_id')
+                    if not fl_id:
+                        fl_id = parsed.get('fl_id')
+                    ie_id = parsed.get('ie_id')
                 except Exception:
                     pass
 
@@ -5675,6 +5718,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 browse_url = f'/browse?sys_id={sys_id}'
                                 if fl_id:
                                     browse_url += f'&fl_id={fl_id}'
+                                if ie_id:
+                                    browse_url += f'&volume_ie={ie_id}'
                                 # Use ui.link for full page reload to ensure browse page recreates with PGP data
                                 with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
                                     ui.button(icon='menu_book').props('flat round size=sm')
@@ -5809,6 +5854,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     browse_url = f'/browse?sys_id={sys_id}'
                                     if fl_id:
                                         browse_url += f'&fl_id={fl_id}'
+                                    if ie_id:
+                                        browse_url += f'&volume_ie={ie_id}'
                                     with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
                                         ui.button(icon='menu_book').props('flat round size=sm color=green')
 

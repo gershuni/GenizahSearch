@@ -7742,7 +7742,7 @@ class SearchEngine:
             'metadata_only': True,
         }
 
-    def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None, allow_cross=False):
+    def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None, allow_cross=False, volume_ie=None):
         browse_map = self._load_browse_map()
         if not browse_map:
             return self._get_metadata_only_browse_page(sys_id)
@@ -7753,9 +7753,20 @@ class SearchEngine:
 
         if sys_id not in browse_map:
             return self._get_metadata_only_browse_page(sys_id)
-        pages = browse_map[sys_id]
-        if not pages:
+        all_pages = browse_map[sys_id]
+        if not all_pages:
             return self._get_metadata_only_browse_page(sys_id)
+
+        # Filter to specific IE for multi-IE manuscripts
+        active_ie = volume_ie
+        if volume_ie:
+            pages = get_volume_pages(all_pages, volume_ie)
+            if not pages:
+                # Requested IE not found — fall back to all pages
+                pages = all_pages
+                active_ie = None
+        else:
+            pages = all_pages
         
         target_idx = -1
 
@@ -7811,14 +7822,15 @@ class SearchEngine:
         text = self.get_full_text_by_id(target_page['uid'])
         
         return {
-            'uid': target_page['uid'], 
+            'uid': target_page['uid'],
             'p_num': target_page['p_num'],
-            'full_header': target_page['full_header'], 
+            'full_header': target_page['full_header'],
             'text': text,
-            'total_pages': len(pages), 
+            'total_pages': len(pages),
             'current_idx': new_idx + 1, # Display is 1-based
             'internal_index': new_idx,  # 0-based for logic (NEW)
-            'sys_id': sys_id
+            'sys_id': sys_id,
+            'volume_ie': active_ie or target_page.get('ie_id'),
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):

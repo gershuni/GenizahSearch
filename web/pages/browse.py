@@ -519,6 +519,8 @@ class BrowseState:
         self.reading_desk_entries: list = []
         # Each entry: {sys_id, shelfmark, pages: [{p_num, text, full_header, fl_id}], sources: [], pgp_doc: {}}
         self.reading_desk_selected_sources: dict = {}  # sys_id -> selected source index
+        # Volume-aware browse (multi-IE manuscripts)
+        self.volume_ie: Optional[str] = None  # Active IE; None = default (all pages)
         # Source switching state: 'nli' (default), 'cambridge', 'manchester', or 'jts'
         self.active_source: str = 'nli'
         self.source_user_override: bool = False  # True when user explicitly clicked a source button
@@ -539,7 +541,7 @@ class BrowseState:
 _crossref_cache: Dict[str, dict] = {}
 
 
-def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None):
+def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None):
     """Create the professional manuscript viewer page UI."""
     state = BrowseState()
     service = get_service()
@@ -561,6 +563,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     if initial_sys_id:
         state.sys_id = initial_sys_id
+    if initial_volume_ie:
+        state.volume_ie = initial_volume_ie
     if highlight:
         state.highlight_terms = highlight
 
@@ -583,6 +587,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         params = {'sys_id': state.sys_id}
         if page.p_num and page.p_num > 0:
             params['page'] = page.p_num
+        if state.volume_ie:
+            params['volume_ie'] = state.volume_ie
         if _url_state['highlight']:
             params['highlight'] = _url_state['highlight']
         qs = urlencode(params)
@@ -630,6 +636,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.reading_desk_entries = []
                 state.active_source = 'nli'
                 state.source_user_override = False
+                state.volume_ie = None  # Reset volume when navigating to new manuscript
                 enrichment_refs.clear()
                 await load_page(p_num=1)
                 return
@@ -661,6 +668,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.reading_desk_entries = []
                 state.active_source = 'nli'  # Reset image source for new manuscript
                 state.source_user_override = False
+                state.volume_ie = None  # Reset volume when navigating to new manuscript
                 enrichment_refs.clear()  # Prevent stale ref usage
                 await load_page(p_num=1)  # Always start at page 1 for new manuscript
             else:
@@ -704,6 +712,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         state.reading_desk_entries = []
                         state.active_source = 'nli'  # Reset image source for new manuscript
                         state.source_user_override = False
+                        state.volume_ie = None  # Reset volume for new manuscript
                         enrichment_refs.clear()  # Prevent stale ref usage
                         dialog.close()
                         await load_page(p_num=1)
@@ -779,19 +788,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             _sys_id = state.sys_id
             _current_p_num = state.current_page.p_num if state.current_page else None
 
+            _volume_ie = state.volume_ie
+
             def _fetch_page():
                 if fl_id:
                     return service.get_browse_page_by_fl(fl_id, sys_id=_sys_id)
                 elif p_num is not None:
-                    return service.get_browse_page(_sys_id, p_num=p_num)
+                    return service.get_browse_page(_sys_id, p_num=p_num, volume_ie=_volume_ie)
                 elif _current_p_num is not None:
                     return service.get_browse_page(
                         _sys_id,
                         p_num=_current_p_num,
-                        direction=direction
+                        direction=direction,
+                        volume_ie=_volume_ie,
                     )
                 else:
-                    return service.get_browse_page(_sys_id, p_num=1)
+                    return service.get_browse_page(_sys_id, p_num=1, volume_ie=_volume_ie)
 
             page = await run.io_bound(_fetch_page)
 
@@ -803,6 +815,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.current_page = page
                 state.page_input_value = page.p_num
                 state.error = None
+                # Update volume_ie from the loaded page (auto-detect if not set)
+                if page.volume_ie:
+                    state.volume_ie = page.volume_ie
 
                 # Save position to storage for persistence
                 try:
@@ -1384,6 +1399,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 state.full_manuscript = []
                 state.reading_desk_entries = []
                 state.active_source = 'nli'  # Reset image source for new manuscript
+                state.volume_ie = None  # Reset volume for new manuscript
                 state.source_user_override = False
                 enrichment_refs.clear()  # Prevent stale ref usage across navigations
                 await load_page(p_num=1)  # Load first page of new manuscript
@@ -3927,7 +3943,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # This works reliably for all collections (Cambridge, Russian, etc.)
                     # Direct browser requests to NLI are blocked for some collections
                     has_image = True
-                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{cache_bust_api}"
+                    _suffix_param = f'&suffix={page.volume_suffix}' if page.volume_suffix > 1 else ''
+                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{_suffix_param}{cache_bust_api}"
                     fallback_url = None
 
                 # External source override: if user switched to Cambridge/Manchester/JTS and images are available
@@ -4146,6 +4163,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                         # Spacer
                         ui.element('div').classes('flex-grow')
+
+                        # -- Volume selector for multi-IE manuscripts --
+                        if page.volume_count > 1 and page.volumes:
+                            _vol_options = {}
+                            for _v in page.volumes:
+                                _label = f"{tr('Volume')} {_v['suffix']} ({_v['page_count']} {tr('Pages').lower()})"
+                                _vol_options[_v['ie_id']] = _label
+                            _vol_current = page.volume_ie or page.volumes[0]['ie_id']
+
+                            def _handle_volume_change(e):
+                                new_ie = e.value
+                                if new_ie and new_ie != state.volume_ie:
+                                    state.volume_ie = new_ie
+                                    asyncio.ensure_future(load_page(p_num=1))
+
+                            ui.select(
+                                options=_vol_options,
+                                value=_vol_current,
+                                on_change=_handle_volume_change,
+                            ).classes('w-48').props('dense outlined color=orange').tooltip(
+                                tr('This manuscript has multiple volumes (IEs)')
+                            )
 
                         # -- Right group: navigation, full manuscript, star --
                         with ui.row().classes('items-center gap-1'):

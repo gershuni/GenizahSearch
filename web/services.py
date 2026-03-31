@@ -125,6 +125,11 @@ class BrowsePage:
     external_provider: str = ''  # Which library provided images_ext: 'manchester', 'jts', or '' (Cambridge)
     physical_metadata: Optional[Dict] = None  # {material, num_folio, num_bifolio, size} from NLI crossref
     library_viewer_url: Optional[Dict] = None  # {url, label, library_abbrev} for holding library link
+    # Volume-aware browse (multi-IE manuscripts)
+    volume_ie: Optional[str] = None  # Active IE identifier (e.g. 'IE89040977')
+    volume_suffix: int = 1  # IIIF manifest suffix for active IE (1=primary)
+    volume_count: int = 1  # Total number of volumes/IEs for this manuscript
+    volumes: List[Dict] = field(default_factory=list)  # [{ie_id, suffix, page_count}, ...]
 
 @dataclass
 class DocumentPage:
@@ -288,12 +293,16 @@ class GenizahService:
             logger.error("Search by shelfmark error: %s", e)
             return [], False
 
-    def get_browse_page(self, sys_id: str, p_num: Optional[int] = None, direction: int = 0, absolute_index: Optional[int] = None, allow_cross: bool = False) -> Optional[BrowsePage]:
-        """Phase A (hot path): Tantivy + csv_bank only. No SQLite/crossref calls."""
+    def get_browse_page(self, sys_id: str, p_num: Optional[int] = None, direction: int = 0, absolute_index: Optional[int] = None, allow_cross: bool = False, volume_ie: Optional[str] = None) -> Optional[BrowsePage]:
+        """Phase A (hot path): Tantivy + csv_bank only. No SQLite/crossref calls.
+
+        Args:
+            volume_ie: If set, navigate within this IE's pages only (for multi-IE manuscripts).
+        """
         if not self.is_ready: return None
         try:
             result = state.searcher.get_browse_page(
-                sys_id, p_num=p_num, next_prev=direction, absolute_index=absolute_index, allow_cross=allow_cross
+                sys_id, p_num=p_num, next_prev=direction, absolute_index=absolute_index, allow_cross=allow_cross, volume_ie=volume_ie
             )
             if not result: return None
 
@@ -318,6 +327,17 @@ class GenizahService:
             # Default NLI attribution (Phase B will refine if needed)
             attribution = _NLI_HE if get_language() == 'he' else _NLI_EN
 
+            # Volume info for multi-IE manuscripts
+            from genizah_core import get_volumes_for_sys_id, _extract_ie_from_header
+            volumes = get_volumes_for_sys_id(actual_sys_id)
+            active_ie = result.get('volume_ie') or _extract_ie_from_header(result.get('full_header', ''))
+            volume_suffix = 1
+            if volumes and active_ie:
+                for v in volumes:
+                    if v['ie_id'] == active_ie:
+                        volume_suffix = v['suffix']
+                        break
+
             return BrowsePage(
                 uid=result.get('uid', ''),
                 p_num=result.get('p_num', 0),
@@ -336,6 +356,10 @@ class GenizahService:
                 is_oxford=is_oxford,
                 library_code=library_code,
                 library_name=library_name,
+                volume_ie=active_ie,
+                volume_suffix=volume_suffix,
+                volume_count=len(volumes) if volumes else 1,
+                volumes=volumes,
             )
         except Exception as e:
             logger.error("Browse page error: %s", e)

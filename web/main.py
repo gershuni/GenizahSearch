@@ -415,7 +415,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('New: Search within results to narrow your search. Exclude known manuscripts from results via lists, files, or pasted shelfmarks.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('New: Search within results, exclude known manuscripts from search, and Visual Similarity — browse and search similar manuscripts using FJMS visual analysis.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()
@@ -873,7 +873,7 @@ def parallels_page_route(text: str = None):
         create_parallels_page(initial_text=text)
 
 @ui.page('/browse', title='Manuscript Browser | עיון בכתב יד — Dicta Genizah Search')
-def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None):
+def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None):
     set_current_page('/browse')
     # Dynamic metadata for manuscript pages when sys_id is provided
     if sys_id:
@@ -910,7 +910,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     content = create_layout()
     with content:
         from web.pages.browse import create_browse_page
-        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None)
+        create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie)
 
 @ui.page('/catalog-browse', title='Catalog Browse | עיון בקטלוג — Dicta Genizah Search')
 def catalog_browse_page_route(

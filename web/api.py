@@ -319,8 +319,13 @@ def init_api_routes():
             cache_time_snapshot = dict(_nli_cache_time)
         _save_nli_persistent_cache(cache_snapshot, cache_time_snapshot)
 
-    def fetch_fl_ids_from_nli(system_id: str) -> list:
+    def fetch_fl_ids_from_nli(system_id: str, suffix: int = 1) -> list:
         """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached.
+
+        Args:
+            system_id: NLI system ID
+            suffix: IIIF manifest suffix (1=primary IE, 2=second IE, etc.)
+                    Maps to MARC 907 field order. Default 1 for single-IE manuscripts.
 
         Resolution order:
         1. In-memory cache — includes negative entries to avoid retrying failures (fastest)
@@ -330,11 +335,13 @@ def init_api_routes():
         """
         import time as _time
 
+        cache_key = f"{system_id}:{suffix}" if suffix != 1 else system_id
+
         # Check cache first (both positive and negative entries)
         with _nli_cache_lock:
-            cached_present = system_id in _nli_cache
-            cached_val = _nli_cache.get(system_id)
-            cache_age = _time.time() - _nli_cache_time.get(system_id, 0)
+            cached_present = cache_key in _nli_cache
+            cached_val = _nli_cache.get(cache_key)
+            cache_age = _time.time() - _nli_cache_time.get(cache_key, 0)
         if cached_present:
             if cached_val is _NLI_FAIL_SENTINEL:
                 # Negative cache: return empty if still within cooldown
@@ -347,23 +354,25 @@ def init_api_routes():
         # Acquire semaphore to cap concurrent NLI requests
         acquired = _nli_semaphore.acquire(timeout=NLI_SEMAPHORE_TIMEOUT)
         if not acquired:
-            logger.warning(f"NLI semaphore timeout for {system_id} — too many concurrent fetches")
+            logger.warning(f"NLI semaphore timeout for {cache_key} — too many concurrent fetches")
             return []
         try:
-            return _fetch_fl_ids_network(system_id)
+            return _fetch_fl_ids_network(system_id, suffix)
         finally:
             _nli_semaphore.release()
 
-    def _fetch_fl_ids_network(system_id: str) -> list:
+    def _fetch_fl_ids_network(system_id: str, suffix: int = 1) -> list:
         """Network fetch for FL IDs (called under semaphore)."""
         import time as _time
+
+        cache_key = f"{system_id}:{suffix}" if suffix != 1 else system_id
 
         # Re-check cache after acquiring semaphore (another thread may have resolved it
         # or stored a negative entry while we were waiting)
         with _nli_cache_lock:
-            cached_present = system_id in _nli_cache
-            cached_val = _nli_cache.get(system_id)
-            cache_age = _time.time() - _nli_cache_time.get(system_id, 0)
+            cached_present = cache_key in _nli_cache
+            cached_val = _nli_cache.get(cache_key)
+            cache_age = _time.time() - _nli_cache_time.get(cache_key, 0)
         if cached_present:
             if cached_val is _NLI_FAIL_SENTINEL:
                 if cache_age < NLI_FAIL_CACHE_TTL:
@@ -372,7 +381,7 @@ def init_api_routes():
                 return cached_val
 
         # Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
-        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-1/manifest"
+        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
         try:
             resp = _nli_session.get(url, timeout=15, verify=True)
             if resp.status_code == 200:
@@ -394,40 +403,41 @@ def init_api_routes():
 
                 if fl_ids:
                     with _nli_cache_lock:
-                        _nli_cache[system_id] = fl_ids
-                        _nli_cache_time[system_id] = _time.time()
+                        _nli_cache[cache_key] = fl_ids
+                        _nli_cache_time[cache_key] = _time.time()
                     _persist_positive_cache_snapshot()
-                    logger.info(f"Resolved {len(fl_ids)} FL IDs for {system_id} from network IIIF manifest")
+                    logger.info(f"Resolved {len(fl_ids)} FL IDs for {cache_key} from network IIIF manifest")
                     return fl_ids
         except Exception as e:
-            logger.error(f"Failed to fetch FL IDs from IIIF manifest for {system_id}: {e}")
+            logger.error(f"Failed to fetch FL IDs from IIIF manifest for {cache_key}: {e}")
 
-        # Fallback to MARC API (only has 1 FL ID typically)
-        try:
-            marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-            resp = _nli_session.get(marc_url, timeout=10, verify=True)
-            if resp.status_code == 200:
-                fl_ids = re.findall(r'FL(\d+)', resp.text)
-                seen = set()
-                unique_fl_ids = []
-                for fl_id in fl_ids:
-                    if fl_id not in seen:
-                        seen.add(fl_id)
-                        unique_fl_ids.append(fl_id)
-                if unique_fl_ids:
-                    with _nli_cache_lock:
-                        _nli_cache[system_id] = unique_fl_ids
-                        _nli_cache_time[system_id] = _time.time()
-                    _persist_positive_cache_snapshot()
-                    logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
-                    return unique_fl_ids
-        except Exception as e:
-            logger.error(f"MARC fallback also failed for {system_id}: {e}")
+        # Fallback to MARC API (only has 1 FL ID typically) — only for suffix 1
+        if suffix == 1:
+            try:
+                marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
+                resp = _nli_session.get(marc_url, timeout=10, verify=True)
+                if resp.status_code == 200:
+                    fl_ids = re.findall(r'FL(\d+)', resp.text)
+                    seen = set()
+                    unique_fl_ids = []
+                    for fl_id in fl_ids:
+                        if fl_id not in seen:
+                            seen.add(fl_id)
+                            unique_fl_ids.append(fl_id)
+                    if unique_fl_ids:
+                        with _nli_cache_lock:
+                            _nli_cache[cache_key] = unique_fl_ids
+                            _nli_cache_time[cache_key] = _time.time()
+                        _persist_positive_cache_snapshot()
+                        logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
+                        return unique_fl_ids
+            except Exception as e:
+                logger.error(f"MARC fallback also failed for {system_id}: {e}")
 
         # Both attempts failed — negative-cache to avoid immediate retry
         with _nli_cache_lock:
-            _nli_cache[system_id] = _NLI_FAIL_SENTINEL
-            _nli_cache_time[system_id] = _time.time()
+            _nli_cache[cache_key] = _NLI_FAIL_SENTINEL
+            _nli_cache_time[cache_key] = _time.time()
         return []
 
     @app.get('/api/fl_ids/{sys_id}')
@@ -485,14 +495,19 @@ def init_api_routes():
     _image_cache = {}
 
     @app.get('/api/nli_image_by_sysid/{sys_id}')
-    def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000):
+    def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
         """
-        Fetch NLI image by System ID. Dynamically gets FL IDs from NLI MARC API.
+        Fetch NLI image by System ID. Dynamically gets FL IDs from NLI IIIF manifest.
+
+        Args:
+            suffix: IIIF manifest suffix (1=primary IE, 2=second IE, etc.).
+                    For multi-IE manuscripts, each IE has its own manifest with
+                    different images. Default 1 for single-IE manuscripts.
         """
         import time as _time
         # Clamp width to reasonable range
         width = max(100, min(width, 2000))
-        cache_key = (sys_id, page, width)
+        cache_key = (sys_id, page, width, suffix)
 
         # Check image cache first
         if cache_key in _image_cache:
@@ -505,7 +520,7 @@ def init_api_routes():
                 )
 
         # Fetch FL IDs from NLI (this function has its own cache)
-        fl_ids = fetch_fl_ids_from_nli(sys_id)
+        fl_ids = fetch_fl_ids_from_nli(sys_id, suffix=suffix)
         if not fl_ids:
             return Response(content="No FL IDs found for this document", status_code=404)
 
