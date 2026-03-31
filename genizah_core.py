@@ -1903,48 +1903,147 @@ class Config:
         return os.path.join(Config.INTERNAL_DIR, relative_path)
 
 
+def _load_ie_volume_map():
+    """Load IE volume map from JSON file (cached after first call).
+
+    Returns: {sys_id: {"primary_ie": str, "volumes": [{"ie_id", "suffix", "page_count"}, ...]}}
+    Falls back to primary_ie_map.json for backward compatibility.
+    """
+    if not hasattr(_load_ie_volume_map, '_cache'):
+        # Try ie_volume_map.json first (new format with full IE→suffix mapping)
+        vol_path = os.path.join(Config.INTERNAL_DIR, "ie_volume_map.json")
+        if os.path.exists(vol_path):
+            try:
+                with open(vol_path, 'r', encoding='utf-8') as f:
+                    _load_ie_volume_map._cache = json.load(f)
+                return _load_ie_volume_map._cache
+            except Exception:
+                pass
+
+        # Fallback: primary_ie_map.json (old format — primary IE only)
+        map_path = os.path.join(Config.INTERNAL_DIR, "primary_ie_map.json")
+        if os.path.exists(map_path):
+            try:
+                with open(map_path, 'r', encoding='utf-8') as f:
+                    old_map = json.load(f)
+                # Convert old format to new format
+                converted = {}
+                for sid, entry in old_map.items():
+                    volumes = []
+                    for idx, (ie_id, count) in enumerate(
+                        sorted(entry.get("all_ies", {}).items(),
+                               key=lambda x: (0 if x[0] == entry.get("primary_ie") else 1, -x[1]))
+                    ):
+                        volumes.append({"ie_id": ie_id, "suffix": idx + 1, "page_count": count})
+                    converted[sid] = {
+                        "primary_ie": entry.get("primary_ie", ""),
+                        "volumes": volumes,
+                    }
+                _load_ie_volume_map._cache = converted
+            except Exception:
+                _load_ie_volume_map._cache = {}
+        else:
+            _load_ie_volume_map._cache = {}
+    return _load_ie_volume_map._cache
+
+
+def _extract_ie_from_header(full_header):
+    """Extract IE identifier from a browse_map entry's full_header."""
+    m = re.search(r'(IE\d+)', full_header or '')
+    return m.group(1) if m else None
+
+
 def dedupe_browse_map(browse_map):
     """
-    Remove duplicate page entries per system ID, preferring V0.8 over V0.7
-    when the same page number appears in both versions.
+    Deduplicate browse_map pages and tag each page with its IE.
+
+    For multi-IE manuscripts, keeps ALL pages from ALL IEs (no cross-IE dedup).
+    Each page gets an 'ie_id' field extracted from its full_header.
+    Only removes true duplicates: same IE + same p_num within one sys_id.
+
+    For single-IE manuscripts, behavior is unchanged — pages are kept as-is
+    with ie_id tagged.
     """
+    ie_volume_map = _load_ie_volume_map()
     cleaned = {}
     changed = False
 
     for sid, pages in browse_map.items():
-        # Group pages by p_num
-        p_num_map = {}
+        is_multi_ie = sid in ie_volume_map
+
+        if not is_multi_ie:
+            # Single-IE: tag ie_id but no dedup needed (p_nums are unique)
+            for page in pages:
+                if 'ie_id' not in page:
+                    page['ie_id'] = _extract_ie_from_header(page.get('full_header', ''))
+            cleaned[sid] = pages
+            continue
+
+        # Multi-IE: tag ie_id, dedup within each IE (same ie+p_num), keep all IEs
+        ie_pages = {}  # {ie_id: {p_num: page}}
         for page in pages:
+            ie_id = _extract_ie_from_header(page.get('full_header', ''))
+            page['ie_id'] = ie_id
             p_num = page.get('p_num')
-            if p_num is None:
-                # Keep pages without p_num as-is
-                if None not in p_num_map:
-                    p_num_map[None] = []
-                p_num_map[None].append(page)
+
+            if ie_id not in ie_pages:
+                ie_pages[ie_id] = {}
+
+            if p_num in ie_pages[ie_id]:
+                # True duplicate (same IE + same p_num) — skip
+                changed = True
                 continue
 
-            if p_num not in p_num_map:
-                p_num_map[p_num] = []
-            p_num_map[p_num].append(page)
+            ie_pages[ie_id][p_num] = page
 
-        # For each p_num, prefer V0.8 over V0.7
-        deduped_pages = []
-        for p_num, page_list in p_num_map.items():
-            if len(page_list) == 1:
-                deduped_pages.append(page_list[0])
-            else:
-                # Multiple pages with same p_num - prefer V0.8
-                changed = True
-                v08_pages = [p for p in page_list if 'V0.8' in p.get('full_header', '')]
-                if v08_pages:
-                    deduped_pages.append(v08_pages[0])
-                else:
-                    # No V0.8, take first V0.7 or other
-                    deduped_pages.append(page_list[0])
+        # Flatten: order IEs by volume map order, then pages by p_num within each IE
+        volume_info = ie_volume_map.get(sid, {})
+        volume_order = [v["ie_id"] for v in volume_info.get("volumes", [])]
 
-        cleaned[sid] = deduped_pages
+        # Add any IEs found in data but not in volume map
+        all_ie_ids = list(ie_pages.keys())
+        for ie_id in all_ie_ids:
+            if ie_id not in volume_order:
+                volume_order.append(ie_id)
+
+        all_pages = []
+        for ie_id in volume_order:
+            if ie_id in ie_pages:
+                ie_sorted = sorted(ie_pages[ie_id].values(), key=lambda p: p.get('p_num', 0))
+                all_pages.extend(ie_sorted)
+
+        # Include pages with unknown IE (ie_id=None) at the end
+        if None in ie_pages:
+            none_sorted = sorted(ie_pages[None].values(), key=lambda p: p.get('p_num', 0))
+            all_pages.extend(none_sorted)
+
+        cleaned[sid] = all_pages
 
     return cleaned, changed
+
+
+def get_volume_pages(pages, ie_id):
+    """Filter browse_map pages to a specific IE's pages only.
+
+    Args:
+        pages: List of page dicts from browse_map[sys_id]
+        ie_id: IE identifier to filter for
+
+    Returns:
+        List of page dicts belonging to the specified IE, sorted by p_num.
+    """
+    return [p for p in pages if p.get('ie_id') == ie_id]
+
+
+def get_volumes_for_sys_id(sys_id):
+    """Get volume information for a sys_id from ie_volume_map.
+
+    Returns:
+        List of {"ie_id", "suffix", "page_count"} dicts, or empty list for single-IE.
+    """
+    ie_volume_map = _load_ie_volume_map()
+    entry = ie_volume_map.get(sys_id, {})
+    return entry.get("volumes", [])
 
 # ==============================================================================
 #  LOGGING
@@ -2992,6 +3091,24 @@ class MetadataManager:
             # to rebuild after background loading completes.
             self._shelfmark_index = None
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
+
+            # Stamp has_vs from vs_manifest.txt (lightweight, ~2.5MB, 129K sys_ids)
+            vs_manifest_path = os.path.join(os.path.dirname(Config.LIBRARIES_CSV), 'fist_data', 'vs_manifest.txt')
+            if not os.path.exists(vs_manifest_path):
+                # Try PyInstaller _internal path
+                vs_manifest_path = os.path.join(os.path.dirname(os.path.abspath(Config.LIBRARIES_CSV)), 'fist_data', 'vs_manifest.txt')
+            if os.path.exists(vs_manifest_path):
+                try:
+                    with open(vs_manifest_path, 'r') as vf:
+                        vs_ids = set(line.strip() for line in vf if line.strip())
+                    stamped = 0
+                    for vid in vs_ids:
+                        if vid in self.csv_bank:
+                            self.csv_bank[vid]['has_vs'] = True
+                            stamped += 1
+                    LOGGER.info("Stamped has_vs on %d/%d manuscripts from vs_manifest.txt", stamped, len(vs_ids))
+                except Exception as e:
+                    LOGGER.warning("Failed to load vs_manifest.txt: %s", e)
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
 
