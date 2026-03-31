@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v7.7
 milestone_name: Volume-Aware Browse
 status: verifying
-stopped_at: Completed 61-01-PLAN.md
-last_updated: "2026-03-31T19:50:44.889Z"
+stopped_at: Completed 61-02-PLAN.md
+last_updated: "2026-03-31T19:53:41.866Z"
 last_activity: 2026-03-31
 progress:
   total_phases: 62
-  completed_phases: 59
+  completed_phases: 60
   total_plans: 197
-  completed_plans: 195
+  completed_plans: 196
 ---
 
 # Project State
@@ -93,6 +93,7 @@ Recent decisions affecting current work:
 - [Phase 57]: Browse VS uses restricted wildcard search rather than custom display
 - [Phase 60]: Separate _iiif_manifest_cache for non-primary suffixes; VolumeManifestThread for lightweight volume switches; auto-switch to NLI source on volume change
 - [Phase 61]: ie_id OR NULL filter pattern for volume-aware corrections/comments
+- [Phase 61]: Restored volume_ie validated against get_volumes_for_sys_id; invalid silently falls back to None (D-12 pattern)
 
 ### Pending Todos
 
@@ -162,9 +163,10 @@ Recent decisions affecting current work:
 | Phase 57 P03 | 11min | 3 tasks | 4 files |
 | Phase 60 P01 | 29min | 5 tasks | 3 files |
 | Phase 61 P01 | 5min | 3 tasks | 6 files |
+| Phase 61 P02 | 7min | 2 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-03-31T19:50:44.883Z
-Stopped at: Completed 61-01-PLAN.md
+Last session: 2026-03-31T19:53:41.861Z
+Stopped at: Completed 61-02-PLAN.md
 Resume file: None

@@ -49,7 +49,7 @@
 ### URL & Session
 
 - [x] **URL-01**: Browse URL includes volume/IE parameter for shareable links
-- [ ] **URL-02**: Session restore preserves active volume across browser refresh
+- [x] **URL-02**: Session restore preserves active volume across browser refresh
 
 ### Community Writes
 
@@ -58,7 +58,7 @@
 
 ### Corpus Validation
 
-- [ ] **VAL-01**: Corpus-wide automated validation of 907→suffix mapping against live IIIF manifests
+- [x] **VAL-01**: Corpus-wide automated validation of 907→suffix mapping against live IIIF manifests
 
 ## Out of Scope
 
@@ -94,10 +94,10 @@
 | DSK-02 | 60 | Complete |
 | DSK-03 | 60 | Complete |
 | URL-01 | 61 | Complete |
-| URL-02 | 61 | Pending |
+| URL-02 | 61 | Complete |
 | CW-01 | 61 | Complete |
 | CW-02 | 61 | Complete |
-| VAL-01 | 61 | Pending |
+| VAL-01 | 61 | Complete |
 
 **Coverage:**
 - Total requirements: 26
