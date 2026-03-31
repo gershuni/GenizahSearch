@@ -53,8 +53,8 @@
 
 ### Community Writes
 
-- [ ] **CW-01**: Corrections include volume/IE context in write payload
-- [ ] **CW-02**: Comments reference specific volume/IE
+- [x] **CW-01**: Corrections include volume/IE context in write payload
+- [x] **CW-02**: Comments reference specific volume/IE
 
 ### Corpus Validation
 
@@ -95,8 +95,8 @@
 | DSK-03 | 60 | Complete |
 | URL-01 | 61 | Complete |
 | URL-02 | 61 | Pending |
-| CW-01 | 61 | Pending |
-| CW-02 | 61 | Pending |
+| CW-01 | 61 | Complete |
+| CW-02 | 61 | Complete |
 | VAL-01 | 61 | Pending |
 
 **Coverage:**

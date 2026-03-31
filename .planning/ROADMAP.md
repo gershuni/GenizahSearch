@@ -223,10 +223,10 @@ lightweight browse first-render. 14/14 requirements satisfied.
 
 **Requirements:** URL-01, URL-02, CW-01, CW-02, VAL-01
 
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 61-01-PLAN.md — Community writes: add ie_id to corrections and comments (web + desktop)
+- [x] 61-01-PLAN.md — Community writes: add ie_id to corrections and comments (web + desktop)
 - [ ] 61-02-PLAN.md — Corpus validation script + session persistence for volume_ie
 
 **Success Criteria:**
