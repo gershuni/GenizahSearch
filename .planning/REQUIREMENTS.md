@@ -38,35 +38,32 @@
 - [x] **REG-03**: Community features (corrections, comments, discoveries) unaffected
 - [x] **REG-04**: Desktop app continues to work with existing index (no desktop changes in v1)
 
-## v2 Requirements (Deferred)
+## Phase 60-61 Requirements (Desktop, Session, Community, Validation)
 
 ### Desktop Parity
 
-- **DSK-01**: Desktop browse supports volume-aware navigation (same IE propagation)
-- **DSK-02**: Desktop volume selector UI in Browse tab
-- **DSK-03**: Desktop search → browse respects IE from search result
+- [x] **DSK-01**: Desktop browse supports volume-aware navigation (same IE propagation)
+- [x] **DSK-02**: Desktop volume selector UI in Browse tab
+- [x] **DSK-03**: Desktop search → browse respects IE from search result
 
 ### URL & Session
 
-- **URL-01**: Browse URL includes volume/IE parameter for shareable links
-- **URL-02**: Session restore preserves active volume across browser refresh
+- [x] **URL-01**: Browse URL includes volume/IE parameter for shareable links
+- [ ] **URL-02**: Session restore preserves active volume across browser refresh
 
 ### Community Writes
 
-- **CW-01**: Corrections include volume/IE context in write payload
-- **CW-02**: Comments reference specific volume/IE
+- [ ] **CW-01**: Corrections include volume/IE context in write payload
+- [ ] **CW-02**: Comments reference specific volume/IE
 
 ### Corpus Validation
 
-- **VAL-01**: Corpus-wide automated validation of 907→suffix mapping against live IIIF manifests
+- [ ] **VAL-01**: Corpus-wide automated validation of 907→suffix mapping against live IIIF manifests
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Desktop volume-aware browse | Deferred to v2 — web ships first |
-| Full URL/session volume propagation | Nice-to-have, not MVP |
-| Community writes with IE context | No existing data on affected manuscripts; defer |
 | IIIF manifest caching per suffix | Optimization, not correctness |
 | Non-NLI multi-source volume handling | Only NLI has multi-IE; Cambridge/Manchester/JTS unaffected |
 
@@ -93,11 +90,22 @@
 | REG-01 | 59 | Complete |
 | REG-03 | 59 | Complete |
 
+| DSK-01 | 60 | Complete |
+| DSK-02 | 60 | Complete |
+| DSK-03 | 60 | Complete |
+| URL-01 | 61 | Complete |
+| URL-02 | 61 | Pending |
+| CW-01 | 61 | Pending |
+| CW-02 | 61 | Pending |
+| VAL-01 | 61 | Pending |
+
 **Coverage:**
-- v1 requirements: 18 total
-- Mapped to phases: 18
+- Total requirements: 26
+- Mapped to phases: 26
+- Complete: 19 (18 v1 + URL-01)
+- Pending: 7
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-31*
-*Last updated: 2026-03-31 after Phase 58-59 completion (18/18 requirements satisfied)*
+*Last updated: 2026-03-31 — Phases 60-61 added with 8 promoted requirements*

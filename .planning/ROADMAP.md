@@ -166,11 +166,11 @@ lightweight browse first-render. 14/14 requirements satisfied.
 
 </details>
 
-### v7.7 Volume-Aware Browse (Phases 58-59)
+### v7.7 Volume-Aware Browse (Phases 58-61)
 
-**Goal:** Fix multi-IE image/text mismatch by making search→browse→paging IE-aware.
+**Goal:** Fix multi-IE image/text mismatch by making search→browse→paging IE-aware across both apps.
 
-**Scope:** Web only (desktop deferred to v2). 3,193 affected manuscripts (1.5%).
+**Scope:** Web + Desktop. 3,193 affected manuscripts (1.5%).
 
 #### Phase 58 — IE Volume Data Infrastructure
 
@@ -201,12 +201,43 @@ lightweight browse first-render. 14/14 requirements satisfied.
 
 **Key files:** `web/api.py:322` (`fetch_fl_ids_from_nli`), `web/pages/browse.py:481` (`BrowseState`), `web/services.py:97` (`BrowsePage`), `genizah_core.py:7682` (`get_browse_page`)
 
+#### Phase 60 — Desktop Volume-Aware Browse
+
+**Goal:** Desktop browse matches web: search→browse propagates IE, volume selector in Browse tab, per-IE paging.
+
+**Requirements:** DSK-01, DSK-02, DSK-03
+
+**Success Criteria:**
+1. Desktop search result → Browse tab opens with the correct IE's images and text
+2. Volume selector dropdown in Browse tab (matching web design — label + page count per volume)
+3. Prev/next navigation stays within active IE; page count reflects that IE only
+4. Single-IE manuscripts completely unchanged in desktop
+
+**Key files:** `genizah_app.py` (Browse tab, search result navigation), `genizah_core.py:7745` (`get_browse_page`)
+
+**Status:** COMPLETE (1/1 plans, 2026-03-31)
+
+#### Phase 61 — Volume Session, Community Context & Corpus Validation
+
+**Goal:** Volume state persists across sessions, community writes include IE context, mapping validated corpus-wide.
+
+**Requirements:** URL-01, URL-02, CW-01, CW-02, VAL-01
+
+**Success Criteria:**
+1. Web browse URL includes `volume_ie` parameter for shareable links (already partially done)
+2. Session restore preserves active volume across browser refresh and desktop restart
+3. Corrections submitted from a volume-aware browse include the active IE in the payload
+4. Comments reference the specific volume/IE they were made on
+5. Automated validation script confirms 907→suffix mapping against live IIIF manifests for a sample of manuscripts
+
+**Key files:** `web/pages/browse.py` (URL/session), `shared/corrections_service.py`, `web/supabase_client.py`, `scripts/build_ie_volume_map.py`
+
 ## Progress
 
 **Total milestones shipped:** 13 (through v7.6)
-**Total phases completed:** 57 (Phases 1-57)
-**Total plans completed:** ~192
+**Total phases completed:** 60 (Phases 1-60, including 58-60 of v7.7)
+**Total plans completed:** ~193
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-03-31 after v7.7 milestone roadmap added*
+*Last updated: 2026-03-31 after Phase 60 complete*

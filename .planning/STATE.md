@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v7.7
 milestone_name: Volume-Aware Browse
-status: Phases 58-59 complete, ready for verification
-stopped_at: null
-last_updated: "2026-03-31T10:00:00.000Z"
+status: Phase 60 complete, Phase 61 pending
+stopped_at: Completed 60-01-PLAN.md
+last_updated: "2026-03-31T17:46:00.000Z"
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 4
+  completed_phases: 3
+  total_plans: 1
+  completed_plans: 1
 ---
 
 # Project State
@@ -23,10 +23,10 @@ See: .planning/PROJECT.md (updated 2026-03-31)
 
 ## Current Position
 
-Phase: 59 — Volume-Aware Web Browse (complete)
-Plan: —
-Status: Both phases implemented, awaiting manual verification
-Last activity: 2026-03-31 — Phase 58 + 59 implemented and committed
+Phase: 60 — Desktop Volume-Aware Browse (complete)
+Plan: 01 of 01 complete
+Status: Phase 60 complete; Phase 61 (polish) pending
+Last activity: 2026-03-31 — Desktop volume-aware browse implemented
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Recent decisions affecting current work:
 - [Phase 57]: VS restriction via URL params (vs_src, vs_mode) with tab storage cache for partner sets
 - [Phase 57]: VS restriction via pre_search_restrict_sys_ids reuses existing pipeline
 - [Phase 57]: Browse VS uses restricted wildcard search rather than custom display
+- [Phase 60]: Separate _iiif_manifest_cache for non-primary suffixes; VolumeManifestThread for lightweight volume switches; auto-switch to NLI source on volume change
 
 ### Pending Todos
 
@@ -157,9 +158,10 @@ Recent decisions affecting current work:
 | 260329-egp | Strip brackets from search matching so bracket-free queries ignore brackets but bracket-containing queries match literally | 2026-03-29 | 5300bbe4 | [260329-egp-strip-brackets-from-search-matching-so-b](./quick/260329-egp-strip-brackets-from-search-matching-so-b/) |
 | Phase 57 P02 | 7min | 2 tasks | 5 files |
 | Phase 57 P03 | 11min | 3 tasks | 4 files |
+| Phase 60 P01 | 29min | 5 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-03-30T04:35:47.385Z
-Stopped at: Completed 57-02 and 57-03 (Task 3 checkpoint pending)
+Last session: 2026-03-31T17:46:00Z
+Stopped at: Completed 60-01-PLAN.md
 Resume file: None
