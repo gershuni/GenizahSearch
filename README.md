@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.5.0
+# Genizah Search Pro 7.7.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,20 +8,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.5.0?
+## What's New in Version 7.6.0?
+
+### v7.6.0: Visual Similarity Suggestions
+
+Researchers can now **discover visually similar manuscripts** using FJMS SVM image analysis data (~15.5M pairs). A new "Visual Similarity" button in the browse page opens a side-by-side workbench showing ranked partners with thumbnails, domains, and action buttons.
+
+- **Browse visual partners** — ranked suggestions with score, domain, and library metadata. Click to browse, add to puzzle, or create a join
+- **Search within suggestions** — restrict a text search to the partner pool, with union/intersection modes for multi-manuscript selection
+- **Both apps** — full feature parity across web and desktop
 
 ### v7.5.0: Exclude Known Manuscripts
 
-Researchers can now **hide already-reviewed manuscripts** from search results using their saved lists, imported shelfmark files (TXT/CSV), or pasted shelfmarks. Multiple exclusion sources can be active simultaneously — each tracked independently with per-source clear buttons. A collapsible "Excluded manuscripts" section shows exactly what was hidden and why.
-
-- **Three ways to exclude** — paste shelfmarks directly, select from your saved lists (with per-manuscript checkboxes), or upload a TXT/CSV file with automatic column detection
-- **Resolution report** — see per-row status (found, not found, duplicate) before applying, so you know exactly what matched
-- **WYSIWYG export** — Excel, CSV, and Word exports only include visible manuscripts, respecting all active exclusions
-- **Both apps** — full feature parity across web and desktop, with session persistence
+Hide already-reviewed manuscripts from search results using saved lists, imported shelfmark files, or pasted shelfmarks. Multi-source tracking with per-source clear, resolution report, and WYSIWYG export.
 
 ### v7.4.0: Search Within Results
 
-Researchers can now **progressively narrow search results** by searching within their current result set. After any search, click "Search within N manuscripts" to restrict a follow-up query to only those manuscripts. A breadcrumb chip chain tracks each refinement step — click × to remove a step, or "Clear all" to start fresh.
+Progressively narrow search results by searching within your current result set. Breadcrumb chip chain tracks each refinement step.
 
 ### v7.2.3: Chrome Extension Live + Puzzle Enabled
 

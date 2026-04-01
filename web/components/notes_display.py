@@ -167,25 +167,26 @@ def render_content_with_mentions(content: str, container_classes: str = '', cont
     return text_element
 
 
-def fetch_document_comments(document_id: str, page_number: int = None) -> List[dict]:
+def fetch_document_comments(document_id: str, page_number: int = None, ie_id: str = None) -> List[dict]:
     """
     Fetch comments for a document.
 
     Args:
         document_id: System ID of the document
         page_number: Optional page number to filter
+        ie_id: Optional IE identifier for volume filtering
 
     Returns:
         List of comment objects
     """
     try:
         # Get public comments for this document
-        comments = get_comments(sys_id=document_id, is_public=True)
+        comments = get_comments(sys_id=document_id, is_public=True, ie_id=ie_id)
 
         # Also get user's private comments if logged in
         user_id = GlobalAuthState.get_user_id()
         if user_id:
-            private_comments = get_comments(sys_id=document_id, author_id=user_id, is_public=False)
+            private_comments = get_comments(sys_id=document_id, author_id=user_id, is_public=False, ie_id=ie_id)
             comments.extend(private_comments)
 
         # Sort by created_at
@@ -223,7 +224,8 @@ def fetch_document_comments(document_id: str, page_number: int = None) -> List[d
 def create_notes_panel(
     document_id: str,
     page_number: Optional[int] = None,
-    shelfmark: str = ""
+    shelfmark: str = "",
+    ie_id: str = None
 ):
     """
     Create a panel showing existing notes for a document/page.
@@ -232,6 +234,7 @@ def create_notes_panel(
         document_id: System ID of the document
         page_number: Optional page number to filter
         shelfmark: Display name for the document
+        ie_id: Optional IE identifier for volume filtering
 
     Returns:
         Tuple of (panel element, refresh function)
@@ -250,7 +253,7 @@ def create_notes_panel(
             notes_container.clear()
 
             with notes_container:
-                comments = fetch_document_comments(document_id, page_number)
+                comments = fetch_document_comments(document_id, page_number, ie_id=ie_id)
 
                 if not comments:
                     with ui.row().classes('w-full justify-center p-4'):
@@ -356,7 +359,8 @@ def create_notes_button(
     document_id: str,
     page_number: Optional[int] = None,
     shelfmark: str = "",
-    size: str = "sm"
+    size: str = "sm",
+    ie_id: str = None
 ):
     """
     Create a button that opens a dialog showing notes.
@@ -367,6 +371,7 @@ def create_notes_button(
         page_number: Optional page number
         shelfmark: Display name
         size: Button size
+        ie_id: Optional IE identifier for volume filtering
 
     Returns:
         The button container element
@@ -384,7 +389,7 @@ def create_notes_button(
 
                 with ui.scroll_area().classes('w-full').style('height: 300px;'):
                     with ui.column().classes('w-full gap-2 p-4'):
-                        comments = fetch_document_comments(document_id, page_number)
+                        comments = fetch_document_comments(document_id, page_number, ie_id=ie_id)
 
                         if not comments:
                             with ui.row().classes('w-full justify-center'):
@@ -409,7 +414,7 @@ def create_notes_button(
         # Check for comments and show indicator
         def check_comments():
             try:
-                comments = fetch_document_comments(document_id, page_number)
+                comments = fetch_document_comments(document_id, page_number, ie_id=ie_id)
                 if comments:
                     indicator.style(add='display: block;')
                     btn.style(add='color: #f59e0b;')

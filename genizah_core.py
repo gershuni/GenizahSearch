@@ -1953,6 +1953,138 @@ def _extract_ie_from_header(full_header):
     return m.group(1) if m else None
 
 
+def _repair_missing_ie_pages(browse_map):
+    """Repair browse_map for multi-IE manuscripts where pages from non-primary IEs
+    were lost by pre-Phase-58 dedup (which deduped by p_num across IEs).
+
+    Also fixes uid format for pages that were repaired with full-header uids
+    (should be IE_P_FL format to match Tantivy index keys).
+
+    Reads Transcriptions.txt headers to find missing IE pages and re-adds them.
+    Returns (repaired_map, repair_count) where repair_count is the number of
+    manuscripts that had pages restored or uid-fixed.
+    """
+    ie_volume_map = _load_ie_volume_map()
+    if not ie_volume_map:
+        return browse_map, 0
+
+    # Phase 1: Fix uid format for already-repaired pages (full-header → IE_P_FL)
+    uid_fix_count = 0
+    uid_re = re.compile(r'(IE\d+_P\d+_FL\d+)')
+    for sid in ie_volume_map:
+        if sid not in browse_map:
+            continue
+        for page in browse_map[sid]:
+            uid = page.get('uid', '')
+            # If uid starts with sys_id prefix, it was repaired with wrong format
+            if uid.startswith(sid + '_'):
+                m = uid_re.search(uid)
+                if m:
+                    page['uid'] = m.group(1)
+                    uid_fix_count += 1
+
+    if uid_fix_count:
+        LOGGER.info("Fixed %d browse_map page uids (removed sys_id prefix)", uid_fix_count)
+
+    transcriptions_path = Config.FILE_V8
+    if not os.path.exists(transcriptions_path):
+        return browse_map, uid_fix_count
+
+    # Phase 2: Find multi-IE manuscripts with missing IEs in browse_map
+    needs_repair = {}  # {sid: set of expected ie_ids not in browse_map}
+    for sid, vol_info in ie_volume_map.items():
+        if sid not in browse_map:
+            continue
+        expected_ies = {v['ie_id'] for v in vol_info.get('volumes', [])}
+        existing_ies = {_extract_ie_from_header(p.get('full_header', '')) for p in browse_map[sid]}
+        missing = expected_ies - existing_ies
+        if missing:
+            needs_repair[sid] = missing
+
+    if not needs_repair:
+        return browse_map, uid_fix_count
+
+    LOGGER.debug("browse_map repair: %d multi-IE manuscripts have IEs without transcription text", len(needs_repair))
+
+    # Scan Transcriptions.txt for missing pages
+    # Parse headers: ==> {sys_id}_{IE_id}_{P_num}_{FL_id} <==
+    header_re = re.compile(r'^==> (.+?) <==\s*$')
+    restored = {}  # {sid: [page_dicts]}
+    current_header = None
+    current_text_lines = []
+
+    def _flush_page():
+        nonlocal current_header, current_text_lines
+        if not current_header:
+            return
+        parts = current_header.split('_')
+        if len(parts) < 4:
+            current_header = None
+            current_text_lines = []
+            return
+        sid = parts[0]
+        if sid not in needs_repair:
+            current_header = None
+            current_text_lines = []
+            return
+        ie_id = _extract_ie_from_header(current_header)
+        if ie_id not in needs_repair[sid]:
+            current_header = None
+            current_text_lines = []
+            return
+        # This page needs to be restored
+        try:
+            p_num = int(parts[2].replace('P', '').lstrip('0') or '0')
+        except ValueError:
+            p_num = 0
+        # Extract uid in the same format as MetadataManager.extract_unique_id
+        # (IE_P_FL without sys_id prefix) to match Tantivy index keys
+        uid_match = re.search(r'(IE\d+_P\d+_FL\d+)', current_header)
+        uid = uid_match.group(1) if uid_match else current_header
+        page = {
+            'uid': uid,
+            'p_num': p_num,
+            'full_header': current_header,
+            'ie_id': ie_id,
+            'seq_index': p_num,
+        }
+        if sid not in restored:
+            restored[sid] = []
+        restored[sid].append(page)
+        current_header = None
+        current_text_lines = []
+
+    try:
+        with open(transcriptions_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = header_re.match(line)
+                if m:
+                    _flush_page()
+                    current_header = m.group(1)
+                    current_text_lines = []
+                else:
+                    current_text_lines.append(line)
+            _flush_page()
+    except Exception as e:
+        LOGGER.warning("Failed to read Transcriptions.txt for browse_map repair: %s", e)
+        return browse_map, 0
+
+    # Merge restored pages into browse_map
+    repair_count = 0
+    for sid, new_pages in restored.items():
+        if sid in browse_map:
+            browse_map[sid].extend(new_pages)
+            repair_count += 1
+            LOGGER.info("Restored %d pages for %s (IEs: %s)",
+                         len(new_pages), sid,
+                         ', '.join(sorted(set(p['ie_id'] for p in new_pages))))
+
+    total_restored = sum(len(v) for v in restored.values())
+    LOGGER.info("browse_map repair complete: %d manuscripts repaired, %d pages restored, %d uids fixed",
+                repair_count, total_restored, uid_fix_count)
+    return browse_map, repair_count + uid_fix_count
+
+
 def dedupe_browse_map(browse_map):
     """
     Deduplicate browse_map pages and tag each page with its IE.
@@ -1963,10 +2095,16 @@ def dedupe_browse_map(browse_map):
 
     For single-IE manuscripts, behavior is unchanged — pages are kept as-is
     with ie_id tagged.
+
+    Also repairs browse_maps where non-primary IE pages were lost by pre-Phase-58
+    dedup that incorrectly deduped by p_num across IEs.
     """
+    # First repair any missing IE pages from Transcriptions.txt
+    browse_map, repair_count = _repair_missing_ie_pages(browse_map)
+
     ie_volume_map = _load_ie_volume_map()
     cleaned = {}
-    changed = False
+    changed = repair_count > 0
 
     for sid, pages in browse_map.items():
         is_multi_ie = sid in ie_volume_map
@@ -5932,30 +6070,44 @@ class SearchEngine:
                 LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
 
+    # Class-level browse_map shared across all instances (loaded once)
+    _shared_browse_map = None
+    _browse_map_lock = threading.Lock()
+
     def _load_browse_map(self):
         """Load the browse map, deduplicate it, and persist corrections if needed.
 
-        Caches in memory after first load to avoid re-reading 100MB+ pickle on every call.
+        Uses class-level cache shared across all SearchEngine instances to avoid
+        redundant file I/O, repair scans, and pickle write race conditions.
         """
+        if SearchEngine._shared_browse_map is not None:
+            return SearchEngine._shared_browse_map
+
         if hasattr(self, '_browse_map_cache') and self._browse_map_cache is not None:
             return self._browse_map_cache
 
         if not os.path.exists(Config.BROWSE_MAP):
             return {}
 
-        with open(Config.BROWSE_MAP, 'rb') as f:
-            raw_map = pickle.load(f)
+        with SearchEngine._browse_map_lock:
+            # Double-check after acquiring lock (another thread may have loaded)
+            if SearchEngine._shared_browse_map is not None:
+                return SearchEngine._shared_browse_map
 
-        cleaned_map, changed = dedupe_browse_map(raw_map)
-        if changed:
-            try:
-                with open(Config.BROWSE_MAP, 'wb') as f:
-                    pickle.dump(cleaned_map, f)
-            except Exception as e:
-                LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
+            with open(Config.BROWSE_MAP, 'rb') as f:
+                raw_map = pickle.load(f)
 
-        self._browse_map_cache = cleaned_map
-        return cleaned_map
+            cleaned_map, changed = dedupe_browse_map(raw_map)
+            if changed:
+                try:
+                    with open(Config.BROWSE_MAP, 'wb') as f:
+                        pickle.dump(cleaned_map, f)
+                except Exception as e:
+                    LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
+
+            SearchEngine._shared_browse_map = cleaned_map
+            self._browse_map_cache = cleaned_map
+            return cleaned_map
 
     def _get_or_compute_variants(self, terms, mode):
         """Pre-compute variants at the larger limit for each search term.
@@ -7819,8 +7971,14 @@ class SearchEngine:
             pages = get_volume_pages(all_pages, volume_ie)
             if not pages:
                 # Requested IE not found — fall back to all pages
+                LOGGER.warning("get_browse_page: volume_ie=%s not found in %d pages for sys_id=%s. ie_ids in pages: %s",
+                               volume_ie, len(all_pages), sys_id,
+                               list(set(p.get('ie_id') for p in all_pages[:20])))
                 pages = all_pages
                 active_ie = None
+            else:
+                LOGGER.info("get_browse_page: volume_ie=%s filtered to %d/%d pages for sys_id=%s",
+                            volume_ie, len(pages), len(all_pages), sys_id)
         else:
             pages = all_pages
         

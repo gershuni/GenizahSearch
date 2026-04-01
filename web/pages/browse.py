@@ -1069,9 +1069,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 except Exception as e:
                     logger.error("Browse enrichment crossref error: %s", e)
 
-                # External images from nli_cache
+                # External images from nli_cache (populated by enrich_metadata)
                 if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
                     cached = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                    if not cached.get('images_ext'):
+                        # nli_cache not yet populated — call enrich_metadata to resolve
+                        # Manchester/Cambridge/JTS images from crossref sidecar + IIIF
+                        try:
+                            state_mod.meta_mgr.enrich_metadata(_sys_id)
+                            cached = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                        except Exception as e:
+                            logger.warning("Browse enrichment enrich_metadata error: %s", e)
                     result['cambridge_images'] = cached.get('images_ext', [])
                     result['external_provider'] = cached.get('external_provider', '')
 
@@ -3933,8 +3941,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 if is_oxford and page.sys_id:
                     has_image = True
+                    # For multi-IE Oxford manuscripts, each volume = next folio in sequence
+                    # e.g., d.50/19 Volume 1 = folio 19, Volume 2 = folio 20
+                    # Oxford folios have 2 sides (recto 'a' + verso 'b'), so offset by
+                    # number of preceding volumes, not pages.
+                    _ox_folio_offset = max(0, (page.volume_suffix or 1) - 1)
                     # Prefer direct Bodleian URL in browser to avoid production /api proxy failures.
-                    oxford_direct = get_oxford_direct_image_url(page.shelfmark, page_idx)
+                    oxford_direct = get_oxford_direct_image_url(page.shelfmark, page_idx, folio_offset=_ox_folio_offset)
                     if oxford_direct:
                         img_url = f"{oxford_direct}{cache_bust_direct}"
                     else:
@@ -3956,6 +3969,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _has_manchester_images = _has_ext_images and page.external_provider == 'manchester'
                 _has_jts_images = _has_ext_images and page.external_provider == 'jts'
 
+                # Auto-default to external sources when available (before image URL construction)
+                # When NLI IIIF is down, these ensure images load from alternate providers
+                if _has_jts_images and state.active_source == 'nli' and not state.source_user_override:
+                    state.active_source = 'jts'
+                if _has_manchester_images and state.active_source == 'nli' and not state.source_user_override:
+                    state.active_source = 'manchester'
+                if _has_cambridge_images and state.active_source == 'nli' and not state.source_user_override:
+                    state.active_source = 'cambridge'
+
                 if state.active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
                     has_image = True
                     img_url = f"/api/cambridge_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
@@ -3964,7 +3986,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Manchester source override
                 if state.active_source == 'manchester' and _has_manchester_images and not is_oxford:
                     has_image = True
-                    img_url = f"/api/manchester_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
+                    # For multi-IE manuscripts, Manchester canvases span all volumes
+                    # sequentially. Compute absolute canvas index by adding preceding
+                    # volumes' transcription page counts as offset.
+                    _manch_page_idx = page_idx
+                    if page.volume_suffix and page.volume_suffix > 1 and page.volumes:
+                        _vol_offset = 0
+                        for v in page.volumes:
+                            if v.get('suffix', 1) < page.volume_suffix:
+                                _vol_offset += v.get('transcription_pages', 0)
+                        _manch_page_idx = page_idx + _vol_offset
+                    img_url = f"/api/manchester_image/{page.sys_id}?page={_manch_page_idx}{cache_bust_api}"
                     fallback_url = None
 
                 # JTS source override
@@ -3983,10 +4015,6 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _has_cambridge = _src_info.get('cambridge', False) or page.is_cambridge
                 _has_manchester = _src_info.get('manchester', False)
                 _has_jts = _src_info.get('jts', False)
-
-                # Auto-default to Princeton DPUL for JTS manuscripts (main image source)
-                if _has_jts_images and state.active_source == 'nli' and not state.source_user_override:
-                    state.active_source = 'jts'
 
                 # Source switching setup -- any external source with NLI enables toggling
                 _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images
@@ -4171,7 +4199,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if page.volume_count > 1 and page.volumes:
                             _vol_options = {}
                             for _v in page.volumes:
-                                _label = f"{tr('Volume')} {_v['suffix']} ({_v['page_count']} {tr('Pages').lower()})"
+                                _vp = _v.get('transcription_pages') or _v['page_count']
+                                _label = f"{tr('Volume')} {_v['suffix']} ({_vp} {tr('Pages').lower()})"
                                 _vol_options[_v['ie_id']] = _label
                             _vol_current = page.volume_ie or page.volumes[0]['ie_id']
 
@@ -4303,7 +4332,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 create_notes_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
-                                    shelfmark=page.shelfmark or page.sys_id
+                                    shelfmark=page.shelfmark or page.sys_id,
+                                    ie_id=state.volume_ie
                                 )
 
                                 # Joins button placeholder (populated by enrichment Phase B)
@@ -4607,7 +4637,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _, notes_refresh_fn = create_notes_panel(
                     document_id=page.sys_id,
                     page_number=page.p_num,
-                    shelfmark=page.shelfmark or page.sys_id
+                    shelfmark=page.shelfmark or page.sys_id,
+                    ie_id=state.volume_ie
                 )
                 # Store the refresh function so comment dialog can call it
                 notes_refresh_ref['refresh'] = notes_refresh_fn

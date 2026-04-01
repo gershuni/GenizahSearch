@@ -17229,19 +17229,33 @@ class GenizahGUI(QMainWindow):
         # This handles both new requests and in-flight enrichment threads that
         # complete after reading desk activation.
         if not self.browse_reading_desk_active:
-            folio_num = _get_folio_number_from_shelfmark(shelf)
-            idx = _get_initial_image_index(meta, folio_num if folio_num is not None else self.current_browse_p)
-            self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
+            # For multi-IE manuscripts, filter external images to the active volume
+            display_meta = meta
+            if self.current_browse_volume_ie and meta.get('images_ext'):
+                import copy as _copy
+                display_meta = _copy.copy(meta)
+                from genizah_core import get_volumes_for_sys_id, resolve_volume_suffix
+                _volumes = get_volumes_for_sys_id(self.current_browse_sid)
+                _suffix = resolve_volume_suffix(self.current_browse_sid, self.current_browse_volume_ie)
+                if _volumes and _suffix > 0:
+                    _offset = 0
+                    _vol_pages = 0
+                    for _v in _volumes:
+                        if _v.get('suffix', 1) < _suffix:
+                            _offset += _v.get('transcription_pages', 0)
+                        elif _v.get('suffix', 1) == _suffix:
+                            _vol_pages = _v.get('transcription_pages', 0)
+                    all_ext = meta['images_ext']
+                    if _vol_pages > 0 and _offset + _vol_pages <= len(all_ext):
+                        display_meta['images_ext'] = all_ext[_offset:_offset + _vol_pages]
+                    elif _offset < len(all_ext):
+                        display_meta['images_ext'] = all_ext[_offset:]
+                    if display_meta.get('images_ext'):
+                        display_meta['images'] = display_meta['images_ext']
 
-            # Auto-switch to NLI source when volume_ie is active and external images exist
-            # External images are per-shelfmark (same for all IEs), only NLI varies per volume
-            if self.current_browse_volume_ie and meta.get('images_ext') and meta.get('images_nli'):
-                combo_src = getattr(self.browse_viewer, 'combo_source', None)
-                if combo_src:
-                    for i in range(combo_src.count()):
-                        if 'NLI' in combo_src.itemText(i):
-                            combo_src.setCurrentIndex(i)
-                            break
+            folio_num = _get_folio_number_from_shelfmark(shelf)
+            idx = _get_initial_image_index(display_meta, folio_num if folio_num is not None else self.current_browse_p)
+            self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
 
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
@@ -19361,15 +19375,13 @@ class GenizahGUI(QMainWindow):
         self._volume_manifest_worker.start()
 
     def _on_volume_manifest_loaded(self, sid, ie_id, data, gen, expected_vol_ie):
-        """Handle volume manifest fetch result — update image viewer with new NLI images."""
+        """Handle volume manifest fetch result — update image viewer for the active volume."""
         # Guard: reject stale results
         if gen != self._browse_enrich_gen:
             return
         if sid != self.current_browse_sid:
             return
         if expected_vol_ie != self.current_browse_volume_ie:
-            return
-        if not data or not data.get('images_nli'):
             return
 
         # Update the cached metadata's NLI images with the new volume's images
@@ -19380,10 +19392,35 @@ class GenizahGUI(QMainWindow):
         # Create a copy to avoid polluting the canonical cache for non-primary volumes
         import copy
         display_meta = copy.copy(meta)
-        display_meta['images_nli'] = data['images_nli']
-        # If no external images, also update 'images' key
+        if data and data.get('images_nli'):
+            display_meta['images_nli'] = data['images_nli']
+
+        # Filter external images (Manchester/Cambridge/JTS) to the active volume.
+        # External canvases span all volumes sequentially, so we slice by offset.
+        all_ext = meta.get('images_ext', [])
+        if all_ext and ie_id:
+            from genizah_core import get_volumes_for_sys_id, resolve_volume_suffix
+            volumes = get_volumes_for_sys_id(sid)
+            suffix = resolve_volume_suffix(sid, ie_id)
+            if volumes and suffix > 0:
+                # Compute offset = sum of transcription_pages of preceding volumes
+                offset = 0
+                vol_pages = 0
+                for v in volumes:
+                    if v.get('suffix', 1) < suffix:
+                        offset += v.get('transcription_pages', 0)
+                    elif v.get('suffix', 1) == suffix:
+                        vol_pages = v.get('transcription_pages', 0)
+                if vol_pages > 0 and offset + vol_pages <= len(all_ext):
+                    display_meta['images_ext'] = all_ext[offset:offset + vol_pages]
+                elif offset < len(all_ext):
+                    display_meta['images_ext'] = all_ext[offset:]
+
+        # If no external images, use NLI; otherwise prefer external
         if not display_meta.get('images_ext'):
-            display_meta['images'] = data['images_nli']
+            display_meta['images'] = display_meta.get('images_nli', [])
+        else:
+            display_meta['images'] = display_meta['images_ext']
 
         # Reload images in viewer
         if hasattr(self, 'browse_viewer') and not self.browse_reading_desk_active:
@@ -19391,15 +19428,6 @@ class GenizahGUI(QMainWindow):
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
             idx = _get_initial_image_index(display_meta, folio_num if folio_num is not None else self.current_browse_p)
             self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
-
-            # Auto-switch to NLI source when volume_ie is active and both sources exist
-            if display_meta.get('images_ext') and display_meta.get('images_nli'):
-                combo_src = getattr(self.browse_viewer, 'combo_source', None)
-                if combo_src:
-                    for i in range(combo_src.count()):
-                        if 'NLI' in combo_src.itemText(i):
-                            combo_src.setCurrentIndex(i)
-                            break
 
     def toggle_browse_image(self):
         visible = self.btn_b_toggle_img.isChecked()
@@ -31243,7 +31271,8 @@ class GenizahGUI(QMainWindow):
             self.combo_browse_volume.blockSignals(True)
             self.combo_browse_volume.clear()
             for v in volumes:
-                label = f"\u05DB\u05E8\u05DA {v['suffix']} ({v['page_count']} {tr('pages')})"
+                _vp = v.get('transcription_pages') or v['page_count']
+                label = f"\u05DB\u05E8\u05DA {v['suffix']} ({_vp} {tr('pages')})"
                 self.combo_browse_volume.addItem(label, v['ie_id'])
             # Select current volume
             active_ie = self.current_browse_volume_ie

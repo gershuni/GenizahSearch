@@ -4,6 +4,46 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.7.0] - Volume-Aware Browse - 2026-04-01
+
+### New Features
+- **Volume-aware browsing**: 3,193 multi-IE manuscripts now show a volume selector, allowing users to switch between different microfilm scans (IEs) with correct text and images per volume (both apps)
+- **Volume-specific community data**: Corrections and comments are tagged with the active IE, so notes on Volume 2 only appear when browsing Volume 2 (legacy data with no IE tag still shows everywhere)
+- **Auto-default to external image sources**: Manchester LUNA, Cambridge IIIF, and JTS/Princeton DPUL images now auto-load when available, instead of waiting for manual source switching (web)
+
+### Improvements
+- **Volume-correct external images**: Manchester and Oxford images properly offset by volume — Volume 2 shows the correct folio, not Volume 1's images (both apps)
+- **Desktop external image filtering**: Manchester/Cambridge/JTS canvases filtered to active volume's pages instead of showing all volumes' images (desktop)
+- **Volume page counts**: Volume selector shows actual transcription page count per volume instead of total IIIF manifest pages (both apps)
+- **Thread-safe browse_map loading**: `threading.Lock` replaces boolean flag to prevent concurrent pickle read/write race conditions
+- **Browse_map IE repair**: Automatically restores pages from non-primary IEs that were lost by pre-v7.7 deduplication, with UID format correction for Tantivy index compatibility
+
+### Bug Fixes
+- **Browse_map pickle corruption**: Multiple SearchEngine instances loading simultaneously no longer causes "pickle data was truncated" errors
+- **Notes/comments ie_id gap**: `create_notes_panel` and `create_notes_button` now pass volume IE to comment queries
+
+---
+
+## [7.6.0] - Visual Similarity Suggestions - 2026-03-31
+
+### New Features
+- **Visual Similarity browse dialog**: New "Visual Similarity" button in the browse page opens a side-by-side workbench showing ranked image-similarity partners from FJMS SVM analysis (~15.5M pairs). Each suggestion shows a thumbnail, shelfmark, domain, library, and score — with Browse, Puzzle, and "Add as Join" action buttons (both apps)
+- **Search in visual suggestions**: From the VS dialog, restrict a text search to the suggestion partner pool. Supports union (any manuscript's partners) and intersection (shared partners only) modes for multi-manuscript selection (both apps)
+
+### Improvements
+- **VS text snippet preloading**: First 20 suggestions preload text snippets in the background for instant preview
+- **VS performance**: 4 regressions fixed from Codex audit — batch enrichment, lazy loading, query optimization
+- **Exclusion dialog "Active exclusions" section**: Clicking the "Exclude Manuscripts" button now shows currently active sources with per-source remove buttons and "Clear all"
+- **New Search clears exclusions**: The reset button now properly clears exclusion sources and their persisted storage
+
+### Bug Fixes
+- **Exclusion chip persisted after New Search**: "Exclude Manuscripts (N)" button remained visible after clicking "New Search" — now properly cleared
+- **VS dialog scrolling**: Fixed web VS dialog right pane not scrolling to show all suggestions
+- **VS dark mode**: Fixed background colors and search URL parameters in dark mode
+- **Desktop VS puzzle integration**: Fixed add_to_puzzle method call from VS dialog
+
+---
+
 ## [7.5.0] - Exclude Known Manuscripts - 2026-03-29
 
 ### New Features

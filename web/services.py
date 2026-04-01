@@ -197,8 +197,13 @@ def is_oxford_manuscript(shelfmark: str = '', library_code: str = '') -> bool:
     return shelfmark_lower.startswith('ms heb') or shelfmark_lower.startswith('ms. heb')
 
 
-def get_oxford_direct_image_url(shelfmark: str = '', page_idx: int = 0) -> str:
-    """Build direct Bodleian image URL from Oxford shelfmark (MS heb. e.93/58)."""
+def get_oxford_direct_image_url(shelfmark: str = '', page_idx: int = 0, folio_offset: int = 0) -> str:
+    """Build direct Bodleian image URL from Oxford shelfmark (MS heb. e.93/58).
+
+    Args:
+        folio_offset: For multi-IE manuscripts, offset the folio number by this amount
+                      (e.g., Volume 2 of d.50/19 → folio 20 = offset 1).
+    """
     if not shelfmark:
         return ''
     match = re.match(
@@ -209,8 +214,9 @@ def get_oxford_direct_image_url(shelfmark: str = '', page_idx: int = 0) -> str:
     if not match:
         return ''
     letter, volume, folio = match.groups()
+    folio_num = int(folio) + folio_offset
     side = 'b' if int(page_idx or 0) % 2 == 1 else 'a'
-    return f"https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_{letter}_{volume}_{folio}{side}.jpg"
+    return f"https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_{letter}_{volume}_{folio_num}{side}.jpg"
 
 # ============================================================================
 # Service Proxy
