@@ -9,7 +9,7 @@ echo Checkpointing sidecar databases...
 python scripts\checkpoint_sidecars.py
 echo Done.
 
-pyinstaller --noconfirm --noconsole --onedir --clean ^
+python -m PyInstaller --noconfirm --noconsole --onedir --clean ^
  --name "GenizahSearchPro" ^
  --icon "icon.ico" ^
  --version-file "version_info.txt" ^
