@@ -333,7 +333,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Search within results, exclude known manuscripts from search, and Visual Similarity — browse and search similar manuscripts using FJMS visual analysis."))
+        self.lbl_msg.setText(tr("New: Browse different volumes in multi-scan manuscripts — fixes image-to-text mismatch, and Visual Similarity suggestions for discovering related manuscripts."))
         self.show()
 
     def on_learn_more(self):
@@ -351,7 +351,7 @@ class WhatsNewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("New Features!"))
         self.setModal(True)
-        self.setFixedSize(500, 380)
+        self.setFixedSize(500, 440)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         if CURRENT_LANG == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -367,9 +367,10 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr('Visual Similarity — a new button in Browse shows similar manuscripts from the Friedberg Project visual algorithm, with similarity score, domain, and library. You can search within the suggestions or add to puzzle.'),
-            tr('Search within results — click "Search within N manuscripts" to restrict your next search to the manuscripts found. Works with all search modes.'),
-            tr('Exclude known manuscripts — hide known manuscripts from search results. Choose from saved lists, upload a file, or paste shelfmarks.'),
+            tr('Volume-Aware Browse — manuscripts with multiple microfilm scans now show a volume selector. This fixes a bug where images did not match the transcription text. Each volume displays its own images and text, with navigation that stays within the active volume.'),
+            tr('Visual Similarity — a new button in Browse shows similar manuscripts based on the FJMS (Friedberg Genizah Project) visual analysis algorithm, with similarity score, domain, and library. You can search within the suggestions or add to puzzle.'),
+            tr('Auto-default to available images — when NLI images are unavailable, the system automatically loads from Manchester, Cambridge, or JTS sources.'),
+            tr('Volume-aware community data — corrections and comments are now tagged per volume, so notes on Volume 2 only appear when browsing Volume 2.'),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "dir='rtl'" if is_heb else ""

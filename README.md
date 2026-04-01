@@ -8,7 +8,17 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.6.0?
+## What's New in Version 7.7.0?
+
+### v7.7.0: Volume-Aware Browse
+
+Manuscripts with multiple microfilm scans (IEs) — 3,193 items — previously showed images from the wrong volume alongside the transcription text. A new **volume selector** fixes this by letting users switch between scans, each with its own correctly matched images and text.
+
+- **Volume selector dropdown** — switch between scans on multi-IE manuscripts. Single-IE manuscripts are unaffected
+- **Volume-correct images** — Manchester, Oxford, Cambridge, and JTS images properly offset per volume
+- **Auto-default to available images** — when NLI IIIF is unavailable, automatically loads from Manchester, Cambridge, or JTS
+- **Volume-aware community data** — corrections and comments are tagged per volume
+- **Both apps** — full feature parity across web and desktop
 
 ### v7.6.0: Visual Similarity Suggestions
 
@@ -18,46 +28,13 @@ Researchers can now **discover visually similar manuscripts** using FJMS SVM ima
 - **Search within suggestions** — restrict a text search to the partner pool, with union/intersection modes for multi-manuscript selection
 - **Both apps** — full feature parity across web and desktop
 
-### v7.5.0: Exclude Known Manuscripts
-
-Hide already-reviewed manuscripts from search results using saved lists, imported shelfmark files, or pasted shelfmarks. Multi-source tracking with per-source clear, resolution report, and WYSIWYG export.
-
-### v7.4.0: Search Within Results
-
-Progressively narrow search results by searching within your current result set. Breadcrumb chip chain tracks each refinement step.
-
-### v7.2.3: Chrome Extension Live + Puzzle Enabled
-
-The Browse by Shelfmark tab now matches the ResultDialog's polished button style, with seamless cross-shelfmark navigation.
-
-* **Icon buttons:** All action buttons have emoji icons matching ResultDialog (Puzzle, Parallels, List, Info, External links)
-* **Reorganized layout:** Action buttons moved to a dedicated row with Bibliography, Catalog, and external library links
-* **Cross-shelfmark navigation:** Page Prev/Next now wrap across manuscript boundaries — last page → first page of next shelfmark
-* **External library links:** Cambridge, Oxford, Manchester, Princeton buttons appear dynamically per manuscript
-* **State preservation:** Extended info open/close and image hide/show remembered across navigation
-* **Fullscreen image viewer:** Press ⛶ on any manuscript image to enter fullscreen with zoom, rotation, adjustments, and arrow-key page navigation
-
 ### Previous Releases
 
-### v7.2.1: Search UX Overhaul & Progressive Images
-
-* **Hero search bar** on the home page, inline accordion results, progressive image loading across all viewers
-
-### v7.2.0: Image Adjustment Controls
-
-* **Brightness / Contrast / Gamma / Invert controls** on all image viewers — web browse, search, reading desk, and desktop app
-
-### v7.1.0: FIST Gap Fill & Expanded Catalog
-
-* **255,615 manuscript records** — 38,673 new records from FIST.db (+18%), 7 new library codes, metadata-only search/browse, shelfmark normalization
-
-### v7.0.0: Fragment Puzzle & Community Publishing
-
-* **Fragment Puzzle:** Visual canvas for arranging manuscript fragments side-by-side. Background removal, zoom/rotate/crop, folio navigation, export as composite PNG (both apps)
-* **Community Publishing:** Share puzzle joins with the research community via Discoveries Center (both apps)
-
-### v6.5.3: Image Viewer — Copy & Save
-* **Right-click image menu:** Copy or save manuscript images directly from the viewer with rotation preserved (desktop)
+- **v7.5.0: Exclude Known Manuscripts** — hide already-reviewed manuscripts from search results using saved lists, imported files, or pasted shelfmarks
+- **v7.4.0: Search Within Results** — progressively narrow search results by searching within your current result set
+- **v7.2.0: Image Adjustment Controls** — brightness / contrast / gamma / invert on all image viewers
+- **v7.1.0: FIST Gap Fill** — 255,615 manuscript records (+18%), 7 new library codes
+- **v7.0.0: Fragment Puzzle** — visual canvas for arranging fragments, community publishing via Discoveries Center
 
 ### v6.5.0: Search UX & Filtered Search
 

@@ -19,6 +19,7 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **Browse_map IE repair**: Automatically restores pages from non-primary IEs that were lost by pre-v7.7 deduplication, with UID format correction for Tantivy index compatibility
 
 ### Bug Fixes
+- **Multi-IE image/text mismatch**: Browse page showed images from Volume 1 regardless of which volume's text was displayed — now each volume shows its own matching images
 - **Browse_map pickle corruption**: Multiple SearchEngine instances loading simultaneously no longer causes "pickle data was truncated" errors
 - **Notes/comments ie_id gap**: `create_notes_panel` and `create_notes_button` now pass volume IE to comment queries
 

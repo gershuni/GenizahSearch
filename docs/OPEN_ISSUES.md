@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-03-29 (bracket-aware search complete: all paths conditional strict/flexible, internal-bracket issue confirmed non-applicable to OCR data)
+> **Last Updated:** 2026-04-01 (v7.7.0 Volume-Aware Browse shipped: multi-IE image/text mismatch fixed for 3,193 manuscripts, volume selector + per-IE paging in web + desktop)
 > **Status:** Active working document
 
 ---

@@ -21,6 +21,7 @@ pyinstaller --noconfirm --noconsole --onedir --clean ^
  --add-data "Help.html;." ^
  --add-data "oxford_full_db.json;." ^
  --add-data "libraries.csv;." ^
+ --add-data "ie_volume_map.json;." ^
  --add-data "bodleian_master_index.csv;." ^
  --add-data "pgp_tag_translations.py;." ^
  --add-data "shared_export_utils.py;." ^

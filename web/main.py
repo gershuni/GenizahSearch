@@ -415,7 +415,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('New: Search within results, exclude known manuscripts from search, and Visual Similarity — browse and search similar manuscripts using FJMS visual analysis.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('New: Browse different volumes in multi-scan manuscripts — fixes image-to-text mismatch, and Visual Similarity suggestions for discovering related manuscripts.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()

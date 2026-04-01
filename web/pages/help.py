@@ -518,6 +518,7 @@ This page enables convenient continuous reading of a full manuscript, synchroniz
 - **View on Ktiv:** Opens the manuscript in the National Library of Israel's online catalog
 - **Edit & Comment:** Submit corrections or add scholarly comments for the benefit of the entire research community, or for yourself (requires login)
 - **PGP Info:** If Princeton Geniza Project data is available, an information panel is displayed with transcriptions, description, tags, and dating (see [PGP Data](#help-pgp) above)
+- **Volume Selector:** Manuscripts with multiple microfilm scans (~1.5% of the collection) now show a volume dropdown. Previously, images could be mismatched with the text — the volume selector fixes this by displaying each volume's own images and transcription, with page navigation staying within the active volume
         ''').style('color: var(--text-secondary);')
 
     # === Browse by Identification ===
@@ -1060,6 +1061,7 @@ def _create_hebrew_content():
 - **צפה בכתיב:** פתיחת כתב היד בקטלוג המקוון של הספרייה הלאומית
 - **עריכה והערות:** הגישו תיקונים או הוסיפו הערות מחקריות לטובת כלל קהילת החוקרים, או לעצמכם (דורש התחברות)
 - **מידע PGP:** אם קיים מידע מפרויקט פרינסטון, יוצג פאנל מידע עם תעתוקים, תיאור, תגיות ותיארוך (ראו [מידע PGP](#help-pgp) לעיל)
+- **בורר כרכים:** כתבי יד עם מספר סריקות מיקרופילם (כ-1.5% מהאוסף) מציגים כעת תפריט בחירת כרך. בעבר, התמונות לא תמיד התאימו לתעתוק — בורר הכרכים מתקן זאת ומציג לכל כרך את התמונות והתעתוק שלו, וניווט העמודים נשאר בתוך הכרך הפעיל
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Browse by Identification ===
