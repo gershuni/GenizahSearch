@@ -146,7 +146,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-(No active milestone — run `/gsd:new-milestone` to start next)
+## Current Milestone: v7.8 Server-Side Image Cache
+
+**Goal:** Eliminate NLI downtime impact by pre-caching manuscript images on EC2, serving cached images as primary source with live IIIF as fallback.
+
+**Target features:**
+- Batch-fetch NLI images (800px minimum, resolution TBD after investigation) to server disk, prioritizing manuscripts without CUL/Oxford/JTS/Manchester alternatives
+- Serve cached images as primary source for both web and desktop apps, with live IIIF fallback
+- Desktop option to download the full image cache locally for offline use
+- Investigation phase for rate limiting, serving architecture, batch priority strategy, and optimal resolution
 
 ### Out of Scope
 
@@ -239,4 +247,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-03 after v7.7 milestone*
+*Last updated: 2026-04-03 after v7.8 milestone started*

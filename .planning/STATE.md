@@ -1,33 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v5.6.0
-milestone_name: milestone
-status: verifying
-stopped_at: Completed 61-02-PLAN.md
-last_updated: "2026-04-03T05:27:34.304Z"
+milestone: v7.8
+milestone_name: Server-Side Image Cache
+status: defining_requirements
+stopped_at: null
+last_updated: "2026-04-03"
 last_activity: 2026-04-03
 progress:
-  total_phases: 62
-  completed_phases: 61
-  total_plans: 197
-  completed_plans: 197
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-31)
+See: .planning/PROJECT.md (updated 2026-04-03)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.7 Volume-Aware Browse — defining requirements
+**Current focus:** v7.8 Server-Side Image Cache — defining requirements
 
 ## Current Position
 
-Phase: 60 — Desktop Volume-Aware Browse (complete)
-Plan: 01 of 01 complete
-Status: Phase complete — ready for verification
-Last activity: 2026-04-03
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-03 — Milestone v7.8 started
 
 ## Performance Metrics
 
