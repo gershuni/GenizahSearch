@@ -8,30 +8,16 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.7 Volume-Aware Browse
+## Current State (after v7.7 shipped)
 
-**Goal:** Fix multi-IE image/text mismatch by making search→browse→paging IE-aware, so users always see the correct images for the transcription they found.
-
-**Target features:**
-- Search result from any IE → browse opens that specific IE/volume
-- Image and text always match within browse (per-volume IIIF manifest loading)
-- Prev/next navigation stays within the same volume
-- Volume selector ("כרך 1/3") for multi-IE manuscripts
-- No silent fallback to wrong IE when correct IE is known
-- Desktop parity (Phase 2, ships after web)
-
-## Current State (after v7.6 shipped)
-
-**Shipped:** v7.6 Search Refinement & Scholarly Joins (2026-03-31)
-- Manuscript dimensions display in browse with measurements dialog (summary, catalog, computed, blank image sizes) (both apps)
-- Pre-search and post-search dimension range filtering (width/height/line height/material) (both apps)
-- Search within results: progressive refinement restricting queries to current result set, breadcrumb chain with per-chip removal (both apps)
-- Exclude known manuscripts from search via saved lists, imported shelfmark files, or pasted shelfmarks with resolution report (both apps)
-- FIST visual similarity suggestions from FJMS SVM image analysis (~15.5M pairs) in browse dialog with ranked partners (both apps)
-- "Search in visual suggestions" with union/intersection modes for multi-manuscript selection (both apps)
-- Lightweight browse first-render: zero SQLite calls in hot path, deferred enrichment in Phase B (web)
-- 38,673 FIST gap manuscripts merged into libraries.csv (216K→255K) with 7 new library codes
-- 206 commits, 151 files changed, +28K/-3.7K lines
+**Shipped:** v7.7.0 Volume-Aware Browse (2026-04-01)
+- IE volume data infrastructure: ie_volume_map.json for 3,193 multi-IE manuscripts with per-IE browse_map grouping
+- Volume-aware web browse: selector dropdown, per-IE paging, volume-correct IIIF suffix loading
+- Desktop volume-aware browse parity: volume selector, suffix-aware IIIF, search-to-browse IE propagation
+- Community writes (corrections/comments) tagged with ie_id for per-volume attribution
+- Session persistence for active volume (web URL + desktop state); shareable browse URLs include volume
+- Stratified IIIF validation confirming 907→suffix mapping accuracy
+- 13 commits, 39 files changed, 26/26 requirements satisfied
 
 **Architecture:**
 - Web: NiceGUI -> Tantivy (search) + SQLite sidecars (pgp.db + FJMS + NLI + libraries_translations.db + visual_similarity.db) + Supabase (community features only)
@@ -54,7 +40,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Data:**
 - pgp.db: 35,839 documents, 9,364 sources, 22,757 footnotes, 36,155 fragments, 34,954 translations (v1.0.0)
-- manuscripts (libraries.csv): ~255,615 records (including 38K FIST gap fill)
+- manuscripts (libraries.csv): ~255,615 records (including 38K FIST gap fill, 3,193 multi-IE with volume data)
 - libraries_translations.db: 184,514 title translations (76MB)
 - fjms_enrichment.db: 390K domains, 48K joins, 685K catalog (37 cols), 427K bib (deduped), 64K catalog_refs, ~260K translations, 1.5M computed measurements (v5.0.0)
 - nli_crossref.db: 815K NLI images, 141K Cambridge manifests, 28K Manchester LUNA, 36,283 JTS DPUL (v2.0.0)
@@ -153,9 +139,14 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - FIST visual similarity suggestions in browse with ranked partners and action buttons (both apps) -- v7.5.0
 - Search within FIST visual suggestion partner pools with union/intersection modes (both apps) -- v7.5.0
 
+- Volume-aware browse: IE-specific IIIF manifest loading, per-IE paging, volume selector for multi-IE manuscripts (both apps) -- v7.7.0
+- Search→browse IE propagation: clicking a search result opens the matching IE/volume (both apps) -- v7.7.0
+- Community writes include ie_id context for per-volume corrections and comments -- v7.7.0
+- Session persistence for active volume with shareable browse URLs including volume parameter -- v7.7.0
+
 ### Active
 
-(Defined in REQUIREMENTS.md for v7.7 Volume-Aware Browse)
+(No active milestone — run `/gsd:new-milestone` to start next)
 
 ### Out of Scope
 
@@ -227,6 +218,8 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | visual_similarity.db as separate sidecar (server-only default) | 500-700MB too large for desktop bundle; on-demand download option | Good |
 | Browse Phase A/B split (zero SQLite hot path) | First paint renders instantly; enrichment loads async | Good |
 | ExclusionSource model with per-source tracking | Users can see and clear individual exclusion sources | Good |
+| IE volume data from MARC 907 field order | 907 field position maps to IIIF suffix; validated via stratified IIIF sampling | Good |
+| Per-IE browse_map grouping (not cross-IE dedup) | Each IE's pages independently addressable; 98.5% single-IE manuscripts unchanged | Good |
 
 ## Evolution
 
@@ -246,4 +239,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-31 — v7.7 Volume-Aware Browse milestone started*
+*Last updated: 2026-04-03 after v7.7 milestone*

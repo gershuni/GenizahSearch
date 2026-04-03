@@ -1,5 +1,87 @@
 # Project Milestones: GenizahSearch
 
+## v7.7 Volume-Aware Browse (Shipped: 2026-04-03)
+
+**Phases completed:** 62 phases, 197 plans, 343 tasks
+
+**Key accomplishments:**
+
+- PostgreSQL tables for PGP document storage with pgpid natural key, JSONB tags, GENERATED url, and RLS public-read policies
+- One-liner:
+- 7,090 PGP transcriptions with metadata imported to Supabase via two-pass batch upsert script with 7,764 fragment links
+- Service layer for PGP document-fragment relationships with 4 query functions, unit tests, and integration verification
+- PGP transcriptions integrated into browse page version selector with auto-selection, verified icon, and attribution display
+- Code verification:
+- Regex-based recto/verso section parsing added to document_service.py, integrated into browse.py for page-filtered transcription display
+- One-liner:
+- One-liner:
+- One-liner:
+- Multi-source version selector with grouped transcriptions/translations sections, scholar attribution, and page-aware content filtering.
+- ALTER TABLE migration adding languages_primary, languages_secondary, inferred_date_standard, inferred_date_rationale to documents table with updated import script
+- PGP metadata section added to browse page with document type, tags, description, dates, and translate buttons
+- Clicking a PGP tag navigates to search page with filtered results, viewer pane preview with manuscript text
+- One-liner:
+- Commit:
+- Added ASCII apostrophe and curly quote variants to search normalization, closing the UAT gap where typing ' (keyboard apostrophe) returned 503 results instead of 11,006
+- Fixed 7 test failures across export service and boundary search by updating expectations to match production behavior changes
+- Fixed 10 test failures (4 responsa mark-tolerant, 6 shelfmark expectations) to achieve full green suite of 410 tests
+- PGP HTML canvas parser using stdlib HTMLParser with 14 tests, plus fixed section regex handling all 712 missed marker variants
+- Canvas-based section lookup wired into both web and desktop display pipelines with 5 consumer sites and 8 integration tests
+- Language-based translation grouping in desktop _populate_pgp_combo matching web app Hebrew-first, English-second order
+- Shared corrections service with get_pending_corrections_for_page() querying Supabase by sys_id, page, author, and status filter
+- Pending corrections as selectable amber-styled entries in web version selector with schedule icon, status label, and on_version_change callback
+- 9 verification tests confirming Browse tab and Reading Desk pending corrections display with permission filtering and emoji labels
+- SQLite sidecar export from 13GB FIST.db producing fjms_enrichment.db with 762K rows across domains/joins/catalog tables plus FTS5 full-text search index
+- FjmsService class providing domain, join, and catalog queries from SQLite sidecar with thread-safe read-only access and 27 unit tests
+- FJMS scholarly join groups merged into Related Fragments panel in both web and desktop apps with scholar name, join type display, purple badge, and deduplication against user/PGP joins
+- GROUP BY + GROUP_CONCAT deduplication in get_join_group() so multi-group manuscripts show each partner once with all scholars and join types aggregated
+- Source merging replaces source-dropping dedup so fragments in both PGP and FJMS show dual badges (blue PGP + purple FJMS) in web and "PGP, FJMS" in desktop
+- 815K NLI image records and 141K Cambridge IIIF manifests imported into nli_crossref.db sidecar with normalized shelfmarks and indexed join keys
+- NliCrossrefService with 12 methods providing image lookup, Cambridge IIIF manifests, physical metadata, relationship queries, and availability indicators for both web and desktop apps
+- Local-first FL ID resolution via NLI crossref sidecar, eliminating network manifest fetch for 766K+ manuscripts
+- Local-first FL ID and Cambridge manifest resolution in enrich_metadata via NLI crossref SQLite sidecar, eliminating 2-3 network calls per manuscript for covered records
+- Folio label parsing from NLI ImageName patterns with navigation dropdown and clickable NLI/CUDL/Oxford source indicator chips on web browse page
+- Folio-labeled page combo, KTIV viewer button, and source indicator enhancements in desktop browse tab matching web app patterns from Plan 01
+- Cambridge/NLI image source toggle via styled chips with cached IIIF proxy endpoint
+- Physical metadata (material, folios) and library digital collection links in web browse via NLI crossref enrichment
+- Physical metadata (material, folios, size) and library digital collection links in desktop browse extended info panel via enrich_metadata enrichment
+- Supabase PGP tables exported to 146.6 MB local SQLite sidecar (pgp.db) with pagination, JSON serialization, built-in validation, and idempotent rebuild
+- PgpService class reading from pgp.db sidecar via SQLite, replacing all 11 Supabase REST API calls with sub-millisecond local queries while preserving identical 14-function public API
+- 33 SQLite-backed tests replacing all Supabase mocks, verifying JSON deserialization, json_each tag search, batch lookup, and graceful degradation for PgpService
+- Surgical fix adding state.pgp_metadata assignment to FL ID initialization path in browse.py, closing gap where PGP tags/links/dates were invisible on search-to-browse navigation
+- Extended fjms_enrichment.db with 4 new catalog tables (2.1M rows), v2 catalog schema with GenizahTitle/NumFolio/UnitCatalogRecId, and contentless FTS5 index spanning RunningTitle + FreeDescription
+- Added get_catalog_source_counts() and get_catalog_detail() methods to FjmsService with v3.0.0 schema support, 46 passing tests, and 10 Hebrew translation keys for dialog labels
+- NiceGUI catalog dialog with FIST 5-section side-by-side team layout, wired into browse page and search cards with batch-loaded source counts
+- Desktop FjmsCatalogDialog with FIST 5-section HTML table layout and Catalog Records (N) button wired into Browse tab and ResultDialog
+- Source team attribution added to catalog free descriptions pipeline (export → service → both UIs) with desktop RTL layout fix for Hebrew interface
+- pgp.db bundled in desktop build via --add-data, deployment docs updated with scp/regeneration commands, PgpService.get_version() added for update checker
+- 12 automated tests proving PGP/FJMS/NLI sidecar services operate entirely from local SQLite with zero network dependencies
+- Desktop app auto-checks GitHub Releases for sidecar updates on startup, prompts user, downloads to LOCALAPPDATA, resets service singletons, and About screen shows installed data versions
+- Parallelized search enrichment via asyncio.gather, batched FJMS metadata pre-fetch in browse, and async stats+feed loading on discoveries page
+- Async domain enrichment via DomainEnrichmentWorker QThread + lazy catalog detail fetch on button click in browse and reading desk
+- Crossref metadata queries moved from synchronous render path to parallel enrichment via asyncio.gather with module-level session cache for instant back-navigation
+- O(1) dict lookup for FL ID browse navigation, replacing linear scan over 217K browse_map entries with background-built index fallback
+- Unified variant cache with superset-aware lookup: Tantivy phase (limit=200) slices from pre-computed regex-phase result (limit=8000) instead of recomputing
+- Elapsed timer, ETA, chunk count, summary line, and min-chunks filter across all search modes in both web and desktop apps
+- Windows toast notification on search complete, OS sleep prevention via SetThreadExecutionState in all search threads, and right-click copy options on search result rows
+- LIBRARY_CODES_HE dictionary with 81 Hebrew library names, lang-aware get_library_display(), all web callers updated for Hebrew mode
+- Web translation integration with global toggle, clickable Translated/Original badges, translated match detection, Dicta-powered translate buttons, and browse shelfmark/sys_id URL support
+- Supabase publish service with 7 CRUD functions, 9 mocked tests, and full RLS schema for community puzzle join sharing
+- Publish/unpublish toggle in web puzzle toolbar, published joins in Discoveries feed with thumbnails, Community Puzzle Joins section in joins panel, and /puzzle?doc= deep link route
+- Desktop publish/unpublish toggle with worker thread, DiscoveriesDialog feed integration, JoinsDialog community section, and All/My Puzzles sub-tabs
+- 38,673 FIST-only manuscripts merged into libraries.csv (216,942 -> 255,615) with 7 new library codes and Yevr/Halper shelfmark normalization aliases
+- Metadata search guard fix enables Title/Shelfmark search to return 38K FIST-only records using meta_mgr API, with TDD test suite and browse fallback
+- RefinementStep dataclass with chain helpers for search-within-results: serialization, None/empty-set restrict merging, replay, scope signature
+- Web search refinement with breadcrumb chain, refine mode toggle, session persistence with replay, and zero-result recovery
+- PyQt6 desktop refinement chain with breadcrumb strip, refine mode badge, session replay, and zero-result recovery
+- Date completed:
+- Split browse page into fast Phase A (Tantivy + csv_bank, zero SQLite) and deferred Phase B (crossref + Oxford + Cambridge + attribution enrichment)
+- Desktop PyQt6 browse parity with web: volume selector, suffix-aware IIIF, search-to-browse IE propagation for 3,193 multi-IE manuscripts
+- ie_id column added to corrections/comments write and read paths so multi-IE manuscript contributions reference the specific volume
+- Stratified IIIF validation script for ie_volume_map.json with volume_ie session persistence in both web and desktop apps
+
+---
+
 ## v7.6 Search Refinement & Scholarly Joins (Shipped: 2026-03-31)
 
 **Phases completed:** 11 phases, 33 plans, 53 tasks
