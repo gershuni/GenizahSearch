@@ -2,14 +2,14 @@
 phase: 62
 reviewers: [gemini, codex]
 reviewed_at: 2026-04-03
-plans_reviewed: [62-CONTEXT.md (pre-plan review)]
+plans_reviewed: [62-01-PLAN.md, 62-02-PLAN.md, 62-03-PLAN.md]
 ---
 
-# Cross-AI Context Review -- Phase 62
+# Cross-AI Plan Review -- Phase 62
 
 ## Gemini Review
 
-This review evaluates the **CONTEXT.md** for Phase 62 (Investigation & Validation) of the GenizahSearch image caching milestone.
+This review evaluates the plans for Phase 62 (Investigation & Validation) of the GenizahSearch image caching milestone.
 
 ### 1. Summary
 The context document is of high quality and demonstrates a mature, risk-averse approach to infrastructure planning. It correctly prioritizes empirical data (rate tests, storage sampling) over assumptions and identifies the crucial "NLI-only" subset to optimize storage. The plan is well-integrated with the existing codebase (`nli_crossref.db`) and provides clear success criteria. However, there are minor gaps in the definition of the "NLI-only" subset and a potential conflict between the "hard gate" requirement for TOS and the implementation decision to proceed without a formal response.
@@ -44,90 +44,139 @@ Addressing the exclusion list and tightening the TOS decision logic would move t
 
 ## Codex Review
 
-### Summary
+Grounded against the current repo patterns in web/api.py and scripts/import_nli_crossref.py, the plans are mostly scoped correctly for an investigation phase and avoid obvious production over-engineering. The main weaknesses are cross-plan handoff ambiguity, one dependency bug, and several places where the measurement definition is still too loose to support a confident go/no-go.
 
-This is a strong investigation-phase context in terms of scope, repo grounding, and deliverable shape, but it is not yet safe for downstream planning as written. The biggest problems are that it weakens the stated hard TOS gate, leaves the actual ingest path implicit even though EC2 is known to be blocked by NLI, and defines the "NLI-only" subset too narrowly for the current codebase's real image-source model.
+### Plan 62-01: NLI-Only Subset + TOS Gate
 
-### Strengths
-* The phase boundary is clear: this is validation work, not feature delivery.
-* The document usefully ties rate testing, storage sampling, and resolution choice together instead of treating them as separate tracks.
-* The deliverables are concrete and appropriately investigation-oriented: report plus scripts.
-* The canonical references are mostly good, especially `shared/nli_crossref_service.py` and `web/api.py`, which are the right places to ground image-source behavior.
-* D-04 is a good idea: testing both `800px` and `1200px` directly supports INV-05 with real data instead of opinion.
-* The focus on the NLI-only subset is directionally right; it keeps the storage estimate tied to the real caching target rather than the whole `815K` image universe.
+**Summary**
+This is the strongest of the three plans. It puts the human TOS decision in the loop, keeps the implementation small, and targets the right prerequisite dataset for the later phases. The main risk is data correctness: the plan says what sources to cross-reference, but not exactly how records are matched or how ambiguity/duplicates are handled.
 
-### Concerns
-* **[HIGH] INV-04 is contradicted by D-09 through D-11.** The requirements say "NLI contacted" and describe a hard go/no-go gate before large-scale fetch begins, but the context turns that into "review terms first, email only if needed, and proceed on conditional go." That will push downstream agents toward planning against a softer gate than the milestone actually allows.
-* **[HIGH] The ingest topology is missing.** The milestone is "pre-cache on EC2," but the context also says NLI blocks datacenter IPs and rate testing must happen from a residential IP. It never states whether the intended Phase 63 path is "fetch from home PC then transfer to EC2," "wait for NLI approval/whitelisting," or something else. That is a core feasibility assumption, not an implementation detail.
-* **[HIGH] The NLI-only subset definition is incomplete.** D-06 excludes Cambridge, Manchester, and JTS/DPUL, but the current app also has Oxford as a separate non-NLI image path in `web/api.py`, and Cambridge can apply to Mosseri via label construction in `genizah_core.py`. "NLI-only" should be defined by actual non-NLI image-provider availability, not just a short list of library names or tables.
-* **[MEDIUM] INV-03 is too underspecified.** D-08 says the EC2 layout is "Claude's Discretion," but it does not define the actual investigation questions a planner needs answered: filesystem type, inode budgeting, per-directory file-count target, EBS assumptions, and what evidence is enough to call `815K+` files feasible.
-* **[MEDIUM] The rate-test success condition is still mushy.** D-02's `100-200` images technically meets the "100+" success criterion, but it does not clearly separate ramp-up from steady-state. A planner will still have to ask what "sustainable rate" means operationally.
-* **[MEDIUM] D-07 is ambiguous when combined with D-04.** It is unclear whether `1000+` means per resolution, total across both resolutions, or only after a provisional resolution choice. That ambiguity matters because INV-02 requires the storage estimate to be grounded in actual sample data at the target resolution.
-* **[MEDIUM] INV-05 is only partially addressed.** The document names `800` vs `1200`, but it does not say how quality will be judged, which manuscript types should be included in the comparison, or who decides "good enough for research use."
-* **[LOW] "Claude's Discretion" is not good cross-agent wording.** This is a context file for downstream agents, so the discretion language should be model-neutral.
-* **[LOW] "Scripts should be reusable by Phase 63"** is reasonable, but stated too strongly it may bias the investigation toward production hardening instead of fastest validation.
+**Strengths**
+- Puts the TOS decision early and makes it an explicit stop condition.
+- Correctly avoids using `library_code` as a proxy for image availability.
+- Keeps deliverables pragmatic: one script, unit tests, JSON output.
+- Includes a sanity check against a rough expected count, which is useful for catching obvious logic errors.
 
-### Suggestions
-* Replace D-09 through D-11 with explicit gate wording: review published terms immediately, contact NLI immediately if bulk academic caching permission is not explicit, and do not record a go decision until the gate outcome is written down.
-* Add a decision that states the assumed ingest path end-to-end. Example: "Phase 63 assumes residential fetching plus transfer/sync to EC2 unless NLI explicitly permits direct server-side acquisition."
-* Redefine "NLI-only subset" as "manuscripts with NLI images and no usable non-NLI image source in the current app architecture." Ground that in `shared/nli_crossref_service.py` and `web/api.py`, not only ad hoc SQL.
-* Explicitly call out Oxford in the subset logic, and treat Mosseri carefully since some Mosseri manuscripts map to Cambridge rather than remaining NLI-only.
-* Clarify that libraries like `RNL`, `AIU`, and many others are collection owners, not automatically alternate image providers. Conversely, `Mosseri` may have Cambridge-backed coverage, so `library_code` alone is not a safe proxy.
-* Tighten INV-01 with a precise definition of success: final plateau rate, minimum successful fetch count at that plateau, allowed error budget, and whether retries count as failures.
-* Clarify the sampling plan for INV-02/INV-05: either sample the same `1000+` images at both `800` and `1200`, or do a smaller dual-resolution pilot first and then a full `1000+` sample at the chosen candidate.
-* Add a lightweight quality-review protocol for INV-05: representative manuscript mix, side-by-side outputs, and a named signoff criterion.
-* Replace "Claude's Discretion" with "Implementation Discretion" or "Investigator Discretion."
-* Start TOS review/outreach first or in parallel with the technical tests, since reply latency is likely to be the longest path in the phase.
+**Concerns**
+- HIGH: The matching strategy is underspecified. If `nli_images`, provider tables, and Oxford JSON do not align on a single canonical key, subset counts can be materially wrong.
+- MEDIUM: "7 test behaviors" is probably too thin for this dataset. It misses likely edge cases such as duplicates, null IDs, one manuscript excluded by multiple providers, and Oxford normalization mismatches.
+- MEDIUM: The output contract is not defined tightly enough for downstream reuse. Later plans need a stable machine-readable artifact, not just summary counts.
+- LOW: `no-FGP stats` is unclear and may be a typo or overloaded term.
 
-### Risk Assessment: HIGH
-The context is close to useful, but not yet planning-safe. One hard requirement is currently softened in a way that conflicts with the milestone, and two central assumptions remain implicit: what exactly counts as "NLI-only," and how data gets from an allowed IP to EC2. Fix those, and the document becomes much more reliable for researcher/planner/executor handoff.
+**Suggestions**
+- Define the canonical join strategy up front: preferred key order, fallback matching, and how conflicts are resolved.
+- Require exclusion-reason counts in the output, not just final totals.
+- Save a deterministic sample list for downstream rate/storage tests, using a fixed seed.
+- Add at least one fixture-based regression test from a small real-data snapshot, not only synthetic unit cases.
+
+**Risk Assessment:** MEDIUM.
+
+### Plan 62-02: Rate Test + Storage Sampling
+
+**Summary**
+This plan addresses the right questions, but it currently mixes several distinct measurements into one wave without fully defining what is being measured. The biggest issue is that rate testing can be distorted if manifest resolution and image downloads are lumped together.
+
+**Strengths**
+- Conservative ramp-up with clear abort conditions is appropriate for an external service.
+- `--dry-run` is useful and keeps development/testing from hitting NLI unnecessarily.
+- Reusing downloaded images is a good anti-waste design choice.
+- Dual-resolution sampling maps directly to the actual product decision.
+
+**Concerns**
+- HIGH: The plan conflates FL-ID resolution traffic with image-fetch traffic. If the rate test measures both together, the sustainable cache-ingest rate will be misestimated.
+- HIGH: "500+ manuscripts at both 800px and 1200px = 1000+ total images" is ambiguous. Manuscripts and images are not the same sampling unit.
+- MEDIUM: Abort on `3+` timeouts may treat residential ISP noise as an upstream block. That can produce false pessimism.
+- MEDIUM: Sampling is not explicitly stratified. If the sample skews toward one image type, the quality/storage decision will be weak.
+- MEDIUM: The plan does not explicitly require persistent request logs and resolved FL-ID artifacts.
+- LOW: Hard-coding a storage-cost number is brittle.
+
+**Suggestions**
+- Split measurements: manifest/FL-ID resolution rate, then image-download rate with resolved FL IDs cached.
+- Define the sample unit explicitly as image pages, not manuscripts.
+- Record per-request outcomes, latency percentiles, and failure types.
+- Add a hard ceiling on total live requests and a cooldown between ramp stages.
+- Make live execution opt-in with `--live`; default modes should never touch NLI.
+
+**Risk Assessment:** HIGH.
+
+### Plan 62-03: EC2 Filesystem + Investigation Report
+
+**Summary**
+The benchmark script is appropriately pragmatic and portable, and the reporting deliverables are sensible. The main problem is structural: the plan claims to depend only on 62-01 even though its report step explicitly needs 62-02 outputs.
+
+**Strengths**
+- Uses stdlib-only Python, which is the right call for EC2 portability.
+- Keeps the benchmark as a disposable investigation tool.
+- Includes both internal and public-facing report outputs.
+- Tests real EC2 behavior rather than assuming filesystem performance.
+
+**Concerns**
+- HIGH: Dependency ordering is wrong. Task 3 depends on Plan 62-02 data but the plan only declares dependency on 62-01.
+- HIGH: Extrapolating 300K-file behavior from a single 50K-file run is weak evidence for an eventual 815K+ target.
+- MEDIUM: The 2-level 65K-directory layout may itself create meaningful inode/metadata overhead; no comparison point.
+- MEDIUM: Thresholds like `ls/stat < 10ms` are not defined as warm-cache, cold-cache, median, or p95.
+- MEDIUM: The plan omits rsync-like tree traversal/write behavior.
+- LOW: `--cleanup` needs explicit guardrails.
+
+**Suggestions**
+- Make Plan 62-03 formally depend on both 62-01 and 62-02.
+- Benchmark at two scales, not one, so scaling claims are empirical.
+- Compare at least one alternate fan-out layout.
+- Add ingest-relevant operations: file creation, tree walk, rsync-like copy/scan.
+- Define acceptance metrics as percentiles with warm vs cold cache conditions.
+
+**Risk Assessment:** MEDIUM.
+
+### Overall Codex Assessment
+
+The plans are close to usable, but would benefit from fixes before execution. The most important:
+- Tighten artifact handoffs between waves: stable JSON/CSV outputs, fixed seeds, reusable sample manifests.
+- Correct the 62-03 dependency on 62-02.
+- Define measurement units precisely, especially for rate testing and storage sampling.
+- Separate "safe upstream behavior" from "storage economics" from "filesystem behavior" so the final go/no-go is defensible.
 
 ---
 
 ## Consensus Summary
 
-Phase 62 context reviewed by Gemini and Codex. Both reviewers agree on the core issues.
+Phase 62 plans reviewed by Gemini and Codex. Both reviewers see the investigation approach as sound but flag specific gaps.
 
 ### Agreed Strengths
-* Phase boundary is clear: investigation, not feature delivery
-* Dual-resolution testing (D-04) is well-designed for INV-05
-* NLI-only subset focus is directionally correct
-* Deliverables (report + scripts) are concrete and appropriate
-* Canonical references are well-chosen
+* Plans are appropriately scoped for investigation (not production code)
+* TOS gate is correctly sequenced as a blocking prerequisite
+* NLI-only subset optimization is the right approach
+* Empirical testing (rate, storage, filesystem) over guesswork
+* Script deliverables are pragmatic and reusable
 
-### Agreed Concerns (HIGH priority -- raised by both reviewers)
+### Agreed Concerns (priority order)
 
-1. **TOS gate contradicts requirements.** Both reviewers flag that D-09 through D-11 soften INV-04's "hard go/no-go gate" into a "conditional go." Gemini calls it ambiguous; Codex calls it a direct contradiction that makes the context not planning-safe.
+1. **[HIGH] TOS gate ambiguity persists.** Gemini flags "conditional go" as conflicting with "hard gate." This was already addressed in the revised CONTEXT.md but Gemini's review was against the pre-revision context prompt. The plans themselves implement the revised conditional-go interpretation correctly.
 
-2. **NLI-only subset definition is incomplete.** Both note that D-06 only excludes Cambridge/Manchester/JTS/DPUL. Gemini suggests adding RNL, BL, AIU, Mosseri. Codex goes further: Oxford is a separate non-NLI image path, Mosseri can map to Cambridge, and `library_code` alone is not a safe proxy for image availability. The definition should be grounded in actual image-provider availability in the codebase, not a hand-curated library list.
+2. **[HIGH] Exclusion list / matching strategy.** Gemini notes RNL/BL/AIU/Mosseri missing from exclusion list (these are NLI-only collections -- they should be INCLUDED, not excluded). Codex flags that the matching strategy between tables is underspecified. The plans do cross-reference all 4 provider tables + Oxford, but join key semantics could be clearer.
 
-3. **Filesystem validation is underspecified.** Both flag INV-03/D-08 as too vague. Gemini suggests a dummy inode stress test; Codex wants explicit investigation questions (filesystem type, inode budget, per-directory targets, EBS assumptions).
+3. **[HIGH] Plan 62-03 dependency on 62-02.** Codex correctly identifies that Task 3 of Plan 62-03 reads 62-02-SUMMARY.md but the plan only declares depends_on: [62-01]. This is a structural bug -- Task 3 cannot run until Plan 02 completes.
 
-### Codex-Only Concerns (not raised by Gemini)
+4. **[HIGH] Rate test conflates manifest resolution with image fetch (Codex).** The ramp-up measures both FL ID resolution and image download together, which could skew the sustainable rate estimate.
 
-4. **[HIGH] Ingest topology is missing.** The document never states how images get from a residential IP to EC2. This is a core feasibility assumption that downstream agents need.
+5. **[MEDIUM] Measurement definitions too loose.** Codex wants explicit sample units (images vs manuscripts), latency percentiles (not just averages), and warm/cold cache conditions. Gemini wants clearer cost projection methodology.
 
-5. **[MEDIUM] Rate-test success criteria are mushy.** D-02 doesn't separate ramp-up from steady-state. "Sustainable rate" is undefined operationally.
-
-6. **[MEDIUM] D-07 sampling ambiguity.** Unclear whether 1000+ means per resolution, total, or after resolution choice. Matters for INV-02.
-
-7. **[MEDIUM] INV-05 quality criteria missing.** No protocol for who judges "good enough" or how quality is evaluated.
+6. **[MEDIUM] Filesystem benchmark extrapolation weak.** Codex wants two-scale testing (e.g., 50K and 150K) instead of single-point extrapolation.
 
 ### Divergent Views
 
-* **Risk level:** Gemini rates LOW/MEDIUM, Codex rates HIGH. Codex's higher rating is driven by the ingest topology gap and TOS contradiction, which it considers blocking for planning. Gemini's lower rating reflects confidence in the technical approach.
-* **Exclusion nuance:** Gemini treats it as a simple list expansion (add more library codes). Codex argues library_code is fundamentally the wrong proxy -- the definition should be based on actual image-provider availability in code, not collection ownership.
+* **Risk level:** Gemini rates LOW/MEDIUM overall; Codex rates Plan 62-02 as HIGH risk due to measurement conflation. Codex is more demanding on measurement rigor.
+* **Exclusion logic:** Gemini misunderstands the exclusion model (suggests excluding RNL/BL/AIU, which are NLI-only collections that SHOULD be in the subset). Codex correctly focuses on join-key ambiguity rather than library names.
+* **Scope:** Gemini reviews appear to be against the CONTEXT.md rather than the PLAN.md files (references D-xx decisions). Codex reviews the actual plan tasks.
 
-### Recommended CONTEXT.md Updates (priority order)
+### Recommended Plan Updates (priority order)
 
-1. **Fix TOS gate** -- Align D-09/D-11 with INV-04's "hard gate" wording, or explicitly acknowledge the softening
-2. **Add ingest topology decision** -- State the assumed residential-fetch-then-transfer path
-3. **Redefine NLI-only subset** -- Ground in actual image-provider availability (nli_crossref_service.py + web/api.py), not ad-hoc library list. Include Oxford; handle Mosseri/Cambridge overlap
-4. **Tighten INV-03** -- Add specific investigation questions for filesystem validation
-5. **Clarify sampling plan** -- Whether 1000+ is per-resolution or total; how quality is judged
-6. **Replace "Claude's Discretion"** -- Use model-neutral "Implementation Discretion"
-7. **Add cost projection** -- Monthly EBS cost estimate as a report deliverable
-8. **Start TOS first/parallel** -- Reply latency is the longest path
+1. **Fix 62-03 dependency** -- Add 62-02 to depends_on list
+2. **Separate FL ID resolution from image rate test** -- Resolve FL IDs first (phase 1), then measure pure image fetch rate (phase 2) within the rate test script
+3. **Clarify join strategy in 62-01** -- Document canonical join keys for each provider table
+4. **Add persistent request logs** -- Rate test should emit per-request CSV for post-hoc analysis
+5. **Define sample units** -- Explicitly state: "1000+ images" = 500 manuscripts x 2 resolutions, where "images" counts individual FL-ID page downloads
+6. **Benchmark at two scales** -- EC2 test at 50K and 150K files for empirical scaling validation
+7. **Add fixed seed for reproducible sampling** -- Downstream reuse and audit trail
 
 ---
 *Review completed: 2026-04-03*
