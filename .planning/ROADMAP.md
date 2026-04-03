@@ -16,6 +16,7 @@
 - **v7.1.0 FIST Gap Fill** -- Phase 53 (shipped 2026-03-19)
 - **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (shipped 2026-03-31)
 - **v7.7 Volume-Aware Browse** -- Phases 58-61 (shipped 2026-04-01)
+- **v7.8 Server-Side Image Cache** -- Phases 62-64 (in progress)
 
 ## Phases
 
@@ -170,7 +171,7 @@ lightweight browse first-render. 14/14 requirements satisfied.
 <summary>v7.7 Volume-Aware Browse (Phases 58-61) -- SHIPPED 2026-04-01</summary>
 
 4 phases, 8 plans, 13 commits.
-Fixed multi-IE image/text mismatch for 3,193 manuscripts (1.5%) by making search→browse→paging
+Fixed multi-IE image/text mismatch for 3,193 manuscripts (1.5%) by making search->browse->paging
 IE-aware across both apps. IE volume data infrastructure, web + desktop volume selector dropdown,
 per-IE paging, volume-correct images for external providers (Manchester/Oxford/Cambridge/JTS),
 auto-default to external sources when NLI is down, session persistence for active volume,
@@ -178,12 +179,62 @@ community writes (corrections/comments) include IE context.
 
 </details>
 
+### v7.8 Server-Side Image Cache (In Progress)
+
+**Milestone Goal:** Eliminate NLI downtime impact by pre-caching manuscript images on EC2, serving cached images as primary source with live IIIF as fallback.
+
+- [ ] **Phase 62: Investigation & Validation** - Validate NLI fetch strategy, storage estimates, and TOS before building anything
+- [ ] **Phase 63: Batch Fetcher & Transfer Pipeline** - Build residential-IP batch fetcher with priority ordering and rsync to EC2
+- [ ] **Phase 64: Serving & Integration** - nginx cache-first serving with unified image resolver in both apps
+
+## Phase Details
+
+### Phase 62: Investigation & Validation
+**Goal**: Confirm that server-side NLI image caching is feasible -- rate limits, storage, filesystem, and TOS all validated before any infrastructure is built
+**Depends on**: Nothing (first phase of milestone)
+**Requirements**: INV-01, INV-02, INV-03, INV-04, INV-05
+**Success Criteria** (what must be TRUE):
+  1. A batch of 100+ NLI images can be fetched from a residential IP at a sustainable rate without triggering blocks
+  2. Storage estimate is grounded in 1000+ image sample data, and EC2 disk/inode budget is confirmed sufficient
+  3. NLI has been contacted about bulk academic caching, and a clear go/no-go decision is recorded (INV-04 gate)
+  4. Target image resolution is decided with documented quality/storage tradeoff rationale
+**Plans**: TBD
+
+### Phase 63: Batch Fetcher & Transfer Pipeline
+**Goal**: Researchers' manuscript images are being systematically cached on the server, starting with NLI-only manuscripts that have no alternative image source
+**Depends on**: Phase 62 (hard gate -- INV-04 TOS decision must be "go")
+**Requirements**: FETCH-01, FETCH-02, FETCH-03, FETCH-04, FETCH-05
+**Success Criteria** (what must be TRUE):
+  1. Batch fetcher runs unattended from residential IP, resuming after interruption without re-fetching completed images
+  2. NLI-only manuscripts (no CUL/Oxford/JTS/Manchester alternatives) are fetched first; coverage of this subset reaches 90%+ before cache-first rollout
+  3. sys_id-to-FL-ID mapping is resolved via IIIF manifests and persisted so image paths are deterministic
+  4. Fetched images land on EC2 in the live cache directory via atomic rsync promotion
+**Plans**: TBD
+
+### Phase 64: Serving & Integration
+**Goal**: Researchers see manuscript images instantly from the server cache, with transparent fallback to live IIIF -- in both web and desktop apps
+**Depends on**: Phase 63 (90%+ NLI-only coverage gate from FETCH-02)
+**Requirements**: SERVE-01, SERVE-02, SERVE-03, WEB-01, WEB-02, WEB-03, DESK-01, DESK-02
+**Success Criteria** (what must be TRUE):
+  1. Cached NLI images load from nginx static files without touching Python, and uncached images fall back to client-side IIIF
+  2. All web image-loading codepaths (browse, search, puzzle, reading desk, fullscreen) use a single unified URL resolver
+  3. Desktop app tries server cache URL first, then direct NLI IIIF, and maintains a local LRU cache of viewed images
+  4. When NLI is down, cached images still load normally; uncached images show a clear "image unavailable" state instead of hanging
+  5. Cache status endpoint reports coverage percentage, per-library breakdown, and disk usage
+**Plans**: TBD
+**UI hint**: yes
+
 ## Progress
 
-**Total milestones shipped:** 14 (through v7.7)
-**Total phases completed:** 61 (Phases 1-61)
-**Total plans completed:** ~201
+**Execution Order:**
+Phases execute in numeric order: 62 -> 63 -> 64
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 62. Investigation & Validation | 0/TBD | Not started | - |
+| 63. Batch Fetcher & Transfer Pipeline | 0/TBD | Not started | - |
+| 64. Serving & Integration | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-01 after v7.7 shipped*
+*Last updated: 2026-04-03 after v7.8 milestone started*

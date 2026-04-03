@@ -53,34 +53,32 @@ Deferred to future milestone:
 
 ## Traceability
 
-Updated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INV-01 | — | Pending |
-| INV-02 | — | Pending |
-| INV-03 | — | Pending |
-| INV-04 | — | Pending |
-| INV-05 | — | Pending |
-| FETCH-01 | — | Pending |
-| FETCH-02 | — | Pending |
-| FETCH-03 | — | Pending |
-| FETCH-04 | — | Pending |
-| FETCH-05 | — | Pending |
-| SERVE-01 | — | Pending |
-| SERVE-02 | — | Pending |
-| SERVE-03 | — | Pending |
-| WEB-01 | — | Pending |
-| WEB-02 | — | Pending |
-| WEB-03 | — | Pending |
-| DESK-01 | — | Pending |
-| DESK-02 | — | Pending |
+| INV-01 | Phase 62 | Pending |
+| INV-02 | Phase 62 | Pending |
+| INV-03 | Phase 62 | Pending |
+| INV-04 | Phase 62 | Pending |
+| INV-05 | Phase 62 | Pending |
+| FETCH-01 | Phase 63 | Pending |
+| FETCH-02 | Phase 63 | Pending |
+| FETCH-03 | Phase 63 | Pending |
+| FETCH-04 | Phase 63 | Pending |
+| FETCH-05 | Phase 63 | Pending |
+| SERVE-01 | Phase 64 | Pending |
+| SERVE-02 | Phase 64 | Pending |
+| SERVE-03 | Phase 64 | Pending |
+| WEB-01 | Phase 64 | Pending |
+| WEB-02 | Phase 64 | Pending |
+| WEB-03 | Phase 64 | Pending |
+| DESK-01 | Phase 64 | Pending |
+| DESK-02 | Phase 64 | Pending |
 
 **Coverage:**
 - v7.8 requirements: 18 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 18
+- Mapped to phases: 18/18
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-03*
-*Last updated: 2026-04-03 after cross-AI review (Gemini + Codex, 2 rounds)*
+*Last updated: 2026-04-03 after roadmap creation (18/18 requirements mapped)*
