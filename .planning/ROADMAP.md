@@ -198,7 +198,11 @@ community writes (corrections/comments) include IE context.
   2. Storage estimate is grounded in 1000+ image sample data, and EC2 disk/inode budget is confirmed sufficient
   3. NLI has been contacted about bulk academic caching, and a clear go/no-go decision is recorded (INV-04 gate)
   4. Target image resolution is decided with documented quality/storage tradeoff rationale
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 62-01-PLAN.md -- NLI-only subset determination + TOS gate checkpoint
+- [ ] 62-02-PLAN.md -- Rate test + storage sampling scripts + resolution decision
+- [ ] 62-03-PLAN.md -- EC2 filesystem validation + investigation report
 
 ### Phase 63: Batch Fetcher & Transfer Pipeline
 **Goal**: Researchers' manuscript images are being systematically cached on the server, starting with NLI-only manuscripts that have no alternative image source
@@ -231,10 +235,10 @@ Phases execute in numeric order: 62 -> 63 -> 64
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 62. Investigation & Validation | 0/TBD | Not started | - |
+| 62. Investigation & Validation | 0/3 | Planned | - |
 | 63. Batch Fetcher & Transfer Pipeline | 0/TBD | Not started | - |
 | 64. Serving & Integration | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-03 after v7.8 milestone started*
+*Last updated: 2026-04-03 after Phase 62 planning (3 plans)*
