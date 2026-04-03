@@ -26,9 +26,12 @@ Investigation should proceed in this order to avoid wasted work:
 6. **Report + cost projection** (D-12 through D-14, D-16)
 
 ### TOS Gate (INV-04)
+
+**Requirement reconciliation:** INV-04's "hard go/no-go gate" is interpreted for this phase as: a documented TOS determination must be recorded within 5 business days, including a "conditional go" outcome if terms are silent. The conditional-go path supersedes the original hard-gate wording -- blocking indefinitely on institutional email response is not practical for an academic project. This interpretation is intentional and must be documented in the investigation report.
+
 - **D-09:** Review NLI's published TOS/terms of use for IIIF **first**, before any rate testing. If TOS explicitly prohibits bulk caching, stop the phase immediately and escalate.
 - **D-10:** If TOS is ambiguous or silent on caching: contact NLI immediately with a formal academic request explaining the project and intended use. Do not wait indefinitely -- set a 5 business day window for response.
-- **D-11:** INV-04 gate criteria: (a) TOS explicitly permits caching -> **GO**. (b) TOS explicitly prohibits -> **NO-GO**. (c) TOS is silent AND email sent AND 5 business days elapsed with no response -> record as **CONDITIONAL GO** with documented reasoning (public IIIF API, academic use, conservative rate). (d) NLI responds with permission -> **GO**. (e) NLI responds with denial -> **NO-GO**. The "conditional go" path is an explicit softening of the original "hard gate" requirement -- this is intentional because blocking indefinitely on institutional email response is not practical, but it must be documented.
+- **D-11:** INV-04 gate criteria: (a) TOS explicitly permits caching -> **GO**. (b) TOS explicitly prohibits -> **NO-GO**. (c) TOS is silent AND email sent AND 5 business days elapsed with no response -> record as **CONDITIONAL GO** with documented reasoning (public IIIF API, academic use, conservative rate). (d) NLI responds with permission -> **GO**. (e) NLI responds with denial -> **NO-GO**.
 
 ### Ingest Topology
 - **D-17:** Phase 63 assumes **residential fetching plus rsync transfer to EC2**. NLI blocks datacenter IPs (verified 2026-03-17), so EC2 cannot fetch directly from NLI. The end-to-end path is: home PC fetches images from NLI IIIF -> local staging directory -> rsync/scp to EC2 staging -> atomic promotion to live cache. Unless NLI explicitly grants permission for direct server-side acquisition (which would change the architecture), this is the assumed topology for all downstream planning.
