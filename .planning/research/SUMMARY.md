@@ -1,164 +1,174 @@
 # Project Research Summary
 
-**Project:** v7.3 Search Refinement & Scholarly Joins
-**Domain:** Manuscript search refinement, exclusion filtering, FIST joins discovery, physical dimensions filtering
-**Researched:** 2026-03-26
-**Confidence:** HIGH
+**Project:** Server-Side IIIF Image Cache (GenizahSearch v7.8)
+**Domain:** Image caching infrastructure for manuscript research platform
+**Researched:** 2026-04-03
+**Confidence:** MEDIUM (strong on architecture/features, significant unknown on NLI access strategy)
 
 ## Executive Summary
 
-This milestone is a pure extension of the existing GenizahSearch architecture — no new technology, no new database schemas, and no new search engine paths are required. All four features (search within results, exclude by list, FIST joins search mode, and dimensions filter) converge on a single existing mechanism: the `restrict_sys_ids` pipeline in `genizah_core.SearchEngine`. The recommended approach is to extend existing integration points incrementally — starting with the lowest-risk features (dimensions display and search-within) and building toward the most complex (joins search mode with post-search enrichment).
+This project adds a server-side image cache for ~815K NLI manuscript images (~86GB at 800px), served as static files by nginx to eliminate Python overhead and provide resilience against NLI downtime. The architecture is well-understood: flat JPEG files on EC2 disk, sharded by sys_id prefix, with nginx `try_files` serving cache hits and the existing Python proxy handling misses. The stack requires no new major dependencies -- aiohttp for the batch fetcher is the only addition, and it stays isolated in a server-only requirements file.
 
-The features divide naturally into two groups: pre-search filtering (dimensions range, joins toggle, exclude list — all feeding restrict_sys_ids) and post-search enrichment (dimensions display in results, join partner display). This separation is already how the existing filter panel works, so the patterns are established and proven. The only genuinely new surface is the exclude-by-file import, which requires shelfmark resolution and a resolution-failure report UI.
+However, the most critical finding from research is that NLI blocks ALL datacenter IP ranges (AWS, Cloudflare, etc.) at the network level -- not by headers, not by User-Agent, but by IP range. This was verified on 2026-03-17 and is the reason the browser extension architecture exists. This means the batch fetcher CANNOT run from EC2. It must run from a residential IP (home machine or university network) with results transferred to EC2 via rsync. This fundamentally reshapes the project: Phase 1 must validate the residential-IP fetching strategy and NLI rate tolerance before any infrastructure is built, and the project should seriously consider contacting NLI for bulk access permission before systematic downloading begins.
 
-The key risks are data quality (dimension outliers reaching 7230mm will break range sliders without clamping), UX state confusion (search-within state must be visible and clearable at all times), and join group display (groups up to 167 fragments must be capped in inline display). All three risks have clear mitigations from existing codebase patterns and are well understood before implementation begins. Overall risk is low.
+The key risks are: (1) NLI IP blocking invalidating the fetch strategy, (2) legal/TOS exposure from bulk-downloading 815K images without permission, (3) storage estimate uncertainty (86GB is extrapolated from one test image), and (4) six independent image-loading codepaths in the codebase that all need consistent cache integration. Mitigations exist for all of these, but the NLI access question is a hard gate -- if residential IP fetching proves unreliable or gets blocked, the project falls back to organic-only caching (cache images as users browse them), which still delivers value but at a much slower fill rate.
 
 ## Key Findings
 
 ### Recommended Stack
 
-No new packages or technologies are needed. Every feature builds directly on the existing stack. The only database change is a new compound index (`idx_catsz_size` on `catalog_sizes(SizeX, SizeY)`) to speed up pre-search dimension range queries — no schema changes, no new tables.
+The stack is deliberately minimal, leveraging existing infrastructure. No new databases, no CDN, no message queue. See [STACK.md](STACK.md) for full rationale.
 
 **Core technologies:**
-- `genizah_core.SearchEngine` with `restrict_sys_ids`: search filtering — the central mechanism for all four features, already fully implemented
-- `shared/fjms_service.FjmsService`: FIST data access — needs three new methods (`get_all_join_sys_ids`, `get_join_groups_batch`, `get_sizes_batch`); existing `get_filter_sys_ids()` extended with dimension params
-- `supabase-py`: Supabase client — fetching user lists for exclude-by-list (already integrated at `supabase_client.py:443, 595`)
-- SQLite `fjms_enrichment.db`: dimensions and joins data — one new index, no schema changes
-- NiceGUI / PyQt6: web and desktop UI — extend existing filter panel, result cards, and browse components
+- **aiohttp** (batch fetcher only): Async HTTP client for high-throughput IIIF downloads -- 2x faster than httpx for pure async workloads. Isolated in `scripts/requirements-batch.txt`, NOT in main requirements.txt
+- **Flat JPEG files on disk**: nginx serves directly via sendfile (zero-copy kernel path). SQLite BLOBs would force every image through Python, defeating the purpose
+- **nginx try_files**: Static file serving for cache hits, Python fallback for misses. 10K+ req/s vs ~200 req/s through NiceGUI
+- **SQLite manifest DB** (cache_status.db): Tracks cache state -- what is cached, when, file size, errors. Enables progress tracking and retry logic
+- **2-level directory sharding**: `nli/{prefix}/{sys_id}/page_{N}_{width}.jpg` -- prevents filesystem degradation from 815K files
+
+**Critical version note:** aiohttp 3.10+ required. No changes to main requirements.txt.
 
 ### Expected Features
 
+See [FEATURES.md](FEATURES.md) for full landscape including resolution analysis.
+
 **Must have (table stakes):**
-- Search within results — restrict_sys_ids already supports this; users expect it in word search after experiencing it in catalog browse
-- Dimensions display in browse and search results — already visible in FJMS detail dialog; promoting to first-class is expected
-- Clickable join partners in browse — partners are already shown but not navigable; navigation is the natural next step
+- Cache-first image serving (check disk before IIIF fetch)
+- Transparent fallback (cache miss still works via existing NLI proxy)
+- Batch fetching script with rate limiting and resumability
+- Priority ordering: NLI-only manuscripts first (~100-120K images with no alternative source)
+- Progress tracking via SQLite manifest
 
 **Should have (differentiators):**
-- Pre-search dimension range filter — unique to physical fragment matching research; no equivalent in other Genizah tools
-- Exclude by saved Supabase list — power users with curated "known manuscripts" lists need bulk exclusion without individual clicks
-- FIST joins search mode — search only within manuscripts that have scholarly joins; unique capability for join discovery workflows
-- Exclude by imported shelfmark file — power users maintain external spreadsheets; file import bridges external tools into the platform
-- Post-search join partner enrichment — see join partners inline with search results, avoiding browse round-trips
+- Nginx direct-serve bypassing Python entirely (10-100x faster)
+- Read-through caching (user browse populates cache organically)
+- Multi-resolution tiers (800px batch-cached, 1200px on-demand)
+- Cache health dashboard for monitoring fill progress
 
-**Defer to v2+:**
-- FIST join group text search (scholar name/comment FTS) — useful but not blocking; 15K groups are manageable with LIKE queries
-- Cross-session web exclude persistence beyond Supabase lists — ephemeral sessions are acceptable; Supabase lists already provide persistence
-- Automatic join partner injection into result set — anti-feature; groups up to 167 fragments make result count expansion unpredictable
+**Defer (v2+):**
+- Desktop offline bundle download (complex UX for 86GB, needs substantial cache first)
+- Desktop selective download by saved lists
+- Cache warming by PostHog popularity data
+- Admin web UI for cache management (CLI scripts suffice)
 
 ### Architecture Approach
 
-All four features integrate with the existing `restrict_sys_ids` pipeline without requiring new search engine paths. The pattern is consistent: compute a set of sys_ids from a filter source, pass to `execute_search()` or `search_composition_logic()` as `restrict_sys_ids`. Post-search enrichment (dimensions, join partners) follows the existing batch-lookup pattern already used for PGP info and domain enrichment. The exclude feature is best implemented as post-search filtering (not pre-search complement) to avoid computing `all_sys_ids - exclude_set` against the 217K corpus.
+The cache is a transparent layer between IIIF sources and consumers. nginx serves static JPEGs for cache hits; Python handles misses and writes through to disk. A shared `image_cache_service.py` provides path resolution for both web and desktop apps. See [ARCHITECTURE.md](ARCHITECTURE.md) for full component diagram and data flows.
 
 **Major components:**
-1. `FjmsService` (extend) — add `get_all_join_sys_ids()`, `get_join_groups_batch()`, `get_sizes_batch()`; extend `get_filter_sys_ids()` with dimension params
-2. `web/pages/search.py` SearchUIState (extend) — add `search_within_sys_ids`, `exclude_sys_ids`, `joins_mode` fields
-3. `web/components/filter_panel.py` (extend) — add dimension range controls and joins-mode toggle
-4. `genizah_app.py` (extend) — search-within button, joins toggle, exclude-by-list dialog, dimension inputs, browse join navigation
-5. `fjms_enrichment.db` (index only) — `CREATE INDEX idx_catsz_size ON catalog_sizes(SizeX, SizeY)`
-
-**Unified data flow (same pattern for all four features):**
-```
-filter source → sys_id set → intersect with existing restrict → execute_search()
-                                                                      ↓
-                                                          post-filter (exclusions)
-                                                                      ↓
-                                                          batch enrich (dimensions, joins)
-                                                                      ↓
-                                                                  display
-```
+1. **Batch Fetcher** (`scripts/image_cache_fetcher.py`) -- runs from residential IP, fetches IIIF images, writes to disk, transfers to EC2
+2. **Image Cache Service** (`shared/image_cache_service.py`) -- deterministic path resolution from (sys_id, page, width), cache availability checks, shared between web/desktop
+3. **nginx static location** (`/cached-images/`) -- serves cached JPEGs directly, bypasses Python, immutable Cache-Control headers
+4. **Cache Status DB** (`image_cache/cache_status.db`) -- tracks cached images, fetch errors, progress state
+5. **Modified web/api.py** -- cache-through on miss (proxy from NLI AND write to disk simultaneously)
 
 ### Critical Pitfalls
 
-1. **restrict_sys_ids > 500 bypasses Tantivy query injection** — for joins mode with 20,088 sys_ids, the post-filter path (not Tantivy injection) is used automatically. This is correct and performant. Do NOT attempt to inject 20K IDs into Tantivy query strings. Monitor search times with joins filter active; they should be comparable to unfiltered search.
+See [PITFALLS.md](PITFALLS.md) for all 15 pitfalls with detailed prevention strategies.
 
-2. **Dimension data outliers (0.7mm to 7230mm)** — raw bounds from `catalog_sizes` make range sliders completely unusable. Compute P5/P95 percentiles for slider bounds before building the UI. Filter outliers (>1000mm or <5mm) from slider range. Display raw values in detail views; use clamped ranges only for the filter control. Verify units against a known manuscript.
-
-3. **Shelfmark resolution failures in file import** — external files use unexpected formats, have typos, or reference unknown manuscripts. Always show a resolution report: "Resolved 80/100 shelfmarks. 20 not found: [list]". Never silently drop unresolved entries. Use existing `normalize_shelfmark()` pipeline and `utf-8-sig` encoding (BOM-aware, already pattern in codebase).
-
-4. **N+1 queries for join and size enrichment** — calling per-manuscript service methods on 50 search results means 50 SQLite queries. Use batch methods (`get_join_groups_batch`, `get_sizes_batch`) with SQL `IN` clauses. This matches the existing PGP enrichment pattern.
-
-5. **Join group display explosion** — Group 1065 has 167 fragments. Inline display of all partners in a result card is unusable. Cap inline partners at 5-10 with "and N more..." expandable link to a full-group dialog or browse navigation.
+1. **NLI blocks all datacenter IPs** -- Batch fetcher CANNOT run from EC2. Must use residential IP with rsync transfer to server. This is a verified hard block, not a rate limit. The entire browser extension was built to work around this. **Investigation phase must validate residential IP strategy before any infrastructure work.**
+2. **Legal/TOS risk of bulk downloading** -- 815K systematic downloads may violate NLI terms. Contact NLI proactively to request permission or a bulk export. If denied, fall back to organic-only caching (defensible as server-level browser caching).
+3. **Inode exhaustion** -- 815K files can exhaust ext4 inode budget before filling disk. Check `df -i` before starting; use hierarchical directory sharding; consider separate XFS volume.
+4. **Six independent image-loading codepaths** -- Browse, search, puzzle, reading desk, fullscreen viewer, and desktop all load images differently. Build unified `image_cache_service.py` BEFORE touching any individual codepath.
+5. **Storage estimate uncertainty** -- 86GB extrapolated from one test image. Sample 1000 diverse images during investigation to validate. Set disk alerts at 80%.
 
 ## Implications for Roadmap
 
-Based on combined research, the four-phase build order is driven by dependency chains and incremental value delivery. Each phase delivers independently useful functionality.
+Based on combined research, the project should have 5 phases with a hard gate after Phase 1.
 
-### Phase 1: Dimensions Display and Pre-search Filter
-**Rationale:** Lowest risk — extends the proven `get_filter_sys_ids()` pipeline with no new search paths. Proving dimension data quality in browse before building the filter prevents shipping a broken slider UI.
-**Delivers:** Dimensions visible in search result cards and browse; pre-search width/height range filter in filter panel (web + desktop); `idx_catsz_size` compound index; P5/P95 bounds for slider.
-**Addresses:** Dimensions display (table stakes), pre-search dimension filter (differentiator), post-search dimension display (differentiator).
-**Avoids:** Pitfall 2 (outliers) — percentile bounds computed and verified before UI is built.
+### Phase 1: Investigation and Validation
+**Rationale:** The NLI IP blocking discovery means NOTHING should be built until the fetching strategy is proven. This phase answers three existential questions before any code is written.
+**Delivers:** Validated fetch strategy, accurate storage estimates, NLI relationship clarity
+**Tasks:**
+- Test residential IP fetching from home machine (curl + small batch of 100 images)
+- Contact NLI about bulk access permission for academic research tool
+- Sample 1000 diverse images to validate 86GB storage estimate
+- Check EC2 inode budget (`df -i`) and plan volume strategy
+- Test Cambridge/Manchester/DPUL from EC2 (may not be blocked -- would change scope)
+**Avoids:** Pitfall 1 (datacenter IP block), Pitfall 5 (TOS risk), Pitfall 11 (storage estimate)
+**Gate:** If residential IP is blocked or NLI objects, pivot to organic-only caching (skip Phase 2, go directly to Phase 3 with read-through only)
 
-### Phase 2: Search Within Results
-**Rationale:** High user value, trivial core changes (restrict_sys_ids is already fully implemented). Placing after Phase 1 means dimensions are visible when the user scopes their search, improving the combined experience.
-**Delivers:** "Search within N results" button in web and desktop search result headers; breadcrumb chip showing active scope with one-click clear; correct intersection with pre-existing filter restrict sets.
-**Addresses:** Search within results (table stakes).
-**Avoids:** Moderate Pitfall 1 (state confusion) — single-level only (replace, not stack), chip always visible, clear button prominent.
+### Phase 2: Batch Fetcher and Transfer Pipeline
+**Rationale:** Once fetching is validated, build the pipeline that populates the cache. Runs from home machine, not EC2. This is the long-running background work (days/weeks).
+**Delivers:** Batch fetcher script, rsync transfer pipeline, cache_status.db with progress tracking
+**Addresses:** Batch fetching, rate limiting, priority ordering, progress tracking (FEATURES table stakes)
+**Uses:** aiohttp (STACK), priority queue pattern (ARCHITECTURE Pattern 3)
+**Avoids:** Pitfall 6 (FGP != FL ID -- must resolve via manifest), Pitfall 10 (residential IP rate limits -- conservative 1 req/3sec), Pitfall 15 (placeholder detection)
+**Key detail:** Two-pass architecture -- first resolve sys_id to FL IDs via IIIF manifests, then fetch images. Seed from existing `nli_fl_ids_cache.json`.
 
-### Phase 3: Exclude by List and File Import
-**Rationale:** Requires Supabase list integration and shelfmark resolution. Logically follows search-within because the breadcrumb/chip UX patterns established in Phase 2 apply directly to exclusion display (showing active exclude count with source breakdown and per-source clear).
-**Delivers:** List picker dialog (web + desktop) fetching user's Supabase lists; file import with shelfmark resolution and resolution report; combined exclusion count badge with breakdown by source (list vs. file); session persistence for exclude set; graceful handling for anonymous users.
-**Addresses:** Exclude by saved list (differentiator), exclude by imported file (differentiator).
-**Avoids:** Pitfall 3 (resolution failures) — always report stats. Anti-Pattern 1 (complement set) — post-search filter, not pre-search. Moderate Pitfall 2 (Supabase latency) — cache list items in SearchUIState. Moderate Pitfall 4 (dual-source merge confusion) — breakdown UI.
+### Phase 3: Web Integration (Cache-First Serving)
+**Rationale:** Can start in parallel with Phase 2 (even a partially populated cache delivers value). This is where users see the benefit.
+**Delivers:** Cache-first image serving, nginx static file serving, read-through caching on miss
+**Addresses:** Cache-first serving, nginx direct-serve, read-through caching (FEATURES table stakes + differentiators)
+**Implements:** Image Cache Service, nginx location block, modified api.py (ARCHITECTURE components 2, 3, 5)
+**Avoids:** Pitfall 3 (I/O starvation -- nginx serves, not Python), Pitfall 4 (partial cache UX -- unified fallback chain), Pitfall 9 (codepath fragmentation -- shared service first), Pitfall 13 (nginx route collision -- specific prefix, test matrix)
 
-### Phase 4: FIST Joins Browse Enrichment and Search Mode
-**Rationale:** Most complex phase — introduces three new service methods and a new filter panel concept (search-mode toggle vs. metadata filter). Benefits from Phases 1-3 being stable: dimensions can appear for join partners; exclude can filter join group members.
-**Delivers:** Clickable join partners in browse with navigation to browse target; "Has joins" filter toggle in filter panel (restricts search to 20,088 join sys_ids); post-search join partner enrichment in result cards (capped inline + expandable full group).
-**Addresses:** Clickable join partners (table stakes), FIST joins search mode (differentiator), join partner enrichment in results (differentiator).
-**Avoids:** Critical Pitfall 1 (>500 restrict — use post-filter path, correct by default). Moderate Pitfall 3 (display explosion — cap at 10 inline). Minor Pitfall 2 (empty intersection — show count before search).
+### Phase 4: Desktop Integration
+**Rationale:** Depends on Phase 3 (server endpoints must exist). Desktop benefits from server cache even without local download.
+**Delivers:** Desktop tries server cache URL before direct NLI, organic local caching as user browses
+**Addresses:** Desktop image loading improvement
+**Implements:** Modified genizah_core.py and gui_threads.py (ARCHITECTURE desktop components)
+**Note:** Defer bulk desktop download to v2+. Organic caching (save images as viewed) is simpler and proven by puzzle cache pattern.
+
+### Phase 5: Monitoring and Polish
+**Rationale:** After cache is serving images, add observability and operational tooling.
+**Delivers:** Cache status endpoint, admin monitoring, documentation
+**Addresses:** Cache health dashboard (FEATURES differentiator)
 
 ### Phase Ordering Rationale
 
-- Dimensions first because it has no inter-feature dependencies, extends the most well-understood pipeline, and the data quality verification in Phase 1 is a prerequisite for trustworthy display in Phase 4 (join partner cards can show dimensions).
-- Search-within second because restrict_sys_ids requires zero core changes and delivers high user value quickly.
-- Exclude third because it requires Supabase integration that both apps already have wired, plus shelfmark resolution that is already implemented — the work is primarily in the UI layer and state management.
-- Joins last because it has the most new service methods (three), the most complex display decisions (group capping, navigation patterns), and depends on the stable patterns from Phases 1-3 for combined-filter scenarios.
-- Both apps (web + desktop) are extended within each phase to maintain feature parity throughout the milestone.
+- **Investigation MUST come first** because the NLI IP block is a project-killing constraint. Building any infrastructure before validating the fetch strategy risks wasted work.
+- **Batch fetcher before web integration** because cache-first serving is most valuable with a populated cache. However, Phase 3 can START in parallel once Phase 2 is running -- read-through caching works with zero pre-populated images.
+- **Web before desktop** because desktop depends on server endpoints (`/cached-images/` URL), and web has higher traffic impact.
+- **Desktop bulk download deferred** because 86GB is a UX disaster (Pitfall 8) and organic caching is proven. Revisit when cache is substantially populated and user demand is clear.
 
 ### Research Flags
 
-Phases with well-documented patterns — skip research-phase during planning:
-- **Phase 1 (Dimensions):** Extends `get_filter_sys_ids()` exactly as documented. Index creation is trivial SQL. Only investigation needed is the units verification and percentile computation (one SQL query).
-- **Phase 2 (Search Within):** restrict_sys_ids is fully built and documented. UI is a button + state field with existing breadcrumb pattern.
-- **Phase 3 (Exclude):** Supabase list fetch is already implemented and tested. Shelfmark normalization pipeline is established. Work is wiring and UI.
+Phases likely needing deeper research during planning:
+- **Phase 1 (Investigation):** This IS the research phase. No additional `/gsd:research-phase` needed -- the tasks are empirical validation (curl tests, NLI outreach, image sampling).
+- **Phase 2 (Batch Fetcher):** Needs research on optimal rsync/transfer patterns for 86GB of small files. Also needs FL ID resolution strategy (two-pass vs. inline).
 
-Phases that may benefit from a plan-phase design review before implementation:
-- **Phase 4 (Joins):** The three new FjmsService batch methods are new code needing query design. The "joins search mode" toggle is a new filter panel concept (restricts corpus, not just metadata) with no existing model. Worth a brief design discussion before starting implementation.
+Phases with standard patterns (skip research-phase):
+- **Phase 3 (Web Integration):** Well-documented nginx `try_files` pattern, existing puzzle cache proves the disk-cache approach, shared service layer is established project pattern.
+- **Phase 4 (Desktop Integration):** Minimal changes -- URL prefix swap in existing image loading threads. Follows established `gui_threads.py` patterns.
+- **Phase 5 (Monitoring):** Standard SQLite queries exposed via JSON endpoint. Trivial.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All technologies already in production use; no new dependencies identified |
-| Features | HIGH | Grounded in user feedback letter (2026-02-27) and PROJECT.md active requirements |
-| Architecture | HIGH | All integration points verified against source code with specific line numbers |
-| Pitfalls | HIGH | Identified from actual data analysis (outlier ranges from DB), actual code (line 6411 threshold), actual data (Group 1065 with 167 fragments) |
+| Stack | HIGH | Minimal new dependencies; aiohttp well-benchmarked; nginx static serving is textbook |
+| Features | HIGH | Feature landscape well-mapped against existing codebase; resolution analysis grounded in real test data |
+| Architecture | HIGH | Follows established project patterns (shared service layer, SQLite sidecars, nginx reverse proxy) |
+| Pitfalls | HIGH on #1 (IP block), MEDIUM on #5 (TOS) | NLI IP block is verified; TOS risk is judgment call requiring NLI outreach |
 
-**Overall confidence:** HIGH
+**Overall confidence:** MEDIUM -- the architecture and implementation patterns are solid, but the fundamental feasibility depends on NLI access strategy (residential IP + permission), which is unvalidated.
 
 ### Gaps to Address
 
-- **Dimension units verification:** Values are presumed mm based on data ranges (0.7–7230) but need confirmation against a known manuscript (e.g., T-S 12.123 physical description). If units are wrong, all display labels and P5/P95 bounds will be incorrect. Resolve at the start of Phase 1 with a one-off SQL spot-check.
-- **Supabase anonymous user handling for exclude:** Research did not determine whether anonymous users should see a login prompt or have the exclude-by-list feature hidden. Needs a product decision before Phase 3 planning.
-- **Joins search mode UI pattern:** No existing model in the filter panel for a corpus-scope toggle (vs. metadata filters). The exact UI pattern (checkbox, dedicated section, radio group) needs a design decision at the start of Phase 4 planning.
+- **NLI rate limits from residential IPs:** Unknown. Must be tested empirically during Phase 1. Conservative assumption: 1 req/3sec.
+- **Actual average image size:** 105KB is one data point. Need 1000-image sample to confirm 86GB estimate fits 150GB budget.
+- **NLI's position on bulk academic caching:** Unknown. Outreach during Phase 1 may yield permission, a bulk export, or a cease-and-desist. Plan for all three outcomes.
+- **Cambridge/Manchester/DPUL server-side accessibility:** Not tested from EC2. If these are NOT blocked (likely -- they don't show the same anti-scraping behavior as NLI), caching them from EC2 is straightforward and expands the cache beyond NLI-only.
+- **EC2 inode budget:** Not checked. Must verify during Phase 1 before committing to flat-file approach.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `genizah_core.py` lines 6411, 6605, 7006 — restrict_sys_ids pipeline: Tantivy injection threshold (<=500), execute_search(), search_composition_logic()
-- `shared/fjms_service.py` lines 848, 1991, 2421-2440 — get_filter_sys_ids(), get_join_group(), catalog_sizes batch fetch
-- `web/pages/search.py` lines 76-98 — SearchUIState dataclass fields including existing `word_search_excluded_ids`
-- `web/supabase_client.py` lines 443, 595 — get_user_lists(), get_list_items() with sys_id field
-- `genizah_app.py` lines 11651-11652, 18512, 29057-29058 — excluded_sys_ids, _catalog_search_in_results(), session state persistence
-- `fjms_enrichment.db` runtime analysis — catalog_sizes (178,579 rows, 104,650 AlmaIds, SizeX range 0.7–7230mm); joins (48,655 rows, 20,088 AlmaIds, 14,906 groups, max group size 167 fragments)
+- Existing codebase: `web/api.py`, `shared/puzzle_image_service.py`, `shared/nli_crossref_service.py`, `web/services.py`
+- `docs/archive/plans/PUZZLE_IIIF_SERVER_SIDE_PROCESSING.md` -- verified NLI IP blocking (2026-03-17)
+- nginx official documentation -- static content serving, `try_files`, `alias` directives
+- IIIF Image API 2.1 specification -- canonical URI structure
 
 ### Secondary (MEDIUM confidence)
-- User feedback letter (2026-02-27) — feature priorities, power-user workflows, exclusion use cases
-- PROJECT.md active requirements — 7 items for v7.3 milestone
+- aiohttp vs httpx benchmarks (multiple sources, Oct 2024)
+- IIIF community discussions on caching architecture
+- Storage estimate: 815K x 105KB = ~86GB (single test image extrapolation)
 
 ### Tertiary (LOW confidence)
-- Dimension units (mm assumed from data ranges) — requires verification against known physical specimens before Phase 1 UI implementation
+- NLI rate limit tolerance from residential IPs (untested assumption)
+- NLI TOS position on academic bulk caching (unknown, requires outreach)
 
 ---
-*Research completed: 2026-03-26*
-*Ready for roadmap: yes*
+*Research completed: 2026-04-03*
+*Ready for roadmap: yes (pending Phase 1 validation gate)*
