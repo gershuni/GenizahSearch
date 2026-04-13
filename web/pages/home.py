@@ -34,7 +34,7 @@ def create_page():
                 def dismiss_banner():
                     app.storage.user['ocr_disclaimer_dismissed'] = True
                     ocr_banner.delete()
-                ui.button(icon='close', on_click=dismiss_banner).props('flat dense round size=xs')
+                ui.button(icon='close', on_click=dismiss_banner).props(f'flat dense round size=xs aria-label="{tr("Dismiss")}"')
                 ui.timer(10.0, dismiss_banner, once=True)
 
         # === Hero Section (compact) ===
@@ -96,7 +96,7 @@ def create_page():
                     sanitize=False
                 )
                 with ui.column().classes('flex-1 gap-1'):
-                    h3(tr('What is the Cairo Genizah?'),
+                    h2(tr('What is the Cairo Genizah?'),
                        classes='text-lg font-bold',
                        style='color: var(--text-primary);')
                     ui.label(tr('Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic — now searchable for the first time')).classes(
@@ -125,7 +125,7 @@ def create_page():
                     ui.button(
                         icon='search',
                         on_click=lambda: _navigate_search()
-                    ).props('round color=primary').style('width: 44px; height: 44px;')
+                    ).props(f'round color=primary aria-label="{tr("Search")}"').style('width: 44px; height: 44px;')
 
         # === Seasonal banner (Pesach/other themes) — hidden until next seasonal activation ===
         # The Pesach banner code is preserved in git history and the supporting module

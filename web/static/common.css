@@ -53,7 +53,7 @@
     --text-primary: #1e293b;
     --text-secondary: #475569;
     --text-tertiary: #64748b;
-    --text-muted: #94a3b8;
+    --text-muted: #64748b;
     --text-inverse: #ffffff;
 
     --border-light: #e2e8f0;
@@ -85,6 +85,16 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex=
 [data-theme="dark"] :focus-visible {
     outline-color: var(--primary-400) !important;
 }
+
+/* ========================================================================
+   Link Color Override — WCAG AA contrast (4.5:1 on white)
+   Quasar default #5898d4 is 3.06:1 on white — fails AA.
+   ======================================================================== */
+a { color: var(--primary-700); }
+[data-theme="dark"] a { color: var(--primary-300); }
+[data-theme="parchment"] a { color: var(--primary-700); }
+/* Preserve explicit inline/class colors (e.g. white text links in headers) */
+a[style*="color"], .text-white a, .citation-link { color: inherit; }
 
 /* Parchment Theme - Academic & Warm */
 [data-theme="parchment"] {

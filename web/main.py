@@ -61,6 +61,30 @@ def _patch_nicegui_esm_handler() -> None:
 
 _patch_nicegui_esm_handler()
 
+
+def _patch_html_lang_attribute():
+    """Ensure <html> tag has lang attribute for Lighthouse a11y compliance.
+
+    NiceGUI's index.html template emits ``<html>`` without ``lang``.  Our JS
+    sets it after parse, but Lighthouse checks the initial HTML.  Patch the
+    template source to include ``lang="he"`` as default (JS updates per user
+    preference at runtime).  The patch is idempotent and re-applies on every
+    boot in case a pip upgrade overwrites the file.
+    """
+    from pathlib import Path
+    import nicegui
+    tmpl_file = Path(nicegui.__file__).parent / 'templates' / 'index.html'
+    try:
+        original = tmpl_file.read_text(encoding='utf-8')
+        if '<html>' in original and 'lang=' not in original.split('\n')[1]:
+            patched = original.replace('<html>', '<html lang="he">', 1)
+            tmpl_file.write_text(patched, encoding='utf-8')
+    except Exception:
+        pass  # Non-fatal: JS fallback still sets lang at runtime
+
+_patch_html_lang_attribute()
+
+
 logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
@@ -361,7 +385,7 @@ def create_layout():
             ui.button(lang_label, on_click=toggle_lang).props('flat round text-color=white').tooltip(tr('Switch language')).classes('lang-btn-header')
 
             # Help Button (hidden on mobile via CSS)
-            ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props('flat round text-color=white').tooltip(tr('Help')).classes('help-btn-header')
+            ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props(f'flat round text-color=white aria-label="{tr("Help")}"').tooltip(tr('Help')).classes('help-btn-header')
         return section
 
     # === Build Header with correct DOM order ===
@@ -426,7 +450,7 @@ def create_layout():
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     whats_new_banner.delete()
-                ui.button(icon='close', on_click=dismiss_whats_new).props('flat dense round size=xs')
+                ui.button(icon='close', on_click=dismiss_whats_new).props(f'flat dense round size=xs aria-label="{tr("Dismiss")}"')
                 ui.timer(10.0, dismiss_whats_new, once=True)
 
     def toggle_drawer():
@@ -535,9 +559,9 @@ def create_layout():
 
                     current_theme = _safe_user_storage_get('theme', 'light')
 
-                    with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props('flat round size=sm').classes(f'theme-btn theme-btn-light {"active" if current_theme == "light" else ""}'): pass
-                    with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props('flat round size=sm').classes(f'theme-btn theme-btn-parchment {"active" if current_theme == "parchment" else ""}'): pass
-                    with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props('flat round size=sm').classes(f'theme-btn theme-btn-dark {"active" if current_theme == "dark" else ""}'): pass
+                    with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props(f'flat round size=sm aria-label="{tr("Light theme")}"').classes(f'theme-btn theme-btn-light {"active" if current_theme == "light" else ""}'): pass
+                    with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props(f'flat round size=sm aria-label="{tr("Parchment theme")}"').classes(f'theme-btn theme-btn-parchment {"active" if current_theme == "parchment" else ""}'): pass
+                    with ui.button(icon='dark_mode', on_click=lambda: set_theme('dark')).props(f'flat round size=sm aria-label="{tr("Dark theme")}"').classes(f'theme-btn theme-btn-dark {"active" if current_theme == "dark" else ""}'): pass
 
                 # Version Info (hidden - using "formerly" in settings instead)
                 # ui.label(f'v{APP_VERSION}').classes('text-xs text-center opacity-50 mt-2')
@@ -555,18 +579,18 @@ def create_layout():
     with footer:
         # Full citation (shown initially)
         with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap citation-full'):
-            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
+            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props(f'flat dense size=xs aria-label="{tr("Copy citation")}"').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
             ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80 citation-hebrew-label')
             ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium citation-link').style('direction: ltr; text-decoration: none;')
-            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
+            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
 
         # Compact citation (shown after auto-collapse — full text, truncated with ellipsis on narrow screens)
         with ui.row().classes('w-full items-center justify-center gap-2 py-1 px-4 citation-compact').style('flex-wrap: nowrap;'):
             ui.label(full_citation).classes('text-xs opacity-80').style(
                 'direction: ltr; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;'
             )
-            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props('flat dense size=xs').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy full citation'))
-            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props('flat dense size=xs').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
+            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props(f'flat dense size=xs aria-label="{tr("Copy citation")}"').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy full citation'))
+            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.querySelector(".citation-footer").style.display = "none";')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
 
     # Dismiss check + auto-collapse after 10 seconds
     ui.run_javascript('''
