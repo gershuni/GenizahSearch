@@ -184,8 +184,8 @@ def create_page():
                             'color: var(--text-secondary);'
                         )
                         with ui.row().classes('gap-2 flex-wrap'):
-                            ui.badge(tr('Lab Mode')).props('outline color=blue').classes('text-xs')
-                            ui.badge(tr('Chunk Analysis')).props('outline color=blue').classes('text-xs')
+                            ui.badge(tr('Lab Mode')).props('outline color=blue-9').classes('text-xs')
+                            ui.badge(tr('Chunk Analysis')).props('outline color=blue-9').classes('text-xs')
 
             # Browse by Shelfmark Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
@@ -205,8 +205,8 @@ def create_page():
                             'color: var(--text-secondary);'
                         )
                         with ui.row().classes('gap-2 flex-wrap'):
-                            ui.badge(tr('Transcriptions')).props('outline color=amber').classes('text-xs')
-                            ui.badge(tr('Images')).props('outline color=amber').classes('text-xs')
+                            ui.badge(tr('Transcriptions')).props('outline color=deep-orange-10').classes('text-xs')
+                            ui.badge(tr('Images')).props('outline color=deep-orange-10').classes('text-xs')
 
             # Browse by Identification Card
             with ui.card().classes('p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all').props(
@@ -247,8 +247,8 @@ def create_page():
                             'color: var(--text-secondary);'
                         )
                         with ui.row().classes('gap-2 flex-wrap'):
-                            ui.badge(tr('Discoveries')).props('outline color=pink').classes('text-xs')
-                            ui.badge(tr('Corrections')).props('outline color=pink').classes('text-xs')
+                            ui.badge(tr('Discoveries')).props('outline color=pink-9').classes('text-xs')
+                            ui.badge(tr('Corrections')).props('outline color=pink-9').classes('text-xs')
 
         # === Secondary Actions Row ===
         with ui.row().classes('w-full gap-6 mt-4 flex-wrap'):

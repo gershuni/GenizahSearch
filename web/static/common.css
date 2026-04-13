@@ -53,7 +53,9 @@
     --text-primary: #1e293b;
     --text-secondary: #475569;
     --text-tertiary: #64748b;
-    --text-muted: #64748b;
+    /* WCAG AA: #475569 (slate-600) passes 4.5:1 on both white (#fff = 7.5:1)
+       and bg-tertiary (#f1f5f9 = 6.98:1). Previous #64748b was 4.34:1 on tertiary -- fail. */
+    --text-muted: #475569;
     --text-inverse: #ffffff;
 
     --border-light: #e2e8f0;
@@ -95,6 +97,104 @@ a { color: var(--primary-700); }
 [data-theme="parchment"] a { color: var(--primary-700); }
 /* Preserve explicit inline/class colors (e.g. white text links in headers) */
 a[style*="color"], .text-white a, .citation-link { color: inherit; }
+/* Force nicegui-link anchors that inline --primary-600 to use the AA-compliant
+   --primary-700 token. #059669 on white = 3.76:1 (fail); #047857 = 4.87:1. */
+a.nicegui-link[style*="--primary-600"] { color: var(--primary-700) !important; }
+
+/* ========================================================================
+   Light-theme Quasar badge/button color overrides -- WCAG AA on white cards
+   Quasar defaults fail AA: #5898d4=3.06, #2196f3=3.12, #ffc107=1.63, #e91e63=4.34
+   ======================================================================== */
+/* !important needed — body has inline style="--q-primary: #5898d4" from Quasar's
+   default theme which otherwise beats a plain [data-theme="light"] rule. Per CSS
+   spec, author !important declarations beat author inline-style normal decls. */
+[data-theme="light"], body[data-theme="light"] {
+    --q-primary: #047857 !important;    /* emerald-700, ~5.4:1 on white */
+    --q-secondary: #0f766e !important;  /* teal-700,   ~6.4:1 */
+    --q-accent: #7e22ce !important;     /* purple-700, ~7.2:1 */
+    --q-warning: #a16207 !important;    /* amber-700,  ~4.8:1 (was #f2c037, ~1.6:1) */
+    --q-negative: #be185d !important;   /* pink-700,   ~5.5:1 */
+    --q-info: #1d4ed8 !important;       /* blue-700,   ~7.0:1 (Quasar default #31ccec fails) */
+}
+/* Outlined badges get color from Quasar's text-* utility classes (which use var(--q-*)).
+   Force AA-compliant colors when those utilities appear on light-theme badges/buttons. */
+[data-theme="light"] .text-primary   { color: #047857 !important; }
+[data-theme="light"] .text-secondary { color: #0f766e !important; }
+[data-theme="light"] .text-accent    { color: #7e22ce !important; }
+[data-theme="light"] .text-warning   { color: #a16207 !important; }
+[data-theme="light"] .text-negative  { color: #be185d !important; }
+[data-theme="light"] .text-info      { color: #1d4ed8 !important; }
+[data-theme="light"] .q-badge--outline.text-primary,
+[data-theme="light"] .q-badge--outline.text-secondary,
+[data-theme="light"] .q-badge--outline.text-accent,
+[data-theme="light"] .q-badge--outline.text-warning,
+[data-theme="light"] .q-badge--outline.text-negative,
+[data-theme="light"] .q-badge--outline.text-info {
+    border-color: currentColor !important;
+}
+/* Override outlined badge inline colors (Quasar bakes RGB into style=""). */
+[data-theme="light"] .q-badge[style*="88, 152, 212"],
+[data-theme="light"] .q-badge[style*="#5898d4"] {
+    color: #1d4ed8 !important; border-color: #1d4ed8 !important;  /* blue-700, 7.0:1 */
+}
+[data-theme="light"] .q-badge[style*="33, 150, 243"],
+[data-theme="light"] .q-badge[style*="#2196f3"] {
+    color: #1d4ed8 !important; border-color: #1d4ed8 !important;
+}
+[data-theme="light"] .q-badge[style*="255, 193, 7"],
+[data-theme="light"] .q-badge[style*="#ffc107"] {
+    color: #a16207 !important; border-color: #a16207 !important;  /* amber-700, ~4.8:1 */
+}
+[data-theme="light"] .q-badge[style*="233, 30, 99"],
+[data-theme="light"] .q-badge[style*="#e91e63"] {
+    color: #be185d !important; border-color: #be185d !important;  /* pink-700, ~5.5:1 */
+}
+[data-theme="light"] .q-badge[style*="156, 39, 176"],
+[data-theme="light"] .q-badge[style*="#9c27b0"] {
+    color: #7e22ce !important; border-color: #7e22ce !important;
+}
+/* Quasar named-color utility classes (from props color=blue/amber/pink/etc.)
+   These fail AA on white. Remap to darker shades. */
+[data-theme="light"] .text-blue,
+[data-theme="light"] .q-badge.text-blue { color: #1d4ed8 !important; }
+[data-theme="light"] .text-amber,
+[data-theme="light"] .q-badge.text-amber { color: #a16207 !important; }
+[data-theme="light"] .text-pink,
+[data-theme="light"] .q-badge.text-pink { color: #be185d !important; }
+[data-theme="light"] .text-purple,
+[data-theme="light"] .q-badge.text-purple { color: #7e22ce !important; }
+[data-theme="light"] .text-yellow,
+[data-theme="light"] .q-badge.text-yellow { color: #a16207 !important; }
+[data-theme="light"] .text-cyan,
+[data-theme="light"] .q-badge.text-cyan { color: #0e7490 !important; }
+[data-theme="light"] .text-light-blue,
+[data-theme="light"] .q-badge.text-light-blue { color: #0369a1 !important; }
+[data-theme="light"] .text-red,
+[data-theme="light"] .q-badge.text-red { color: #b91c1c !important; }
+[data-theme="light"] .text-orange,
+[data-theme="light"] .q-badge.text-orange { color: #c2410c !important; }
+[data-theme="light"] .text-teal,
+[data-theme="light"] .q-badge.text-teal { color: #0f766e !important; }
+[data-theme="light"] .text-green,
+[data-theme="light"] .q-badge.text-green { color: #15803d !important; }
+[data-theme="light"] .q-badge--outline.text-blue,
+[data-theme="light"] .q-badge--outline.text-amber,
+[data-theme="light"] .q-badge--outline.text-pink,
+[data-theme="light"] .q-badge--outline.text-purple,
+[data-theme="light"] .q-badge--outline.text-yellow,
+[data-theme="light"] .q-badge--outline.text-cyan,
+[data-theme="light"] .q-badge--outline.text-light-blue,
+[data-theme="light"] .q-badge--outline.text-red,
+[data-theme="light"] .q-badge--outline.text-orange,
+[data-theme="light"] .q-badge--outline.text-teal,
+[data-theme="light"] .q-badge--outline.text-green {
+    border-color: currentColor !important;
+}
+/* Button text with text-primary variant also inherits --q-primary on white */
+[data-theme="light"] .q-btn--flat .text-primary,
+[data-theme="light"] .text-primary {
+    color: #047857 !important;
+}
 
 /* Parchment Theme - Academic & Warm */
 [data-theme="parchment"] {

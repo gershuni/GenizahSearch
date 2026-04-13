@@ -4,6 +4,26 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.7.2] - PageSpeed Quick Wins (A11y + Perf) - 2026-04-13
+
+### Accessibility
+- **Valid html lang attribute**: Fixed Lighthouse "Document does not have a valid `lang` attribute" by passing full Quasar lang pack (with `isoName`) to `Quasar.lang.set()` instead of partial `{rtl: false}` object, which caused `<html lang="undefined">`. Added JS belt-and-braces guard + NiceGUI template patch at startup (web)
+- **Aria-labels**: Added descriptive `aria-label` to 10 icon-only buttons (help, dismiss, theme toggles, citation copy/close, OCR banner dismiss, hero search) (web)
+- **Color contrast (WCAG AA)**: Light-theme `--text-muted` `#94a3b8` → `#64748b` (2.34:1 → 4.63:1); global link color `--primary-700` replaces Quasar default `#5898d4` (3.06:1 → 5.44:1); dark-theme overrides for `--text-muted`, `--primary-600/700`, and Quasar primary/secondary/accent tokens so inline links and badges meet AA on dark backgrounds (web)
+- **Heading hierarchy**: Homepage "What is the Cairo Genizah?" promoted from `h3` to `h2` (web)
+
+### Performance
+- **font-display: swap**: Starlette middleware injects `font-display: swap` into NiceGUI's `fonts.css` response, preventing ~1200ms of invisible text on slow connections (web)
+- **Conditional iiif preconnect**: `<link rel="preconnect" href="https://iiif.nli.org.il">` now only emitted on routes that actually load manuscript images (`/search`, `/browse`, `/puzzle`) instead of every page (web)
+
+### Results (Lighthouse desktop, homepage)
+- Accessibility: 85 → 96 (target ≥95)
+- Performance: 90 → 98 (target ≥93)
+- SEO: 100 (unchanged)
+- Remaining: 13 parchment-theme color-contrast warnings (same root cause as dark-theme fix, deferred — a11y still above target)
+
+---
+
 ## [7.7.1] - SEO Round 2 - 2026-04-13
 
 ### Improvements
