@@ -7,13 +7,17 @@ All notable changes to Genizah Search Pro will be documented in this file.
 ## [7.7.1] - SEO Round 2 - 2026-04-13
 
 ### Improvements
-- **Hebrew-leading meta tags**: Default title and description rewritten to lead with Hebrew intent phrases ("חיפוש בגניזה הקהירית") for better discoverability on Hebrew-language searches (web)
-- **Per-page Hebrew titles**: All indexable page titles (homepage, browse, catalog, puzzle, discoveries, help, about, download) now lead with Hebrew before English (web)
-- **SearchAction JSON-LD**: Homepage structured data extended with Sitelinks Search Box markup targeting `/search?q=` for potential in-SERP search (web)
-- **Organization JSON-LD**: Added Organization schema with logo and parent organization (Dicta) on homepage (web)
-- **BreadcrumbList JSON-LD**: Browse manuscript pages now emit breadcrumb structured data (Home > Browse > Shelfmark) (web)
-- **Performance**: PostHog analytics deferred past first paint via requestIdleCallback, dns-prefetch hints for analytics CDNs (web)
-- **Homepage h1**: Updated to contain target search phrases for crawler visibility (web)
+- **Bilingual meta tags**: Default title now bilingual (English brand + Hebrew search phrase + Hebrew brand) so the site can rank for Hebrew queries like "חיפוש בגניזה הקהירית" while preserving English brand identity. Description, keywords, and JSON-LD alternateName also include both languages (web)
+- **Per-page titles**: Indexable pages (`/browse`, `/catalog-browse`, `/about`) use English-leading bilingual format; manuscript pages stay shelfmark-first; low-intent pages (`/help`, `/download`, `/accessibility`) restored to original concise English (web)
+- **Homepage h1**: Updated to "אתר הגניזה של דיקטה — חיפוש בגניזה הקהירית" (in Hebrew UI mode) so target search phrases appear in visible above-the-fold content for crawlers (web)
+- **Structured data**: Added Organization JSON-LD on homepage and BreadcrumbList JSON-LD on browse manuscript pages. Also added Sitelinks Search Box (SearchAction) markup — note: Google deprecated this surface in November 2024, but markup is harmless and may be used elsewhere (web)
+- **Performance**: PostHog analytics deferred past first paint via requestIdleCallback; dns-prefetch hints added for analytics CDNs (web)
+- **Title consistency fix**: Client-side intra-app navigation on `/browse` no longer overrides server-rendered title to a different format (web)
+
+### Known Limitations
+- Real performance measurement (Lighthouse / PageSpeed Insights / Search Console) was NOT performed in this release — placeholder analysis only. Schedule a follow-up with real Search Console URL Inspection and PSI runs after deploy.
+- Site is single-URL bilingual (no `/he/` vs `/en/` routes, no hreflang). Google sees Hebrew as the default rendered language because UI defaults to Hebrew. Future phase: per-language URLs with hreflang.
+- Browse and catalog page bodies are mostly empty until WebSocket hydration — limits crawlable text content. Tracked in `docs/OPEN_ISSUES.md`.
 
 ---
 
