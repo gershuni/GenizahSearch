@@ -77,10 +77,10 @@ Recent decisions affecting current work:
 
 | Task ID | Date | Description | Version | Commits |
 |---------|------|-------------|---------|---------|
-| 260413-eqk | 2026-04-13 | SEO Round 2: Hebrew meta, JSON-LD, perf quick-wins | 7.7.1 | c42c4fa5, 99018426, ddc2bc53, 48282467, e0cea8f2 |
+| 260413-eqk | 2026-04-13 | SEO Round 2: bilingual meta, JSON-LD, perf quick-wins. Original 5 commits revised by 3 pre-deploy correction commits per Codex review. Ready for deploy. | 7.7.1 | c42c4fa5, 99018426, ddc2bc53, 48282467, e0cea8f2, aba02f6b, 945723ad, 06b808db |
 
 ## Session Continuity
 
 Last session: 2026-04-13
-Stopped at: Quick task 260413-eqk complete (Tasks 1-5), awaiting human checkpoint for deploy
+Stopped at: Quick task 260413-eqk revised (3 correction commits applied per Codex review), ready for human checkpoint + deploy
 Resume file: .planning/quick/260413-eqk-seo-improvements-based-on-expert-feedbac/SUMMARY.md
