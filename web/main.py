@@ -104,32 +104,49 @@ async def _inject_font_display_swap(request, call_next):
     pass through with zero overhead beyond a string comparison on the path.
     """
     response = await call_next(request)
-    if '/static/fonts.css' in str(request.url.path):
-        body = b''
-        async for chunk in response.body_iterator:
-            body += chunk if isinstance(chunk, bytes) else chunk.encode()
-        text = body.decode('utf-8')
-        # NiceGUI 3.6+ ships fonts.css with `font-display: block` on a handful
-        # of @font-face blocks, and **no** font-display at all on the rest
-        # (~40 icon fonts). Block keeps text invisible up to 3 s; missing
-        # declarations also default to block in most browsers. Fix both:
-        # 1) Replace every explicit `block` with `swap`.
-        # 2) Inject `font-display: swap;` into any @font-face block that
-        #    still lacks one after step 1. Uses a regex with a per-block
-        #    check so we don't double-insert.
-        text = text.replace('font-display: block', 'font-display: swap')
-        def _ensure_swap(match: '_re.Match[str]') -> str:
-            block = match.group(0)
-            return block if 'font-display' in block else (
-                block.replace('@font-face {', '@font-face {\n  font-display: swap;', 1)
-            )
-        text = _re.sub(r'@font-face\s*\{[^}]*\}', _ensure_swap, text)
-        return _StarletteResponse(
-            content=text,
-            media_type='text/css',
-            headers={k: v for k, v in response.headers.items() if k.lower() != 'content-length'},
+    if '/static/fonts.css' not in str(request.url.path):
+        return response
+    # Only rewrite 200 responses with a body. For 304/206/4xx/5xx we must pass
+    # the original response through untouched: a 304 has no body to mutate, and
+    # returning 200 with our CSS would break HTTP cache semantics. (Reported by
+    # Codex code review, 2026-04-13.)
+    if response.status_code != 200:
+        return response
+    body = b''
+    async for chunk in response.body_iterator:
+        body += chunk if isinstance(chunk, bytes) else chunk.encode()
+    text = body.decode('utf-8')
+    # NiceGUI 3.6+ ships fonts.css with `font-display: block` on a handful
+    # of @font-face blocks, and **no** font-display at all on the rest
+    # (~40 icon fonts). Block keeps text invisible up to 3 s; missing
+    # declarations also default to block in most browsers. Fix both:
+    # 1) Replace every explicit `block` with `swap`.
+    # 2) Inject `font-display: swap;` into any @font-face block that
+    #    still lacks one after step 1. Uses a regex with a per-block
+    #    check so we don't double-insert.
+    text = text.replace('font-display: block', 'font-display: swap')
+    def _ensure_swap(match: '_re.Match[str]') -> str:
+        block = match.group(0)
+        return block if 'font-display' in block else (
+            block.replace('@font-face {', '@font-face {\n  font-display: swap;', 1)
         )
-    return response
+    text = _re.sub(r'@font-face\s*\{[^}]*\}', _ensure_swap, text)
+    # Drop cache validators that describe the pre-mutation payload — keeping
+    # them would let clients revalidate and then apply our rewritten CSS under
+    # the upstream ETag/Last-Modified, poisoning conditional GETs. Also drop
+    # content-length (stale after rewrite) and content-encoding (body is now
+    # plaintext).
+    stale = {'content-length', 'etag', 'last-modified', 'content-encoding'}
+    headers = {
+        k: v for k, v in response.headers.items()
+        if k.lower() not in stale
+    }
+    return _StarletteResponse(
+        content=text,
+        status_code=200,
+        media_type='text/css',
+        headers=headers,
+    )
 
 
 # NOTE: Tried to defer quasar.unimportant.prod.css via a media-print preload

@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-04-13 (v7.7.1 SEO Round 2 revised pre-deploy: bilingual English-leading meta tags, JSON-LD structured data, PostHog deferral, client/server title consistency fix)
+> **Last Updated:** 2026-04-13 (reviewed Claude perf/font-display patch; added `fonts.css` cache-status follow-up)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 11 | 57 | 68 |
+| P2 Medium Bugs | 12 | 57 | 69 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **17** | **99** | **116** |
+| **Total** | **18** | **99** | **117** |
 
 ---
 
@@ -78,6 +78,7 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **FjmsService batch queries intermittently fail with "bad parameter or other API misuse" / "tuple index out of range"** | `shared/fjms_service.py` | ❌ Open | `get_printed_sys_ids()` and `get_domains_for_sys_ids()` use `row["AlmaId"]` dict access which requires `conn.row_factory = sqlite3.Row`. Under concurrent access or connection recycling, row_factory may be lost, causing "bad parameter" (SQLite API error) or "tuple index out of range" (fallback to tuple row). Pre-existing, intermittent, fails gracefully (returns empty set/dict). |
+| **Font-display middleware rebuilds cached `fonts.css` responses as fresh 200s and preserves stale validators** | `web/main.py` | ❌ Open | Review of the 2026-04-13 perf patch found `_inject_font_display_swap()` consumes `/static/fonts.css` responses and returns a new plain `Response` without preserving `response.status_code`. Conditional/static responses such as `304 Not Modified` (and any future non-200s) therefore become `200 OK`, while the code also copies original `ETag` / `Last-Modified` headers onto mutated CSS content. That can break browser/CDN cache semantics and, on a 304 path with an empty upstream body, risks returning an empty stylesheet body as `200`. Fix path: skip rewriting unless `status_code == 200` and `content-type` is CSS, then either recompute/remove validators or patch the source asset at startup instead of rewriting the served response. |
 | **Refinement counts switch units after replay/session restore** | `shared/refinement.py`, `web/pages/search.py`, `genizah_app.py` | ✅ Fixed (2026-03-29) | Fixed in v7.4.0: `replay_chain()` now uses `len(results)` (page-level) consistently. |
 | **Phase 54 desktop post-search measurement filters run before fresh summaries arrive, so rows can be filtered against stale prior-search data and are not re-applied after the new batch fetch completes** | `genizah_app.py` | ✅ Fixed (2026-03-27) | Re-review confirmed `_launch_enrichment_workers()` now reapplies `_apply_results_table_filters()` after `get_measurement_summaries_batch()` completes, so active post-search measurement filters are reevaluated against fresh data. |
 | **Phase 54 desktop session-restored post-search measurement filters are overwritten from pre-search filters when enrichment workers start** | `genizah_app.py` | ✅ Fixed (2026-03-27) | Re-review confirmed post-search filters are only initialized from pre-search when `_post_measurement_filters` is empty, preserving session-restored post-search state. |
