@@ -65,22 +65,27 @@ _patch_nicegui_esm_handler()
 def _patch_html_lang_attribute():
     """Ensure <html> tag has lang attribute for Lighthouse a11y compliance.
 
-    NiceGUI's index.html template emits ``<html>`` without ``lang``.  Our JS
-    sets it after parse, but Lighthouse checks the initial HTML.  Patch the
-    template source to include ``lang="he"`` as default (JS updates per user
-    preference at runtime).  The patch is idempotent and re-applies on every
-    boot in case a pip upgrade overwrites the file.
+    NiceGUI's ``index.html`` template emits ``<html>`` with no ``lang``. We patch
+    the template file in-place at startup to add ``lang="he"`` so the initial
+    HTML payload is valid for Lighthouse and crawlers. JS in
+    ``apply_theme_immediately()`` updates the value per user preference at
+    runtime via ``Quasar.lang.set(Quasar.lang['en-US'|'he'])`` (passing a full
+    Quasar lang pack is essential -- a partial object like ``{rtl: false}``
+    causes Quasar to set ``lang`` to the literal string ``"undefined"``).
+
+    The patch is idempotent (no-op if already patched) and re-applies on every
+    boot, so it survives ``pip install -U nicegui``.
     """
     from pathlib import Path
     import nicegui
     tmpl_file = Path(nicegui.__file__).parent / 'templates' / 'index.html'
     try:
         original = tmpl_file.read_text(encoding='utf-8')
-        if '<html>' in original and 'lang=' not in original.split('\n')[1]:
+        if '<html>' in original:
             patched = original.replace('<html>', '<html lang="he">', 1)
             tmpl_file.write_text(patched, encoding='utf-8')
-    except Exception:
-        pass  # Non-fatal: JS fallback still sets lang at runtime
+    except Exception as e:
+        logging.getLogger(__name__).warning('html lang patch failed: %s', e)
 
 _patch_html_lang_attribute()
 
@@ -776,10 +781,19 @@ def apply_theme_immediately():
                     if (Quasar.lang.he) {{
                         Quasar.lang.set(Quasar.lang.he);
                     }} else {{
-                        Quasar.lang.set({{ rtl: true }});
+                        Quasar.lang.set({{ isoName: 'he', rtl: true }});
                     }}
                 }} else {{
-                    Quasar.lang.set({{ rtl: false }});
+                    // Use full lang pack so isoName is set (otherwise html lang becomes "undefined")
+                    if (Quasar.lang['en-US']) {{
+                        Quasar.lang.set(Quasar.lang['en-US']);
+                    }} else {{
+                        Quasar.lang.set({{ isoName: 'en', rtl: false }});
+                    }}
+                }}
+                // Belt-and-braces: ensure html lang is never the literal string "undefined"
+                if (document.documentElement.lang === 'undefined' || !document.documentElement.lang) {{
+                    document.documentElement.lang = lang || 'en';
                 }}
 
                 document.documentElement.setAttribute("data-quasar-rtl-ready", "true");

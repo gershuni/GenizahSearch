@@ -133,9 +133,15 @@ a[style*="color"], .text-white a, .citation-link { color: inherit; }
 
     --text-primary: #f1f5f9;
     --text-secondary: #cbd5e1;
-    --text-tertiary: #94a3b8;
-    --text-muted: #64748b;
+    --text-tertiary: #cbd5e1;
+    /* WCAG AA: #94a3b8 (slate-400) on #1e293b (slate-800) = 5.6:1; #64748b was 3.07:1 */
+    --text-muted: #94a3b8;
     --text-inverse: #0f172a;
+
+    /* Lighter primary shades for dark mode -- emerald-400/300 for AA on dark bg.
+       Without this, var(--primary-600)=#059669 inline links fail at 3.88:1 on #1e293b. */
+    --primary-600: #34d399;
+    --primary-700: #6ee7b7;
 
     --border-light: #334155;
     --border-medium: #475569;
@@ -145,6 +151,28 @@ a[style*="color"], .text-white a, .citation-link { color: inherit; }
     --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4);
     --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
 }
+
+/* Quasar uses --q-primary/secondary/accent for badges, buttons, etc.
+   In dark mode the defaults (#5898d4 blue, #26a69a teal, #9c27b0 purple) fail
+   AA contrast on dark cards. Override with brighter equivalents (~5:1+). */
+[data-theme="dark"] {
+    --q-primary: #60a5fa;       /* blue-400, ~6.3:1 on #1e293b */
+    --q-secondary: #5eead4;     /* teal-300, ~9.4:1 */
+    --q-accent: #d8b4fe;        /* purple-300, ~7.5:1 */
+}
+[data-theme="dark"] body {
+    --q-primary: #60a5fa;
+    --q-secondary: #5eead4;
+    --q-accent: #d8b4fe;
+}
+/* Quasar badges set color via inline style="color: rgb(...)" matching --q-* tokens.
+   Force-brighten the specific badge variants flagged by Lighthouse on dark theme. */
+[data-theme="dark"] .q-badge[style*="156, 39, 176"],
+[data-theme="dark"] .q-badge[style*="#9c27b0"] { color: #d8b4fe !important; border-color: #d8b4fe !important; }
+[data-theme="dark"] .q-badge[style*="233, 30, 99"],
+[data-theme="dark"] .q-badge[style*="#e91e63"] { color: #f9a8d4 !important; border-color: #f9a8d4 !important; }
+[data-theme="dark"] .q-badge[style*="88, 152, 212"],
+[data-theme="dark"] .q-badge[style*="#5898d4"] { color: #60a5fa !important; border-color: #60a5fa !important; }
 
 /* Dark theme input fixes */
 [data-theme="dark"] .q-field__native,
