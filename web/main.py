@@ -86,7 +86,7 @@ app.add_static_files('/static', STATIC_DIR)
 # ============================================================================
 
 _SITE_URL = 'https://genizahsearch.com'
-_DEFAULT_TITLE = 'חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה | Dicta Genizah Search'
+_DEFAULT_TITLE = 'Dicta Genizah Search | חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה'
 _DEFAULT_DESCRIPTION = 'חיפוש מלא בכתבי יד מהגניזה הקהירית — טקסטים, תמונות, קטלוג ומטא-דאטה מ-255,000 קטעי גניזת קהיר. אתר הגניזה של דיקטה.'
 _DEFAULT_KEYWORDS = 'חיפוש בגניזה הקהירית, חיפוש גניזה, כתבי יד גניזת קהיר, גניזה קהירית, מחקר גניזה, Cairo Genizah search, Genizah manuscripts, Jewish manuscripts, Dicta Genizah Search'
 
@@ -789,7 +789,7 @@ def set_current_page(page_path: str):
     except (AssertionError, KeyError, Exception):
         pass  # Storage not ready yet, ignore
 
-@ui.page('/', title='חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה | Dicta Genizah Search')
+@ui.page('/', title='Dicta Genizah Search | חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה')
 def dashboard_page():
     set_current_page('/')
     try:
@@ -853,7 +853,7 @@ def dashboard_page():
         if hasattr(home, 'create_page'):
             home.create_page()
 
-@ui.page('/search', title='חיפוש טקסט מלא בגניזה | Full-Text Search — Dicta Genizah Search')
+@ui.page('/search', title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search')
 def search_page_route(
     q: str = None, tag: str = None,
     mode: str = None, variants: int = None,
@@ -865,7 +865,7 @@ def search_page_route(
     set_current_page('/search')
     ui.add_head_html(page_meta(
         '/search',
-        title='חיפוש טקסט מלא בגניזה | Full-Text Search — Dicta Genizah Search',
+        title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search',
         description='Search across 500,000+ Cairo Genizah manuscript fragments with variant-aware full-text search, Responsa syntax, and domain filters.',
         noindex=True,  # search result pages should not be indexed
     ))
@@ -886,12 +886,12 @@ def search_page_route(
             vs_src=vs_src, vs_mode=vs_mode, vs_browse=vs_browse,
         )
 
-@ui.page('/parallels', title='מקבילות טקסטואליות | Textual Parallels — Dicta Genizah Search')
+@ui.page('/parallels', title='Textual Parallels | Dicta Genizah Search')
 def parallels_page_route(text: str = None):
     set_current_page('/parallels')
     ui.add_head_html(page_meta(
         '/parallels',
-        title='מקבילות טקסטואליות | Textual Parallels — Dicta Genizah Search',
+        title='Textual Parallels | Dicta Genizah Search',
         description='Find textual parallels and intertextual connections across Cairo Genizah manuscripts. Paste text to discover matching fragments.',
         noindex=True,
     ))
@@ -905,7 +905,7 @@ def parallels_page_route(text: str = None):
         from web.pages.parallels import create_parallels_page
         create_parallels_page(initial_text=text)
 
-@ui.page('/browse', title='עיון בכתב יד מהגניזה | Manuscript Browser — Dicta Genizah Search')
+@ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None):
     set_current_page('/browse')
     # Dynamic metadata for manuscript pages when sys_id is provided
@@ -918,12 +918,12 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
                 _shelfmark_display = _row.get('shelfmark', sys_id) if _row else sys_id
             except Exception:
                 _shelfmark_display = sys_id
-        _browse_title = f'{_shelfmark_display} — כתב יד | Dicta Genizah Search'
+        _browse_title = f'{_shelfmark_display} | Dicta Genizah Search'
         ui.page_title(_browse_title)
         ui.add_head_html(page_meta(
             f'/browse?sys_id={sys_id}',
-            title=f'{_shelfmark_display} — כתב יד | Dicta Genizah Search',
-            description=f'צפייה בכתב יד {_shelfmark_display} מגניזת קהיר — תמונות, תעתוק, קטלוג, ביבליוגרפיה ומטא-דאטה מדעית.',
+            title=f'{_shelfmark_display} | Dicta Genizah Search',
+            description=f'View Cairo Genizah manuscript {_shelfmark_display} — images, transcription, catalog, bibliography, and scholarly metadata. צפייה בכתב יד {_shelfmark_display} מגניזת קהיר.',
         ))
         # Structured data: BreadcrumbList for manuscript pages
         _safe_shelfmark = _shelfmark_display.replace('"', '&quot;').replace('<', '&lt;')
@@ -958,8 +958,8 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     else:
         ui.add_head_html(page_meta(
             '/browse',
-            title='עיון בכתב יד מהגניזה | Manuscript Browser — Dicta Genizah Search',
-            description='עיון בכתבי יד מגניזת קהיר — תמונות ברזולוציה גבוהה, תעתוקים, ניווט בין דפים ומטא-דאטה מדעית מ-FJMS ו-PGP.',
+            title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search',
+            description='Browse Cairo Genizah manuscripts — high-resolution images, transcriptions, scholarly metadata, and catalog data from FJMS and PGP. עיון בכתבי יד מגניזת קהיר.',
         ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -975,7 +975,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
         from web.pages.browse import create_browse_page
         create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie)
 
-@ui.page('/catalog-browse', title='עיון בקטלוג הגניזה | Catalog Browse — Dicta Genizah Search')
+@ui.page('/catalog-browse', title='Catalog Browse | עיון בקטלוג — Dicta Genizah Search')
 def catalog_browse_page_route(
     domain: str = None, author: str = None, work: str = None, page: int = None,
     text_all: str = None, text_any: str = None, text_not: str = None,
@@ -998,8 +998,8 @@ def catalog_browse_page_route(
     else:
         ui.add_head_html(page_meta(
             '/catalog-browse',
-            title='עיון בקטלוג הגניזה | Catalog Browse — Dicta Genizah Search',
-            description='עיון ב-255,000+ כתבי יד מגניזת קהיר לפי תחום, מחבר ויצירה. קטלוג מבוסס נתוני פרידברג.',
+            title='Catalog Browse | עיון בקטלוג — Dicta Genizah Search',
+            description='Browse 255,000+ Cairo Genizah manuscripts by domain, author, and work. Catalog based on Friedberg Genizah data. עיון בקטלוג הגניזה.',
         ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -1033,12 +1033,12 @@ def lists_page_route():
         from web.pages.lists import create_lists_page
         create_lists_page()
 
-@ui.page('/puzzle', title='פאזל קטעים | Fragment Puzzle — Dicta Genizah Search')
+@ui.page('/puzzle', title='Fragment Puzzle | Dicta Genizah Search')
 def puzzle_page_route(add: str = None, doc: str = None):
     set_current_page('/puzzle')
     ui.add_head_html(page_meta(
         '/puzzle',
-        title='פאזל קטעים | Fragment Puzzle — Dicta Genizah Search',
+        title='Fragment Puzzle | Dicta Genizah Search',
         description='Visually arrange and join Cairo Genizah manuscript fragments. Background removal, zoom, rotate, and composite export for scholarly joins.',
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -1129,12 +1129,12 @@ def settings_page_route():
         from web.pages.settings import create_settings_page
         create_settings_page()
 
-@ui.page('/help', title='עזרה ומדריך | Help — Dicta Genizah Search')
+@ui.page('/help', title='Help | Dicta Genizah Search')
 def help_page_route():
     set_current_page('/help')
     ui.add_head_html(page_meta(
         '/help',
-        title='עזרה ומדריך | Help — Dicta Genizah Search',
+        title='Help | Dicta Genizah Search',
         description='User guide for Dicta Genizah Search: full-text search, Responsa syntax, catalog browsing, manuscript viewer, fragment puzzle, and research tools.',
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -1161,12 +1161,12 @@ async def corrections_page_route():
         from web.pages.corrections import create_corrections_page
         await create_corrections_page()
 
-@ui.page('/discoveries', title='מרכז גילויים | Discoveries — Dicta Genizah Search')
+@ui.page('/discoveries', title='Discoveries Center | Dicta Genizah Search')
 def discoveries_page_route():
     set_current_page('/discoveries')
     ui.add_head_html(page_meta(
         '/discoveries',
-        title='מרכז גילויים | Discoveries — Dicta Genizah Search',
+        title='Discoveries Center | Dicta Genizah Search',
         description='Community-published Cairo Genizah discoveries: fragment joins, new identifications, and scholarly findings shared by researchers.',
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -1207,12 +1207,12 @@ async def profile_page_route():
         from web.pages.profile import create_profile_page
         await create_profile_page()
 
-@ui.page('/accessibility', title='נגישות | Accessibility — Dicta Genizah Search')
+@ui.page('/accessibility', title='Accessibility | Dicta Genizah Search')
 def accessibility_page_route():
     set_current_page('/accessibility')
     ui.add_head_html(page_meta(
         '/accessibility',
-        title='נגישות | Accessibility — Dicta Genizah Search',
+        title='Accessibility | Dicta Genizah Search',
         description='Accessibility statement for Dicta Genizah Search. Keyboard navigation, screen reader support, and accommodations for researchers.',
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -1226,12 +1226,12 @@ def accessibility_page_route():
         create_accessibility_page()
 
 
-@ui.page('/about', title='מהי גניזת קהיר? | About the Cairo Genizah — Dicta Genizah Search')
+@ui.page('/about', title='About the Cairo Genizah | על גניזת קהיר — Dicta Genizah Search')
 def about_page_route():
     set_current_page('/about')
     ui.add_head_html(page_meta(
         '/about',
-        title='מהי גניזת קהיר? | About the Cairo Genizah — Dicta Genizah Search',
+        title='About the Cairo Genizah | על גניזת קהיר — Dicta Genizah Search',
         description='The Cairo Genizah: over 350,000 medieval manuscript fragments from the Ben Ezra Synagogue in Cairo, spanning 1,000 years of Jewish life. Search the transcriptions for the first time.',
         og_type='article',
     ))
@@ -1246,12 +1246,12 @@ def about_page_route():
         create_about_page()
 
 
-@ui.page('/download', title='הורדת תוכנה | Download — Dicta Genizah Search')
+@ui.page('/download', title='Download Desktop App | Dicta Genizah Search')
 def download_page_route():
     set_current_page('/download')
     ui.add_head_html(page_meta(
         '/download',
-        title='הורדת תוכנה | Download — Dicta Genizah Search',
+        title='Download Desktop App | Dicta Genizah Search',
         description='Download the Dicta Genizah Search desktop application for Windows. Full offline search across Cairo Genizah manuscripts.',
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
