@@ -4,6 +4,19 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.7.1] - SEO Round 2 - 2026-04-13
+
+### Improvements
+- **Hebrew-leading meta tags**: Default title and description rewritten to lead with Hebrew intent phrases ("חיפוש בגניזה הקהירית") for better discoverability on Hebrew-language searches (web)
+- **Per-page Hebrew titles**: All indexable page titles (homepage, browse, catalog, puzzle, discoveries, help, about, download) now lead with Hebrew before English (web)
+- **SearchAction JSON-LD**: Homepage structured data extended with Sitelinks Search Box markup targeting `/search?q=` for potential in-SERP search (web)
+- **Organization JSON-LD**: Added Organization schema with logo and parent organization (Dicta) on homepage (web)
+- **BreadcrumbList JSON-LD**: Browse manuscript pages now emit breadcrumb structured data (Home > Browse > Shelfmark) (web)
+- **Performance**: PostHog analytics deferred past first paint via requestIdleCallback, dns-prefetch hints for analytics CDNs (web)
+- **Homepage h1**: Updated to contain target search phrases for crawler visibility (web)
+
+---
+
 ## [7.7.0] - Volume-Aware Browse - 2026-04-01
 
 ### New Features

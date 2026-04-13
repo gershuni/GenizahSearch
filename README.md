@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.7.0
+# Genizah Search Pro 7.7.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
