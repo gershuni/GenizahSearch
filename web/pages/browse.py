@@ -595,7 +595,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         new_url = f'/browse?{qs}'
         shelfmark = page.shelfmark or state.sys_id
         safe_url = _json.dumps(new_url)
-        safe_title = _json.dumps(f'{shelfmark} — Manuscript | Dicta Genizah Search')
+        safe_title = _json.dumps(f'{shelfmark} | Dicta Genizah Search')
         js = f'try {{ history.replaceState(null, "", {safe_url}); document.title = {safe_title}; }} catch(e) {{}}'
         _page_client.run_javascript(js)
     # If a shelfmark was passed via URL (not already resolved to sys_id), set it for auto-search on load
