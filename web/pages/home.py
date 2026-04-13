@@ -43,7 +43,7 @@ def create_page():
         ):
             with ui.row().classes('w-full items-center justify-between gap-4'):
                 with ui.row().classes('items-center gap-3'):
-                    h1(tr('Welcome to Dicta Genizah Search'),
+                    h1(tr('Genizah Search — Full-Text Manuscript Search'),
                        classes='text-lg font-bold',
                        style='color: var(--text-primary); margin: 0;')
                     ui.label('|').style('color: var(--text-muted);')
