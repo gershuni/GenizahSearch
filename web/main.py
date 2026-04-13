@@ -85,6 +85,35 @@ def _patch_html_lang_attribute():
 _patch_html_lang_attribute()
 
 
+# ---------------------------------------------------------------------------
+# Middleware: inject font-display: swap into NiceGUI's bundled fonts.css
+# ---------------------------------------------------------------------------
+from starlette.responses import Response as _StarletteResponse
+
+@app.middleware('http')
+async def _inject_font_display_swap(request, call_next):
+    """Add ``font-display: swap`` to NiceGUI's fonts.css for faster text paint.
+
+    Without this, text is invisible during font load (~1200 ms on slow connections).
+    The middleware only processes the single fonts.css request; all other requests
+    pass through with zero overhead beyond a string comparison on the path.
+    """
+    response = await call_next(request)
+    if '/static/fonts.css' in str(request.url.path):
+        body = b''
+        async for chunk in response.body_iterator:
+            body += chunk if isinstance(chunk, bytes) else chunk.encode()
+        text = body.decode('utf-8')
+        if 'font-display' not in text:
+            text = text.replace('@font-face {', '@font-face {\n  font-display: swap;')
+        return _StarletteResponse(
+            content=text,
+            media_type='text/css',
+            headers={k: v for k, v in response.headers.items() if k.lower() != 'content-length'},
+        )
+    return response
+
+
 logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
@@ -121,6 +150,7 @@ def page_meta(
     description: str = _DEFAULT_DESCRIPTION,
     og_type: str = 'website',
     noindex: bool = False,
+    needs_iiif: bool = False,
 ) -> str:
     """Build per-page meta tags with correct canonical, OG, and Twitter metadata."""
     import html as _html
@@ -135,7 +165,7 @@ def page_meta(
 <meta name="author" content="Dicta Genizah Search">
 <meta name="theme-color" content="#059669">
 <!-- Preconnect hints -->
-<link rel="preconnect" href="https://iiif.nli.org.il">
+{'<link rel="preconnect" href="https://iiif.nli.org.il">' if needs_iiif else ''}
 <link rel="dns-prefetch" href="https://cudl.lib.cam.ac.uk">
 <link rel="dns-prefetch" href="https://eu.i.posthog.com">
 <link rel="dns-prefetch" href="https://www.googletagmanager.com">
@@ -892,6 +922,7 @@ def search_page_route(
         title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search',
         description='Search across 500,000+ Cairo Genizah manuscript fragments with variant-aware full-text search, Responsa syntax, and domain filters.',
         noindex=True,  # search result pages should not be indexed
+        needs_iiif=True,
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -948,6 +979,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
             f'/browse?sys_id={sys_id}',
             title=f'{_shelfmark_display} | Dicta Genizah Search',
             description=f'View Cairo Genizah manuscript {_shelfmark_display} — images, transcription, catalog, bibliography, and scholarly metadata. צפייה בכתב יד {_shelfmark_display} מגניזת קהיר.',
+            needs_iiif=True,
         ))
         # Structured data: BreadcrumbList for manuscript pages
         _safe_shelfmark = _shelfmark_display.replace('"', '&quot;').replace('<', '&lt;')
@@ -984,6 +1016,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
             '/browse',
             title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search',
             description='Browse Cairo Genizah manuscripts — high-resolution images, transcriptions, scholarly metadata, and catalog data from FJMS and PGP. עיון בכתבי יד מגניזת קהיר.',
+            needs_iiif=True,
         ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -1064,6 +1097,7 @@ def puzzle_page_route(add: str = None, doc: str = None):
         '/puzzle',
         title='Fragment Puzzle | Dicta Genizah Search',
         description='Visually arrange and join Cairo Genizah manuscript fragments. Background removal, zoom, rotate, and composite export for scholarly joins.',
+        needs_iiif=True,
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
