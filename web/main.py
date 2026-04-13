@@ -109,7 +109,13 @@ async def _inject_font_display_swap(request, call_next):
         async for chunk in response.body_iterator:
             body += chunk if isinstance(chunk, bytes) else chunk.encode()
         text = body.decode('utf-8')
-        if 'font-display' not in text:
+        # NiceGUI 3.6+ ships fonts.css with `font-display: block` which keeps text
+        # invisible for up to 3s. Force-swap to `swap` (paints fallback immediately,
+        # swaps when custom font loads). Idempotent: handles both the pre-injected
+        # `block` value and a bare `@font-face` block.
+        if 'font-display: block' in text:
+            text = text.replace('font-display: block', 'font-display: swap')
+        elif 'font-display' not in text:
             text = text.replace('@font-face {', '@font-face {\n  font-display: swap;')
         return _StarletteResponse(
             content=text,
@@ -117,6 +123,60 @@ async def _inject_font_display_swap(request, call_next):
             headers={k: v for k, v in response.headers.items() if k.lower() != 'content-length'},
         )
     return response
+
+
+# ---------------------------------------------------------------------------
+# Middleware: defer the 33 KB ``quasar.unimportant.prod.css`` (95 %+ unused on
+# every page per PSI) by converting NiceGUI's blocking <link rel="stylesheet">
+# into the media-print preload-swap pattern. Cuts ~280 ms off Speed Index
+# without visible FOUC because — as the filename implies — it only contains
+# non-critical Quasar utility rules.
+# ---------------------------------------------------------------------------
+import re as _re
+
+_UNIMPORTANT_RE = _re.compile(
+    r'<link\s+[^>]*?href="([^"]*?quasar\.unimportant\.prod\.css[^"]*?)"[^>]*?>',
+    _re.IGNORECASE,
+)
+
+
+def _defer_unimportant_link(match: '_re.Match[str]') -> str:
+    href = match.group(1)
+    # Loads only when "print" media matches (never on screen); onload flips
+    # media to 'all' so the rules apply post-render. noscript keeps it working
+    # for users with JS disabled.
+    return (
+        f'<link rel="stylesheet" href="{href}" media="print" '
+        f'onload="this.media=\'all\'">'
+        f'<noscript><link rel="stylesheet" href="{href}"></noscript>'
+    )
+
+
+@app.middleware('http')
+async def _defer_unimportant_css(request, call_next):
+    response = await call_next(request)
+    # Only touch top-level HTML documents (NiceGUI page responses).
+    ctype = response.headers.get('content-type', '')
+    if 'text/html' not in ctype.lower():
+        return response
+    body = b''
+    async for chunk in response.body_iterator:
+        body += chunk if isinstance(chunk, bytes) else chunk.encode()
+    text = body.decode('utf-8', errors='replace')
+    if 'quasar.unimportant.prod.css' not in text:
+        return _StarletteResponse(
+            content=body,
+            status_code=response.status_code,
+            headers={k: v for k, v in response.headers.items() if k.lower() != 'content-length'},
+            media_type=ctype,
+        )
+    new_text = _UNIMPORTANT_RE.sub(_defer_unimportant_link, text, count=1)
+    return _StarletteResponse(
+        content=new_text,
+        status_code=response.status_code,
+        headers={k: v for k, v in response.headers.items() if k.lower() != 'content-length'},
+        media_type=ctype,
+    )
 
 
 logger = logging.getLogger(__name__)
