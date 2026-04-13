@@ -113,6 +113,8 @@ def page_meta(
 <!-- Preconnect hints -->
 <link rel="preconnect" href="https://iiif.nli.org.il">
 <link rel="dns-prefetch" href="https://cudl.lib.cam.ac.uk">
+<link rel="dns-prefetch" href="https://eu.i.posthog.com">
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
 <!-- Open Graph -->
 <meta property="og:type" content="{og_type}">
 <meta property="og:url" content="{url}">
@@ -149,19 +151,24 @@ POSTHOG_SCRIPT = f'''
 <!-- PostHog Analytics -->
 <script>
     !function(t,e){{var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){{function g(t,e){{var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){{var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e}},u.people.toString=function(){{return u.toString(1)+".people (stub)"}},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url lib get_property getSessionProperty sessionRecording startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_config __request_queue".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])}},e.__SV=1)}}(document,window.posthog||[]);
-    posthog.init('{_posthog_key}', {{
-        api_host: 'https://eu.i.posthog.com',
-        person_profiles: 'identified_only',
-        autocapture: true,
-        capture_pageview: true,
-        capture_pageleave: true,
-        session_recording: {{
-            maskAllInputs: true,
-            maskTextSelector: 'input, textarea'
-        }},
-        // Filter out localhost / dev traffic
-        opt_out_capturing_by_default: ['localhost', '127.0.0.1'].includes(location.hostname),
-    }})
+    // Defer PostHog init past first paint (events are queued by the stub loader above)
+    function _phInit() {{
+        posthog.init('{_posthog_key}', {{
+            api_host: 'https://eu.i.posthog.com',
+            person_profiles: 'identified_only',
+            autocapture: true,
+            capture_pageview: true,
+            capture_pageleave: true,
+            session_recording: {{
+                maskAllInputs: true,
+                maskTextSelector: 'input, textarea'
+            }},
+            // Filter out localhost / dev traffic
+            opt_out_capturing_by_default: ['localhost', '127.0.0.1'].includes(location.hostname),
+        }});
+    }}
+    if (window.requestIdleCallback) {{ requestIdleCallback(_phInit); }}
+    else {{ setTimeout(_phInit, 2000); }}
 </script>
 ''' if _posthog_key else ''
 
