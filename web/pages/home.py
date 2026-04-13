@@ -127,31 +127,15 @@ def create_page():
                         on_click=lambda: _navigate_search()
                     ).props('round color=primary').style('width: 44px; height: 44px;')
 
-        # === Pesach banner (seasonal, through April 20, 2026) ===
-        from web.pesach import is_pesach_season, get_random_pesach_fragments, EMOJI_WINE
-        if is_pesach_season():
-            _is_he = is_rtl()
-            _frags = get_random_pesach_fragments(3)
-            _dir = 'rtl' if _is_he else 'ltr'
-            with ui.row().classes('w-full items-center justify-center gap-2 mt-1 flex-wrap').style(f'direction: {_dir};'):
-                ui.label(EMOJI_WINE + (' \u05e4\u05e1\u05d7 \u05d1\u05d2\u05e0\u05d9\u05d6\u05d4:' if _is_he else ' Pesach in the Genizah:')).classes(
-                    'text-xs font-bold').style('color: #7c3aed;')
-                for i, frag in enumerate(_frags):
-                    if i > 0:
-                        ui.label('\u00b7').classes('text-xs').style('color: #a78bfa;')
-                    ui.link(
-                        f"{frag['shelfmark']} ({frag['title']})",
-                        target=f"/browse?sys_id={frag['sys_id']}",
-                    ).classes('text-xs no-underline hover:underline').style('color: #5b21b6;')
-                def _go_random():
-                    from web.pesach import get_random_pesach_fragments as _gr
-                    f = _gr(1)[0]
-                    ui.navigate.to(f"/browse?sys_id={f['sys_id']}")
-                ui.label('\u00b7').classes('text-xs').style('color: #a78bfa;')
-                ui.button(
-                    '\u05e7\u05d8\u05e2 \u05e4\u05e1\u05d7 \u05d0\u05e7\u05e8\u05d0\u05d9' if _is_he else 'Random Pesach Fragment',
-                    on_click=_go_random,
-                ).props('flat dense no-caps size=xs').style('color: #7c3aed; font-weight: bold; padding: 0 4px; min-height: 0;')
+        # === Seasonal banner (Pesach/other themes) — hidden until next seasonal activation ===
+        # The Pesach banner code is preserved in git history and the supporting module
+        # web/pesach.py remains as a reusable template for future seasonal themes
+        # (e.g. Rosh Hashanah, Hanukkah, Shavuot). To re-enable: uncomment below and
+        # update the is_*_season() gate + fragment source.
+        #
+        # from web.pesach import is_pesach_season, get_random_pesach_fragments, EMOJI_WINE
+        # if is_pesach_season():
+        #     ... (see git history before commit hiding Pesach banner)
 
         # === Main Action Cards Grid ===
         # Changed to H2
