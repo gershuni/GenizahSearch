@@ -790,18 +790,44 @@ def dashboard_page():
     except (AssertionError, KeyError, Exception):
         current_theme = 'light'
     ui.add_head_html(page_meta('/'))
-    # Structured data: WebSite schema for homepage
+    # Structured data: WebSite schema with SearchAction for homepage
     ui.add_head_html('''
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "WebSite",
         "name": "Dicta Genizah Search",
-        "alternateName": "חיפוש גניזת קהיר",
+        "alternateName": "חיפוש בגניזה הקהירית",
         "url": "https://genizahsearch.com",
-        "description": "Advanced research platform with full-text search across 500,000+ Cairo Genizah manuscript fragments from Cambridge, Oxford, JTS, and other collections.",
+        "description": "חיפוש מלא בכתבי יד מהגניזה הקהירית — טקסטים, תמונות, קטלוג ומטא-דאטה מ-255,000 קטעי גניזת קהיר.",
         "inLanguage": ["he", "en"],
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "https://genizahsearch.com/search?q={search_term_string}"
+            },
+            "query-input": "required name=search_term_string"
+        },
         "publisher": {
+            "@type": "Organization",
+            "name": "Dicta — The Israel Center for Text Analysis",
+            "url": "https://dicta.org.il"
+        }
+    }
+    </script>
+    ''')
+    # Structured data: Organization schema
+    ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Dicta Genizah Search",
+        "alternateName": "חיפוש בגניזה הקהירית — דיקטה",
+        "url": "https://genizahsearch.com",
+        "logo": "https://genizahsearch.com/static/og-image.png",
+        "parentOrganization": {
             "@type": "Organization",
             "name": "Dicta — The Israel Center for Text Analysis",
             "url": "https://dicta.org.il"
@@ -892,6 +918,36 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
             title=f'{_shelfmark_display} — כתב יד | Dicta Genizah Search',
             description=f'צפייה בכתב יד {_shelfmark_display} מגניזת קהיר — תמונות, תעתוק, קטלוג, ביבליוגרפיה ומטא-דאטה מדעית.',
         ))
+        # Structured data: BreadcrumbList for manuscript pages
+        _safe_shelfmark = _shelfmark_display.replace('"', '&quot;').replace('<', '&lt;')
+        ui.add_head_html(f'''
+        <script type="application/ld+json">
+        {{
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {{
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": "https://genizahsearch.com/"
+                }},
+                {{
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Browse",
+                    "item": "https://genizahsearch.com/browse"
+                }},
+                {{
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": "{_safe_shelfmark}",
+                    "item": "https://genizahsearch.com/browse?sys_id={sys_id}"
+                }}
+            ]
+        }}
+        </script>
+        ''')
     else:
         ui.add_head_html(page_meta(
             '/browse',
