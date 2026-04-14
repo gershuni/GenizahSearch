@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
 milestone: v7.8
-milestone_name: Server-Side Image Cache
-status: executing
-stopped_at: Phase 62 context gathered
-last_updated: "2026-04-13T11:10:00.000Z"
-last_activity: 2026-04-13 -- Quick task 260413-jil PageSpeed wins -- 2/3 tasks complete, awaiting human Lighthouse verification
+milestone_name: Structural Quality
+status: defining_requirements
+stopped_at: null
+last_updated: "2026-04-14T12:00:00.000Z"
+last_activity: 2026-04-14 -- Milestone v7.8 Structural Quality started (prev Image Cache deferred)
 progress:
-  total_phases: 3
+  total_phases: 0
   completed_phases: 0
-  total_plans: 3
+  total_plans: 0
   completed_plans: 0
   percent: 0
 ---
@@ -18,19 +18,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-03)
+See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 62 — investigation-validation
+**Current focus:** Defining requirements for v7.8 Structural Quality
 
 ## Current Position
 
-Phase: 62 (investigation-validation) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 62
-Last activity: 2026-04-03 -- Phase 62 execution started
-
-Progress: [░░░░░░░░░░] 0%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-14 — Milestone v7.8 Structural Quality started
 
 ## Performance Metrics
 

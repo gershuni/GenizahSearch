@@ -146,15 +146,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-## Current Milestone: v7.8 Server-Side Image Cache
+## Current Milestone: v7.8 Structural Quality
 
-**Goal:** Eliminate NLI downtime impact by pre-caching manuscript images on EC2, serving cached images as primary source with live IIIF as fallback.
+**Goal:** Reduce structural debt identified by dual code review (Claude Opus + Codex) — break up god files, add CI, pin deps, clean state management — without changing any user-visible behavior.
 
 **Target features:**
-- Batch-fetch NLI images (800px minimum, resolution TBD after investigation) to server disk, prioritizing manuscripts without CUL/Oxford/JTS/Manchester alternatives
-- Serve cached images as primary source for both web and desktop apps, with live IIIF fallback
-- Desktop option to download the full image cache locally for offline use
-- Investigation phase for rate limiting, serving architecture, batch priority strategy, and optimal resolution
+- Pin dependencies with exact versions + add pytest CI pipeline + replace deprecated gotrue imports
+- Break up genizah_app.py (32.8K lines, 42 classes) into ~10 focused modules
+- Break up web/pages/search.py (6.7K) and browse.py (5K) into smaller modules with explicit page-scoped state objects
+- Repo hygiene: clean root debris, tighten .gitignore, reduce silent exception swallowing, encapsulate framework monkey-patches
+
+**Key constraint:** Zero user-visible behavior changes. Every test that passes before must pass after. Both apps must work identically.
 
 ### Out of Scope
 
@@ -168,6 +170,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - NLI BifolioWith pairs UI (23K records) -- service method exists, UI deferred
 - FJMS full texts as version selector sources -- deferred (catalog descriptions only)
 - Migrating libraries.csv to SQLite -- high refactoring risk, no user-visible benefit yet
+- Server-Side Image Cache (prev v7.8) -- deferred to v7.9+, blocked on NLI TOS outreach (INV-04)
 - FGP direct image access -- FGPImageNumberId ≠ IIIF FL ID, different numbering systems
 - Search tabs / multi-search workspace (יג) -- deferred, too architectural
 - Transcription search (FJMS import + unified index + distribution) -- deferred to future milestone
@@ -247,4 +250,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-03 after v7.8 milestone started*
+*Last updated: 2026-04-14 after v7.8 Structural Quality milestone started (prev v7.8 Image Cache deferred)*
