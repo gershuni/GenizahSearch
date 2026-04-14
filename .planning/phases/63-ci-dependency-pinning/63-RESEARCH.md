@@ -342,7 +342,7 @@ Current `pip freeze` produces 115 packages (14 direct + ~101 transitive). [VERIF
 | A2 | Exact CI workflow YAML syntax | Architecture Patterns | LOW -- standard GHA patterns, validated by CI run itself |
 | A3 | ruff config syntax for select/ignore | Code Examples | LOW -- well-documented, errors caught immediately on `ruff check` |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **check_docs.py staleness warnings**
    - What we know: Script returns exit 1 if any stale docs found (>90 days old)
