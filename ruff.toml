@@ -4,20 +4,17 @@
 
 line-length = 120  # Future-friendly default (not enforced yet)
 
+extend-exclude = [
+    ".claude",
+    "extension",
+    "dist",
+    "build",
+]
+
 [lint]
 select = [
     "E9",    # Syntax errors (runtime-breaking)
     "F401",  # Unused imports
     "F811",  # Redefined while unused
     "F821",  # Undefined name
-]
-
-exclude = [
-    ".claude",
-    ".git",
-    "venv",
-    "__pycache__",
-    "extension",
-    "dist",
-    "build",
 ]
