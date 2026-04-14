@@ -1,0 +1,23 @@
+# GenizahSearch ruff configuration
+# Phase 63: syntax errors + import hygiene only
+# Expand ruleset in future milestones
+
+line-length = 120  # Future-friendly default (not enforced yet)
+
+[lint]
+select = [
+    "E9",    # Syntax errors (runtime-breaking)
+    "F401",  # Unused imports
+    "F811",  # Redefined while unused
+    "F821",  # Undefined name
+]
+
+exclude = [
+    ".claude",
+    ".git",
+    "venv",
+    "__pycache__",
+    "extension",
+    "dist",
+    "build",
+]

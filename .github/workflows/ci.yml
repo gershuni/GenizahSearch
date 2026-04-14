@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [master-main]
+  pull_request:
+
+jobs:
+  lint-and-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install ruff==0.15.10  # Pinned -- update version intentionally
+      - run: ruff check .
+      - run: python scripts/check_docs.py
+
+  tests:
+    needs: lint-and-docs
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.10'
+          - os: windows-latest
+            python-version: '3.11'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt
+      # pytest and ruff are CI-only dev tools, not runtime deps
+      - run: pip install pytest
+      - run: pytest tests/
