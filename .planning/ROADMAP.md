@@ -221,7 +221,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 63-01-PLAN.md — CI workflow + ruff config + fix violations
-- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
+- [x] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 65: Repo Hygiene
 **Goal**: The codebase follows consistent error handling patterns, framework patches are discoverable and version-guarded, and the repo root is clean
@@ -236,7 +236,7 @@ Plans:
 **Note**: Update `docs/OPEN_ISSUES.md` incrementally as issues are resolved during this phase, not only at end
 **Plans**: 2 plans
 Plans:
-- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
+- [x] 63-01-PLAN.md — CI workflow + ruff config + fix violations
 - [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 66: Documentation Update
@@ -261,7 +261,7 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 63. CI & Dependency Pinning | 2/2 | Complete   | 2026-04-14 |
+| 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
 | 64. Auth Migration | 0/TBD | Not started | - |
 | 65. Repo Hygiene | 0/TBD | Not started | - |
 | 66. Documentation Update | 0/TBD | Not started | - |
