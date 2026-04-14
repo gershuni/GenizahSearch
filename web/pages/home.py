@@ -41,13 +41,12 @@ def create_page():
         with ui.element('div').classes('w-full px-6 py-3').style(
             'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
-            with ui.row().classes('w-full items-center justify-between gap-4'):
-                with ui.row().classes('items-center gap-3'):
+            with ui.row().classes('w-full items-center justify-between gap-4 flex-wrap'):
+                with ui.column().classes('gap-1 flex-1 min-w-0'):
                     h1(tr('Dicta Genizah Search — Full-Text Manuscript Search'),
                        classes='text-lg font-bold',
                        style='color: var(--text-primary); margin: 0;')
-                    ui.label('|').style('color: var(--text-muted);')
-                    ui.label(tr('Advanced research tools for Cairo Genizah manuscripts')).classes(
+                    ui.label(tr('Search over 255,000 MiDRASH transcriptions — text, variants, parallels, joins, and images')).classes(
                         'text-sm'
                     ).style('color: var(--text-secondary);')
 
@@ -82,29 +81,7 @@ def create_page():
                     mini_stat('library_books', get_doc_count, tr('Pages'))
                     mini_stat('star', get_list_count, tr('Lists'))
 
-        # === About the Genizah Banner ===
-        with ui.card().classes('w-full p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all mt-2').props(
-            'role=button tabindex=0'
-        ).style(
-            'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
-        ).on('click', lambda: ui.navigate.to('/about')).on('keydown.enter', lambda: ui.navigate.to('/about')).on('keydown.space', lambda: ui.navigate.to('/about')):
-            with ui.row().classes('w-full items-center gap-6 p-5 flex-wrap'):
-                # Manuscript image thumbnail
-                ui.html(
-                    '<img src="https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T-S_K5.13%29_%28cropped%29.jpg"'
-                    ' alt="" loading="lazy" style="width: 100px; height: 80px; object-fit: cover; border-radius: 8px; opacity: 0.9;">',
-                    sanitize=False
-                )
-                with ui.column().classes('flex-1 gap-1'):
-                    h2(tr('What is the Cairo Genizah?'),
-                       classes='text-lg font-bold',
-                       style='color: var(--text-primary);')
-                    ui.label(tr('Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic — now searchable for the first time')).classes(
-                        'text-sm'
-                    ).style('color: var(--text-secondary);')
-                ui.icon('arrow_back' if is_rtl() else 'arrow_forward').classes('text-2xl').style('color: var(--primary-600);')
-
-        # === Hero Search Bar (below About card) ===
+        # === Hero Search Bar ===
         with ui.element('div').classes('w-full px-6 py-4 mt-2').style(
             'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
@@ -126,6 +103,123 @@ def create_page():
                         icon='search',
                         on_click=lambda: _navigate_search()
                     ).props(f'round color=primary aria-label="{tr("Search")}"').style('width: 44px; height: 44px;')
+
+        # === Capability Chips (clickable) ===
+        with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-2 px-2'):
+            _chips = [
+                ('text_fields', tr('Free Text Search'), '/search'),
+                ('spellcheck', tr('Spelling Variants'), '/search?mode=variants'),
+                ('compare_arrows', tr('Parallel Detection'), '/parallels'),
+                ('hub', tr('Join Search'), '/search?mode=responsa'),
+                ('terminal', tr('Advanced Search'), '/search?mode=Regex'),
+                ('image', tr('Images + Text'), '/browse'),
+                ('category', tr('Browse by Identification'), '/catalog-browse'),
+                ('lightbulb', tr('Community'), '/discoveries'),
+                ('computer', tr('Downloadable App'), '/download'),
+            ]
+            for icon_name, label, href in _chips:
+                with ui.row().classes('items-center gap-1 px-2 py-1 cursor-pointer hover:shadow-sm transition-all').style(
+                    'border: 1px solid var(--border-light); border-radius: 16px; background: var(--bg-tertiary);'
+                ).on('click', lambda h=href: ui.navigate.to(h)):
+                    ui.icon(icon_name).classes('text-sm').style('color: var(--primary-600);')
+                    ui.label(label).classes('text-xs').style('color: var(--text-secondary);')
+
+        # === Info Carousel (auto-rotates + manual arrows) ===
+        _card_style = 'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
+        _card_classes = 'w-full p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all'
+
+        # Define carousel slides: (icon_or_img, heading, body, link)
+        _slides_data = [
+            {
+                'icon': None,
+                'img': 'https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T-S_K5.13%29_%28cropped%29.jpg',
+                'heading': tr('What is the Cairo Genizah?'),
+                'body': tr('Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic — now searchable for the first time'),
+                'link': '/about',
+            },
+            {
+                'icon': 'explore',
+                'heading': tr('What can I do here?'),
+                'body': tr('Search MiDRASH transcriptions of ~255,000 Genizah manuscripts with variants, find textual parallels, locate joins, browse images alongside text, and share discoveries with the research community.'),
+                'link': '/help',
+            },
+            {
+                'icon': 'dataset',
+                'heading': tr('Data Sources'),
+                'body': tr('Transcriptions: MiDRASH. Manuscript images: NLI, Cambridge, Oxford, and others. Scholarly descriptions, bibliography, and catalog data: NLI, FGP, PGP, Oxford, Cambridge, and others.'),
+                'link': '/about',
+            },
+            {
+                'icon': 'computer',
+                'heading': tr('Desktop App'),
+                'body': tr('A downloadable Windows application for power users — fast local search, offline access, and advanced workflows.'),
+                'link': '/download',
+            },
+            {
+                'icon': 'lightbulb',
+                'heading': tr('Community Discoveries'),
+                'body': tr('Researchers are already finding new joins and parallels. Share your own discoveries, suggest corrections, and contribute to the research community.'),
+                'link': '/discoveries',
+            },
+        ]
+
+        # Build slide cards
+        _slide_cards = []
+        for i, slide in enumerate(_slides_data):
+            card = ui.card().classes(_card_classes).props('role=button tabindex=0').style(_card_style)
+            card.on('click', lambda link=slide['link']: ui.navigate.to(link))
+            if i > 0:
+                card.set_visibility(False)
+            with card:
+                with ui.row().classes('w-full items-center gap-6 p-5 flex-wrap'):
+                    if slide.get('img'):
+                        ui.html(
+                            f'<img src="{slide["img"]}" alt="" loading="lazy"'
+                            ' style="width: 100px; height: 80px; object-fit: cover; border-radius: 8px; opacity: 0.9;">',
+                            sanitize=False
+                        )
+                    elif slide.get('icon'):
+                        ui.icon(slide['icon']).classes('text-5xl').style('color: var(--primary-600); opacity: 0.8;')
+                    with ui.column().classes('flex-1 gap-1'):
+                        h2(slide['heading'], classes='text-lg font-bold', style='color: var(--text-primary);')
+                        ui.label(slide['body']).classes('text-sm').style('color: var(--text-secondary);')
+            _slide_cards.append(card)
+
+        # Carousel state + controls
+        _carousel = {'index': 0}
+
+        def _show_slide(idx):
+            _carousel['index'] = idx % len(_slide_cards)
+            for j, c in enumerate(_slide_cards):
+                c.set_visibility(j == _carousel['index'])
+            _dot_update()
+
+        def _next_slide():
+            _show_slide(_carousel['index'] + 1)
+
+        def _prev_slide():
+            _show_slide(_carousel['index'] - 1)
+
+        # Navigation row: prev arrow, dots, next arrow
+        _prev_icon = 'chevron_right' if is_rtl() else 'chevron_left'
+        _next_icon = 'chevron_left' if is_rtl() else 'chevron_right'
+        with ui.row().classes('w-full justify-center items-center gap-1 mt-1'):
+            ui.button(icon=_prev_icon, on_click=_prev_slide).props('flat dense round size=sm')
+            _dots = []
+            for i in range(len(_slide_cards)):
+                dot = ui.icon('circle').classes('text-xs cursor-pointer').style(
+                    f'color: {"var(--primary-600)" if i == 0 else "var(--border-light)"}; font-size: 8px;'
+                )
+                dot.on('click', lambda idx=i: _show_slide(idx))
+                _dots.append(dot)
+            ui.button(icon=_next_icon, on_click=_next_slide).props('flat dense round size=sm')
+
+        def _dot_update():
+            for j, dot in enumerate(_dots):
+                dot.style(f'color: {"var(--primary-600)" if j == _carousel["index"] else "var(--border-light)"}; font-size: 8px;')
+
+        # Auto-rotate every 15 seconds
+        ui.timer(15.0, _next_slide)
 
         # === Seasonal banner (Pesach/other themes) — hidden until next seasonal activation ===
         # The Pesach banner code is preserved in git history and the supporting module
