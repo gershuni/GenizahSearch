@@ -220,8 +220,8 @@ Plans:
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Plans**: 2 plans
 Plans:
-- [x] 63-01-PLAN.md — CI workflow + ruff config + fix violations
-- [x] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
+- [ ] 64-01-PLAN.md — Auth import migration + PKCE flow + callback cleanup
+- [ ] 64-02-PLAN.md — Remove gotrue dependency + update test guards + manual verification
 
 ### Phase 65: Repo Hygiene
 **Goal**: The codebase follows consistent error handling patterns, framework patches are discoverable and version-guarded, and the repo root is clean
@@ -262,7 +262,7 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
-| 64. Auth Migration | 0/TBD | Not started | - |
+| 64. Auth Migration | 0/2 | Planned | - |
 | 65. Repo Hygiene | 0/TBD | Not started | - |
 | 66. Documentation Update | 0/TBD | Not started | - |
 
