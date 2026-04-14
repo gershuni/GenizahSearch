@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-04-13 (reviewed Claude perf/font-display patch; added `fonts.css` cache-status follow-up)
+> **Last Updated:** 2026-04-14 (reviewed Claude perf/font-display patch; added `fonts.css` cache-status follow-up)
 > **Status:** Active working document
 
 ---
@@ -243,6 +243,14 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 | `_CACHE_TTL = 30` | `joins_panel.py:19` | ג… Fixed (2026-02-04) | Now uses `JOINS_CACHE_TTL` env var |
 | `CACHE_TTL = 300` | `api.py:46` | ג… Fixed (2026-02-04) | Now uses `NLI_CACHE_TTL` / `IMAGE_CACHE_TTL` env vars |
 | Timeouts & retries | `auth_state.py:17-20` | ג Deferred | Low priority - defaults are reasonable |
+
+| **Supabase URL + anon key defaults** | `supabase_corrections_client.py:62-63` | ❌ Open | Should use `shared/supabase_provider.py` like web client. Phase 64 code review CR-01. |
+
+### Input Sanitization
+
+| Issue | File | Status | Notes |
+|-------|------|--------|-------|
+| **ilike injection via unescaped user input** | `supabase_corrections_client.py:950,1384,1494,1528` | ❌ Open | User strings interpolated into PostgREST `.or_()` filters. Phase 64 code review CR-02. |
 
 ---
 
