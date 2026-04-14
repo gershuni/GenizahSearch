@@ -151,12 +151,13 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 **Goal:** Reduce structural debt identified by dual code review (Claude Opus + Codex) — break up god files, add CI, pin deps, clean state management — without changing any user-visible behavior.
 
 **Target features:**
-- Pin dependencies with exact versions + add pytest CI pipeline + replace deprecated gotrue imports
-- Break up genizah_app.py (32.8K lines, 42 classes) into ~10 focused modules
-- Break up web/pages/search.py (6.7K) and browse.py (5K) into smaller modules with explicit page-scoped state objects
-- Repo hygiene: clean root debris, tighten .gitignore, reduce silent exception swallowing, encapsulate framework monkey-patches
+- Pin dependencies with exact versions, add pytest+ruff CI (including Windows runner), migrate deprecated gotrue auth
+- Audit and fix silent exception handlers, encapsulate framework monkey-patches, clean repo root debris
+- Update documentation (CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE, check_docs green)
 
-**Key constraint:** Zero user-visible behavior changes. Every test that passes before must pass after. Both apps must work identically.
+**Key constraint:** Zero user-visible behavior changes. Current pytest baseline (1067 passed, 8 skipped) must remain green. Both apps must work identically.
+
+**Follow-up (v7.9 Decomposition):** Break up genizah_app.py god file and web page god files — deferred to leverage v7.8 CI safety net.
 
 ### Out of Scope
 
