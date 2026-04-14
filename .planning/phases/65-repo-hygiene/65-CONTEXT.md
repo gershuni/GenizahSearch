@@ -14,7 +14,7 @@ Clean up structural debt identified by dual code review (Claude Opus + Codex): a
 ## Implementation Decisions
 
 ### Silent Exception Handlers (HYGN-01)
-- **D-01:** Add logging (log.warning or log.debug) to every silent `except Exception: pass` in first-party code. Don't just comment — make errors visible in logs.
+- **D-01:** Audit silent exception handlers in first-party code; each must either log at an appropriate level or include an inline comment justifying suppression. Prefer logging where practical.
 - **D-02:** Scope: first-party source files only (genizah_core.py, genizah_app.py, web/, shared/). Exclude .venv/, venv/, dist/, third-party code.
 - **D-03:** Known locations: genizah_core.py lines 540, 585, 703. Full audit may find more in genizah_app.py and web/.
 
@@ -25,8 +25,8 @@ Clean up structural debt identified by dual code review (Claude Opus + Codex): a
 - **D-07:** web/main.py imports and calls the patches from framework_patches.py at startup.
 
 ### Root Debris Cleanup (HYGN-03)
-- **D-08:** Gitignore all temp/debug/backup files — do NOT delete from disk or relocate. Keep local files untouched.
-- **D-09:** Claude's Discretion on which root files are "intentional assets" vs debris: check which files are actually imported/referenced in code. Referenced files stay tracked; unreferenced temp/debug/backup files get gitignored.
+- **D-08:** Prefer gitignore for local debris; relocation is allowed where it better matches the accepted requirement (HYGN-03: "gitignored or relocated").
+- **D-09:** Classify root files as intentional vs debris using code references plus packaging, deployment, docs, test, and user-workflow relevance — not Python imports alone. Files used by build scripts, deployment, Inno Setup, tests, or manual workflows count as intentional.
 - **D-10:** Known debris categories (gitignore these patterns):
   - Debug/temp: `_*.txt`, `_*.log`, `_*.js`, `_*.md` (underscore-prefixed scratch files)
   - Backup files: `*.bak`, `*.tmp.*`
@@ -38,7 +38,7 @@ Clean up structural debt identified by dual code review (Claude Opus + Codex): a
   - Misc: `sync.ffs_db`, `genizah-extension-*.zip`, `genizah_app.py.tmp.*`
 
 ### Gitignore Update (HYGN-04)
-- **D-11:** Add wildcard patterns to .gitignore that prevent future accumulation of the debris categories above.
+- **D-11:** Add wildcard patterns to .gitignore that prevent future accumulation of the debris categories above. Use root-anchored patterns (e.g., `/*.bak` not `*.bak`) where possible to avoid hiding similarly named intentional files in subdirectories.
 - **D-12:** Intentional root assets that MUST stay tracked: `libraries.csv`, `ie_volume_map.json`, `primary_ie_map.json`, `Help.html`, `icon.ico`, `image.png`, `genizah_core.py`, `genizah_app.py`, `genizah_translations.py`, `unified_variants.py`, and all other source `.py` files. Claude verifies by checking code references.
 
 ### Claude's Discretion
@@ -57,7 +57,7 @@ Clean up structural debt identified by dual code review (Claude Opus + Codex): a
 
 ### Requirements
 - `.planning/REQUIREMENTS.md` — HYGN-01 through HYGN-04 acceptance criteria
-- `.planning/ROADMAP.md` — Phase 65 success criteria (5 items)
+- `.planning/ROADMAP.md` — Phase 65 success criteria (4 items)
 
 ### Monkey-patch targets
 - `web/main.py` lines 28-89 — Current location of 2 NiceGUI patches to be moved
@@ -71,7 +71,7 @@ Clean up structural debt identified by dual code review (Claude Opus + Codex): a
 - `.github/workflows/ci.yml` — Phase 63 CI workflow (must stay green)
 
 ### Current gitignore
-- `.gitignore` — Current patterns (50 lines, has gaps)
+- `.gitignore` — Current patterns (44 lines, has gaps)
 
 </canonical_refs>
 
@@ -99,7 +99,7 @@ Clean up structural debt identified by dual code review (Claude Opus + Codex): a
 ## Specific Ideas
 
 - User wants plain-English communication; technical decisions deferred to AI review
-- Keep local files untouched — gitignore only, no deletion or relocation
+- Prefer gitignore over deletion; relocation allowed where appropriate
 - Conservative approach: this is a structural debt cleanup, not a feature
 
 </specifics>
