@@ -202,7 +202,10 @@ community writes (corrections/comments) include IE context.
   4. `pip install -r requirements.txt` on a fresh venv produces a deterministic environment with exact package versions (pinning done last in phase, after CI is green)
   5. DEVELOPER_GUIDE.md documents how to add/upgrade a dependency
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
+- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 64: Auth Migration
 **Goal**: Supabase authentication uses the current supported API with zero behavior change for users
@@ -215,7 +218,10 @@ community writes (corrections/comments) include IE context.
   4. Current pytest baseline remains green after migration
   5. requirements.txt re-pinned to reflect any dependency changes from auth migration
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
+- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 65: Repo Hygiene
 **Goal**: The codebase follows consistent error handling patterns, framework patches are discoverable and version-guarded, and the repo root is clean
@@ -228,7 +234,10 @@ community writes (corrections/comments) include IE context.
   4. `.gitignore` covers the patterns that caused root debris accumulation, preventing future recurrence
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Note**: Update `docs/OPEN_ISSUES.md` incrementally as issues are resolved during this phase, not only at end
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
+- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 66: Documentation Update
 **Goal**: Project documentation accurately reflects the current codebase state after all structural changes
@@ -240,7 +249,10 @@ community writes (corrections/comments) include IE context.
   3. `scripts/check_docs.py` passes green with zero warnings
   4. `docs/guides/DEVELOPER_GUIDE.md` documents the CI workflow, ruff configuration, and dependency upgrade process
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
+- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ## Progress
 
