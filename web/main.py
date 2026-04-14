@@ -1376,14 +1376,13 @@ def download_page_route():
 
 
 @ui.page('/auth/callback')
-async def auth_callback_route(code: str = None):
+async def auth_callback_route(code: str = None, error: str = None, error_description: str = None):
     """
     OAuth callback handler.
-    Supabase redirects here after Google login with either:
-    - ?code= parameter (PKCE flow) - needs code exchange (fallback)
-    - #access_token= hash (implicit flow) - direct tokens (preferred)
+    Supabase redirects here after Google login with ?code= parameter (PKCE flow).
+    Also handles ?error= / ?error_description= from cancelled or failed OAuth attempts.
     """
-    from web.supabase_client import set_session_from_url, get_profile, exchange_code_for_session
+    from web.supabase_client import get_profile, exchange_code_for_session
     from web.auth_state import GlobalAuthState
     import json
 
@@ -1423,7 +1422,14 @@ async def auth_callback_route(code: str = None):
         home_btn.classes(remove='hidden')
 
     try:
-        # Method 1: PKCE flow - code in query parameter (fallback)
+        # Handle OAuth error params (e.g., user cancelled consent, provider error)
+        if error or error_description:
+            error_msg = error_description or error
+            logger.warning(f"OAuth callback error from provider: {error_msg}")
+            show_error(f'Authentication failed: {error_msg}')
+            return
+
+        # PKCE flow - code in query parameter
         if code:
             logger.info(f"OAuth callback: exchanging code {code[:20]}...")
             result = exchange_code_for_session(code)
@@ -1441,62 +1447,9 @@ async def auth_callback_route(code: str = None):
                 show_error('Login failed - no user returned')
             return
 
-        # Method 2: Implicit flow - tokens in URL hash
-        await asyncio.sleep(0.5)
-        tokens_json = await ui.run_javascript('''
-            (function() {
-                const hash = window.location.hash.substring(1);
-                console.log("Hash:", hash);
-                if (hash) {
-                    const params = new URLSearchParams(hash);
-                    return JSON.stringify({
-                        access_token: params.get('access_token'),
-                        refresh_token: params.get('refresh_token'),
-                        error: params.get('error_description') || params.get('error')
-                    });
-                }
-                // Also check query params for error
-                const urlParams = new URLSearchParams(window.location.search);
-                const error = urlParams.get('error_description') || urlParams.get('error');
-                if (error) {
-                    return JSON.stringify({error: error});
-                }
-                return JSON.stringify({no_tokens: true});
-            })();
-        ''')
-
-        logger.info(f"OAuth callback received: {tokens_json}")
-        tokens = json.loads(tokens_json) if tokens_json else {}
-
-        if tokens.get('error'):
-            show_error(tokens['error'])
-            return
-
-        if tokens.get('no_tokens'):
-            # No tokens found - redirect to home
-            ui.navigate.to('/')
-            return
-
-        access_token = tokens.get('access_token')
-        refresh_token = tokens.get('refresh_token')
-
-        if not access_token or not refresh_token:
-            ui.navigate.to('/')
-            return
-
-        result = set_session_from_url(access_token, refresh_token)
-        logger.info(f"set_session_from_url result: {result}")
-
-        if 'error' in result:
-            show_error(result['error'])
-            return
-
-        user = result.get('user')
-        if user:
-            profile = get_profile(user['id'])
-            await complete_login(user, profile, session=result.get('session'))
-        else:
-            show_error('Login failed - no user returned')
+        # No code or error parameter -- redirect home
+        logger.info("OAuth callback: no code or error params, redirecting home")
+        ui.navigate.to('/')
 
     except Exception as e:
         logger.exception(f"OAuth callback error: {e}")
