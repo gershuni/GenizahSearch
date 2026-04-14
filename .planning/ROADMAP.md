@@ -204,7 +204,7 @@ community writes (corrections/comments) include IE context.
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Plans**: 2 plans
 Plans:
-- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
+- [x] 63-01-PLAN.md — CI workflow + ruff config + fix violations
 - [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 64: Auth Migration
@@ -261,7 +261,7 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 63. CI & Dependency Pinning | 0/TBD | Not started | - |
+| 63. CI & Dependency Pinning | 1/2 | In Progress|  |
 | 64. Auth Migration | 0/TBD | Not started | - |
 | 65. Repo Hygiene | 0/TBD | Not started | - |
 | 66. Documentation Update | 0/TBD | Not started | - |
