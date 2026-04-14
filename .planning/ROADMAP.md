@@ -16,7 +16,7 @@
 - **v7.1.0 FIST Gap Fill** -- Phase 53 (shipped 2026-03-19)
 - **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (shipped 2026-03-31)
 - **v7.7 Volume-Aware Browse** -- Phases 58-61 (shipped 2026-04-01)
-- **v7.8 Server-Side Image Cache** -- Phases 62-64 (in progress)
+- **v7.8 Structural Foundation** -- Phases 63-66 (in progress)
 
 ## Phases
 
@@ -179,66 +179,81 @@ community writes (corrections/comments) include IE context.
 
 </details>
 
-### v7.8 Server-Side Image Cache (In Progress)
+### v7.8 Structural Foundation (In Progress)
 
-**Milestone Goal:** Eliminate NLI downtime impact by pre-caching manuscript images on EC2, serving cached images as primary source with live IIIF as fallback.
+**Milestone Goal:** Reduce structural debt identified by dual code review (Claude Opus + Codex) -- pin dependencies, add CI, migrate deprecated auth, clean up repo hygiene, update docs -- without changing any user-visible behavior. Establishes CI safety net for v7.9 Decomposition.
+**Per-phase gate:** `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows after each phase.
 
-- [ ] **Phase 62: Investigation & Validation** - Validate NLI fetch strategy, storage estimates, and TOS before building anything
-- [ ] **Phase 63: Batch Fetcher & Transfer Pipeline** - Build residential-IP batch fetcher with priority ordering and rsync to EC2
-- [ ] **Phase 64: Serving & Integration** - nginx cache-first serving with unified image resolver in both apps
+- [ ] **Phase 63: CI & Dependency Pinning** - Pin all deps, add GitHub Actions CI with pytest + ruff + check_docs, configure scoped ruff ruleset
+- [ ] **Phase 64: Auth Migration** - Migrate deprecated gotrue auth to current Supabase API across both apps
+- [ ] **Phase 65: Repo Hygiene** - Audit silent exceptions, encapsulate monkey-patches, clean root debris, update gitignore
+- [ ] **Phase 66: Documentation Update** - Update CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE; ensure check_docs green
 
 ## Phase Details
 
-### Phase 62: Investigation & Validation
-**Goal**: Confirm that server-side NLI image caching is feasible -- rate limits, storage, filesystem, and TOS all validated before any infrastructure is built
+### Phase 63: CI & Dependency Pinning
+**Goal**: The project has reproducible builds and an automated safety net that catches regressions on every push
 **Depends on**: Nothing (first phase of milestone)
-**Requirements**: INV-01, INV-02, INV-03, INV-04, INV-05
+**Requirements**: BLDG-01, BLDG-02, BLDG-04
 **Success Criteria** (what must be TRUE):
-  1. A batch of 100+ NLI images can be fetched from a residential IP at a sustainable rate without triggering blocks
-  2. Storage estimate is grounded in 1000+ image sample data, and EC2 disk/inode budget is confirmed sufficient
-  3. NLI has been contacted about bulk academic caching, and a clear go/no-go decision is recorded (INV-04 gate)
-  4. Target image resolution is decided with documented quality/storage tradeoff rationale
-**Plans:** 3 plans
-Plans:
-- [ ] 62-01-PLAN.md -- NLI-only subset determination + TOS gate checkpoint
-- [ ] 62-02-PLAN.md -- Rate test + storage sampling scripts + resolution decision
-- [ ] 62-03-PLAN.md -- EC2 filesystem validation + investigation report
-
-### Phase 63: Batch Fetcher & Transfer Pipeline
-**Goal**: Researchers' manuscript images are being systematically cached on the server, starting with NLI-only manuscripts that have no alternative image source
-**Depends on**: Phase 62 (hard gate -- INV-04 TOS decision must be "go")
-**Requirements**: FETCH-01, FETCH-02, FETCH-03, FETCH-04, FETCH-05
-**Success Criteria** (what must be TRUE):
-  1. Batch fetcher runs unattended from residential IP, resuming after interruption without re-fetching completed images
-  2. NLI-only manuscripts (no CUL/Oxford/JTS/Manchester alternatives) are fetched first; coverage of this subset reaches 90%+ before cache-first rollout
-  3. sys_id-to-FL-ID mapping is resolved via IIIF manifests and persisted so image paths are deterministic
-  4. Fetched images land on EC2 in the live cache directory via atomic rsync promotion
+  1. Every push and PR triggers a GitHub Actions workflow that runs pytest, ruff, and check_docs.py -- and the workflow passes on the current codebase
+  2. The CI workflow includes at least one Windows runner (matching the development/deployment platform)
+  3. Ruff enforces syntax errors and import hygiene (scoped ruleset) with zero violations on the current codebase
+  4. `pip install -r requirements.txt` on a fresh venv produces a deterministic environment with exact package versions (pinning done last in phase, after CI is green)
+  5. DEVELOPER_GUIDE.md documents how to add/upgrade a dependency
+**Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Plans**: TBD
 
-### Phase 64: Serving & Integration
-**Goal**: Researchers see manuscript images instantly from the server cache, with transparent fallback to live IIIF -- in both web and desktop apps
-**Depends on**: Phase 63 (90%+ NLI-only coverage gate from FETCH-02)
-**Requirements**: SERVE-01, SERVE-02, SERVE-03, WEB-01, WEB-02, WEB-03, DESK-01, DESK-02
+### Phase 64: Auth Migration
+**Goal**: Supabase authentication uses the current supported API with zero behavior change for users
+**Depends on**: Phase 63 (CI safety net catches any auth regression)
+**Requirements**: BLDG-03
 **Success Criteria** (what must be TRUE):
-  1. Cached NLI images load from nginx static files without touching Python, and uncached images fall back to client-side IIIF
-  2. All web image-loading codepaths (browse, search, puzzle, reading desk, fullscreen) use a single unified URL resolver
-  3. Desktop app tries server cache URL first, then direct NLI IIIF, and maintains a local LRU cache of viewed images
-  4. When NLI is down, cached images still load normally; uncached images show a clear "image unavailable" state instead of hanging
-  5. Cache status endpoint reports coverage percentage, per-library breakdown, and disk usage
+  1. Desktop login with email/password works identically to before the migration
+  2. Web login with email/password and OAuth callback work identically to before the migration
+  3. Token refresh (session persistence across restarts) works in both apps
+  4. Current pytest baseline remains green after migration
+  5. requirements.txt re-pinned to reflect any dependency changes from auth migration
+**Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Plans**: TBD
-**UI hint**: yes
+
+### Phase 65: Repo Hygiene
+**Goal**: The codebase follows consistent error handling patterns, framework patches are discoverable and version-guarded, and the repo root is clean
+**Depends on**: Phase 63 (CI catches any hygiene change that breaks tests)
+**Requirements**: HYGN-01, HYGN-02, HYGN-03, HYGN-04
+**Success Criteria** (what must be TRUE):
+  1. Every bare `except:` and `except Exception: pass` in first-party code either logs at an appropriate level or has an inline comment justifying the suppression
+  2. All NiceGUI monkey-patches live in `web/framework_patches.py` with version guards (using `packaging.version.Version()` or equivalent, not string comparison) and a comment explaining why each patch exists
+  3. Non-source generated/temp artifacts in the repo root are either gitignored or relocated; intentional root assets explicitly exempted
+  4. `.gitignore` covers the patterns that caused root debris accumulation, preventing future recurrence
+**Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
+**Note**: Update `docs/OPEN_ISSUES.md` incrementally as issues are resolved during this phase, not only at end
+**Plans**: TBD
+
+### Phase 66: Documentation Update
+**Goal**: Project documentation accurately reflects the current codebase state after all structural changes
+**Depends on**: Phase 65 (all code changes complete before documenting)
+**Requirements**: DOCS-01, DOCS-02, DOCS-03, DOCS-04
+**Success Criteria** (what must be TRUE):
+  1. `docs/CODE_INDEX.md` reflects any file moves or new files created during this milestone (framework_patches.py, etc.)
+  2. `docs/OPEN_ISSUES.md` includes structural debt items from the code review with their resolution status (includes any items already updated in earlier phases)
+  3. `scripts/check_docs.py` passes green with zero warnings
+  4. `docs/guides/DEVELOPER_GUIDE.md` documents the CI workflow, ruff configuration, and dependency upgrade process
+**Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 62 -> 63 -> 64
+Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 62. Investigation & Validation | 0/3 | Planned | - |
-| 63. Batch Fetcher & Transfer Pipeline | 0/TBD | Not started | - |
-| 64. Serving & Integration | 0/TBD | Not started | - |
+| 63. CI & Dependency Pinning | 0/TBD | Not started | - |
+| 64. Auth Migration | 0/TBD | Not started | - |
+| 65. Repo Hygiene | 0/TBD | Not started | - |
+| 66. Documentation Update | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-03 after Phase 62 planning (3 plans)*
+*Last updated: 2026-04-14 after v7.8 Structural Foundation roadmap created (4 phases, 12 requirements)*

@@ -70,24 +70,24 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BLDG-01 | — | Pending |
-| BLDG-02 | — | Pending |
-| BLDG-03 | — | Pending |
-| BLDG-04 | — | Pending |
-| HYGN-01 | — | Pending |
-| HYGN-02 | — | Pending |
-| HYGN-03 | — | Pending |
-| HYGN-04 | — | Pending |
-| DOCS-01 | — | Pending |
-| DOCS-02 | — | Pending |
-| DOCS-03 | — | Pending |
-| DOCS-04 | — | Pending |
+| BLDG-01 | Phase 63 | Pending |
+| BLDG-02 | Phase 63 | Pending |
+| BLDG-03 | Phase 64 | Pending |
+| BLDG-04 | Phase 63 | Pending |
+| HYGN-01 | Phase 65 | Pending |
+| HYGN-02 | Phase 65 | Pending |
+| HYGN-03 | Phase 65 | Pending |
+| HYGN-04 | Phase 65 | Pending |
+| DOCS-01 | Phase 66 | Pending |
+| DOCS-02 | Phase 66 | Pending |
+| DOCS-03 | Phase 66 | Pending |
+| DOCS-04 | Phase 66 | Pending |
 
 **Coverage:**
 - v7.8 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12 ⚠️
+- Mapped to phases: 12
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-14*
-*Last updated: 2026-04-14 after initial definition*
+*Last updated: 2026-04-14 after roadmap creation (12/12 mapped)*
