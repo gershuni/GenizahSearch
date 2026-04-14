@@ -184,7 +184,7 @@ community writes (corrections/comments) include IE context.
 **Milestone Goal:** Reduce structural debt identified by dual code review (Claude Opus + Codex) -- pin dependencies, add CI, migrate deprecated auth, clean up repo hygiene, update docs -- without changing any user-visible behavior. Establishes CI safety net for v7.9 Decomposition.
 **Per-phase gate:** `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows after each phase.
 
-- [ ] **Phase 63: CI & Dependency Pinning** - Pin all deps, add GitHub Actions CI with pytest + ruff + check_docs, configure scoped ruff ruleset
+- [x] **Phase 63: CI & Dependency Pinning** - Pin all deps, add GitHub Actions CI with pytest + ruff + check_docs, configure scoped ruff ruleset (completed 2026-04-14)
 - [ ] **Phase 64: Auth Migration** - Migrate deprecated gotrue auth to current Supabase API across both apps
 - [ ] **Phase 65: Repo Hygiene** - Audit silent exceptions, encapsulate monkey-patches, clean root debris, update gitignore
 - [ ] **Phase 66: Documentation Update** - Update CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE; ensure check_docs green
@@ -205,7 +205,7 @@ community writes (corrections/comments) include IE context.
 **Plans**: 2 plans
 Plans:
 - [x] 63-01-PLAN.md — CI workflow + ruff config + fix violations
-- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
+- [x] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 64: Auth Migration
 **Goal**: Supabase authentication uses the current supported API with zero behavior change for users
@@ -220,7 +220,7 @@ Plans:
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Plans**: 2 plans
 Plans:
-- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
+- [x] 63-01-PLAN.md — CI workflow + ruff config + fix violations
 - [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
 
 ### Phase 65: Repo Hygiene
@@ -261,7 +261,7 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 63. CI & Dependency Pinning | 1/2 | In Progress|  |
+| 63. CI & Dependency Pinning | 2/2 | Complete   | 2026-04-14 |
 | 64. Auth Migration | 0/TBD | Not started | - |
 | 65. Repo Hygiene | 0/TBD | Not started | - |
 | 66. Documentation Update | 0/TBD | Not started | - |
