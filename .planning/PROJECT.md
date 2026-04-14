@@ -8,7 +8,10 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current State (after v7.7 shipped)
+## Current State (after v7.8 Phase 63 complete)
+
+**In progress:** v7.8 Build Infrastructure milestone
+- Phase 63 complete: CI & Dependency Pinning (2026-04-14) — GitHub Actions CI with ruff + pytest + check_docs.py, two-file dependency pinning, zero-violation baseline
 
 **Shipped:** v7.7.0 Volume-Aware Browse (2026-04-01)
 - IE volume data infrastructure: ie_volume_map.json for 3,193 multi-IE manuscripts with per-IE browse_map grouping
