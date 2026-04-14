@@ -185,7 +185,7 @@ community writes (corrections/comments) include IE context.
 **Per-phase gate:** `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows after each phase.
 
 - [x] **Phase 63: CI & Dependency Pinning** - Pin all deps, add GitHub Actions CI with pytest + ruff + check_docs, configure scoped ruff ruleset (completed 2026-04-14)
-- [ ] **Phase 64: Auth Migration** - Migrate deprecated gotrue auth to current Supabase API across both apps
+- [x] **Phase 64: Auth Migration** - Migrate deprecated gotrue auth to current Supabase API across both apps (completed 2026-04-14)
 - [ ] **Phase 65: Repo Hygiene** - Audit silent exceptions, encapsulate monkey-patches, clean root debris, update gitignore
 - [ ] **Phase 66: Documentation Update** - Update CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE; ensure check_docs green
 
@@ -220,8 +220,8 @@ Plans:
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Plans**: 2 plans
 Plans:
-- [ ] 64-01-PLAN.md — Auth import migration + PKCE flow + callback cleanup
-- [ ] 64-02-PLAN.md — Remove gotrue dependency + update test guards + manual verification
+- [x] 64-01-PLAN.md — Auth import migration + PKCE flow + callback cleanup
+- [x] 64-02-PLAN.md — Remove gotrue dependency + update test guards + manual verification
 
 ### Phase 65: Repo Hygiene
 **Goal**: The codebase follows consistent error handling patterns, framework patches are discoverable and version-guarded, and the repo root is clean
@@ -236,8 +236,8 @@ Plans:
 **Note**: Update `docs/OPEN_ISSUES.md` incrementally as issues are resolved during this phase, not only at end
 **Plans**: 2 plans
 Plans:
-- [x] 63-01-PLAN.md — CI workflow + ruff config + fix violations
-- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
+- [ ] 65-01-PLAN.md — Monkey-patch isolation + silent exception audit
+- [ ] 65-02-PLAN.md — Gitignore extension for root debris prevention
 
 ### Phase 66: Documentation Update
 **Goal**: Project documentation accurately reflects the current codebase state after all structural changes
@@ -249,10 +249,7 @@ Plans:
   3. `scripts/check_docs.py` passes green with zero warnings
   4. `docs/guides/DEVELOPER_GUIDE.md` documents the CI workflow, ruff configuration, and dependency upgrade process
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
-**Plans**: 2 plans
-Plans:
-- [ ] 63-01-PLAN.md — CI workflow + ruff config + fix violations
-- [ ] 63-02-PLAN.md — Dependency pinning + DEVELOPER_GUIDE docs
+**Plans**: TBD
 
 ## Progress
 
@@ -262,10 +259,10 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
-| 64. Auth Migration | 0/2 | Planned | - |
-| 65. Repo Hygiene | 0/TBD | Not started | - |
+| 64. Auth Migration | 2/2 | Complete    | 2026-04-14 |
+| 65. Repo Hygiene | 0/2 | Not started | - |
 | 66. Documentation Update | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-14 after v7.8 Structural Foundation roadmap created (4 phases, 12 requirements)*
+*Last updated: 2026-04-14 after Phase 65 planning (2 plans, Wave 1 parallel)*
