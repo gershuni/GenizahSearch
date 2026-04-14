@@ -5,11 +5,11 @@ User Profile Page - Dicta Genizah Search
 Edit user profile details and change password.
 """
 
-from nicegui import ui, app
+from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.supabase_client import update_profile, get_user_client, get_user_corrections_count
-from web.components.typography import h1, h2, h3
+from web.components.typography import h1, h2
 
 
 async def create_profile_page():

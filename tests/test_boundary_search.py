@@ -9,7 +9,6 @@ Tests the core algorithm functions for:
 - Applying score boosts
 """
 
-import pytest
 from genizah_core import (
     parse_boundaries,
     chunk_crosses_boundary,

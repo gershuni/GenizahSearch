@@ -12,23 +12,14 @@ Tests cover:
 
 import re
 import sys
-import importlib
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import genizah_core as _gc_module
 
 from genizah_core import (
     ResponsaComponent,
-    parse_responsa_query,
-    extract_per_pair_gaps,
-    expand_grammatical_prefixes,
-    expand_grammatical_suffixes,
-    expand_plene_defective,
-    expand_judeo_arabic,
-    _apply_explosion_guard,
     SearchEngine,
-    Config,
 )
 
 

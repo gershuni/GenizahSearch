@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
 
 

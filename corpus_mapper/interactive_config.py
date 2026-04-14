@@ -8,7 +8,7 @@ what to do with each type of special symbol/pattern found.
 
 import os
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from .config import SYMBOL_REPORT_FILE, CLEANING_RULES_FILE, ensure_dirs
 

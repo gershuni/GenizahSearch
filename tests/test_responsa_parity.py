@@ -13,12 +13,10 @@ Tests cover:
 - Explosion guard warning propagation through the full pipeline
 """
 
-import re
 import sys
-import importlib
 import itertools
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import genizah_core as _gc_module
 
@@ -27,7 +25,6 @@ from genizah_core import (
     parse_responsa_query,
     extract_per_pair_gaps,
     SearchEngine,
-    Config,
 )
 
 

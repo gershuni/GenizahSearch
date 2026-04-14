@@ -1,6 +1,5 @@
 """Tests for construct_mosseri_cudl_label() — Mosseri shelfmark to CUDL label conversion."""
 
-import pytest
 from genizah_core import construct_mosseri_cudl_label
 
 

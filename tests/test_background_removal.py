@@ -5,7 +5,6 @@ All tests use synthetic images created with Pillow -- no external test fixtures 
 """
 
 import io
-import pytest
 import numpy as np
 from PIL import Image
 
@@ -15,9 +14,6 @@ from shared.background_removal import (
     detect_blue_mat,
     create_blue_mat_mask,
     create_cul_blue_mask,  # legacy alias
-    create_mask,
-    DEFAULT_THRESHOLD,
-    MIN_FOREGROUND_RATIO,
     BLUE_MAT_DETECT_THRESHOLD,
 )
 

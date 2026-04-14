@@ -6,10 +6,10 @@ General settings for search behavior, display preferences, and Lab Mode configur
 """
 
 import logging
-from nicegui import ui, run, app
+from nicegui import ui, app
 from web.state import state
 from web.translations import tr
-from web.components.typography import h1, h2, h3
+from web.components.typography import h1, h3
 
 logger = logging.getLogger(__name__)
 

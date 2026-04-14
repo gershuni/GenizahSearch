@@ -3,7 +3,6 @@ import time
 import requests
 import subprocess
 import os
-import signal
 import sys
 
 def wait_for_server(url, timeout=30):

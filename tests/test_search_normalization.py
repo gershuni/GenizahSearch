@@ -7,7 +7,6 @@ Tests cover:
 """
 
 import re
-import pytest
 
 from genizah_core import (
     strip_search_diacritics,

@@ -46,7 +46,7 @@ from shared_export_utils import (
     clean_text_single_line,
     remove_highlight_markers,
     make_safe_filename,
-    encode_filename_for_header,
+    encode_filename_for_header as encode_filename_for_header,  # re-exported for web.api
     contains_any_term,
     extract_search_terms,
 )

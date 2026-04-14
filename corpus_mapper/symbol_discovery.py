@@ -11,9 +11,9 @@ import re
 import json
 import glob
 from collections import defaultdict, Counter
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Any
 
-from .config import CORPORA, OUTPUT_DIR, SYMBOL_REPORT_FILE, ensure_dirs
+from .config import CORPORA, SYMBOL_REPORT_FILE, ensure_dirs
 
 
 # Regex patterns to detect special constructs

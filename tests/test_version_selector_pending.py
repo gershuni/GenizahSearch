@@ -8,8 +8,7 @@ Validates that the version selector correctly:
 - Skips fetch when not logged in
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 
 # Test 1: Import chain works

@@ -3139,7 +3139,7 @@ def create_parallels_page(initial_text: str = None):
 
                 # Show PGP description translation if available (only when UI is Hebrew)
                 _md_desc = ''
-                if _par_show_trans and get_language() == 'he' and sys_id and p_state.translation_data:
+                if p_state.translation_data and get_language() == 'he' and sys_id:
                     _md_trans = p_state.translation_data.get(sys_id)
                     if _md_trans:
                         _md_desc = _md_trans.get('description_he') or ''

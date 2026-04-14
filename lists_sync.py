@@ -8,12 +8,9 @@ between the desktop app and web app.
 
 Part of Phase 5: Desktop App Supabase Migration
 """
-import os
-import json
 import logging
 import time
-from typing import Optional, Dict, List, Any
-from datetime import datetime
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 

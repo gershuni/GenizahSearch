@@ -8,7 +8,7 @@ app.storage.user mechanism. This allows consistent login state throughout the ap
 Uses Supabase for authentication instead of the FastAPI backend.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from nicegui import app, ui
 import asyncio
 import os
@@ -19,9 +19,9 @@ load_dotenv()
 
 # Import Supabase client
 from web.supabase_client import (
-    get_client, sign_in as supabase_sign_in, sign_up as supabase_sign_up,
+    sign_in as supabase_sign_in, sign_up as supabase_sign_up,
     sign_out as supabase_sign_out, get_profile, update_profile,
-    get_oauth_url, set_session_from_url
+    get_oauth_url
 )
 
 

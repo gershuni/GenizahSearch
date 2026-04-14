@@ -1,8 +1,6 @@
 
 import re
 import unittest
-from openpyxl.cell.rich_text import TextBlock, CellRichText
-from openpyxl.cell.text import InlineFont
 
 # Mocking the functions from genizah_app.py for testing logic
 

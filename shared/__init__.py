@@ -1,1 +1,1 @@
-from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
+from shared.reading_desk_model import ReadingDeskEntry as ReadingDeskEntry, ReadingDeskState as ReadingDeskState

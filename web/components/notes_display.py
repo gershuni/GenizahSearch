@@ -17,7 +17,7 @@ from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState
 from web.supabase_client import get_comments
-from web.components.translate_button import create_translatable_text, detect_language, translate_text
+from web.components.translate_button import detect_language, translate_text
 from typing import Optional, List
 
 logger = logging.getLogger(__name__)

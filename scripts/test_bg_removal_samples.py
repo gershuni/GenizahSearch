@@ -12,7 +12,6 @@ Usage:
 
 import io
 import json
-import os
 import sys
 import base64
 import argparse
@@ -25,13 +24,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from shared.background_removal import (
-    remove_background, detect_background_color, create_blue_mat_mask,
-    create_cul_blue_mask,  # legacy alias
-    create_mask, BLUE_MAT_HUE_MIN, BLUE_MAT_HUE_MAX, BLUE_MAT_SAT_MIN,
-    CUL_BLUE_HUE_MIN, CUL_BLUE_HUE_MAX, CUL_BLUE_SAT_MIN,  # legacy aliases
-    DEFAULT_THRESHOLD,
-)
-from shared.puzzle_image_service import PuzzleImageService
+    remove_background, CUL_BLUE_HUE_MIN, CUL_BLUE_HUE_MAX, CUL_BLUE_SAT_MIN,  # legacy aliases
+    )
 
 # ── Sample CUL sys_ids to test ──
 # Mix of T-S NS, T-S, OR., ADD. — varied shelfmarks and conditions

@@ -1428,7 +1428,6 @@ def init_api_routes():
         from shared.puzzle_model import PuzzleDocument, PuzzleFragment
         from shared.puzzle_export import generate_thumbnail
         from shared.puzzle_image_service import get_puzzle_image_service
-        import json
         import uuid
 
         body = await request.json()
@@ -1834,7 +1833,6 @@ def init_api_routes():
         """
         Handle OAuth callback - receive tokens from client-side and set session.
         """
-        from fastapi import Request
         from fastapi.responses import JSONResponse
         from web.supabase_client import set_session_from_url, get_profile
         from web.auth_state import GlobalAuthState

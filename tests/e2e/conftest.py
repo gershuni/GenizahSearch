@@ -61,7 +61,7 @@ try:
     from nicegui.testing.screen import Screen
     from nicegui.testing.general import prepare_simulation
     from nicegui.testing.general import nicegui_reset_globals as _nicegui_reset_globals_ctx
-    from nicegui import app, ui
+    from nicegui import app, ui  # noqa: F401 (app imported for NiceGUI test setup side effects)
 
     DOWNLOAD_DIR = Path(__file__).parent / 'download'
     MAIN_FILE = Path(__file__).resolve().parent.parent.parent / 'web' / 'main.py'
@@ -141,8 +141,6 @@ try:
         This custom fixture avoids the NiceGUI default's requirement for
         config.inipath (pytest.ini), instead directly using the main_file path.
         """
-        from nicegui.server import Server
-        from nicegui import core
 
         os.environ['NICEGUI_SCREEN_TEST_PORT'] = str(Screen.PORT)
         screen_ = Screen(nicegui_driver, caplog, request=None)  # Pass None to skip main_file lookup

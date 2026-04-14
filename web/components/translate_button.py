@@ -13,7 +13,7 @@ powered by Dicta LM 2.0 with scholarly few-shot prompts.
 import logging
 import os
 from nicegui import ui
-from web.translations import tr, get_language
+from web.translations import tr
 from typing import Optional, Callable
 import re
 

@@ -27,8 +27,6 @@ from web.export_service import (
     make_safe_filename,
     contains_any_term,
     extract_search_terms,
-    set_paragraph_rtl,
-    set_run_rtl_font,
     add_hebrew_paragraph,
     add_highlighted_hebrew_paragraph,
     create_excel_workbook,

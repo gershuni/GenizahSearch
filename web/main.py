@@ -14,7 +14,6 @@ import asyncio
 import logging
 import os
 import sys
-import asyncio
 
 # Load environment variables first (for Supabase configuration)
 from dotenv import load_dotenv
@@ -163,7 +162,7 @@ from web.state import state
 from web.api import init_api_routes
 from web.translations import tr, set_language, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
-from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager, Config
+from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
 
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
@@ -1409,7 +1408,6 @@ async def auth_callback_route(code: str = None):
                 'access_token': session.get('access_token'),
                 'refresh_token': session.get('refresh_token'),
             }
-        from web.analytics import posthog_capture
         posthog_capture('login_success', {'method': 'google_oauth'})
         status_label.text = 'Login successful! Redirecting...'
         await asyncio.sleep(0.5)
@@ -1417,7 +1415,6 @@ async def auth_callback_route(code: str = None):
 
     def show_error(message):
         """Display error and show home button."""
-        from web.analytics import posthog_capture
         posthog_capture('login_failed', {'reason': str(message)[:100], 'method': 'google_oauth'})
         spinner.set_visibility(False)
         status_label.set_visibility(False)

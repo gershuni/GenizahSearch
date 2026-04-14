@@ -16,7 +16,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.models.database import SessionLocal
-from backend.models.correction import Correction, CorrectionStatus
+from backend.models.correction import Correction
 from backend.models.transcription_version import TranscriptionVersion
 
 

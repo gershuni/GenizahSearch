@@ -3,10 +3,9 @@
 
 import io
 import pytest
-from pathlib import Path
 from PIL import Image
 
-from shared.puzzle_image_service import PuzzleImageService, _safe_filename
+from shared.puzzle_image_service import PuzzleImageService
 
 
 # ── Fixtures ──────────────────────────────────────────────────────

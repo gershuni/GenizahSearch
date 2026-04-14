@@ -10,15 +10,13 @@ These tests ensure that the Responsa additions did not break any existing
 search functionality.
 """
 
-import re
 import sys
-import importlib
 import pytest
 from unittest.mock import MagicMock, patch
 
 import genizah_core as _gc_module
 
-from genizah_core import SearchEngine, Config
+from genizah_core import SearchEngine
 
 
 @pytest.fixture(autouse=True)

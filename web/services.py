@@ -7,9 +7,7 @@ import logging
 import sys
 import os
 import re
-import threading
-import time
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -18,13 +16,6 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from genizah_core import (
-    Config,
-    MetadataManager,
-    VariantManager,
-    SearchEngine,
-    LabEngine,
-    LabSettings,
-    LIBRARY_CODES,
     get_library_display,
 )
 from web.state import state

@@ -12,7 +12,6 @@ never auto-reject. False positives are acceptable; false negatives are costly.
 """
 
 import re
-import unicodedata
 from typing import Dict, List, Optional, Tuple
 
 # =============================================================================

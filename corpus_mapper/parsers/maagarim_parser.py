@@ -14,7 +14,7 @@ Content format:
 import os
 import re
 import glob
-from typing import Dict, List, Any, Iterator, Optional, Tuple
+from typing import Dict, List, Any, Iterator, Optional
 from dataclasses import dataclass, field
 
 from ..config import CORPORA

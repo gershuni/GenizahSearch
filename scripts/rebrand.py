@@ -12,7 +12,6 @@ Usage:
 
 import os
 import sys
-import re
 
 # Files to update (relative to script directory)
 # Currently only web files - desktop/docs can be added later after approval

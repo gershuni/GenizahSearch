@@ -9,7 +9,7 @@ and applies them to clean text from various corpora.
 import os
 import re
 import json
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
 
 from .config import CLEANING_RULES_FILE
 

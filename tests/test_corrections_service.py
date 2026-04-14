@@ -12,7 +12,6 @@ to avoid real Supabase calls:
 - Empty results handling
 """
 
-import pytest
 from unittest.mock import MagicMock
 
 from shared.corrections_service import get_pending_corrections_for_page

@@ -6,7 +6,6 @@
 
 import argparse
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 def load_from_excel(filepath: str) -> list:

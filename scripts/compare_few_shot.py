@@ -12,7 +12,6 @@ This script:
 Note: Uses ASCII-safe print to avoid Windows console encoding issues.
 """
 
-import json
 import os
 import sqlite3
 import sys

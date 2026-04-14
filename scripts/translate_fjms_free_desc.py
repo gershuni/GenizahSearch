@@ -40,7 +40,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.dicta_client import (
-    GOD_MODE,
     MAX_WORKERS,
     build_few_shot_prompt,
     load_few_shot_template,

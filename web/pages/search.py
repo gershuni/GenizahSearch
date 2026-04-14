@@ -14,7 +14,7 @@ from nicegui import ui, run, app
 from web.state import state
 from web.translations import tr, is_rtl, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
-from web.components.typography import h1, h2, h3, h4
+from web.components.typography import h2, h3, h4
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
     build_filter_summary, has_active_filters, persist_value,
@@ -31,14 +31,13 @@ from web.search_bootstrap import resolve_search_bootstrap
 from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
 from shared.exclusion_service import (
-    ExclusionSource, ResolvedEntry, parse_shelfmark_file, parse_csv_shelfmarks,
+    ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
     resolve_shelfmarks, build_shelf_map, compute_excluded_ids,
     serialize_sources, deserialize_sources,
 )
 from web.document_service import get_sys_ids_with_transcriptions, get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page, get_fragments_by_tag, get_all_distinct_tags
 from urllib.parse import quote
-from typing import Optional, List, Dict, Any, Set
-from dataclasses import dataclass, field
+from typing import Optional, List, Set
 import logging
 import re
 import html
@@ -4866,7 +4865,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )
                         # Library badge (if available)
                         if library_code:
-                            from genizah_core import get_library_display, LIBRARY_CODES
+                            from genizah_core import get_library_display
                             full_name = get_library_display(library_code, short=False, lang=get_language())
                             ui.label(library_code).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                 'background: var(--primary-100); color: var(--primary-700);'

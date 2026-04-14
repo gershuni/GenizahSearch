@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for PuzzleDocument and PuzzleFragment data model."""
 
-import pytest
 from shared.puzzle_model import PuzzleDocument, PuzzleFragment
 
 

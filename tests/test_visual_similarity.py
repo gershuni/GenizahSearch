@@ -4,7 +4,6 @@
 import pytest
 import sqlite3
 import os
-import tempfile
 
 from shared.visual_similarity_service import VisualSimilarityService
 

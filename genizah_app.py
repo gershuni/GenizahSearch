@@ -23,18 +23,17 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QToolButton, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem, QGraphicsSimpleTextItem, QGraphicsTextItem,
                              QCompleter, QAbstractItemView, QDockWidget)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, QSize, pyqtSignal, QThread, QEventLoop, QEvent, QRect, QRectF, QPoint, QPointF)
-from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTextDocument, QTransform, QPainter, QColor,
+from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QImage, QFontMetrics, QTransform, QPainter, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QTextCursor, QTextCharFormat, QPen, QBrush, QPainterPath, QCursor, QAction)
 from PyQt6 import sip
 
 from version import APP_VERSION
 
-from collections import defaultdict
 from functools import partial
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax  # noqa: F401 (VariantManager used at lines 880, 12908 -- ruff can't see through try/except)
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -48,7 +47,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, ExternalResourceThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleImageLoaderThread, PuzzleMetaLoaderThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleImageLoaderThread, PuzzleMetaLoaderThread
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -56,14 +55,14 @@ from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
 from shared.exclusion_service import (
-    ExclusionSource, ResolvedEntry, parse_shelfmark_file, parse_csv_shelfmarks,
-    resolve_shelfmarks, build_shelf_map, compute_excluded_ids,
+    ExclusionSource, parse_csv_shelfmarks,
+    resolve_shelfmarks, compute_excluded_ids,
     serialize_sources, deserialize_sources,
 )
 
 # NLI crossref service for folio labels and source indicators (Phase 31)
 try:
-    from shared.nli_crossref_service import parse_folio_label, get_nli_crossref_service
+    from shared.nli_crossref_service import get_nli_crossref_service  # noqa: F401 (availability check)
     _HAS_NLI_CROSSREF = True
 except ImportError:
     _HAS_NLI_CROSSREF = False
@@ -76,7 +75,7 @@ from corrections_ui import (
     MyCorrectionsDialog, AllCorrectionsDialog,
     CommentDialog, CommentsViewerDialog, MyCommentsDialog,
     DiscoveriesDialog, CreateDiscoveryDialog, DiscoveryDetailDialog,
-    TextEditorDialog, JoinsDialog
+    JoinsDialog
 )
 
 logger = get_logger(__name__)
@@ -535,7 +534,6 @@ class UpdateProgressDialog(QDialog):
         """Run the installer in silent mode (Windows only)."""
         import subprocess
         import sys
-        import os
 
         # Check platform
         if sys.platform != 'win32':
@@ -2913,7 +2911,7 @@ class ExcludeDialog(QDialog):
         self._loaded_filename: str = ''
 
         # Tabbed interface (Phase 56)
-        from PyQt6.QtWidgets import QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QListWidget, QListWidgetItem, QAbstractItemView
+        from PyQt6.QtWidgets import QTabWidget, QTableWidget, QHeaderView, QListWidget, QListWidgetItem, QAbstractItemView
         self._tab_widget = QTabWidget()
         layout.addWidget(self._tab_widget)
 
@@ -9467,7 +9465,7 @@ class PreSearchFilterDialog(QDialog):
         layout.addLayout(mode_layout)
 
         # --- 2-column body layout ---
-        from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QScrollArea
+        from PyQt6.QtWidgets import QTreeWidget, QScrollArea
         self._updating_domain_checks = False
 
         body_layout = QHBoxLayout()
@@ -13204,7 +13202,6 @@ class GenizahGUI(QMainWindow):
 
     def _on_tab_changed(self, index):
         """Handle tab change events."""
-        import sys
         logger.debug("_on_tab_changed called with index=%s", index)
         try:
             current_widget = self.tabs.widget(index)
@@ -15458,7 +15455,6 @@ class GenizahGUI(QMainWindow):
 
         # Dropdown arrow inside search input for history
         from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor as _QColor
-        from PyQt6.QtWidgets import QStyle
         _arrow_pm = QPixmap(16, 16)
         _arrow_pm.fill(_QColor(0, 0, 0, 0))
         _arrow_painter = QPainter(_arrow_pm)
@@ -23773,7 +23769,6 @@ class GenizahGUI(QMainWindow):
 
     def _show_correction_details(self, correction_id):
         """Show correction details dialog."""
-        from corrections_ui import CorrectionDetailDialog
         # Fetch the correction object first
         correction = self.corrections_client.get_correction(correction_id)
         if correction:

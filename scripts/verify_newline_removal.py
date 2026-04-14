@@ -1,6 +1,5 @@
 
 import sys
-import re
 from unittest.mock import MagicMock
 
 # Mock dependencies to import genizah_app

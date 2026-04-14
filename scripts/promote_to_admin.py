@@ -9,7 +9,6 @@ Example:
     python scripts/promote_to_admin.py user@example.com
 """
 import sys
-import os
 from pathlib import Path
 
 # Add parent directory to path

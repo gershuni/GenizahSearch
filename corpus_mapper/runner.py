@@ -15,26 +15,22 @@ Features:
 import os
 import sys
 import json
-import time
 import sqlite3
 import logging
 import csv
-import multiprocessing as mp
-from functools import partial
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Iterator, Tuple
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Any, Optional, Tuple
+from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from .config import (
-    CORPORA, OUTPUT_DIR, CHECKPOINTS_DIR, LOGS_DIR, RESULTS_DB,
-    DEFAULT_MIN_SCORE, DEFAULT_CHUNK_SIZE, DEFAULT_BATCH_SIZE, ensure_dirs
+    CORPORA, LOGS_DIR, RESULTS_DB,
+    ensure_dirs
 )
 from .parsers import JAParser, MaagarimParser
-from .text_cleaner import get_cleaner
 
 
 # ============================================================================

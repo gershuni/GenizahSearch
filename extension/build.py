@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Build Chrome and Firefox extension packages from shared source files."""
 
-import os
-import shutil
 import zipfile
 from pathlib import Path
 

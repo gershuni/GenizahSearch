@@ -36,7 +36,7 @@ class SafeRotatingFileHandler(RotatingFileHandler):
             else:
                 raise
 from typing import Mapping, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 import itertools
 import json

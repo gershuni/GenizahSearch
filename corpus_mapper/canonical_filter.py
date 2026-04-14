@@ -10,7 +10,6 @@ import os
 import re
 import pickle
 from typing import Set, Optional
-from pathlib import Path
 
 from .config import CORPORA, OUTPUT_DIR
 

@@ -7,7 +7,7 @@ Uses Supabase directly for all data operations.
 """
 
 import logging
-from nicegui import ui, app
+from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState
 from web.state import state

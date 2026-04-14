@@ -7,7 +7,7 @@ Required for Israeli Standard 5568 compliance.
 
 from nicegui import ui
 from web.translations import tr, is_rtl
-from web.components.typography import h1, h2, h3
+from web.components.typography import h1, h2
 
 def create_accessibility_page():
     """Create the Accessibility Statement page."""

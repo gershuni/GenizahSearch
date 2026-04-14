@@ -27,12 +27,12 @@ import numpy as np
 from PIL import Image
 import requests
 
-from PyQt6.QtCore import Qt, QByteArray, QBuffer
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor, QBrush
+from PyQt6.QtCore import Qt, QByteArray
+from PyQt6.QtGui import QImage, QPixmap, QColor
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QSlider, QComboBox, QLineEdit, QGroupBox,
-    QSplitter, QStatusBar, QScrollArea
+    QSplitter, QScrollArea
 )
 
 from shared.puzzle_image_service import PuzzleImageService

@@ -10,7 +10,6 @@ Verifies:
 - web.supabase_client.get_client still works
 - Desktop importability (shared works without web/ on sys.path)
 """
-import pytest
 
 
 class TestSharedProviderImport:

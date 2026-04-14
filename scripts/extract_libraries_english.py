@@ -13,7 +13,6 @@ import csv
 import re
 import sqlite3
 import sys
-import os
 from pathlib import Path
 from datetime import datetime, timezone
 

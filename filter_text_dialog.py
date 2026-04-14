@@ -1,23 +1,20 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPlainTextEdit, QHBoxLayout, QPushButton,
-    QFileDialog, QGroupBox, QProgressBar, QMessageBox, QComboBox, QCheckBox,
+    QGroupBox, QProgressBar, QMessageBox, QComboBox, QCheckBox,
     QListWidget, QListWidgetItem, QAbstractItemView, QTreeWidget, QTreeWidgetItem,
     QSplitter, QLineEdit, QWidget
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from genizah_core import tr
 import os
-import json
 import requests
-import time
-import re
 
 # Import shared sanitization utility
 from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename
 
 # Import shared utilities (no PyQt6 dependency)
 from sefaria_utils import (
-    SefariaLibraryManager, get_sefaria_library, SEFARIA_SOURCES,
+    get_sefaria_library, SEFARIA_SOURCES,
     get_cache_dir, clean_hebrew_text
 )
 

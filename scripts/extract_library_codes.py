@@ -19,7 +19,7 @@ import re
 import sys
 import os
 from collections import Counter
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 # Library detection patterns in priority order
 # First match wins

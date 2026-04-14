@@ -2,7 +2,6 @@
 """Tests for PuzzleService (joins.db sidecar CRUD, concurrency, fragment index)."""
 
 import threading
-import pytest
 from shared.puzzle_model import PuzzleDocument, PuzzleFragment
 from shared.puzzle_service import PuzzleService, get_puzzle_service, reset_puzzle_service
 

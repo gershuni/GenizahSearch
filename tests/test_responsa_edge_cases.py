@@ -18,16 +18,11 @@ import genizah_core as _gc_module
 
 from genizah_core import (
     ResponsaComponent,
-    parse_responsa_query,
-    extract_per_pair_gaps,
     expand_grammatical_prefixes,
     expand_grammatical_suffixes,
-    expand_plene_defective,
-    expand_judeo_arabic,
     _apply_explosion_guard,
     _make_flex_spacing_pattern,
     SearchEngine,
-    Config,
     GRAMMATICAL_PREFIXES,
     GRAMMATICAL_SUFFIXES,
 )

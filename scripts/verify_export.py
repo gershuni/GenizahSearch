@@ -1,6 +1,5 @@
 import sys
 import os
-import shutil
 from unittest.mock import MagicMock
 import PyQt6.QtWidgets
 

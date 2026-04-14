@@ -6,7 +6,6 @@ containing bracketed words, while bracket-containing queries match literally.
 """
 
 import re
-import pytest
 
 from genizah_core import (
     _add_bracket_variants,

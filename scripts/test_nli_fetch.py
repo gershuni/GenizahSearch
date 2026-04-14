@@ -1,5 +1,4 @@
 
-import sys
 import logging
 from genizah_core import MetadataManager, configure_logger
 

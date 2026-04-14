@@ -7,7 +7,6 @@ in the call_numbers field.
 """
 
 import csv
-import sys
 from collections import Counter
 
 # Patterns to detect libraries - order matters (more specific first)

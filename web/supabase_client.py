@@ -12,11 +12,9 @@ Replaces the FastAPI backend for data operations.
 """
 
 import logging
-import os
 import threading
 import time
-from typing import Optional, Dict, List, Any, Tuple
-from urllib.parse import urlencode
+from typing import Optional, Dict, List, Tuple
 from supabase import create_client, Client, ClientOptions
 from gotrue.errors import AuthApiError
 from shared.supabase_provider import get_url, get_anon_key
@@ -151,12 +149,6 @@ def get_user_client() -> Client:
     except Exception as e:
         logger.error(f"[get_user_client] Error creating per-user client: {e}")
         return get_client()
-
-
-def reset_client():
-    """Reset the client (useful for testing or re-authentication)."""
-    global _client
-    _client = None
 
 
 # ============================================================================

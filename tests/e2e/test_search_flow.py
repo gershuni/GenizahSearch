@@ -11,13 +11,11 @@ available, or a lightweight stub otherwise.
 """
 
 import os
-import time
 import pytest
 
 pytest.importorskip("selenium", reason="selenium not installed -- skipping E2E tests")
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import NoSuchElementException
 
 
 # Mark all tests in this module as e2e

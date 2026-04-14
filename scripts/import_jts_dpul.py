@@ -20,7 +20,6 @@ Usage:
 
 import argparse
 import json
-import os
 import re
 import sqlite3
 import sys
@@ -29,7 +28,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from urllib.parse import quote as url_quote
 
 import requests
 from requests.adapters import HTTPAdapter

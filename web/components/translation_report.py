@@ -8,10 +8,8 @@ machine translations. Reports are stored locally in a CSV file for admin review.
 
 import csv
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from nicegui import ui, app
 

@@ -13,7 +13,7 @@ import asyncio
 import difflib
 import html
 import logging
-from nicegui import ui, app, run
+from nicegui import ui, run
 from web.translations import tr, is_rtl
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState, create_login_dialog

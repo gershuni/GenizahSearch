@@ -17,7 +17,6 @@ from web.auth_state import GlobalAuthState
 from web.state import state
 from genizah_core import get_library_display
 from typing import Optional, Callable
-import asyncio
 
 
 def get_star_icon(lists_mgr, sys_id: str) -> str:

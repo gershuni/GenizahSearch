@@ -6,7 +6,6 @@ Uses a simple key-value approach where English is the key
 and translations are the values. Supports RTL languages.
 """
 
-from typing import Optional
 from genizah_translations import TRANSLATIONS
 
 # Current language state

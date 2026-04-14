@@ -15,7 +15,6 @@ Mirrors the FIST web interface "Cataloging Data Details" view:
 
 from nicegui import ui
 from web.translations import tr, get_language
-from typing import Optional
 
 
 def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):

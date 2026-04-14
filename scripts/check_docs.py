@@ -12,7 +12,6 @@ Usage:
     python scripts/check_docs.py
 """
 
-import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path

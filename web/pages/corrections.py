@@ -7,12 +7,11 @@ User corrections and comments system: view, edit, and manage your contributions.
 
 import asyncio
 
-from nicegui import ui, app
+from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, create_login_dialog, do_logout
 from web.supabase_client import get_corrections, update_correction, get_comments, get_client
 from web.state import state
-from typing import Optional, Dict, Any, List
 from web.components.typography import h1, h2, h3
 
 

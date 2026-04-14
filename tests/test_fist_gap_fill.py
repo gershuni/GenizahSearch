@@ -10,12 +10,10 @@ Tests cover:
 """
 
 import csv
-import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 # Ensure project root is importable
 ROOT = Path(__file__).resolve().parent.parent

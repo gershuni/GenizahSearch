@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for bibliography helpers in shared/fjms_service.py."""
 
-import pytest
 from shared.fjms_service import (
     format_page_ref, _parse_marc_bib_string,
     _parse_marc_annotations, strip_marc_annotation_suffix, _ts_symbol,

@@ -25,8 +25,6 @@ from web.services import (
     get_service,
     BrowsePage,
     DocumentPage,
-    get_thumbnail_url,
-    get_full_image_url,
     get_oxford_direct_image_url,
     is_oxford_manuscript,
 )
@@ -35,7 +33,7 @@ from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
-from web.document_service import get_document_for_fragment, get_section_for_page, get_sources_for_document, get_all_sources_for_fragment
+from web.document_service import get_document_for_fragment, get_section_for_page, get_all_sources_for_fragment
 from web.components.joins_panel import fetch_connected_fragments
 
 
@@ -4305,7 +4303,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Edit, Comment, Notes, and Joins buttons
                             if page.text:
-                                from web.components import create_edit_button, create_comment_button, create_version_selector, create_notes_button, create_joins_button
+                                from web.components import create_comment_button, create_version_selector, create_notes_button, create_joins_button
 
                                 # Refresh callback to reload page after edits/comments
                                 def refresh_page():

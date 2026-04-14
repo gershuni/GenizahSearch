@@ -12,9 +12,7 @@ Output: SITE_USER_MAP dict for use in fix script, plus report of unmatched/ambig
 """
 
 import sqlite3
-import json
 import sys
-import os
 
 FIST_DB = "fist_data/FIST.db"
 ENRICHMENT_DB = "fist_data/fjms_enrichment.db"

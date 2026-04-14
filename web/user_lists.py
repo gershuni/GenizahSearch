@@ -15,8 +15,7 @@ Usage:
 """
 
 import time
-from typing import Optional, Dict, List, Any
-from nicegui import app
+from typing import Optional, Dict, List
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -24,11 +23,11 @@ load_dotenv()
 
 from web.auth_state import GlobalAuthState
 from web.supabase_client import (
-    get_client, get_user_lists, create_list as sb_create_list,
+    get_user_lists, create_list as sb_create_list,
     update_list as sb_update_list, delete_list as sb_delete_list,
     get_list_items, add_list_item, update_list_item, delete_list_item,
     get_recent_items, add_recent_item, get_projects, create_project as sb_create_project,
-    update_project as sb_update_project, delete_project as sb_delete_project, get_profile
+    update_project as sb_update_project, delete_project as sb_delete_project
 )
 from genizah_core import ListsManager
 

@@ -14,7 +14,6 @@ Features:
 """
 
 from nicegui import ui, run, app
-from web.services import get_service
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
 from shared.fjms_service import get_fjms_service

@@ -13,7 +13,6 @@
 import argparse
 import re
 import sys
-import os
 from collections import defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -388,8 +387,7 @@ def create_excel_report(substitutions: Dict[Tuple[str, str], List[dict]],
     """
     try:
         import openpyxl
-        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-        from openpyxl.utils import get_column_letter
+        from openpyxl.styles import Font, Alignment, PatternFill
     except ImportError:
         print("נדרש להתקין openpyxl: pip install openpyxl")
         # יוצר CSV במקום

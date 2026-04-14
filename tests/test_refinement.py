@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for shared/refinement.py — RefinementStep dataclass and chain helpers."""
 
-import pytest
 from shared.refinement import (
     RefinementStep,
     compute_effective_restrict,

@@ -3,20 +3,19 @@ Corrections UI Components for PyQt6 Desktop App
 Integrates with the Genizah Corrections API
 """
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QComboBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget,
-    QGroupBox, QFrame, QMessageBox, QProgressDialog,
-    QSpinBox, QDoubleSpinBox, QCheckBox, QScrollArea,
-    QSplitter, QMenu, QStatusBar, QListWidget, QListWidgetItem,
+    QTableWidget, QTableWidgetItem, QTabWidget,
+    QGroupBox, QFrame, QMessageBox, QSpinBox, QDoubleSpinBox, QCheckBox, QScrollArea,
+    QSplitter, QMenu, QListWidget, QListWidgetItem,
     QCompleter, QInputDialog
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QAction, QPalette, QStandardItem, QStandardItemModel
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QPalette
 
 try:
     from genizah_core import tr, CURRENT_LANG, normalize_shelfmark
@@ -27,8 +26,7 @@ except ImportError:
 
 from corrections_client import (
     CorrectionsClient, get_corrections_client,
-    User, Correction, Comment, Discovery, DiscoveryResponse, FeedItem,
-    FragmentJoin, ConnectedFragments
+    Correction, Comment, FeedItem
 )
 
 

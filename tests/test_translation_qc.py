@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for translation QC heuristics."""
 
-import pytest
 from shared.translation_qc import (
     run_qc,
     run_qc_batch,

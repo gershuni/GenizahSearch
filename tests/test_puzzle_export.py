@@ -10,7 +10,6 @@ import base64
 import io
 from unittest.mock import MagicMock
 
-import pytest
 from PIL import Image
 
 from shared.puzzle_model import PuzzleFragment

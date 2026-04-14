@@ -50,7 +50,6 @@ class TestPuzzleImageEndpoint:
         mock_service.resolve_fragment_image.return_value = mock_png_bytes
 
         with patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=mock_service):
-            from fastapi import Response
             from shared.puzzle_image_service import get_puzzle_image_service
 
             service = get_puzzle_image_service()

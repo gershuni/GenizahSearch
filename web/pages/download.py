@@ -7,7 +7,7 @@ Desktop application download page with installation instructions.
 
 from nicegui import ui
 from web.translations import tr, get_language
-from web.components.typography import h1, h2, h3
+from web.components.typography import h1, h2
 
 
 def create_download_page():

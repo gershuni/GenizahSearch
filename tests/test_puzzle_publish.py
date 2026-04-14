@@ -9,7 +9,7 @@ sequences, data transformations, and error handling.
 import json
 import io
 import uuid
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.puzzle_model import PuzzleDocument, PuzzleFragment

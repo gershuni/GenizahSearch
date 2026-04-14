@@ -19,7 +19,6 @@ import sqlite3
 import sys
 import time
 from datetime import date
-from pathlib import Path
 
 
 def import_visual_similarity(fist_db_path: str, output_db_path: str):

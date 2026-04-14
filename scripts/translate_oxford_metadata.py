@@ -12,7 +12,6 @@ import json
 import sqlite3
 import signal
 import sys
-import os
 import time
 from pathlib import Path
 from datetime import datetime, timezone

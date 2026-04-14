@@ -17,14 +17,13 @@ import logging
 
 from nicegui import ui
 from web.state import state
-from web.translations import tr, is_rtl, get_language
+from web.translations import tr, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
-from web.components.typography import h1, h2, h3
+from web.components.typography import h1, h3
 from web.components.project_tree import create_project_tree
 from web.auth_state import GlobalAuthState
 from genizah_core import get_library_display
 from typing import Optional
-import time
 import asyncio
 
 logger = logging.getLogger(__name__)

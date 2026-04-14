@@ -33,9 +33,8 @@ import os
 import re
 import sys
 from collections import defaultdict
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from dotenv import load_dotenv
 load_dotenv()

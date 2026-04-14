@@ -25,7 +25,6 @@ import io
 import logging
 import numpy as np
 from PIL import Image, ImageFilter
-from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
