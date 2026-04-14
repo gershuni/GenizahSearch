@@ -25,7 +25,6 @@ et_xmlfile==2.0.0
 fastapi==0.135.1
 frozenlist==1.8.0
 fsspec==2026.2.0
-gotrue==2.12.4
 h11==0.16.0
 h2==4.3.0
 hpack==4.1.0

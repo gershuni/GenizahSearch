@@ -7,7 +7,6 @@ openpyxl==3.1.5
 python-docx==1.2.0
 nicegui==3.8.0
 supabase==2.28.0
-gotrue==2.12.4
 python-dotenv==1.2.2
 keyring==25.7.0
 Pillow==12.1.1

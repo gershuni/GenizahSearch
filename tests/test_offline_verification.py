@@ -444,7 +444,7 @@ class TestNliCrossrefServiceOffline:
         source = inspect.getsource(nli_module)
 
         # Must not import Supabase ecosystem packages
-        forbidden_supabase = ['supabase', 'postgrest', 'gotrue', 'realtime']
+        forbidden_supabase = ['supabase', 'postgrest', 'gotrue', 'realtime', 'supabase_auth']
         for term in forbidden_supabase:
             assert term not in source.lower(), (
                 f"Found '{term}' in shared/nli_crossref_service.py source. "
@@ -506,7 +506,7 @@ class TestNoNetworkImportsInServiceModules:
 
     # Supabase ecosystem packages that must never appear in service modules
     FORBIDDEN_PACKAGES = frozenset({
-        'supabase', 'postgrest', 'gotrue', 'realtime',
+        'supabase', 'postgrest', 'gotrue', 'realtime', 'supabase_auth',
     })
 
     @pytest.mark.parametrize("module_path,module_name", [
