@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'web'))
 
 try:
     from supabase import create_client, Client
-    from gotrue.errors import AuthApiError
+    from supabase_auth.errors import AuthApiError
     SUPABASE_AVAILABLE = True
 except ImportError:
     SUPABASE_AVAILABLE = False

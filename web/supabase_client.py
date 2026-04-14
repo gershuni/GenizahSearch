@@ -15,8 +15,8 @@ import logging
 import threading
 import time
 from typing import Optional, Dict, List, Tuple
-from supabase import create_client, Client, ClientOptions
-from gotrue.errors import AuthApiError
+from supabase import create_client, Client
+from supabase_auth.errors import AuthApiError
 from shared.supabase_provider import get_url, get_anon_key
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,7 @@ def get_client() -> Client:
                 "SUPABASE_ANON_KEY not set! "
                 "Set it in environment variables or .env file."
             )
-        _client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY,
-                                options=ClientOptions(flow_type='implicit'))
+        _client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     return _client
 
 
