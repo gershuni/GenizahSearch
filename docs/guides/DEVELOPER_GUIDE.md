@@ -1,7 +1,7 @@
 # GenizahSearch Developer Guide
 
 > Quick start guide for developers working on GenizahSearch
-> Last updated: 2026-03-13
+> Last updated: 2026-04-14
 
 ---
 
@@ -39,6 +39,8 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+> **Note:** `requirements.txt` contains direct dependencies with pinned versions. `requirements-lock.txt` contains the full transitive dependency tree (used by CI). For local development, installing from `requirements.txt` is sufficient.
 
 ### 4. Set Up Environment Variables
 
@@ -316,6 +318,69 @@ pip install PyQt6 PyQt6-WebEngine
 
 ---
 
+## Dependency Management
+
+### Adding a New Dependency
+
+1. Add the package with `==` pin to `requirements.txt`:
+   ```
+   new-package==1.2.3
+   ```
+2. Install it: `pip install -r requirements.txt`
+3. Regenerate the lock file: `pip freeze > requirements-lock.txt`
+4. Run tests: `pytest tests/`
+5. Commit both `requirements.txt` and `requirements-lock.txt`
+
+### Upgrading a Dependency
+
+1. Edit the version in `requirements.txt` (e.g., `requests==2.32.5` -> `requests==2.33.0`)
+2. Install: `pip install -r requirements.txt`
+3. Regenerate lock: `pip freeze > requirements-lock.txt`
+4. Run tests: `pytest tests/`
+5. Verify CI passes, then commit both files
+
+### Two-File Strategy
+
+| File | Purpose | Maintained by |
+|------|---------|---------------|
+| `requirements.txt` | Direct dependencies, exact `==` pins | Human (edit manually) |
+| `requirements-lock.txt` | Full transitive tree (`pip freeze` output) | Machine (regenerate after any change) |
+
+CI installs from `requirements-lock.txt` to ensure fully reproducible builds.
+
+### Dev Tools (pytest, ruff)
+
+`pytest` and `ruff` are **CI-only dev tools** and are NOT listed in `requirements.txt` (which is for runtime dependencies only). They are installed separately in the CI workflow:
+
+- `pip install ruff==0.15.10` (in the lint-and-docs job)
+- `pip install pytest` (in the tests job)
+
+For local development, install them manually: `pip install ruff pytest`
+
+### Known Limitations
+
+The lock file is generated from a single environment (`pip freeze` on the developer's machine). Platform-specific transitive dependencies (e.g., Windows-only packages) may differ between Ubuntu and Windows CI runners. In practice this has not caused issues because the 14 direct dependencies all have cross-platform wheels. If a CI runner fails to install from the lock file, regenerate it on that platform or remove the platform-specific line from the lock file.
+
+---
+
+## Linting
+
+The project uses [ruff](https://docs.astral.sh/ruff/) for linting. Configuration is in `ruff.toml`.
+
+```bash
+# Check for violations
+ruff check .
+
+# Auto-fix what can be fixed
+ruff check --fix .
+```
+
+Current ruleset (Phase 63): syntax errors (`E9xx`) and import hygiene (`F401`, `F811`, `F821`). The ruleset will expand in future milestones.
+
+CI runs `ruff check .` on every push and PR. All violations must be fixed before merging.
+
+---
+
 ## Useful Commands
 
 ```bash
@@ -331,8 +396,8 @@ python build_index.py lab
 # Run tests
 pytest tests/ -v
 
-# Check code style
-flake8 web/ genizah_core.py
+# Check code style (ruff)
+ruff check .
 ```
 
 ---
