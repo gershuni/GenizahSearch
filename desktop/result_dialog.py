@@ -41,7 +41,8 @@ class ResultDialog(QDialog):
 
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
         super().__init__(parent)
-        
+        self._app = parent
+
         self.all_results = all_results
         self.current_result_idx = current_index
         self.meta_mgr = meta_mgr
@@ -532,7 +533,7 @@ class ResultDialog(QDialog):
             self.load_result_by_index(new_idx)
 
     def open_full_transcription(self):
-        parent = self.parent()
+        parent = self._app
         if parent and hasattr(parent, "open_result_in_browse"):
             parent.open_result_in_browse(
                 self.data,
@@ -543,7 +544,7 @@ class ResultDialog(QDialog):
             self.close()
 
     def search_for_parallels(self):
-        parent = self.parent()
+        parent = self._app
         if parent and hasattr(parent, "send_result_to_composition"):
             # Trim title to first 6 words and append ... if longer
             full_title = self.lbl_title.text() or ""
@@ -562,7 +563,7 @@ class ResultDialog(QDialog):
 
     def add_current_to_list(self):
         """Add the current manuscript to a list."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'lists_mgr') or not parent.lists_mgr:
             return
 
@@ -586,7 +587,7 @@ class ResultDialog(QDialog):
 
     def _add_to_puzzle(self):
         """Add current result to puzzle canvas (mirrors _browse_add_to_puzzle logic)."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'add_to_puzzle'):
             return
         sys_id = self.current_sys_id
@@ -616,7 +617,7 @@ class ResultDialog(QDialog):
 
     def _rd_search_visual_similarity(self):
         """D-10: Show visual similarity dialog from ResultDialog context."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, '_show_vs_dialog'):
             return
         sys_id = self.current_sys_id
@@ -664,7 +665,7 @@ class ResultDialog(QDialog):
         QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
 
     def _update_add_to_list_button(self):
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'lists_mgr') or not parent.lists_mgr:
             return
         if not self.current_sys_id:
@@ -681,7 +682,7 @@ class ResultDialog(QDialog):
 
     def add_comment(self):
         """Open comment dialog for current document."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
         if not parent.corrections_client.is_logged_in():
@@ -697,7 +698,7 @@ class ResultDialog(QDialog):
 
     def view_corrections(self):
         """View corrections for current document."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
         dialog = CorrectionsViewerDialog(
@@ -711,7 +712,7 @@ class ResultDialog(QDialog):
 
     def view_comments(self):
         """View comments for current document."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
         dialog = CommentsViewerDialog(
@@ -723,7 +724,7 @@ class ResultDialog(QDialog):
 
     def _rd_view_joins(self):
         """View joined fragments for current document."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
 
@@ -753,7 +754,7 @@ class ResultDialog(QDialog):
     def _rd_update_joins_menu(self):
         """Update the joins dropdown menu with connected fragments."""
         self.rd_joins_menu.clear()
-        parent = self.parent()
+        parent = self._app
 
         # Use document_id (sys_id) for lookup - this is the reliable key
         document_id = self.current_sys_id
@@ -912,7 +913,7 @@ class ResultDialog(QDialog):
 
     def _rd_on_joins_menu_show(self):
         """Called when joins menu is about to show - trigger sync and update."""
-        parent = self.parent()
+        parent = self._app
         # Trigger a background sync to get latest joins from server
         if parent and hasattr(parent, 'joins_mgr') and parent.joins_mgr:
             import threading
@@ -929,7 +930,7 @@ class ResultDialog(QDialog):
 
     def _rd_load_versions(self):
         """Load versions for current document page."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
 
@@ -969,7 +970,7 @@ class ResultDialog(QDialog):
 
     def _rd_refresh_versions(self, select_latest=False):
         """Refresh version list. If select_latest=True, select and load the latest version."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
 
@@ -1236,7 +1237,7 @@ class ResultDialog(QDialog):
                 self._rd_versions_cache[cache_key] = content
                 self._rd_display_text(content)
         elif version_id:
-            parent = self.parent()
+            parent = self._app
             if parent and hasattr(parent, 'corrections_client'):
                 # Restore RTL for user versions (Hebrew text)
                 self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -1286,7 +1287,7 @@ class ResultDialog(QDialog):
             if getattr(self, '_rd_enriched_data_loaded', False):
                 self._rd_update_extended_info_with_pgp()
             elif not self.btn_ext_info.isVisible():
-                parent_win = self.parent()
+                parent_win = self._app
                 if parent_win and hasattr(parent_win, '_build_pgp_extended_info_html'):
                     pal = self.txt_extended_info.palette()
                     tc = pal.color(QPalette.ColorRole.Text).name()
@@ -1302,7 +1303,7 @@ class ResultDialog(QDialog):
         if not sources:
             return
 
-        parent = self.parent()
+        parent = self._app
         if not parent:
             return
 
@@ -1418,7 +1419,7 @@ class ResultDialog(QDialog):
                     f"<span style='{_loading_style}'>⏳ {tr('Translating...')}</span>"
                 )
             if cached:
-                parent = self.parent()
+                parent = self._app
                 _toggle = getattr(parent, '_trans_toggle_state', {}) if parent else {}
                 showing_orig = _toggle.get(field_key, False)
                 show_text = text if showing_orig else cached
@@ -1544,7 +1545,7 @@ class ResultDialog(QDialog):
             html += kti_html
 
         # Append FJMS catalog section
-        parent = self.parent()
+        parent = self._app
         if parent and hasattr(parent, '_build_fjms_catalog_html'):
             fjms_catalog = parent._build_fjms_catalog_html(self.current_sys_id, text_color)
             if fjms_catalog:
@@ -1579,7 +1580,7 @@ class ResultDialog(QDialog):
 
     def _rd_toggle_edit_mode(self):
         """Toggle edit mode in ResultDialog."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
         if not parent.corrections_client.is_logged_in():
@@ -1671,7 +1672,7 @@ class ResultDialog(QDialog):
 
     def _rd_save_correction(self, submit=False):
         """Save correction from ResultDialog."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, 'corrections_client'):
             return
 
@@ -1874,7 +1875,7 @@ class ResultDialog(QDialog):
                 self.current_volume_ie = ie_from_header
 
         # Add to Recently Viewed
-        parent = self.parent()
+        parent = self._app
         if parent and hasattr(parent, 'lists_mgr') and parent.lists_mgr and self.current_sys_id:
             fl_id = parent._normalize_fl_id(ids.get('fl_id'))
             parent.lists_mgr.add_to_recent(self.current_sys_id, fl_id=fl_id, img=ids.get('p_num'))
@@ -1901,7 +1902,7 @@ class ResultDialog(QDialog):
         # 2. Source Context
         source_text = ""
         if 'source_ctx' in data:
-            parent = self.parent()
+            parent = self._app
             if parent and hasattr(parent, "comp_text_area"):
                 source_text = parent.comp_text_area.toPlainText().strip()
             if not source_text:
@@ -1939,7 +1940,7 @@ class ResultDialog(QDialog):
     def load_by_shelfmark(self, shelfmark: str, page_num: int = 1):
         """Load a document by shelfmark within the same dialog."""
         try:
-            parent = self.parent()
+            parent = self._app
             if not parent:
                 return False
 
@@ -2111,7 +2112,7 @@ class ResultDialog(QDialog):
         self.btn_rd_measurements.setEnabled(False)
         if hasattr(self, 'btn_compact_measurements'):
             self.btn_compact_measurements.setVisible(False)
-        parent = self.parent()
+        parent = self._app
         if parent:
             # Disconnect old worker signals first to prevent stale results
             if hasattr(self, '_rd_pgp_worker') and self._rd_pgp_worker is not None:
@@ -2133,7 +2134,7 @@ class ResultDialog(QDialog):
 
     def _update_rd_domain_label(self):
         """Update domain info label and printed badge for the current result in ResultDialog."""
-        parent = self.parent()
+        parent = self._app
         if not parent or not hasattr(parent, '_result_domain_map'):
             self.lbl_rd_domains.setVisible(False)
             self.lbl_rd_printed.setVisible(False)
@@ -2173,7 +2174,7 @@ class ResultDialog(QDialog):
         # Clear field translation cache when navigating to a new manuscript
         from gui_threads import _field_translation_cache
         _field_translation_cache.clear()
-        parent = self.parent()
+        parent = self._app
         if parent:
             parent._trans_toggle_state = {}
 
@@ -2244,12 +2245,12 @@ class ResultDialog(QDialog):
         url_str = url.toString()
         if url_str.startswith('tag:'):
             tag = url_str[4:]
-            parent = self.parent()
+            parent = self._app
             if parent and hasattr(parent, '_search_by_pgp_tag'):
                 self.close()
                 parent._search_by_pgp_tag(tag)
         elif url_str.startswith('toggle-trans:'):
-            parent = self.parent()
+            parent = self._app
             if parent:
                 parts = url_str[len('toggle-trans:'):].split(':', 1)
                 if len(parts) == 2:
@@ -2261,14 +2262,14 @@ class ResultDialog(QDialog):
                     self._rd_refresh_extended_info()
         elif url_str.startswith('translate-field:'):
             field_key = url_str[len('translate-field:'):]
-            parent = self.parent()
+            parent = self._app
             if parent:
                 parent._start_field_translation(field_key, 'rd', self)
         elif url_str.startswith('toggle-always:'):
             action = url_str[len('toggle-always:'):]
             new_val = action == 'on'
             save_app_config({'show_translations': new_val})
-            parent = self.parent()
+            parent = self._app
             if parent:
                 parent._trans_toggle_state = {}
             self._rd_refresh_extended_info()
@@ -2290,7 +2291,7 @@ class ResultDialog(QDialog):
                 self.btn_compact_translations.setChecked(checked)
                 self.btn_compact_translations.setText(_rd_label)
             # Sync Settings checkbox
-            parent = self.parent()
+            parent = self._app
             if parent:
                 if hasattr(parent, 'chk_show_translations'):
                     parent.chk_show_translations.setChecked(checked)
@@ -2330,7 +2331,7 @@ class ResultDialog(QDialog):
         rd_meta = getattr(self, '_rd_enrichment_meta', None)
         if not rd_meta:
             return
-        parent = self.parent()
+        parent = self._app
         if not parent:
             return
         marc = rd_meta.get('marc', {})
@@ -2621,7 +2622,7 @@ class ResultDialog(QDialog):
                 self.btn_compact_measurements.setVisible(False)
 
         # 3b. Visual Similarity button (D-10: ResultDialog context)
-        _parent = self.parent()
+        _parent = self._app
         _vs_has_rd = bool(_parent and hasattr(_parent, 'meta_mgr') and _parent.meta_mgr
                           and _parent.meta_mgr.csv_bank.get(sid, {}).get('has_vs'))
         self.btn_rd_visual_sim.setVisible(_vs_has_rd)
