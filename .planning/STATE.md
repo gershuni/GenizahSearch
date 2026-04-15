@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.8
 milestone_name: Structural Foundation
 status: executing
-stopped_at: Phase 65 context gathered
-last_updated: "2026-04-14T19:21:47.095Z"
-last_activity: 2026-04-14 -- Phase 65 planning complete
+stopped_at: Completed 65-01-PLAN.md
+last_updated: "2026-04-15T00:59:44.455Z"
+last_activity: 2026-04-15
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 4
-  percent: 67
+  total_plans: 7
+  completed_plans: 5
+  percent: 71
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 64 — Auth Migration
+**Current focus:** Phase 65 — repo-hygiene
 
 ## Current Position
 
-Phase: 65
-Plan: Not started
+Phase: 65 (repo-hygiene) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-04-14 -- Phase 65 planning complete
+Last activity: 2026-04-15
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -57,6 +57,7 @@ Recent decisions affecting current work:
 - pytest baseline (1067 passed, 8 skipped) must stay green throughout
 - CI first (Phase 63) establishes safety net before riskier auth migration (Phase 64)
 - Prev v7.8 (Server-Side Image Cache) deferred to v7.9+ (blocked on NLI TOS outreach)
+- [Phase 65]: Independent per-patch version guards using packaging.version.Version for NiceGUI monkey-patches
 
 ### Pending Todos
 
@@ -71,6 +72,6 @@ None for v7.8. All requirements are self-contained refactoring work.
 
 ## Session Continuity
 
-Last session: 2026-04-14T19:06:03.738Z
-Stopped at: Phase 65 context gathered
-Resume file: .planning/phases/65-repo-hygiene/65-CONTEXT.md
+Last session: 2026-04-15T00:59:44.450Z
+Stopped at: Completed 65-01-PLAN.md
+Resume file: None

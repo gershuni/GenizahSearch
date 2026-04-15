@@ -18,7 +18,7 @@ Current pytest baseline (1067 passed, 8 skipped, 1 warning on 2026-04-14) must r
 ### Repo Hygiene
 
 - [ ] **HYGN-01**: Silent exception handlers audited — each either logs at appropriate level or is explicitly justified in a code comment; third-party/generated code excluded from audit
-- [ ] **HYGN-02**: Framework monkey-patches isolated in web/framework_patches.py with NiceGUI version guards and justification comments for why each patch still exists
+- [x] **HYGN-02**: Framework monkey-patches isolated in web/framework_patches.py with NiceGUI version guards and justification comments for why each patch still exists
 - [ ] **HYGN-03**: Non-source generated/temp artifacts in repo root gitignored or relocated; intentional root assets explicitly exempted
 - [ ] **HYGN-04**: .gitignore updated to prevent future accumulation of generated artifacts
 
@@ -75,7 +75,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BLDG-03 | Phase 64 | Pending |
 | BLDG-04 | Phase 63 | Pending |
 | HYGN-01 | Phase 65 | Pending |
-| HYGN-02 | Phase 65 | Pending |
+| HYGN-02 | Phase 65 | Complete |
 | HYGN-03 | Phase 65 | Pending |
 | HYGN-04 | Phase 65 | Pending |
 | DOCS-01 | Phase 66 | Pending |
