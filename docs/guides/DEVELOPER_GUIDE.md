@@ -7,7 +7,7 @@
 
 ## Prerequisites
 
-- **Python 3.10+**
+- **Python 3.11+**
 - **Git**
 - **~10GB disk space** (for indexes and transcription data)
 
