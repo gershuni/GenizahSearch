@@ -357,7 +357,7 @@ def create_settings_page():
                                         ui.label(tr('Documents')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                                         ui.label(f'{doc_count:,}').style('color: var(--text-primary);')
                             except Exception:
-                                pass  # Font/metrics calculation failed; use default spacing
+                                pass  # Doc count display failed; settings page still usable
 
                     ui.separator().classes('my-2')
 

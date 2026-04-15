@@ -901,7 +901,7 @@ def show_add_join_form(
                                                                             try:
                                                                                 item_shelfmark, _ = state.meta_mgr.get_meta_for_id(item_sys_id)
                                                                             except Exception:
-                                                                                pass  # Font/metrics calculation failed; use default spacing
+                                                                                pass  # Metadata lookup failed; fall back to sys_id below
 
                                                                         # Fallback to sys_id only if we can't find shelfmark
                                                                         if not item_shelfmark:

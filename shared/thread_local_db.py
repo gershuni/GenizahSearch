@@ -77,7 +77,7 @@ class ThreadLocalConnection:
             try:
                 self._conns[tid].close()
             except Exception:
-                pass  # Lock acquisition failed; continue without lock
+                pass  # conn.close() can raise ProgrammingError; safe to ignore during cleanup
             del self._conns[tid]
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -130,7 +130,7 @@ class ThreadLocalConnection:
                 try:
                     conn.close()
                 except Exception:
-                    pass  # Lock acquisition failed; continue without lock
+                    pass  # conn.close() can raise ProgrammingError; safe to ignore during shutdown
             self._conns.clear()
         # Reset thread-local storage so new connections can be created
         self._local = threading.local()

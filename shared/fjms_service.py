@@ -2745,7 +2745,7 @@ class FjmsService:
             )
             result["blank_images"] = [dict(r) for r in cursor]
         except Exception:
-            pass  # Lock acquisition failed; continue without lock
+            pass  # blank_images table may not exist in older sidecar versions
 
         return result
 

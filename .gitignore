@@ -121,6 +121,3 @@ TestLLMAPIsProgram.cs
 /pgp_sample_*.txt
 /test_*.txt
 /shelfmark_mismatch_report.txt
-
-# AI workspace files
-/AGENTS.md

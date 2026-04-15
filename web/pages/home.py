@@ -67,7 +67,7 @@ def create_page():
                                 try:
                                     refresh()
                                 except Exception:
-                                    pass  # Font/metrics calculation failed; use default spacing
+                                    pass  # Deferred UI refresh failed; home page still usable
                             asyncio.ensure_future(_deferred_refresh())
 
                     def get_doc_count():
@@ -494,7 +494,7 @@ def create_page():
                             try:
                                 refresh()
                             except Exception:
-                                pass  # Font/metrics calculation failed; use default spacing
+                                pass  # Deferred status refresh failed; page still usable
                         asyncio.ensure_future(_deferred_status_refresh())
 
                 status_item(
