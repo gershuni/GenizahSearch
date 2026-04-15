@@ -234,10 +234,11 @@ Plans:
   4. `.gitignore` covers the patterns that caused root debris accumulation, preventing future recurrence
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Note**: Update `docs/OPEN_ISSUES.md` incrementally as issues are resolved during this phase, not only at end
-**Plans**: 2 plans
+**Plans**: 3 plans
 Plans:
-- [ ] 65-01-PLAN.md — Monkey-patch isolation + silent exception audit
-- [ ] 65-02-PLAN.md — Gitignore extension for root debris prevention
+- [ ] 65-01-PLAN.md — Monkey-patch isolation into web/framework_patches.py with version guards
+- [ ] 65-02-PLAN.md — Full repo-wide silent exception handler audit (genizah_core, genizah_app, web/, shared/)
+- [ ] 65-03-PLAN.md — Gitignore extension for root debris prevention with full asset verification
 
 ### Phase 66: Documentation Update
 **Goal**: Project documentation accurately reflects the current codebase state after all structural changes
@@ -260,9 +261,9 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 |-------|----------------|--------|-----------|
 | 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
 | 64. Auth Migration | 2/2 | Complete    | 2026-04-14 |
-| 65. Repo Hygiene | 0/2 | Not started | - |
+| 65. Repo Hygiene | 0/3 | Not started | - |
 | 66. Documentation Update | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-14 after Phase 65 planning (2 plans, Wave 1 parallel)*
+*Last updated: 2026-04-15 after Phase 65 replanning with review feedback (3 plans, Wave 1 parallel)*
