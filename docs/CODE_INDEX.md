@@ -1,6 +1,6 @@
 # Codebase Index
 
-> Last updated: 2026-03-26
+> Last updated: 2026-04-15
 
 Auto-generated index of classes and methods.
 
@@ -1401,3 +1401,67 @@ Auto-generated index of classes and methods.
 - **Function** `create_comment_card` (Line 277)
 - **Function** `create_reply_item` (Line 327)
 - **Function** `create_notes_button` (Line 355)
+
+## web/main.py
+
+- **Function** `_inject_font_display_swap` (Line 36) — middleware injecting `font-display: swap` into NiceGUI fonts.css
+- **Function** `page_meta` (Line 128) — per-route SEO metadata (title, description, canonical, OG/Twitter)
+- **Function** `_resolve_ui_language` (Line 222) — detect UI language from storage/cookie
+- **Function** `create_layout` (Line 240) — shared page layout (header, sidebar, footer)
+- **Function** `_show_citation_reminder` (Line 635) — periodic citation reminder popup
+- **Function** `apply_theme_immediately` (Line 689) — inject dark/light theme CSS
+- **Function** `_safe_user_storage_get` (Line 821) — safe app.storage.user accessor
+- **Function** `set_current_page` (Line 829) — track current page for analytics
+- **Function** `dashboard_page` (Line 837) — homepage route
+- **Function** `search_page_route` (Line 901) — search page route
+- **Function** `parallels_page_route` (Line 935) — parallels page route
+- **Function** `browse_page_route` (Line 954) — manuscript browse route
+- **Function** `catalog_browse_page_route` (Line 1026) — FJMS catalog browse route
+- **Function** `lists_page_route` (Line 1070) — user lists route
+- **Function** `puzzle_page_route` (Line 1084) — fragment puzzle route
+- **Function** `auth_callback_route` (Line 1317) — OAuth callback handler
+- **Function** `initialize_engine` (Line 1404) — async startup: load search engine, metadata, variants
+- **Function** `_find_free_port` (Line 1465) — dev-mode port auto-discovery
+
+## web/framework_patches.py
+
+- **Function** `_patch_nicegui_esm_handler` (Line 20) — add is_file() guard to ESM route handler (prevents RuntimeError on directory URLs)
+- **Function** `_patch_html_lang_attribute` (Line 63) — patch NiceGUI index.html to add `lang="he"` for Lighthouse a11y
+- **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
+
+## web/auth_state.py
+
+- **Class** `GlobalAuthState` (Line 28) — singleton auth state using NiceGUI app.storage.user
+    - Method `get_user` (Line 39)
+    - Method `get_profile` (Line 46)
+    - Method `is_logged_in` (Line 55)
+    - Method `get_user_id` (Line 60)
+    - Method `get_role` (Line 66)
+    - Method `is_admin` (Line 72)
+    - Method `is_editor` (Line 77)
+    - Method `can_edit` (Line 83)
+    - Method `can_comment` (Line 88)
+    - Method `set_auth` (Line 93)
+    - Method `_posthog_identify` (Line 102)
+    - Method `update_profile_cache` (Line 115)
+    - Method `clear_auth` (Line 120)
+    - Method `get_username` (Line 137)
+    - Method `get_headers` (Line 148)
+- **Function** `do_login` (Line 154) — perform login and update global auth state
+- **Function** `do_register` (Line 199) — register and auto-login
+- **Function** `do_logout` (Line 240) — clear auth state
+- **Function** `create_login_dialog` (Line 245) — build login/register dialog
+- **Function** `create_auth_buttons` (Line 421) — header auth buttons (login/register or user menu)
+- **Function** `get_api_base` (Line 482) — legacy compatibility stub
+- **Function** `api_call` (Line 487) — legacy API call redirector
+
+## shared/thread_local_db.py
+
+- **Class** `ThreadLocalConnection` (Line 29) — thread-safe SQLite connection pool (one connection per thread)
+    - Method `__init__` (Line 45)
+    - Method `_prune_dead` (Line 69) — close connections from dead threads
+    - Method `_get_conn` (Line 83) — get or create per-thread connection
+    - Method `execute` (Line 110) — execute SQL on current thread's connection
+    - Property `row_factory` (Line 114)
+    - Method `close` (Line 126) — close all connections and reset state
+    - Method `__bool__` (Line 138) — truthy for availability checks
