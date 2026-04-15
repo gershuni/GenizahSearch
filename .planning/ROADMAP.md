@@ -244,7 +244,7 @@ Plans:
 **Phase gate**: pytest green, CI green
 **Plans**: 2 plans
 Plans:
-- [ ] 68-01-PLAN.md -- Extract 4 scholarly dialogs to desktop/dialogs_scholarly.py, retarget result_dialog.py lazy imports, add re-exports
+- [x] 68-01-PLAN.md -- Extract 4 scholarly dialogs to desktop/dialogs_scholarly.py, retarget result_dialog.py lazy imports, add re-exports
 - [ ] 68-02-PLAN.md -- Move FilterCountWorker to gui_threads.py, extract 3 filter dialogs to desktop/dialogs_filter.py, delete self-imports, add re-exports
 **Note**: These are leaf dialogs with minimal cross-dependencies -- grouping them is safe. If any dialog has unexpected coupling to ResultDialog or viewers, split into a separate plan.
 
@@ -355,7 +355,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 67. ResultDialog Extraction | 3/3 | Complete    | 2026-04-15 |
-| 68. Desktop Dialog Extractions | 0/2 | Not started | - |
+| 68. Desktop Dialog Extractions | 1/2 | In Progress|  |
 | 69. Image Viewer Extraction | 0/TBD | Not started | - |
 | 70. Puzzle Extraction | 0/TBD | Not started | - |
 | 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
