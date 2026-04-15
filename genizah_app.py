@@ -48,6 +48,7 @@ if _CORE_IMPORT_ERROR:
     else:
         raise _CORE_IMPORT_ERROR
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleImageLoaderThread, PuzzleMetaLoaderThread
+from desktop.widgets import ActionsHoverWidget, _format_add_to_list_label
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -8859,33 +8860,6 @@ class ResultDialog(QDialog):
                 docid += f",FL{self.current_fl_id}"
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/viewerpage?vid=MANUSCRIPTS&docid={docid}"))
 
-class ActionsHoverWidget(QWidget):
-    def __init__(self, parent=None, alignment=Qt.AlignmentFlag.AlignCenter):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(4)
-        layout.setAlignment(alignment)
-        self.buttons = []
-        self.always_visible_buttons = set()
-
-    def add_btn(self, btn, always_visible=False):
-        self.layout().addWidget(btn)
-        self.buttons.append(btn)
-        if always_visible:
-            self.always_visible_buttons.add(btn)
-            btn.setVisible(True)
-        else:
-            btn.setVisible(False)
-
-    def set_buttons_visible(self, visible):
-        for b in self.buttons:
-            if b in self.always_visible_buttons:
-                b.setVisible(True)
-            else:
-                b.setVisible(visible)
-
-
 class ListsTreeWidget(QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -8902,11 +8876,6 @@ class ListsTreeWidget(QTreeWidget):
         # קריאה לפונקציה בחלון הראשי לעדכון הצבעים והסדר
         if self.main_window and hasattr(self.main_window, 'lists_handle_tree_reorder'):
             self.main_window.lists_handle_tree_reorder()
-
-
-def _format_add_to_list_label(in_list=False):
-    star = "⭐" if in_list else "☆"
-    return f"{star} {tr('List')}"
 
 
 def _format_list_star(in_list=False):
