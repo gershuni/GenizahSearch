@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-04-15 (fixed CI/runtime Python-version drift after `numpy==2.4.3` made Python 3.10 unsupported)
+> **Last Updated:** 2026-04-15 (added v7.8 code review findings from Phase 65)
 > **Status:** Active working document
 
 ---
@@ -51,11 +51,11 @@ Move to "Completed Issues" section at bottom with date
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
-| Code Quality Debt | 0 | 6 | 6 |
+| Code Quality Debt | 6 | 7 | 13 |
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **18** | **100** | **118** |
+| **Total** | **23** | **101** | **124** |
 
 ---
 
@@ -253,6 +253,16 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 |-------|------|--------|-------|
 | **ilike injection via unescaped user input** | `supabase_corrections_client.py:950,1384,1494,1528` | ❌ Open | User strings interpolated into PostgREST `.or_()` filters. Phase 64 code review CR-02. |
 
+### v7.8 Code Review Findings (Phase 65)
+
+| Issue | File | Status | Notes |
+|-------|------|--------|-------|
+| **WR-01: `_re` used before import in middleware** | `web/main.py:65,70,95` | ❌ Open | `_inject_font_display_swap` references `_re.sub()` at line 70 but `import re as _re` is at line 95. Works at runtime but fragile ordering. |
+| **WR-02: Misleading exception comment in puzzle token verification** | `web/puzzle_tokens.py:64` | ❌ Open | Comment says "Puzzle operation failed; continue with defaults" but this is a security gate (token verification). |
+| **WR-03: Wrong comment on dead-thread prune exception handlers** | `shared/thread_local_db.py:80,133` | ✅ Fixed (2026-04-15) | Comments corrected during Phase 65 execution to "conn.close() can raise ProgrammingError; safe to ignore". |
+| **IN-01: Redundant exception tuple in auth_state** | `web/auth_state.py:43,51` | ❌ Open | `except (AssertionError, Exception)` is equivalent to `except Exception:`. Code clarity issue. |
+| **IN-02: Version guard threshold needs tracking on NiceGUI upgrade** | `web/framework_patches.py:34,74` | ❌ Open | Both patches skip when `_NV > _V('3.8.0')`. No automated reminder to re-check on version bump. |
+
 ---
 
 ## 6. Documentation Gaps
@@ -299,6 +309,7 @@ All completed items have been moved to `docs/archive/`:
 
 | Date | Change | By |
 |------|--------|-----|
+| 2026-04-15 | Added 5 v7.8 code review findings (65-REVIEW.md): WR-01/02/03, IN-01/02. WR-03 already fixed; 4 remain open (comment/style debt). Recomputed summary totals from scratch. | Claude |
 | 2026-04-15 | Fixed CI/runtime Python-version drift: `.github/workflows/ci.yml` now runs lint/docs and both test jobs on Python 3.11, matching the pinned dependency set (`numpy==2.4.3`) and tracked developer docs. Updated `.cursorrules` and `docs/guides/DEVELOPER_GUIDE.md` from `Python 3.10+` to `Python 3.11+`. | Codex |
 | 2026-04-13 | SEO Round 2 (v7.7.1, revised pre-deploy): Bilingual English-leading meta tags on indexable pages (not Hebrew-first as originally committed). SearchAction JSON-LD added (note: Google deprecated Sitelinks Search Box Nov 2024, markup is harmless). Organization + BreadcrumbList JSON-LD. PostHog deferred, dns-prefetch hints. Homepage h1 updated. Client-side browse title bug fixed. Real Lighthouse/PSI measurement NOT performed -- deferred to post-deploy follow-up. | Claude |
 | 2026-03-29 | Fixed the browse Phase B follow-up issues from the two-phase optimization review: `_load_enrichment()` now re-checks generation after deferred Oxford translation fetches and before final rerender, metadata-only records promoted from derived folio data now switch cleanly from page 0 to page 1 with the first folio label, and crossref physical metadata is applied even when `fetch_browse_enrichment()` falls back to an empty dict. | Codex |
