@@ -23,70 +23,8 @@ load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nicegui import ui, app, run
-
-# ---------------------------------------------------------------------------
-# Monkey-patch: NiceGUI _get_esm missing is_file() guard (affects <= 3.8.0)
-#
-# NiceGUI's ESM route handler checks filepath.exists() but not filepath.is_file().
-# When a browser or bot requests the bare directory URL (e.g. /_nicegui/.../esm/{key}/)
-# the path resolves to the dist/ directory itself, passes exists(), and then
-# Starlette's FileResponse crashes with:
-#   RuntimeError: File at path .../aggrid/dist is not a file.
-#
-# Fix: override the route to add an is_file() check, returning 404 for directories.
-# ---------------------------------------------------------------------------
-def _patch_nicegui_esm_handler() -> None:
-    import mimetypes
-    from starlette.responses import FileResponse
-    from fastapi import HTTPException
-    from nicegui import __version__ as _nv
-    from nicegui.dependencies import esm_modules
-
-    route_path = f'/_nicegui/{_nv}/esm/{{key}}/{{path:path}}'
-
-    # Remove the existing route so we can replace it
-    app.routes[:] = [r for r in app.routes if getattr(r, 'path', None) != route_path]
-
-    @app.get(route_path)
-    def _get_esm_patched(key: str, path: str) -> FileResponse:
-        if key in esm_modules:
-            filepath = esm_modules[key].path / path
-            if not filepath.resolve().is_relative_to(esm_modules[key].path.resolve()):
-                raise HTTPException(status_code=403, detail='forbidden')
-            if filepath.exists() and filepath.is_file():
-                media_type, _ = mimetypes.guess_type(filepath)
-                return FileResponse(filepath, media_type=media_type)
-        raise HTTPException(status_code=404, detail=f'ESM module "{key}" not found')
-
-_patch_nicegui_esm_handler()
-
-
-def _patch_html_lang_attribute():
-    """Ensure <html> tag has lang attribute for Lighthouse a11y compliance.
-
-    NiceGUI's ``index.html`` template emits ``<html>`` with no ``lang``. We patch
-    the template file in-place at startup to add ``lang="he"`` so the initial
-    HTML payload is valid for Lighthouse and crawlers. JS in
-    ``apply_theme_immediately()`` updates the value per user preference at
-    runtime via ``Quasar.lang.set(Quasar.lang['en-US'|'he'])`` (passing a full
-    Quasar lang pack is essential -- a partial object like ``{rtl: false}``
-    causes Quasar to set ``lang`` to the literal string ``"undefined"``).
-
-    The patch is idempotent (no-op if already patched) and re-applies on every
-    boot, so it survives ``pip install -U nicegui``.
-    """
-    from pathlib import Path
-    import nicegui
-    tmpl_file = Path(nicegui.__file__).parent / 'templates' / 'index.html'
-    try:
-        original = tmpl_file.read_text(encoding='utf-8')
-        if '<html>' in original:
-            patched = original.replace('<html>', '<html lang="he">', 1)
-            tmpl_file.write_text(patched, encoding='utf-8')
-    except Exception as e:
-        logging.getLogger(__name__).warning('html lang patch failed: %s', e)
-
-_patch_html_lang_attribute()
+from web.framework_patches import apply_all_patches
+apply_all_patches()
 
 
 # ---------------------------------------------------------------------------
