@@ -1,7 +1,10 @@
 """Shared desktop UI widgets and helper functions."""
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout
+import re
+
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QTextEdit
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QTextCursor, QTextCharFormat
 
 from genizah_core import tr
 
@@ -36,3 +39,114 @@ class ActionsHoverWidget(QWidget):
 def _format_add_to_list_label(in_list=False):
     star = "\u2b50" if in_list else "\u2606"
     return f"{star} {tr('List')}"
+
+
+def apply_find_highlight(text_browser, query):
+    if not text_browser:
+        return
+    if not query:
+        text_browser.setExtraSelections([])
+        return
+    doc = text_browser.document()
+    cursor = QTextCursor(doc)
+    highlight_format = QTextCharFormat()
+    highlight_format.setBackground(QColor("#fff59d"))
+    selections = []
+    while True:
+        cursor = doc.find(query, cursor)
+        if cursor.isNull():
+            break
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format = highlight_format
+        selections.append(selection)
+    text_browser.setExtraSelections(selections)
+
+
+def _get_folio_number_from_shelfmark(shelfmark):
+    """Extract folio number from Oxford-style shelfmarks only.
+
+    Oxford shelfmarks like "MS. Heb. a. 1/1" or "Bodl. Or. 12/3" contain
+    actual folio numbers after the slash. Other libraries (Cambridge, NLI, etc.)
+    use classmarks where trailing numbers are not folio references.
+    """
+    if not shelfmark:
+        return None
+    upper = shelfmark.upper()
+    # Only extract folio from Oxford-style shelfmarks (MS. Heb., Bodl., etc.)
+    is_oxford = (
+        'MS. HEB' in upper or
+        'MS HEB' in upper or
+        upper.startswith('BODL') or
+        'BODLEIAN' in upper
+    )
+    if not is_oxford:
+        return None
+    match = re.search(r'[/.](\d+)\s*$', shelfmark)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_folio_image_index(meta, folio_num, side_offset=0):
+    base_idx = _get_initial_image_index(meta, folio_num)
+    if side_offset <= 0:
+        return base_idx
+
+    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+    if not images or base_idx >= len(images):
+        return base_idx
+
+    target_folio = images[base_idx].get('folio_num')
+    if target_folio is None:
+        return base_idx
+
+    label = str(images[base_idx].get('label', '')).lower()
+    if label.endswith('b'):
+        return base_idx
+
+    next_idx = base_idx + 1
+    if next_idx < len(images) and images[next_idx].get('folio_num') == target_folio:
+        return next_idx
+
+    for idx, img in enumerate(images):
+        if img.get('folio_num') == target_folio and str(img.get('label', '')).lower().endswith('b'):
+            return idx
+
+    return base_idx
+
+
+def _get_initial_image_index(meta, page_num):
+    if page_num is None:
+        return 0
+    try:
+        p_num = int(page_num)
+    except (TypeError, ValueError):
+        return 0
+
+    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+    folio_entries = []
+    for idx, img in enumerate(images):
+        folio_num = img.get('folio_num')
+        if folio_num is None:
+            continue
+        try:
+            folio_entries.append((idx, int(folio_num)))
+        except (TypeError, ValueError):
+            continue
+
+    if not folio_entries:
+        return max(p_num - 1, 0)
+
+    for idx, folio_num in folio_entries:
+        if folio_num == p_num:
+            return idx
+
+    prior = [(idx, folio_num) for idx, folio_num in folio_entries if folio_num <= p_num]
+    if prior:
+        return max(prior, key=lambda pair: pair[1])[0]
+
+    return min(folio_entries, key=lambda pair: pair[1])[0]
