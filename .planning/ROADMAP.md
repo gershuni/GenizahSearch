@@ -202,7 +202,7 @@ Zero user-visible behavior changes.
 **Per-phase gate:** current pytest baseline remains green, CI green (Ubuntu + Windows) after each phase.
 **Milestone-level gate:** `scripts/check_docs.py` green at milestone close (Phase 76).
 
-- [ ] **Phase 67: ResultDialog Extraction** - Extract ResultDialog class from genizah_app.py into desktop/result_dialog.py
+- [x] **Phase 67: ResultDialog Extraction** - Extract ResultDialog class from genizah_app.py into desktop/result_dialog.py (completed 2026-04-15)
 - [ ] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules
 - [ ] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py
 - [ ] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py
@@ -229,7 +229,7 @@ Zero user-visible behavior changes.
 Plans:
 - [x] 67-01-PLAN.md -- Create desktop/ package, move ActionsHoverWidget + _format_add_to_list_label to widgets.py
 - [x] 67-02-PLAN.md -- Delete browse dead code, move helpers to cohesive modules, extract ResultDialog (additive copy then cut-over), update tests
-- [ ] 67-03-PLAN.md -- Rename self.parent() to self._app + manual desktop smoke test
+- [x] 67-03-PLAN.md -- Rename self.parent() to self._app + manual desktop smoke test
 **Risk**: ResultDialog likely references GenizahGUI methods (e.g., for browse navigation callbacks). These cross-references need careful handling -- callback injection or signal-based decoupling. Discuss during planning.
 
 ### Phase 68: Desktop Dialog Extractions
@@ -350,7 +350,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 67. ResultDialog Extraction | 2/3 | In Progress|  |
+| 67. ResultDialog Extraction | 3/3 | Complete   | 2026-04-15 |
 | 68. Desktop Dialog Extractions | 0/TBD | Not started | - |
 | 69. Image Viewer Extraction | 0/TBD | Not started | - |
 | 70. Puzzle Extraction | 0/TBD | Not started | - |
