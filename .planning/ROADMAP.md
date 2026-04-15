@@ -225,7 +225,11 @@ Zero user-visible behavior changes.
   3. Any helper classes/functions used exclusively by ResultDialog move with it; shared helpers remain accessible
   4. current pytest baseline remains green
 **Phase gate**: pytest green, CI green
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 67-01-PLAN.md -- Create desktop/ package and move shared helpers to desktop/widgets.py
+- [ ] 67-02-PLAN.md -- Move ResultDialog class to desktop/result_dialog.py
+- [ ] 67-03-PLAN.md -- Rename self.parent() to self._app + manual smoke test
 **Risk**: ResultDialog likely references GenizahGUI methods (e.g., for browse navigation callbacks). These cross-references need careful handling -- callback injection or signal-based decoupling. Discuss during planning.
 
 ### Phase 68: Desktop Dialog Extractions
@@ -346,7 +350,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 67. ResultDialog Extraction | 0/TBD | Not started | - |
+| 67. ResultDialog Extraction | 0/3 | Planned | - |
 | 68. Desktop Dialog Extractions | 0/TBD | Not started | - |
 | 69. Image Viewer Extraction | 0/TBD | Not started | - |
 | 70. Puzzle Extraction | 0/TBD | Not started | - |
