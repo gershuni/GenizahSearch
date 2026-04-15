@@ -6,6 +6,9 @@ env/
 .idea/
 .vscode/
 
+# Outreach (private contacts and emails)
+docs/outreach/
+
 # Local Data (Don't upload these huge files!)
 Transcriptions.txt
 AllGenizah_OLD.txt
@@ -44,3 +47,80 @@ backend_legacy/
 
 # API keys / test files
 TestLLMAPIsProgram.cs
+
+# ── Root debris prevention (Phase 65 HYGN-03/HYGN-04) ──────────────
+
+# ── Intentional root assets (DO NOT ignore these) ──────────────────
+# Tracked root files verified as intentional (Phase 65 audit):
+#   libraries.csv, ie_volume_map.json, primary_ie_map.json
+#   Help.html, icon.ico, image.png, version_info.txt
+#   ANTIVIRUS_INFO.txt, CompileScriptGenizah.iss
+#   oxford_full_db.json, cambridge_genizah.json (tracked data files)
+#   All *.py source files, README.md, CHANGELOG.md, CLAUDE.md
+#   requirements.txt, ruff.toml, .gitignore
+# If adding new ignore patterns, verify they don't match these files.
+
+# Debug / scratch files (underscore-prefixed temp files)
+/_*.txt
+/_*.log
+/_*.js
+/_*.md
+/_*.json
+
+# Backup and temp files
+/*.bak
+/*.tmp.*
+/genizah_app.py.tmp.*
+
+# Translation pipeline checkpoints
+/translate_*_checkpoint.json
+/translate_*_log.txt
+
+# Performance / diagnostic reports
+/psi_*.json
+/battery-report.html
+/crash_log*.txt
+
+# Data backups and one-off imports
+/libraries_backup_*.csv
+/libraries_fixed.csv
+/libraries_translations_backup*.db
+/libraries_translations_clean.db
+/libraries_translations_new.db
+/fist_gap_*.txt
+/fist_gap_*.csv
+/fist_domains.db
+/char_merges_*.xlsx
+
+# Extension build outputs (dist/ already covered above; root zips)
+/genizah-extension-*.zip
+
+# FreeFileSync database
+/sync.ffs_db
+
+# SQLite WAL/journal artifacts (runtime-generated, not source)
+/*.db-shm
+/*.db-wal
+/*.db-journal
+
+# Large data/DB files (local-only, not tracked in git)
+/FIST.db
+/FIST_Computed_Measurements.xlsx
+/fjms_enrichment.db
+/nli_crossref.db
+/pgp.db
+/libraries_translations.db
+
+# Legacy data files (unreferenced in codebase as of Phase 65 audit)
+/bodleian_master_index.csv
+/CrossReference_Final.csv
+/nli_crossreference.csv
+
+# Test/sample scratch files (unreferenced in code or tests)
+/sample_*.txt
+/pgp_sample_*.txt
+/test_*.txt
+/shelfmark_mismatch_report.txt
+
+# AI workspace files
+/AGENTS.md
