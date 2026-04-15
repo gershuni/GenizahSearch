@@ -250,7 +250,10 @@ Plans:
   3. `scripts/check_docs.py` passes green with zero warnings
   4. `docs/guides/DEVELOPER_GUIDE.md` documents the CI workflow, ruff configuration, and dependency upgrade process
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 66-01-PLAN.md — Update CODE_INDEX.md and OPEN_ISSUES.md with v7.8 changes
+- [ ] 66-02-PLAN.md — CI/ruff/deps documentation in DEVELOPER_GUIDE + check_docs green
 
 ## Progress
 
@@ -262,8 +265,8 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 | 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
 | 64. Auth Migration | 2/2 | Complete    | 2026-04-14 |
 | 65. Repo Hygiene | 3/3 | Complete    | 2026-04-15 |
-| 66. Documentation Update | 0/TBD | Not started | - |
+| 66. Documentation Update | 0/2 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-15 after Phase 65 replanning with review feedback (3 plans, Wave 1 parallel)*
+*Last updated: 2026-04-15 after Phase 66 planning (2 plans, Wave 1 parallel)*
