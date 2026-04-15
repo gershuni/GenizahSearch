@@ -1,5 +1,29 @@
 # Project Milestones: GenizahSearch
 
+## v7.8 Structural Foundation (Shipped: 2026-04-15)
+
+**Phases completed:** 4 phases (63-66), 9 plans
+**Git range:** 506ec1e7 → c987c2f2 (64 commits)
+**Scope:** 173 files changed (+6,269 / -828 lines)
+**Timeline:** 2026-04-14 → 2026-04-15 (~14 hours)
+**Requirements:** 12/12 satisfied
+
+**Delivered:** Structural debt reduction with zero user-visible behavior changes — CI safety net, pinned dependencies, migrated auth stack, cleaned repo hygiene, refreshed documentation.
+
+**Key accomplishments:**
+
+- **CI safety net** (Phase 63): GitHub Actions workflow with Ubuntu + Windows matrix runs ruff, scripts/check_docs.py, and pytest on every push and PR. Ruff configured with scoped ruleset (E9/F401/F811/F821), 267 violations fixed to establish zero-violation baseline.
+- **Reproducible builds** (Phase 63): Two-file dependency pinning — 14 direct deps in requirements.txt + 115 transitive in requirements-lock.txt, all exact `==` pins. CI installs from lock file.
+- **Auth modernization** (Phase 64): Migrated from deprecated gotrue to supabase_auth.errors across web and desktop clients. Removed implicit OAuth flow and dead /api/auth/oauth-callback endpoint. PKCE-only callback with error parameter handling. Production-verified including OAuth cancellation and expired code replay.
+- **Framework patches isolated** (Phase 65): NiceGUI monkey-patches extracted to web/framework_patches.py with per-patch `packaging.version.Version()` guards and WARNING-level failure logging. packaging==26.0 pinned.
+- **Exception hygiene** (Phase 65): 205+ silent exception handlers across 76 first-party files audited — each now logs or has inline justification. Zero behavioral changes.
+- **Repo cleanup** (Phase 65): .gitignore extended 50→126 lines with root-anchored patterns covering 15+ debris categories. Untracked root files 67→1 (intentional asset).
+- **Documentation refresh** (Phase 66): CODE_INDEX.md gained v7.8 sections for framework_patches, auth_state, thread_local_db. OPEN_ISSUES.md tracks 7 Phase 65/64 code review findings. DEVELOPER_GUIDE.md documents CI workflow, ruff config, and dependency upgrade process. scripts/check_docs.py passes green.
+
+**Known deferred items at close:** 0 critical. Tech debt tracked: 4 Phase 65 code review findings in OPEN_ISSUES.md (WR-01, WR-02, IN-01, IN-02 — non-blocking), CODE_INDEX line-number drift for genizah_app.py/core.py (pre-existing), Nyquist VALIDATION.md partial/missing across all 4 phases (acceptable for infrastructure milestone).
+
+---
+
 ## v7.7 Volume-Aware Browse (Shipped: 2026-04-03)
 
 **Phases completed:** 62 phases, 197 plans, 343 tasks

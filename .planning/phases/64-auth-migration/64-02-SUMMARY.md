@@ -4,6 +4,7 @@ plan: 02
 status: complete
 started: 2026-04-14
 completed: 2026-04-14
+requirements-completed: [BLDG-03]
 ---
 
 # Plan 64-02 Summary: Remove gotrue + Update Test Guards + Manual Verification

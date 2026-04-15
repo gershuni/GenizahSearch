@@ -38,6 +38,7 @@ metrics:
   tasks_completed: 2
   tasks_total: 2
   files_changed: 108
+requirements-completed: [BLDG-02, BLDG-04]
 ---
 
 # Phase 63 Plan 01: CI Workflow & Ruff Baseline Summary

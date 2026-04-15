@@ -1,16 +1,17 @@
 ---
 phase: 64-auth-migration
 verified: 2026-04-14T00:00:00Z
-status: human_needed
-score: 11/12
+status: passed
+score: 12/12
 overrides_applied: 0
+human_verification_resolved: 2026-04-15
 human_verification:
   - test: "Web OAuth cancellation — click Login with Google, then cancel/deny on Google consent screen"
     expected: "Redirects to /auth/callback?error=access_denied, user sees 'Authentication failed: access_denied' error message (not a silent redirect home)"
-    why_human: "Requires live Google OAuth + Supabase; localhost limitation confirmed in 64-02-SUMMARY.md (item 3 marked 'Not tested'). Code path is present and correct, but end-to-end flow not verified."
+    status: "PASSED (user-confirmed 2026-04-15)"
   - test: "Expired/used OAuth code handling — use browser back button after successful OAuth to replay the callback URL"
     expected: "Error message displayed, not a crash or silent redirect"
-    why_human: "Requires live Supabase session; cannot stage the condition programmatically. Code has generic except block that calls show_error(), but token rejection path untested."
+    status: "PASSED (user-confirmed 2026-04-15)"
 ---
 
 # Phase 64: Auth Migration — Verification Report

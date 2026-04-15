@@ -8,13 +8,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current State (after v7.8 Phase 66 complete)
+## Current State (after v7.8 Structural Foundation shipped)
 
-**In progress:** v7.8 Structural Foundation milestone
-- Phase 66 complete: Documentation Update (2026-04-15) — CODE_INDEX.md v7.8 file sections (framework_patches.py, web/main.py, web/auth_state.py, thread_local_db.py), DEVELOPER_GUIDE.md CI + ruff + dependency docs, OPEN_ISSUES.md revalidated Phase 65 code review findings (WR-03 fixed, 4 open)
-- Phase 65 complete: Repo Hygiene (2026-04-14) — silent exception audit + annotation, NiceGUI monkey-patch extraction to web/framework_patches.py, root debris .gitignore extension
-- Phase 64 complete: Auth Migration (2026-04-14) — gotrue→supabase_auth imports (fixes silently broken error handling), implicit→PKCE OAuth flow, dead endpoint removal, gotrue removed from deps
-- Phase 63 complete: CI & Dependency Pinning (2026-04-14) — GitHub Actions CI with ruff + pytest + check_docs.py, two-file dependency pinning, zero-violation baseline
+**Shipped:** v7.8 Structural Foundation (2026-04-15)
+- CI safety net: GitHub Actions (Ubuntu + Windows matrix) runs ruff + scripts/check_docs.py + pytest on every push/PR
+- Reproducible builds: two-file dependency pinning (14 direct + 115 transitive, all exact `==`)
+- Auth modernized: gotrue → supabase_auth, PKCE-only OAuth callback, dead implicit-flow endpoint removed
+- Framework patches isolated: web/framework_patches.py with per-patch `packaging.version.Version` guards
+- Exception hygiene: 205+ silent handlers across 76 first-party files audited (each logs or is justified)
+- Repo cleanup: .gitignore 50→126 lines, root untracked files 67→1
+- Documentation refresh: CODE_INDEX v7.8 sections, OPEN_ISSUES code review tracking, DEVELOPER_GUIDE CI/ruff/deps docs
+- 4 phases, 9 plans, 64 commits, 12/12 requirements satisfied. Zero user-visible behavior changes.
 
 **Shipped:** v7.7.0 Volume-Aware Browse (2026-04-01)
 - IE volume data infrastructure: ie_volume_map.json for 3,193 multi-IE manuscripts with per-IE browse_map grouping
@@ -150,20 +154,19 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Community writes include ie_id context for per-volume corrections and comments -- v7.7.0
 - Session persistence for active volume with shareable browse URLs including volume parameter -- v7.7.0
 
+- GitHub Actions CI (Ubuntu + Windows matrix) running ruff, scripts/check_docs.py, pytest on every push and PR -- v7.8
+- Two-file dependency pinning: requirements.txt (14 direct) + requirements-lock.txt (115 transitive), exact `==` pins -- v7.8
+- Ruff scoped ruleset (E9/F401/F811/F821) with zero-violation baseline across 105 source files -- v7.8
+- Supabase auth migrated from deprecated gotrue to supabase_auth.errors in web and desktop clients -- v7.8
+- PKCE-only OAuth callback (implicit flow removed) with error parameter handling and dead /api/auth/oauth-callback endpoint removed -- v7.8
+- NiceGUI monkey-patches isolated in web/framework_patches.py with packaging.version version guards -- v7.8
+- 205+ silent exception handlers across 76 first-party files audited (each logs or has justification comment) -- v7.8
+- .gitignore root debris cleanup (50→126 lines, untracked root 67→1) with exempted intentional assets -- v7.8
+- Documentation refresh: CODE_INDEX.md v7.8 sections, OPEN_ISSUES.md code review tracking, DEVELOPER_GUIDE.md CI/ruff/deps workflow -- v7.8
+
 ### Active
 
-## Current Milestone: v7.8 Structural Quality
-
-**Goal:** Reduce structural debt identified by dual code review (Claude Opus + Codex) — break up god files, add CI, pin deps, clean state management — without changing any user-visible behavior.
-
-**Target features:**
-- Pin dependencies with exact versions, add pytest+ruff CI (including Windows runner), migrate deprecated gotrue auth
-- Audit and fix silent exception handlers, encapsulate framework monkey-patches, clean repo root debris
-- Update documentation (CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE, check_docs green)
-
-**Key constraint:** Zero user-visible behavior changes. Current pytest baseline (1067 passed, 8 skipped) must remain green. Both apps must work identically.
-
-**Follow-up (v7.9 Decomposition):** Break up genizah_app.py god file and web page god files — deferred to leverage v7.8 CI safety net.
+_No active requirements — v7.8 milestone just completed. Next milestone (v7.9 Decomposition) to be defined via /gsd-new-milestone._
 
 ### Out of Scope
 
@@ -238,6 +241,13 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | ExclusionSource model with per-source tracking | Users can see and clear individual exclusion sources | Good |
 | IE volume data from MARC 907 field order | 907 field position maps to IIIF suffix; validated via stratified IIIF sampling | Good |
 | Per-IE browse_map grouping (not cross-IE dedup) | Each IE's pages independently addressable; 98.5% single-IE manuscripts unchanged | Good |
+| Two-file dependency pinning (requirements.txt + requirements-lock.txt) | Direct deps editable, full transitive closure reproducible in CI, cross-platform caveat documented | Good |
+| Scoped ruff ruleset (E9/F401/F811/F821 only) | Catch real bugs without side-questing over a legacy codebase; expandable over time | Good |
+| CI matrix on both Ubuntu and Windows | Windows is dev + deploy platform; ensures CI catches platform-specific regressions | Good |
+| Per-patch version guards using packaging.version.Version() | Each patch can be retired independently as NiceGUI fixes them upstream; string comparison would break at 3.10 vs 3.8 | Good |
+| Inline justification comments for silent handlers (not converting to logging) | Preserves intentional suppression behavior; grep-visible; zero behavioral change | Good |
+| Root-anchored .gitignore patterns with explicit exemption block | Prevents accidentally hiding subdirectory files; intentional assets documented at the source of truth | Good |
+| PKCE-only OAuth callback (implicit flow removed) | Removes unused dead code path; aligns with Supabase default; confirmed via production testing | Good |
 
 ## Evolution
 
@@ -257,4 +267,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-15 after v7.8 Phase 66 (Documentation Update) complete*
+*Last updated: 2026-04-15 after v7.8 Structural Foundation milestone shipped*
