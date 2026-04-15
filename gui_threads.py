@@ -1073,3 +1073,65 @@ class PuzzleMetaLoaderThread(QThread):
             } for img in images]
         except Exception:
             return []
+
+
+class FilterCountWorker(QThread):
+    """Background worker to compute manuscript count for pre-search filters."""
+    finished = pyqtSignal(object)  # set or None
+
+    def __init__(self, filters: dict, parent=None):
+        super().__init__(parent)
+        self.filters = filters
+
+    def run(self):
+        try:
+            from shared.fjms_service import FjmsService
+            fjms = FjmsService(thread_safe=True)
+            if not fjms.is_available():
+                self.finished.emit(None)
+                return
+            include_mode = self.filters.get('include_mode', True)
+            kwargs = dict(
+                date_from=self.filters.get('date_from'),
+                date_to=self.filters.get('date_to'),
+                include_undated=self.filters.get('include_undated', False),
+                material_include=self.filters.get('material_include'),
+                material_exclude=self.filters.get('material_exclude'),
+                text_all=self.filters.get('text_all') or None,
+                text_any=self.filters.get('text_any') or None,
+                text_not=self.filters.get('text_not') or None,
+                # Measurement filters (Phase 54)
+                width_min=self.filters.get('width_min'),
+                width_max=self.filters.get('width_max'),
+                height_min=self.filters.get('height_min'),
+                height_max=self.filters.get('height_max'),
+                line_count_min=self.filters.get('line_count_min'),
+                line_count_max=self.filters.get('line_count_max'),
+                line_height_min=self.filters.get('line_height_min'),
+                line_height_max=self.filters.get('line_height_max'),
+                text_density_min=self.filters.get('text_density_min'),
+                text_density_max=self.filters.get('text_density_max'),
+                measurement_material=self.filters.get('measurement_material'),
+            )
+            _domains = self.filters.get('domains') or None
+            _authors = self.filters.get('authors') or None
+            _works = self.filters.get('works') or None
+            # Legacy single-value fallback
+            if not _domains and self.filters.get('domain'):
+                _domains = [self.filters['domain']]
+            if not _authors and self.filters.get('author'):
+                _authors = [self.filters['author']]
+            if not _works and self.filters.get('work'):
+                _works = [self.filters['work']]
+            if include_mode:
+                kwargs['domains'] = _domains
+                kwargs['authors'] = _authors
+                kwargs['works'] = _works
+            else:
+                kwargs['domains_exclude'] = _domains
+                kwargs['authors_exclude'] = _authors
+                kwargs['works_exclude'] = _works
+            result = fjms.get_filter_sys_ids(**kwargs)
+            self.finished.emit(result)
+        except Exception:
+            self.finished.emit(None)  # Operation failed; emit empty/None so caller handles gracefully
