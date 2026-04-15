@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: null
-milestone_name: null
-status: milestone_complete
+milestone: v7.9
+milestone_name: Decomposition
+status: defining_requirements
 stopped_at: null
-last_updated: "2026-04-15T07:30:00Z"
+last_updated: "2026-04-15T08:00:00Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 0
@@ -25,11 +25,14 @@ last_shipped:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Planning next milestone (v7.9 Decomposition tentatively — run `/gsd-new-milestone` to define)
+**Current focus:** v7.9 Decomposition — defining requirements
 
 ## Current Position
 
-No active milestone. Most recent shipped: v7.8 Structural Foundation (2026-04-15).
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-15 — Milestone v7.9 started
 
 ## Performance Metrics
 

@@ -166,7 +166,14 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-_No active requirements — v7.8 milestone just completed. Next milestone (v7.9 Decomposition) to be defined via /gsd-new-milestone._
+**Milestone v7.9: Decomposition**
+
+Goal: Reduce structural debt by decomposing the two largest files (genizah_app.py ~18.5K lines, web/pages/search.py + browse.py) into focused modules — leveraging the v7.8 CI safety net. Zero user-visible behavior changes.
+
+Target features:
+- Desktop: Extract ResultDialog, PuzzleCanvasWindow + puzzle classes, ManuscriptViewerWidget + image viewers, ExcludeDialog + filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules; GenizahGUI stays in genizah_app.py as orchestrator
+- Web: Split web/pages/search.py and web/pages/browse.py into state/UI/logic modules; reduce app.storage.user sprawl and detached asyncio.ensure_future flows via page-scoped state objects
+- Non-regression: pytest baseline green throughout + qualitative search/browse responsiveness preserved
 
 ### Out of Scope
 
@@ -267,4 +274,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-15 after v7.8 Structural Foundation milestone shipped*
+*Last updated: 2026-04-15 — v7.9 Decomposition milestone started*
