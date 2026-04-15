@@ -8769,25 +8769,6 @@ class ResultDialog(QDialog):
         self.img_thread.image_loaded.connect(self.on_img_loaded)
         self.img_thread.load_failed.connect(self.on_img_failed)
         self.img_thread.start()
-        
-    def start_browse_download(self, sid, thumb_url):
-        if sid != self.current_browse_sid:
-            return
-
-        logger.debug("Starting browse image download for SID=%s, URL=%s", sid, thumb_url)
-
-        self.browse_thumb_url = thumb_url
-        self.cancel_browse_image_thread()
-
-        if not thumb_url:
-            self.on_browse_img_failed()
-            return
-
-        # Create and start thread
-        self.browse_img_thread = ImageLoaderThread(thumb_url)
-        self.browse_img_thread.image_loaded.connect(self.on_browse_img_loaded)
-        self.browse_img_thread.load_failed.connect(self.on_browse_img_failed)
-        self.browse_img_thread.start()
 
     def on_img_loaded(self, image):
         pix = QPixmap.fromImage(image)
@@ -8833,14 +8814,6 @@ class ResultDialog(QDialog):
                 if self.group_thread.isRunning():
                     self.group_thread.terminate()
                     self.group_thread.wait()
-                    
-            if getattr(self, 'browse_img_thread', None) and self.browse_img_thread.isRunning():
-                try:
-                    self.browse_img_thread.image_loaded.disconnect()
-                    self.browse_img_thread.load_failed.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
-                self._wait_or_terminate_thread(self.browse_img_thread)
 
             # Stop manuscript viewer image threads
             if getattr(self, 'ms_viewer', None):
