@@ -256,7 +256,7 @@ def create_catalog_browse_page(
                                 text = text[:200] + '...'
                             snippet_map[sid] = text
                     except Exception:
-                        pass
+                        pass  # Browse enrichment failed; continue with available data
         except Exception as e:
             logger.debug(f"Snippet fetch failed: {e}")
 
@@ -271,7 +271,7 @@ def create_catalog_browse_page(
                     shelfmark = sm or ''
                     library_code = state.meta_mgr.get_library_for_id(sid) or ''
             except Exception:
-                pass
+                pass  # Enrichment failed for this item; continue with available data
             resolved.append({
                 'shelfmark': shelfmark,
                 'library_code': library_code,
@@ -338,7 +338,7 @@ def create_catalog_browse_page(
             try:
                 _show_cat_trans = app.storage.user.get('show_translations', False)
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
             _is_translated_title = False
             if _show_cat_trans:
                 alma_id = r.get('alma_id', '')
@@ -362,7 +362,7 @@ def create_catalog_browse_page(
                                 _is_translated_title = True
                         _tsvc_cat.close()
                     except Exception:
-                        pass
+                        pass  # Translation lookup failed; continue without translation
 
             rows.append({
                 'sys_id': sid,
@@ -1288,5 +1288,5 @@ def create_catalog_browse_page(
         try:
             await initial_load()
         except Exception:
-            pass
+            pass  # Deferred UI refresh failed; page still usable
     asyncio.ensure_future(_deferred_initial_load())

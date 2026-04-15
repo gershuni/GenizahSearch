@@ -306,7 +306,7 @@ def _render_list_item(
     try:
         count = lists_mgr._get_list_item_count(list_id)
     except Exception:
-        count = 0
+        count = 0  # Count query failed; use zero as fallback
 
     # Item container
     item_classes = 'w-full p-2 rounded cursor-pointer transition-all'

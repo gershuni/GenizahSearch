@@ -151,7 +151,7 @@ def create_report_button(
                     try:
                         user_id = app.storage.user.get('user_id', '')
                     except Exception:
-                        pass
+                        pass  # Browser storage operation failed; preference not persisted
                     success = save_report(
                         dataset=dataset,
                         record_id=record_id,

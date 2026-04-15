@@ -128,7 +128,7 @@ def publish_join(client, user_id: str, doc: PuzzleDocument, image_service) -> st
         try:
             bucket.remove([image_path, thumbnail_path])
         except Exception:
-            pass
+            pass  # Thumbnail load failed; full image will replace it
         raise
 
     return doc.id

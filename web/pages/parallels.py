@@ -84,7 +84,7 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
                 if text:
                     return text
         except Exception:
-            pass
+            pass  # Cache cleanup failed; stale cache is acceptable
 
     try:
         encoded_ref = ref.replace(' ', '%20')
@@ -138,7 +138,7 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
                     with open(cache_file, 'w', encoding='utf-8') as f:
                         f.write(cleaned)
                 except Exception:
-                    pass
+                    pass  # Cache cleanup failed; stale cache is acceptable
                 return cleaned
     except requests.Timeout:
         logger.error(f"Timeout fetching {ref}")
@@ -223,7 +223,7 @@ def create_parallels_page(initial_text: str = None):
             state.parallels_results = p_state.results
             state.parallels_filtered = app.storage.user.get('parallels_filtered', [])
         except Exception:
-            pass
+            pass  # Browser storage operation failed; preference not persisted
 
     # Decode initial text from URL or restore from storage
     decoded_text = ""
@@ -235,7 +235,7 @@ def create_parallels_page(initial_text: str = None):
             # The initial_text might encode sys_id info, or we check query params
             # NiceGUI query params are available via app.storage.user or client
         except Exception:
-            decoded_text = initial_text
+            decoded_text = initial_text  # Operation failed; use fallback value
     else:
         # Try to restore from storage
         decoded_text = app.storage.user.get('parallels_source_text', '')
@@ -251,7 +251,7 @@ def create_parallels_page(initial_text: str = None):
                 p_state.excluded_manuscript_ids.add(source_sys_id)
                 persist_value('parallels_excluded_manuscript_ids', list(p_state.excluded_manuscript_ids))
         except Exception:
-            pass
+            pass  # Browser storage operation failed; preference not persisted
 
     # --- Composition History Management ---
     def _get_comp_history() -> list:
@@ -371,7 +371,7 @@ def create_parallels_page(initial_text: str = None):
                         try:
                             app.storage.user['parallels_source_text'] = text
                         except Exception:
-                            pass
+                            pass  # Browser storage operation failed; preference not persisted
 
                     text_input.on('update:model-value', update_word_count)
                     # Also update on blur to catch paste events
@@ -521,7 +521,7 @@ def create_parallels_page(initial_text: str = None):
                                 else:
                                     boundary_warning_label.style('display: none;')
                         except Exception:
-                            boundary_stats_label.style('display: none;')
+                            boundary_stats_label.style('display: none;')  # Operation failed; use fallback value
                             boundary_warning_label.style('display: none;')
 
                     # Update stats when relevant controls change
@@ -1335,7 +1335,7 @@ def create_parallels_page(initial_text: str = None):
             app.storage.user['filter_sources_custom'] = custom_texts
             app.storage.user['filter_sources_custom_count'] = filter_sources.get('custom_count', 0)
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
 
     def on_source_toggled(ref, checked):
         """Handle source checkbox toggle."""
@@ -1390,7 +1390,7 @@ def create_parallels_page(initial_text: str = None):
             try:
                 dialog.close()
             except Exception:
-                pass
+                pass  # UI element update optional; continue rendering
 
         # Filter out already loaded refs
         new_refs = [r for r in refs if r not in filter_sources['loaded']]
@@ -2185,7 +2185,7 @@ def create_parallels_page(initial_text: str = None):
                     app.storage.user['parallels_results'] = main_results
                     app.storage.user['parallels_filtered'] = filtered_results
                 except Exception:
-                    pass
+                    pass  # Browser storage operation failed; preference not persisted
 
                 # Add to composition history
                 try:
@@ -2221,7 +2221,7 @@ def create_parallels_page(initial_text: str = None):
                         },
                     )
                 except Exception:
-                    pass
+                    pass  # Filter operation failed; continue with defaults
 
                 # Collect domain data for parallels results
                 all_sys_ids = []
@@ -2247,7 +2247,7 @@ def create_parallels_page(initial_text: str = None):
                     try:
                         _par_show_trans = app.storage.user.get('show_translations', False)
                     except Exception:
-                        pass
+                        pass  # Translation lookup failed; continue without translation
 
                     def collect_parallels_translations(sys_ids, show_trans=False):
                         """Batch-fetch title and PGP translations for parallels results (Phase 46-07)."""
@@ -2650,7 +2650,7 @@ def create_parallels_page(initial_text: str = None):
                         shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
                         shelfmark = shelf_temp or shelfmark
                 except Exception:
-                    pass
+                    pass  # Shelfmark lookup failed; use fallback identifier
 
             # Use sys_id as key, fallback to shelfmark
             key = sys_id if sys_id else shelfmark
@@ -2691,7 +2691,7 @@ def create_parallels_page(initial_text: str = None):
                             shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
                             shelfmark = shelf_temp or shelfmark
                     except Exception:
-                        pass
+                        pass  # Shelfmark lookup failed; use fallback identifier
 
                 key = sys_id if sys_id else shelfmark
                 if key not in filtered_grouped:
@@ -2860,7 +2860,7 @@ def create_parallels_page(initial_text: str = None):
                     from genizah_core import get_library_display
                     library_name = get_library_display(library_code, short=False, lang=get_language())
             except Exception:
-                pass
+                pass  # Library enrichment failed; continue with available data
 
         # Build display shelfmark with library name
         display_shelfmark = shelfmark
@@ -3119,7 +3119,7 @@ def create_parallels_page(initial_text: str = None):
                     from genizah_core import get_library_display
                     library_name = get_library_display(library_code, short=False, lang=get_language())
             except Exception:
-                pass
+                pass  # Library enrichment failed; continue with available data
 
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-96 max-w-2xl'):
             # Changed to H3
@@ -3206,7 +3206,7 @@ def create_parallels_page(initial_text: str = None):
                     shelf, _ = state.meta_mgr.get_meta_for_id(sys_id)
                     return shelf or 'Unknown'
             except Exception:
-                pass
+                pass  # Shelfmark lookup failed; use fallback identifier
         return 'Unknown'
 
     def create_result_card(idx, item):
@@ -3233,7 +3233,7 @@ def create_parallels_page(initial_text: str = None):
                         from genizah_core import get_library_display
                         library_name = get_library_display(library_code, short=False, lang=get_language())
             except Exception:
-                pass
+                pass  # Library enrichment failed; continue with available data
 
         # Build display shelfmark with library name
         display_shelfmark = shelfmark

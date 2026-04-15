@@ -53,7 +53,7 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
             fjms_trans = fjms_trans.get(sys_id, {})
         tsvc.close()
     except Exception:
-        pass
+        pass  # Translation lookup failed; continue without translation
 
     # Group records by source_name to get team columns, skipping generic sources
     from shared.fjms_service import GENERIC_SOURCE_NAMES
@@ -289,7 +289,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
                 )
         _tsvc_rt.close()
     except Exception:
-        pass
+        pass  # Translation lookup failed; continue without translation
 
     # Check if any team has running title data
     _any_rt = False
@@ -402,7 +402,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
                     _tf_trans_map = {k: v[0] for k, v in _tf_lookup.get(alma_id, {}).items()}
                 _tsvc_tf.close()
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
 
         dc_vals = []
         for team in teams:
@@ -439,7 +439,7 @@ def _render_catalog_table(teams, running_titles, sizes, fields,
                 _title_trans_map = {k: v[0] for k, v in _gt_lookup.get(alma_id, {}).items()}
             _tsvc_gt.close()
         except Exception:
-            pass
+            pass  # Translation lookup failed; continue without translation
 
     gt_vals = []
     for team in teams:
@@ -645,7 +645,7 @@ def _render_free_descriptions(free_descriptions, is_heb, fjms_trans=None, alma_i
                             _fd_lookup[sid] = en
             _tsvc_fd.close()
         except Exception:
-            pass
+            pass  # Translation lookup failed; continue without translation
 
     for desc in free_descriptions:
         text = desc.get("text", "")

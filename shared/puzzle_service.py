@@ -180,7 +180,7 @@ class PuzzleService:
                 ).fetchone()
                 thumbnail_b64 = existing['thumbnail_b64'] if existing else ''
             except Exception:
-                thumbnail_b64 = ''
+                thumbnail_b64 = ''  # Thumbnail extraction failed; use empty string
 
         with self._write_lock:
             try:
@@ -268,7 +268,7 @@ class PuzzleService:
                             seen.append(sm)
                     d['shelfmarks_summary'] = ' + '.join(seen) if seen else ''
                 except Exception:
-                    d['shelfmarks_summary'] = ''
+                    d['shelfmarks_summary'] = ''  # Shelfmark lookup failed; use raw identifier
                 results.append(d)
             return results
         except Exception as e:

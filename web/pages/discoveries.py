@@ -176,7 +176,7 @@ def resolve_shelfmark(doc_id: str, shelfmark: str = None) -> tuple:
             sh, title = state.meta_mgr.get_meta_for_id(doc_id)
             return sh or doc_id, title or ''
         except Exception:
-            pass
+            pass  # Shelfmark lookup failed; use fallback identifier
 
     return doc_id or '', ''
 
@@ -265,7 +265,7 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
             try:
                 await load_detail()
             except Exception:
-                pass
+                pass  # Deferred UI refresh failed; page still usable
         asyncio.ensure_future(_deferred_load_detail())
     dlg.open()
 
@@ -444,7 +444,7 @@ def create_discoveries_page():
             try:
                 await initial_load()
             except Exception:
-                pass
+                pass  # Deferred UI refresh failed; page still usable
         asyncio.ensure_future(_deferred_initial_load())
 
 
@@ -1237,7 +1237,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                         else:
                                             ui.label(tr('No responses yet')).classes('text-sm').style('color: var(--text-tertiary);')
                                 except Exception:
-                                    pass
+                                    pass  # Render/display failed; continue
 
                                     # Reply form
                                     if GlobalAuthState.is_logged_in():
@@ -1273,7 +1273,7 @@ def create_feed_item(item: dict, on_refresh=None):
                                 try:
                                     await do_load_responses()
                                 except Exception:
-                                    pass
+                                    pass  # Deferred UI refresh failed; page still usable
                             asyncio.ensure_future(_deferred_responses())
 
                 # Footer - collapsed view info
@@ -1404,12 +1404,12 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                     try:
                                         selected_doc['page_number'] = int(e.value)
                                     except Exception:
-                                        selected_doc['page_number'] = None
+                                        selected_doc['page_number'] = None  # Initialization failed; feature degrades gracefully
 
                                 page_sel.on('update:model-value', on_page_change)
                             selected_doc['page_number'] = int(initial_page)
                     except Exception:
-                        pass
+                        pass  # Update failed; continue with current state
 
                 update_doc_info()
 
@@ -1444,7 +1444,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                             shelfmark = sh or doc_id
                                             title = title or ti or ''
                                         except Exception:
-                                            shelfmark = doc_id
+                                            shelfmark = doc_id  # Shelfmark lookup failed; use raw identifier
 
                                     def make_pick(did=doc_id, sm=shelfmark, ti=title, pg=page):
                                         def pick():
@@ -1488,7 +1488,7 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                 try:
                                     count = state.lists_mgr._get_list_item_count(list_id) if list_id != 'recent' else len(state.lists_mgr.data.get('recent_items', []))
                                 except Exception:
-                                    count = 0
+                                    count = 0  # Count query failed; use zero as fallback
 
                                 def make_list_click(lid=list_id, lname=list_name):
                                     def click():
@@ -1551,11 +1551,11 @@ def open_edit_discovery_dialog(discovery_id: str, item: dict, on_refresh=None):
                                     try:
                                         selected_doc['page_number'] = int(e.value)
                                     except Exception:
-                                        selected_doc['page_number'] = None
+                                        selected_doc['page_number'] = None  # Initialization failed; feature degrades gracefully
 
                                 page_sel.on('update:model-value', on_page_change)
                     except Exception:
-                        pass
+                        pass  # Update failed; continue with current state
 
             update_doc_info()
 
@@ -1738,7 +1738,7 @@ def create_new_discovery_dialog(on_success=None):
                                         )
                                     selected_doc['selected_page'] = initial_page
                             except Exception:
-                                pass
+                                pass  # Browse enrichment failed; continue with available data
 
                         update_doc_info()
 
@@ -1773,7 +1773,7 @@ def create_new_discovery_dialog(on_success=None):
                                                     shelfmark = sh or doc_id
                                                     title = title or ti or ''
                                                 except Exception:
-                                                    shelfmark = doc_id
+                                                    shelfmark = doc_id  # Shelfmark lookup failed; use raw identifier
 
                                             def make_pick(did=doc_id, sm=shelfmark, ti=title, pg=page):
                                                 def pick():
@@ -1817,7 +1817,7 @@ def create_new_discovery_dialog(on_success=None):
                                         try:
                                             count = state.lists_mgr._get_list_item_count(list_id) if list_id != 'recent' else len(state.lists_mgr.data.get('recent_items', []))
                                         except Exception:
-                                            count = 0
+                                            count = 0  # Count query failed; use zero as fallback
 
                                         def make_list_click(lid=list_id, lname=list_name):
                                             def click():
@@ -1919,7 +1919,7 @@ def create_new_discovery_dialog(on_success=None):
                         try:
                             page_num = int(selected_doc['selected_page'])
                         except Exception:
-                            pass
+                            pass  # Dialog operation failed; continue with available data
 
                     # Filter out empty entries
                     valid_additional_shelfmarks = [

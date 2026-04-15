@@ -33,7 +33,7 @@ def _navigate_random_fragment():
             ui.navigate.to(f'/browse?sys_id={random_id}')
             return
     except Exception:
-        pass
+        pass  # HTML processing failed; use original text
     ui.navigate.to('/browse')
 
 

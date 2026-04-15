@@ -239,7 +239,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             try:
                 search_state.exclusion_sources = deserialize_sources(_saved_excl)
             except Exception:
-                search_state.exclusion_sources = []
+                search_state.exclusion_sources = []  # Lookup failed; use empty list
 
     # Phase 55: Restore refinement chain from session (D-14)
     _saved_refinement_chain = app.storage.user.get('search_refinement_chain', [])
@@ -247,7 +247,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         try:
             search_state.refinement_chain = [RefinementStep.from_dict(d) for d in _saved_refinement_chain]
         except Exception:
-            search_state.refinement_chain = []
+            search_state.refinement_chain = []  # Lookup failed; use empty list
 
     # Phase 57: Visual Similarity URL param initialization
     if vs_src:
@@ -260,7 +260,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         try:
             _vs_cached = app.storage.tab.get('vs_partner_cache')
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
 
         if _vs_cached:
             import json as _json_vs
@@ -268,7 +268,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _vs_sys_ids = set(_json_vs.loads(_vs_cached))
                 del app.storage.tab['vs_partner_cache']  # One-time use
             except Exception:
-                _vs_sys_ids = None
+                _vs_sys_ids = None  # Initialization failed; feature degrades gracefully
         else:
             _vs_sys_ids = None
 
@@ -279,7 +279,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _vs_svc = get_vs_service(thread_safe=True)
                 _vs_sys_ids = _vs_svc.get_suggestion_partners(_vs_source_ids, _vs_mode_val)
             except Exception:
-                _vs_sys_ids = set()
+                _vs_sys_ids = set()  # Batch lookup failed; use empty set for this batch
 
         if _vs_sys_ids:
             # Resolve shelfmarks for display label
@@ -422,7 +422,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _sr = app.storage.user.get('search_results')
             search_state.results = _sr if _sr is not None else []
         except Exception:
-            pass
+            pass  # Browser storage operation failed; preference not persisted
 
 
     # === UI Layout ===
@@ -1934,7 +1934,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         result = await run.io_bound(_do_replay)
                         search_state.refinement_restrict_sys_ids = result
                     except Exception:
-                        pass
+                        pass  # Shelfmark lookup failed; use fallback identifier
                     search_state._refine_mode = True
                     await execute_search()
                 asyncio.ensure_future(_replay_and_search())
@@ -2582,7 +2582,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     else:
                         preview_label_ref['el'].text = tr('No words entered')
             except Exception:
-                if preview_label_ref['el']:
+                if preview_label_ref['el']:  # Operation failed; use fallback value
                     preview_label_ref['el'].text = ''
 
         def on_word_focus(comp_idx, word_idx):
@@ -3500,7 +3500,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         try:
                             all_lists = lists_mgr.get_all_lists(include_recent=False)
                         except Exception:
-                            all_lists = []
+                            all_lists = []  # Lookup failed; use empty list
                         if not all_lists:
                             with ui.column().classes('items-center py-6'):
                                 ui.icon('list_alt', size='3rem').classes('text-gray-300')
@@ -3521,7 +3521,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         try:
                                             list_items = lists_mgr.get_items_in_list_sync(list_id)
                                         except Exception:
-                                            list_items = []
+                                            list_items = []  # Lookup failed; use empty list
                                         resolved = []
                                         for it in list_items:
                                             sid = it.get('sys_id', '')
@@ -3532,7 +3532,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 try:
                                                     sm, _ = state.meta_mgr.get_meta_for_id(sid)
                                                 except Exception:
-                                                    pass
+                                                    pass  # Shelfmark lookup failed; use fallback identifier
                                             resolved.append({'sys_id': sid, 'shelfmark': sm or sid})
                                         if not resolved:
                                             continue
@@ -4192,7 +4192,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         return tt
                     search_state.title_translations = await run.io_bound(_fetch_partial_titles)
                 except Exception:
-                    pass
+                    pass  # Translation lookup failed; continue without translation
 
             # Render what we have (no enrichment badges -- acceptable for partial results)
             render_results(results, page=0)
@@ -4215,7 +4215,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     return tt
                 search_state.title_translations = await run.io_bound(_fetch_titles_fast)
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
 
         # Finalize search state for immediate display
         state.last_results = results
@@ -4330,7 +4330,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if bidirectional_cb.value: params += '&bidirectional=1'
             ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
         except Exception:
-            pass
+            pass  # JavaScript execution failed; non-fatal UI glitch
 
         # Storage persistence (cap at 1000, strip full_text)
         try:
@@ -4347,7 +4347,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 storage_results.append(sr)
             app.storage.user['search_results'] = storage_results
         except Exception:
-            pass
+            pass  # Browser storage operation failed; preference not persisted
 
         # Search history -- D-15: Refined searches don't enter history
         if not search_state.refinement_chain:
@@ -4391,7 +4391,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     },
                 )
             except Exception:
-                pass
+                pass  # Filter operation failed; continue with defaults
 
         # IMMEDIATE RENDER — user sees results with title translations only
         render_results(results, page=0)
@@ -4416,7 +4416,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         try:
             _show_trans_for_enrich = app.storage.user.get('show_translations', False)
         except Exception:
-            pass
+            pass  # Translation lookup failed; continue without translation
 
         def collect_translations(sys_ids, show_trans=False):
             try:
@@ -4933,7 +4933,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                         ui.badge(f'#{_p["rank"]}').props('color=deep-orange-1 text-color=deep-orange-9').classes('text-xs')
                                                         ui.link(_p_sm, f'/browse?sys_id={_p["alma_id"]}').classes('text-xs')
                                         except Exception:
-                                            with container:
+                                            with container:  # Visual similarity lookup failed; continue
                                                 ui.label(tr('Could not load visual similarity data. Try again later.')).classes('text-xs').style('color: var(--text-muted);')
                                 else:
                                     container.classes(add='hidden')
@@ -4956,7 +4956,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     try:
                         _show_trans = app.storage.user.get('show_translations', False)
                     except Exception:
-                        pass
+                        pass  # Translation lookup failed; continue without translation
                     _title_info = search_state.title_translations.get(sys_id) if sys_id else None
                     if _title_info:
                         _lang = get_language()
@@ -5057,7 +5057,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             _card_fl_id = _parsed.get('fl_id')
                             _card_ie_id = _parsed.get('ie_id')
                         except Exception:
-                            pass
+                            pass  # UI visibility update failed; continue rendering
                     _card_browse_url = f'/browse?sys_id={sys_id}'
                     if _card_fl_id:
                         _card_browse_url += f'&fl_id={_card_fl_id}'
@@ -5130,7 +5130,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     from web.pages.browse import is_oxford_manuscript
                     is_oxford = is_oxford_manuscript(display.get('shelfmark', ''), display.get('library_code', ''))
                 except Exception:
-                    pass
+                    pass  # NLI enrichment failed; continue without
                 if is_oxford:
                     try:
                         from web.pages.browse import get_oxford_direct_image_url
@@ -5140,7 +5140,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         else:
                             _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
                     except Exception:
-                        _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+                        _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"  # Enrichment failed; continue with available data
 
             with expand_container:
                 # Content row: image + text
@@ -5367,7 +5367,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _parsed_hdr = state.meta_mgr.parse_full_id_components(result['raw_header'])
                     adv_state.volume_ie = _parsed_hdr.get('ie_id')
                 except Exception:
-                    pass
+                    pass  # Browse enrichment failed; continue with available data
 
             # Fetch page data asynchronously
             async def fetch_and_render():
@@ -5399,7 +5399,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'catalog_refs': fjms.get_catalog_refs(sid),
                             })
                     except Exception:
-                        pass
+                        pass  # Enrichment failed for this item; continue with available data
                     try:
                         from shared.nli_crossref_service import get_nli_crossref_service
                         svc = get_nli_crossref_service(thread_safe=True)
@@ -5408,7 +5408,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 lambda: svc.get_crossref_metadata(sid)
                             )
                     except Exception:
-                        pass
+                        pass  # Enrichment failed for this item; continue with available data
 
                 render_content(result)
 
@@ -5643,7 +5643,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         fl_id = parsed.get('fl_id')
                     ie_id = parsed.get('ie_id')
                 except Exception:
-                    pass
+                    pass  # URL parse failed; return error response
 
             # Determine if Oxford manuscript
             is_oxford = is_oxford_manuscript(shelfmark, library_code)
@@ -5829,7 +5829,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         cached = app_state.meta_mgr.nli_cache.get(sys_id, {})
                         marc_bib = cached.get('marc', {}).get('bibliography', [])
                 except Exception:
-                    pass
+                    pass  # Enrichment failed for this item; continue with available data
                 catalog_source_count = len(fjms_data.get('source_names', []))
 
                 # === Info Bar (outside scroll area) ===
@@ -6035,7 +6035,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     try:
                                         _show_type_trans = app.storage.user.get('show_translations', False)
                                     except Exception:
-                                        pass
+                                        pass  # Translation lookup failed; continue without translation
                                     _type_lang = get_language()
                                     if _show_type_trans and _type_lang == 'he' and _pgpid_for_type and search_state.translation_data:
                                         _type_trans = search_state.translation_data.get(sys_id)
@@ -6093,7 +6093,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 try:
                                     _show_trans_adv = app.storage.user.get('show_translations', False)
                                 except Exception:
-                                    pass
+                                    pass  # Translation lookup failed; continue without translation
                                 _adv_pgpid = pgp_metadata.get('pgpid')
                                 _adv_trans_he = None
                                 _adv_lang = get_language()
@@ -6104,7 +6104,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         _adv_trans_he = _tsvc_adv.get_pgp_description_he(_adv_pgpid)
                                         _tsvc_adv.close()
                                     except Exception:
-                                        pass
+                                        pass  # Translation lookup failed; continue without translation
                                 if _adv_trans_he:
                                     _adv_st = {'showing_original': False, 'label': None, 'badge': None}
                                     def _make_adv_toggle(st, orig, trans):
@@ -6624,7 +6624,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 return result
                             _tag_trans = await run.io_bound(_fetch_tag_trans)
                 except Exception:
-                    pass
+                    pass  # Translation lookup failed; continue without translation
 
             results_container.clear()
             with results_container:

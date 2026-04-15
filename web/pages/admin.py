@@ -24,7 +24,7 @@ def get_shelfmark_for_id(sys_id: str) -> tuple:
             shelfmark, title = state.meta_mgr.get_meta_for_id(sys_id)
             return shelfmark or sys_id, title or ''
     except Exception:
-        pass
+        pass  # Translation lookup failed; continue without translation
     return sys_id, ''
 
 

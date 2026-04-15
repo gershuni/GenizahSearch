@@ -191,7 +191,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                         try:
                             resolved_shelfmark, _ = state.meta_mgr.get_meta_for_id(alma_id)
                         except Exception:
-                            pass
+                            pass  # Shelfmark lookup failed; use fallback identifier
 
                     if not resolved_shelfmark or resolved_shelfmark == 'Unknown':
                         continue
@@ -417,7 +417,7 @@ def create_joins_dialog(
                 try:
                     spinner_state['spinner'].delete()
                 except Exception:
-                    pass
+                    pass  # Shelfmark lookup failed; use fallback identifier
                 spinner_state['deleted'] = True
 
             content.clear()
@@ -524,7 +524,7 @@ def create_joins_dialog(
                                         if len(title.split()) > 4:
                                             title_preview += "..."
                                 except Exception:
-                                    pass
+                                    pass  # Join operation failed; continue with available data
 
                             # Create click handler - capture is_current properly
                             def make_click_handler(f, current):
@@ -694,7 +694,7 @@ def create_joins_dialog(
                                         for p in (pj_profiles_resp.data or [])
                                     }
                                 except Exception:
-                                    pass
+                                    pass  # Thumbnail load failed; full image will replace it
 
                                 ui.separator().classes('my-3')
                                 with ui.row().classes('items-center gap-2'):
@@ -759,7 +759,7 @@ def create_joins_dialog(
             try:
                 await load_content()
             except Exception:
-                pass
+                pass  # Shelfmark lookup failed; use fallback identifier
         asyncio.ensure_future(_deferred_load())
 
     dialog.open()
@@ -836,7 +836,7 @@ def show_add_join_form(
                                                         try:
                                                             item_shelfmark, _ = state.meta_mgr.get_meta_for_id(item_sys_id)
                                                         except Exception:
-                                                            pass
+                                                            pass  # Shelfmark lookup failed; use fallback identifier
 
                                                     # Fallback to sys_id only if we can't find shelfmark
                                                     if not item_shelfmark:
@@ -901,7 +901,7 @@ def show_add_join_form(
                                                                             try:
                                                                                 item_shelfmark, _ = state.meta_mgr.get_meta_for_id(item_sys_id)
                                                                             except Exception:
-                                                                                pass
+                                                                                pass  # Font/metrics calculation failed; use default spacing
 
                                                                         # Fallback to sys_id only if we can't find shelfmark
                                                                         if not item_shelfmark:
@@ -1128,6 +1128,6 @@ def create_joins_indicator(
         try:
             await load_and_display()
         except Exception:
-            pass
+            pass  # Tooltip metadata optional; item still valid
     asyncio.ensure_future(_deferred_load_display())
     return container

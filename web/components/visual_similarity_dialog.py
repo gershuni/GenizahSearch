@@ -60,7 +60,7 @@ async def _fetch_original_info(sys_id: str) -> dict:
     try:
         info = await run.io_bound(_do_fetch)
     except Exception:
-        pass
+        pass  # Dialog operation failed; continue with available data
     return info
 
 
@@ -74,12 +74,12 @@ async def _fetch_suggestion_text(alma_id: str) -> str:
                 if text:
                     return text[:150].strip()
         except Exception:
-            pass
+            pass  # Dialog operation failed; continue with available data
         return ''
     try:
         return await run.io_bound(_do)
     except Exception:
-        return ''
+        return ''  # Lookup failed; return empty string
 
 
 async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=None):
@@ -100,7 +100,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
     try:
         data = await run.io_bound(vs_service.get_suggestions, sys_id, 200)
     except Exception:
-        data = []
+        data = []  # Lookup failed; use empty list
 
     # Enrich each suggestion with shelfmark, library_code, domain
     if data:
@@ -116,7 +116,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                 if fjms.is_available():
                     domain_map = fjms.get_domains_for_sys_ids(all_ids)
             except Exception:
-                pass
+                pass  # Enrichment failed for this item; continue with available data
             for s in suggestions:
                 meta = csv_bank.get(s['alma_id']) if csv_bank else None
                 s['shelfmark'] = meta.get('shelfmark', s['alma_id']) if meta else s['alma_id']
@@ -408,7 +408,7 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, origina
                         try:
                             spinner.delete()
                         except Exception:
-                            pass
+                            pass  # Cache operation failed; continue without cached data
                         with text_label_container:
                             if text:
                                 dir_style = 'direction: rtl; text-align: right;' if is_heb else ''

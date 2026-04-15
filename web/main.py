@@ -224,7 +224,7 @@ def _resolve_ui_language() -> str:
     try:
         saved_lang = app.storage.user.get('ui_language')
     except Exception:
-        saved_lang = None
+        saved_lang = None  # Language pref load failed; will use default
 
     if saved_lang in ('he', 'en'):
         return saved_lang
@@ -388,7 +388,7 @@ def create_layout():
                 try:
                     app.storage.user['ui_language'] = new_lang
                 except Exception:
-                    pass
+                    pass  # Browser storage operation failed; preference not persisted
                 set_language(new_lang)
                 ui.navigate.reload()
 
@@ -440,7 +440,7 @@ def create_layout():
         try:
             await close_drawer_on_mobile()
         except Exception:
-            pass
+            pass  # Drawer close failed; non-fatal UI glitch
     asyncio.ensure_future(_deferred_close_drawer())
 
     # Content Area
@@ -528,14 +528,14 @@ def create_layout():
                 try:
                     show_translations = app.storage.user.get('show_translations', False)
                 except Exception:
-                    pass
+                    pass  # Translation lookup failed; continue without translation
 
                 def toggle_translations():
                     try:
                         current = app.storage.user.get('show_translations', False)
                         app.storage.user['show_translations'] = not current
                     except Exception:
-                        pass
+                        pass  # Translation lookup failed; continue without translation
                     ui.navigate.reload()
 
                 trans_icon = 'g_translate' if show_translations else 'translate'
@@ -691,7 +691,7 @@ def apply_theme_immediately():
     try:
         current_theme = app.storage.user.get('theme', 'light')
     except Exception:
-        current_theme = 'light'
+        current_theme = 'light'  # Theme read failed; default to light
     current_lang = _resolve_ui_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
 
@@ -962,7 +962,7 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
                 _row = state.meta_mgr.csv_bank.get(sys_id) if state.meta_mgr else None
                 _shelfmark_display = _row.get('shelfmark', sys_id) if _row else sys_id
             except Exception:
-                _shelfmark_display = sys_id
+                _shelfmark_display = sys_id  # Shelfmark lookup failed; use raw identifier
         _browse_title = f'{_shelfmark_display} | Dicta Genizah Search'
         ui.page_title(_browse_title)
         ui.add_head_html(page_meta(

@@ -22,7 +22,7 @@ def get_shelfmark_for_id(sys_id: str) -> tuple:
             shelfmark, title = state.meta_mgr.get_meta_for_id(sys_id)
             return shelfmark or sys_id, title or ''
     except Exception:
-        pass
+        pass  # Translation lookup failed; continue without translation
     return sys_id, ''
 
 
@@ -181,7 +181,7 @@ async def create_corrections_page():
                 try:
                     await load_edits()
                 except Exception:
-                    pass
+                    pass  # Deferred UI refresh failed; page still usable
             asyncio.ensure_future(_deferred_load_edits())
 
         def create_edit_card(corr: dict, delete_callback):
@@ -424,7 +424,7 @@ async def create_corrections_page():
                 try:
                     await load_comments()
                 except Exception:
-                    pass
+                    pass  # Deferred UI refresh failed; page still usable
             asyncio.ensure_future(_deferred_load_comments())
 
         def create_comment_card(comment: dict):

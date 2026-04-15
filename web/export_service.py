@@ -261,7 +261,7 @@ class ExportService:
             shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
             return (shelfmark or 'Unknown', title or '')
         except Exception:
-            return ('Unknown', '')
+            return ('Unknown', '')  # Metadata extraction failed; return fallback values
 
     def get_library_code(self, sys_id: str) -> str:
         """Get library code for a system ID."""
@@ -270,7 +270,7 @@ class ExportService:
         try:
             return self.meta_mgr.get_library_for_id(sys_id) or ''
         except Exception:
-            return ''
+            return ''  # Lookup failed; return empty string
 
     def get_library_display(self, library_code: str, short: bool = True) -> str:
         """Get library display name from code."""

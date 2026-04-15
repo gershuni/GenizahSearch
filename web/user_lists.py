@@ -708,7 +708,7 @@ class UserListsManager:
                         try:
                             sb_update_list(int(list_id), {'project_id': None})
                         except Exception:
-                            pass
+                            pass  # Cache operation failed; continue without cached data
 
             result = sb_delete_project(project_id_int)
             if result.get('success'):

@@ -691,7 +691,7 @@ class FjmsService:
                 if self._has_persons_titles:
                     logger.info("FjmsService: v5+ lookup tables detected (genizah_persons, genizah_titles)")
             except Exception:
-                self._has_persons_titles = False
+                self._has_persons_titles = False  # Feature detection failed; assume not available
 
             # Detect extended bibliography columns (re-exported with JournalVolumeTxt etc.)
             try:
@@ -699,7 +699,7 @@ class FjmsService:
                 self._has_bib_extended = True
                 logger.info("FjmsService: extended bibliography columns detected")
             except Exception:
-                self._has_bib_extended = False
+                self._has_bib_extended = False  # Feature detection failed; assume not available
         except Exception as e:
             logger.error(f"FjmsService: Failed to connect to {db_path}: {e}")
             self._conn = None
@@ -1390,7 +1390,7 @@ class FjmsService:
                                 (child_name,)
                             ).fetchone()[0]
                         except Exception:
-                            dc = hierarchy[child_name].get('count', 0)
+                            dc = hierarchy[child_name].get('count', 0)  # Count extraction failed; use default
                         # Set the child entry's count and nest sub-sub-domains
                         orphan_children = hierarchy[child_name].get('children', [])
                         for info in hierarchy.values():
@@ -2705,7 +2705,7 @@ class FjmsService:
             )
             result["catalog_sizes"] = [dict(r) for r in cursor]
         except Exception:
-            pass
+            pass  # Measurement query failed; try next source
 
         # Computed measurements (exclude all 4 flags per D-11)
         try:
@@ -2722,7 +2722,7 @@ class FjmsService:
             )
             result["computed"] = [dict(r) for r in cursor]
         except Exception:
-            pass
+            pass  # Measurement query failed; try next source
 
         # Extra info for this manuscript
         try:
@@ -2734,7 +2734,7 @@ class FjmsService:
             )
             result["extra_info"] = [dict(r) for r in cursor]
         except Exception:
-            pass
+            pass  # Measurement query failed; try next source
 
         # Blank images (fragments without text blocks)
         try:
@@ -2745,7 +2745,7 @@ class FjmsService:
             )
             result["blank_images"] = [dict(r) for r in cursor]
         except Exception:
-            pass
+            pass  # Lock acquisition failed; continue without lock
 
         return result
 
@@ -2766,7 +2766,7 @@ class FjmsService:
             cols_info = self._conn.execute("PRAGMA table_info(manuscript_measurements)").fetchall()
             cols = {row[1] if isinstance(row, (tuple, list)) else row['name'] for row in cols_info}
         except Exception:
-            return {}
+            return {}  # Lookup failed; return empty dict
         has_line_height = 'avg_line_height_mm' in cols
         lh_col = ", avg_line_height_mm" if has_line_height else ""
 
@@ -2823,7 +2823,7 @@ class FjmsService:
             if row:
                 return True
         except Exception:
-            pass
+            pass  # Measurement query failed; try next source
         # Fallback: check catalog_sizes (may have data not in summary)
         try:
             row = self._conn.execute(
@@ -2833,7 +2833,7 @@ class FjmsService:
             if row:
                 return True
         except Exception:
-            pass
+            pass  # Measurement query failed; try next source
         # Fallback: check computed_measurements
         try:
             row = self._conn.execute(
@@ -2843,7 +2843,7 @@ class FjmsService:
             if row:
                 return True
         except Exception:
-            pass
+            pass  # Measurement query failed; try next source
         return False
 
     def close(self):

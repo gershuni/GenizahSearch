@@ -156,7 +156,7 @@ def create_settings_page():
                     try:
                         lab_settings = state.lab_engine.settings
                     except Exception:
-                        pass
+                        pass  # Browser storage operation failed; preference not persisted
 
                 if lab_settings:
                     with ui.column().classes('w-full gap-4'):
@@ -253,7 +253,7 @@ def create_settings_page():
                     try:
                         settings = state.lab_engine.settings
                     except Exception:
-                        pass
+                        pass  # Filter operation failed; continue with defaults
 
                 if settings:
                     with ui.column().classes('w-full gap-4'):
@@ -357,7 +357,7 @@ def create_settings_page():
                                         ui.label(tr('Documents')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                                         ui.label(f'{doc_count:,}').style('color: var(--text-primary);')
                             except Exception:
-                                pass
+                                pass  # Font/metrics calculation failed; use default spacing
 
                     ui.separator().classes('my-2')
 
@@ -375,7 +375,7 @@ def create_settings_page():
                             else:
                                 ui.badge(tr('Not loaded'), color='gray')
                         except Exception:
-                            ui.badge(tr('Not loaded'), color='gray')
+                            ui.badge(tr('Not loaded'), color='gray')  # Visual similarity lookup failed; continue
                         # VS DB download deferred — nginx proxy_max_temp_file_size blocks 1.3GB response
                         # ui.button(
                         #     tr('Download full visual similarity database'), icon='download',

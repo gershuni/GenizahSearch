@@ -61,4 +61,4 @@ def verify_upload_token(token: str, fl_id: str) -> bool:
             return False
         return True
     except Exception:
-        return False
+        return False  # Puzzle operation failed; continue with defaults

@@ -169,7 +169,7 @@ def _save_nli_persistent_cache(
             if os.path.exists(temp_path):
                 os.remove(temp_path)
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
 
 def init_api_routes():
     """Register API routes for image proxy and exports."""
@@ -212,7 +212,7 @@ def init_api_routes():
                 _sitemap_sys_ids_cache['ids'] = sorted(mm.csv_bank.keys())
                 return _sitemap_sys_ids_cache['ids']
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
         # csv_bank not ready yet — return empty without caching so we retry next request
         return []
 
@@ -546,7 +546,7 @@ def init_api_routes():
                         headers={"Cache-Control": "public, max-age=600"}
                     )
             except Exception:
-                pass
+                pass  # Thumbnail load failed; full image will replace it
 
         # Fallback: try each FL ID until one works
         for fl_id in fl_ids:
@@ -563,7 +563,7 @@ def init_api_routes():
                         headers={"Cache-Control": "public, max-age=600"}
                     )
             except Exception:
-                pass
+                pass  # Cache operation failed; continue without cached data
 
         return Response(content="Image not found", status_code=404)
 
@@ -1135,7 +1135,7 @@ def init_api_routes():
                 return Response(content=cached, media_type=content_type,
                                 headers={"Cache-Control": "public, max-age=3600"})
             except Exception:
-                pass
+                pass  # Cache operation failed; continue without cached data
 
         # Read and validate client-uploaded image bytes
         content_length = int(request.headers.get('content-length', 0))
@@ -1157,7 +1157,7 @@ def init_api_routes():
             img = _PILImage.open(_io.BytesIO(raw_bytes))
             img.verify()
         except Exception:
-            return Response(content="Corrupt image data", status_code=400)
+            return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
 
         if not processed:
             # Cache original and return (validated as real image)
@@ -1173,7 +1173,7 @@ def init_api_routes():
         try:
             result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
         except Exception:
-            result_bytes = raw_bytes
+            result_bytes = raw_bytes  # Image processing failed; serve original bytes
 
         # Cache result via versioned cache path
         service.save_derivative_to_cache(fl_id, size, threshold, is_cul, result_bytes)
@@ -1232,7 +1232,7 @@ def init_api_routes():
             img = _PILImage.open(_io.BytesIO(png_bytes))
             img.verify()
         except Exception:
-            return Response(content="Corrupt image data", status_code=400)
+            return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
 
         # Save to cache
         service = get_puzzle_image_service()
@@ -1533,7 +1533,7 @@ def init_api_routes():
             if parsed.netloc not in ALLOWED_IMAGE_DOMAINS:
                 return Response(content="Domain not allowed", status_code=403)
         except Exception:
-            return Response(content="Invalid URL format", status_code=400)
+            return Response(content="Invalid URL format", status_code=400)  # Request processing failed; return error response
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1665,7 +1665,7 @@ def init_api_routes():
                 for s in suggestions:
                     s['domain'] = ''
         except Exception:
-            for s in suggestions:
+            for s in suggestions:  # Enrichment failed; populate empty defaults
                 s.setdefault('domain', '')
 
         return suggestions

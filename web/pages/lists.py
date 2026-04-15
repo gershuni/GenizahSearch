@@ -601,7 +601,7 @@ def create_lists_page():
                                             try:
                                                 create_snippet_ui(c, s, f, e)
                                             except Exception:
-                                                pass
+                                                pass  # UI element update optional; continue rendering
                                         asyncio.ensure_future(_deferred_snippet())
                                     return handler
 

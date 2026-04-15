@@ -299,7 +299,7 @@ class VisualSimilarityService:
             try:
                 self._conn.close()
             except Exception:
-                pass
+                pass  # Connection close failed; non-fatal
             self._conn = None
 
 

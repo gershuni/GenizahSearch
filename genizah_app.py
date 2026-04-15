@@ -2702,7 +2702,7 @@ class _CatalogRefreshWorker(QThread):
             )
             self.done.emit(result)
         except Exception:
-            self.done.emit({'data': {'results': [], 'total': 0}})
+            self.done.emit({'data': {'results': [], 'total': 0}})  # Operation failed; emit empty/None so caller handles gracefully
 
 
 class ImageLoaderThread(QThread):
@@ -3077,7 +3077,7 @@ class ExcludeDialog(QDialog):
                     if sid and sid not in new_sys_ids:
                         new_sys_ids.append(sid)
             except Exception:
-                pass
+                pass  # Shelfmark lookup failed; use fallback identifier
         if not new_sys_ids:
             return
         # Append to existing sys_id text area
@@ -3184,7 +3184,7 @@ class ExcludeDialog(QDialog):
                     items = self._lists_mgr.get_items_in_list(list_id)
                     sys_ids = {it.get('sys_id') for it in items if it.get('sys_id')}
                 except Exception:
-                    sys_ids = set()
+                    sys_ids = set()  # Batch lookup failed; use empty set for this batch
                 if sys_ids:
                     sources.append(ExclusionSource(
                         label=list_name,
@@ -5378,7 +5378,7 @@ class PuzzleCanvasWindow(QMainWindow):
                     pixmap.loadFromData(thumb_bytes)
                     item.setIcon(QIcon(pixmap))
                 except Exception:
-                    pass
+                    pass  # Thumbnail load failed; full image will replace it
             self._docs_list.addItem(item)
 
     def _on_doc_list_clicked(self, item):
@@ -5638,7 +5638,7 @@ class PuzzleCanvasWindow(QMainWindow):
         try:
             os.makedirs(puzzle_folder, exist_ok=True)
         except Exception:
-            puzzle_folder = default_folder
+            puzzle_folder = default_folder  # Custom folder path failed; use default
         default_path = os.path.join(puzzle_folder, suggested_name)
 
         path, _ = QFileDialog.getSaveFileName(
@@ -5833,7 +5833,7 @@ class PuzzleCanvasWindow(QMainWindow):
                 self.btn_publish.setToolTip(tr("Publish to Community"))
                 self.btn_publish.setStyleSheet("")
         except Exception:
-            self._is_published = False
+            self._is_published = False  # Publish status check failed; assume unpublished
 
     def _on_doc_context_menu(self, pos):
         """Show context menu on right-click in document list."""
@@ -6646,7 +6646,7 @@ class ResultDialog(QDialog):
                 parent._show_vs_dialog(sys_id, shelfmark, data, parent_dialog=self)
                 return
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
         # Try cache
         if not hasattr(parent, '_vs_cache'):
             parent._vs_cache = DesktopVSCache()
@@ -6667,7 +6667,7 @@ class ResultDialog(QDialog):
                 parent._show_vs_dialog(sys_id, shelfmark, data, parent_dialog=self)
                 return
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
         QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
 
     def _update_add_to_list_button(self):
@@ -6963,7 +6963,7 @@ class ResultDialog(QDialog):
             else:
                 self.btn_view_comments.setVisible(False)
         except Exception:
-            self.btn_view_comments.setVisible(False)
+            self.btn_view_comments.setVisible(False)  # Feature check failed; hide button
 
         # Fetch versions and corrections using shared method
         self._rd_refresh_versions(select_latest=True)
@@ -7401,7 +7401,7 @@ class ResultDialog(QDialog):
                                 if _ox_eng == part_meta.get('contents', '').strip():
                                     _ft_cache.setdefault('rd_part_contents', _ox_heb)
                 except Exception:
-                    pass
+                    pass  # Translation lookup failed; continue without translation
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
 
@@ -8164,7 +8164,7 @@ class ResultDialog(QDialog):
                 if fjms_svc.is_available():
                     is_printed = bool(fjms_svc.get_printed_sys_ids([self.current_sys_id]))
             except Exception:
-                pass
+                pass  # Cache operation failed; continue without cached data
         if is_printed:
             _printed_tag = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
             self.lbl_rd_printed.setText(f" | 🖨 {_printed_tag}")
@@ -8428,7 +8428,7 @@ class ResultDialog(QDialog):
                 if fjms_svc.is_available():
                     self._rd_catalog_detail = fjms_svc.get_catalog_detail(self.current_sys_id)
             except Exception:
-                pass
+                pass  # Shelfmark lookup failed; use fallback identifier
 
         if not self._rd_catalog_detail:
             return
@@ -8450,7 +8450,7 @@ class ResultDialog(QDialog):
                 if fjms_svc.is_available():
                     self._rd_measurements_data = fjms_svc.get_measurements(self.current_sys_id)
             except Exception:
-                pass
+                pass  # Measurement query failed; try next source
 
         if self._rd_measurements_data:
             shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
@@ -8595,7 +8595,7 @@ class ResultDialog(QDialog):
                     self.btn_compact_catalog.setEnabled(catalog_count > 0)
                     self.btn_compact_catalog.setVisible(True)
         except Exception:
-            self.btn_rd_catalog.setVisible(False)
+            self.btn_rd_catalog.setVisible(False)  # Feature check failed; hide button
             if hasattr(self, 'btn_compact_catalog'):
                 self.btn_compact_catalog.setVisible(False)
 
@@ -8932,7 +8932,7 @@ def _get_title_svc():
             from shared.translation_service import TranslationService
             _title_svc_singleton = TranslationService()
         except Exception:
-            return None
+            return None  # Operation failed; use fallback value
     return _title_svc_singleton
 
 def _is_hebrew_text(text):
@@ -9058,7 +9058,7 @@ def _resolve_display_title(sys_id, raw_title, eng_title_marc='', show_translatio
                 elif en.strip():
                     return en
     except Exception:
-        pass
+        pass  # Translation lookup failed; continue without translation
     # Fallback: original behavior
     if (not raw_title or not raw_title.strip()) and eng_title_marc:
         return eng_title_marc
@@ -9422,7 +9422,7 @@ class FilterCountWorker(QThread):
             result = fjms.get_filter_sys_ids(**kwargs)
             self.finished.emit(result)
         except Exception:
-            self.finished.emit(None)
+            self.finished.emit(None)  # Operation failed; emit empty/None so caller handles gracefully
 
 
 class PreSearchFilterDialog(QDialog):
@@ -9846,7 +9846,7 @@ class PreSearchFilterDialog(QDialog):
             self.domain_tree.blockSignals(False)
             self.domain_tree.expandAll()
         except Exception:
-            pass
+            pass  # UI population failed; continue with available data
 
     def _populate_authors(self, domain=None):
         """Populate author dropdown, optionally filtered by first selected domain."""
@@ -9873,7 +9873,7 @@ class PreSearchFilterDialog(QDialog):
                 self.author_combo.addItem(display_text, author_id)
                 self._author_data[author_id] = display_text
         except Exception:
-            pass
+            pass  # Catalog/FJMS operation failed; continue with available data
         finally:
             self.author_combo.setCurrentIndex(0)
             self.author_combo.blockSignals(False)
@@ -9904,7 +9904,7 @@ class PreSearchFilterDialog(QDialog):
                 self.work_combo.addItem(display_text, work_id)
                 self._work_data[work_id] = display_text
         except Exception:
-            pass
+            pass  # Catalog/FJMS operation failed; continue with available data
         finally:
             self.work_combo.setCurrentIndex(0)
             self.work_combo.blockSignals(False)
@@ -10552,7 +10552,7 @@ class FjmsCatalogDialog(QDialog):
                     _trans_svc.close()
                     _trans_svc = None
             except Exception:
-                _trans_svc = None
+                _trans_svc = None  # Translation service unavailable; features degrade gracefully
 
         # Clickable translation toggle badge style (used in RunningTitle, FreeDesc, FullText)
         _badge_style = (
@@ -12096,7 +12096,7 @@ class TabularQueryBuilderDialog(QDialog):
             self._syntax = syntax
             self._negated_words = negated
         except Exception:
-            self._syntax = ''
+            self._syntax = ''  # Syntax parse failed; reset to empty
             self._negated_words = []
 
         self._preview_label.setText(self._syntax if self._syntax else "")
@@ -12391,21 +12391,21 @@ class SettingsDialog(QDialog):
             pgp_svc = get_pgp_service()
             pgp_ver = pgp_svc.get_version() if pgp_svc.is_available() else None
         except Exception:
-            pgp_ver = None
+            pgp_ver = None  # Version query failed; show None in About dialog
         sources.append(("PGP Documents", pgp_ver))
         try:
             from shared.fjms_service import get_fjms_service
             fjms_svc = get_fjms_service()
             fjms_ver = fjms_svc.get_version() if fjms_svc.is_available() else None
         except Exception:
-            fjms_ver = None
+            fjms_ver = None  # Version query failed; show None in About dialog
         sources.append(("FJMS Catalog", fjms_ver))
         try:
             from shared.nli_crossref_service import get_nli_crossref_service
             nli_svc = get_nli_crossref_service()
             nli_ver = nli_svc.get_version() if nli_svc.is_available() else None
         except Exception:
-            nli_ver = None
+            nli_ver = None  # Version query failed; show None in About dialog
         sources.append(("NLI Crossref", nli_ver))
 
         for name, ver in sources:
@@ -12747,7 +12747,7 @@ class VSDownloadThread(QThread):
                 try:
                     os.remove(tmp_path)
                 except Exception:
-                    pass
+                    pass  # Download failed; emit None so caller knows
             self.error.emit(str(e))
 
 
@@ -13187,7 +13187,7 @@ class GenizahGUI(QMainWindow):
                 self._fjms_warmup_thread = _FjmsWarmupThread(self)
                 self._fjms_warmup_thread.start()
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
 
     def _update_corner_login_state(self):
         """Update the corner login button based on login state."""
@@ -14047,7 +14047,7 @@ class GenizahGUI(QMainWindow):
             else:
                 self.btn_b_view_comments.setVisible(False)
         except Exception:
-            self.btn_b_view_comments.setVisible(False)
+            self.btn_b_view_comments.setVisible(False)  # Feature check failed; hide button
 
         # Fetch versions from API
         try:
@@ -14321,7 +14321,7 @@ class GenizahGUI(QMainWindow):
                 self._show_vs_dialog(sys_id, shelfmark, data)
                 return
         except Exception:
-            pass
+            pass  # Domain enrichment failed; populate empty defaults
 
         # Try cache
         if not hasattr(self, '_vs_cache'):
@@ -14344,7 +14344,7 @@ class GenizahGUI(QMainWindow):
                 self._show_vs_dialog(sys_id, shelfmark, data)
                 return
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
 
         QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
 
@@ -14355,7 +14355,7 @@ class GenizahGUI(QMainWindow):
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=False)
         except Exception:
-            fjms = None
+            fjms = None  # Initialization failed; feature degrades gracefully
         for s in data:
             meta = csv_bank.get(s.get('alma_id', ''))
             s['shelfmark'] = meta.get('shelfmark', s.get('alma_id', '')) if meta else s.get('alma_id', '')
@@ -14367,7 +14367,7 @@ class GenizahGUI(QMainWindow):
                 else:
                     s['domain'] = '--'
             except Exception:
-                s['domain'] = '--'
+                s['domain'] = '--'  # Domain enrichment failed; use placeholder
 
     def _on_vs_fetch_complete(self, sys_id, shelfmark, data):
         if not hasattr(self, '_vs_cache'):
@@ -14484,7 +14484,7 @@ class GenizahGUI(QMainWindow):
                 if self.meta_mgr:
                     return self.meta_mgr.get_thumbnail(target_sys_id)
             except Exception:
-                pass
+                pass  # Thumbnail load failed; full image will replace it
             return None
 
         def _load_image_for_label(lbl, target_sys_id, max_width=350, max_height=300):
@@ -14500,7 +14500,7 @@ class GenizahGUI(QMainWindow):
                         url = _get_thumb_url_for_sys_id(self._sid) or ''
                         self.url_ready.emit(url)
                     except Exception:
-                        self.url_ready.emit('')
+                        self.url_ready.emit('')  # URL fetch failed; emit empty string so caller handles gracefully
 
             fetch_worker = _ImageFetchWorker(self, target_sys_id)
 
@@ -14555,7 +14555,7 @@ class GenizahGUI(QMainWindow):
                             snippet += '...'
                         self.text_ready.emit(snippet)
                     except Exception:
-                        self.text_ready.emit('')
+                        self.text_ready.emit('')  # Text fetch failed; emit empty string so caller handles gracefully
 
             worker = _TextWorker(self, target_sys_id, max_chars)
 
@@ -14584,7 +14584,7 @@ class GenizahGUI(QMainWindow):
                 try:
                     shelf, _ = self.meta_mgr.get_meta_for_id(partner_id)
                 except Exception:
-                    shelf = partner_id
+                    shelf = partner_id  # Shelfmark lookup failed; use raw identifier
             shelf = shelf or partner_id
             domain = item.get('domain', '--')
             lib_code = item.get('library_code', '')
@@ -14830,7 +14830,7 @@ class GenizahGUI(QMainWindow):
             try:
                 shelf, _ = self.meta_mgr.get_meta_for_id(partner_sys_id)
             except Exception:
-                pass
+                pass  # UI element update optional; continue rendering
         if shelf:
             self.browse_shelf_input.setText(shelf)
             self._set_last_browse_field("shelf")
@@ -14871,7 +14871,7 @@ class GenizahGUI(QMainWindow):
                 try:
                     shelf, _ = self.meta_mgr.get_meta_for_id(partner_sys_id)
                 except Exception:
-                    pass
+                    pass  # Shelfmark lookup failed; use fallback identifier
             self.add_to_puzzle(partner_sys_id, shelf or partner_sys_id)
         except Exception as e:
             logger.debug(f"VS add to puzzle error: {e}")
@@ -14885,7 +14885,7 @@ class GenizahGUI(QMainWindow):
             if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
                 return {s['alma_id'] for s in vs_svc.get_suggestions(sys_id, 200)}
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
         # Try cache
         if not hasattr(self, '_vs_cache'):
             self._vs_cache = DesktopVSCache()
@@ -14901,7 +14901,7 @@ class GenizahGUI(QMainWindow):
             self._vs_cache.store(sys_id, data)
             return {s['alma_id'] for s in data}
         except Exception:
-            return set()
+            return set()  # Visual similarity lookup failed; continue
 
     def _search_in_visual_suggestions(self, sys_id=None, shelfmark=None):
         """Restrict search to visual similarity partner pool ('Search in VS' action)."""
@@ -14913,7 +14913,7 @@ class GenizahGUI(QMainWindow):
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
             except Exception:
-                pass
+                pass  # Cache operation failed; continue without cached data
         shelfmark = shelfmark or sys_id
 
         partners = self._vs_get_partners(sys_id)
@@ -14947,7 +14947,7 @@ class GenizahGUI(QMainWindow):
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
             except Exception:
-                pass
+                pass  # Shelfmark lookup failed; use fallback identifier
         shelfmark = shelfmark or sys_id
 
         partners = self._vs_get_partners(sys_id)
@@ -15081,7 +15081,7 @@ class GenizahGUI(QMainWindow):
                                 try:
                                     shelf, _ = self.meta_mgr.get_meta_for_id(alma_id)
                                 except Exception:
-                                    pass
+                                    pass  # Catalog/FJMS operation failed; continue with available data
                             if not shelf or shelf == 'Unknown':
                                 continue
                             valid_members.append((shelf, member))
@@ -15202,7 +15202,7 @@ class GenizahGUI(QMainWindow):
                         try:
                             shelf, _ = self.meta_mgr.get_meta_for_id(alma_id)
                         except Exception:
-                            pass
+                            pass  # Catalog/FJMS operation failed; continue with available data
                     if not shelf or shelf == 'Unknown':
                         continue
                     # Deduplicate against existing fragments
@@ -17075,7 +17075,7 @@ class GenizahGUI(QMainWindow):
                     fjms_svc.is_available() and bool(fjms_svc.get_printed_sys_ids([sid]))
                 )
             except Exception:
-                self._browse_printed_cache[sid] = False
+                self._browse_printed_cache[sid] = False  # Printed status check failed; assume not printed
         if self._browse_printed_cache[sid]:
             _printed_tag = '\u05d3\u05e4\u05d5\u05e1' if CURRENT_LANG == 'he' else 'Printed'
             info_text += f" | <span style='color: #dc2626; font-weight: bold;'>\U0001f5a8 {_printed_tag}</span>"
@@ -17366,7 +17366,7 @@ class GenizahGUI(QMainWindow):
                 self.btn_b_catalog_records.setEnabled(catalog_count > 0)
                 self.btn_b_catalog_records.setVisible(True)
         except Exception:
-            self.btn_b_catalog_records.setVisible(False)
+            self.btn_b_catalog_records.setVisible(False)  # Feature check failed; hide button
 
         # Measurements button
         self._browse_measurements_data = None
@@ -17377,7 +17377,7 @@ class GenizahGUI(QMainWindow):
             else:
                 self.btn_b_measurements.setVisible(False)
         except Exception:
-            self.btn_b_measurements.setVisible(False)
+            self.btn_b_measurements.setVisible(False)  # Feature check failed; hide button
 
         enriched_html = fjms_domain_html + fjms_catalog_html + catalog_refs_html + secondary_meta_html + enriched_html
 
@@ -17526,7 +17526,7 @@ class GenizahGUI(QMainWindow):
                     trans_data = trans_map.get(sys_id)
                     trans_svc.close()
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
 
         pgp_html = (
             f"<div style='background-color: transparent; color:{text_color}; "
@@ -17674,7 +17674,7 @@ class GenizahGUI(QMainWindow):
                         else:
                             title = eng_title  # Fallback to English
                     except Exception:
-                        title = eng_title
+                        title = eng_title  # Translation failed; use English title
         if title and title.strip():
             html += f"<p><b>{tr('Title')}:</b> {title}</p>"
 
@@ -17857,7 +17857,7 @@ class GenizahGUI(QMainWindow):
                                 if _ox_eng == part_meta.get('contents', '').strip():
                                     _ft_cache.setdefault('br_part_contents', _ox_heb)
                 except Exception:
-                    pass
+                    pass  # Translation lookup failed; continue without translation
         import html as _html_mod
         _tbadge = 'color: #0369a1; font-size: 11px; text-decoration: none; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;'
         _toggle = getattr(self, '_trans_toggle_state', {})
@@ -18050,7 +18050,7 @@ class GenizahGUI(QMainWindow):
                 if fjms_svc.is_available():
                     self._browse_catalog_detail = fjms_svc.get_catalog_detail(self.current_browse_sid)
             except Exception:
-                pass
+                pass  # Shelfmark lookup failed; use fallback identifier
             self.statusBar().clearMessage()
 
         if not self._browse_catalog_detail or not self._browse_catalog_detail.get("records"):
@@ -18075,7 +18075,7 @@ class GenizahGUI(QMainWindow):
                 if fjms_svc.is_available():
                     self._browse_measurements_data = fjms_svc.get_measurements(self.current_browse_sid)
             except Exception:
-                pass
+                pass  # Measurement query failed; try next source
 
         if self._browse_measurements_data:
             shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
@@ -18823,7 +18823,7 @@ class GenizahGUI(QMainWindow):
             try:
                 shelfmark, _ = self.meta_mgr.get_meta_for_id(document_id)
             except Exception:
-                pass
+                pass  # UI visibility update failed; continue rendering
 
         if not shelfmark:
             return
@@ -18870,7 +18870,7 @@ class GenizahGUI(QMainWindow):
                     if result:
                         frag_sid = result.get('sys_id')
                 except Exception:
-                    pass
+                    pass  # Shelfmark lookup failed; use fallback identifier
             if frag_sid:
                 fragments_info.append({
                     'sys_id': frag_sid,
@@ -18892,7 +18892,7 @@ class GenizahGUI(QMainWindow):
             if doc_data:
                 pgpid = doc_data.get('pgpid')
         except Exception:
-            pass
+            pass  # Share operation failed; continue
 
         self._browse_enter_reading_desk(fragments_info, pgpid=pgpid)
 
@@ -20813,7 +20813,7 @@ class GenizahGUI(QMainWindow):
                     self._catalog_render_tree(h, u)
                     return
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
         # If we got here, caches weren't ready — clear loading indicator
         self.catalog_domain_tree.clear()
 
@@ -24308,7 +24308,7 @@ class GenizahGUI(QMainWindow):
             if buf.value:
                 documents_folder = buf.value
         except Exception:
-            pass
+            pass  # Load failed; continue with defaults
 
         # Fallback: try common locations
         if not documents_folder or not os.path.isdir(documents_folder):
@@ -24688,7 +24688,7 @@ class GenizahGUI(QMainWindow):
 
             self.variant_count_label.setText(f"≈{total_variants}")
         except Exception:
-            self.variant_count_label.setText("")
+            self.variant_count_label.setText("")  # Variant count display failed; clear label
 
     def update_lab_ui_state(self, checked):
         """Disable standard controls when Lab Mode is active."""
@@ -25007,7 +25007,7 @@ class GenizahGUI(QMainWindow):
                                     if CURRENT_LANG == 'he' and s_heb:
                                         domain_display_map[_sq] = f"{s_heb} ({c_heb})" if _sq != _sc['domain'] else s_heb
                 except Exception:
-                    pass
+                    pass  # UI population failed; continue with available data
             for d in filters.get('domains', []):
                 display = domain_display_map.get(str(d), str(d))
                 self._add_filter_chip(chip_layout, tr("Domain") + ": " + display, ('domains', d))
@@ -25646,7 +25646,7 @@ class GenizahGUI(QMainWindow):
             from shared.session_persistence import clear_session_state
             clear_session_state()
         except Exception:
-            pass
+            pass  # Share operation failed; continue
 
         # 15. Save the cleared state
         self._schedule_session_save()
@@ -26317,7 +26317,7 @@ class GenizahGUI(QMainWindow):
                     else:
                         self._result_measurement_map = {}
                 except Exception:
-                    self._result_measurement_map = {}
+                    self._result_measurement_map = {}  # Lookup failed; use empty dict
                 self._measurement_fetch_complete = True
                 if hasattr(self, 'btn_measurement_filter'):
                     self.btn_measurement_filter.setEnabled(bool(self._result_measurement_map))
@@ -28924,7 +28924,7 @@ class GenizahGUI(QMainWindow):
             from shared.session_persistence import clear_session_state
             clear_session_state()
         except Exception:
-            pass
+            pass  # Share operation failed; continue
 
         # 16. Save the cleared state
         self._schedule_session_save()
@@ -29516,7 +29516,7 @@ class GenizahGUI(QMainWindow):
                 if '*' not in source_text:
                     source_text = regex.sub(r'*\g<0>*', source_text)
             except Exception:
-                pass
+                pass  # Operation failed; non-fatal, continue with defaults
 
         match = re.search(r'\*(.*?)\*', source_text or "")
         anchor = match.group(1) if match else None
@@ -31131,7 +31131,7 @@ class GenizahGUI(QMainWindow):
                 regex = re.compile(self.browse_highlight_pattern, flags)
                 page_text = regex.sub(r'*\g<0>*', page_text)
             except Exception:
-                pass
+                pass  # UI element update optional; continue rendering
         browse_html_text = page_text.replace('\n', '<br>')
         self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
@@ -31758,7 +31758,7 @@ class GenizahGUI(QMainWindow):
                                 if s_heb:
                                     domain_heb_map[sq] = f"{s_heb} ({c_heb})" if sq != sc['domain'] else s_heb
             except Exception:
-                pass
+                pass  # Catalog/FJMS operation failed; continue with available data
         parts = []
         for d in filters.get('domains', []):
             parts.append(domain_heb_map.get(str(d), str(d)))
@@ -32820,7 +32820,7 @@ def resource_path(relative_path):
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
-        base_path = os.path.dirname(os.path.abspath(__file__))
+        base_path = os.path.dirname(os.path.abspath(__file__))  # Path resolution failed; use script directory
     return os.path.join(base_path, relative_path)
 
 if __name__ == "__main__":

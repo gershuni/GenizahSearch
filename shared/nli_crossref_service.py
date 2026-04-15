@@ -438,7 +438,7 @@ class NliCrossrefService:
                     img_row = img_cursor.fetchone()
                     img_source = (img_row["ImageSourceName"] or "").lower() if img_row else ""
                 except Exception:
-                    img_source = ""
+                    img_source = ""  # Image source lookup failed; use empty string
 
                 luna_id = self.get_manchester_luna_id(img_source) if img_source else None
                 if luna_id:

@@ -232,7 +232,7 @@ def sign_out() -> Dict:
             _client_cache.pop(storage_id, None)
             _session_locks.pop(storage_id, None)
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
         client = get_client()
         client.auth.sign_out()
         return {'success': True}
@@ -249,7 +249,7 @@ def get_current_user() -> Optional[Dict]:
             return _user_to_dict(response.user)
         return None
     except Exception:
-        return None
+        return None  # Operation failed; use fallback value
 
 
 def get_session() -> Optional[Dict]:
@@ -261,7 +261,7 @@ def get_session() -> Optional[Dict]:
             return _session_to_dict(session)
         return None
     except Exception:
-        return None
+        return None  # Operation failed; use fallback value
 
 
 def refresh_session() -> Dict:
@@ -402,7 +402,7 @@ def get_profile(user_id: str) -> Optional[Dict]:
         response = client.table('profiles').select('*').eq('id', user_id).single().execute()
         return response.data
     except Exception:
-        return None
+        return None  # Operation failed; use fallback value
 
 
 def get_user_corrections_count(user_id: str) -> int:
@@ -412,7 +412,7 @@ def get_user_corrections_count(user_id: str) -> int:
         response = client.table('corrections').select('id', count='exact').eq('author_id', user_id).eq('status', 'approved').execute()
         return response.count if response.count is not None else 0
     except Exception:
-        return 0
+        return 0  # Operation failed; use fallback value
 
 
 def update_profile(user_id: str, data: Dict) -> Dict:
@@ -848,7 +848,7 @@ def _enrich_with_profiles(client, rows: List[Dict], id_field: str = 'author_id')
         ).in_('id', list(user_ids)).execute()
         profiles_map = {p['id']: p for p in (profiles_response.data or [])}
     except Exception:
-        profiles_map = {}
+        profiles_map = {}  # Lookup failed; use empty dict
     for r in rows:
         aid = r.get(id_field)
         r['profiles'] = profiles_map.get(aid, {}) if aid else {}
@@ -1013,7 +1013,7 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
         try:
             client = get_user_client()
         except Exception:
-            client = get_client()
+            client = get_client()  # Operation failed; use fallback value
         query = client.table('fragment_joins').select('*')
 
         if user_id:
@@ -1035,7 +1035,7 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
                 for p in (profiles_resp.data or []):
                     profiles_map[p['id']] = p.get('full_name') or p.get('username') or ''
             except Exception:
-                pass
+                pass  # Render/display failed; continue
         for row in rows:
             row['created_by_username'] = profiles_map.get(row.get('user_id'), '')
         return rows

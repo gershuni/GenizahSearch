@@ -458,7 +458,7 @@ def create_edit_text_dialog(
                     try:
                         do_auto_save()
                     except Exception:
-                        break
+                        break  # Error in loop iteration; break out gracefully
             asyncio.ensure_future(_auto_save_loop())
 
         # ============================================

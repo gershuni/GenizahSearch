@@ -763,7 +763,7 @@ class TranslationService:
             ).fetchone()
             return row[0] if row else None
         except Exception:
-            return None
+            return None  # Operation failed; use fallback value
 
     def get_oxford_translations_batch(
         self, english_texts: List[str]
@@ -838,19 +838,19 @@ class TranslationService:
             try:
                 self._pgp_conn.close()
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
             self._pgp_conn = None
         if self._fjms_conn:
             try:
                 self._fjms_conn.close()
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
             self._fjms_conn = None
         if self._titles_conn:
             try:
                 self._titles_conn.close()
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
             self._titles_conn = None
 
     # -------------------------------------------------------------------------
@@ -867,7 +867,7 @@ class TranslationService:
             ).fetchone()
             return row is not None
         except Exception:
-            return False
+            return False  # Operation failed; use fallback value
 
     @staticmethod
     def _find_pgp_db() -> Optional[str]:

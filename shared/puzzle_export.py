@@ -56,10 +56,10 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
     try:
         return ImageFont.truetype('arial.ttf', size)
     except Exception:
-        try:
+        try:  # Primary method failed; try fallback
             return ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', size)
         except Exception:
-            return ImageFont.load_default()
+            return ImageFont.load_default()  # Font loading failed; use system default
 
 
 def _measure_text(font: ImageFont.ImageFont, text: str) -> Tuple[int, int]:

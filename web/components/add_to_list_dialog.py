@@ -36,7 +36,7 @@ def get_star_icon(lists_mgr, sys_id: str) -> str:
         if lists_mgr.is_item_in_any_list(sys_id):
             return 'star'
     except Exception:
-        pass
+        pass  # Operation failed; non-fatal, continue with defaults
     return 'star_border'
 
 
@@ -292,7 +292,7 @@ def create_add_to_list_button(
         try:
             is_in_list = lists_mgr.is_item_in_any_list(sys_id)
         except Exception:
-            pass
+            pass  # Tooltip metadata optional; item still valid
 
     # Use filled star if in list, outline if not
     icon = 'star' if is_in_list else 'star_border'

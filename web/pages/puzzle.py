@@ -2584,7 +2584,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 publish_btn.props(remove='color')
                 publish_btn.tooltip(tr('Publish to Community'))
             except Exception:
-                pass
+                pass  # Tooltip metadata optional; item still valid
             return
         try:
             from shared.puzzle_publish_service import get_published_join_detail
@@ -2601,7 +2601,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 publish_btn.props(remove='color')
                 publish_btn.tooltip(tr('Publish to Community'))
         except Exception:
-            pass
+            pass  # Tooltip metadata optional; item still valid
 
     async def toggle_publish():
         """Publish or unpublish current join."""
@@ -3434,7 +3434,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     _refresh_fragment_select()
                     schedule_auto_save()
             except Exception:
-                pass
+                pass  # Browser storage operation failed; preference not persisted
         canvas_wrap.on('puzzle-delete', on_puzzle_delete)
 
         def on_puzzle_object_modified(e):
@@ -3509,7 +3509,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         }}
                     ''')
                 except Exception:
-                    pass
+                    pass  # Puzzle operation failed; continue with available data
                 doc_state['pending_crops'].pop(key, None)
 
             # Decrement loading counter and clear guard when all fragments loaded.
@@ -3521,7 +3521,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     try:
                         await ui.run_javascript('window.puzzleCanvas && window.puzzleCanvas.fitAll()')
                     except Exception:
-                        pass
+                        pass  # JavaScript execution failed; non-fatal UI glitch
 
             # Refresh fragment selector and trigger auto-save
             _refresh_fragment_select()
@@ -3629,7 +3629,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     details_container.style('display: block;')
                     await check_publish_state()
             except Exception:
-                pass
+                pass  # Publish status check failed; assume unpublished
         # Populate outer puzzle_meta so callbacks can find existing fragments
         if saved_meta and isinstance(saved_meta, dict):
             puzzle_meta.update(saved_meta)

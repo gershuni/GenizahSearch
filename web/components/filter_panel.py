@@ -155,7 +155,7 @@ def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int
                             if s_heb:
                                 domain_heb_map[sq] = f"{s_heb} ({c_heb})" if sq != sc['domain'] else s_heb
         except Exception:
-            pass
+            pass  # Catalog/FJMS operation failed; continue with available data
     parts = []
     for d in filters.get('domains', []):
         parts.append(domain_heb_map.get(str(d), str(d)))

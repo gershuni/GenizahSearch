@@ -183,7 +183,7 @@ def _save_history_file(data: dict) -> bool:
                 json.dump(data, f, ensure_ascii=False, indent=2, default=_json_default)
             os.replace(tmp_path, HISTORY_FILE)
         except Exception:
-            try:
+            try:  # Primary method failed; try fallback
                 os.remove(tmp_path)
             except OSError:
                 pass

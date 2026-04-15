@@ -826,7 +826,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         'volume_ie': state.volume_ie,  # persist volume across refresh
                     }
                 except Exception:
-                    pass
+                    pass  # Browser storage operation failed; preference not persisted
 
                 # PostHog: track manuscript views
                 from web.analytics import posthog_capture
@@ -885,13 +885,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         title_result = svc.get_title_translations_batch([_title_sys_id]).get(_title_sys_id)
                     svc.close()
                 except Exception:
-                    pass
+                    pass  # Translation lookup failed; continue without translation
                 return title_result
             try:
                 state.title_translation = await run.io_bound(_fetch_title_translations)
                 state.oxford_translations = {}  # Will be populated in Phase B
             except Exception:
-                pass
+                pass  # Translation lookup failed; continue without translation
 
         state.is_loading = False
         update_content()  # Phase A complete: show image + header + title translation
@@ -946,7 +946,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             result['has_visual_suggestions'] = False
                             result['visual_suggestion_count'] = 0
                     except Exception:
-                        result['has_visual_suggestions'] = False
+                        result['has_visual_suggestions'] = False  # Feature detection failed; assume not available
                         result['visual_suggestion_count'] = 0
                     return result
                 return None
@@ -1216,14 +1216,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         svc.close()
                         return result
                     except Exception:
-                        return {}
+                        return {}  # Lookup failed; return empty dict
                 try:
                     ox_result = await run.io_bound(_fetch_oxford_translations)
                     # Re-check generation after await to avoid stale state on rapid navigation
                     if generation == _load_generation['value']:
                         state.oxford_translations = ox_result
                 except Exception:
-                    pass
+                    pass  # Translation lookup failed; continue without translation
 
         # Re-check generation before committing final state (guards Oxford await above)
         if generation != _load_generation['value']:
@@ -1317,7 +1317,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 cached = app_state.meta_mgr.nli_cache.get(page.sys_id, {})
                 marc_bib = cached.get('marc', {}).get('bibliography', [])
         except Exception:
-            pass
+            pass  # Cache operation failed; continue without cached data
 
         catalog_source_count = len(fjms_data.get('source_names', []))
 
@@ -1470,7 +1470,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 sources = get_all_sources_for_fragment(frag_sid) or []
                 pgp_doc = get_document_for_fragment(frag_sid)
             except Exception:
-                pass
+                pass  # Shelfmark lookup failed; use fallback identifier
             entries.append({
                 'sys_id': frag_sid,
                 'shelfmark': frag_sm,
@@ -1494,7 +1494,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         try:
             app.storage.user.pop('reading_desk_state', None)
         except Exception:
-            pass
+            pass  # Browser storage operation failed; preference not persisted
         update_content()
 
     def add_to_reading_desk():
@@ -1522,7 +1522,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 sources = rd_get_sources(current_sid) or []
                 pgp_doc = rd_get_doc(current_sid)
             except Exception:
-                pass
+                pass  # Join operation failed; continue with available data
             state.reading_desk_entries.append({
                 'sys_id': current_sid,
                 'shelfmark': current_sm,
@@ -1554,7 +1554,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             sources = rd_get_sources(sys_id) or []
             pgp_doc = rd_get_doc(sys_id)
         except Exception:
-            pass
+            pass  # Shelfmark lookup failed; use fallback identifier
         state.reading_desk_entries.append({
             'sys_id': sys_id,
             'shelfmark': shelfmark,
@@ -2548,7 +2548,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 try:
                                     _browse_show_trans = app.storage.user.get('show_translations', False)
                                 except Exception:
-                                    pass
+                                    pass  # Translation lookup failed; continue without translation
                                 if _browse_show_trans and _browse_type_lang == 'he' and _browse_pgpid:
                                     try:
                                         from shared.translation_service import TranslationService
@@ -2556,7 +2556,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         _browse_type_he = _tsvc_type.get_pgp_document_type_he(_browse_pgpid)
                                         _tsvc_type.close()
                                     except Exception:
-                                        pass
+                                        pass  # Translation lookup failed; continue without translation
                                 if _browse_type_he:
                                     ui.label(_browse_type_he).classes('text-sm').style('color: var(--text-primary); direction: rtl;')
                                 else:
@@ -2583,7 +2583,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 try:
                                     _show_trans_browse = app.storage.user.get('show_translations', False)
                                 except Exception:
-                                    pass
+                                    pass  # Translation lookup failed; continue without translation
                                 _pgpid_browse = state.pgp_metadata.get('pgpid')
                                 _trans_desc_he = None
                                 _browse_lang = get_language()
@@ -2594,7 +2594,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         _trans_desc_he = _tsvc.get_pgp_description_he(_pgpid_browse)
                                         _tsvc.close()
                                     except Exception:
-                                        pass
+                                        pass  # Translation lookup failed; continue without translation
                                 if _trans_desc_he:
                                     _br_st = {'showing_original': False}
                                     with ui.row().classes('w-full items-start gap-1'):
@@ -2934,7 +2934,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 try:
                                                     frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
                                                 except Exception:
-                                                    frag_library_code = ''
+                                                    frag_library_code = ''  # Library code lookup failed; use empty string
                                             frag_is_oxford = is_oxford_manuscript(frag_sm, frag_library_code)
 
                                             # Show recto and verso images side by side
@@ -3150,7 +3150,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         try:
                                             list_items = lists_mgr.get_items_in_list_sync(list_id) or []
                                         except Exception:
-                                            pass
+                                            pass  # Shelfmark lookup failed; use fallback identifier
 
                                         # Resolve shelfmarks for display
                                         resolved_items = []
@@ -3163,7 +3163,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 try:
                                                     item_sm, _ = app_state.meta_mgr.get_meta_for_id(item_sid)
                                                 except Exception:
-                                                    pass
+                                                    pass  # Shelfmark lookup failed; use fallback identifier
                                             if not item_sm:
                                                 item_sm = item_sid
                                             resolved_items.append({'sys_id': item_sid, 'shelfmark': item_sm})
@@ -3191,7 +3191,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                         sources = ld_src(item_sid) or []
                                                         pgp_doc_data = ld_doc(item_sid)
                                                     except Exception:
-                                                        pass
+                                                        pass  # Shelfmark lookup failed; use fallback identifier
                                                     state.reading_desk_entries.append({
                                                         'sys_id': item_sid,
                                                         'shelfmark': item_sm,
@@ -3394,7 +3394,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     try:
                                         frag_library_code = state.meta_mgr.get_library_for_id(frag_sid) or ''
                                     except Exception:
-                                        frag_library_code = ''
+                                        frag_library_code = ''  # Library code lookup failed; use empty string
                                 frag_is_oxford = is_oxford_manuscript(frag_sm, frag_library_code)
 
                                 if not frag_pages:
@@ -4987,7 +4987,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             try:
                 saved_rd = app.storage.user.get('reading_desk_state')
             except Exception:
-                pass
+                pass  # Browser storage operation failed; preference not persisted
 
             if saved_rd and saved_rd.get('entries'):
                 # Check if initial_sys_id matches one of the persisted desk entries
@@ -5005,7 +5005,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     try:
                         app.storage.user.pop('reading_desk_state', None)
                     except Exception:
-                        pass
+                        pass  # Browser storage operation failed; preference not persisted
                     state.is_loading = True
                     update_content()
                     asyncio.ensure_future(load_page(p_num=initial_page))

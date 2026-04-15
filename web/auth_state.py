@@ -126,12 +126,12 @@ class GlobalAuthState:
         try:
             ui.run_javascript('if(window.posthog)posthog.reset()')
         except Exception:
-            pass
+            pass  # PostHog analytics optional; failure is non-fatal
         # Also sign out from Supabase client
         try:
             supabase_sign_out()
         except Exception:
-            pass
+            pass  # Supabase sign_out failed; local session cleared anyway
 
     @classmethod
     def get_username(cls) -> str:
