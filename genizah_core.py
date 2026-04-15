@@ -537,7 +537,8 @@ class LabSettings:
                     self.boundary_boost = data.get('boundary_boost', 1.5)
                     self.min_boundary_matches = data.get('min_boundary_matches', 0)
                     self.min_delimiter_distance = data.get('min_delimiter_distance', 3)
-            except Exception: pass
+            except Exception as e:
+                logging.getLogger(__name__).warning('Failed to load lab config from %s: %s', Config.LAB_CONFIG_FILE, e)
 
     def save(self):
         try:
@@ -582,7 +583,8 @@ class LabSettings:
                     'min_boundary_matches': self.min_boundary_matches,
                     'min_delimiter_distance': self.min_delimiter_distance
                 }, f, indent=4)
-        except Exception: pass
+        except Exception as e:
+            logging.getLogger(__name__).warning('Failed to save lab config to %s: %s', Config.LAB_CONFIG_FILE, e)
 
 # ==============================================================================
 #  LAB ENGINE 
@@ -607,7 +609,7 @@ class LabEngine:
                 with open(Config.LAB_WEIGHTS_FILE, 'r', encoding='utf-8') as f:
                     self.dynamic_rank_map = json.load(f)
             except Exception:
-                pass
+                pass  # Dynamic weights file corrupt or unreadable; use defaults
 
         self._reload_lab_index()
 
@@ -622,11 +624,11 @@ class LabEngine:
         try:
             index.register_tokenizer("whitespace", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
         except Exception:
-            pass
+            pass  # Tokenizer registration may fail on reopen; non-fatal, search still works
         try:
             index.register_tokenizer("simple", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build())
         except Exception:
-            pass
+            pass  # Tokenizer registration may fail on reopen; non-fatal, search still works
 
     def _reload_lab_index(self):
         """Loads index with heavy debug logging."""
@@ -700,7 +702,8 @@ class LabEngine:
                     for line in f:
                         if label == "V0.8" and line.startswith("==>"): count += 1
                         elif label == "V0.7" and line.startswith("###"): count += 1
-            except Exception: pass
+            except Exception as e:
+                logging.getLogger(__name__).debug('Could not count documents in %s: %s', fname, e)
             return count
 
         estimated_total = count_documents(Config.FILE_V8, "V0.8") + count_documents(Config.FILE_V7, "V0.7")
@@ -805,7 +808,7 @@ class LabEngine:
             try:
                 return strategy()
             except Exception:
-                continue
+                continue  # Try next query strategy; all-fail logged after loop by LAB_LOGGER.error
 
         LAB_LOGGER.error("All query strategies failed.")
         return None
@@ -847,7 +850,7 @@ class LabEngine:
                 except (InterruptedError, KeyboardInterrupt):
                     raise
                 except Exception:
-                    pass
+                    pass  # Score extraction optional — result still usable without score
                 # Send text status for Label
                 progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
 
@@ -1114,7 +1117,7 @@ class LabEngine:
                     try:
                         progress_callback(*args)
                     except Exception:
-                        pass
+                        pass  # Progress callback optional — search proceeds without progress updates
 
             iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
         else:
@@ -1123,7 +1126,8 @@ class LabEngine:
                 # Limit 5000 for standard scan
                 res = self.lab_searcher.search(query_obj, 5000)
                 iterator = res.hits
-            except Exception:
+            except Exception as e:
+                LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
                 iterator = []
 
         for score, doc_addr in iterator:
@@ -1317,7 +1321,8 @@ class LabEngine:
                     try:
                         res = self.lab_searcher.search(q_obj, 5000)
                         iterator = res.hits
-                    except Exception:
+                    except Exception as e:
+                        LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
                         iterator = []
 
                 for score, doc_addr in iterator:
@@ -1792,7 +1797,7 @@ class Config:
             os.remove(test_path)
             return primary
         except Exception:
-            pass
+            pass  # Best-effort path resolution; falls through to next candidate
 
         # Fallback
         os.makedirs(fallback, exist_ok=True)
@@ -1811,7 +1816,7 @@ class Config:
             if buf.value:
                 documents_dir = buf.value
         except Exception:
-            pass
+            pass  # Best-effort path resolution; falls through to next candidate
 
         if not documents_dir or not os.path.isdir(documents_dir):
             for folder_name in ["Documents", "My Documents"]:
@@ -1855,6 +1860,7 @@ class Config:
     try:
         os.makedirs(INDEX_DIR, exist_ok=True)
     except Exception:
+        # Registry/env path failed; fall back to portable index location
         INDEX_DIR = _PORTABLE_INDEX_PATH
         os.makedirs(INDEX_DIR, exist_ok=True)
 
@@ -1917,8 +1923,8 @@ def _load_ie_volume_map():
                 with open(vol_path, 'r', encoding='utf-8') as f:
                     _load_ie_volume_map._cache = json.load(f)
                 return _load_ie_volume_map._cache
-            except Exception:
-                pass
+            except Exception as e:
+                LOGGER.debug('Could not load ie_volume_map.json: %s', e)
 
         # Fallback: primary_ie_map.json (old format — primary IE only)
         map_path = os.path.join(Config.INTERNAL_DIR, "primary_ie_map.json")
@@ -1940,7 +1946,8 @@ def _load_ie_volume_map():
                         "volumes": volumes,
                     }
                 _load_ie_volume_map._cache = converted
-            except Exception:
+            except Exception as e:
+                LOGGER.debug('ie_volume_map.json parse failed, using empty cache: %s', e)
                 _load_ie_volume_map._cache = {}
         else:
             _load_ie_volume_map._cache = {}
@@ -2307,7 +2314,7 @@ def load_app_config():
             with open(Config.CONFIG_FILE, 'rb') as f:
                 cfg = pickle.load(f)
         except Exception:
-            pass
+            pass  # Config key missing or malformed; default value used
     return cfg
 
 def save_app_config(new_data):
@@ -3118,8 +3125,8 @@ def _get_crossref_service():
         try:
             from shared.nli_crossref_service import NliCrossrefService
             _nli_crossref_svc = NliCrossrefService(thread_safe=True)
-        except Exception:
-            pass
+        except Exception as e:
+            LOGGER.warning('Failed to initialize NLI crossref service: %s', e)
     return _nli_crossref_svc
 
 
@@ -3135,8 +3142,8 @@ def _get_fjms_service():
         try:
             from shared.fjms_service import FjmsService
             _fjms_svc = FjmsService(thread_safe=True)
-        except Exception:
-            pass
+        except Exception as e:
+            LOGGER.warning('Failed to initialize FJMS service: %s', e)
     return _fjms_svc
 
 
@@ -3699,7 +3706,7 @@ class MetadataManager:
         try:
             marc_data = marc_future.result(timeout=15)
         except Exception:
-            marc_data = {}
+            marc_data = {}  # Network/parse failure; proceed with empty metadata
         current_meta['marc'] = marc_data
         marc_attribution = marc_data.get('attribution')
 
@@ -3824,7 +3831,7 @@ class MetadataManager:
         try:
             nli_iiif_data = iiif_future.result(timeout=15)
         except Exception:
-            nli_iiif_data = {}
+            nli_iiif_data = {}  # Network/parse failure; proceed with empty metadata
         if nli_iiif_data.get('canvas_map'):
             sorted_map = sorted(nli_iiif_data['canvas_map'].items(), key=lambda x: x[0])
             for fl_id, label in sorted_map:
@@ -4084,8 +4091,8 @@ class MetadataManager:
                 else:
                     break
             except Exception:
-                time.sleep(1)
-        
+                time.sleep(1)  # Transient failure; retry after delay
+
         return system_id, meta
 
     def _extract_fl_ids(self, root):
@@ -4137,7 +4144,8 @@ class MetadataManager:
             if resp.status_code == 200:
                 root = ET.fromstring(resp.content)
                 return self._extract_fl_ids(root)
-        except Exception:
+        except Exception as e:
+            LOGGER.debug('Metadata batch fetch failed: %s', e)
             return []
         return []
 
@@ -5714,7 +5722,7 @@ def _count_expanded_terms(components: List[ResponsaComponent],
                 sample_variants = var_mgr.get_variants(sample_word, variant_mode)
                 variant_multiplier = max(1, len(sample_variants))
             except Exception:
-                variant_multiplier = 1
+                variant_multiplier = 1  # Variant expansion failed; treat as single variant
             word_count *= variant_multiplier
 
         total += word_count
@@ -6350,7 +6358,7 @@ class SearchEngine:
             try:
                 return re.compile(pattern_str, re.IGNORECASE)
             except Exception:
-                return None
+                return None  # Boundary data unavailable for this document
 
         # --- Existing path (unchanged) ---
         if mode == 'Regex':
@@ -6449,7 +6457,7 @@ class SearchEngine:
             try:
                 uid_val = doc['unique_id'][0]
             except Exception:
-                uid_val = '?'
+                uid_val = '?'  # UID extraction failed; use placeholder for warning message
             LOGGER.warning("Failed to parse boundaries for doc %s: %s", uid_val, e)
             return []
 
@@ -6489,7 +6497,7 @@ class SearchEngine:
         try:
             return doc[field]
         except Exception:
-            return default
+            return default  # Key missing or type mismatch; caller gets default value
 
     def _get_best_text_for_id(self, sys_id):
         """Find the first page with meaningful text for a given System ID."""
@@ -6626,7 +6634,7 @@ class SearchEngine:
                 try:
                     var.extend(self.var_mgr.get_variants(w, variant_mode, limit=200))
                 except Exception:
-                    var.append(w)
+                    var.append(w)  # Variant expansion failed for this word; use original
             expanded = list(dict.fromkeys(var))
 
         return expanded
@@ -7152,7 +7160,7 @@ class SearchEngine:
                             variants = self.var_mgr.get_variants(w, variant_mode, limit=200)
                             var_expanded.extend(variants)
                         except Exception:
-                            var_expanded.append(w)
+                            var_expanded.append(w)  # Variant expansion failed for this word; use original
                     expanded_words = list(dict.fromkeys(var_expanded))
 
                 # Build flex spacing patterns for original words only
@@ -8966,7 +8974,7 @@ class ListsManager:
             sync = get_lists_sync(self)
             sync.clear_user()
         except Exception:
-            pass
+            pass  # Cloud sync best-effort; offline mode continues
 
     def sync_from_cloud(self):
         """Pull lists from cloud and merge with local data."""
@@ -8988,7 +8996,7 @@ class ListsManager:
         except ImportError:
             return False
         except Exception:
-            return False
+            return False  # Cannot determine sync state; assume not synced
 
     @property
     def _last_sync(self):
@@ -8998,7 +9006,7 @@ class ListsManager:
             sync = get_lists_sync(self)
             return getattr(sync, '_last_sync', 0)
         except Exception:
-            return 0
+            return 0  # Count unavailable; return zero
 
     def sync_to_cloud(self):
         """Push local lists to cloud."""
