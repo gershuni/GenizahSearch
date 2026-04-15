@@ -36,6 +36,14 @@ def genizah_app_source():
         return f.read()
 
 
+@pytest.fixture(scope="module")
+def desktop_rd_source():
+    """Return the full source code of desktop/result_dialog.py as a string."""
+    src_path = os.path.join(os.path.dirname(__file__), '..', 'desktop', 'result_dialog.py')
+    with open(src_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 def _extract_method(source, method_name):
     """Extract a method's source from the full file by finding its def and
     reading until the next def at the same or lower indentation level."""
@@ -122,20 +130,20 @@ class TestBrowseTabPendingCorrections:
 class TestReadingDeskPendingCorrections:
     """Verify Reading Desk version selector handles pending corrections."""
 
-    def test_reading_desk_fetches_corrections_with_drafts(self, genizah_app_source):
+    def test_reading_desk_fetches_corrections_with_drafts(self, desktop_rd_source):
         """Reading Desk calls get_corrections_for_document with include_drafts=True."""
-        method_source = _extract_method(genizah_app_source, '_rd_refresh_versions')
-        assert method_source, "_rd_refresh_versions method should exist in genizah_app.py"
+        method_source = _extract_method(desktop_rd_source, '_rd_refresh_versions')
+        assert method_source, "_rd_refresh_versions method should exist in desktop/result_dialog.py"
 
         assert "get_corrections_for_document" in method_source, \
             "_rd_refresh_versions should call get_corrections_for_document"
         assert "include_drafts=True" in method_source, \
             "_rd_refresh_versions should pass include_drafts=True"
 
-    def test_reading_desk_shows_pending_labels(self, genizah_app_source):
+    def test_reading_desk_shows_pending_labels(self, desktop_rd_source):
         """Reading Desk shows emoji status labels for pending corrections."""
-        method_source = _extract_method(genizah_app_source, '_rd_refresh_versions')
-        assert method_source, "_rd_refresh_versions method should exist in genizah_app.py"
+        method_source = _extract_method(desktop_rd_source, '_rd_refresh_versions')
+        assert method_source, "_rd_refresh_versions method should exist in desktop/result_dialog.py"
 
         # Same emoji labels as Browse tab
         assert "\U0001f4dd" in method_source, \
@@ -145,10 +153,10 @@ class TestReadingDeskPendingCorrections:
         assert "Pending" in method_source, \
             "RD should contain 'Pending' status text"
 
-    def test_reading_desk_handles_correction_selection(self, genizah_app_source):
+    def test_reading_desk_handles_correction_selection(self, desktop_rd_source):
         """_rd_load_version_content handles source=='correction' and reads corrected_text."""
-        method_source = _extract_method(genizah_app_source, '_rd_load_version_content')
-        assert method_source, "_rd_load_version_content method should exist in genizah_app.py"
+        method_source = _extract_method(desktop_rd_source, '_rd_load_version_content')
+        assert method_source, "_rd_load_version_content method should exist in desktop/result_dialog.py"
 
         assert 'source == "correction"' in method_source or "source == 'correction'" in method_source, \
             "_rd_load_version_content should check for source == 'correction'"
