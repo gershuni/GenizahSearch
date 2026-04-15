@@ -2795,6 +2795,9 @@ class ResultDialog(QDialog):
                         worker.terminate()
                         worker.wait()
 
+            # Stop dialog's own thumbnail image loaders (img_thread, ext_img_thread)
+            self.cancel_image_thread()
+
             # Stop manuscript viewer image threads
             if getattr(self, 'ms_viewer', None):
                 self.ms_viewer.stop_threads()
