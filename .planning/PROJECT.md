@@ -8,9 +8,11 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current State (after v7.8 Phase 64 complete)
+## Current State (after v7.8 Phase 66 complete)
 
-**In progress:** v7.8 Build Infrastructure milestone
+**In progress:** v7.8 Structural Foundation milestone
+- Phase 66 complete: Documentation Update (2026-04-15) — CODE_INDEX.md v7.8 file sections (framework_patches.py, web/main.py, web/auth_state.py, thread_local_db.py), DEVELOPER_GUIDE.md CI + ruff + dependency docs, OPEN_ISSUES.md revalidated Phase 65 code review findings (WR-03 fixed, 4 open)
+- Phase 65 complete: Repo Hygiene (2026-04-14) — silent exception audit + annotation, NiceGUI monkey-patch extraction to web/framework_patches.py, root debris .gitignore extension
 - Phase 64 complete: Auth Migration (2026-04-14) — gotrue→supabase_auth imports (fixes silently broken error handling), implicit→PKCE OAuth flow, dead endpoint removal, gotrue removed from deps
 - Phase 63 complete: CI & Dependency Pinning (2026-04-14) — GitHub Actions CI with ruff + pytest + check_docs.py, two-file dependency pinning, zero-violation baseline
 
@@ -255,4 +257,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-14 after v7.8 Structural Quality milestone started (prev v7.8 Image Cache deferred)*
+*Last updated: 2026-04-15 after v7.8 Phase 66 (Documentation Update) complete*
