@@ -1,7 +1,7 @@
 # GenizahSearch Developer Guide
 
 > Quick start guide for developers working on GenizahSearch
-> Last updated: 2026-04-14
+> Last updated: 2026-04-15
 
 ---
 
@@ -207,6 +207,7 @@ Fragment/leaf identifier. Format: `{shelfmark}.{folio}{side}`
 3. Test locally
 4. Commit with descriptive message
 5. Push and create PR
+6. CI runs automatically on push/PR (lint + docs + tests on Ubuntu and Windows)
 
 ### Code Style
 
@@ -318,6 +319,40 @@ pip install PyQt6 PyQt6-WebEngine
 
 ---
 
+## Continuous Integration
+
+The project uses GitHub Actions for CI. The workflow is defined in `.github/workflows/ci.yml`.
+
+### Triggers
+
+- **Push** to `master-main` branch
+- **Pull requests** to any branch
+
+### Jobs
+
+| Job | Runner | What it does |
+|-----|--------|-------------|
+| `lint-and-docs` | `ubuntu-latest` | Installs `ruff==0.15.10`, runs `ruff check .`, runs `python scripts/check_docs.py` |
+| `tests` | `ubuntu-latest` + `windows-latest` | Installs from `requirements-lock.txt`, runs `pytest tests/` |
+
+The `tests` job depends on `lint-and-docs` -- tests only run if lint and docs checks pass first.
+
+Both test runners use Python 3.11 (matching the pinned dependency set).
+
+### Local Pre-Push Checks
+
+Before pushing, run these locally to catch CI failures early:
+
+```bash
+ruff check .                          # Lint (same as CI)
+PYTHONIOENCODING=utf-8 python scripts/check_docs.py  # Doc health
+pytest tests/ -x -q                   # Tests (quick mode)
+```
+
+> **Windows note:** `scripts/check_docs.py` uses emoji in output. Set `PYTHONIOENCODING=utf-8` or pipe through `| Out-Null` if your terminal uses cp1255/cp1252.
+
+---
+
 ## Dependency Management
 
 ### Adding a New Dependency
@@ -365,7 +400,7 @@ The lock file is generated from a single environment (`pip freeze` on the develo
 
 ## Linting
 
-The project uses [ruff](https://docs.astral.sh/ruff/) for linting. Configuration is in `ruff.toml`.
+The project uses [ruff](https://docs.astral.sh/ruff/) for linting, configured in `ruff.toml` at the project root.
 
 ```bash
 # Check for violations
@@ -376,6 +411,11 @@ ruff check --fix .
 ```
 
 Current ruleset (Phase 63): syntax errors (`E9xx`) and import hygiene (`F401`, `F811`, `F821`). The ruleset will expand in future milestones.
+
+Configuration is in `ruff.toml` at the project root. Key settings:
+- `line-length = 120` (not enforced yet, future-friendly default)
+- `extend-exclude`: `.claude`, `extension`, `dist`, `build`
+- `select`: `E9` (syntax errors), `F401` (unused imports), `F811` (redefined unused), `F821` (undefined name)
 
 CI runs `ruff check .` on every push and PR. All violations must be fixed before merging.
 
