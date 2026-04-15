@@ -237,7 +237,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 65-01-PLAN.md — Monkey-patch isolation into web/framework_patches.py with version guards
-- [ ] 65-02-PLAN.md — Full repo-wide silent exception handler audit (genizah_core, genizah_app, web/, shared/)
+- [x] 65-02-PLAN.md — Full repo-wide silent exception handler audit (genizah_core, genizah_app, web/, shared/)
 - [ ] 65-03-PLAN.md — Gitignore extension for root debris prevention with full asset verification
 
 ### Phase 66: Documentation Update
@@ -261,7 +261,7 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 |-------|----------------|--------|-----------|
 | 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
 | 64. Auth Migration | 2/2 | Complete    | 2026-04-14 |
-| 65. Repo Hygiene | 1/3 | In Progress|  |
+| 65. Repo Hygiene | 2/3 | In Progress|  |
 | 66. Documentation Update | 0/TBD | Not started | - |
 
 ---
