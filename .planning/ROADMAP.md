@@ -227,9 +227,9 @@ Zero user-visible behavior changes.
 **Phase gate**: pytest green, CI green
 **Plans**: 3 plans
 Plans:
-- [ ] 67-01-PLAN.md -- Create desktop/ package, move shared helpers, produce dependency manifest
-- [ ] 67-02-PLAN.md -- Move helpers + ResultDialog class (derive-then-ruff-verify), update source-grep tests
-- [ ] 67-03-PLAN.md -- Rename self.parent() to self._app + manual smoke test
+- [ ] 67-01-PLAN.md -- Create desktop/ package, move ActionsHoverWidget + _format_add_to_list_label to widgets.py
+- [ ] 67-02-PLAN.md -- Delete browse dead code, move helpers to cohesive modules, extract ResultDialog (additive copy then cut-over), update tests
+- [ ] 67-03-PLAN.md -- Rename self.parent() to self._app + manual desktop smoke test
 **Risk**: ResultDialog likely references GenizahGUI methods (e.g., for browse navigation callbacks). These cross-references need careful handling -- callback injection or signal-based decoupling. Discuss during planning.
 
 ### Phase 68: Desktop Dialog Extractions
