@@ -2391,7 +2391,7 @@ class ResultDialog(QDialog):
         if not self._rd_fjms_bib:
             return
         shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
-        from genizah_app import FjmsBibliographyDialog
+        from desktop.dialogs_scholarly import FjmsBibliographyDialog
         dlg = FjmsBibliographyDialog(
             self._rd_fjms_bib,
             sys_id=self.current_sys_id or '',
@@ -2405,7 +2405,7 @@ class ResultDialog(QDialog):
         if not self._rd_marc_bib:
             return
         shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
-        from genizah_app import NliBibliographyDialog
+        from desktop.dialogs_scholarly import NliBibliographyDialog
         dlg = NliBibliographyDialog(
             self._rd_marc_bib,
             sys_id=self.current_sys_id or '',
@@ -2429,7 +2429,7 @@ class ResultDialog(QDialog):
         if not self._rd_catalog_detail:
             return
         shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
-        from genizah_app import FjmsCatalogDialog
+        from desktop.dialogs_scholarly import FjmsCatalogDialog
         dlg = FjmsCatalogDialog(
             self._rd_catalog_detail,
             sys_id=self.current_sys_id or '',
@@ -2452,7 +2452,7 @@ class ResultDialog(QDialog):
         if self._rd_measurements_data:
             shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
             _side = 'recto' if (self.current_p_num or 1) == 1 else 'verso'
-            from genizah_app import FjmsMeasurementsDialog
+            from desktop.dialogs_scholarly import FjmsMeasurementsDialog
             dlg = FjmsMeasurementsDialog(
                 self._rd_measurements_data,
                 sys_id=self.current_sys_id or '',
