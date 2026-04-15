@@ -91,7 +91,7 @@ Known parent attrs/methods (sampled via grep of `NR>=6045 && NR<=8862`):
 ### Reusable Assets
 - **`shared/` service pattern**: 20+ shared modules (e.g., `shared/document_service.py`, `shared/corrections_service.py`) already show how a neutral module imported by both web and desktop avoids circular imports. `desktop/widgets.py` follows the same direction rule.
 - **`gui_threads.py`**: already a neutral module imported by `genizah_app.py` (e.g., `SearchThread`). Demonstrates that breaking classes out of the monolith into a sibling top-level `.py` works.
-- **`genizah_translations.py`**: `tr()` function is already imported by `genizah_app.py` — `desktop/result_dialog.py` imports directly from there, not transitively.
+- **`genizah_core.py`**: `tr()` function is defined here (line 2334) and imported by `genizah_app.py` (`from genizah_core import tr` at line 36) — `desktop/result_dialog.py` and `desktop/widgets.py` import `tr` directly from `genizah_core`, not transitively. `genizah_translations.py` holds translation **data** (dictionaries), not the `tr` function.
 
 ### Established Patterns
 - **One-directional imports**: `shared/*` NEVER imports from `genizah_app.py` or `web/*`. `desktop/*` must preserve this — `desktop/result_dialog.py` and `desktop/widgets.py` must not import `genizah_app`.
