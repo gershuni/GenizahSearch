@@ -32,6 +32,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
       - run: pip install -r requirements-lock.txt
       # pytest and ruff are CI-only dev tools, not runtime deps
       - run: pip install pytest
