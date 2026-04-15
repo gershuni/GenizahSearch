@@ -168,7 +168,7 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Milestone v7.9: Decomposition**
 
-Goal: Reduce structural debt by decomposing the two largest files (genizah_app.py ~18.5K lines, web/pages/search.py + browse.py) into focused modules — leveraging the v7.8 CI safety net. Zero user-visible behavior changes.
+Goal: Reduce structural debt by decomposing the largest source files (genizah_app.py ~32.8K lines, web/pages/search.py ~6.7K, web/pages/browse.py ~5.1K) into focused modules — leveraging the v7.8 CI safety net. Zero user-visible behavior changes.
 
 Target features:
 - Desktop: Extract ResultDialog, PuzzleCanvasWindow + puzzle classes, ManuscriptViewerWidget + image viewers, ExcludeDialog + filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules; GenizahGUI stays in genizah_app.py as orchestrator

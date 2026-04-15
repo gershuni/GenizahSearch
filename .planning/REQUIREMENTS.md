@@ -67,22 +67,23 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DESK-01 | TBD | Not started |
-| DESK-02 | TBD | Not started |
-| DESK-03 | TBD | Not started |
-| DESK-04 | TBD | Not started |
-| DESK-05 | TBD | Not started |
-| DESK-06 | TBD | Not started |
-| DESK-07 | TBD | Not started |
-| WEBM-01 | TBD | Not started |
-| WEBM-02 | TBD | Not started |
-| WEBM-03 | TBD | Not started |
-| NREG-01 | TBD | Not started |
+| DESK-01 | Phase 67 | Not started |
+| DESK-02 | Phase 70 | Not started |
+| DESK-03 | Phase 69 | Not started |
+| DESK-04 | Phase 68 | Not started |
+| DESK-05 | Phase 68 | Not started |
+| DESK-06 | Phase 71 | Not started |
+| DESK-07 | Phase 71 | Not started |
+| WEBM-01 | Phase 72 | Not started |
+| WEBM-02 | Phase 73 | Not started |
+| WEBM-03 | Phase 74 | Not started |
+| NREG-01 | Phase 75 | Not started |
 
 **Coverage:**
 - v7.9 requirements: 11 total
-- Mapped to phases: 0
-- Unmapped: 11
+- Mapped to phases: 11
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-15*
+*Traceability updated: 2026-04-15 -- all 11 requirements mapped to phases 67-75*

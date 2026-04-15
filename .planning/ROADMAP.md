@@ -17,6 +17,7 @@
 - **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (shipped 2026-03-31)
 - **v7.7 Volume-Aware Browse** -- Phases 58-61 (shipped 2026-04-01)
 - **v7.8 Structural Foundation** -- Phases 63-66 (shipped 2026-04-15)
+- **v7.9 Decomposition** -- Phases 67-76 (in progress)
 
 ## Phases
 
@@ -187,14 +188,175 @@ See: .planning/milestones/v7.8-ROADMAP.md
 4 phases, 9 plans, 64 commits, 173 files changed (+6,269/-828 lines).
 CI safety net with GitHub Actions (Ubuntu + Windows matrix, ruff + check_docs + pytest),
 two-file dependency pinning (14 direct + 115 transitive), Supabase auth migration
-(gotrue → supabase_auth, PKCE-only OAuth), 205+ silent exception handlers audited across
+(gotrue -> supabase_auth, PKCE-only OAuth), 205+ silent exception handlers audited across
 76 first-party files, isolated NiceGUI monkey-patches with version guards, repo root
-cleanup (.gitignore 50→126 lines, untracked root 67→1), documentation refresh
+cleanup (.gitignore 50->126 lines, untracked root 67->1), documentation refresh
 (CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE). 12/12 requirements satisfied.
 Zero user-visible behavior changes.
 
 </details>
 
+### v7.9 Decomposition (In Progress)
+
+**Milestone Goal:** Reduce structural debt by decomposing the largest source files -- `genizah_app.py` (~32,800 lines), `web/pages/search.py` (~6,700 lines), `web/pages/browse.py` (~5,100 lines) -- into focused modules. Zero user-visible behavior changes. Leverages v7.8 CI safety net (ruff + pytest on Ubuntu + Windows).
+**Per-phase gate:** current pytest baseline remains green, CI green (Ubuntu + Windows) after each phase.
+**Milestone-level gate:** `scripts/check_docs.py` green at milestone close (Phase 76).
+
+- [ ] **Phase 67: ResultDialog Extraction** - Extract ResultDialog class from genizah_app.py into desktop/result_dialog.py
+- [ ] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules
+- [ ] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py
+- [ ] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py
+- [ ] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite
+- [ ] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules
+- [ ] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules
+- [ ] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects
+- [ ] **Phase 75: Non-Regression Verification** - Manual qualitative verification of search/browse responsiveness in both apps
+- [ ] **Phase 76: Documentation Close** - Refresh CODE_INDEX.md, OPEN_ISSUES.md, and path references for all moved files
+
+## Phase Details
+
+### Phase 67: ResultDialog Extraction
+**Goal**: ResultDialog and its helper classes live in their own module, imported by genizah_app.py
+**Depends on**: Nothing (first phase of milestone; CI safety net from v7.8 is prerequisite)
+**Requirements**: DESK-01
+**Success Criteria** (what must be TRUE):
+  1. `ResultDialog` class is defined in a new `desktop/result_dialog.py` module (not in `genizah_app.py`)
+  2. `genizah_app.py` imports `ResultDialog` from the new module and all existing call sites work unchanged
+  3. Any helper classes/functions used exclusively by ResultDialog move with it; shared helpers remain accessible
+  4. current pytest baseline remains green
+**Phase gate**: pytest green, CI green
+**Plans**: TBD
+**Risk**: ResultDialog likely references GenizahGUI methods (e.g., for browse navigation callbacks). These cross-references need careful handling -- callback injection or signal-based decoupling. Discuss during planning.
+
+### Phase 68: Desktop Dialog Extractions
+**Goal**: All filter and scholarly dialogs live in dedicated modules, not in genizah_app.py
+**Depends on**: Phase 67 (establishes extraction pattern and module layout)
+**Requirements**: DESK-04, DESK-05
+**Success Criteria** (what must be TRUE):
+  1. `ExcludeDialog` and filter dialog classes are defined in a new `desktop/dialogs_filter.py` module (not in `genizah_app.py`)
+  2. FJMS catalog dialog, NLI crossref dialog, bibliography dialog, and measurement dialog classes are defined in a new `desktop/dialogs_scholarly.py` module (not in `genizah_app.py`)
+  3. `genizah_app.py` imports all dialog classes from their new modules and all existing call sites work unchanged
+  4. current pytest baseline remains green
+**Phase gate**: pytest green, CI green
+**Note**: These are leaf dialogs with minimal cross-dependencies -- grouping them is safe. If any dialog has unexpected coupling to ResultDialog or viewers, split into a separate plan.
+
+### Phase 69: Image Viewer Extraction
+**Goal**: All manuscript image viewing classes live in their own module
+**Depends on**: Phase 68 (dialog extractions complete, reducing genizah_app.py surface area)
+**Requirements**: DESK-03
+**Success Criteria** (what must be TRUE):
+  1. `ManuscriptViewerWidget`, `FullscreenImageWindow`, and related image viewer classes are defined in a new `desktop/viewers.py` module (not in `genizah_app.py`)
+  2. Image-loading helper functions shared between viewers and puzzle are accessible from the new module (or extracted to a shared `desktop/image_utils.py`)
+  3. `genizah_app.py` imports viewer classes from the new module and all existing call sites work unchanged
+  4. current pytest baseline remains green
+**Phase gate**: pytest green, CI green
+**Risk**: DESK-03 and DESK-02 (puzzle) may share image-loading helpers (IIIF fetch, background removal integration, image adjustment pipelines). During discuss-phase, map the shared surface and decide whether to extract a `desktop/image_utils.py` or let puzzle import from viewers.
+
+### Phase 70: Puzzle Extraction
+**Goal**: All puzzle/join canvas classes live in their own module
+**Depends on**: Phase 69 (image viewer extraction resolves shared image helper placement)
+**Requirements**: DESK-02
+**Success Criteria** (what must be TRUE):
+  1. `PuzzleCanvasWindow` and all puzzle-related classes (fragment items, toolbar, etc.) are defined in a new `desktop/puzzle.py` module (not in `genizah_app.py`)
+  2. Puzzle classes import image helpers from `desktop/viewers.py` or `desktop/image_utils.py` (no circular imports)
+  3. `genizah_app.py` imports puzzle classes from the new module and all existing call sites work unchanged
+  4. current pytest baseline remains green
+**Phase gate**: pytest green, CI green
+**Risk**: Import cycle between puzzle and viewer modules if they reference each other. Phase 69 should establish the dependency direction (puzzle depends on viewers, not vice versa).
+
+### Phase 71: GenizahGUI Consolidation & Smoke Tests
+**Goal**: genizah_app.py is a clean orchestrator and all desktop extractions pass smoke tests
+**Depends on**: Phase 70 (all desktop extractions complete)
+**Requirements**: DESK-06, DESK-07
+**Success Criteria** (what must be TRUE):
+  1. `genizah_app.py` contains `GenizahGUI` as the top-level coordinator, with all dialog/viewer/puzzle implementations imported from `desktop/` modules
+  2. All substantial dialog, viewer, and puzzle implementations are extracted to `desktop/` modules; small coordination helpers and thin wrappers may remain alongside `GenizahGUI`
+  3. Desktop smoke-test suite passes: app starts, basic search executes, browse navigation changes pages, ResultDialog opens/closes, puzzle window opens and loads a fragment
+  4. current pytest baseline remains green
+  5. No import cycles between `desktop/` modules (verified by ruff or manual inspection)
+**Phase gate**: pytest green, CI green, smoke tests pass
+**Note**: Smoke tests may be a manual checklist or a lightweight script. Decide during planning. DESK-07 requires each prior extraction step to keep pytest green -- this phase is the final verification that the cumulative result is sound.
+
+### Phase 72: Search Page Split
+**Goal**: web/pages/search.py is decomposed into focused modules for state, UI, and results
+**Depends on**: Phase 71 (desktop complete; web phases are independent but sequenced after desktop to avoid context switching)
+**Requirements**: WEBM-01
+**Success Criteria** (what must be TRUE):
+  1. Search state management (query parameters, refinement chain, session persistence) lives in a dedicated module (e.g., `web/pages/search_state.py`)
+  2. Search results rendering (result cards, pagination, export) lives in a dedicated module (e.g., `web/pages/search_results.py`)
+  3. `web/pages/search.py` remains the entry point / page registration but delegates to the split modules
+  4. current pytest baseline remains green
+**Phase gate**: pytest green, CI green
+**UI hint**: yes
+
+### Phase 73: Browse Page Split
+**Goal**: web/pages/browse.py is decomposed into focused modules for state, UI, and enrichment
+**Depends on**: Phase 72 (establishes web split pattern)
+**Requirements**: WEBM-02
+**Success Criteria** (what must be TRUE):
+  1. Browse state management (current manuscript, volume, navigation history) lives in a dedicated module (e.g., `web/pages/browse_state.py`)
+  2. Browse enrichment logic (Phase A/B deferred loading, crossref, Oxford, Cambridge) lives in a dedicated module (e.g., `web/pages/browse_enrichment.py`)
+  3. `web/pages/browse.py` remains the entry point / page registration but delegates to the split modules
+  4. current pytest baseline remains green
+**Phase gate**: pytest green, CI green
+**UI hint**: yes
+
+### Phase 74: Page-Scoped State Refactor
+**Goal**: Search and browse pages use page-scoped state objects instead of app.storage.user sprawl and detached async flows
+**Depends on**: Phase 73 (split modules provide clean boundaries for state refactoring)
+**Requirements**: WEBM-03
+**Success Criteria** (what must be TRUE):
+  1. Search page state is managed through a page-scoped object rather than scattered `app.storage.user` keys for live page state (session persistence keys may remain in app.storage.user)
+  2. Browse page state is managed through a page-scoped object rather than scattered `app.storage.user` keys for live page state
+  3. Detached `asyncio.ensure_future` calls in search and browse are replaced with page-scoped handlers or NiceGUI background_tasks where practical (some may remain with justification)
+  4. current pytest baseline remains green
+  5. Web smoke check: app starts; `/` search page loads; a basic search returns results; `/browse` loads for at least one manuscript; shelfmark navigation between manuscripts works
+**Phase gate**: pytest green, CI green, web smoke check passes
+**UI hint**: yes
+**Note**: This is the most architectural web change in the milestone. It touches the runtime behavior of state management, not just file organization. Plan carefully -- the split modules from Phases 72-73 provide natural boundaries, but the state refactoring changes how data flows at runtime. Page-scoped objects should be lightweight wrappers, not a state management framework. The web smoke check catches behavioral regressions earlier than Phase 75's full verification.
+
+### Phase 75: Non-Regression Verification
+**Goal**: Both apps behave identically to pre-refactor in all user-facing interactions
+**Depends on**: Phase 74 (all code changes complete)
+**Requirements**: NREG-01
+**Success Criteria** (what must be TRUE):
+  1. Web search: initial render, result paging, result interaction (expand, browse, export) show no obvious slowdown versus pre-refactor
+  2. Web browse: manuscript loading, enrichment panel population, volume switching show no obvious slowdown versus pre-refactor
+  3. Desktop search: basic search, composition search, result dialog interaction show no obvious slowdown versus pre-refactor
+  4. Desktop browse: page navigation, image loading, folio switching show no obvious slowdown versus pre-refactor
+  5. `pytest tests/` baseline green (1067 passed, 8 skipped)
+**Phase gate**: pytest green, qualitative sign-off from user
+**Verification method**: Manual checklist only -- no benchmark suite. Executor walks through the web and desktop surfaces listed in criteria 1-4, then the user signs off on each surface (explicit yes/no per surface). No quantitative thresholds; the bar is "no obvious slowdown vs pre-refactor."
+
+### Phase 76: Documentation Close
+**Goal**: Project documentation accurately reflects the decomposed codebase
+**Depends on**: Phase 75 (all code and verification complete)
+**Requirements**: (milestone deliverable, not a numbered requirement)
+**Success Criteria** (what must be TRUE):
+  1. `docs/CODE_INDEX.md` lists all new `desktop/` modules and updated `web/pages/` module structure with accurate descriptions
+  2. `docs/OPEN_ISSUES.md` includes any decomposition findings, deferred cleanup items, or import-cycle concerns discovered during execution
+  3. Any docs that reference specific file paths or line numbers in `genizah_app.py`, `web/pages/search.py`, or `web/pages/browse.py` are updated to reflect new locations
+  4. `scripts/check_docs.py` passes green
+**Phase gate**: check_docs green, CI green
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 -> 75 -> 76
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 67. ResultDialog Extraction | 0/TBD | Not started | - |
+| 68. Desktop Dialog Extractions | 0/TBD | Not started | - |
+| 69. Image Viewer Extraction | 0/TBD | Not started | - |
+| 70. Puzzle Extraction | 0/TBD | Not started | - |
+| 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
+| 72. Search Page Split | 0/TBD | Not started | - |
+| 73. Browse Page Split | 0/TBD | Not started | - |
+| 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
+| 75. Non-Regression Verification | 0/TBD | Not started | - |
+| 76. Documentation Close | 0/TBD | Not started | - |
+
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-15 after v7.8 Structural Foundation milestone shipped*
+*Last updated: 2026-04-15 -- v7.9 Decomposition roadmap created (10 phases, 67-76)*

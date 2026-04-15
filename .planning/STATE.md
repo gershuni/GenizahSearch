@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v7.9
 milestone_name: Decomposition
-status: defining_requirements
-stopped_at: null
-last_updated: "2026-04-15T08:00:00Z"
+status: ready_to_plan
+stopped_at: Phase 67 ready to plan
+last_updated: "2026-04-15T09:00:00Z"
 last_activity: 2026-04-15
 progress:
-  total_phases: 0
+  total_phases: 10
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -25,14 +25,16 @@ last_shipped:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.9 Decomposition — defining requirements
+**Current focus:** v7.9 Decomposition -- Phase 67 ready to plan
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-15 — Milestone v7.9 started
+Phase: 67 of 76 (ResultDialog Extraction)
+Plan: -- (not yet planned)
+Status: Ready to plan
+Last activity: 2026-04-15 -- Roadmap created for v7.9 (10 phases, 67-76)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -63,10 +65,11 @@ See PROJECT.md Key Decisions table for full history.
 
 ### Blockers/Concerns
 
-None. v7.8 shipped cleanly with 12/12 requirements satisfied.
+- DESK-03/DESK-02 shared image helpers: ManuscriptViewerWidget and PuzzleCanvasWindow may share IIIF fetch / image adjustment code. Phase 69 discuss-phase must map this surface before extraction.
+- WEBM-03 architectural risk: page-scoped state refactor changes runtime data flow, not just file layout. Phases 72-73 splits should be stable before attempting.
 
 ## Session Continuity
 
-Last session: 2026-04-15T07:30:00Z
-Stopped at: v7.8 milestone close
+Last session: 2026-04-15T09:00:00Z
+Stopped at: v7.9 roadmap created, Phase 67 ready to plan
 Resume file: none
