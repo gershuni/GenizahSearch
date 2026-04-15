@@ -1384,7 +1384,6 @@ async def auth_callback_route(code: str = None, error: str = None, error_descrip
     """
     from web.supabase_client import get_profile, exchange_code_for_session
     from web.auth_state import GlobalAuthState
-    import json
 
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
