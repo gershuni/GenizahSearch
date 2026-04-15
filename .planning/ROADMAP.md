@@ -186,7 +186,7 @@ community writes (corrections/comments) include IE context.
 
 - [x] **Phase 63: CI & Dependency Pinning** - Pin all deps, add GitHub Actions CI with pytest + ruff + check_docs, configure scoped ruff ruleset (completed 2026-04-14)
 - [x] **Phase 64: Auth Migration** - Migrate deprecated gotrue auth to current Supabase API across both apps (completed 2026-04-14)
-- [ ] **Phase 65: Repo Hygiene** - Audit silent exceptions, encapsulate monkey-patches, clean root debris, update gitignore
+- [x] **Phase 65: Repo Hygiene** - Audit silent exceptions, encapsulate monkey-patches, clean root debris, update gitignore (completed 2026-04-15)
 - [ ] **Phase 66: Documentation Update** - Update CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE; ensure check_docs green
 
 ## Phase Details
@@ -238,7 +238,7 @@ Plans:
 Plans:
 - [x] 65-01-PLAN.md — Monkey-patch isolation into web/framework_patches.py with version guards
 - [x] 65-02-PLAN.md — Full repo-wide silent exception handler audit (genizah_core, genizah_app, web/, shared/)
-- [ ] 65-03-PLAN.md — Gitignore extension for root debris prevention with full asset verification
+- [x] 65-03-PLAN.md — Gitignore extension for root debris prevention with full asset verification
 
 ### Phase 66: Documentation Update
 **Goal**: Project documentation accurately reflects the current codebase state after all structural changes
@@ -261,7 +261,7 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 |-------|----------------|--------|-----------|
 | 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
 | 64. Auth Migration | 2/2 | Complete    | 2026-04-14 |
-| 65. Repo Hygiene | 2/3 | In Progress|  |
+| 65. Repo Hygiene | 3/3 | Complete   | 2026-04-15 |
 | 66. Documentation Update | 0/TBD | Not started | - |
 
 ---

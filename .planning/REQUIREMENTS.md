@@ -19,8 +19,8 @@ Current pytest baseline (1067 passed, 8 skipped, 1 warning on 2026-04-14) must r
 
 - [x] **HYGN-01**: Silent exception handlers audited — each either logs at appropriate level or is explicitly justified in a code comment; third-party/generated code excluded from audit
 - [x] **HYGN-02**: Framework monkey-patches isolated in web/framework_patches.py with NiceGUI version guards and justification comments for why each patch still exists
-- [ ] **HYGN-03**: Non-source generated/temp artifacts in repo root gitignored or relocated; intentional root assets explicitly exempted
-- [ ] **HYGN-04**: .gitignore updated to prevent future accumulation of generated artifacts
+- [x] **HYGN-03**: Non-source generated/temp artifacts in repo root gitignored or relocated; intentional root assets explicitly exempted
+- [x] **HYGN-04**: .gitignore updated to prevent future accumulation of generated artifacts
 
 ### Documentation
 
@@ -76,8 +76,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BLDG-04 | Phase 63 | Pending |
 | HYGN-01 | Phase 65 | Complete |
 | HYGN-02 | Phase 65 | Complete |
-| HYGN-03 | Phase 65 | Pending |
-| HYGN-04 | Phase 65 | Pending |
+| HYGN-03 | Phase 65 | Complete |
+| HYGN-04 | Phase 65 | Complete |
 | DOCS-01 | Phase 66 | Pending |
 | DOCS-02 | Phase 66 | Pending |
 | DOCS-03 | Phase 66 | Pending |
