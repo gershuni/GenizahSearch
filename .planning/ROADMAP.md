@@ -227,7 +227,7 @@ Zero user-visible behavior changes.
 **Phase gate**: pytest green, CI green
 **Plans**: 3 plans
 Plans:
-- [ ] 67-01-PLAN.md -- Create desktop/ package, move ActionsHoverWidget + _format_add_to_list_label to widgets.py
+- [x] 67-01-PLAN.md -- Create desktop/ package, move ActionsHoverWidget + _format_add_to_list_label to widgets.py
 - [ ] 67-02-PLAN.md -- Delete browse dead code, move helpers to cohesive modules, extract ResultDialog (additive copy then cut-over), update tests
 - [ ] 67-03-PLAN.md -- Rename self.parent() to self._app + manual desktop smoke test
 **Risk**: ResultDialog likely references GenizahGUI methods (e.g., for browse navigation callbacks). These cross-references need careful handling -- callback injection or signal-based decoupling. Discuss during planning.
@@ -350,7 +350,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 67. ResultDialog Extraction | 0/3 | Planned | - |
+| 67. ResultDialog Extraction | 1/3 | In Progress|  |
 | 68. Desktop Dialog Extractions | 0/TBD | Not started | - |
 | 69. Image Viewer Extraction | 0/TBD | Not started | - |
 | 70. Puzzle Extraction | 0/TBD | Not started | - |
