@@ -187,7 +187,7 @@ community writes (corrections/comments) include IE context.
 - [x] **Phase 63: CI & Dependency Pinning** - Pin all deps, add GitHub Actions CI with pytest + ruff + check_docs, configure scoped ruff ruleset (completed 2026-04-14)
 - [x] **Phase 64: Auth Migration** - Migrate deprecated gotrue auth to current Supabase API across both apps (completed 2026-04-14)
 - [x] **Phase 65: Repo Hygiene** - Audit silent exceptions, encapsulate monkey-patches, clean root debris, update gitignore (completed 2026-04-15)
-- [ ] **Phase 66: Documentation Update** - Update CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE; ensure check_docs green
+- [x] **Phase 66: Documentation Update** - Update CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE; ensure check_docs green (completed 2026-04-15)
 
 ## Phase Details
 
@@ -252,8 +252,8 @@ Plans:
 **Phase gate**: `pytest tests/` green, `scripts/check_docs.py` green, CI green on Windows
 **Plans**: 2 plans
 Plans:
-- [ ] 66-01-PLAN.md — Update CODE_INDEX.md and OPEN_ISSUES.md with v7.8 changes
-- [ ] 66-02-PLAN.md — CI/ruff/deps documentation in DEVELOPER_GUIDE + check_docs green
+- [x] 66-01-PLAN.md — Update CODE_INDEX.md and OPEN_ISSUES.md with v7.8 changes
+- [x] 66-02-PLAN.md — CI/ruff/deps documentation in DEVELOPER_GUIDE + check_docs green
 
 ## Progress
 
@@ -265,7 +265,7 @@ Phases execute in numeric order: 63 -> 64 -> 65 -> 66
 | 63. CI & Dependency Pinning | 2/2 | Complete    | 2026-04-14 |
 | 64. Auth Migration | 2/2 | Complete    | 2026-04-14 |
 | 65. Repo Hygiene | 3/3 | Complete    | 2026-04-15 |
-| 66. Documentation Update | 0/2 | Not started | - |
+| 66. Documentation Update | 2/2 | Complete   | 2026-04-15 |
 
 ---
 *Roadmap created: 2026-02-09*
