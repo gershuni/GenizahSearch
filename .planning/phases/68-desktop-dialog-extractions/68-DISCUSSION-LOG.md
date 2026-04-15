@@ -68,7 +68,7 @@ User preference (carried from Phase 67): questions in plain English with pros/co
 | B-reversed. Two plans: scholarly first, filter second | Lower-risk slice first, immediate back-edge removal. | ✓ |
 | C. Three plans: filter, scholarly, smoke | Smoke as its own artifact. | |
 
-**Claude's recommendation:** B (filter first, then scholarly, with Plan 3 smoke).
+**Claude's recommendation:** B (two plans, filter first then scholarly). Option C (three plans with smoke as its own plan) was presented but not recommended — Claude listed it for completeness, not as the top choice.
 **External AI (Codex) verdict:** Reverse the order — scholarly first, filter second. Reasoning:
 - Scholarly slice is cleaner: 4 dialogs, 2 call sites each, no QThread, no self-import cleanup.
 - Eliminates the `desktop.result_dialog → genizah_app` back-edge immediately (Phase 67's acknowledged debt).

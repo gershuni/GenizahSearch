@@ -56,7 +56,7 @@ Out of scope:
 
 ### Verification (Gray Area 4 — expanded per external AI concern)
 - **D-13:** **Scholarly slice smoke (end of Plan 1):** launch desktop app → run one basic search → open a result in ResultDialog → from ResultDialog open **one** scholarly dialog (FJMS catalog preferred, whichever is reachable) → close dialog → close ResultDialog → close app. No crash, no visible regression. (The prior Phase 67 smoke of "search → open result → navigate → close" is **insufficient** for Phase 68 — it never touches the moved code paths.)
-- **D-14:** **Filter slice smoke (end of Plan 2):** launch desktop app → open `PreSearchFilterDialog`, apply a filter, close → open `DomainFilterDialog` from the search UI, pick a domain, close → open `ExcludeDialog`, add an item, close → re-open the app to verify session-restore path (exercises `FilterCountWorker` at `genizah_app.py:28658` / `28695`-equivalent after cleanup) → close. No crash, no visible regression.
+- **D-14:** **Filter slice smoke (end of Plan 2):** launch desktop app → open `PreSearchFilterDialog`, apply a filter, close → open `DomainFilterDialog` from the search UI, pick a domain, close → open `ExcludeDialog`, add an item, close → **click a saved entry in the search-history menu** to exercise `_restore_regular_search_from_state` (the `genizah_app.py:28658`-equivalent `FilterCountWorker` site after cleanup) → **click a saved entry in the composition-history menu** to exercise `_restore_comp_search_from_state` (the `:28695`-equivalent site) → re-open the app (exercises the session-restore `FilterCountWorker` site at `genizah_app.py:29166`) → close. No crash, no visible regression. The re-open step alone covers **only** session restore — the history-click steps are what verify the deleted self-import paths.
 - **D-15:** pytest baseline (1067 passed, 9 skipped as of 2026-04-14, post-Phase 67 confirmed at same counts) must remain green after each plan — no change to counts.
 - **D-16:** Import smoke executed after each plan:
   - After Plan 1: `python -c "from desktop.dialogs_scholarly import FjmsBibliographyDialog, FjmsCatalogDialog, FjmsMeasurementsDialog, NliBibliographyDialog; from desktop.result_dialog import ResultDialog; from genizah_app import FjmsBibliographyDialog, FjmsCatalogDialog, FjmsMeasurementsDialog, NliBibliographyDialog, GenizahGUI"` — all succeed.
@@ -118,7 +118,7 @@ Scholarly dialogs (target module: `desktop/dialogs_scholarly.py`):
 ### CI & Verification Context
 - `.github/workflows/ci.yml` (v7.8 safety net — Ubuntu + Windows matrix; Ubuntu will catch Windows-case-insensitivity mistakes that local Windows hides)
 - `tests/` (1067 passing tests, 9 skipped as of Phase 67 close; same counts required at Phase 68 close)
-- `docs/OPEN_ISSUES.md` — any new decomposition findings logged here at Phase 76 close
+- `docs/OPEN_ISSUES.md` — per `AGENTS.md:143` policy, any bug discovered during Phase 68 execution MUST be logged here when found and marked resolved at session end (NOT deferred to Phase 76). Only the bulk `CODE_INDEX.md` path-reference cleanup is deferred to Phase 76 close — not issue logging.
 
 </canonical_refs>
 
@@ -148,13 +148,13 @@ Scholarly dialogs (target module: `desktop/dialogs_scholarly.py`):
 - **No Qt meta-object relocation hazards** — external AI review confirmed no pickling, no monkey-patching tests, no `QMetaObject` tricks. Risk is import-graph and runtime coverage only.
 
 ### Known Parent-Surface Coupling (for researcher context; NO rename in this phase)
-Grep evidence (from class-body scans) — these 7 dialogs reach their parent through `__init__` parameters, not via `self.parent()`:
-- `ExcludeDialog` reaches `parent.meta_mgr`, `parent.lists_mgr`, `parent._normalize_shelfmark`, and others via the `meta_mgr` / `lists_mgr` it receives.
-- `PreSearchFilterDialog` reaches FJMS services directly (`from shared.fjms_service import FjmsService`) — not a parent coupling, but a service coupling that moves with the class.
-- `DomainFilterDialog` reaches `parent._result_domain_map` and similar via parameters.
-- Scholarly dialogs receive FJMS/NLI records as constructor arguments — minimal parent surface.
+Grep evidence (direct `parent.` reads inside each class body, NR range `2674..3183`, `5848..6130`, `6193..7033`, `7034..7233`, `7234..7921`, `7922..8166`, `8167..8331`):
+- `ExcludeDialog` directly reads `parent.meta_mgr` (once, at `genizah_app.py:2687`, via `getattr(parent, "meta_mgr", None)`). `lists_mgr`, `shelf_map`, `existing_entries`, `exclusion_sources` are all explicit `__init__` constructor arguments — NOT `parent.*` reads. `_normalize_shelfmark` is not referenced inside the dialog.
+- `DomainFilterDialog` does NOT read any `parent.*` attributes. It takes `result_domains`, `excluded_domains`, `uncategorized_count` as explicit constructor arguments. (Grep hits on "parent" inside its body are all for a local `parent_name` key inside a domain-hierarchy dict — unrelated to the Qt parent.)
+- `PreSearchFilterDialog` — parent-surface audit deferred to researcher; initial scan suggests it is parameter-driven (`current_filters` passed in) and reaches FJMS services directly via `from shared.fjms_service import FjmsService`. That's a service coupling that moves with the class, not a parent coupling.
+- Scholarly dialogs (`FjmsBibliographyDialog`, `FjmsCatalogDialog`, `FjmsMeasurementsDialog`, `NliBibliographyDialog`) receive FJMS/NLI records as constructor arguments — minimal parent surface.
 
-D-18 leaves all of this verbatim. A Protocol/ABC narrowing can happen in Phase 71.
+**Researcher should re-audit each dialog's `parent.*` usage with fresh grep before the move** to catch anything missed above. The takeaway stays: no `self.parent()` usage across all 7 classes (grep-verified), so D-18 (no `self._app` rename) stands. A Protocol/ABC narrowing of the remaining parent reads and constructor surfaces is Phase 71.
 
 </code_context>
 
