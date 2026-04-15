@@ -2785,32 +2785,15 @@ class ResultDialog(QDialog):
         except Exception as e:
             logger.error("Failed to save metadata caches on exit: %s", e)
 
-        # 2. Stop worker threads safely
+        # 2. Stop ResultDialog-owned worker threads
         try:
-            if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
-                self.meta_loader.request_cancel()
-                self.meta_loader.wait()
-
-            if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
-                self.search_thread.cancel_flag = True
-                self.search_thread.wait(2000)
-                if self.search_thread.isRunning():
-                    self.search_thread.terminate()
-                    self.search_thread.wait()
-
-            if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
-                self.comp_thread.requestInterruption()
-                self.comp_thread.wait(2000)
-                if self.comp_thread.isRunning():
-                    self.comp_thread.terminate()
-                    self.comp_thread.wait()
-
-            if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
-                self.group_thread.requestInterruption()
-                self.group_thread.wait(2000)
-                if self.group_thread.isRunning():
-                    self.group_thread.terminate()
-                    self.group_thread.wait()
+            for attr in ('enrich_worker', '_rd_pgp_worker', 'preload_meta_worker'):
+                worker = getattr(self, attr, None)
+                if worker and worker.isRunning():
+                    worker.requestInterruption()
+                    if not worker.wait(2000):
+                        worker.terminate()
+                        worker.wait()
 
             # Stop manuscript viewer image threads
             if getattr(self, 'ms_viewer', None):
