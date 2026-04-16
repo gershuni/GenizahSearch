@@ -411,8 +411,8 @@ All completed items have been moved to `docs/archive/`:
 
 ## Related Documents
 
-- `PRE_LAUNCH_CHECKLIST.md` - Detailed test checklist
-- `FIX_PLAN.md` - Bug fix tracking
+- `docs/archive/PRE_LAUNCH_CHECKLIST.md` - Detailed test checklist
+- `docs/archive/plans/FIX_PLAN.md` - Bug fix tracking
 - `CODE_QUALITY_AUDIT_2026-01-30.md` - Full code audit
 - `PLANS_INDEX.md` - Implementation plans overview
 
