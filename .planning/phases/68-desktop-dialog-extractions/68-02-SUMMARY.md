@@ -2,10 +2,10 @@
 phase: 68-desktop-dialog-extractions
 plan: 02
 title: Extract filter dialogs to desktop/dialogs_filter.py
-status: pending-verification
-completed: null
+status: complete
+completed: 2026-04-16
 duration: ~13 min (Task 1 only)
-tasks_completed: 1
+tasks_completed: 2
 tasks_total: 2
 tags: [decomposition, extraction, desktop, filter-dialogs, qthread-relocation]
 dependency_graph:
@@ -42,7 +42,7 @@ Moved 3 filter dialog classes (ExcludeDialog, DomainFilterDialog, PreSearchFilte
 | Task | Name | Status | Commit | Key Changes |
 |------|------|--------|--------|-------------|
 | 1 | Move FilterCountWorker and create desktop/dialogs_filter.py | Done | 4f16c599 | Created module, moved 3 classes + 1 QThread, deleted 2 self-imports, added re-exports, cleaned unused imports |
-| 2 | Filter slice desktop smoke test (D-14) | Pending | -- | Awaiting user verification |
+| 2 | Filter slice desktop smoke test (D-14) | Done | -- | User approved 2026-04-16: no crash, no regression |
 
 ## Verification Results
 
@@ -83,19 +83,9 @@ Moved 3 filter dialog classes (ExcludeDialog, DomainFilterDialog, PreSearchFilte
 - **Issue:** pytest reports 1067 passed / 8 skipped. Plan 01 reported 1066/9. Plan text expected 1067/9. Minor environment-dependent variance, no failures.
 - **Fix:** None needed -- documented for accuracy.
 
-## Pending Verification
+## Verification
 
-Task 2 (D-14 filter slice smoke test) requires manual desktop app testing:
-1. Launch `python genizah_app.py`
-2. Open PreSearchFilterDialog -- apply a filter, close
-3. Open DomainFilterDialog -- pick a domain, close
-4. Open ExcludeDialog -- add an item, close
-5. Click a saved entry in regular search history menu (exercises deleted self-import path at former line 28658)
-6. Click a saved entry in composition search history menu (exercises deleted self-import path at former line 28695)
-7. Close and re-open app (exercises session-restore FilterCountWorker path)
-8. Close app
-
-Expected: No crash, no regression at any step.
+D-14 filter slice smoke test approved by user on 2026-04-16. All filter dialogs opened without crash, history-menu restore and session restore worked correctly. No visible regression.
 
 ## Known Stubs
 
