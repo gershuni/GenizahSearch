@@ -28,6 +28,12 @@ from web.services import (
     is_oxford_manuscript,
 )
 from web.search_bootstrap import resolve_search_bootstrap
+from web.pages.search_state import (
+    SearchUIState, AdvancedViewState, SearchPageRefs,
+    get_search_history, add_to_search_history,
+    delete_search_history_entry, clear_search_history,
+    domain_display_name,
+)
 from genizah_core import SearchEngine, get_library_display, generate_tabular_syntax
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
 from shared.exclusion_service import (
@@ -59,99 +65,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # === State Management ===
     PAGE_SIZE = 50  # Results per page for pagination
-
-    class SearchUIState:
-        def __init__(self):
-            self.progress = 0.0
-            self.status = ""
-            self.is_running = False
-            self.is_cancelled = False  # For stop button functionality
-            self.results = []
-            self.selected_result = None
-            self.total_count = 0
-            self.current_page_idx = 0  # For browse within viewer
-            self.current_page = 0  # Zero-indexed page number for result pagination
-            self.selected_indices = set()  # For bulk operations
-            self.is_panel_collapsed = False  # For collapsible search panel
-            self.last_scroll_top = 0  # For scroll-based auto-collapse
-            self.update_timer = None  # Track progress update asyncio Task to prevent duplicates
-            self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions
-            self.displayed_results = []  # Currently rendered subset (may be filtered)
-            self.builder_negated_words: list = []  # Words negated via Query Builder
-            self.result_domains: dict = {}  # Domain classification map for result indicators
-            self.all_result_domains: dict = {}  # sys_id -> list of domain names (deduped)
-            self.domain_exclusions: set = set()  # domain names user has excluded
-            self.has_domain_data: bool = False  # whether any results have domain data
-            self.domain_name_map: dict = {}  # English domain name -> Hebrew name
-            self.catalog_source_counts: dict = {}  # sys_id -> count of catalog sources
-            self.domain_hierarchy: dict = {}  # cached hierarchy from get_domain_hierarchy()
-            self.search_start_time: float = 0.0  # For elapsed timer display
-            self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
-            self.printed_filter: str = 'all'  # 'all', 'hide_printed', 'only_printed'
-            self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
-            # Pre-search filter state (Search only in... panel)
-            self.filter_domains: list = []      # Selected domain filters (multi-select)
-            self.filter_authors: list = []      # Selected authors (person_ids, multi-select)
-            self.filter_works: list = []        # Selected works (title_ids, multi-select)
-            self.filter_include_mode: bool = True  # True=include, False=exclude
-            self.filter_date_from: int = None   # Date range start
-            self.filter_date_to: int = None     # Date range end
-            self.filter_material_exclude: list = []  # Material types to exclude (e.g., ['Printed'])
-            self.filter_manuscript_count: int = None  # Count of manuscripts matching current filters
-            self.restrict_sys_ids: set = None   # Computed from filters, passed to search engine
-            self.filter_text_all: list = []     # FTS5 text: all words must match
-            self.filter_text_any: list = []     # FTS5 text: any word must match
-            self.filter_text_not: list = []     # FTS5 text: exclude these words
-            self.word_search_excluded_ids: set = set()  # Per-manuscript exclusions for word search mode
-            self.word_search_excluded_results: list = []  # Results hidden by word search exclusion
-            # Pre-search measurement filter state (DIM-02, Phase 54)
-            self.filter_width_min = None
-            self.filter_width_max = None
-            self.filter_height_min = None
-            self.filter_height_max = None
-            self.filter_line_count_min = None
-            self.filter_line_count_max = None
-            self.filter_line_height_min = None
-            self.filter_line_height_max = None
-            self.filter_text_density_min = None
-            self.filter_text_density_max = None
-            self.filter_measurement_material: list = []
-            # Post-search measurement filter state (DIM-03, Phase 54) -- SEPARATE from pre-search
-            self.post_filter_width_min = None
-            self.post_filter_width_max = None
-            self.post_filter_height_min = None
-            self.post_filter_height_max = None
-            self.post_filter_line_count_min = None
-            self.post_filter_line_count_max = None
-            self.post_filter_line_height_min = None
-            self.post_filter_line_height_max = None
-            self.post_filter_text_density_min = None
-            self.post_filter_text_density_max = None
-            self.post_filter_measurement_material: list = []
-            self._measurement_cache: dict = {}  # {sys_id: summary_dict}
-            # Translation enrichment (Phase 46)
-            self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
-            self.title_translations: dict = {}  # sys_id -> {original_title, english_title, hebrew_title, source}
-            self.search_generation: int = 0  # Monotonic counter to discard stale background enrichment
-            # Refinement chain state (Phase 55 -- search within results)
-            self.refinement_chain: list = []               # list of RefinementStep (the chain)
-            self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results, not post-filtered)
-            self._refine_mode: bool = False                # True when user clicked "Search within" and is entering query
-            self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)
-            self._refinement_scope_sig: str = ''           # scope_signature at time of last chain step creation
-            self._zero_result_refine: bool = False         # True when last refine returned 0 results (D-14a)
-            self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
-            # Visual Similarity restriction state (Phase 57)
-            self.vs_restrict_sys_ids: set = None   # Partner sys_ids from visual suggestions
-            self.vs_restrict_label: str = None     # Display label for VS breadcrumb
-            self.vs_restrict_source_ids: list = [] # Source manuscript sys_ids that generated the restrict set
-            self.vs_restrict_mode: str = 'union'   # 'union' or 'intersection'
-            self.vs_availability: dict = {}        # sys_id -> bool, batch VS availability for current results
-            self.vs_browse_mode: bool = False      # True = show pool as results without text query
-            # Manuscript exclusion state (Phase 56 -- exclude known manuscripts)
-            self.exclusion_sources: list = []                    # list of ExclusionSource objects
-            self.manuscript_excluded_results: list = []          # Results hidden by manuscript exclusion [{result, reason}]
-            self._exclusion_shelf_map: dict | None = None        # Lazy-built norm->sys_id map for file resolution
 
     search_state = SearchUIState()
 
@@ -298,103 +211,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Check if any pre-search filters are active."""
         return has_active_filters(search_state)
 
-    # --- Search History Management ---
-    def _get_search_history() -> list:
-        """Get search history from storage."""
-        return app.storage.user.get('search_history', [])
-
-    def _add_to_search_history(query: str, result_count: int, mode: str, params: dict, state_snapshot: dict):
-        """Add or update a search history entry. Deduplicates by query+mode."""
-        if not app.storage.user.get('session_persistence_enabled', True):
-            return
-        limit = app.storage.user.get('search_history_limit', 20)
-        history = _get_search_history()
-
-        # Dedup: check for existing entry with same query + mode
-        existing_idx = None
-        for i, entry in enumerate(history):
-            if entry.get('query') == query and entry.get('mode') == mode:
-                existing_idx = i
-                break
-
-        entry = {
-            'query': query,
-            'result_count': result_count,
-            'mode': mode,
-            'timestamp': datetime.now().isoformat(),
-            'params': params,
-            'state': state_snapshot,
-        }
-
-        if existing_idx is not None:
-            history.pop(existing_idx)  # Remove old position
-            history.insert(0, entry)   # Move to front with updated data
-        else:
-            history.insert(0, entry)   # Add at front (newest first)
-
-        # Enforce limit
-        history = history[:limit]
-        app.storage.user['search_history'] = history
-
-    def _delete_search_history_entry(index: int):
-        """Delete a specific history entry by index."""
-        history = _get_search_history()
-        if 0 <= index < len(history):
-            history.pop(index)
-            app.storage.user['search_history'] = history
-
-    def _clear_search_history():
-        """Clear all search history."""
-        app.storage.user['search_history'] = []
-
+    # _domain_display_name closure wrapper (delegates to module-level function with search_state)
     def _domain_display_name(en_name: str) -> str:
-        """Get display name for a domain (Hebrew if UI is Hebrew, else English)."""
-        from web.translations import get_language
-        if get_language() == 'he':
-            if en_name in search_state.domain_name_map:
-                return search_state.domain_name_map[en_name]
-            # Fall back to tr() for non-FJMS labels like 'Uncategorized'
-            translated = tr(en_name)
-            if translated != en_name:
-                return translated
-        return en_name
+        return domain_display_name(search_state, en_name)
 
-    # State for Advanced View dialog (used for in-place updates)
-    class AdvancedViewState:
-        """State holder for the Advanced View dialog to enable in-place updates."""
-        def __init__(self):
-            self.current_result_idx: int = 0
-            self.results: List[dict] = []
-            self.current_sys_id: Optional[str] = None
-            self.current_p_num: int = 1
-            self.current_fl_id: Optional[str] = None
-            self.total_pages: int = 1
-            self.current_page: Optional[BrowsePage] = None
-            self.show_image_panel: bool = True
-            self.zoom_level: float = 1.0
-            self.rotation: int = 0
-            self.is_fullscreen: bool = False  # Fullscreen mode
-            # Edit mode state (inline editing like browse.py)
-            self.edit_mode: bool = False
-            self.edit_text: str = ""
-            self.edit_notes: str = ""
-            self.original_edit_text: str = ""
-            self.draft_saved: bool = False
-            self.draft_id: Optional[str] = None
-            # Enrichment data (FJMS + crossref)
-            self.fjms_data: Optional[dict] = None
-            self.crossref_data: Optional[dict] = None
-            # Volume-aware browse (multi-IE manuscripts)
-            self.volume_ie: Optional[str] = None
-            # Highlighted search terms for re-application on version change
-            self.highlight_terms: List[str] = []
-            # UI element references for in-place updates
-            self.result_label = None
-            self.score_badge = None
-            self.prev_btn = None
-            self.next_btn = None
-            self.content_container = None
-            self.image_container = None
+    # AdvancedViewState is now imported from search_state.py
 
     # === VIEWER_STYLES for Advanced View image handling (must be at page level) ===
     ADVANCED_VIEWER_STYLES = '''
@@ -3813,7 +3634,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def _refresh_history_menu():
         """Refresh the history dropdown menu contents."""
         history_menu.clear()
-        history = _get_search_history()
+        history = get_search_history()
         if not history:
             with history_menu:
                 ui.menu_item(tr('No search history')).props('disable')
@@ -3842,17 +3663,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.label(filter_text).style('font-size: 0.7rem; color: var(--primary-600); direction: ltr;')
                     # Delete button on each item
                     ui.button(icon='close', on_click=lambda e, idx=idx: (
-                        _delete_search_history_entry(idx), _refresh_history_menu()
+                        delete_search_history_entry(idx), _refresh_history_menu()
                     )).props('flat dense size=xs round').classes('ml-auto')
 
             ui.separator()
             ui.menu_item(tr('Clear all'), on_click=lambda: (
-                _clear_search_history(), _refresh_history_menu()
+                clear_search_history(), _refresh_history_menu()
             ))
 
     async def _on_history_item_clicked(index: int):
         """Restore state from a search history entry."""
-        history = _get_search_history()
+        history = get_search_history()
         if index >= len(history):
             return
         entry = history[index]
@@ -4362,7 +4183,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         d.pop('full_text', None)
                         hr['display'] = d
                     hist_results.append(hr)
-                _add_to_search_history(
+                add_to_search_history(
                     query=query_input.value or '',
                     result_count=len(results),
                     mode=mode_select.value or 'exact',
