@@ -289,9 +289,9 @@ Plans:
   4. current pytest baseline remains green
   5. No import cycles between `desktop/` modules (verified by ruff or manual inspection)
 **Phase gate**: pytest green, CI green, smoke tests pass
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 71-01-PLAN.md -- Extract DesktopVSCache trio to desktop/vs_cache.py, fix OPEN_ISSUES path
+- [x] 71-01-PLAN.md -- Extract DesktopVSCache trio to desktop/vs_cache.py, fix OPEN_ISSUES path
 - [ ] 71-02-PLAN.md -- Create desktop smoke checklist, user walkthrough verification
 
 ### Phase 72: Search Page Split
@@ -367,7 +367,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 68. Desktop Dialog Extractions | 2/2 | Complete    | 2026-04-16 |
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
-| 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
+| 71. GenizahGUI Consolidation & Smoke Tests | 1/2 | In Progress|  |
 | 72. Search Page Split | 0/TBD | Not started | - |
 | 73. Browse Page Split | 0/TBD | Not started | - |
 | 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
