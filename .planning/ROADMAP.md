@@ -305,9 +305,9 @@ Plans:
   4. current pytest baseline remains green
 **Phase gate**: pytest green, CI green
 **UI hint**: yes
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 72-01-PLAN.md -- Extract SearchUIState, AdvancedViewState, SearchPageRefs, search history helpers to search_state.py
+- [x] 72-01-PLAN.md -- Extract SearchUIState, AdvancedViewState, SearchPageRefs, search history helpers to search_state.py
 - [ ] 72-02-PLAN.md -- Extract toggle_expansion, render_results, create_result_card, open_advanced_dialog to search_results.py + web smoke test
 
 ### Phase 73: Browse Page Split
@@ -372,7 +372,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
 | 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
-| 72. Search Page Split | 0/2 | Not started | - |
+| 72. Search Page Split | 1/2 | In Progress|  |
 | 73. Browse Page Split | 0/TBD | Not started | - |
 | 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
 | 75. Non-Regression Verification | 0/TBD | Not started | - |
