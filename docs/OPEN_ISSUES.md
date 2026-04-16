@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-04-15 (added v7.8 code review findings from Phase 65)
+> **Last Updated:** 2026-04-15 (added recurring NiceGUI parent_slot timer error in production logs)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 12 | 58 | 70 |
+| P2 Medium Bugs | 13 | 58 | 71 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **23** | **101** | **124** |
+| **Total** | **24** | **101** | **125** |
 
 ---
 
@@ -79,6 +79,7 @@ Move to "Completed Issues" section at bottom with date
 |-------|------|--------|-------|
 | **FjmsService batch queries intermittently fail with "bad parameter or other API misuse" / "tuple index out of range"** | `shared/fjms_service.py` | ❌ Open | `get_printed_sys_ids()` and `get_domains_for_sys_ids()` use `row["AlmaId"]` dict access which requires `conn.row_factory = sqlite3.Row`. Under concurrent access or connection recycling, row_factory may be lost, causing "bad parameter" (SQLite API error) or "tuple index out of range" (fallback to tuple row). Pre-existing, intermittent, fails gracefully (returns empty set/dict). |
 | **Font-display middleware rebuilds cached `fonts.css` responses as fresh 200s and preserves stale validators** | `web/main.py` | ❌ Open | Review of the 2026-04-13 perf patch found `_inject_font_display_swap()` consumes `/static/fonts.css` responses and returns a new plain `Response` without preserving `response.status_code`. Conditional/static responses such as `304 Not Modified` (and any future non-200s) therefore become `200 OK`, while the code also copies original `ETag` / `Last-Modified` headers onto mutated CSS content. That can break browser/CDN cache semantics and, on a 304 path with an empty upstream body, risks returning an empty stylesheet body as `200`. Fix path: skip rewriting unless `status_code == 200` and `content-type` is CSS, then either recompute/remove validators or patch the source asset at startup instead of rewriting the served response. |
+| **Recurring NiceGUI `parent_slot has been deleted` RuntimeError spams journalctl** | `web/` (callsite unknown) | ❌ Open | Observed in `genizah-web` journal on 2026-04-15 — `ui.timer` callback fires after its parent container was deleted, raising `RuntimeError: The parent slot of the element has been deleted.` from `nicegui/elements/timer.py:12`. Caught by NiceGUI's `_handle_exceptions` so no user-visible crash, but pollutes logs and indicates a timer outliving its UI container. Same class of bug as the v6.5.1 parallels fix — one instance was patched, but another callsite still spawns a `ui.timer` in an ephemeral context. Fix path: grep `web/` for remaining `ui.timer(` usages in ephemeral containers and convert to `asyncio.call_later` (see memory note). Low urgency — cosmetic log noise. |
 | **CI still ran Ubuntu jobs on Python 3.10 after the pinned dependency set moved to Python 3.11** | `.github/workflows/ci.yml`, `requirements*.txt`, `.cursorrules`, `docs/guides/DEVELOPER_GUIDE.md` | ✅ Fixed (2026-04-15) | `requirements.txt` / `requirements-lock.txt` pin `numpy==2.4.3`, so the repo no longer has a coherent Python 3.10 story. CI now uses Python 3.11 for lint/docs and both test jobs, and the tracked developer-facing docs were updated from `Python 3.10+` to `Python 3.11+` to match the actual dependency/runtime floor. |
 | **Refinement counts switch units after replay/session restore** | `shared/refinement.py`, `web/pages/search.py`, `genizah_app.py` | ✅ Fixed (2026-03-29) | Fixed in v7.4.0: `replay_chain()` now uses `len(results)` (page-level) consistently. |
 | **Phase 54 desktop post-search measurement filters run before fresh summaries arrive, so rows can be filtered against stale prior-search data and are not re-applied after the new batch fetch completes** | `genizah_app.py` | ✅ Fixed (2026-03-27) | Re-review confirmed `_launch_enrichment_workers()` now reapplies `_apply_results_table_filters()` after `get_measurement_summaries_batch()` completes, so active post-search measurement filters are reevaluated against fresh data. |
@@ -168,6 +169,8 @@ Move to "Completed Issues" section at bottom with date
 | **CSRF protection missing** | API endpoints | ג Deferred | Low risk - NiceGUI uses WebSocket |
 | **Puzzle BG removal: brown backing page not removed on glued manuscripts** | `shared/background_removal.py`, `web/pages/puzzle.py` | ⏳ Deferred | BL manuscripts have brown backing over blue mat; Oxford has full brown background. Color segmentation alone can't distinguish brown backing from parchment. Planned solution: interactive click-to-remove eraser tool (user clicks background areas, BFS flood fill removes connected region, additive with per-step undo). Requires persistence plumbing (save/load/export eraser steps), auth on endpoint, proper canvas coordinate transforms, Fabric event model integration. Full design: `docs/plans/INTERACTIVE_BG_REMOVAL_DESIGN.md`. Recommend implementing as a full GSD phase. |
 | **FJMS enrichment DB: fixed Shivtiel transliteration, Sussmann Supplement translation, removed empty "צוות 500" records — pending upload to server** | `fist_data/fjms_enrichment.db` | ❌ Open | Fixed locally on 2026-03-26: (1) `SourceNameHeb` "קטלוג שבתיאל/ניסן" → "קטלוג שבטיאל/ניסן" (tav→tet, 16,936 rows in catalog+free_desc), (2) "Sussmann (Talmud) – Supplement Catalog" untranslated → "קטלוג זוסמן (תלמוד) – נספח" (191 rows), (3) deleted 34 empty "צוות 500" catalog + 2 free_desc placeholder records. **Upload to server after current en2he translation script finishes** (writing to fjms_translations table, different tables but same .db file — uploading while running risks corruption). |
+| **Reading Desk UX: "Add to view" field not pre-populated** | `genizah_app.py` (reading desk) | ❌ Open | When clicking "Add to view" in the reading desk, the shelfmark/sys_id field should pre-populate with the current manuscript's shelfmark or sys_id. Currently appears empty. |
+| **Reading Desk UX: green bar too tall** | `genizah_app.py` (reading desk) | ❌ Open | The green status/info bar in the reading desk view takes too much vertical space. Reduce height/padding to be more compact. |
 | **Session restore is not pixel-perfect** | genizah_app.py | ❌ Open | v6.5.1 added restore for browse tabs, catalog filters, composition results, and active tab. But composition restores flat (grouping/appendix lost), catalog sidebar doesn't highlight the selected author/work in the list widget, and browse-by-shelfmark skips full resolution (loads directly by sys_id). Could be improved to persist grouping state or re-run grouping more reliably. |
 | **BrowseState.meta_mgr AttributeError in joined view** | `web/pages/browse.py:3255` | ✅ Fixed (2026-03-17) | `state.meta_mgr` accessed without guard in Oxford detection code path. Fixed with `getattr(state, 'meta_mgr', None)`. |
 | **Desktop discovery stats all zeros** | `supabase_corrections_client.py` | ✅ Fixed (2026-03-17) | `get_discovery_stats()` only queried discoveries table type column, returning keys that didn't match UI stat_labels. Now queries corrections, profiles, fragment_joins tables. |
