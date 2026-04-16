@@ -206,7 +206,7 @@ Zero user-visible behavior changes.
 - [x] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules (completed 2026-04-16)
 - [x] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py (completed 2026-04-16)
 - [x] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py (completed 2026-04-16)
-- [ ] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite
+- [x] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite (completed 2026-04-16)
 - [ ] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules
 - [ ] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules
 - [ ] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects
@@ -289,10 +289,10 @@ Plans:
   4. current pytest baseline remains green
   5. No import cycles between `desktop/` modules (verified by ruff or manual inspection)
 **Phase gate**: pytest green, CI green, smoke tests pass
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 71-01-PLAN.md -- Extract DesktopVSCache trio to desktop/vs_cache.py, fix OPEN_ISSUES path
-- [ ] 71-02-PLAN.md -- Create desktop smoke checklist, user walkthrough verification
+- [x] 71-02-PLAN.md -- Create desktop smoke checklist, user walkthrough verification
 
 ### Phase 72: Search Page Split
 **Goal**: web/pages/search.py is decomposed into focused modules for state, UI, and results
@@ -367,7 +367,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 68. Desktop Dialog Extractions | 2/2 | Complete    | 2026-04-16 |
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
-| 71. GenizahGUI Consolidation & Smoke Tests | 1/2 | In Progress|  |
+| 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete   | 2026-04-16 |
 | 72. Search Page Split | 0/TBD | Not started | - |
 | 73. Browse Page Split | 0/TBD | Not started | - |
 | 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
