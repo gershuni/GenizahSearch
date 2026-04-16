@@ -4,14 +4,14 @@ milestone: v7.9
 milestone_name: Decomposition
 status: executing
 stopped_at: Phase 67 context gathered
-last_updated: "2026-04-16T05:08:27.261Z"
-last_activity: 2026-04-16
+last_updated: "2026-04-16T07:06:19.812Z"
+last_activity: 2026-04-16 -- Phase 70 execution started
 progress:
   total_phases: 10
   completed_phases: 3
-  total_plans: 6
+  total_plans: 7
   completed_plans: 6
-  percent: 100
+  percent: 86
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 69 — image-viewer-extraction
+**Current focus:** Phase 70 — puzzle-extraction
 
 ## Current Position
 
-Phase: 70
-Plan: Not started
-Status: Executing Phase 69
-Last activity: 2026-04-16
+Phase: 70 (puzzle-extraction) — EXECUTING
+Plan: 1 of 1
+Status: Executing Phase 70
+Last activity: 2026-04-16 -- Phase 70 execution started
 
 Progress: [░░░░░░░░░░] 0%
 

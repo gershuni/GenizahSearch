@@ -29,7 +29,7 @@ Out of scope:
 
 ### self.app Coupling (Gray Area 2)
 - **D-02:** `PuzzleCanvasWindow.__init__(self, app)` and all 20+ `self.app.*` references move **verbatim** to `desktop/puzzle.py`. No Protocol/ABC narrowing, no typing changes. `self.app` remains an untyped GenizahGUI reference. Phase 71 is explicitly scoped for Protocol narrowing.
-- **D-03:** The `self.app.*` attributes accessed include: `meta_mgr`, `shelf_model`, `valid_shelf_keys`, `_ensure_shelf_map`, `_shelf_to_sys`, `lists_mgr`, `joins_mgr`, `corrections_client`, `add_to_puzzle`, `_get_default_save_folder`, `windowIcon`. These are all accessed via `getattr()` or `hasattr()` guards — safe without typing.
+- **D-03:** The `self.app.*` attributes accessed include: `meta_mgr`, `shelf_model`, `valid_shelf_keys`, `_ensure_shelf_map`, `_shelf_to_sys`, `lists_mgr`, `joins_mgr`, `corrections_client`, `add_to_puzzle`, `_get_default_save_folder`, `windowIcon`. **Some are guarded** via `getattr()`/`hasattr()` (e.g., `shelf_model`, `lists_mgr`, `joins_mgr`), but **many are hard-coupled** — direct attribute access without guards (e.g., `self.app.meta_mgr.get_meta_for_id(...)`, `PuzzleMetaLoaderThread(self.app.meta_mgr, ...)`, `self.app._get_default_save_folder()`, `self.app.corrections_client.current_user`). This is **hard coupling**, not soft — the extraction moves it verbatim but downstream agents (Phase 71) must not assume these are safe to refactor without testing all code paths.
 
 ### ShelfmarkCompleter Import (Gray Area 3)
 - **D-04:** `PuzzleCanvasWindow` uses `ShelfmarkCompleter` (genizah_app.py:1014) for shelfmark autocomplete. After extraction, `desktop/puzzle.py` imports it via **`from genizah_app import ShelfmarkCompleter`** as a lazy function-local import inside `__init__`. This creates a `desktop.puzzle → genizah_app` edge, but it's the same re-export pattern. ShelfmarkCompleter is also used directly by GenizahGUI so extracting it is scope creep.
@@ -49,7 +49,7 @@ Out of scope:
 ### Verification
 - **D-11:** pytest baseline (1067 passed, 8 skipped as of Phase 69 close) must remain green.
 - **D-12:** Import smoke: `python -c "from desktop.puzzle import PuzzleFragmentItem, PuzzleCanvasView, PuzzleExportThread, PuzzlePublishThread, PuzzleCanvasWindow; from genizah_app import PuzzleFragmentItem, PuzzleCanvasView, PuzzleExportThread, PuzzlePublishThread, PuzzleCanvasWindow, GenizahGUI"` — all succeed.
-- **D-13:** Desktop smoke test: launch app → open puzzle window (Add to Puzzle from browse or toolbar) → add a fragment by shelfmark → verify fragment loads on canvas → flip/rotate → close puzzle. No crash, no visible regression.
+- **D-13:** Desktop smoke test (expanded per Codex review): launch app → (a) open puzzle window via toolbar → add a fragment by shelfmark → verify fragment loads on canvas → flip/rotate → close puzzle. Then (b) browse a manuscript → click "Add to Puzzle" from browse tab (exercises `add_to_puzzle` GenizahGUI integration path with `_folio_lists`/`_on_meta_resolved` wiring). Then (c) if a saved join document exists, open it from the puzzle file menu (exercises `_load_document` private API path). No crash, no visible regression.
 - **D-14:** CI green (Ubuntu + Windows matrix).
 
 ### Claude's Discretion
@@ -82,6 +82,10 @@ None — matched todos are orthogonal to puzzle extraction.
 
 ### Call sites in GenizahGUI (must keep working via re-export)
 - `genizah_app.py:16685, 16693` — `PuzzleCanvasWindow(self)` construction
+- `genizah_app.py:16695` — `self._puzzle_window.add_fragment(...)` (public API)
+- `genizah_app.py:16578` — `self._puzzle_window._load_document(new_doc_id)` (private API — fork/load published join)
+- `genizah_app.py:16698-16699` — `self._puzzle_window._folio_lists[sys_id]` (private state access)
+- `genizah_app.py:16709-16711` — `self._puzzle_window._on_meta_resolved`, `._on_meta_failed`, `._meta_threads` (private signal wiring)
 
 ### Cross-class dependency
 - `genizah_app.py:1014` — `ShelfmarkCompleter` (used by PuzzleCanvasWindow, stays in genizah_app.py)
