@@ -289,7 +289,10 @@ Plans:
   4. current pytest baseline remains green
   5. No import cycles between `desktop/` modules (verified by ruff or manual inspection)
 **Phase gate**: pytest green, CI green, smoke tests pass
-**Note**: Smoke tests may be a manual checklist or a lightweight script. Decide during planning. DESK-07 requires each prior extraction step to keep pytest green -- this phase is the final verification that the cumulative result is sound.
+**Plans:** 2 plans
+Plans:
+- [ ] 71-01-PLAN.md -- Extract DesktopVSCache trio to desktop/vs_cache.py, fix OPEN_ISSUES path
+- [ ] 71-02-PLAN.md -- Create desktop smoke checklist, user walkthrough verification
 
 ### Phase 72: Search Page Split
 **Goal**: web/pages/search.py is decomposed into focused modules for state, UI, and results
