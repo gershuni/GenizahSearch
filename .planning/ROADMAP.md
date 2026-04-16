@@ -321,6 +321,10 @@ Plans:
   4. current pytest baseline remains green
 **Phase gate**: pytest green, CI green
 **UI hint**: yes
+**Plans:** 2 plans
+Plans:
+- [ ] 73-01-PLAN.md -- Extract BrowseState, BrowsePageRefs, _crossref_cache to browse_state.py
+- [ ] 73-02-PLAN.md -- Extract enrichment functions to browse_enrichment.py + web smoke test
 
 ### Phase 74: Page-Scoped State Refactor
 **Goal**: Search and browse pages use page-scoped state objects instead of app.storage.user sprawl and detached async flows
@@ -373,11 +377,11 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
 | 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
 | 72. Search Page Split | 2/2 | Complete    | 2026-04-16 |
-| 73. Browse Page Split | 0/TBD | Not started | - |
+| 73. Browse Page Split | 0/2 | Not started | - |
 | 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
 | 75. Non-Regression Verification | 0/TBD | Not started | - |
 | 76. Documentation Close | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-16 -- Phase 72 planned (2 plans in 2 waves)*
+*Last updated: 2026-04-16 -- Phase 73 planned (2 plans in 2 waves)*
