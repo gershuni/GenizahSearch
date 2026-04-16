@@ -2,6 +2,7 @@
 phase: 73
 reviewers: [gemini, codex]
 reviewed_at: 2026-04-16T21:00:00Z
+round_2_at: 2026-04-16T22:00:00Z
 plans_reviewed: [73-01-PLAN.md, 73-02-PLAN.md]
 ---
 
@@ -105,3 +106,66 @@ This is the right functional boundary for the second wave. The actual Phase B pa
 ### Divergent Views
 - **_crossref_cache placement** — Codex says it belongs with enrichment (not pure state); Gemini accepts it in browse_state.py. The plan places it in browse_state.py for import simplicity (both enrichment and browse.py need it). This is a reasonable pragmatic choice.
 - **Aliasing severity** — Gemini rates aliasing as HIGH risk (could break generation logic); Codex treats it as pragmatic and acceptable. The actual risk is LOW since `load_generation` is already a `{'value': 0}` dict (mutable), but the concern is valid for future-proofing.
+
+---
+
+# Round 2 Review — Revised Plans (2026-04-16)
+
+Plans were revised to address all Round 1 concerns. Both reviewers re-reviewed.
+
+## Gemini Review (Round 2)
+
+The revised plans successfully address all concerns from round 1. The introduction of `browse_enrichment.py` as a stub in Wave 1 is an excellent architectural choice that avoids circular imports while providing the necessary `BrowsePageRefs` container. The use of a mutable dictionary for `load_generation` ensures async task guards remain synchronized across module boundaries.
+
+### Original Concerns Status
+
+| Concern | Status |
+|---------|--------|
+| BrowsePageRefs module ownership | RESOLVED |
+| Callback wiring order | RESOLVED |
+| State aliasing safety | RESOLVED |
+| Circular import risk | RESOLVED |
+| Incomplete refs population timing | RESOLVED |
+| _populate_bib_catalog_buttons wrapper | RESOLVED |
+| D-11 Wave 1 checkpoint | RESOLVED |
+| Verification expanded | RESOLVED |
+
+### New Concerns
+- **LOW — Import requirements for browse_state.py**: Will require `typing` and `web.services` for type hints. Assumed part of verbatim extraction but should be noted during implementation.
+
+### Risk Assessment
+**LOW** — Highly surgical plan with specific guidance for fragile parts. Incremental approach with human-verify checkpoints at each wave significantly mitigates risk.
+
+---
+
+## Codex Review (Round 2)
+
+The revised plans are in good shape. The main structural question from round 1 — where `BrowsePageRefs` should live — is now aligned with the intended ownership boundary. The stub pattern is sound: it avoids moving `BrowsePageRefs` twice and lets Wave 1 establish the final import home before Wave 2 fills in function bodies.
+
+### Original Concerns Status
+
+| Concern | Status |
+|---------|--------|
+| BrowsePageRefs ownership wrong | RESOLVED — matches actual dependency direction |
+| Callback wiring order underspecified | RESOLVED — explicit 4-step sequence |
+| Mutable dict aliasing implicit | RESOLVED — safety note + inline comments |
+| Circular import risk | RESOLVED — acyclic graph + AST verify |
+| Refs population timing unclear | RESOLVED — exact timing documented |
+| _populate_bib_catalog_buttons wrapper unnecessary | RESOLVED — removed |
+| Missing Wave 1 checkpoint | RESOLVED — human verify added |
+
+### New Concerns
+- **LOW — Verification gap on state-only contract**: browse_state.py should have negative verify that it does not import `nicegui` or `web.pages.browse`.
+
+### Risk Assessment
+**LOW** — Remaining risk is normal refactor risk in a large async UI file, not a flaw in the plan. Wave 1 checkpoint and expanded Wave 2 smoke matrix are appropriate controls.
+
+---
+
+## Round 2 Consensus
+
+**All 7 original HIGH/MEDIUM concerns: RESOLVED.**
+**New concerns: 2 LOW** (import requirements for browse_state.py, negative verify for nicegui import).
+**Both reviewers: LOW risk.**
+
+Plans are approved for execution.
