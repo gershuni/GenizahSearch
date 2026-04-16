@@ -203,7 +203,7 @@ Zero user-visible behavior changes.
 **Milestone-level gate:** `scripts/check_docs.py` green at milestone close (Phase 76).
 
 - [x] **Phase 67: ResultDialog Extraction** - Extract ResultDialog class from genizah_app.py into desktop/result_dialog.py (completed 2026-04-15)
-- [ ] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules
+- [x] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules (completed 2026-04-16)
 - [ ] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py
 - [ ] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py
 - [ ] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite
@@ -245,7 +245,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 68-01-PLAN.md -- Extract 4 scholarly dialogs to desktop/dialogs_scholarly.py, retarget result_dialog.py lazy imports, add re-exports
-- [ ] 68-02-PLAN.md -- Move FilterCountWorker to gui_threads.py, extract 3 filter dialogs to desktop/dialogs_filter.py, delete self-imports, add re-exports
+- [x] 68-02-PLAN.md -- Move FilterCountWorker to gui_threads.py, extract 3 filter dialogs to desktop/dialogs_filter.py, delete self-imports, add re-exports
 **Note**: These are leaf dialogs with minimal cross-dependencies -- grouping them is safe. If any dialog has unexpected coupling to ResultDialog or viewers, split into a separate plan.
 
 ### Phase 69: Image Viewer Extraction
@@ -355,7 +355,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 67. ResultDialog Extraction | 3/3 | Complete    | 2026-04-15 |
-| 68. Desktop Dialog Extractions | 1/2 | In Progress|  |
+| 68. Desktop Dialog Extractions | 2/2 | Complete   | 2026-04-16 |
 | 69. Image Viewer Extraction | 0/TBD | Not started | - |
 | 70. Puzzle Extraction | 0/TBD | Not started | - |
 | 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
