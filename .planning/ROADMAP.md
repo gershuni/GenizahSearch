@@ -207,7 +207,7 @@ Zero user-visible behavior changes.
 - [x] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py (completed 2026-04-16)
 - [x] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py (completed 2026-04-16)
 - [x] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite (completed 2026-04-16)
-- [ ] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules
+- [x] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules (completed 2026-04-16)
 - [ ] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules
 - [ ] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects
 - [ ] **Phase 75: Non-Regression Verification** - Manual qualitative verification of search/browse responsiveness in both apps
@@ -305,10 +305,10 @@ Plans:
   4. current pytest baseline remains green
 **Phase gate**: pytest green, CI green
 **UI hint**: yes
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 72-01-PLAN.md -- Extract SearchUIState, AdvancedViewState, SearchPageRefs, search history helpers to search_state.py
-- [ ] 72-02-PLAN.md -- Extract toggle_expansion, render_results, create_result_card, open_advanced_dialog to search_results.py + web smoke test
+- [x] 72-02-PLAN.md -- Extract toggle_expansion, render_results, create_result_card, open_advanced_dialog to search_results.py + web smoke test
 
 ### Phase 73: Browse Page Split
 **Goal**: web/pages/browse.py is decomposed into focused modules for state, UI, and enrichment
@@ -372,7 +372,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
 | 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
-| 72. Search Page Split | 1/2 | In Progress|  |
+| 72. Search Page Split | 2/2 | Complete   | 2026-04-16 |
 | 73. Browse Page Split | 0/TBD | Not started | - |
 | 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
 | 75. Non-Regression Verification | 0/TBD | Not started | - |
