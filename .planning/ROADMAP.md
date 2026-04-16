@@ -206,7 +206,7 @@ Zero user-visible behavior changes.
 - [x] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules (completed 2026-04-16)
 - [x] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py (completed 2026-04-16)
 - [x] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py (completed 2026-04-16)
-- [x] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite (completed 2026-04-16)
+- [x] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite (completed 2026-04-16)
 - [ ] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules
 - [ ] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules
 - [ ] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects
@@ -305,6 +305,10 @@ Plans:
   4. current pytest baseline remains green
 **Phase gate**: pytest green, CI green
 **UI hint**: yes
+**Plans:** 2 plans
+Plans:
+- [ ] 72-01-PLAN.md -- Extract SearchUIState, AdvancedViewState, SearchPageRefs, search history helpers to search_state.py
+- [ ] 72-02-PLAN.md -- Extract toggle_expansion, render_results, create_result_card, open_advanced_dialog to search_results.py + web smoke test
 
 ### Phase 73: Browse Page Split
 **Goal**: web/pages/browse.py is decomposed into focused modules for state, UI, and enrichment
@@ -368,7 +372,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
 | 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
-| 72. Search Page Split | 0/TBD | Not started | - |
+| 72. Search Page Split | 0/2 | Not started | - |
 | 73. Browse Page Split | 0/TBD | Not started | - |
 | 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
 | 75. Non-Regression Verification | 0/TBD | Not started | - |
@@ -376,4 +380,4 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-16 -- Phase 70 planned (1 plan in 1 wave)*
+*Last updated: 2026-04-16 -- Phase 72 planned (2 plans in 2 waves)*
