@@ -486,7 +486,7 @@ class ResultDialog(QDialog):
         self.txt_ext_meta.setStyleSheet("font-size: 11px;")
 
         # New: Reusable Viewer Widget
-        from genizah_app import ManuscriptViewerWidget
+        from desktop.viewers import ManuscriptViewerWidget
         self.ms_viewer = ManuscriptViewerWidget()
 
         ext_layout.addWidget(self.lbl_ext_attr)

@@ -36,6 +36,14 @@ def genizah_app_source():
 
 
 @pytest.fixture(scope="module")
+def viewers_source():
+    """Return the full source code of desktop/viewers.py as a string."""
+    src_path = os.path.join(os.path.dirname(__file__), '..', 'desktop', 'viewers.py')
+    with open(src_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
 def genizah_core_source():
     """Return the full source code of genizah_core.py as a string."""
     src_path = os.path.join(os.path.dirname(__file__), '..', 'genizah_core.py')
@@ -87,14 +95,14 @@ def test_browse_combo_folio_label_population(genizah_app_source):
 # Test 2: KTIV button exists with correct NLI URL pattern
 # ---------------------------------------------------------------------------
 
-def test_msviewer_ktiv_button_exists(genizah_app_source):
+def test_msviewer_ktiv_button_exists(viewers_source):
     """Verify a KTIV/NLI viewer button is created with the correct URL."""
     # Check KTIV button creation
-    assert 'self.btn_ktiv' in genizah_app_source, \
+    assert 'self.btn_ktiv' in viewers_source, \
         "ManuscriptViewerWidget should have a btn_ktiv button"
 
     # Check that it opens the correct NLI URL
-    ktiv_method = _extract_method(genizah_app_source, '_open_ktiv_viewer')
+    ktiv_method = _extract_method(viewers_source, '_open_ktiv_viewer')
     assert ktiv_method, "_open_ktiv_viewer method not found"
     assert 'nli.org.il' in ktiv_method, \
         "_open_ktiv_viewer should open NLI website"
@@ -112,9 +120,9 @@ def test_msviewer_ktiv_button_exists(genizah_app_source):
 # Test 3: Source combo includes page count context
 # ---------------------------------------------------------------------------
 
-def test_msviewer_source_combo_enhanced(genizah_app_source):
+def test_msviewer_source_combo_enhanced(viewers_source):
     """Verify combo_source population includes page count context."""
-    load_method = _extract_method(genizah_app_source, 'load_images')
+    load_method = _extract_method(viewers_source, 'load_images')
     assert load_method, "load_images method not found"
 
     # Should include "pages" in the combo item text
@@ -227,9 +235,9 @@ def test_real_crossref_folio_labels():
 # Test 7: KTIV button visibility controlled by image_source_info
 # ---------------------------------------------------------------------------
 
-def test_ktiv_button_visibility_logic(genizah_app_source):
+def test_ktiv_button_visibility_logic(viewers_source):
     """Verify KTIV button visibility is controlled by image_source_info.nli_fgp."""
-    load_method = _extract_method(genizah_app_source, 'load_images')
+    load_method = _extract_method(viewers_source, 'load_images')
     assert load_method, "load_images method not found"
 
     # Should check image_source_info for nli_fgp
