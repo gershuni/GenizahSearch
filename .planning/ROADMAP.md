@@ -359,7 +359,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 |-------|----------------|--------|-----------|
 | 67. ResultDialog Extraction | 3/3 | Complete    | 2026-04-15 |
 | 68. Desktop Dialog Extractions | 2/2 | Complete    | 2026-04-16 |
-| 69. Image Viewer Extraction | 1/1 | Complete   | 2026-04-16 |
+| 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
 | 70. Puzzle Extraction | 0/TBD | Not started | - |
 | 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
 | 72. Search Page Split | 0/TBD | Not started | - |
