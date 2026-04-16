@@ -273,7 +273,10 @@ Plans:
   3. `genizah_app.py` imports puzzle classes from the new module and all existing call sites work unchanged
   4. current pytest baseline remains green
 **Phase gate**: pytest green, CI green
-**Risk**: Import cycle between puzzle and viewer modules if they reference each other. Phase 69 should establish the dependency direction (puzzle depends on viewers, not vice versa).
+**Plans**: 1 plan
+Plans:
+- [ ] 70-01-PLAN.md -- Extract 5 puzzle classes to desktop/puzzle.py, add re-exports
+**Note**: Largest single extraction (~2642 lines, 5 classes). D-10 confirmed no viewer dependency -- no circular import risk. ShelfmarkCompleter imported lazily from genizah_app.py (D-04).
 
 ### Phase 71: GenizahGUI Consolidation & Smoke Tests
 **Goal**: genizah_app.py is a clean orchestrator and all desktop extractions pass smoke tests
@@ -360,7 +363,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 67. ResultDialog Extraction | 3/3 | Complete    | 2026-04-15 |
 | 68. Desktop Dialog Extractions | 2/2 | Complete    | 2026-04-16 |
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
-| 70. Puzzle Extraction | 0/TBD | Not started | - |
+| 70. Puzzle Extraction | 0/1 | Not started | - |
 | 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
 | 72. Search Page Split | 0/TBD | Not started | - |
 | 73. Browse Page Split | 0/TBD | Not started | - |
@@ -370,4 +373,4 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-16 -- Phase 69 planned (1 plan in 1 wave)*
+*Last updated: 2026-04-16 -- Phase 70 planned (1 plan in 1 wave)*
