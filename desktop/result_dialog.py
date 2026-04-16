@@ -642,7 +642,7 @@ class ResultDialog(QDialog):
             pass  # Cache operation failed; continue without cached data
         # Try cache
         if not hasattr(parent, '_vs_cache'):
-            from genizah_app import DesktopVSCache
+            from desktop.vs_cache import DesktopVSCache
             parent._vs_cache = DesktopVSCache()
         cached = parent._vs_cache.get_cached(sys_id)
         if cached is not None:
