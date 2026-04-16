@@ -205,7 +205,7 @@ Zero user-visible behavior changes.
 - [x] **Phase 67: ResultDialog Extraction** - Extract ResultDialog class from genizah_app.py into desktop/result_dialog.py (completed 2026-04-15)
 - [x] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules (completed 2026-04-16)
 - [x] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py (completed 2026-04-16)
-- [ ] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py
+- [x] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py (completed 2026-04-16)
 - [ ] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite
 - [ ] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules
 - [ ] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules
@@ -275,7 +275,7 @@ Plans:
 **Phase gate**: pytest green, CI green
 **Plans**: 1 plan
 Plans:
-- [ ] 70-01-PLAN.md -- Extract 5 puzzle classes to desktop/puzzle.py, add re-exports
+- [x] 70-01-PLAN.md -- Extract 5 puzzle classes to desktop/puzzle.py, add re-exports
 **Note**: Largest single extraction (~2642 lines, 5 classes). D-10 confirmed no viewer dependency -- no circular import risk. ShelfmarkCompleter imported lazily from genizah_app.py (D-04).
 
 ### Phase 71: GenizahGUI Consolidation & Smoke Tests
@@ -363,7 +363,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 67. ResultDialog Extraction | 3/3 | Complete    | 2026-04-15 |
 | 68. Desktop Dialog Extractions | 2/2 | Complete    | 2026-04-16 |
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
-| 70. Puzzle Extraction | 0/1 | Not started | - |
+| 70. Puzzle Extraction | 1/1 | Complete   | 2026-04-16 |
 | 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
 | 72. Search Page Split | 0/TBD | Not started | - |
 | 73. Browse Page Split | 0/TBD | Not started | - |
