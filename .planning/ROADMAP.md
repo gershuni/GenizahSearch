@@ -355,7 +355,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 67. ResultDialog Extraction | 3/3 | Complete    | 2026-04-15 |
-| 68. Desktop Dialog Extractions | 2/2 | Complete   | 2026-04-16 |
+| 68. Desktop Dialog Extractions | 2/2 | Complete    | 2026-04-16 |
 | 69. Image Viewer Extraction | 0/TBD | Not started | - |
 | 70. Puzzle Extraction | 0/TBD | Not started | - |
 | 71. GenizahGUI Consolidation & Smoke Tests | 0/TBD | Not started | - |
