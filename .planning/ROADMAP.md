@@ -372,7 +372,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
 | 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
-| 72. Search Page Split | 2/2 | Complete   | 2026-04-16 |
+| 72. Search Page Split | 2/2 | Complete    | 2026-04-16 |
 | 73. Browse Page Split | 0/TBD | Not started | - |
 | 74. Page-Scoped State Refactor | 0/TBD | Not started | - |
 | 75. Non-Regression Verification | 0/TBD | Not started | - |
