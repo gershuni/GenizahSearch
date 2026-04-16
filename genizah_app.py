@@ -50,6 +50,7 @@ from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
     apply_find_highlight, _get_folio_number_from_shelfmark,
     _get_folio_image_index, _get_initial_image_index,
+    ShelfmarkCompleter,
 )
 from desktop.title_helpers import (
     _get_title_svc, _truncate_title, _is_hebrew_text,
@@ -1010,36 +1011,6 @@ def log_tls_relaxation_notice():
         )
         _TLS_NOTICE_LOGGED = True
 
-
-class ShelfmarkCompleter(QCompleter):
-    """
-    Custom Completer that normalizes input before matching.
-    Input "T-S" -> Normalized "ts" -> Matches model items where UserRole starts with "ts".
-    """
-    def __init__(self, model, parent=None, valid_keys=None):
-        super().__init__(model, parent)
-        self.valid_keys = valid_keys or set()
-
-    @staticmethod
-    def normalize(text):
-        t = re.sub(r'^\s*m[\.\s]*s[\.\s]*\.?\s*', '', text, flags=re.IGNORECASE)
-        return re.sub(r"[^\w\./]", "", t).lower()
-
-    def splitPath(self, path):
-        return [self.normalize(path)]
-
-    def pathFromIndex(self, index):
-        # Return the pretty display text when an item is selected
-        return index.data(Qt.ItemDataRole.DisplayRole)
-
-    def complete(self, rect=QRect()):
-        # Hide popup if there is an exact match
-        text = self.widget().text()
-        norm = self.normalize(text)
-        if norm in self.valid_keys:
-            self.popup().hide()
-            return
-        super().complete(rect)
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):
     """Custom item for sorting shelfmarks by ignoring 'Ms.' prefix and case."""

@@ -747,8 +747,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self.shelfmark_input.setMinimumWidth(180)
         self.shelfmark_input.setMaximumWidth(280)
         if hasattr(self.app, 'shelf_model') and self.app.shelf_model:
-            # Lazy import to avoid circular import at module load (D-04)
-            from genizah_app import ShelfmarkCompleter
+            from desktop.widgets import ShelfmarkCompleter
             completer = ShelfmarkCompleter(
                 self.app.shelf_model, self,
                 valid_keys=getattr(self.app, 'valid_shelf_keys', set())
