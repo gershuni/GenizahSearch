@@ -2,7 +2,7 @@
 phase: 71-genizahgui-consolidation-smoke-tests
 plan: 02
 subsystem: desktop
-status: pending-verification
+status: complete
 tags: [smoke-test, checklist, desktop, verification, DESK-07]
 dependency_graph:
   requires: [desktop/vs_cache.py, desktop/result_dialog.py, desktop/puzzle.py, desktop/viewers.py, desktop/dialogs_filter.py, desktop/dialogs_scholarly.py]
