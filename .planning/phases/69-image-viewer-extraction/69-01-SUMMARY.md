@@ -19,9 +19,9 @@ decisions:
 metrics:
   duration: 610s
   completed: 2026-04-16
-  tasks_completed: 1
+  tasks_completed: 2
   tasks_total: 2
-  status: pending-verification
+  status: complete
 ---
 
 # Phase 69 Plan 01: Image Viewer Extraction Summary
