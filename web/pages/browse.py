@@ -1375,7 +1375,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.draft_saved = False
         state.draft_id = None
         ui.notify(tr('Correction submitted successfully'), type='positive')
-        asyncio.ensure_future(load_page(direction=0))
+        await load_page(direction=0)
 
     def handle_save_draft():
         """Save draft locally (simulated for now, or use backend draft)."""
@@ -1567,7 +1567,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
                     ui.label(state.error).classes('text-red-600 mt-4 text-lg')
-                    ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=lambda: asyncio.ensure_future(load_page())).classes('mt-4')
+                    ui.button(tr('Back'), icon='arrow_forward' if is_rtl() else 'arrow_back', on_click=lambda: load_page()).classes('mt-4')
                 return
 
             if not state.current_page and not state.view_joined:
@@ -1607,7 +1607,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Prev Shelfmark Button
                     ui.button(
                         icon='skip_next' if is_rtl() else 'skip_previous',
-                        on_click=lambda: asyncio.ensure_future(navigate_shelfmark(-1))
+                        on_click=lambda: navigate_shelfmark(-1)
                     ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript"').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
                     # Shelfmark and Title
@@ -1800,7 +1800,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Next Shelfmark Button
                     ui.button(
                         icon='skip_previous' if is_rtl() else 'skip_next',
-                        on_click=lambda: asyncio.ensure_future(navigate_shelfmark(1))
+                        on_click=lambda: navigate_shelfmark(1)
                     ).props('flat round aria-label="Next manuscript" data-action="next-manuscript"').style('color: white !important;').tooltip(tr('Next manuscript'))
 
             # === Action Buttons Row ===
@@ -3670,11 +3670,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 _vol_options[_v['ie_id']] = _label
                             _vol_current = page.volume_ie or page.volumes[0]['ie_id']
 
-                            def _handle_volume_change(e):
+                            async def _handle_volume_change(e):
                                 new_ie = e.value
                                 if new_ie and new_ie != state.volume_ie:
                                     state.volume_ie = new_ie
-                                    asyncio.ensure_future(load_page(p_num=1))
+                                    await load_page(p_num=1)
 
                             ui.select(
                                 options=_vol_options,
@@ -3689,7 +3689,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             prev_disabled = _is_single_page or page.current_idx <= 1
                             ui.button(
                                 icon='chevron_right' if is_rtl() else 'chevron_left',
-                                on_click=lambda: asyncio.ensure_future(load_page(direction=-1))
+                                on_click=lambda: load_page(direction=-1)
                             ).props(f'flat round dense size=sm {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
@@ -3709,12 +3709,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     for i, img in enumerate(_folio_images)
                                 }
 
-                                def handle_folio_select(e):
+                                async def handle_folio_select(e):
                                     try:
                                         val = int(e.value) if e.value is not None else 1
                                     except (ValueError, TypeError):
                                         return
-                                    asyncio.ensure_future(go_to_page(val))
+                                    await go_to_page(val)
 
                                 # Clamp p_num to valid folio range to prevent ValueError
                                 _folio_val = str(min(page.p_num, len(_folio_images)))
@@ -3728,12 +3728,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     value=page.p_num, min=1, max=page.total_pages
                                 ).classes('w-14').props('dense outlined')
 
-                                def handle_go_click():
+                                async def handle_go_click():
                                     try:
                                         val = int(page_input.value) if page_input.value is not None else 1
                                     except (ValueError, TypeError):
                                         val = 1
-                                    asyncio.ensure_future(go_to_page(val))
+                                    await go_to_page(val)
 
                                 ui.button(tr('Go'), on_click=handle_go_click).props('flat dense color=green size=sm')
 
@@ -3742,7 +3742,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             next_disabled = _is_single_page or page.current_idx >= page.total_pages
                             ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
-                                on_click=lambda: asyncio.ensure_future(load_page(direction=1))
+                                on_click=lambda: load_page(direction=1)
                             ).props(f'flat round dense size=sm {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
                             )
@@ -3774,8 +3774,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 from web.components import create_comment_button, create_version_selector, create_notes_button, create_joins_button
 
                                 # Refresh callback to reload page after edits/comments
-                                def refresh_page():
-                                    asyncio.ensure_future(load_page(direction=0))
+                                async def refresh_page():
+                                    await load_page(direction=0)
 
                                 # Navigation callback for joins
                                 async def navigate_to_shelfmark(target_shelfmark: str):
@@ -4483,6 +4483,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if initial_sys_id:
                     state.is_loading = True
                     update_content()
+                    # Cat-2: deferred init safety-net fallback - container must mount before async load.
                     asyncio.ensure_future(load_page(p_num=bootstrap['p_num']))
                 else:
                     update_content()

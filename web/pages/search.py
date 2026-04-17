@@ -435,6 +435,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 opts[en_tag] = display
                         tag_select.options = opts
                         tag_select.update()
+                    # Cat-2: deferred to let tag select mount before loading PGP tag options.
                     asyncio.ensure_future(_after_delay(0.1, load_pgp_tags))
 
                     # Mode Selector - includes variant levels when not using slider
@@ -850,7 +851,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.row().classes('w-full gap-1 flex-wrap') as text_chip_row:
                         _filter_refs['text_chips'] = text_chip_row
 
-                def _add_text_term():
+                async def _add_text_term():
                     """Add a text filter term from the input."""
                     term = text_filter_input.value.strip() if text_filter_input.value else ''
                     if not term:
@@ -869,17 +870,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     persist_value('search_filter_text_all', search_state.filter_text_all)
                     persist_value('search_filter_text_any', search_state.filter_text_any)
                     persist_value('search_filter_text_not', search_state.filter_text_not)
-                    asyncio.ensure_future(_recompute_filter_count())
+                    await _recompute_filter_count()
                     _update_chip_bar()
                     _rebuild_text_chips()
 
-                def _remove_text_term(mode, term):
+                async def _remove_text_term(mode, term):
                     """Remove a text filter term."""
                     target = getattr(search_state, f'filter_text_{mode}')
                     if term in target:
                         target.remove(term)
                     persist_value(f'search_filter_text_{mode}', target)
-                    asyncio.ensure_future(_recompute_filter_count())
+                    await _recompute_filter_count()
                     _update_chip_bar()
                     _rebuild_text_chips()
 
@@ -963,7 +964,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         # Change handlers -- fire on blur for debounced recompute
                         def _on_meas_blur(attr_name, inp_widget, is_int=False):
-                            def handler(e=None):
+                            async def handler(e=None):
                                 val = inp_widget.value
                                 if val is not None and val != '':
                                     val = int(val) if is_int else float(val)
@@ -971,7 +972,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     val = None
                                 setattr(search_state, f'filter_{attr_name}', val)
                                 persist_value(f'search_filter_{attr_name}', val)
-                                asyncio.ensure_future(_recompute_filter_count())
+                                await _recompute_filter_count()
                                 _update_chip_bar()
                             return handler
 
@@ -986,10 +987,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         meas_td_min_inp.on('blur', _on_meas_blur('text_density_min', meas_td_min_inp))
                         meas_td_max_inp.on('blur', _on_meas_blur('text_density_max', meas_td_max_inp))
 
-                        def _on_meas_material_change(e=None):
+                        async def _on_meas_material_change(e=None):
                             search_state.filter_measurement_material = meas_material_select.value or []
                             persist_value('search_filter_measurement_material', search_state.filter_measurement_material)
-                            asyncio.ensure_future(_recompute_filter_count())
+                            await _recompute_filter_count()
                             _update_chip_bar()
                         meas_material_select.on('update:model-value', _on_meas_material_change)
 
@@ -1123,26 +1124,26 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ]
                 for _chip_text, _attrs, _widgets in _meas_chips:
                     if _chip_text:
-                        def _clear_meas(attrs=_attrs, widgets=_widgets):
+                        async def _clear_meas(attrs=_attrs, widgets=_widgets):
                             for a in attrs:
                                 setattr(search_state, f'filter_{a}', None)
                                 persist_value(f'search_filter_{a}', None)
                             for w in widgets:
                                 w.value = None
                             _update_chip_bar()
-                            asyncio.ensure_future(_recompute_filter_count())
+                            await _recompute_filter_count()
                         ui.chip(
                             _chip_text, icon='straighten', removable=True,
                             on_click=lambda: None, color='teal-2',
                         ).on('remove', _clear_meas)
                 for _mat in (search_state.filter_measurement_material or []):
-                    def _clear_mat(m=_mat):
+                    async def _clear_mat(m=_mat):
                         if m in search_state.filter_measurement_material:
                             search_state.filter_measurement_material.remove(m)
                         meas_material_select.value = search_state.filter_measurement_material
                         persist_value('search_filter_measurement_material', search_state.filter_measurement_material)
                         _update_chip_bar()
-                        asyncio.ensure_future(_recompute_filter_count())
+                        await _recompute_filter_count()
                     ui.chip(
                         tr(_mat), icon='layers', removable=True,
                         on_click=lambda: None, color='teal-2',
@@ -1156,7 +1157,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-light);'
                     )
 
-        def _remove_filter(filter_type, value=None):
+        async def _remove_filter(filter_type, value=None):
             """Remove a specific filter and update state."""
             if filter_type == 'domain':
                 if value and value in search_state.filter_domains:
@@ -1165,8 +1166,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_domains = []
                 domain_select.value = search_state.filter_domains
                 persist_value('search_filter_domains', search_state.filter_domains)
-                asyncio.ensure_future(_refresh_author_options())
-                asyncio.ensure_future(_refresh_work_options())
+                await _refresh_author_options()
+                await _refresh_work_options()
             elif filter_type == 'author':
                 if value and value in search_state.filter_authors:
                     search_state.filter_authors.remove(value)
@@ -1174,7 +1175,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_authors = []
                 author_select.value = search_state.filter_authors
                 persist_value('search_filter_authors', search_state.filter_authors)
-                asyncio.ensure_future(_refresh_work_options())
+                await _refresh_work_options()
             elif filter_type == 'work':
                 if value and value in search_state.filter_works:
                     search_state.filter_works.remove(value)
@@ -1194,7 +1195,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_material_exclude.remove(value)
                     persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
                     exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
-            asyncio.ensure_future(_recompute_filter_count())
+            await _recompute_filter_count()
             _update_chip_bar()
 
         _filter_refresh_seq = {'author': 0, 'work': 0}
@@ -1670,14 +1671,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_state._refinement_stale:
                 ui.label(tr('Scope changed \u2014 results will update on next search')).classes('text-xs ml-2').style('color: #e67e22; font-style: italic;')
 
-    def _remove_refinement_step(index):
+    async def _remove_refinement_step(index):
         """D-12: Remove chip at index and all subsequent, then re-execute with feedback."""
         search_state.refinement_chain = truncate_chain(search_state.refinement_chain, index)
         # Always clear refine mode badge after chip removal
         refine_badge.set_visibility(False)
         refine_cancel_btn.set_visibility(False)
         if search_state.refinement_chain:
-            asyncio.ensure_future(_replay_refinement_chain_and_search())
+            await _replay_refinement_chain_and_search()
         else:
             _clear_refinement_chain()
 
@@ -1718,7 +1719,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if ms_count > 0:
             search_within_btn.text = f"{tr('Search within')} {ms_count:,} {tr('manuscripts')}"
 
-    def _undo_zero_result_refine():
+    async def _undo_zero_result_refine():
         """D-14a: Recover from zero-result refinement — re-run previous chain step's query."""
         search_state._zero_result_refine = False
         search_state._refine_mode = False
@@ -1743,10 +1744,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         pass  # Shelfmark lookup failed; use fallback identifier
                     search_state._refine_mode = True
                     await execute_search()
-                asyncio.ensure_future(_replay_and_search())
+                await _replay_and_search()
             else:
                 # No chain left — just re-run as normal search
-                asyncio.ensure_future(execute_search())
+                await execute_search()
 
     # === Panel Toggle Functions ===
 
@@ -1876,6 +1877,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             pass  # JS still executes, timeout is just about awaiting response
 
     # Set up scroll handlers after a short delay
+    # Cat-2: _after_delay pattern for JS DOM readiness - scroll handlers bind to
+    # dynamically rendered elements that must exist before JS runs.
     asyncio.ensure_future(_after_delay(1.0, setup_scroll_collapse))
 
     # === Helper Functions ===
@@ -2279,6 +2282,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 break
             await asyncio.sleep(0.5)
 
+    # Cat-3: long-running owned task handle - intentionally detached. Task stored
+    # on search_state.update_timer so it can be cancelled on new search.
     search_state.update_timer = asyncio.ensure_future(_progress_update_loop())
 
     def open_query_builder():
@@ -4518,6 +4523,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         truncated = (desc[:150] + '...') if len(desc) > 150 else desc
                                         ui.label(truncated).classes('text-sm').style('color: var(--text-secondary); line-height: 1.4; font-size: 0.75rem;')
 
+        # Cat-2: deferred page-mount init - tag results need container to mount.
         asyncio.ensure_future(_after_delay(0.1, load_tag_results))
 
     # Initialize with restored results or initial query
@@ -4525,8 +4531,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # VS Browse mode: auto-search with wildcard restricted to suggestion pool
         query_input.value = '*'
         mode_select.value = 'shelfmark'
+        # Cat-2: deferred page-mount init - execute_search needs UI to render first.
         asyncio.ensure_future(_after_delay(0.5, execute_search))
     elif initial_query:
+        # Cat-2: deferred page-mount init - execute_search needs UI to render first.
         asyncio.ensure_future(_after_delay(0.5, execute_search))
     elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
@@ -4549,6 +4557,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         work_select.update()
         _update_chip_bar()
 
+    # Cat-2: deferred select option population - filter selects must be mounted.
     asyncio.ensure_future(_after_delay(0.1, _deferred_filter_init))
 
     async def _deferred_transcription_restore():
@@ -4565,8 +4574,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 )
                 render_results(search_state.results, page=search_state.current_page)
 
+    # Cat-2: deferred enrichment on restore - results container must be mounted.
     asyncio.ensure_future(_after_delay(0.2, _deferred_transcription_restore))
 
     # Phase 55: Deferred refinement chain replay on session restore
     if search_state.refinement_chain:
+        # Cat-2: deferred chain replay after restore - results render must complete.
         asyncio.ensure_future(_after_delay(0.3, _deferred_chain_replay))
