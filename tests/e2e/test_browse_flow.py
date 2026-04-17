@@ -88,6 +88,15 @@ class TestBrowseNavigation:
         assert has_content, \
             f"Browse page should show manuscript content, got {len(page_text)} chars"
 
+    def test_shelfmark_navigation_updates_url(self, screen):
+        """Shelfmark navigation (Prev/Next) updates the browser URL bar.
+
+        This is the regression test for the Cat-1 ensure_future fix (D-20).
+        Body filled in by Plan 74-03 once Cat-1 sweep lands.
+        """
+        import pytest
+        pytest.skip("Cat-1 conversion pending - Plan 74-03")
+
     def test_browse_shows_metadata(self, screen):
         """Browse page displays manuscript metadata."""
         screen.open('/browse?sys_id=003750')
