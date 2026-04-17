@@ -442,51 +442,51 @@ def create_filter_handlers(state, storage_prefix, filter_refs, refresh_author_fn
     import asyncio
     pfx = storage_prefix
 
-    def on_domain_change(e=None):
+    async def on_domain_change(e=None):
         val = filter_refs['domain'].value or []
         state.filter_domains = val if isinstance(val, list) else [val] if val else []
         persist_value(f'{pfx}_filter_domains', state.filter_domains)
-        asyncio.ensure_future(refresh_author_fn())
-        asyncio.ensure_future(refresh_work_fn())
-        asyncio.ensure_future(recompute_fn())
+        await refresh_author_fn()
+        await refresh_work_fn()
+        await recompute_fn()
         update_chip_fn()
 
-    def on_author_change(e=None):
+    async def on_author_change(e=None):
         val = filter_refs['author'].value or []
         state.filter_authors = val if isinstance(val, list) else [val] if val else []
         persist_value(f'{pfx}_filter_authors', state.filter_authors)
-        asyncio.ensure_future(refresh_work_fn())
-        asyncio.ensure_future(recompute_fn())
+        await refresh_work_fn()
+        await recompute_fn()
         update_chip_fn()
 
-    def on_work_change(e=None):
+    async def on_work_change(e=None):
         val = filter_refs['work'].value or []
         state.filter_works = val if isinstance(val, list) else [val] if val else []
         persist_value(f'{pfx}_filter_works', state.filter_works)
-        asyncio.ensure_future(recompute_fn())
+        await recompute_fn()
         update_chip_fn()
 
-    def on_mode_change(e=None):
+    async def on_mode_change(e=None):
         state.filter_include_mode = filter_refs['mode'].value
         persist_value(f'{pfx}_filter_include_mode', state.filter_include_mode)
-        asyncio.ensure_future(recompute_fn())
+        await recompute_fn()
         update_chip_fn()
 
-    def on_date_from_change(e=None):
+    async def on_date_from_change(e=None):
         val = filter_refs['date_from'].value
         state.filter_date_from = int(val) if val is not None and val != '' else None
         persist_value(f'{pfx}_filter_date_from', state.filter_date_from)
-        asyncio.ensure_future(recompute_fn())
+        await recompute_fn()
         update_chip_fn()
 
-    def on_date_to_change(e=None):
+    async def on_date_to_change(e=None):
         val = filter_refs['date_to'].value
         state.filter_date_to = int(val) if val is not None and val != '' else None
         persist_value(f'{pfx}_filter_date_to', state.filter_date_to)
-        asyncio.ensure_future(recompute_fn())
+        await recompute_fn()
         update_chip_fn()
 
-    def on_exclude_printed_change(e=None):
+    async def on_exclude_printed_change(e=None):
         if filter_refs['exclude_printed'].value:
             if 'Printed' not in state.filter_material_exclude:
                 state.filter_material_exclude.append('Printed')
@@ -494,7 +494,7 @@ def create_filter_handlers(state, storage_prefix, filter_refs, refresh_author_fn
             if 'Printed' in state.filter_material_exclude:
                 state.filter_material_exclude.remove('Printed')
         persist_value(f'{pfx}_filter_material_exclude', state.filter_material_exclude)
-        asyncio.ensure_future(recompute_fn())
+        await recompute_fn()
         update_chip_fn()
 
     return {

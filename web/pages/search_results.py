@@ -108,6 +108,7 @@ def toggle_expansion(search_state, refs, index):
             async def _run_lazy(fn=lazy_loaders[index]):
                 with refs.page_client:
                     await fn()
+            # Cat-2: client context re-entry required - _run_lazy uses `with refs.page_client:`.
             asyncio.ensure_future(_run_lazy())
 
 
@@ -735,6 +736,8 @@ def create_result_card(search_state, refs, index, result):
                     def _toggle(i):
                         orig_fn(i)
                         if search_state.expanded_index == idx:
+                            # Cat-2: lazy toggle client-context re-entry - sync toggle helper
+                            # cannot await; load_fn hits run.io_bound under its own context.
                             asyncio.ensure_future(load_fn())
                     return _toggle
 
@@ -927,6 +930,7 @@ def open_advanced_dialog(search_state, refs, index, result):
 
             render_content(result)
 
+        # Cat-2: deferred enrichment fetch after dialog mount - sync UI builder cannot await.
         asyncio.ensure_future(fetch_and_render())
 
     async def load_page(direction: int = 0, p_num: int = None):
@@ -1246,7 +1250,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                         if total_pages > 1:
                             prev_pg_btn = ui.button(
                                 icon='chevron_right' if is_rtl() else 'chevron_left',
-                                on_click=lambda: asyncio.ensure_future(load_page(direction=-1))
+                                on_click=lambda: load_page(direction=-1)
                             ).props('flat round size=sm').tooltip(tr('Previous Page'))
                             prev_pg_btn.set_enabled(current_p_num > 1)
 
@@ -1254,7 +1258,7 @@ def open_advanced_dialog(search_state, refs, index, result):
 
                             next_pg_btn = ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
-                                on_click=lambda: asyncio.ensure_future(load_page(direction=1))
+                                on_click=lambda: load_page(direction=1)
                             ).props('flat round size=sm').tooltip(tr('Next Page'))
                             next_pg_btn.set_enabled(current_p_num < total_pages)
                         else:
@@ -1823,25 +1827,25 @@ def open_advanced_dialog(search_state, refs, index, result):
                                             ui.separator().props('vertical').classes('h-4 mx-1')
                                             prev_page_btn = ui.button(
                                                 icon='chevron_right' if is_rtl() else 'chevron_left',
-                                                on_click=lambda: asyncio.ensure_future(load_page(direction=-1))
+                                                on_click=lambda: load_page(direction=-1)
                                             ).props('flat round size=xs').tooltip(tr('Previous Page'))
                                             prev_page_btn.set_enabled(current_p_num > 1)
 
                                             page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-12').props('dense outlined borderless')
                                             ui.label(f"/{total_pages}").classes('text-xs').style('color: var(--text-secondary);')
 
-                                            def go_to_page():
+                                            async def go_to_page():
                                                 try:
                                                     p = int(page_input.value) if page_input.value else 1
                                                     p = max(1, min(total_pages, p))
-                                                    asyncio.ensure_future(load_page(p_num=p))
+                                                    await load_page(p_num=p)
                                                 except (ValueError, TypeError):
                                                     pass
                                             page_input.on('keydown.enter', lambda: go_to_page())
 
                                             next_page_btn = ui.button(
                                                 icon='chevron_left' if is_rtl() else 'chevron_right',
-                                                on_click=lambda: asyncio.ensure_future(load_page(direction=1))
+                                                on_click=lambda: load_page(direction=1)
                                             ).props('flat round size=xs').tooltip(tr('Next Page'))
                                             next_page_btn.set_enabled(current_p_num < total_pages)
 
