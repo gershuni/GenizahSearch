@@ -17,7 +17,7 @@ updated: 2026-04-17
 
 ## Current Test
 
-[Surfaces 1–2 passed; resuming at surface 3 Desktop Search Responsiveness]
+[Surfaces 1–3 passed; resuming at surface 4 Desktop Browse Responsiveness]
 
 ## Tests
 
@@ -54,7 +54,7 @@ expected:
   - No new visible hitches/stalls during ResultDialog open/close
   - Composition search (D-09): short composition query (2–3 short chunks, ≤50 chunks target) — timer starts, ETA appears within ~2s, results stream in (cancel-with-partial-results NOT exercised — feature behavior, not regression surface)
 
-result: pending
+result: passed (user approval 2026-04-17 — functional baseline and D-09 composition timer/ETA both green; user flagged two pre-existing perf issues (desktop search ~30s time-to-first-results; composition UI freezes ~15s before first composition result appears) — both confirmed **pre-existing** and NOT v7.9 decomposition regressions; logged to docs/OPEN_ISSUES.md P2 for future triage, outside Phase 75 scope)
 
 ### 4. Desktop Browse Responsiveness
 
@@ -75,9 +75,9 @@ result: pending
 
 ## Summary
 total: 5
-passed: 2
+passed: 3
 issues: 0
-pending: 3
+pending: 2
 skipped: 0
 blocked: 0
 
@@ -102,3 +102,11 @@ blocked: 0
 - (d) Multi-IE Ms. Heb. 6972=8 volume selector + IE switch: passed
 - (e) Folio Prev/Next updates URL bar (Phase 74 D-20 Cat-1 regression check): passed
 - (f) JTS ENA 1052.1 Princeton DPUL spot-check: **pre-existing bug** (no source-switch button visible; image credit shows NLI for a JTS manuscript that should default to DPUL) — NOT a v7.9 decomposition regression, confirmed against live website; logged to `docs/OPEN_ISSUES.md` §1 P2 for future triage, outside Phase 75 scope
+
+## Notes on surface 3 items that passed
+
+- Functional baseline (basic search → ResultDialog open/close): passed
+- Composition search D-09 timer + ETA mechanics: passed
+- **Pre-existing perf issues flagged by user (NOT v7.9 regressions):**
+  - Desktop search time-to-first-results ~30s on `"שלום"` — logged to `docs/OPEN_ISSUES.md` §1 P2
+  - Desktop composition UI freezes ~15s before first composition result appears — logged to `docs/OPEN_ISSUES.md` §1 P2
