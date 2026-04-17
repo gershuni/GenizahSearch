@@ -196,6 +196,181 @@ class SearchPageRefs:
 
 
 # ---------------------------------------------------------------------------
+# Phase 74: Page-scoped snapshot helpers (D-06)
+# ---------------------------------------------------------------------------
+#
+# These are the SOLE owners of the restorable_page_snapshot storage keys
+# for the search page. Direct app.storage.user writes to any of the keys in
+# _SEARCH_SNAPSHOT_KEYS elsewhere in the codebase is a violation after
+# Phase 74 (D-03, D-05, D-08).
+
+_SEARCH_SNAPSHOT_VERSION = 1
+
+# Legacy keys owned by these helpers (D-08 - no format change).
+# Bootstrap-input keys (search_mode, search_query, search_preset,
+# search_max_changes, search_gap, search_text_position) are NOT in this set -
+# they feed resolve_search_bootstrap and are not SearchUIState fields
+# (per must_haves.truths[0]). Migration of bootstrap-input keys is explicitly
+# OUT OF SCOPE for Plan 74-01 (review-revision: Codex HIGH #1).
+# Filter keys are NOT here either - they are owned by filter_panel.load_filter_state
+# / persist_value and cleared separately by clear_search_snapshot.
+_SEARCH_SNAPSHOT_KEYS = (
+    'domain_exclusions', 'search_printed_filter',
+    'word_search_excluded_ids', 'search_exclusion_sources',
+    'search_refinement_chain', 'search_results',
+    'search_all_terms_filter',
+)
+
+# Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
+_SEARCH_FILTER_KEYS = (
+    'search_filter_domains', 'search_filter_authors', 'search_filter_works',
+    'search_filter_include_mode', 'search_filter_date_from',
+    'search_filter_date_to', 'search_filter_material_exclude',
+    'search_filter_text_all', 'search_filter_text_any', 'search_filter_text_not',
+)
+_SEARCH_FILTER_MEASUREMENT_KEYS = (
+    'search_filter_width_min', 'search_filter_width_max',
+    'search_filter_height_min', 'search_filter_height_max',
+    'search_filter_line_count_min', 'search_filter_line_count_max',
+    'search_filter_line_height_min', 'search_filter_line_height_max',
+    'search_filter_text_density_min', 'search_filter_text_density_max',
+    'search_filter_measurement_material',
+)
+
+
+def restore_search_snapshot(state: 'SearchUIState') -> None:
+    """Hydrate page-scoped state from app.storage.user snapshot.
+
+    Called once at page mount. After this call, SearchUIState is authoritative -
+    direct app.storage.user reads for snapshot keys are forbidden (D-03).
+    Silently discards snapshot if version stamp is missing or stale (D-04).
+
+    Does NOT hydrate filter_* keys - callers still use
+    filter_panel.load_filter_state(state, 'search') for those.
+
+    NOTE (tab stomping limitation): the version stamp prevents cross-version
+    corruption but does NOT prevent Tab B overwriting Tab A's snapshot.
+    True per-tab isolation is deferred (Codex W3).
+    """
+    stored_version = app.storage.user.get('search_snapshot_schema_version', 0)
+    if stored_version != _SEARCH_SNAPSHOT_VERSION:
+        clear_search_snapshot()
+        return
+
+    try:
+        # Restorable scalar/list fields (match RESEARCH §1.1 bucket).
+        state.results = app.storage.user.get('search_results', []) or []
+        state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
+        _de = app.storage.user.get('domain_exclusions')
+        state.domain_exclusions = set(_de) if _de else set()
+        # refinement_chain (list[dict] -> list[RefinementStep])
+        from shared.refinement import RefinementStep
+        raw_chain = app.storage.user.get('search_refinement_chain', []) or []
+        try:
+            state.refinement_chain = [RefinementStep.from_dict(d) for d in raw_chain]
+        except Exception:
+            state.refinement_chain = []
+        # exclusion sources (list[dict])
+        state.exclusion_sources = app.storage.user.get('search_exclusion_sources', []) or []
+        # NOTE: search_mode, search_query, search_preset, search_max_changes,
+        # search_gap are read as needed by search.py's bootstrap block
+        # (they feed resolve_search_bootstrap). They are not stored on
+        # SearchUIState directly in the current codebase.
+    except Exception:
+        # Defensive: bad snapshot -> reset to defaults.
+        pass
+
+
+def persist_search_snapshot(state: 'SearchUIState') -> None:
+    """Serialize restorable fields of SearchUIState to app.storage.user.
+
+    runtime_only and cross_page_preference fields are NOT written.
+    Gated by session_persistence_enabled, mirroring filter_panel.persist_value.
+    """
+    if not app.storage.user.get('session_persistence_enabled', True):
+        return
+    try:
+        app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
+        app.storage.user['search_results'] = state.results or []
+        app.storage.user['search_printed_filter'] = state.printed_filter
+        app.storage.user['domain_exclusions'] = list(state.domain_exclusions or [])
+        # refinement_chain (list[RefinementStep] -> list[dict])
+        try:
+            app.storage.user['search_refinement_chain'] = [
+                s.to_dict() for s in (state.refinement_chain or [])
+            ]
+        except Exception:
+            app.storage.user['search_refinement_chain'] = []
+        app.storage.user['search_exclusion_sources'] = list(state.exclusion_sources or [])
+    except Exception:
+        pass  # Browser storage operation failed; snapshot not persisted (D-08)
+
+
+def clear_search_snapshot() -> None:
+    """Wipe all search snapshot keys from app.storage.user.
+
+    Replaces the scattered blocks at search.py:~805-832 and search.py:~2019-2025.
+    Clears both the core snapshot keys (_SEARCH_SNAPSHOT_KEYS) and the filter keys
+    (_SEARCH_FILTER_KEYS / _SEARCH_FILTER_MEASUREMENT_KEYS) owned by filter_panel.
+
+    Does NOT touch cross_page_preference keys (session_persistence_enabled,
+    search_history, show_translations) or the cross-page signal 'incoming_filters'
+    (Pitfall 7).
+    """
+    # Core snapshot keys: reset to safe defaults.
+    # NOTE (review-revision): Bootstrap-input keys (search_query, search_mode,
+    # search_preset, search_max_changes, search_gap, search_text_position) are
+    # NOT cleared here - they are owned by the bootstrap path. The existing
+    # search.py:2019-2025 reset block writes search_query='' / search_mode='exact'
+    # for UX reasons (New Search wipes the query bar); those writes STAY in
+    # search.py and are NOT migrated into this helper. This preserves the
+    # Plan 74-01 scope stated in must_haves.truths[0].
+    defaults = {
+        'search_results': [],
+        'domain_exclusions': [],
+        'search_printed_filter': 'all',
+        'word_search_excluded_ids': [],
+        'search_exclusion_sources': [],
+    }
+    for key, value in defaults.items():
+        try:
+            app.storage.user[key] = value
+        except Exception:
+            pass
+    # Remaining snapshot keys: drop them.
+    for key in ('search_refinement_chain',
+                'search_all_terms_filter', 'search_snapshot_schema_version'):
+        try:
+            app.storage.user.pop(key, None)
+        except Exception:
+            pass
+    # Filter keys (match search.py:806-832 reset block).
+    # Defaults match LIVE field types verified in web/pages/search_state.py:60, :82
+    # and web/components/filter_panel.py:248, :271 (review-revision: Codex HIGH #2):
+    #   filter_include_mode is bool (default True) - NOT string 'any'
+    #   filter_measurement_material is list (default []) - NOT None
+    for key in _SEARCH_FILTER_KEYS:
+        try:
+            if key == 'search_filter_include_mode':
+                app.storage.user[key] = True  # bool, matches filter_panel.py:248
+            elif key in ('search_filter_date_from', 'search_filter_date_to'):
+                app.storage.user[key] = None
+            else:
+                app.storage.user[key] = []
+        except Exception:
+            pass
+    # Measurement keys: mins/maxes default to None (numeric), material to [].
+    for key in _SEARCH_FILTER_MEASUREMENT_KEYS:
+        try:
+            if key == 'search_filter_measurement_material':
+                app.storage.user[key] = []  # list, matches filter_panel.py:271
+            else:
+                app.storage.user[key] = None  # numeric min/max
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Search history management (reads/writes app.storage.user)
 # ---------------------------------------------------------------------------
 
