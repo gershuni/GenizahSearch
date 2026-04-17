@@ -1,6 +1,6 @@
 ﻿# GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-04-17 (logged pre-existing web search Export-ignores-checkbox bug discovered during Phase 75 non-regression walkthrough)
+> **Last Updated:** 2026-04-17 (logged pre-existing web search Export-ignores-checkbox bug + JTS DPUL-button-missing bug discovered during Phase 75 non-regression walkthrough)
 > **Status:** Active working document
 
 ---
@@ -47,7 +47,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 0 | 7 | 7 |
-| P2 Medium Bugs | 14 | 59 | 73 |
+| P2 Medium Bugs | 15 | 59 | 74 |
 | P3 Low Priority | 1 | 5 | 6 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
@@ -55,7 +55,7 @@ Move to "Completed Issues" section at bottom with date
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **25** | **102** | **127** |
+| **Total** | **26** | **102** | **128** |
 
 ---
 
@@ -78,6 +78,7 @@ Move to "Completed Issues" section at bottom with date
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **Web search Export ignores row checkboxes: with one result checked, Export produces the full list instead of just the selected item** | `web/pages/search.py` (Export handler) | ❌ Open | Surfaced 2026-04-17 during Phase 75 non-regression walkthrough (surface 1 item e). User confirmed this is **pre-existing** behavior on the live website — NOT a v7.9 decomposition regression. Expected: when one or more result checkboxes are ticked, Export should emit only the checked rows. Actual: Export emits the entire current result set regardless of checkbox selection. Out of Phase 75 scope (phase only covers regressions introduced by Phases 67–74); triaged here for future attention. |
+| **JTS browse page missing Princeton DPUL image source switch; image credit shows NLI for a JTS manuscript that should default to DPUL** | `web/pages/browse.py` (image-source selector / default-source logic for JTS) | ❌ Open | Surfaced 2026-04-17 during Phase 75 non-regression walkthrough (surface 2 item f, `/browse?sys_id=990053572370205171` ENA 1052.1). User confirmed this is **pre-existing** behavior on the live website — NOT a v7.9 decomposition regression. Expected (per v7.2.3 What's New / Princeton DPUL upgrade, and nli_crossref.db `jts_dpul` table): JTS manuscripts with DPUL coverage should show a source-switch control AND default the displayed image to Princeton DPUL (36,283-item v2.0.0 catalog), with credit attributing DPUL. Actual: no source-switch control appears; credit reads NLI. Either the DPUL lookup is silently failing for this sys_id, the JTS→DPUL default logic is not wired, or the source-switch UI was lost. Out of Phase 75 scope; triaged for future attention. |
 | **FjmsService batch queries intermittently fail with "bad parameter or other API misuse" / "tuple index out of range"** | `shared/fjms_service.py` | ❌ Open | `get_printed_sys_ids()` and `get_domains_for_sys_ids()` use `row["AlmaId"]` dict access which requires `conn.row_factory = sqlite3.Row`. Under concurrent access or connection recycling, row_factory may be lost, causing "bad parameter" (SQLite API error) or "tuple index out of range" (fallback to tuple row). Pre-existing, intermittent, fails gracefully (returns empty set/dict). |
 | **Font-display middleware rebuilds cached `fonts.css` responses as fresh 200s and preserves stale validators** | `web/main.py` | ❌ Open | Review of the 2026-04-13 perf patch found `_inject_font_display_swap()` consumes `/static/fonts.css` responses and returns a new plain `Response` without preserving `response.status_code`. Conditional/static responses such as `304 Not Modified` (and any future non-200s) therefore become `200 OK`, while the code also copies original `ETag` / `Last-Modified` headers onto mutated CSS content. That can break browser/CDN cache semantics and, on a 304 path with an empty upstream body, risks returning an empty stylesheet body as `200`. Fix path: skip rewriting unless `status_code == 200` and `content-type` is CSS, then either recompute/remove validators or patch the source asset at startup instead of rewriting the served response. |
 | **Recurring NiceGUI `parent_slot has been deleted` RuntimeError spams journalctl** | `web/` (callsite unknown) | ❌ Open | Observed in `genizah-web` journal on 2026-04-15 — `ui.timer` callback fires after its parent container was deleted, raising `RuntimeError: The parent slot of the element has been deleted.` from `nicegui/elements/timer.py:12`. Caught by NiceGUI's `_handle_exceptions` so no user-visible crash, but pollutes logs and indicates a timer outliving its UI container. Same class of bug as the v6.5.1 parallels fix — one instance was patched, but another callsite still spawns a `ui.timer` in an ephemeral context. Fix path: grep `web/` for remaining `ui.timer(` usages in ephemeral containers and convert to `asyncio.call_later` (see memory note). Low urgency — cosmetic log noise. |

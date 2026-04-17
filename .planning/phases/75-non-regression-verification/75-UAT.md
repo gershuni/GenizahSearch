@@ -11,13 +11,13 @@ updated: 2026-04-17
 | Surface test | sys_id | Shelfmark | Library | Notes |
 |---|---|---|---|---|
 | Cambridge T-S (web browse step c) | 990051334060205171 | T-S 12.123 | CUL | CUDL image load |
-| NLI-only with crossref (web browse step a) | 990053385670205171 | arch. O.d.8/1 | Oxford | nli_crossref.db nli_images row; no Cambridge/JTS crossref overlap |
+| NLI-only with crossref (web browse step a) | 990001273900205171 | MS. 2065 | HUC (Hebrew Union College) | Substituted 2026-04-17 — original 990053385670205171 (Oxford arch. O.d.8/1) had no image/text/data in-app; HUC 2065 has 20 images in nli_crossref.db nli_images with no Cambridge/JTS/Manchester overlap |
 | Multi-IE (web browse step d) | 990000412990205171 | Ms. Heb. 6972=8 | Allony (NLI) | IE104549337, IE19213988 — 2 IEs, 7 trans FLs |
 | JTS DPUL (web browse spot check) | 990053572370205171 | ENA 1052.1 | JTS | Princeton DPUL image path — v7.2.3 regression surface |
 
 ## Current Test
 
-[Surface 1 passed after 75-03 fix; resuming at surface 2 Web Browse Responsiveness]
+[Surfaces 1–2 passed; resuming at surface 3 Desktop Search Responsiveness]
 
 ## Tests
 
@@ -43,7 +43,7 @@ expected:
 - (e) Folio Prev/Next updates the URL bar (Phase 74 D-20 E2E regression check — confirms Cat-1 fix holds under real use)
 - (f) Spot-check: navigate `/browse?sys_id=990053572370205171` → Princeton DPUL image path still works (v7.2.3 regression surface)
 
-result: pending
+result: passed (user approval 2026-04-17 — items (a)/(b) re-run against substitute sys_id 990001273900205171 HUC MS. 2065 because the original Oxford arch. O.d.8/1 had no image/text/data in-app; (c) CUDL image, (d) volume selector + IE switch, (e) folio Prev/Next URL bar update all green; (f) Princeton DPUL path flagged as pre-existing bug — no source-switch button and credit reads NLI, confirmed NOT a v7.9 decomposition regression against live website, logged to docs/OPEN_ISSUES.md P2 for future triage, outside Phase 75 scope)
 
 ### 3. Desktop Search Responsiveness
 
@@ -75,9 +75,9 @@ result: pending
 
 ## Summary
 total: 5
-passed: 1
+passed: 2
 issues: 0
-pending: 4
+pending: 3
 skipped: 0
 blocked: 0
 
@@ -90,6 +90,15 @@ blocked: 0
 - (a) cold-load `/`: passed
 - (b) Hebrew query `"שלום"` → results visible: passed
 - (c) result accordion expand: passed
-- (d) Browse navigation from result: passed (forward direction only — Back is the regression)
+- (d) Browse navigation from result: passed (forward direction **and** Back direction after 75-03 fix)
 - (e) Export with one checkbox ticked: **pre-existing bug** (exports whole list instead of the checked item) — NOT a v7.9 decomposition regression; logged to `docs/OPEN_ISSUES.md` §1 P2 for future triage, outside Phase 75 scope
 - (f) Paginate forward twice: passed
+
+## Notes on surface 2 items that passed
+
+- (a) NLI-only manuscript renders: passed (substitute sys_id 990001273900205171 HUC MS. 2065 used because original Oxford arch. O.d.8/1 had no in-app data; Fixed Test Manuscripts table updated)
+- (b) FJMS catalog + bibliography enrichment load: passed (on HUC 2065 substitute)
+- (c) Cambridge T-S 12.123 CUDL image load: passed
+- (d) Multi-IE Ms. Heb. 6972=8 volume selector + IE switch: passed
+- (e) Folio Prev/Next updates URL bar (Phase 74 D-20 Cat-1 regression check): passed
+- (f) JTS ENA 1052.1 Princeton DPUL spot-check: **pre-existing bug** (no source-switch button visible; image credit shows NLI for a JTS manuscript that should default to DPUL) — NOT a v7.9 decomposition regression, confirmed against live website; logged to `docs/OPEN_ISSUES.md` §1 P2 for future triage, outside Phase 75 scope
