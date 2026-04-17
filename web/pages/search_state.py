@@ -291,7 +291,22 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
         return
     try:
         app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
-        app.storage.user['search_results'] = state.results or []
+        # Cap at 1000 results and strip heavy full_text fields before writing
+        # to app.storage.user (browser WS message size limit) -- matches the
+        # pre-Phase-74 inline behavior at search.py:4171-4190.
+        capped = (state.results or [])[:1000]
+        storage_results = []
+        for r in capped:
+            sr = dict(r) if isinstance(r, dict) else r
+            if isinstance(sr, dict):
+                sr.pop('full_text', None)
+                disp = sr.get('display')
+                if disp and isinstance(disp, dict):
+                    d = dict(disp)
+                    d.pop('full_text', None)
+                    sr['display'] = d
+            storage_results.append(sr)
+        app.storage.user['search_results'] = storage_results
         app.storage.user['search_printed_filter'] = state.printed_filter
         app.storage.user['domain_exclusions'] = list(state.domain_exclusions or [])
         # refinement_chain (list[RefinementStep] -> list[dict])

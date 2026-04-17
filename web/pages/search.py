@@ -26,6 +26,7 @@ from web.pages.search_state import (
     get_search_history, add_to_search_history,
     delete_search_history_entry, clear_search_history,
     domain_display_name,
+    persist_search_snapshot, clear_search_snapshot,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -127,7 +128,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:
         search_state.domain_exclusions = set()
-        app.storage.user['domain_exclusions'] = []
+        persist_search_snapshot(search_state)
 
     # --- Incoming filters from catalog browse (Path B: browse -> search) ---
     _filters_from_browse = False
@@ -802,17 +803,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             exclude_printed_cb.value = False
                             if _filter_refs.get('text_input'):
                                 _filter_refs['text_input'].value = ''
-                            # Reset filter storage to clean defaults
-                            app.storage.user['search_filter_domains'] = []
-                            app.storage.user['search_filter_authors'] = []
-                            app.storage.user['search_filter_works'] = []
-                            app.storage.user['search_filter_include_mode'] = True
-                            app.storage.user['search_filter_date_from'] = None
-                            app.storage.user['search_filter_date_to'] = None
-                            app.storage.user['search_filter_material_exclude'] = []
-                            app.storage.user['search_filter_text_all'] = []
-                            app.storage.user['search_filter_text_any'] = []
-                            app.storage.user['search_filter_text_not'] = []
                             # Clear measurement filters (Phase 54)
                             search_state.filter_width_min = None
                             search_state.filter_width_max = None
@@ -825,11 +815,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             search_state.filter_text_density_min = None
                             search_state.filter_text_density_max = None
                             search_state.filter_measurement_material = []
-                            for _mk in ['width_min', 'width_max', 'height_min', 'height_max',
-                                        'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
-                                        'text_density_min', 'text_density_max', 'measurement_material']:
-                                app.storage.user[f'search_filter_{_mk}'] = None
-                            app.storage.user['search_filter_measurement_material'] = []
+                            # Reset filter storage to clean defaults (Phase 74: via helper)
+                            clear_search_snapshot()
                             _update_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',
@@ -2015,14 +2002,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.exclusion_sources = []
         _update_exclude_btn()
         _set_btn_visible(exclude_btn, False)
-        # Reset persistent storage to clean defaults (use explicit values, not None or pop)
-        app.storage.user['search_results'] = []
+        # Reset persistent storage to clean defaults (Phase 74: via helper).
+        # search_query/search_mode are bootstrap-input keys NOT owned by the helper;
+        # keep their UX-driven writes here to wipe the query bar on New Search.
+        clear_search_snapshot()
         app.storage.user['search_query'] = ''
         app.storage.user['search_mode'] = 'exact'
-        app.storage.user['domain_exclusions'] = []
-        app.storage.user['search_printed_filter'] = 'all'
-        app.storage.user['word_search_excluded_ids'] = []
-        app.storage.user['search_exclusion_sources'] = []
         ui.notify(tr('Search reset'), type='info', timeout=2000)
 
     # === Bulk Operations ===
@@ -3009,7 +2994,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             )
                             excluded = set(excluded_list) if excluded_list else set()
                             search_state.domain_exclusions = excluded
-                            app.storage.user['domain_exclusions'] = list(excluded)
+                            persist_search_snapshot(search_state)
                             if search_state.exclusion_sources:
                                 _apply_manuscript_exclusions()
                             else:
@@ -4183,20 +4168,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass  # JavaScript execution failed; non-fatal UI glitch
 
-        # Storage persistence (cap at 1000, strip full_text)
+        # Storage persistence via snapshot helper (Phase 74).
+        # The helper handles capping at 1000 and stripping full_text fields
+        # internally (matches pre-Phase-74 inline behavior).
         try:
-            capped = results[:1000]
-            storage_results = []
-            for r in capped:
-                sr = dict(r)
-                sr.pop('full_text', None)
-                display = sr.get('display')
-                if display and isinstance(display, dict):
-                    d = dict(display)
-                    d.pop('full_text', None)
-                    sr['display'] = d
-                storage_results.append(sr)
-            app.storage.user['search_results'] = storage_results
+            persist_search_snapshot(search_state)
         except Exception:
             pass  # Browser storage operation failed; preference not persisted
 

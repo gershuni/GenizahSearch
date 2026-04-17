@@ -37,6 +37,7 @@ from web.document_service import get_document_for_fragment, get_section_for_page
 from web.components.joins_panel import fetch_connected_fragments
 from web.pages.browse_state import (
     BrowseState, _crossref_cache,
+    persist_browse_snapshot, clear_browse_snapshot,
 )
 from web.pages.browse_enrichment import (
     BrowsePageRefs,
@@ -773,16 +774,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 if page.volume_ie:
                     state.volume_ie = page.volume_ie
 
-                # Save position to storage for persistence
-                try:
-                    app.storage.user['browse_position'] = {
-                        'sys_id': state.sys_id,
-                        'p_num': page.p_num,
-                        'shelfmark': page.shelfmark,
-                        'volume_ie': state.volume_ie,  # persist volume across refresh
-                    }
-                except Exception:
-                    pass  # Browser storage operation failed; preference not persisted
+                # Save position to storage for persistence (Phase 74: via helper)
+                persist_browse_snapshot(state, page)
 
                 # PostHog: track manuscript views
                 from web.analytics import posthog_capture
@@ -977,11 +970,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.joined_pgpid = None
         state.reading_desk_entries = []
         state.reading_desk_selected_sources = {}
-        # Clear persisted reading desk state
-        try:
-            app.storage.user.pop('reading_desk_state', None)
-        except Exception:
-            pass  # Browser storage operation failed; preference not persisted
+        # Clear persisted reading desk state (Phase 74: via helper).
+        # NOTE: clear_browse_snapshot also drops browse_position, which is the
+        # intended behavior when exiting joined view (state reset).
+        clear_browse_snapshot()
         update_content()
 
     def add_to_reading_desk():
@@ -1054,24 +1046,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.notify(f'{shelfmark} {tr("added to Reading Desk")}', type='positive')
 
     def _persist_reading_desk_state():
-        """Save reading desk state to app.storage.user for language-switch persistence."""
-        try:
-            if state.view_joined and state.reading_desk_entries:
-                rd_data = []
-                for entry in state.reading_desk_entries:
-                    rd_data.append({
-                        'sys_id': entry.get('sys_id', ''),
-                        'shelfmark': entry.get('shelfmark', '')
-                    })
-                app.storage.user['reading_desk_state'] = {
-                    'entries': rd_data,
-                    'pgpid': state.joined_pgpid,
-                    'selected_sources': state.reading_desk_selected_sources or {}
-                }
-            else:
-                app.storage.user.pop('reading_desk_state', None)
-        except Exception as e:
-            logger.error(f"[ReadingDesk] Error persisting state: {e}")
+        """Save reading desk state via Phase 74 snapshot helper.
+
+        Thin shim preserved so existing call sites do not need updating.
+        page=state.current_page carries shelfmark/p_num for browse_position.
+        """
+        persist_browse_snapshot(state, state.current_page)
 
     def _restore_reading_desk_state():
         """Restore reading desk state from app.storage.user after language switch."""
