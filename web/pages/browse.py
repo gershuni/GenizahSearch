@@ -1608,7 +1608,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.button(
                         icon='skip_next' if is_rtl() else 'skip_previous',
                         on_click=lambda: asyncio.ensure_future(navigate_shelfmark(-1))
-                    ).props('flat round').style('color: white !important;').tooltip(tr('Previous manuscript'))
+                    ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript"').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
                     # Shelfmark and Title
                     with ui.row().classes('flex-1 items-center justify-center gap-4'):
@@ -1801,7 +1801,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.button(
                         icon='skip_previous' if is_rtl() else 'skip_next',
                         on_click=lambda: asyncio.ensure_future(navigate_shelfmark(1))
-                    ).props('flat round').style('color: white !important;').tooltip(tr('Next manuscript'))
+                    ).props('flat round aria-label="Next manuscript" data-action="next-manuscript"').style('color: white !important;').tooltip(tr('Next manuscript'))
 
             # === Action Buttons Row ===
             # Removed - buttons moved to appropriate headers
