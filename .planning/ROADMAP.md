@@ -17,7 +17,7 @@
 - **v7.6 Search Refinement & Scholarly Joins** -- Phases 54-57 (shipped 2026-03-31)
 - **v7.7 Volume-Aware Browse** -- Phases 58-61 (shipped 2026-04-01)
 - **v7.8 Structural Foundation** -- Phases 63-66 (shipped 2026-04-15)
-- **v7.9 Decomposition** -- Phases 67-76 (in progress)
+- **v7.9 Decomposition** -- Phases 67-76 (complete 2026-04-17)
 
 ## Phases
 
@@ -196,7 +196,7 @@ Zero user-visible behavior changes.
 
 </details>
 
-### v7.9 Decomposition (In Progress)
+### v7.9 Decomposition (Complete 2026-04-17)
 
 **Milestone Goal:** Reduce structural debt by decomposing the largest source files -- `genizah_app.py` (~32,800 lines), `web/pages/search.py` (~6,700 lines), `web/pages/browse.py` (~5,100 lines) -- into focused modules. Zero user-visible behavior changes. Leverages v7.8 CI safety net (ruff + pytest on Ubuntu + Windows).
 **Per-phase gate:** current pytest baseline remains green, CI green (Ubuntu + Windows) after each phase.
@@ -211,7 +211,7 @@ Zero user-visible behavior changes.
 - [x] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules (completed 2026-04-16; housekeeping committed 2026-04-17)
 - [x] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects (completed 2026-04-17)
 - [x] **Phase 75: Non-Regression Verification** - Manual qualitative verification of search/browse responsiveness in both apps (completed 2026-04-17)
-- [ ] **Phase 76: Documentation Close** - Refresh CODE_INDEX.md, OPEN_ISSUES.md, and path references for all moved files
+- [x] **Phase 76: Documentation Close** - Refresh CODE_INDEX.md, OPEN_ISSUES.md, and path references for all moved files (completed 2026-04-17 — added scripts/gen_code_index_section.py AST generator + v7.9 module index; check_docs green)
 
 ## Phase Details
 
@@ -381,10 +381,10 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
 | 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
 | 72. Search Page Split | 2/2 | Complete    | 2026-04-16 |
-| 73. Browse Page Split | 1/2 | In progress | - |
+| 73. Browse Page Split | 2/2 | Complete    | 2026-04-16 |
 | 74. Page-Scoped State Refactor | 3/3 | Complete    | 2026-04-17 |
-| 75. Non-Regression Verification | 2/2 | Complete   | 2026-04-17 |
-| 76. Documentation Close | 0/TBD | Not started | - |
+| 75. Non-Regression Verification | 3/3 | Complete   | 2026-04-17 |
+| 76. Documentation Close | 1/1 | Complete    | 2026-04-17 |
 
 ---
 *Roadmap created: 2026-02-09*

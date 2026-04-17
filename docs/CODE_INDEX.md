@@ -1,8 +1,25 @@
 # Codebase Index
 
-> Last updated: 2026-04-15
+> Last updated: 2026-04-17
 
-Auto-generated index of classes and methods.
+Auto-generated index of classes and methods. New sections for modules can be
+appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
+Python AST and emits markdown in the existing style).
+
+**v7.9 decomposition (Phases 67–74) added the following modules** — see the
+"v7.9 Decomposed Modules" section below for their class / function indexes:
+
+- Desktop: `desktop/widgets.py`, `desktop/title_helpers.py`,
+  `desktop/image_loader.py`, `desktop/result_dialog.py`,
+  `desktop/dialogs_filter.py`, `desktop/dialogs_scholarly.py`,
+  `desktop/viewers.py`, `desktop/puzzle.py`, `desktop/vs_cache.py`
+- Web: `web/pages/search_state.py`, `web/pages/search_results.py`,
+  `web/pages/browse_state.py`, `web/pages/browse_enrichment.py`,
+  `web/search_bootstrap.py`
+
+The `## genizah_app.py`, `## web/pages/search.py`, and `## web/pages/browse.py`
+sections below predate the decomposition and may reference line numbers that
+have shifted; use them as a guide to intent rather than current anchors.
 
 ## genizah_app.py
 
@@ -1465,3 +1482,432 @@ Auto-generated index of classes and methods.
     - Property `row_factory` (Line 114)
     - Method `close` (Line 126) — close all connections and reset state
     - Method `__bool__` (Line 138) — truthy for availability checks
+
+
+---
+
+# v7.9 Decomposed Modules
+
+## desktop/__init__.py
+
+
+## desktop/widgets.py
+
+- **Class** `ActionsHoverWidget` (Line 12)
+    - Method `__init__` (Line 13)
+    - Method `add_btn` (Line 22)
+    - Method `set_buttons_visible` (Line 31)
+- **Function** `_format_add_to_list_label` (Line 39)
+- **Function** `apply_find_highlight` (Line 44)
+- **Function** `_get_folio_number_from_shelfmark` (Line 66) — Extract folio number from Oxford-style shelfmarks only.
+- **Function** `_get_folio_image_index` (Line 94)
+- **Function** `_get_initial_image_index` (Line 122)
+- **Class** `ShelfmarkCompleter` (Line 155) — Custom Completer that normalizes input before matching.
+    - Method `__init__` (Line 160)
+    - Method `normalize` (Line 165)
+    - Method `splitPath` (Line 169)
+    - Method `pathFromIndex` (Line 172)
+    - Method `complete` (Line 176)
+
+## desktop/title_helpers.py
+
+- **Function** `_get_title_svc` (Line 11) — Get or create a cached TranslationService for title lookups.
+- **Function** `_truncate_title` (Line 22) — Truncate long title text with ellipsis. Returns (truncated_text, tooltip_or_None).
+- **Function** `_is_hebrew_text` (Line 30) — Check if text is purely/nearly Hebrew with negligible English.
+- **Function** `_translate_hebrew_date` (Line 43) — Translate Hebrew-numeral dates like 'מאה ט״ו' → '15th century'.
+- **Function** `_resolve_display_title` (Line 95) — Resolve the display title using libraries_translations.db if available.
+- **Function** `_set_label_with_tooltip` (Line 164) — Set label text with truncation and tooltip for full text.
+
+## desktop/image_loader.py
+
+- **Class** `ImageLoaderThread` (Line 15) — Smart Image Loader:
+    - Method `__init__` (Line 26)
+    - Method `cancel` (Line 42)
+    - Method `run` (Line 45)
+    - Method `_download_bytes` (Line 123) — Helper to download bytes safely.
+
+## desktop/result_dialog.py
+
+- **Class** `ResultDialog` (Line 36) — Allow browsing a single search result and its surrounding pages.
+    - Method `__init__` (Line 42)
+    - Method `init_ui` (Line 73)
+    - Method `_toggle_compact_mode` (Line 507) — Toggle between compact and full header mode.
+    - Method `navigate_results` (Line 529)
+    - Method `open_full_transcription` (Line 535)
+    - Method `search_for_parallels` (Line 546)
+    - Method `add_current_to_list` (Line 564) — Add the current manuscript to a list.
+    - Method `_add_to_puzzle` (Line 588) — Add current result to puzzle canvas (mirrors _browse_add_to_puzzle logic).
+    - Method `_rd_search_visual_similarity` (Line 618) — D-10: Show visual similarity dialog from ResultDialog context.
+    - Method `_update_add_to_list_button` (Line 667)
+    - Method `add_comment` (Line 683) — Open comment dialog for current document.
+    - Method `view_corrections` (Line 699) — View corrections for current document.
+    - Method `view_comments` (Line 713) — View comments for current document.
+    - Method `_rd_view_joins` (Line 725) — View joined fragments for current document.
+    - Method `_rd_update_joins_menu` (Line 754) — Update the joins dropdown menu with connected fragments.
+    - Method `_rd_on_joins_menu_show` (Line 914) — Called when joins menu is about to show - trigger sync and update.
+    - Method `_rd_navigate_to_joined_fragment` (Line 926) — Navigate to a joined fragment within the same results dialog.
+    - Method `_rd_load_versions` (Line 931) — Load versions for current document page.
+    - Method `_rd_change_version` (Line 965) — Handle version change in ResultDialog.
+    - Method `_rd_refresh_versions` (Line 971) — Refresh version list. If select_latest=True, select and load the latest version.
+    - Method `_rd_load_version_content` (Line 1184) — Load and display version content.
+    - Method `_rd_display_text` (Line 1256) — Display text in the manuscript viewer.
+    - Method `_rd_display_pgp_text` (Line 1261) — Display PGP edition/translation text with proper directionality.
+    - Method `_on_rd_pgp_loaded` (Line 1272) — Handle PGP sources loaded from background thread.
+    - Method `_on_rd_pgp_error` (Line 1337) — Handle PGP source fetch error -- silently fall back to existing behavior.
+    - Method `_rd_update_extended_info_with_pgp` (Line 1341) — Rebuild extended info HTML after PGP data arrives late.
+    - Method `_rd_build_extended_html` (Line 1360) — Build the full extended info HTML for ResultDialog.
+    - Method `_rd_refresh_extended_info` (Line 1565) — Rebuild ResultDialog extended info with current toggle state.
+    - Method `_rd_toggle_edit_mode` (Line 1581) — Toggle edit mode in ResultDialog.
+    - Method `_rd_exit_edit_mode` (Line 1619) — Exit edit mode.
+    - Method `_rd_on_text_changed` (Line 1638) — Handle text changes in edit mode.
+    - Method `_rd_cancel_edit` (Line 1667) — Cancel edit mode and restore original text.
+    - Method `_rd_save_correction` (Line 1673) — Save correction from ResultDialog.
+    - Method `_refresh_find_highlights` (Line 1781)
+    - Method `_apply_source_highlights` (Line 1784)
+    - Method `open_external_link` (Line 1798)
+    - Method `_htmlify` (Line 1806)
+    - Method `_apply_manual_highlights_to_text` (Line 1812)
+    - Method `load_result_by_index` (Line 1834)
+    - Method `_preload_next_result` (Line 1924)
+    - Method `load_by_shelfmark` (Line 1940) — Load a document by shelfmark within the same dialog.
+    - Method `load_page` (Line 1999)
+    - Method `_update_rd_domain_label` (Line 2135) — Update domain info label and printed badge for the current result in ResultDialog.
+    - Method `apply_metadata` (Line 2212)
+    - Method `toggle_extended_info` (Line 2232)
+    - Method `_on_rd_ext_link_clicked` (Line 2243) — Handle clicks on links in ResultDialog extended info.
+    - Method `_rd_toggle_translations` (Line 2279) — Toggle show_translations from ResultDialog toolbar button.
+    - Method `_rd_refresh_title` (Line 2316) — Refresh the ResultDialog title label based on current translation toggle.
+    - Method `_rd_auto_translate_all` (Line 2328) — Auto-fire translations for all translatable fields that aren't cached yet.
+    - Method `_show_rd_fjms_bib` (Line 2389) — Open FJMS bibliography dialog from ResultDialog.
+    - Method `_show_rd_nli_bib` (Line 2403) — Open NLI bibliography dialog from ResultDialog.
+    - Method `_show_rd_catalog` (Line 2417) — Open FJMS catalog records dialog from reading desk (lazy fetch).
+    - Method `_show_rd_measurements` (Line 2441) — Open measurements dialog from reading desk (lazy fetch on first click).
+    - Method `toggle_external_viewer` (Line 2465)
+    - Method `on_enriched_data_loaded` (Line 2470)
+    - Method `sync_external_view` (Line 2679)
+    - Method `on_metadata_loaded` (Line 2697)
+    - Method `_wait_or_terminate_thread` (Line 2703) — Wait for a QThread to finish; terminate as last resort.
+    - Method `cancel_image_thread` (Line 2711)
+    - Method `fetch_image` (Line 2719)
+    - Method `_on_thumb_resolved` (Line 2746)
+    - Method `start_download` (Line 2754)
+    - Method `on_img_loaded` (Line 2770)
+    - Method `on_img_failed` (Line 2776)
+    - Method `closeEvent` (Line 2780)
+    - Method `open_catalog` (Line 2808)
+    - Method `open_viewer` (Line 2811)
+
+## desktop/dialogs_filter.py
+
+- **Class** `ExcludeDialog` (Line 21) — Collect system IDs or shelfmarks that should be excluded from searches.
+    - Method `__init__` (Line 23)
+    - Method `_clear_all` (Line 175) — Clear all entries from the editor and accept (removes all exclusions).
+    - Method `_load_list_to_editor` (Line 191) — Load selected list items into the editor tab (sys_ids + shelfmarks).
+    - Method `_resolve_and_show_report` (Line 225) — Resolve shelfmarks from the text areas and show resolution report table.
+    - Method `get_exclusion_sources` (Line 261) — Return ExclusionSource objects from the active tab.
+    - Method `eventFilter` (Line 327)
+    - Method `_split_existing_entries` (Line 346)
+    - Method `_on_sys_text_changed` (Line 360)
+    - Method `_on_shelf_text_changed` (Line 365)
+    - Method `_sync_from_sys` (Line 370)
+    - Method `_sync_from_shelf` (Line 379)
+    - Method `resizeEvent` (Line 388)
+    - Method `_get_lines` (Line 393)
+    - Method `_set_titles` (Line 396)
+    - Method `_refresh_title_display` (Line 400)
+    - Method `_resolve_shelves_from_sys` (Line 409)
+    - Method `_resolve_titles_from_sys` (Line 423)
+    - Method `_ensure_shelf_map` (Line 437)
+    - Method `_add_shelf_map` (Line 448)
+    - Method `_resolve_sys_from_shelves` (Line 453)
+    - Method `_normalize_shelfmark` (Line 461)
+    - Method `load_file` (Line 470)
+    - Method `get_entries_text` (Line 507)
+- **Class** `DomainFilterDialog` (Line 533) — Hierarchical domain filter dialog with checkboxes and type-ahead search.
+    - Method `__init__` (Line 540)
+    - Method `_populate_tree` (Line 593) — Populate tree with domains from current search results only.
+    - Method `_filter_tree` (Line 671) — Filter tree items by search text.
+    - Method `_handle_item_changed` (Line 701) — Handle checkbox state changes with parent-child propagation.
+    - Method `_check_all` (Line 722) — Check all items (no filtering).
+    - Method `_uncheck_all` (Line 737) — Uncheck all items (exclude all domains).
+    - Method `_restore_exclusions` (Line 752) — Restore previously excluded domains by unchecking them.
+    - Method `get_excluded_domains` (Line 779) — Return set of excluded (unchecked) domain names.
+    - Method `_update_summary` (Line 803) — Update exclusion summary label.
+- **Class** `PreSearchFilterDialog` (Line 818) — Pre-search filter dialog with multi-select domain, author, work, date range,
+    - Method `__init__` (Line 826)
+    - Method `_check_list_item` (Line 1117) — Check/uncheck a QListWidget item by its data value.
+    - Method `_check_tree_item` (Line 1126) — Check/uncheck a QTreeWidget item by its data value (searches all levels).
+    - Method `_get_checked_items` (Line 1142) — Return list of data values for all checked items.
+    - Method `_get_checked_tree_items` (Line 1154) — Return list of data values for all checked leaf/child items in a QTreeWidget (up to 3 levels).
+    - Method `_populate_domains` (Line 1184) — Populate domain tree with hierarchy from FJMS.
+    - Method `_populate_authors` (Line 1241) — Populate author dropdown, optionally filtered by first selected domain.
+    - Method `_populate_works` (Line 1271) — Populate work dropdown, optionally filtered by domain and author.
+    - Method `_filter_domain_list` (Line 1302) — Filter domain tree items by search text.
+    - Method `_on_domain_tree_changed` (Line 1318) — Handle domain tree checkbox with parent-child propagation.
+    - Method `_on_domain_changed` (Line 1335) — When domain selection changes, re-populate authors and works.
+    - Method `_on_author_selected` (Line 1342) — Handle author dropdown selection — add to selected list.
+    - Method `_on_work_selected` (Line 1352) — Handle work dropdown selection — add to selected list.
+    - Method `_on_author_changed` (Line 1362) — When author selection changes, re-populate works.
+    - Method `_on_filter_changed` (Line 1368) — Any filter changed -- update count and chip bar.
+    - Method `_add_text_term` (Line 1373) — Add a text filter term from the input.
+    - Method `_remove_text_term` (Line 1385) — Remove a text filter term.
+    - Method `_make_chip` (Line 1392) — Create a removable chip button (dark-mode aware).
+    - Method `_rebuild_dialog_chips` (Line 1420) — Rebuild unified chip bar showing all active filters.
+    - Method `_get_current_filter_dict` (Line 1516) — Build filter dict from current dialog state.
+    - Method `_get_measurement_filters` (Line 1550) — Extract measurement filter values from dialog spin boxes and checkboxes.
+    - Method `_get_display_name` (Line 1578) — Get display name (without count) from data map.
+    - Method `_update_count` (Line 1583) — Recompute manuscript count in background thread.
+    - Method `_on_count_finished` (Line 1597) — Handle count worker result.
+    - Method `_clear_all` (Line 1610) — Reset all filter controls to default.
+    - Method `get_filters` (Line 1650) — Return the current filter state dict.
+    - Method `get_restrict_sys_ids` (Line 1654) — Return the computed restrict_sys_ids set (or None).
+
+## desktop/dialogs_scholarly.py
+
+- **Class** `FjmsBibliographyDialog` (Line 13) — FJMS bibliography dialog with structured table.
+    - Method `__init__` (Line 16)
+    - Method `_filter_rows` (Line 125)
+    - Method `_safe` (Line 162) — Return stripped string or empty string for None/placeholder values.
+    - Method `_on_row_selected` (Line 167)
+- **Class** `FjmsCatalogDialog` (Line 213) — Dialog showing FJMS catalog records with multi-team scholarly descriptions.
+    - Method `__init__` (Line 222)
+    - Method `_on_anchor_clicked` (Line 259) — Handle anchor clicks: toggle translation or open external links.
+    - Method `_build_html` (Line 272) — Build HTML table mirroring FIST Cataloging Data Details view.
+    - Method `_section_row` (Line 836) — Build a section header row.
+    - Method `_field_row` (Line 844) — Build a field row: label + value columns. RTL: values first, label last.
+    - Method `_field_category_row` (Line 862) — Build a row for a specific FieldCategory from catalog_fields.
+    - Method `_fmt_num` (Line 881) — Format a numeric value for size display, removing trailing .0.
+    - Method `_fmt_int` (Line 891) — Format a numeric value as integer (2.0 → '2').
+- **Class** `FjmsMeasurementsDialog` (Line 901) — Dialog showing physical measurements for a manuscript.
+    - Method `__init__` (Line 908)
+    - Method `_build_html` (Line 942) — Build HTML content for the measurements dialog.
+- **Class** `NliBibliographyDialog` (Line 1146) — NLI bibliography dialog with MARC 581 reference strings.
+    - Method `__init__` (Line 1149)
+    - Method `_filter_rows` (Line 1257)
+    - Method `_on_row_selected` (Line 1288)
+
+## desktop/viewers.py
+
+- **Function** `_make_scrollable_row` (Line 28) — Wrap a QHBoxLayout in a horizontal QScrollArea so it can shrink freely in a splitter.
+- **Function** `_generate_oxford_dynamic_url` (Line 45) — Generate dynamic Oxford image URL for a folio not in the database.
+- **Class** `ZoomableScrollArea` (Line 70) — A GraphicsView that supports hand-panning and wheel-zooming.
+    - Method `__init__` (Line 72)
+    - Method `_show_image_context_menu` (Line 113) — Show context menu with Copy/Save options for the displayed image.
+    - Method `_copy_image` (Line 126) — Copy current image (with rotation) to clipboard.
+    - Method `_save_image` (Line 132) — Save current image (with rotation) to file.
+    - Method `_get_rotated_pixmap` (Line 143) — Return the current pixmap with adjustments and rotation applied (for export).
+    - Method `set_image` (Line 155)
+    - Method `set_status_message` (Line 198)
+    - Method `_update_text_pos` (Line 206)
+    - Method `set_rotation` (Line 217) — Set absolute rotation (degrees clockwise) and update view.
+    - Method `rotate_view` (Line 222) — Add degrees to current rotation and update.
+    - Method `wheelEvent` (Line 227)
+    - Method `zoom_in` (Line 239)
+    - Method `zoom_out` (Line 243)
+    - Method `_apply_zoom` (Line 247)
+    - Method `resizeEvent` (Line 259)
+    - Method `_apply_fit_to_viewport` (Line 266)
+    - Method `set_adjustments` (Line 275) — Update image adjustment values and schedule a filter update.
+    - Method `_schedule_filter_update` (Line 283) — Debounce filter updates to 100ms for performance on large images.
+    - Method `_build_lut` (Line 295) — Build a 256-entry lookup table for brightness/contrast/gamma/invert.
+    - Method `_apply_display_filters` (Line 314) — Apply brightness/contrast/gamma/invert to display via LUT on pixels.
+    - Method `_apply_adjustments_to_pixmap` (Line 351) — Apply current adjustments to a pixmap and return the result. Used for export.
+    - Method `reset_adjustments` (Line 378) — Reset all image adjustments to defaults.
+- **Class** `FullscreenImageWindow` (Line 390) — Borderless fullscreen window for manuscript image viewing.
+    - Method `__init__` (Line 402)
+    - Method `_adjust_rotation` (Line 581)
+    - Method `_update_page_label` (Line 585)
+    - Method `set_image` (Line 594) — Update the displayed image (called when page changes).
+    - Method `keyPressEvent` (Line 607)
+    - Method `showFullScreen` (Line 618)
+- **Class** `ManuscriptViewerWidget` (Line 625) — Reusable widget for displaying manuscript images with navigation.
+    - Method `__init__` (Line 629)
+    - Method `init_ui` (Line 649)
+    - Method `_detect_external_provider` (Line 815)
+    - Method `set_image_by_fl_id` (Line 842)
+    - Method `load_images` (Line 859)
+    - Method `_on_source_changed` (Line 979)
+    - Method `_resolve_url` (Line 994)
+    - Method `_retire_thread` (Line 999) — Move a canceled QThread to the in-flight list so it stays alive until finished.
+    - Method `_cleanup_inflight` (Line 1015) — Remove a finished thread from the in-flight list and schedule deletion.
+    - Method `_preload` (Line 1023)
+    - Method `_wait_or_terminate` (Line 1036) — Wait for a QThread to finish; terminate as last resort to prevent destroyed-while-running.
+    - Method `stop_threads` (Line 1044) — Stop all running image loading threads. Call before destroying widget.
+    - Method `_on_thumbnail_ready` (Line 1062) — Handle thumbnail loaded signal - only display if still on same page and same load generation.
+    - Method `_load_thumbnail_async` (Line 1070) — Load thumbnail asynchronously for quick display while full image loads.
+    - Method `set_page` (Line 1100)
+    - Method `_execute_set_page` (Line 1120) — Actually load the image after debounce settles.
+    - Method `display_image` (Line 1167)
+    - Method `open_external` (Line 1180)
+    - Method `_open_ktiv_viewer` (Line 1188) — Open the NLI KTIV manuscript viewer at the current page.
+    - Method `_open_fullscreen` (Line 1201) — Open current image in fullscreen window.
+    - Method `_on_fullscreen_page_change` (Line 1211) — Handle page navigation from fullscreen window.
+    - Method `_sync_fullscreen_image` (Line 1218) — Push current image to the fullscreen window if open.
+    - Method `adjust_rotation` (Line 1225) — Adjust rotation via slider to keep controls in sync.
+
+## desktop/puzzle.py
+
+- **Class** `PuzzleFragmentItem` (Line 29) — A positioned fragment image on the puzzle canvas.
+    - Method `__init__` (Line 45)
+    - Method `_pixmap_rect` (Line 73) — The actual pixmap bounding rect (without handle margin).
+    - Method `_handle_points` (Line 77) — Return dict of handle_id -> QPointF center positions.
+    - Method `_hit_handle` (Line 88) — Return handle id under pos using wide border zones.
+    - Method `_apply_flip` (Line 133) — Apply horizontal/vertical flip via QTransform.
+    - Method `flip_horizontal` (Line 145)
+    - Method `flip_vertical` (Line 149)
+    - Method `_is_crop_mode` (Line 155) — Check if crop mode is active (set by PuzzleCanvasWindow).
+    - Method `mousePressEvent` (Line 159)
+    - Method `mouseMoveEvent` (Line 199)
+    - Method `mouseReleaseEvent` (Line 292)
+    - Method `hoverMoveEvent` (Line 335)
+    - Method `hoverLeaveEvent` (Line 351)
+    - Method `adjust_scale_from_wheel` (Line 357) — Resize fragment from a wheel delta (called by PuzzleCanvasView).
+    - Method `wheelEvent` (Line 365)
+    - Method `boundingRect` (Line 372) — Always include handle margin so Qt repaints handle areas on move.
+    - Method `paint` (Line 378)
+    - Method `update_pixmap` (Line 431) — Replace displayed image (e.g. folio nav or threshold change).
+    - Method `shape` (Line 458)
+- **Class** `PuzzleCanvasView` (Line 464) — A QGraphicsView hosting PuzzleFragmentItem instances.
+    - Method `__init__` (Line 470)
+    - Method `cycle_background` (Line 506) — Cycle to the next background mode.
+    - Method `set_checkerboard` (Line 512) — Legacy toggle -- switches between dark gray and checkerboard.
+    - Method `drawBackground` (Line 517)
+    - Method `mousePressEvent` (Line 553)
+    - Method `mouseMoveEvent` (Line 568)
+    - Method `mouseReleaseEvent` (Line 582)
+    - Method `wheelEvent` (Line 592)
+    - Method `get_fragment_items` (Line 615) — Return all PuzzleFragmentItem instances on the scene.
+    - Method `get_selected_fragments` (Line 619) — Return selected PuzzleFragmentItem instances.
+- **Class** `PuzzleExportThread` (Line 624) — Compose and save a puzzle PNG without blocking the desktop UI.
+    - Method `__init__` (Line 632)
+    - Method `run` (Line 639)
+- **Class** `PuzzlePublishThread` (Line 674) — Worker thread for publish/unpublish operations.
+    - Method `__init__` (Line 678)
+    - Method `run` (Line 685)
+- **Class** `PuzzleCanvasWindow` (Line 696) — Standalone puzzle workspace for assembling fragment images.
+    - Method `__init__` (Line 704)
+    - Method `add_fragment` (Line 1045) — Add a fragment to the puzzle canvas. Starts async image load.
+    - Method `_on_add_shelfmark` (Line 1115) — Handle shelfmark entry: resolve sys_id, then async fl_id resolution.
+    - Method `_show_add_from_list` (Line 1152) — Show picker to add fragments from a personal list.
+    - Method `_show_add_from_joins` (Line 1215) — Show connected fragments for the selected fragment and add them.
+    - Method `_on_meta_resolved` (Line 1305) — Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio.
+    - Method `_on_meta_failed` (Line 1319) — Callback from PuzzleMetaLoaderThread -- show error.
+    - Method `_on_image_loaded` (Line 1329) — Called when PuzzleImageLoaderThread finishes -- create or update item.
+    - Method `_fit_all_fragments` (Line 1401) — Fit view to show all fragments with some padding.
+    - Method `_on_image_failed` (Line 1415) — Called when PuzzleImageLoaderThread fails.
+    - Method `_on_selection_changed` (Line 1439) — Update toolbar to reflect current selection.
+    - Method `_flip_selected_h` (Line 1480)
+    - Method `_flip_selected_v` (Line 1484)
+    - Method `_cycle_bg` (Line 1488) — Cycle to next background mode and show name in status bar.
+    - Method `_rotate_selected` (Line 1501) — Rotate selected fragments by given degrees.
+    - Method `_has_blue_mat` (Line 1509) — Check if a PuzzleFragment is likely from a library with blue conservation mat.
+    - Method `_flip_recto_verso` (Line 1523) — Flip selected fragment(s) to show recto/verso -- navigates to next/prev folio.
+    - Method `_flip_entire_puzzle` (Line 1576) — Flip ALL fragments -- shows the other side of the joined page.
+    - Method `_toggle_crop_mode` (Line 1656) — Enter/exit crop mode. In crop mode, drag edges of selected fragment to trim.
+    - Method `_crop_edge` (Line 1679) — Crop a specific edge from selected fragment.
+    - Method `_revert_crop` (Line 1712) — Revert selected fragments to original uncropped image.
+    - Method `_nudge_threshold` (Line 1735) — Increment/decrement threshold by delta, then apply.
+    - Method `_on_threshold_changed` (Line 1741) — Re-fetch images with new threshold for selected fragments.
+    - Method `_nudge_scale` (Line 1759) — Increment/decrement scale by delta percent.
+    - Method `_on_scale_changed` (Line 1764) — Update scale for selected fragments proportionally.
+    - Method `_navigate_folio` (Line 1795) — Navigate folio prev/next for selected fragments.
+    - Method `_change_z_order` (Line 1849) — Move selected fragment one layer up (+1) or down (-1).
+    - Method `_delete_selected` (Line 1859) — Remove selected fragments from the canvas.
+    - Method `_refresh_fragment_combo` (Line 1872) — Rebuild the fragment dropdown from current items.
+    - Method `_browse_selected_fragment` (Line 1883) — Open the selected fragment in the browse tab.
+    - Method `_on_fragment_combo_changed` (Line 1900) — Select the fragment chosen in the dropdown.
+    - Method `_on_canvas_context_menu` (Line 1912) — Show right-click context menu on fragment items.
+    - Method `_refresh_docs_list` (Line 1976) — Refresh the saved documents list in the side panel.
+    - Method `_on_doc_list_clicked` (Line 2010) — Load a document when clicked in the side panel.
+    - Method `_load_document` (Line 2027) — Load a PuzzleDocument onto the canvas, replacing current content.
+    - Method `_spawn_meta_loader` (Line 2083) — Spawn a PuzzleMetaLoaderThread to fetch folio lists for a sys_id.
+    - Method `_on_meta_ready_for_load` (Line 2091) — Handle meta_ready from folio list rebuild during document load.
+    - Method `_on_save_join` (Line 2097) — Save current puzzle as a join document (new or update).
+    - Method `_build_fragments_list` (Line 2169) — Build list of PuzzleFragment from current canvas items.
+    - Method `_on_new_puzzle` (Line 2192) — Clear canvas to a fresh scratch pad.
+    - Method `_clear_canvas` (Line 2213) — Remove all fragments from canvas.
+    - Method `_on_export_png` (Line 2229) — Export composite PNG in a background thread.
+    - Method `_cancel_export_thread` (Line 2297) — Request cancellation of the active export thread.
+    - Method `_on_export_progress` (Line 2304) — Update the desktop export progress dialog.
+    - Method `_clear_export_ui` (Line 2313) — Close and release the active export UI objects.
+    - Method `_on_export_finished` (Line 2325) — Handle successful export completion.
+    - Method `_on_export_cancelled` (Line 2330) — Handle user-cancelled export.
+    - Method `_on_export_error` (Line 2335) — Handle export failure.
+    - Method `_on_publish` (Line 2342) — Toggle publish/unpublish for current puzzle join.
+    - Method `_run_publish_worker` (Line 2378) — Run publish/unpublish on a worker thread to avoid freezing UI.
+    - Method `_on_publish_finished` (Line 2421) — Handle publish/unpublish completion on main thread.
+    - Method `_check_publish_state` (Line 2448) — Check if current doc is published and update button state.
+    - Method `_on_doc_context_menu` (Line 2464) — Show context menu on right-click in document list.
+    - Method `_delete_document` (Line 2479) — Delete a saved join document with confirmation.
+    - Method `_rename_document` (Line 2508) — Rename a saved join document.
+    - Method `_on_title_changed` (Line 2530) — Handle title edit finished -- auto-save if editing a saved document.
+    - Method `_on_notes_changed` (Line 2536) — Handle notes text changed -- auto-save if editing a saved document.
+    - Method `_on_scene_changed` (Line 2542) — Handle scene.changed signal -- debounce and trigger auto-save for saved documents.
+    - Method `_schedule_auto_save` (Line 2547) — Schedule a debounced auto-save (1.5s).
+    - Method `_auto_save` (Line 2554) — Perform auto-save for the current document.
+    - Method `_update_fragments_label` (Line 2583) — Update the fragments read-only label in the details panel.
+    - Method `keyPressEvent` (Line 2595) — Keyboard shortcuts for puzzle canvas.
+    - Method `closeEvent` (Line 2660) — Wait for active loader threads before closing.
+
+## desktop/vs_cache.py
+
+- **Class** `DesktopVSCache` (Line 11) — Local SQLite cache for visual similarity suggestions fetched from server.
+    - Method `__init__` (Line 15)
+    - Method `get_server_version` (Line 38)
+    - Method `set_server_version` (Line 42)
+    - Method `check_and_update_version` (Line 50) — Check server version and invalidate cache if stale. Called on app startup.
+    - Method `get_cached` (Line 63)
+    - Method `store` (Line 74)
+    - Method `has_cached` (Line 90)
+    - Method `get_cached_partners` (Line 93)
+- **Class** `VSFetchThread` (Line 107) — Fetch visual similarity suggestions from server for a single manuscript.
+    - Method `__init__` (Line 112)
+    - Method `run` (Line 117)
+- **Class** `VSDownloadThread` (Line 128) — Download full visual_similarity.db with checksum, disk-space, and corruption checks.
+    - Method `__init__` (Line 134)
+    - Method `run` (Line 139)
+
+## web/pages/search_state.py
+
+- **Class** `SearchUIState` (Line 27)
+    - Method `__init__` (Line 28)
+- **Class** `AdvancedViewState` (Line 129) — State holder for the Advanced View dialog to enable in-place updates.
+    - Method `__init__` (Line 131)
+- **Class** `SearchPageRefs` (Line 175) — UI element references and callbacks needed by extracted search_results functions.
+- **Function** `restore_search_snapshot` (Line 241) — Hydrate page-scoped state from app.storage.user snapshot.
+- **Function** `persist_search_snapshot` (Line 293) — Serialize restorable fields of SearchUIState to app.storage.user.
+- **Function** `clear_search_snapshot` (Line 333) — Wipe all search snapshot keys from app.storage.user.
+- **Function** `clear_search_filters` (Line 397) — Reset only pre-search filter storage keys (Advanced 'Clear All' filters).
+- **Function** `get_search_history` (Line 430) — Get search history from storage.
+- **Function** `add_to_search_history` (Line 435) — Add or update a search history entry. Deduplicates by query+mode.
+- **Function** `delete_search_history_entry` (Line 469) — Delete a specific history entry by index.
+- **Function** `clear_search_history` (Line 477) — Clear all search history.
+- **Function** `domain_display_name` (Line 486) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
+
+## web/pages/search_results.py
+
+- **Function** `copy_result_text` (Line 47) — Copy text to clipboard.
+- **Function** `show_add_to_list_dialog` (Line 61)
+- **Function** `toggle_expansion` (Line 86) — Toggle inline accordion expansion for a result card.
+- **Function** `render_results` (Line 115)
+- **Function** `create_result_card` (Line 345)
+- **Function** `open_advanced_dialog` (Line 752) — Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
+
+## web/pages/browse_state.py
+
+- **Class** `BrowseState` (Line 23) — Holds the state for the browse page.
+    - Method `__init__` (Line 26)
+- **Function** `restore_browse_snapshot` (Line 95) — Hydrate browse snapshot fields; return raw (position, reading_desk) dicts.
+- **Function** `persist_browse_snapshot` (Line 154) — Serialize browse position and reading desk state to app.storage.user.
+- **Function** `clear_browse_snapshot` (Line 196) — Wipe browse snapshot keys.
+
+## web/pages/browse_enrichment.py
+
+- **Class** `BrowsePageRefs` (Line 33) — UI element references and callbacks needed by extracted browse_enrichment functions.
+- **Function** `load_enrichment` (Line 66) — Phase B: Load PGP + FJMS enrichment data in background.
+- **Function** `update_enrichment_sections` (Line 404) — Update enrichment placeholder containers after Phase B completes.
+- **Function** `populate_bib_catalog_buttons` (Line 464) — Populate bibliography and catalog buttons in the page navigation pane.
+
+## web/search_bootstrap.py
+
+- **Function** `resolve_search_bootstrap` (Line 22) — Resolve whether persisted search UI state should be reused for this request.
