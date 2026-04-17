@@ -439,7 +439,6 @@ def create_filter_handlers(state, storage_prefix, filter_refs, refresh_author_fn
     Returns:
         Dict of handler functions keyed by event name.
     """
-    import asyncio
     pfx = storage_prefix
 
     async def on_domain_change(e=None):

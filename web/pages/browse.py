@@ -13,7 +13,7 @@ Features:
 import logging
 
 from nicegui import ui, app, run
-from typing import Optional, List, Dict, Any
+from typing import Optional
 import asyncio
 import re
 import html as html_module
@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 from web.services import (
     get_service,
-    BrowsePage,
-    DocumentPage,
     get_oxford_direct_image_url,
     is_oxford_manuscript,
 )
@@ -33,11 +31,9 @@ from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
-from web.document_service import get_document_for_fragment, get_section_for_page, get_all_sources_for_fragment
 from web.components.joins_panel import fetch_connected_fragments
 from web.pages.browse_state import (
-    BrowseState, _crossref_cache,
-    persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
+    BrowseState, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
 )
 from web.browse_bootstrap import resolve_browse_bootstrap
 from web.pages.browse_enrichment import (
