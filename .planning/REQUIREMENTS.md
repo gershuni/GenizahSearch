@@ -23,7 +23,7 @@ Current pytest baseline (1067 passed, 8 skipped, 1 warning on 2026-04-14) must r
 
 - [ ] **WEBM-01**: `web/pages/search.py` split into search state, UI, and results modules
 - [ ] **WEBM-02**: `web/pages/browse.py` split into browse state, UI, and enrichment modules
-- [ ] **WEBM-03**: search and browse reduce reliance on `app.storage.user` for live page state and reduce detached `asyncio.ensure_future` flows by using page-scoped state / handlers where practical
+- [x] **WEBM-03**: search and browse reduce reliance on `app.storage.user` for live page state and reduce detached `asyncio.ensure_future` flows by using page-scoped state / handlers where practical
 
 ### Non-Regression
 
