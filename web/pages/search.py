@@ -26,7 +26,7 @@ from web.pages.search_state import (
     get_search_history, add_to_search_history,
     delete_search_history_entry, clear_search_history,
     domain_display_name,
-    persist_search_snapshot, clear_search_snapshot,
+    persist_search_snapshot, clear_search_snapshot, clear_search_filters,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -816,8 +816,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             search_state.filter_text_density_min = None
                             search_state.filter_text_density_max = None
                             search_state.filter_measurement_material = []
-                            # Reset filter storage to clean defaults (Phase 74: via helper)
-                            clear_search_snapshot()
+                            # Reset filter-only storage keys (Phase 74: narrower helper).
+                            # clear_search_snapshot() was too broad here - it wiped
+                            # live search_results / exclusions / refinement chain
+                            # leaving storage divergent from the visible page
+                            # (Codex 74-CODEX-REVIEW2 #3).
+                            clear_search_filters()
                             _update_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',

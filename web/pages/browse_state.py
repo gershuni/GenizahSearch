@@ -120,7 +120,16 @@ def restore_browse_snapshot(state: 'BrowseState') -> tuple:
     True per-tab isolation is deferred (Codex W3 - future phase).
     """
     stored_version = app.storage.user.get('browse_snapshot_schema_version', 0)
-    if stored_version != _BROWSE_SNAPSHOT_VERSION:
+    if stored_version == 0:
+        # Pre-Phase-74 snapshots have no version stamp. Adopt the legacy payload
+        # once by stamping to the current version; otherwise returning users
+        # would have their reading_desk_state / browse_position silently wiped
+        # on the first post-upgrade load (Codex review 74-CODEX-REVIEW2.md #1).
+        try:
+            app.storage.user['browse_snapshot_schema_version'] = _BROWSE_SNAPSHOT_VERSION
+        except Exception:
+            pass
+    elif stored_version != _BROWSE_SNAPSHOT_VERSION:
         clear_browse_snapshot()
         return (None, None)
 
@@ -184,9 +193,21 @@ def persist_browse_snapshot(state: 'BrowseState', page=None) -> None:
         logger.error(f"[BrowseSnapshot] Error persisting state: {e}")
 
 
-def clear_browse_snapshot() -> None:
-    """Wipe browse_position and reading_desk_state keys."""
-    for key in ('browse_position', 'reading_desk_state', 'browse_snapshot_schema_version'):
+def clear_browse_snapshot(keep_position: bool = False) -> None:
+    """Wipe browse snapshot keys.
+
+    Args:
+        keep_position: When True, preserve 'browse_position'. Intended for
+            sites that only want to drop the reading desk (exit joined view,
+            stale-desk clear on explicit ?sys_id= navigation). Default False
+            preserves pre-refactor behavior for stale-version resets, which
+            wipe everything including the stamp so a fresh session starts
+            clean (Codex review 74-CODEX-REVIEW2.md #2).
+    """
+    keys = ['reading_desk_state']
+    if not keep_position:
+        keys.extend(('browse_position', 'browse_snapshot_schema_version'))
+    for key in keys:
         try:
             app.storage.user.pop(key, None)
         except Exception:

@@ -253,7 +253,16 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
     True per-tab isolation is deferred (Codex W3).
     """
     stored_version = app.storage.user.get('search_snapshot_schema_version', 0)
-    if stored_version != _SEARCH_SNAPSHOT_VERSION:
+    if stored_version == 0:
+        # Pre-Phase-74 snapshots have no version stamp. Adopt the legacy payload
+        # once by stamping to current; otherwise returning users would have
+        # their search_results / exclusions / refinement chain silently wiped
+        # on the first post-upgrade load (Codex review 74-CODEX-REVIEW2.md #1).
+        try:
+            app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
+        except Exception:
+            pass
+    elif stored_version != _SEARCH_SNAPSHOT_VERSION:
         clear_search_snapshot()
         return
 
@@ -381,6 +390,35 @@ def clear_search_snapshot() -> None:
                 app.storage.user[key] = []  # list, matches filter_panel.py:271
             else:
                 app.storage.user[key] = None  # numeric min/max
+        except Exception:
+            pass
+
+
+def clear_search_filters() -> None:
+    """Reset only pre-search filter storage keys (Advanced 'Clear All' filters).
+
+    Narrower than clear_search_snapshot: preserves live search state
+    (search_results, domain_exclusions, search_printed_filter, refinement chain,
+    exclusion sources). Intended for the Advanced Filters 'Clear All' button,
+    which should not wipe results / exclusions already on screen
+    (Codex review 74-CODEX-REVIEW2.md #3).
+    """
+    for key in _SEARCH_FILTER_KEYS:
+        try:
+            if key == 'search_filter_include_mode':
+                app.storage.user[key] = True
+            elif key in ('search_filter_date_from', 'search_filter_date_to'):
+                app.storage.user[key] = None
+            else:
+                app.storage.user[key] = []
+        except Exception:
+            pass
+    for key in _SEARCH_FILTER_MEASUREMENT_KEYS:
+        try:
+            if key == 'search_filter_measurement_material':
+                app.storage.user[key] = []
+            else:
+                app.storage.user[key] = None
         except Exception:
             pass
 

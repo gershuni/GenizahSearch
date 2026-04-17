@@ -972,9 +972,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.reading_desk_entries = []
         state.reading_desk_selected_sources = {}
         # Clear persisted reading desk state (Phase 74: via helper).
-        # NOTE: clear_browse_snapshot also drops browse_position, which is the
-        # intended behavior when exiting joined view (state reset).
-        clear_browse_snapshot()
+        # keep_position=True preserves the user's last single-page position;
+        # pre-refactor this path only cleared the desk (Codex 74-CODEX-REVIEW2 #2).
+        clear_browse_snapshot(keep_position=True)
         update_content()
 
     def add_to_reading_desk():
@@ -4468,7 +4468,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         elif action == 'sys_id':
             if bootstrap['clear_desk']:
                 # Stale desk - use snapshot helper, not direct pop (Codex HIGH #9).
-                clear_browse_snapshot()
+                # keep_position=True: pre-refactor this path only dropped reading_desk_state
+                # (Codex 74-CODEX-REVIEW2 #2).
+                clear_browse_snapshot(keep_position=True)
             state.is_loading = True
             update_content()
             # Cat-2: deferred init - container must mount before async load.
