@@ -1,69 +1,75 @@
 ---
 plan: 75-02
 phase: 75-non-regression-verification
-status: blocked
-outcome: partial-blocker-path
+status: complete
+outcome: passed
 date: 2026-04-17
 requirements: [NREG-01]
 ---
 
-# Plan 75-02 Summary — Walkthrough (HALTED on surface 1)
+# Plan 75-02 Summary — Walkthrough COMPLETE (all 5 tests green)
 
-## Self-Check: PARTIAL — BLOCKER PATH (per D-15, D-17, D-18)
+## Self-check: COMPLETE
 
-Plan executed Task 1 for surface 1 only, then halted per D-18 because a blocker regression was recorded. Surfaces 2–4 not executed. Task 2 (pytest baseline) not executed per D-18 guard ("pytest runs LAST, only after all manual surfaces pass").
+Plan 75-02 initially halted on surface 1 (back-navigation blocker, recorded in the earlier version of this summary). Plan 75-03 closed the gap (commits 4a04aab3 + 8f9c5ef3 + f40b8eab + 1d722198), surface 1 re-signed green, and this plan resumed at surface 2. All 4 manual surfaces then signed off, pytest ran LAST per D-18, all tests passed.
 
-## What happened
+## Per-surface sign-offs
 
-Ran inline (not via subagent) per user preference — driving the user through the `75-UAT.md` checklist in the live conversation. Surface 1 (Web Search Responsiveness) walkthrough:
+| Surface | Status | Notes |
+|---|---|---|
+| 1 — Web Search Responsiveness | passed 2026-04-17 | Initial run failed on item (d) back-nav; 75-03 fixed; user re-signed green. Item (e) pre-existing Export bug logged to OPEN_ISSUES.md P2. |
+| 2 — Web Browse Responsiveness | passed 2026-04-17 | Items (a)/(b) re-run against substitute sys_id 990001273900205171 (HUC MS. 2065) because original Oxford arch. O.d.8/1 had no in-app data; Fixed Test Manuscripts table updated. Item (f) JTS DPUL image-source-switch pre-existing bug logged to OPEN_ISSUES.md P2. |
+| 3 — Desktop Search Responsiveness | passed 2026-04-17 | Functional baseline + D-09 composition timer/ETA green. Two pre-existing perf issues logged to OPEN_ISSUES.md P2 (desktop search ~30s time-to-first-results; composition UI freeze ~15s). User confirmed both NOT v7.9 regressions. |
+| 4 — Desktop Browse Responsiveness | passed 2026-04-17 | Functional baseline + D-06 responsiveness overlay both green. No issues. |
+| 5 — pytest baseline | passed 2026-04-17 | 1089 passed, 8 skipped, 0 failed, 0 errors in 37.9s. +18 vs 75-03 expectation (1071) is env-explained: local full suite vs Phase 74 CI's `--ignore=tests/e2e` (1085) + 4 new 75-03 tests = 1089. User accepted. |
 
-- Items (a) cold-load `/`, (b) Hebrew query `"שלום"` → results, (c) accordion expand, (d) Browse navigation from result, (f) Paginate forward twice → all passed.
-- Item (d) has a new regression in the **Back** direction: hitting browser Back from `/browse` to `/` triggers a fresh search from scratch instead of restoring the saved result state. User confirmed against live website (`genizahsearch.com`): live restores state on Back; current working tree does not.
-- Item (e) Export: with one row checkbox ticked, Export still emits the full list instead of only the checked row. User classified this as **pre-existing** (confirmed on live website), so it is NOT a v7.9 decomposition regression.
+## D-02 worktree fallback
 
-User classified the Back-navigation regression as **Blocker — fix now** (D-15 blocker path).
+Not invoked at any point. Surface 1 blocker was confirmed against the live website directly; no A/B comparison needed at subsequent surfaces.
 
-## Artifacts modified
+## Pytest baseline counts
 
-- `.planning/phases/75-non-regression-verification/75-UAT.md`:
-  - Frontmatter `status: in-progress` → `status: failed`
-  - `## Current Test` → `[HALTED on surface 1 — BLOCKER regression found; gap plan required before walkthrough resumes]`
-  - Test 1 `result: pending` → `result: failed (BLOCKER — back-navigation regression ...)` with detailed note on which items passed and which are pre-existing
-  - `## Summary` updated: `total: 5, passed: 0, issues: 1, pending: 4, skipped: 0, blocked: 0`
-  - `## Gaps` populated with a structured bullet citing suspected Phase 74 `restore_search_snapshot` / `persist_search_snapshot` origin
-  - New `## Notes on surface 1 items that passed` subsection itemizing (a)–(f) passes vs regressions vs pre-existing
-- `docs/OPEN_ISSUES.md`:
-  - Appended pre-existing Export-ignores-checkbox bug as a new P2 row (NOT under any v7.9 decomposition heading — pre-existing is explicitly out of scope for Phase 75)
-  - Updated "Last Updated" timestamp to 2026-04-17
-  - Bumped P2 Medium Bugs Open count 13 → 14, Total 72 → 73, grand total Open 24 → 25, grand Total 126 → 127
+- **Actual:** `1089 passed, 8 skipped` (0 failed, 0 errors, 37.91s)
+- **Expected per 75-03:** `1071 passed, 8 skipped`
+- **Expected per 75-02 original:** `1067 passed, 8 skipped`
+- **Reconciliation:** Phase 74 CI ran with `--ignore=tests/e2e` (→ 1085 passed). Local full-suite includes e2e tests. 1085 + 4 new tests from 75-03 (back-nav restore, fresh-query-different-saved, empty-snapshot edge, back-nav-restores-saved-mode-Title) = 1089. The 1067/1071 baseline numbers encoded in earlier plan artifacts were themselves stale CI-basis estimates; the actual local full-suite result is 1089 with zero failures and no new skips, which is healthy and non-regressive.
 
-## Artifacts NOT produced (per D-18 guard)
+## Pre-existing issues logged to OPEN_ISSUES.md (P2)
 
-- `75-pytest-baseline.txt` — NOT generated. Task 2 pytest capture was gated on all 4 surfaces passing (D-18). Will run after gap plan fixes the blocker and surface 1 re-signs.
-- `docs/OPEN_ISSUES.md` "v7.9 decomposition — cosmetic perf observations" section — not created. The single regression found was Blocker, not Minor, so it does not belong in that section.
+All out of Phase 75 scope — phase only covers regressions introduced by Phases 67–74. Logged for future triage:
 
-## D-02 fallback
+1. **Web search Export ignores row checkboxes** — surface 1 item (e). `web/pages/search.py` Export handler emits full list regardless of checkbox selection.
+2. **JTS browse page missing Princeton DPUL source switch** — surface 2 item (f). `web/pages/browse.py` — no source-switch control visible; credit reads NLI for a JTS manuscript that should default to DPUL per v7.2.3 design intent.
+3. **Desktop search time-to-first-results ~30s** — surface 3 note. `genizah_app.py`, `gui_threads.py::SearchThread`.
+4. **Desktop composition UI freezes ~15s** — surface 3 note. `genizah_app.py` composition path, `gui_threads.py::SearchThread` composition branch.
 
-Not invoked. User compared against live website directly (no local baseline worktree needed).
+OPEN_ISSUES.md P2 count moved from 14 to 17; Total from 127 to 130 across the walkthrough.
+
+## Artifacts produced
+
+- `.planning/phases/75-non-regression-verification/75-UAT.md` — frontmatter `status: passed`; all 5 tests `result: passed`; Summary `passed: 5, pending: 0`; Current Test `[none — all items passed]`. Fixed Test Manuscripts table records the HUC 2065 substitution for surface 2 items (a)/(b).
+- `.planning/phases/75-non-regression-verification/75-pytest-baseline.txt` — full pytest output, final line `1089 passed, 8 skipped in 37.91s`. 60 lines total.
+- `docs/OPEN_ISSUES.md` — 4 new P2 rows added (2026-04-17 surfacing source noted in each); summary counts updated.
+
+## Artifacts NOT produced (per phase separation)
+
+- `75-VERIFICATION.md` — verifier agent's job, invoked separately by the orchestrator via `/gsd-verify-phase 75`. This plan stops at `75-UAT.md` reaching `status: passed`.
+
+## Minor perceptual notes (D-15 minor path)
+
+No "v7.9 decomposition — cosmetic perf observations" section was created in OPEN_ISSUES.md. The two desktop perf issues flagged on surface 3 are PRE-EXISTING (user explicitly confirmed NOT v7.9 regressions), so they belong in the regular P2 section, not a v7.9-decomp subsection. The v7.9 decomposition did NOT introduce any new perceptible slowdowns in the 4 surfaces.
+
+## Commits produced across 75-02's execution arc
+
+- (earlier halt) commits written before 75-02's initial 2026-04-17 halt for the blocker-path UAT state.
+- 4a04aab3 — docs(75-03): root-cause file
+- 8f9c5ef3 — fix(75-03): bootstrap is_back_navigation branch + 9 tests + storage-write hole close
+- f40b8eab — fix(75-03): elif cascade reorder (Gemini Option B) + UAT flip
+- 1d722198 — docs(75-03): 75-03 summary
+- 64afdf6b — docs(75-02): surface 2 passed + log pre-existing JTS DPUL bug + HUC 2065 substitute
+- 3b9f4ece — docs(75-02): surface 3 passed + log 2 pre-existing desktop perf issues
+- (this commit) — docs(75-02): finalize — surface 4 passed + pytest 1089 passed + UAT status: passed
 
 ## Next step
 
-Per D-15 blocker path:
-
-```
-/gsd-plan-phase 75 --gaps
-```
-
-The gap plan should target the Phase 74 snapshot-restore logic in `web/pages/search.py` / `web/pages/search_state.py` / `web/search_bootstrap.py`. After the gap plan commits a fix, re-run the walkthrough from surface 1 (the other surfaces 2–4 are not yet verified), then run pytest baseline as Task 2.
-
-## Why this is the right outcome
-
-D-15 explicitly calls out exactly this scenario: "surface is demonstrably slower in a way that impacts real workflow" → user explicitly labels it "slow enough to fix now" → halt phase, run `/gsd-plan-phase 75 --gaps`. Phase 75 succeeded at its actual purpose (**catching a real decomposition regression**). The refactor did introduce a regression; Phase 75 caught it before merge.
-
-## Notes on Phase 74 traceability
-
-Phase 74's `74-CONTEXT.md` D-20 added E2E coverage for URL-bar updates on browse navigation (which the walkthrough confirmed is still working in the forward direction — URL bar does update on Prev/Next). But the `restore_search_snapshot` / `persist_search_snapshot` helpers added in Phase 74 for search-side state appear to have either a scope mismatch (wrong key / wrong route guard) or are not being invoked on Back navigation into `/`. The gap plan's researcher/planner should examine `web/search_bootstrap.py:bootstrap_search_page()` (or equivalent) and `web/pages/search_state.py:restore_search_snapshot()` first.
-
-## Commits produced by this plan
-
-None yet — this summary is written before commit. The orchestrator will commit `75-UAT.md`, `docs/OPEN_ISSUES.md`, and this `75-02-SUMMARY.md` atomically.
+Orchestrator invokes `/gsd-verify-phase 75` to produce `75-VERIFICATION.md`. With UAT `status: passed`, all 5 tests green, and `75-pytest-baseline.txt` captured, the phase gate is satisfied per D-19.

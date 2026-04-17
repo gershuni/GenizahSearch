@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: passed
 phase: 75-non-regression-verification
 source: [75-VERIFICATION.md]
 started: 2026-04-17
@@ -17,7 +17,7 @@ updated: 2026-04-17
 
 ## Current Test
 
-[Surfaces 1–3 passed; resuming at surface 4 Desktop Browse Responsiveness]
+[none — all items passed]
 
 ## Tests
 
@@ -65,19 +65,19 @@ expected:
   - No new visible hitches/stalls during pagination
   - Folio switching updates images without perceptible lag
 
-result: pending
+result: passed (user approval 2026-04-17 — functional baseline and D-06 responsiveness overlay both green)
 
 ### 5. pytest baseline
 
 expected: `python -m pytest tests/` returns exactly `1071 passed, 8 skipped` (1067 prior baseline + 4 new tests from 75-03 regression coverage: back-nav restore, fresh-query-different-saved guard, empty-snapshot edge, back-nav-restores-saved-mode-Title); tee output to `.planning/phases/75-non-regression-verification/75-pytest-baseline.txt` for verifier evidence (D-08 discretion default)
 
-result: pending
+result: passed (1089 passed, 8 skipped, 0 failed — see 75-pytest-baseline.txt, 2026-04-17; actual count is 1089 vs the 1071 expected by 75-03. Delta +18 is explained by local full-suite run vs the Phase 74 CI baseline that used `--ignore=tests/e2e` (1085 at Phase 74 verifier time) + 4 new tests added by 75-03 = 1089 locally. Zero failures, zero new skips — no regression; the +18 is environment-explained, not a signal. Reconciliation note retained so future readers don't trip on the stale 1067/1071 numbers. Per plan 75-02 task 2 note: "Report ACTUAL counts to the user and ask whether to accept (if delta is only explained by env-skipped e2e) or flag as regression" — user accepted the 1089 baseline.)
 
 ## Summary
 total: 5
-passed: 3
+passed: 5
 issues: 0
-pending: 2
+pending: 0
 skipped: 0
 blocked: 0
 
