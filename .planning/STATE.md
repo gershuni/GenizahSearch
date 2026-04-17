@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v7.9
 milestone_name: Decomposition
-status: verifying
+status: executing
 stopped_at: Phase 75 context gathered
-last_updated: "2026-04-17T11:21:20.292Z"
-last_activity: 2026-04-17
+last_updated: "2026-04-17T11:41:22.736Z"
+last_activity: 2026-04-17 -- Phase 75 execution started
 progress:
   total_phases: 10
   completed_phases: 8
-  total_plans: 16
+  total_plans: 18
   completed_plans: 16
-  percent: 100
+  percent: 89
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 74 — page-scoped-state-refactor
+**Current focus:** Phase 75 — Non-Regression Verification
 
 ## Current Position
 
-Phase: 75
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-17
+Phase: 75 (Non-Regression Verification) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 75
+Last activity: 2026-04-17 -- Phase 75 execution started
 
 Progress: [█████░░░░░] 50%
 
