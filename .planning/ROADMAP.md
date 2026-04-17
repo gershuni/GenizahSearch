@@ -352,6 +352,10 @@ Plans:
   5. `pytest tests/` baseline green (1067 passed, 8 skipped)
 **Phase gate**: pytest green, qualitative sign-off from user
 **Verification method**: Manual checklist only -- no benchmark suite. Executor walks through the web and desktop surfaces listed in criteria 1-4, then the user signs off on each surface (explicit yes/no per surface). No quantitative thresholds; the bar is "no obvious slowdown vs pre-refactor."
+**Plans**: 2 plans
+Plans:
+- [ ] 75-01-PLAN.md -- Pre-populate 75-UAT.md with YAML frontmatter, locked test sys_ids, and 5 test sections (autonomous)
+- [ ] 75-02-PLAN.md -- Walk user through 4 user-facing surfaces, record per-surface sign-off, run pytest baseline last, finalize UAT status (non-autonomous)
 
 ### Phase 76: Documentation Close
 **Goal**: Project documentation accurately reflects the decomposed codebase
@@ -379,9 +383,9 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 72. Search Page Split | 2/2 | Complete    | 2026-04-16 |
 | 73. Browse Page Split | 1/2 | In progress | - |
 | 74. Page-Scoped State Refactor | 3/3 | Complete    | 2026-04-17 |
-| 75. Non-Regression Verification | 0/TBD | Not started | - |
+| 75. Non-Regression Verification | 0/2  | Planned     | - |
 | 76. Documentation Close | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-16 -- Phase 73 planned (2 plans in 2 waves)*
+*Last updated: 2026-04-17 -- Phase 75 planned (2 plans in 2 waves)*
