@@ -8,7 +8,26 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.7.0?
+## What's New in Version 7.7.2?
+
+### v7.7.2: PageSpeed Quick Wins (A11y + Perf)
+
+Targeted fixes against Lighthouse findings on the homepage — accessibility 85 → 96, performance 90 → 98.
+
+- **Valid `html lang`** — fixed `<html lang="undefined">` by passing the full Quasar lang pack, plus a JS guard and NiceGUI template patch at startup
+- **Aria-labels** — descriptive labels on 10 icon-only buttons (help, dismiss, theme, citation copy/close, hero search)
+- **Color contrast (WCAG AA)** — light-theme `--text-muted` and global link color now meet AA; dark-theme overrides for muted text and Quasar primary/secondary/accent tokens
+- **`font-display: swap`** — Starlette middleware injects it into NiceGUI's `fonts.css`, preventing ~1200ms of invisible text on slow connections
+- **Conditional IIIF preconnect** — only emitted on routes that actually load manuscript images (`/search`, `/browse`, `/puzzle`)
+
+### v7.7.1: SEO Round 2
+
+Bilingual meta tags so the site can rank for Hebrew queries like "חיפוש בגניזה הקהירית" while preserving English brand identity.
+
+- **Bilingual titles/descriptions** — English brand + Hebrew search phrase + Hebrew brand across default and per-page metadata
+- **Homepage h1** — now contains target Hebrew search phrases in visible content for crawlers
+- **Structured data** — Organization + BreadcrumbList JSON-LD; legacy SearchAction markup retained (Google deprecated Sitelinks Search Box in Nov 2024)
+- **Performance** — PostHog deferred past first paint via `requestIdleCallback`; dns-prefetch for analytics CDNs
 
 ### v7.7.0: Volume-Aware Browse
 
@@ -113,7 +132,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V6.1.1_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.7.2_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

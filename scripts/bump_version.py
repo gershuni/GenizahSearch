@@ -51,6 +51,7 @@ TARGETS = [
         "README.md",
         [
             (r"^# Genizah Search Pro [\d.]+", "# Genizah Search Pro {version}"),
+            (r"GenizahSearchPro_V[\d.]+_Setup\.exe", "GenizahSearchPro_V{version}_Setup.exe"),
         ],
     ),
 ]

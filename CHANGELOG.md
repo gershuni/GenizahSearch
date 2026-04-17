@@ -4,6 +4,34 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+Structural refactor work currently on `master-main` but not yet cut as a user-facing release. The internal GSD milestones `v7.8` (Structural Foundation, complete 2026-04-15) and `v7.9` (Decomposition, complete 2026-04-17) are repo-state tags, not version bumps — `APP_VERSION` is still `7.7.2`. These changes will ship as the next `APP_VERSION` release.
+
+### Internal: v7.9 Decomposition (milestone complete 2026-04-17)
+10 phases, 23 plans. Zero user-visible behavior changes.
+- **Desktop split**: `ResultDialog`, filter/scholarly dialogs, image viewers (`ManuscriptViewerWidget`, `FullscreenImageWindow`), puzzle canvas, VS cache, and shared widgets extracted into a new `desktop/` package — `genizah_app.py` slimmer (though remaining core still ~22.5K lines per external review)
+- **Web split**: `web/pages/search.py` decomposed into `search_state.py` + `search_results.py`; `web/pages/browse.py` decomposed into `browse_state.py` + `browse_enrichment.py`
+- **Page-scoped state refactor**: reduced `app.storage.user` sprawl and detached `asyncio.ensure_future` usage in search and browse pages
+- **Documentation**: `docs/CODE_INDEX.md` v7.9 section regenerated via new `scripts/gen_code_index_section.py` AST generator; `check_docs` green
+
+### Internal: v7.8 Structural Foundation (milestone complete 2026-04-15)
+4 phases, 9 plans, 64 commits, 173 files changed (+6,269/-828 lines). Zero user-visible behavior changes. 12/12 requirements satisfied.
+- **CI safety net**: GitHub Actions with Ubuntu + Windows matrix running `ruff` + `check_docs` + `pytest` (`.github/workflows/ci.yml`)
+- **Dependency pinning**: `requirements.txt` (14 direct) + `requirements-lock.txt` (115 transitive) for reproducible builds
+- **Supabase auth migration**: deprecated `gotrue` error surface replaced with `supabase_auth`; PKCE-only OAuth flow
+- **Silent-exception audit**: 205+ `except: pass` handlers reviewed across 76 first-party files
+- **Framework-patch isolation**: NiceGUI monkey-patches moved into `web/framework_patches.py` with version guards and logging
+- **Repo hygiene**: `.gitignore` 50 → 126 lines; untracked root files 67 → 1; CODE_INDEX / OPEN_ISSUES / DEVELOPER_GUIDE docs refreshed
+
+### Bug Fixes
+- **Back-navigation state loss**: browser Back from `/browse` to `/search` now restores the saved snapshot; regression introduced 2026-03-27 (commit `829cd7cf`) and fixed 2026-04-17 (commit `8f9c5ef3`). Caught during Phase 75 non-regression verification.
+
+### Build / Release Tooling
+- **`scripts/bump_version.py`**: added README installer-filename regex so `GenizahSearchPro_V<X.Y.Z>_Setup.exe` stays in sync on future bumps. Closes long-standing drift (filename had been stale since v6.1.1, eight releases).
+
+---
+
 ## [7.7.2] - PageSpeed Quick Wins (A11y + Perf) - 2026-04-13
 
 ### Accessibility
