@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: failed
 phase: 75-non-regression-verification
 source: [75-VERIFICATION.md]
 started: 2026-04-17
@@ -17,7 +17,7 @@ updated: 2026-04-17
 
 ## Current Test
 
-[none — not yet started]
+[HALTED on surface 1 — BLOCKER regression found; gap plan required before walkthrough resumes]
 
 ## Tests
 
@@ -31,7 +31,7 @@ expected:
 - (e) Click "Export" on one result → export action completes without UI block
 - (f) Paginate forward twice → next-page results appear without perceptible slowdown
 
-result: pending
+result: failed (BLOCKER — back-navigation regression: hitting browser Back from /browse to / re-runs the search from scratch instead of restoring saved state; items (a), (b), (c), (d), (f) passed; item (e) export-whole-list-when-one-checked is pre-existing and logged separately to docs/OPEN_ISSUES.md — not a v7.9 decomposition regression. User confirmed against live website: live restores state on Back; working tree does not.)
 
 ### 2. Web Browse Responsiveness
 
@@ -76,11 +76,20 @@ result: pending
 ## Summary
 total: 5
 passed: 0
-issues: 0
-pending: 5
+issues: 1
+pending: 4
 skipped: 0
 blocked: 0
 
 ## Gaps
 
-[none yet — appended by walkthrough plan (75-02) if any surface fails per D-15 triage]
+- **Surface 1 blocker — back-navigation state loss (decomposition regression)** — Observed 2026-04-17. Symptom: hitting browser Back from `/browse` to `/` causes the search page to re-run the query from scratch instead of restoring the saved result state (chips, scroll position, result set). Expected behavior (live website `genizahsearch.com`): Back restores the prior search state. User confirmed side-by-side against live. Suspected regression origin: Phase 74 page-scoped state refactor (`web/pages/search.py`, `web/pages/search_state.py`, `web/search_bootstrap.py`) — `restore_search_snapshot()` / `persist_search_snapshot()` logic introduced in Phase 74 (see `.planning/phases/74-page-scoped-state-refactor/74-CONTEXT.md` D-20 URL-bar E2E regression check and Phase 74 snapshot helpers). Likely root cause: either the snapshot key/scope changed, the snapshot is not being read on route entry, or the bootstrap path now always treats `/` as a fresh load. Next action: run `/gsd-plan-phase 75 --gaps` to generate a fix plan; re-verify surface 1 after fix; surfaces 2–4 and pytest still pending per D-18 (pytest runs LAST, only after all manual surfaces pass).
+
+## Notes on surface 1 items that passed
+
+- (a) cold-load `/`: passed
+- (b) Hebrew query `"שלום"` → results visible: passed
+- (c) result accordion expand: passed
+- (d) Browse navigation from result: passed (forward direction only — Back is the regression)
+- (e) Export with one checkbox ticked: **pre-existing bug** (exports whole list instead of the checked item) — NOT a v7.9 decomposition regression; logged to `docs/OPEN_ISSUES.md` §1 P2 for future triage, outside Phase 75 scope
+- (f) Paginate forward twice: passed
