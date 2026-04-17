@@ -208,9 +208,9 @@ Zero user-visible behavior changes.
 - [x] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py (completed 2026-04-16)
 - [x] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite (completed 2026-04-16)
 - [x] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules (completed 2026-04-16)
-- [ ] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules
+- [x] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules (completed 2026-04-16; housekeeping committed 2026-04-17)
 - [x] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects (completed 2026-04-17)
-- [ ] **Phase 75: Non-Regression Verification** - Manual qualitative verification of search/browse responsiveness in both apps
+- [x] **Phase 75: Non-Regression Verification** - Manual qualitative verification of search/browse responsiveness in both apps (completed 2026-04-17)
 - [ ] **Phase 76: Documentation Close** - Refresh CODE_INDEX.md, OPEN_ISSUES.md, and path references for all moved files
 
 ## Phase Details
@@ -355,7 +355,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 75-01-PLAN.md -- Pre-populate 75-UAT.md with YAML frontmatter, locked test sys_ids, and 5 test sections (autonomous)
-- [ ] 75-02-PLAN.md -- Walk user through 4 user-facing surfaces, record per-surface sign-off, run pytest baseline last, finalize UAT status (non-autonomous)
+- [x] 75-02-PLAN.md -- Walk user through 4 user-facing surfaces, record per-surface sign-off, run pytest baseline last, finalize UAT status (non-autonomous)
 
 ### Phase 76: Documentation Close
 **Goal**: Project documentation accurately reflects the decomposed codebase
@@ -383,7 +383,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 72. Search Page Split | 2/2 | Complete    | 2026-04-16 |
 | 73. Browse Page Split | 1/2 | In progress | - |
 | 74. Page-Scoped State Refactor | 3/3 | Complete    | 2026-04-17 |
-| 75. Non-Regression Verification | 1/2 | In Progress|  |
+| 75. Non-Regression Verification | 2/2 | Complete   | 2026-04-17 |
 | 76. Documentation Close | 0/TBD | Not started | - |
 
 ---
