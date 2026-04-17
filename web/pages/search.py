@@ -103,6 +103,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
         use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
 
+    # Count saved results to detect back-navigation from /browse: a non-zero
+    # count combined with URL `q` matching saved_query means the browser restored
+    # a URL this session stamped via history.replaceState at end of a successful
+    # search. Without this signal, Back would fire a fresh search and lose state.
+    _saved_results = app.storage.user.get('search_results', []) or []
+    try:
+        _saved_results_count = len(_saved_results)
+    except TypeError:
+        _saved_results_count = 0
+
     bootstrap_state = resolve_search_bootstrap(
         initial_query=initial_query,
         initial_tag=initial_tag,
@@ -111,6 +121,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         from_browse=from_browse,
         saved_mode=raw_saved_mode,
         saved_query=raw_saved_query,
+        saved_results_count=_saved_results_count,
         use_slider=use_slider,
     )
     saved_mode = bootstrap_state['mode']
@@ -4184,6 +4195,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             persist_search_snapshot(search_state)
         except Exception:
             pass  # Browser storage operation failed; preference not persisted
+
+        # 75-03 Edit 2b: write search_query at search-execute time so back-nav
+        # detection (saved_query == URL q) works reliably. Without this, the
+        # blur-only write at search.py:~401 misses Enter-to-search flows, and the
+        # is_back_navigation guard in resolve_search_bootstrap silently fails.
+        # This mirrors the query that history.replaceState just stamped into the URL.
+        try:
+            app.storage.user['search_query'] = clean_query
+        except Exception:
+            pass  # Browser storage operation failed; back-nav guard will no-op
 
         # Search history -- D-15: Refined searches don't enter history
         if not search_state.refinement_chain:
