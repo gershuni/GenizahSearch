@@ -37,8 +37,9 @@ from web.document_service import get_document_for_fragment, get_section_for_page
 from web.components.joins_panel import fetch_connected_fragments
 from web.pages.browse_state import (
     BrowseState, _crossref_cache,
-    persist_browse_snapshot, clear_browse_snapshot,
+    persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
 )
+from web.browse_bootstrap import resolve_browse_bootstrap
 from web.pages.browse_enrichment import (
     BrowsePageRefs,
     load_enrichment as _load_enrichment_fn,
@@ -4443,73 +4444,71 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Main content container
         content_container = ui.column().classes('w-full')
 
-        # Load initial page if sys_id or fl_id provided (async via ensure_future)
-        if initial_fl_id_value:
-            # Load by FL ID — delegate to async load_page with fl_id parameter
+        # Phase 74 (D-17): precedence logic extracted to resolve_browse_bootstrap.
+        # asyncio.ensure_future calls remain here because create_browse_page() still
+        # requires deferred init - the UI container must mount (update_content spinner)
+        # before load_page() begins async work. Pure scheduling stays with this caller;
+        # precedence logic is unit-tested separately.
+        saved_position, saved_reading_desk = restore_browse_snapshot(state)
+        bootstrap = resolve_browse_bootstrap(
+            initial_fl_id=initial_fl_id_value,
+            initial_sys_id=initial_sys_id,
+            initial_page=initial_page or 1,        # normalize Optional[int] -> int (Codex #8)
+            pending_shelfmark=_pending_shelfmark,
+            saved_reading_desk=saved_reading_desk,
+            saved_position=saved_position,
+        )
+
+        action = bootstrap['action']
+        if action == 'fl_id':
             state.is_loading = True
             update_content()  # Show spinner synchronously before async kicks in
-            asyncio.ensure_future(load_page(fl_id=initial_fl_id_value))
-        elif initial_sys_id:
-            # Determine if this is a language-switch reload (same manuscripts)
-            # or cross-page navigation (different manuscript requested)
-            saved_rd = None
-            try:
-                saved_rd = app.storage.user.get('reading_desk_state')
-            except Exception:
-                pass  # Browser storage operation failed; preference not persisted
-
-            if saved_rd and saved_rd.get('entries'):
-                # Check if initial_sys_id matches one of the persisted desk entries
-                persisted_sids = {e.get('sys_id', '') for e in saved_rd['entries']}
-                if initial_sys_id in persisted_sids:
-                    # Language-switch case: sys_id is one of the desk's manuscripts
-                    # Restore the full reading desk
-                    if not _restore_reading_desk_state():
-                        state.is_loading = True
-                        update_content()
-                        asyncio.ensure_future(load_page(p_num=initial_page))
-                else:
-                    # Cross-page navigation: user wants a DIFFERENT manuscript
-                    # Clear stale reading desk state and load the requested manuscript
-                    try:
-                        app.storage.user.pop('reading_desk_state', None)
-                    except Exception:
-                        pass  # Browser storage operation failed; preference not persisted
+            # Cat-2: deferred to next event loop tick to allow spinner to render before load.
+            asyncio.ensure_future(load_page(fl_id=bootstrap['fl_id']))
+        elif action == 'sys_id':
+            if bootstrap['clear_desk']:
+                # Stale desk - use snapshot helper, not direct pop (Codex HIGH #9).
+                clear_browse_snapshot()
+            state.is_loading = True
+            update_content()
+            # Cat-2: deferred init - container must mount before async load.
+            asyncio.ensure_future(load_page(p_num=bootstrap['p_num']))
+        elif action == 'restore_desk':
+            # Reuses the existing local _restore_reading_desk_state() helper.
+            # NOTE (Codex MEDIUM #5): _restore_reading_desk_state is responsible for
+            # fully-populated page/source hydration - restore_browse_snapshot only
+            # returned the minimal dict for precedence resolution.
+            if not _restore_reading_desk_state():
+                # Safety net: fall through to normal page load when desk restore fails.
+                if initial_sys_id:
                     state.is_loading = True
                     update_content()
-                    asyncio.ensure_future(load_page(p_num=initial_page))
-            else:
-                # No saved reading desk state, normal page load
-                state.is_loading = True
-                update_content()
-                asyncio.ensure_future(load_page(p_num=initial_page))
-        elif _pending_shelfmark:
-            # Shelfmark passed via URL param — auto-search on load
-            state.shelfmark_query = _pending_shelfmark
+                    asyncio.ensure_future(load_page(p_num=bootstrap['p_num']))
+                else:
+                    update_content()
+        elif action == 'shelfmark':
+            # Shelfmark passed via URL param - auto-search on load.
+            state.shelfmark_query = bootstrap['shelfmark']
+            # Cat-2: bootstrap deferred init.
             asyncio.ensure_future(search_shelfmark())
-        else:
-            # No sys_id in URL -- try to restore reading desk (language-switch case)
-            if _restore_reading_desk_state():
-                pass  # Reading desk restored successfully
-            else:
-                # Try to restore previous position
-                saved_position = app.storage.user.get('browse_position')
-                if saved_position and saved_position.get('sys_id'):
-                    state.sys_id = saved_position['sys_id']
-                    state.shelfmark_query = saved_position.get('shelfmark', '')
-                    # Restore volume_ie with validation (D-12: invalid falls back to None)
-                    restored_vie = saved_position.get('volume_ie')
-                    if restored_vie:
-                        from genizah_core import get_volumes_for_sys_id
-                        volumes = get_volumes_for_sys_id(saved_position['sys_id'])
-                        if any(v['ie_id'] == restored_vie for v in volumes):
-                            state.volume_ie = restored_vie
-                        # else: silently fall back to None (primary IE)
-                    state.is_loading = True
-                    update_content()
-                    asyncio.ensure_future(load_page(p_num=saved_position.get('p_num', 1)))
-                else:
-                    update_content()
+        elif action == 'restore_position':
+            # PRESERVE live side effects from pre-refactor block (Codex HIGH #6).
+            state.sys_id = bootstrap['sys_id']
+            state.shelfmark_query = bootstrap.get('shelfmark') or ''
+            # Restore volume_ie with validation (D-12: invalid falls back to None).
+            restored_vie = bootstrap.get('volume_ie')
+            if restored_vie:
+                from genizah_core import get_volumes_for_sys_id
+                volumes = get_volumes_for_sys_id(bootstrap['sys_id'])
+                if any(v['ie_id'] == restored_vie for v in volumes):
+                    state.volume_ie = restored_vie
+                # else: silently fall back to None (primary IE)
+            state.is_loading = True
+            update_content()
+            # Cat-2: bootstrap deferred init.
+            asyncio.ensure_future(load_page(p_num=bootstrap['p_num']))
+        else:  # action == 'none'
+            update_content()
 
         # Add keyboard event handlers
         ui.add_body_html('''
