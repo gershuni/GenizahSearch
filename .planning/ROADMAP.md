@@ -209,7 +209,7 @@ Zero user-visible behavior changes.
 - [x] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite (completed 2026-04-16)
 - [x] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules (completed 2026-04-16)
 - [ ] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules
-- [ ] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects
+- [x] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects (completed 2026-04-17)
 - [ ] **Phase 75: Non-Regression Verification** - Manual qualitative verification of search/browse responsiveness in both apps
 - [ ] **Phase 76: Documentation Close** - Refresh CODE_INDEX.md, OPEN_ISSUES.md, and path references for all moved files
 
@@ -378,7 +378,7 @@ Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 ->
 | 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
 | 72. Search Page Split | 2/2 | Complete    | 2026-04-16 |
 | 73. Browse Page Split | 1/2 | In progress | - |
-| 74. Page-Scoped State Refactor | 2/3 | In Progress|  |
+| 74. Page-Scoped State Refactor | 3/3 | Complete   | 2026-04-17 |
 | 75. Non-Regression Verification | 0/TBD | Not started | - |
 | 76. Documentation Close | 0/TBD | Not started | - |
 
