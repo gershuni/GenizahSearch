@@ -91,11 +91,76 @@ class TestBrowseNavigation:
     def test_shelfmark_navigation_updates_url(self, screen):
         """Shelfmark navigation (Prev/Next) updates the browser URL bar.
 
-        This is the regression test for the Cat-1 ensure_future fix (D-20).
-        Body filled in by Plan 74-03 once Cat-1 sweep lands.
+        This is the regression test for the Cat-1 asyncio.ensure_future fix (D-20).
+        Before the fix: on_click=lambda: asyncio.ensure_future(navigate_shelfmark(...))
+        returned a Task, bypassing NiceGUI's context-preserving awaitable path.
+        history.replaceState was then called outside the client context and
+        silently dropped by NiceGUI, leaving the URL bar stale.
+
+        After the Phase 74 Cat-1 sweep: on_click=lambda: navigate_shelfmark(...)
+        returns a coroutine that NiceGUI schedules via handle_event under
+        parent_slot, so history.replaceState reaches the correct client.
+
+        Selector reliability (review-revision: Codex HIGH #10):
+        Uses the stable aria-label / data-action attributes added to the
+        shelfmark buttons in Task 0. No XPath chevron fallback - that fallback
+        would match page-nav chevrons at browse.py:3712/3765, not shelfmark
+        navigation, and pass the test for the wrong reason.
         """
+        import re
         import pytest
-        pytest.skip("Cat-1 conversion pending - Plan 74-03")
+        from selenium.webdriver.common.by import By
+
+        screen.open('/browse?sys_id=003750')
+        screen.wait(8.0)  # Allow page mount + initial load.
+
+        initial_url = screen.selenium.current_url
+        # Extract initial sys_id from URL to compare later (Codex HIGH #11:
+        # strengthen assertion beyond "URL string changed").
+        initial_sys_id_match = re.search(r'sys_id=([0-9]+)', initial_url)
+        assert initial_sys_id_match, f"Expected sys_id in initial URL: {initial_url}"
+        initial_sys_id = initial_sys_id_match.group(1)
+
+        # Locate the Next Shelfmark button via stable selector (Task 0).
+        next_btns = screen.selenium.find_elements(
+            By.CSS_SELECTOR,
+            'button[aria-label="Next manuscript"], button[data-action="next-manuscript"]'
+        )
+
+        if not next_btns:
+            pytest.skip(
+                "Next Shelfmark button not found via stable selector. "
+                "Check Task 0 ran: aria-label / data-action attribute must be present."
+            )
+
+        # Click Next.
+        try:
+            next_btns[0].click()
+        except Exception as e:
+            pytest.skip(f"Could not click next shelfmark button: {e}")
+
+        screen.wait(5.0)  # Allow async navigate_shelfmark + history.replaceState.
+
+        updated_url = screen.selenium.current_url
+        # STRONGER assertion (Codex HIGH #11): verify sys_id CHANGED, not just
+        # that the URL string differs. A cache-buster or hash change would pass
+        # the naive "updated_url != initial_url" check while the Cat-1 bug
+        # remains unfixed.
+        updated_sys_id_match = re.search(r'sys_id=([0-9]+)', updated_url)
+        assert updated_sys_id_match, (
+            f"Updated URL missing sys_id parameter - shelfmark navigation did "
+            f"not complete correctly. Initial: {initial_url!r} Updated: {updated_url!r}. "
+            f"This is the Cat-1 asyncio.ensure_future regression - NiceGUI's "
+            f"awaitable scheduling path must be used (on_click=lambda: fn(), "
+            f"NOT on_click=lambda: asyncio.ensure_future(fn()))."
+        )
+        updated_sys_id = updated_sys_id_match.group(1)
+        assert updated_sys_id != initial_sys_id, (
+            f"sys_id should have changed after Next Shelfmark click. "
+            f"Initial: {initial_sys_id} Updated: {updated_sys_id}. "
+            f"If sys_id did not change, history.replaceState was dropped - "
+            f"this is the Cat-1 asyncio.ensure_future regression."
+        )
 
     def test_browse_shows_metadata(self, screen):
         """Browse page displays manuscript metadata."""
