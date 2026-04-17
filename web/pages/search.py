@@ -4558,13 +4558,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         mode_select.value = 'shelfmark'
         # Cat-2: deferred page-mount init - execute_search needs UI to render first.
         asyncio.ensure_future(_after_delay(0.5, execute_search))
-    elif initial_query:
-        # Cat-2: deferred page-mount init - execute_search needs UI to render first.
-        asyncio.ensure_future(_after_delay(0.5, execute_search))
     elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
         render_results(search_state.results, page=0)
         ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
+    elif initial_query:
+        # Cat-2: deferred page-mount init - execute_search needs UI to render first.
+        asyncio.ensure_future(_after_delay(0.5, execute_search))
 
     # --- Deferred initialization (runs after UI renders) ---
 

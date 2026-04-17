@@ -1,5 +1,5 @@
 ---
-status: failed
+status: in-progress
 phase: 75-non-regression-verification
 source: [75-VERIFICATION.md]
 started: 2026-04-17
@@ -17,7 +17,7 @@ updated: 2026-04-17
 
 ## Current Test
 
-[HALTED on surface 1 — BLOCKER regression found; gap plan required before walkthrough resumes]
+[Surface 1 passed after 75-03 fix; resuming at surface 2 Web Browse Responsiveness]
 
 ## Tests
 
@@ -31,7 +31,7 @@ expected:
 - (e) Click "Export" on one result → export action completes without UI block
 - (f) Paginate forward twice → next-page results appear without perceptible slowdown
 
-result: failed (BLOCKER — back-navigation regression: hitting browser Back from /browse to / re-runs the search from scratch instead of restoring saved state; items (a), (b), (c), (d), (f) passed; item (e) export-whole-list-when-one-checked is pre-existing and logged separately to docs/OPEN_ISSUES.md — not a v7.9 decomposition regression. User confirmed against live website: live restores state on Back; working tree does not.)
+result: passed (user approval 2026-04-17 — back-navigation regression fixed via 75-03-PLAN.md; items (a), (b), (c), (d), (f) confirmed green; item (e) export-whole-list pre-existing bug unchanged, remains in docs/OPEN_ISSUES.md P2, outside Phase 75 scope)
 
 ### 2. Web Browse Responsiveness
 
@@ -69,21 +69,21 @@ result: pending
 
 ### 5. pytest baseline
 
-expected: `python -m pytest tests/` returns exactly `1067 passed, 8 skipped` (no new failures, no new skips); tee output to `.planning/phases/75-non-regression-verification/75-pytest-baseline.txt` for verifier evidence (D-08 discretion default)
+expected: `python -m pytest tests/` returns exactly `1071 passed, 8 skipped` (1067 prior baseline + 4 new tests from 75-03 regression coverage: back-nav restore, fresh-query-different-saved guard, empty-snapshot edge, back-nav-restores-saved-mode-Title); tee output to `.planning/phases/75-non-regression-verification/75-pytest-baseline.txt` for verifier evidence (D-08 discretion default)
 
 result: pending
 
 ## Summary
 total: 5
-passed: 0
-issues: 1
+passed: 1
+issues: 0
 pending: 4
 skipped: 0
 blocked: 0
 
 ## Gaps
 
-- **Surface 1 blocker — back-navigation state loss (decomposition regression)** — Observed 2026-04-17. Symptom: hitting browser Back from `/browse` to `/` causes the search page to re-run the query from scratch instead of restoring the saved result state (chips, scroll position, result set). Expected behavior (live website `genizahsearch.com`): Back restores the prior search state. User confirmed side-by-side against live. Suspected regression origin: Phase 74 page-scoped state refactor (`web/pages/search.py`, `web/pages/search_state.py`, `web/search_bootstrap.py`) — `restore_search_snapshot()` / `persist_search_snapshot()` logic introduced in Phase 74 (see `.planning/phases/74-page-scoped-state-refactor/74-CONTEXT.md` D-20 URL-bar E2E regression check and Phase 74 snapshot helpers). Likely root cause: either the snapshot key/scope changed, the snapshot is not being read on route entry, or the bootstrap path now always treats `/` as a fresh load. Next action: run `/gsd-plan-phase 75 --gaps` to generate a fix plan; re-verify surface 1 after fix; surfaces 2–4 and pytest still pending per D-18 (pytest runs LAST, only after all manual surfaces pass).
+- **Surface 1 blocker — back-navigation state loss (decomposition regression)** — Observed 2026-04-17. Symptom: hitting browser Back from `/browse` to `/` causes the search page to re-run the query from scratch instead of restoring the saved result state (chips, scroll position, result set). Expected behavior (live website `genizahsearch.com`): Back restores the prior search state. User confirmed side-by-side against live. Suspected regression origin: Phase 74 page-scoped state refactor (`web/pages/search.py`, `web/pages/search_state.py`, `web/search_bootstrap.py`) — `restore_search_snapshot()` / `persist_search_snapshot()` logic introduced in Phase 74 (see `.planning/phases/74-page-scoped-state-refactor/74-CONTEXT.md` D-20 URL-bar E2E regression check and Phase 74 snapshot helpers). Likely root cause: either the snapshot key/scope changed, the snapshot is not being read on route entry, or the bootstrap path now always treats `/` as a fresh load. Next action: run `/gsd-plan-phase 75 --gaps` to generate a fix plan; re-verify surface 1 after fix; surfaces 2–4 and pytest still pending per D-18 (pytest runs LAST, only after all manual surfaces pass). **Status:** CLOSED 2026-04-17 via plan 75-03 (fix in web/search_bootstrap.py + regression tests in tests/test_search_bootstrap.py + search_query storage-write hole closed in web/pages/search.py + elif-cascade reorder in web/pages/search.py so restored results render before auto-execute fires; user re-signed surface 1 green after Gemini-guided Option B follow-up to the initial 75-03 commit). True regression origin: commit 829cd7cf (2026-03-27), NOT Phase 74 as originally suspected.
 
 ## Notes on surface 1 items that passed
 
