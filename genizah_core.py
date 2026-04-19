@@ -2211,6 +2211,53 @@ def resolve_volume_suffix(sys_id, ie_id):
 
 
 # ==============================================================================
+#  CUDL CANVAS LABEL PARSING (260419-cfx)
+# ==============================================================================
+#
+# CUDL (Cambridge University Digital Library) IIIF manifest canvas labels
+# follow a small vocabulary: "1r", "1v", "f.2r", "f. 2v", bare "1", and
+# non-folio prefixes like "Binding", "Cover". The resolver
+# (shared.nli_crossref_service.resolve_cambridge_canvas_for_page) matches
+# canvases by (folio_num, side) pairs derived from these labels, so we
+# extract both here and store them on every canvas entry produced by
+# GenizahSearchEngine.fetch_external_iiif_data.
+
+_CUDL_LABEL_RE = re.compile(r'^\s*(?:f\.?\s*)?(\d+)\s*([rv])?\b', re.IGNORECASE)
+
+
+def _parse_cudl_label(lbl):
+    """Parse a CUDL canvas label → (folio_num:int|None, folio_side:'r'|'v'|None).
+
+    Convention: a bare numeric label (no 'r'/'v' suffix) is treated as recto
+    ('r'); non-numeric labels ('Binding', 'Cover', etc.) return (None, None).
+    Uppercase side letters ('1R', '1V') are normalized to lowercase.
+
+    Examples:
+        '1'        → (1, 'r')   # bare numeric = recto by convention
+        '1r'       → (1, 'r')
+        '1v'       → (1, 'v')
+        '6R'       → (6, 'r')   # uppercase normalized
+        'f.2v'     → (2, 'v')
+        'f. 2v'    → (2, 'v')
+        'Binding'  → (None, None)
+        ''         → (None, None)
+        None       → (None, None)
+    """
+    if not lbl:
+        return (None, None)
+    m = _CUDL_LABEL_RE.match(str(lbl).strip())
+    if not m:
+        return (None, None)
+    try:
+        folio_num = int(m.group(1))
+    except (TypeError, ValueError):
+        return (None, None)
+    side_raw = m.group(2)
+    side = side_raw.lower() if side_raw else 'r'  # bare numeric → recto
+    return (folio_num, side)
+
+
+# ==============================================================================
 #  LOGGING
 # ==============================================================================
 
@@ -3992,17 +4039,16 @@ class MetadataManager:
                             img_id = service.get('@id') if service else resource.get('@id')
 
                             if img_id:
-                                # Extract folio_num from label for proper page indexing
-                                # Labels like "1", "1r", "1v", "2" etc. - extract leading number
-                                # Labels like "Binding", "Cover" etc. - no folio_num
-                                folio_num = None
-                                lbl_match = re.match(r'^(\d+)', str(lbl).strip())
-                                if lbl_match:
-                                    try:
-                                        folio_num = int(lbl_match.group(1))
-                                    except (TypeError, ValueError):
-                                        pass
-                                result['canvases'].append({'label': lbl, 'url': img_id, 'folio_num': folio_num})
+                                # Extract folio_num + folio_side from label for
+                                # proper page indexing. Labels like "1", "1r",
+                                # "1v", "f.2v" → (1,'r'|'v'); "Binding"/"Cover"
+                                # → (None, None). See _parse_cudl_label below.
+                                folio_num, folio_side = _parse_cudl_label(lbl)
+                                result['canvases'].append({
+                                    'label': lbl, 'url': img_id,
+                                    'folio_num': folio_num,
+                                    'folio_side': folio_side,
+                                })
 
             return result
         except Exception as e:
