@@ -28,8 +28,11 @@ logger = logging.getLogger(__name__)
 
 # ── Folio Label Parsing (Phase 31: IMG-04) ───────────────────────
 
-# Pattern: L{leaf}F{folio}B{bifolio}S{side} within NLI ImageName values
-_FOLIO_PATTERN = re.compile(r'L(\d+)F\d+B\d+S(\d+)')
+# Pattern: L{leaf}(optionally _{second_leaf} for bifolio/paired-leaf)F{folio}B{bifolio}S{side}
+# Paired-leaf form (e.g. 'L1_12F0B0S1') indicates a bifolio of two conjoint
+# leaves; the first number is treated as the primary leaf for folio-label
+# and sort-order purposes (bug 260419-nwv).
+_FOLIO_PATTERN = re.compile(r'L(\d+)(?:_\d+)?F\d+B\d+S(\d+)')
 
 
 def parse_folio_label(image_name: str) -> str:
@@ -37,13 +40,16 @@ def parse_folio_label(image_name: str) -> str:
     Extract folio notation from an NLI ImageName value.
 
     The ImageName pattern is: {shelfmark_prefix}__L{leaf}F{folio}B{bifolio}S{side}
-    where S1=recto (r), S2=verso (v).
+    where S1=recto (r), S2=verso (v). A paired-leaf / bifolio variant
+    ``L{first}_{second}F...`` is also accepted; the primary leaf is the
+    first number.
 
     Examples:
         - 'T_S_12_1__L1F0B0S1' -> '1r'
         - 'T_S_12_1__L1F0B0S2' -> '1v'
         - 'I_C_71__L3F0B0S1'   -> '3r'
         - 'Yevr_III_B_1093__L7F0B0S1' -> '7r'
+        - 'T_S_NS_158_112__L1_12F0B0S1' -> '1r' (paired-leaf / bifolio; primary leaf = 1)
 
     Args:
         image_name: The NLI ImageName string.

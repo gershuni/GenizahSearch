@@ -395,6 +395,114 @@ def test_parse_folio_label_high_leaf():
     assert parse_folio_label("Test__L25F0B0S1") == "25r"
 
 
+class TestParseFolioLabelPairedLeaf:
+    """
+    Paired-leaf / bifolio ImageName notation: L{first}_{second}F{...}B{...}S{...}.
+
+    Historically the _FOLIO_PATTERN regex required ``F`` to immediately follow
+    the leaf number, so paired-leaf names like ``T_S_NS_158_112__L1_12F0B0S1``
+    produced an empty folio label. This broke folio-picker display and
+    collapsed every paired-leaf image into the (999999, 0) sort fallback.
+
+    Regression test fixtures are bug 260419-nwv (T-S NS 158.112 / CUL).
+    Decision: primary leaf is the first number in the pair (leaf 1 in
+    ``L1_12``), matching conservation page-turning order.
+    """
+
+    def test_paired_leaf_recto_primary_is_first_number(self):
+        assert parse_folio_label("T_S_NS_158_112__L1_12F0B0S1") == "1r"
+
+    def test_paired_leaf_verso_primary_is_first_number(self):
+        assert parse_folio_label("T_S_NS_158_112__L1_12F0B0S2") == "1v"
+
+    def test_paired_leaf_middle_pair(self):
+        # L2_11 in a bifolio of leaves 2 and 11 -> primary leaf 2.
+        assert parse_folio_label("T_S_NS_158_112__L2_11F0B0S1") == "2r"
+
+    def test_non_paired_still_works_regression_guard(self):
+        # L5F... (no paired suffix) must still parse the same way.
+        assert parse_folio_label("T_S_NS_158_112__L5F0B0S1") == "5r"
+
+    def test_existing_single_leaf_case_unchanged(self):
+        # Regression guard for the original test_parse_folio_label_standard case.
+        assert parse_folio_label("T_S_12_1__L1F0B0S2") == "1v"
+
+    def test_existing_I_C_case_unchanged(self):
+        assert parse_folio_label("I_C_71__L3F0B0S1") == "3r"
+
+    def test_empty_input_returns_empty(self):
+        assert parse_folio_label("") == ""
+
+    def test_no_pattern_returns_empty(self):
+        assert parse_folio_label("no_folio_here") == ""
+
+
+def test_get_folio_images_sorts_paired_leaf_by_leaf_number(tmp_path):
+    """
+    Paired-leaf ImageNames must sort by primary (first) leaf number, then
+    side -- not collapse into the (999999, 0) alphabetical fallback.
+
+    Regression fixture for bug 260419-nwv: prior to the _FOLIO_PATTERN fix,
+    all three rows had sort key (999999, 0) and stayed in alphabetical
+    ImageName order, placing L2_11F0B0S1 *before* L1_12F0B0S2.
+    """
+    db_path = str(tmp_path / "paired_leaf.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE nli_images (
+            LibraryNameEng TEXT, LibraryAbbrev TEXT, LibraryCity TEXT,
+            LibraryNameHeb TEXT, CollectionName TEXT, Shelfmark TEXT,
+            InventoryId TEXT, OBBox TEXT, OBVolume TEXT, OBFolio TEXT,
+            NLI_AlmaId TEXT, CatalogAbbrev TEXT, CatalogEntry TEXT,
+            FGPImageNumberId TEXT, FGPNumber TEXT, ImageName TEXT,
+            ImageSourceName TEXT, PartOf TEXT, See TEXT, BifolioWith TEXT,
+            NumFolio TEXT, NumBifolio TEXT, Material TEXT, Size TEXT,
+            IsNotGenizah TEXT
+        )
+        """
+    )
+    # Insert in intentionally-wrong alphabetical order to prove the sort is
+    # numeric-by-leaf, not alphabetical by ImageName.
+    rows = [
+        ("CUL", "CUL", "", "", "", "T-S NS 158.112", "", "", "", "",
+         "SYS001", "", "", "", "", "T_S_NS_158_112__L2_11F0B0S1", "NLI",
+         "", "", "", "", "", "", "", ""),
+        ("CUL", "CUL", "", "", "", "T-S NS 158.112", "", "", "", "",
+         "SYS001", "", "", "", "", "T_S_NS_158_112__L1_12F0B0S2", "NLI",
+         "", "", "", "", "", "", "", ""),
+        ("CUL", "CUL", "", "", "", "T-S NS 158.112", "", "", "", "",
+         "SYS001", "", "", "", "", "T_S_NS_158_112__L1_12F0B0S1", "NLI",
+         "", "", "", "", "", "", "", ""),
+    ]
+    # Normalize to 25 columns (table has 25)
+    rows = [r[:25] + ("",) * (25 - len(r)) for r in rows]
+    conn.executemany(
+        "INSERT INTO nli_images VALUES (" + ",".join(["?"] * 25) + ")",
+        rows,
+    )
+    # Minimal cambridge_manifests + meta tables so service initializes cleanly.
+    conn.execute(
+        "CREATE TABLE cambridge_manifests (normalized_shelfmark TEXT PRIMARY KEY, manifest_url TEXT)"
+    )
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+    conn.commit()
+    conn.close()
+
+    svc = NliCrossrefService(db_path=db_path)
+    images = svc.get_folio_images("SYS001")
+    assert len(images) == 3
+    image_names = [img["image_name"] for img in images]
+    assert image_names == [
+        "T_S_NS_158_112__L1_12F0B0S1",  # leaf 1, side 1 (recto)
+        "T_S_NS_158_112__L1_12F0B0S2",  # leaf 1, side 2 (verso)
+        "T_S_NS_158_112__L2_11F0B0S1",  # leaf 2, side 1 (recto)
+    ]
+    assert images[0]["folio_label"] == "1r"
+    assert images[1]["folio_label"] == "1v"
+    assert images[2]["folio_label"] == "2r"
+
+
 def test_get_folio_images(service):
     """get_folio_images returns enriched dicts with folio_label key."""
     images = service.get_folio_images("A001")
