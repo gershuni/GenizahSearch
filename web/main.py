@@ -95,6 +95,45 @@ async def _inject_font_display_swap(request, call_next):
 import re as _re
 
 
+# ---------------------------------------------------------------------------
+# Debug endpoint: /_internal/memstat — diagnostic RssAnon/VmRSS probe
+# Added 2026-04-19 for leak-investigation baseline tracking post-v7.9.0 deploy.
+# Gated by MEMSTAT_SECRET header; returns 503 if the env var is unset.
+# ---------------------------------------------------------------------------
+from fastapi import Header, HTTPException
+from fastapi.responses import JSONResponse
+import time as _memstat_time
+
+_MEMSTAT_SECRET = os.environ.get('MEMSTAT_SECRET', '').strip()
+
+
+@app.get('/_internal/memstat')
+def _memstat_endpoint(x_memstat_secret: str = Header(default='')):
+    if not _MEMSTAT_SECRET:
+        raise HTTPException(status_code=503, detail='memstat disabled (MEMSTAT_SECRET unset)')
+    if x_memstat_secret != _MEMSTAT_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    stats: dict = {}
+    try:
+        with open('/proc/self/status', 'r') as f:
+            for line in f:
+                for key in ('VmRSS', 'VmData', 'VmSize', 'RssAnon', 'RssFile'):
+                    if line.startswith(key + ':'):
+                        stats[key + '_kb'] = int(line.split(':', 1)[1].strip().split()[0])
+                        break
+    except FileNotFoundError:
+        raise HTTPException(status_code=501, detail='/proc not available (non-Linux)')
+    stats['pid'] = os.getpid()
+    stats['timestamp_utc'] = _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime())
+    stats['version'] = None  # filled below
+    try:
+        from version import APP_VERSION as _v
+        stats['version'] = _v
+    except Exception:
+        pass
+    return JSONResponse(stats)
+
+
 logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
