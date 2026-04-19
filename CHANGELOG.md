@@ -4,9 +4,13 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [7.9.0] - Structural Foundation + Decomposition - 2026-04-19
 
-Structural refactor work currently on `master-main` but not yet cut as a user-facing release. The internal GSD milestones `v7.8` (Structural Foundation, complete 2026-04-15) and `v7.9` (Decomposition, complete 2026-04-17) are repo-state tags, not version bumps — `APP_VERSION` is still `7.7.2`. These changes will ship as the next `APP_VERSION` release.
+Bundles the two internal GSD milestones `v7.8` (Structural Foundation, 2026-04-15) and `v7.9` (Decomposition, 2026-04-17) into a shippable release, plus a back-navigation bugfix caught during Phase 75 verification and a CUL paired-leaf folio-label fix. Zero user-visible behavior changes except the two bug fixes below.
+
+### Bug Fixes
+- **Back-navigation state loss**: browser Back from `/browse` to `/search` now restores the saved snapshot; regression introduced 2026-03-27 (commit `829cd7cf`) and fixed 2026-04-17 (commit `8f9c5ef3`). Caught during Phase 75 non-regression verification.
+- **CUL paired-leaf folio labels**: `parse_folio_label` now handles paired-leaf bifolio `ImageName` patterns (e.g., T-S NS 158.112), so image-text alignment is correct for these manuscripts.
 
 ### Internal: v7.9 Decomposition (milestone complete 2026-04-17)
 10 phases, 23 plans. Zero user-visible behavior changes.
@@ -23,9 +27,6 @@ Structural refactor work currently on `master-main` but not yet cut as a user-fa
 - **Silent-exception audit**: 205+ `except: pass` handlers reviewed across 76 first-party files
 - **Framework-patch isolation**: NiceGUI monkey-patches moved into `web/framework_patches.py` with version guards and logging
 - **Repo hygiene**: `.gitignore` 50 → 126 lines; untracked root files 67 → 1; CODE_INDEX / OPEN_ISSUES / DEVELOPER_GUIDE docs refreshed
-
-### Bug Fixes
-- **Back-navigation state loss**: browser Back from `/browse` to `/search` now restores the saved snapshot; regression introduced 2026-03-27 (commit `829cd7cf`) and fixed 2026-04-17 (commit `8f9c5ef3`). Caught during Phase 75 non-regression verification.
 
 ### Build / Release Tooling
 - **`scripts/bump_version.py`**: added README installer-filename regex so `GenizahSearchPro_V<X.Y.Z>_Setup.exe` stays in sync on future bumps. Closes long-standing drift (filename had been stale since v6.1.1, eight releases).
