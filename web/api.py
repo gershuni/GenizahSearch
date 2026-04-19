@@ -491,8 +491,74 @@ def init_api_routes():
 
         return Response(content="Image not found", status_code=404)
 
-    # Image cache: (sys_id, page) -> (content, content_type, timestamp)
+    # Image cache: (sys_id, page, width, suffix) -> (content, content_type, fl_id, timestamp)
+    # Legacy 3-tuple shape (content, content_type, timestamp) is still readable
+    # for backward compatibility with any warm caches from before 260419-cfx.
     _image_cache = {}
+
+    def _fetch_nli_image_bytes(sys_id: str, page: int, width: int = 2000, suffix: int = 1):
+        """Internal helper: fetch NLI image bytes for (sys_id, page, width, suffix).
+
+        Returns (content_bytes, content_type, fl_id) on success, or None when
+        nothing was retrievable. The fl_id is the FL digit string that
+        actually succeeded (for logging / observability).
+
+        FL ids are sourced from fetch_fl_ids_from_nli, which reads the NLI
+        IIIF manifest's canvas_map. This is the AUTHORITATIVE source. NEVER
+        construct NLI IIIF URLs from nli_crossref FGPImageNumberId — that
+        column holds Friedberg photo numbers, not NLI FL ids (see
+        .planning/research/PITFALLS.md Pitfall 6).
+        """
+        import time as _time
+        width = max(100, min(width, 2000))
+        cache_key = (sys_id, page, width, suffix)
+
+        if cache_key in _image_cache:
+            entry = _image_cache[cache_key]
+            # Support both new 4-tuple (with fl_id) and legacy 3-tuple shapes.
+            if len(entry) == 4:
+                content, content_type, fl_id, cached_at = entry
+            else:
+                content, content_type, cached_at = entry
+                fl_id = None
+            if _time.time() - cached_at < IMAGE_CACHE_TTL:
+                return (content, content_type, fl_id)
+
+        fl_ids = fetch_fl_ids_from_nli(sys_id, suffix=suffix)
+        if not fl_ids:
+            return None
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.nli.org.il/',
+        }
+
+        def _try_fl(fl_id):
+            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
+            try:
+                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
+                min_size = 1000 if width < 500 else 5000  # Thumbnails are smaller
+                ct = resp.headers.get('Content-Type', '')
+                if resp.status_code == 200 and 'image' in ct and len(resp.content) > min_size:
+                    return (resp.content, ct or 'image/jpeg')
+            except Exception:
+                return None
+            return None
+
+        if 0 <= page < len(fl_ids):
+            got = _try_fl(fl_ids[page])
+            if got is not None:
+                _image_cache[cache_key] = (got[0], got[1], fl_ids[page], _time.time())
+                return (got[0], got[1], fl_ids[page])
+
+        # Fallback: try each FL id until one works.
+        for fl_id in fl_ids:
+            got = _try_fl(fl_id)
+            if got is not None:
+                _image_cache[cache_key] = (got[0], got[1], fl_id, _time.time())
+                return (got[0], got[1], fl_id)
+
+        return None
 
     @app.get('/api/nli_image_by_sysid/{sys_id}')
     def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
@@ -504,93 +570,74 @@ def init_api_routes():
                     For multi-IE manuscripts, each IE has its own manifest with
                     different images. Default 1 for single-IE manuscripts.
         """
-        import time as _time
-        # Clamp width to reasonable range
-        width = max(100, min(width, 2000))
-        cache_key = (sys_id, page, width, suffix)
-
-        # Check image cache first
-        if cache_key in _image_cache:
-            content, content_type, cached_at = _image_cache[cache_key]
-            if _time.time() - cached_at < IMAGE_CACHE_TTL:
-                return Response(
-                    content=content,
-                    media_type=content_type,
-                    headers={"Cache-Control": "public, max-age=600"}
-                )
-
-        # Fetch FL IDs from NLI (this function has its own cache)
-        fl_ids = fetch_fl_ids_from_nli(sys_id, suffix=suffix)
-        if not fl_ids:
-            return Response(content="No FL IDs found for this document", status_code=404)
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://www.nli.org.il/',
-        }
-
-        # If page index specified, try that specific FL ID first
-        if 0 <= page < len(fl_ids):
-            fl_id = fl_ids[page]
-            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
-            try:
-                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
-                min_size = 1000 if width < 500 else 5000  # Thumbnails are smaller
-                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > min_size:
-                    content_type = resp.headers.get('Content-Type', 'image/jpeg')
-                    # Cache the image
-                    _image_cache[cache_key] = (resp.content, content_type, _time.time())
-                    return Response(
-                        content=resp.content,
-                        media_type=content_type,
-                        headers={"Cache-Control": "public, max-age=600"}
-                    )
-            except Exception:
-                pass  # Thumbnail load failed; full image will replace it
-
-        # Fallback: try each FL ID until one works
-        for fl_id in fl_ids:
-            iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
-            try:
-                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
-                min_size = 1000 if width < 500 else 5000
-                if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '') and len(resp.content) > min_size:
-                    content_type = resp.headers.get('Content-Type', 'image/jpeg')
-                    _image_cache[cache_key] = (resp.content, content_type, _time.time())
-                    return Response(
-                        content=resp.content,
-                        media_type=content_type,
-                        headers={"Cache-Control": "public, max-age=600"}
-                    )
-            except Exception:
-                pass  # Cache operation failed; continue without cached data
-
-        return Response(content="Image not found", status_code=404)
+        got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=suffix)
+        if got is None:
+            return Response(content="Image not found", status_code=404)
+        content, content_type, _fl_id = got
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=600"},
+        )
 
     # Oxford image cache: (sys_id, page) -> (content, content_type, timestamp)
     _oxford_image_cache = {}
 
-    # Cambridge image cache: (sys_id, page) -> (content, content_type, timestamp)
+    # Cambridge image cache (260419-cfx shape):
+    #   key   = (_CAMBRIDGE_CACHE_VERSION, sys_id, page)
+    #   value = (content, content_type, extra_headers_dict, timestamp)
+    # Bumping _CAMBRIDGE_CACHE_VERSION invalidates all server-side entries.
+    # _CAMBRIDGE_ETAG_VERSION is the matching ETag suffix exposed to clients;
+    # bump BOTH in lockstep when the resolver contract changes so browsers
+    # and CDNs revalidate via ETag too.
+    _CAMBRIDGE_CACHE_VERSION = 2
+    _CAMBRIDGE_ETAG_VERSION = "v2"
     _cambridge_image_cache = {}
+    # sys_ids for which we have already logged a "degraded: legacy positional"
+    # WARNING (once per process lifetime, per sys_id — not per request).
+    _cambridge_degraded_warned = set()
 
     @app.get('/api/cambridge_image/{sys_id}')
     def cambridge_image(sys_id: str, page: int = 0):
         """
-        Fetch Cambridge IIIF image by System ID.
-        Looks up images_ext from nli_cache and fetches the canvas image via IIIF.
+        Fetch Cambridge IIIF image by System ID with folio+side matching.
+
+        Resolution:
+          1. Consult resolve_cambridge_canvas_for_page(sys_id, page, images_ext)
+             — maps page N → CUDL canvas whose (folio_num, side) matches the
+             N-th NLI nli_images row for this sys_id.
+          2. On match: serve the CUDL IIIF tile.
+          3. No match (resolver returns None): serve the NLI image for this
+             page via _fetch_nli_image_bytes (X-Image-Fallback-Source: nli).
+          4. Degraded (resolver returns {'degraded': True}): fall back to
+             legacy positional images_ext[page] behavior and log WARN once
+             per sys_id.
+
+        All responses carry X-Image-Resolver-Version and ETag headers so
+        downstream caches (browser + CDN) can revalidate after a deploy.
         """
         import time as _time
-        cache_key = (sys_id, page)
+        # Imported locally to avoid adding a hot-path import at module load.
+        from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
 
-        # Check image cache first
+        cache_key = (_CAMBRIDGE_CACHE_VERSION, sys_id, page)
+
+        def _base_headers():
+            """Resolver-version metadata on every response (success, fallback,
+            legacy). ETag lets clients revalidate after a deploy."""
+            return {
+                "Cache-Control": "public, max-age=600",
+                "ETag": f'"{sys_id}-p{page}-{_CAMBRIDGE_ETAG_VERSION}"',
+                "X-Image-Resolver-Version": str(_CAMBRIDGE_CACHE_VERSION),
+            }
+
         if cache_key in _cambridge_image_cache:
-            content, content_type, cached_at = _cambridge_image_cache[cache_key]
+            content, content_type, headers_extra, cached_at = _cambridge_image_cache[cache_key]
             if _time.time() - cached_at < IMAGE_CACHE_TTL:
-                return Response(
-                    content=content,
-                    media_type=content_type,
-                    headers={"Cache-Control": "public, max-age=600"}
-                )
+                resp_headers = _base_headers()
+                if headers_extra:
+                    resp_headers.update(headers_extra)
+                return Response(content=content, media_type=content_type, headers=resp_headers)
 
         # Look up Cambridge images from nli_cache
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
@@ -602,17 +649,85 @@ def init_api_routes():
         if not images_ext:
             return Response(content="No Cambridge images available", status_code=404)
 
-        if page < 0 or page >= len(images_ext):
-            return Response(content="Page out of range", status_code=404)
+        # Resolve page → canvas or NLI fallback. Sentinel check via
+        # `.get('degraded')` — never identity-compare the _DEGRADED dict.
+        try:
+            resolved = resolve_cambridge_canvas_for_page(sys_id, page, images_ext, svc=nli_svc)
+        except Exception as e:  # defensive: never 500 on resolver error
+            logger.warning(
+                "cambridge_image: resolver raised for sys_id=%s page=%s: %s — "
+                "falling back to legacy positional", sys_id, page, e,
+            )
+            resolved = {'degraded': True}
 
-        canvas_entry = images_ext[page]
-        canvas_url = canvas_entry.get('url', '')
+        canvas_entry = None
+        fallback_to_nli = False
+        matched_folio_side = None  # e.g. '8r' — when resolver produced (folio, side)
+
+        if resolved is None:
+            # Resolver identified a target (folio, side) but no CUDL canvas
+            # matches → serve NLI fallback. Attempt to record the folio
+            # label for the X-Folio-Matched response header.
+            fallback_to_nli = True
+            try:
+                folio_rows = nli_svc.get_folio_images(sys_id) if nli_svc else []
+                if 0 <= page < len(folio_rows):
+                    matched_folio_side = folio_rows[page].get('folio_label') or None
+            except Exception:
+                matched_folio_side = None
+        elif resolved.get('degraded'):
+            # Sidecar unavailable OR sys_id has no nli_images rows → legacy
+            # positional behavior. Warn once per sys_id per process.
+            if sys_id not in _cambridge_degraded_warned:
+                logger.warning(
+                    "cambridge_image: nli_crossref unavailable or empty for "
+                    "sys_id=%s — using legacy positional canvas lookup", sys_id,
+                )
+                _cambridge_degraded_warned.add(sys_id)
+            if 0 <= page < len(images_ext):
+                canvas_entry = images_ext[page]
+            else:
+                return Response(content="Page out of range", status_code=404)
+        else:
+            # Exact (folio, side) match.
+            idx = resolved.get('canvas_index')
+            matched_folio_side = f"{resolved['folio_num']}{resolved['side']}"
+            if idx is not None and 0 <= idx < len(images_ext):
+                canvas_entry = images_ext[idx]
+            else:
+                # Resolver produced an index but it was out of range — treat
+                # as NLI fallback. Shouldn't happen with well-formed data.
+                fallback_to_nli = True
+
+        if fallback_to_nli:
+            # KNOWN LIMITATION (documented in SUMMARY.md): suffix=1 is
+            # hardcoded here because the /api/cambridge_image endpoint
+            # contract has no `suffix` query param (adding one is out of
+            # scope per CONTEXT.md). Multi-IE CUL shelfmarks (rare) may
+            # therefore receive the wrong volume's NLI image on the web
+            # fallback path. Desktop does NOT have this limitation.
+            got = _fetch_nli_image_bytes(sys_id, page, width=2000, suffix=1)
+            if got is None:
+                return Response(content="Image not found", status_code=404)
+            content, ct, resolved_fl_id = got
+            logger.info(
+                "cambridge_image NLI fallback: sys_id=%s page=%s folio=%s fl_id=%s",
+                sys_id, page, matched_folio_side or "?", resolved_fl_id or "?",
+            )
+            extra_headers = {"X-Image-Fallback-Source": "nli"}
+            if matched_folio_side:
+                extra_headers["X-Folio-Matched"] = matched_folio_side
+            _cambridge_image_cache[cache_key] = (content, ct, extra_headers, _time.time())
+            resp_headers = _base_headers()
+            resp_headers.update(extra_headers)
+            return Response(content=content, media_type=ct, headers=resp_headers)
+
+        # Normal CUDL fetch path.
+        canvas_url = (canvas_entry or {}).get('url', '')
         if not canvas_url:
             return Response(content="No canvas URL for this page", status_code=404)
 
-        # Build IIIF Image API URL from canvas base URL
         img_url = f"{canvas_url}/full/2000,/0/default.jpg"
-
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://cudl.lib.cam.ac.uk/',
@@ -622,14 +737,24 @@ def init_api_routes():
             resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
-                _cambridge_image_cache[cache_key] = (resp.content, content_type, _time.time())
+                extra_headers = {}
+                if matched_folio_side:
+                    extra_headers["X-Folio-Matched"] = matched_folio_side
+                _cambridge_image_cache[cache_key] = (
+                    resp.content, content_type, extra_headers, _time.time(),
+                )
+                resp_headers = _base_headers()
+                resp_headers.update(extra_headers)
                 return Response(
                     content=resp.content,
                     media_type=content_type,
-                    headers={"Cache-Control": "public, max-age=600"}
+                    headers=resp_headers,
                 )
             else:
-                return Response(content=f"Failed to fetch Cambridge image: {resp.status_code}", status_code=resp.status_code)
+                return Response(
+                    content=f"Failed to fetch Cambridge image: {resp.status_code}",
+                    status_code=resp.status_code,
+                )
         except Exception as e:
             return Response(content=f"Error fetching Cambridge image: {e}", status_code=500)
 

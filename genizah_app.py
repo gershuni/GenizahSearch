@@ -49,7 +49,8 @@ from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkL
 from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
     apply_find_highlight, _get_folio_number_from_shelfmark,
-    _get_folio_image_index, _get_initial_image_index,
+    _get_folio_image_index, _get_folio_side_image_index,
+    _get_initial_image_index,
     ShelfmarkCompleter,
 )
 from desktop.title_helpers import (
@@ -6807,6 +6808,240 @@ class GenizahGUI(QMainWindow):
         self.enrich_browse_worker.finished_signal.connect(self._browse_enrich_slot)
         self.enrich_browse_worker.start()
 
+    # ── 260419-cfx: CUDL folio+side resolver helpers ──────────────────
+    #
+    # These three helpers wire the web-side folio+side resolver (see
+    # shared.nli_crossref_service.resolve_cambridge_canvas_for_page) into
+    # the desktop browse viewer so CUL manuscripts whose CUDL canvas
+    # count is shorter than their transcription page count (paired-leaf
+    # bifolios like T-S NS 158.112) show the correct image for every
+    # transcription page on INITIAL load, switch-source reload, AND
+    # prev/next navigation.
+    #
+    # LOAD site calls: _resolve_cambridge_page_or_fallback
+    # NAV  site calls: _resolve_cambridge_navigation_index
+    # URL  helper:     _build_nli_iiif_url_for_page (suffix derived from
+    #                  current_browse_volume_ie via resolve_volume_suffix)
+    #
+    # HARD RULE: NEVER construct NLI IIIF URLs from
+    # NliCrossrefService.get_images()['fgp_image_number_id']. FGPImageNumberId
+    # is a Friedberg photo number, not an NLI IIIF FL id (see
+    # .planning/research/PITFALLS.md Pitfall 6). FL ids ONLY come from
+    # meta_mgr.fetch_iiif_manifest(sys_id, suffix)['canvas_map'].
+
+    # Class-level dedup set so the "current_browse_volume_ie is None"
+    # WARNING logs at most once per sys_id per process lifetime.
+    _desktop_nli_fallback_warned: set = set()
+
+    def _build_nli_iiif_url_for_page(self, sys_id, page_idx, width=2000):
+        """Build a direct NLI IIIF URL for (sys_id, page_idx).
+
+        FL id source: NLI IIIF manifest canvas_map (authoritative). We
+        fetch via meta_mgr.fetch_iiif_manifest(sys_id, suffix) and pick
+        the page_idx-th FL digit (numerically-sorted for determinism).
+
+        Suffix policy (per 260419-cfx review H-R2):
+          - When self.current_browse_volume_ie is set, suffix =
+            resolve_volume_suffix(sys_id, vol_ie). Mirrors what
+            switch_to_cambridge() already does at L9098.
+          - When self.current_browse_volume_ie is None (single-IE
+            shelfmark OR no volume selector active), suffix=1 and a
+            one-line WARNING is logged once per sys_id per process.
+
+        Returns a direct IIIF URL string, or None if the manifest could
+        not be fetched or page_idx is out of range. Never raises.
+        """
+        from genizah_core import resolve_volume_suffix
+
+        vol_ie = getattr(self, 'current_browse_volume_ie', None)
+        if vol_ie:
+            try:
+                volume_suffix = resolve_volume_suffix(sys_id, vol_ie)
+                if not volume_suffix or volume_suffix < 1:
+                    volume_suffix = 1
+            except Exception:
+                volume_suffix = 1
+        else:
+            volume_suffix = 1
+            if sys_id not in type(self)._desktop_nli_fallback_warned:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "_build_nli_iiif_url_for_page: current_browse_volume_ie "
+                    "is None for sys_id=%s — using suffix=1 (single-IE "
+                    "default). If this shelfmark is multi-IE, the NLI "
+                    "fallback may show the wrong volume.", sys_id,
+                )
+                type(self)._desktop_nli_fallback_warned.add(sys_id)
+
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        if meta_mgr is None:
+            return None
+        try:
+            manifest = meta_mgr.fetch_iiif_manifest(sys_id, suffix=volume_suffix)
+        except Exception:
+            return None
+        canvas_map = (manifest or {}).get('canvas_map') or {}
+        if not canvas_map:
+            return None
+
+        # canvas_map is {fl_digits: label, ...} in NLI manifest order.
+        # Numeric-sort for determinism across platforms; falls back to
+        # insertion order if keys aren't numeric.
+        try:
+            fl_keys = sorted(canvas_map.keys(), key=lambda k: int(k))
+        except (TypeError, ValueError):
+            fl_keys = list(canvas_map.keys())
+
+        if page_idx < 0 or page_idx >= len(fl_keys):
+            return None
+        fl_digits = fl_keys[page_idx]
+        return (
+            f"https://iiif.nli.org.il/IIIFv21/FL{fl_digits}"
+            f"/full/{width},/0/default.jpg"
+        )
+
+    def _is_cambridge_display(self, display_meta):
+        """Return True iff display_meta looks like a CUDL-Cambridge source.
+
+        Prefers display_meta['external_provider'] == 'cambridge'; falls
+        back to URL inspection on images_ext entries (mirrors the
+        ManuscriptViewerWidget._detect_external_provider logic).
+        """
+        if not display_meta:
+            return False
+        provider = (display_meta.get('external_provider') or '').lower()
+        if provider == 'cambridge':
+            return True
+        marc = display_meta.get('marc', {}) if display_meta else {}
+        url = (marc.get('external_iiif_link') or '').lower()
+        if 'cudl.lib.cam.ac.uk' in url:
+            return True
+        for img in display_meta.get('images_ext', []) or []:
+            iurl = (img.get('url', '') or '').lower()
+            if 'cudl.lib.cam.ac.uk' in iurl:
+                return True
+        return False
+
+    def _resolve_cambridge_page_or_fallback(self, sys_id, page_idx, display_meta, folio_num):
+        """Compute (display_meta, idx) for a Cambridge CUDL page using
+        folio+side resolution, injecting a synthetic NLI-fallback entry
+        when no CUDL canvas matches.
+
+        display_meta is treated as IMMUTABLE: when we need to append a
+        synthetic NLI fallback entry, we return a SHALLOW COPY with a
+        fresh 'images_ext'/'images' list so we never mutate
+        meta_mgr.nli_cache[sid] (which is shared across volumes).
+
+        Returns:
+            (display_meta_to_use, idx) — always. On any error, falls
+            back to legacy _get_initial_image_index behavior.
+        """
+        from shared.nli_crossref_service import (
+            resolve_cambridge_canvas_for_page,
+            get_nli_crossref_service,
+        )
+        # Cache the service singleton on self to avoid repeated lookups.
+        _nli_svc = getattr(self, '_nli_crossref_service', None)
+        if _nli_svc is None:
+            try:
+                _nli_svc = get_nli_crossref_service(thread_safe=False)
+                self._nli_crossref_service = _nli_svc
+            except Exception:
+                _nli_svc = None
+
+        images_ext = (display_meta or {}).get('images_ext') or []
+        resolved = None
+        if _nli_svc is not None and images_ext:
+            try:
+                resolved = resolve_cambridge_canvas_for_page(
+                    sys_id, page_idx, images_ext, svc=_nli_svc,
+                )
+            except Exception:
+                resolved = None
+
+        # Path A: exact (folio, side) canvas match.
+        if resolved and resolved.get('canvas_index') is not None:
+            return (display_meta, resolved['canvas_index'])
+
+        # Path B: resolver returned None → NLI fallback with a synthetic
+        # canvas entry appended on a COPY of display_meta.
+        if resolved is None:
+            nli_url = self._build_nli_iiif_url_for_page(sys_id, page_idx)
+            if nli_url:
+                display_meta_copy = dict(display_meta)  # shallow copy
+                display_meta_copy['images_ext'] = (
+                    list(display_meta_copy.get('images_ext') or []) + [{
+                        'label': 'NLI',
+                        'url': nli_url,
+                        'folio_num': None,
+                        'folio_side': None,
+                        'is_nli_fallback': True,
+                    }]
+                )
+                # Mirror 'images' alias (same pattern as L6948, L9117).
+                display_meta_copy['images'] = display_meta_copy['images_ext']
+                return (display_meta_copy, len(display_meta_copy['images_ext']) - 1)
+            # Could not build an NLI URL → legacy positional.
+            idx = _get_initial_image_index(
+                display_meta,
+                folio_num if folio_num is not None else page_idx,
+            )
+            return (display_meta, idx)
+
+        # Path C: resolver returned {'degraded': True} OR _nli_svc is None
+        # → legacy positional behavior.
+        idx = _get_initial_image_index(
+            display_meta,
+            folio_num if folio_num is not None else page_idx,
+        )
+        return (display_meta, idx)
+
+    def _resolve_cambridge_navigation_index(self, sys_id, viewer_images, folio_num, side_offset):
+        """Side-aware index lookup for prev/next navigation on CUDL.
+
+        Returns (nav_meta, idx):
+          - (None, int)  — (folio_num, side) already in viewer_images; caller
+                           uses set_page(idx) on the existing viewer.
+          - (dict, int)  — no match; nav_meta is a synthetic {'images_ext',
+                           'images'} with an appended NLI fallback entry;
+                           caller calls load_images(nav_meta, idx, ...).
+          - (None, None) — no match AND no NLI URL; caller uses legacy
+                           _get_folio_image_index + set_page.
+        """
+        if folio_num is None or not viewer_images:
+            return (None, None)
+        target_side = 'v' if side_offset == 1 else 'r'
+
+        # 1. Exact (folio, side) match in the current viewer list.
+        idx = _get_folio_side_image_index(
+            {'images_ext': viewer_images}, folio_num, target_side,
+        )
+        if idx is not None:
+            return (None, idx)
+
+        # 2. Build NLI fallback. Use the current transcription page index
+        # (already set by prev/next navigation before this helper runs).
+        page_idx = getattr(self, 'current_browse_p', None)
+        if page_idx is None:
+            return (None, None)
+        nli_url = self._build_nli_iiif_url_for_page(sys_id, page_idx)
+        if not nli_url:
+            return (None, None)
+
+        # Defensive COPY: never mutate the viewer's images list in place.
+        synthetic = {
+            'label': 'NLI',
+            'url': nli_url,
+            'folio_num': None,
+            'folio_side': None,
+            'is_nli_fallback': True,
+        }
+        new_images = list(viewer_images) + [synthetic]
+        nav_meta = {'images_ext': new_images, 'images': new_images}
+        return (nav_meta, len(new_images) - 1)
+
+    # ── /260419-cfx helpers ──────────────────────────────────────────
+
     def on_browse_enriched_loaded(self, sid, meta, gen=None, expected_vol_ie=None):
         if not meta: return
         # Generation guard: reject stale enrichment from a previous browse action
@@ -6948,7 +7183,20 @@ class GenizahGUI(QMainWindow):
                         display_meta['images'] = display_meta['images_ext']
 
             folio_num = _get_folio_number_from_shelfmark(shelf)
-            idx = _get_initial_image_index(display_meta, folio_num if folio_num is not None else self.current_browse_p)
+            # 260419-cfx: when the active source is Cambridge CUDL, consult
+            # the folio+side resolver. It may inject a synthetic NLI
+            # fallback canvas on a shallow copy of display_meta for
+            # transcription pages with no matching CUDL canvas (e.g.
+            # T-S NS 158.112 pages 13–14 → folios 8r/8v).
+            if self._is_cambridge_display(display_meta) and display_meta.get('images_ext'):
+                display_meta, idx = self._resolve_cambridge_page_or_fallback(
+                    self.current_browse_sid, self.current_browse_p, display_meta, folio_num,
+                )
+            else:
+                idx = _get_initial_image_index(
+                    display_meta,
+                    folio_num if folio_num is not None else self.current_browse_p,
+                )
             self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
 
         # 3. Enable buttons
@@ -9120,7 +9368,17 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'browse_viewer') and not self.browse_reading_desk_active:
             shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
-            idx = _get_initial_image_index(display_meta, folio_num if folio_num is not None else self.current_browse_p)
+            # 260419-cfx: folio+side resolver for CUDL shelfmarks. See
+            # _resolve_cambridge_page_or_fallback docstring.
+            if self._is_cambridge_display(display_meta) and display_meta.get('images_ext'):
+                display_meta, idx = self._resolve_cambridge_page_or_fallback(
+                    sid, self.current_browse_p, display_meta, folio_num,
+                )
+            else:
+                idx = _get_initial_image_index(
+                    display_meta,
+                    folio_num if folio_num is not None else self.current_browse_p,
+                )
             self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
 
     def toggle_browse_image(self):
@@ -21001,6 +21259,14 @@ class GenizahGUI(QMainWindow):
             viewer_images = getattr(self.browse_viewer, 'active_list', []) or getattr(self.browse_viewer, 'images_ext', [])
             folio_in_viewer = any(img.get('folio_num') == folio_num for img in viewer_images) if folio_num and viewer_images else False
 
+            # 260419-cfx: on navigation, if the active viewer source is
+            # Cambridge CUDL and the target folio is outside CUDL coverage,
+            # the resolver can inject a synthetic NLI-fallback entry. The
+            # Oxford folio_range branch (L21266-21269) is UNCHANGED — it
+            # is gated on oxford_part_id which is never set on CUL CUDL.
+            is_cambridge_nav = (
+                getattr(self.browse_viewer, 'external_provider', None) == 'cambridge'
+            )
             if not folio_in_viewer and folio_num is not None and meta:
                 # Check if this is Oxford with folio_range that includes this folio
                 oxford_part_meta = meta.get('oxford_part_metadata', {})
@@ -21010,11 +21276,38 @@ class GenizahGUI(QMainWindow):
                     idx = _get_folio_image_index(meta, folio_num, side_offset=side_offset)
                     self.browse_viewer.load_images(meta, idx, target_folio=folio_num)
                 elif viewer_images:
+                    if is_cambridge_nav:
+                        nav_meta, idx = self._resolve_cambridge_navigation_index(
+                            self.current_browse_sid, viewer_images, folio_num, side_offset,
+                        )
+                        if nav_meta is None and idx is not None:
+                            # Exact match found in existing viewer list.
+                            self.browse_viewer.set_page(idx)
+                        elif nav_meta is not None:
+                            # Synthetic NLI fallback needs load_images.
+                            self.browse_viewer.load_images(nav_meta, idx, target_folio=folio_num)
+                        else:
+                            # No NLI URL available — fall back to legacy.
+                            idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                            self.browse_viewer.set_page(idx)
+                    else:
+                        idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                        self.browse_viewer.set_page(idx)
+            elif viewer_images:
+                if is_cambridge_nav:
+                    nav_meta, idx = self._resolve_cambridge_navigation_index(
+                        self.current_browse_sid, viewer_images, folio_num, side_offset,
+                    )
+                    if nav_meta is None and idx is not None:
+                        self.browse_viewer.set_page(idx)
+                    elif nav_meta is not None:
+                        self.browse_viewer.load_images(nav_meta, idx, target_folio=folio_num)
+                    else:
+                        idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                        self.browse_viewer.set_page(idx)
+                else:
                     idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
                     self.browse_viewer.set_page(idx)
-            elif viewer_images:
-                idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
-                self.browse_viewer.set_page(idx)
         # -------------------------------
 
         if self.current_browse_sid in self.meta_mgr.nli_cache:
@@ -22506,9 +22799,27 @@ class GenizahGUI(QMainWindow):
                 return
 
         if viewer_images and self.browse_viewer.active_list:
-            image_idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num, side_offset=side_offset)
-            self.browse_viewer.set_page(image_idx)
-    
+            # 260419-cfx: composition-summary nav mirrors the browse nav
+            # resolver wiring. Cambridge CUDL may need a synthetic NLI
+            # fallback when the target folio is outside CUDL coverage.
+            is_cambridge_nav = (
+                getattr(self.browse_viewer, 'external_provider', None) == 'cambridge'
+            )
+            if is_cambridge_nav:
+                nav_meta, image_idx = self._resolve_cambridge_navigation_index(
+                    self.current_browse_sid, viewer_images, folio_num, side_offset,
+                )
+                if nav_meta is None and image_idx is not None:
+                    self.browse_viewer.set_page(image_idx)
+                elif nav_meta is not None:
+                    self.browse_viewer.load_images(nav_meta, image_idx, target_folio=folio_num)
+                else:
+                    image_idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num, side_offset=side_offset)
+                    self.browse_viewer.set_page(image_idx)
+            else:
+                image_idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num, side_offset=side_offset)
+                self.browse_viewer.set_page(image_idx)
+
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:

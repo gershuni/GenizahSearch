@@ -1064,3 +1064,199 @@ def test_web_shim_import():
     from web.nli_crossref_service import get_nli_crossref_service as web_get_service
     assert WebNliService is NliCrossrefService
     assert web_get_service is get_nli_crossref_service
+
+
+# ── _parse_cudl_label (genizah_core, 260419-cfx) ──────────────────
+
+
+def test_parse_cudl_label_bare_numeric_is_recto():
+    """Bare numeric label ('1') is treated as recto by convention."""
+    from genizah_core import _parse_cudl_label
+    assert _parse_cudl_label('1') == (1, 'r')
+
+
+def test_parse_cudl_label_verso():
+    """'1v' parses to (1, 'v')."""
+    from genizah_core import _parse_cudl_label
+    assert _parse_cudl_label('1v') == (1, 'v')
+
+
+def test_parse_cudl_label_binding():
+    """Non-folio label 'Binding' returns (None, None)."""
+    from genizah_core import _parse_cudl_label
+    assert _parse_cudl_label('Binding') == (None, None)
+
+
+def test_parse_cudl_label_with_f_prefix():
+    """'f.2v' and 'f. 3r' (space variant) parse correctly."""
+    from genizah_core import _parse_cudl_label
+    assert _parse_cudl_label('f.2v') == (2, 'v')
+    assert _parse_cudl_label('f. 3r') == (3, 'r')
+
+
+# ── resolve_cambridge_canvas_for_page (260419-cfx) ────────────────
+
+
+class TestFolioSideResolver:
+    """T-S NS 158.112 fixture: 14 nli_images rows (incl. paired-leaf
+    bifolio ImageNames), 12 CUDL canvases 1r..6v.
+
+    Validates resolve_cambridge_canvas_for_page for all 14 pages:
+        pages 0..11 → exact canvas match (1r, 1v, ..., 6v)
+        pages 12..13 → None (folios 8r/8v; no CUDL canvas)
+    """
+
+    TS_NS_158_112_IMAGE_NAMES = [
+        'T_S_NS_158_112__L1_12F0B0S1',  # 1r
+        'T_S_NS_158_112__L1_12F0B0S2',  # 1v
+        'T_S_NS_158_112__L2_11F0B0S1',  # 2r
+        'T_S_NS_158_112__L2_11F0B0S2',  # 2v
+        'T_S_NS_158_112__L3_10F0B0S1',  # 3r
+        'T_S_NS_158_112__L3_10F0B0S2',  # 3v
+        'T_S_NS_158_112__L4_9F0B0S1',   # 4r
+        'T_S_NS_158_112__L4_9F0B0S2',   # 4v
+        'T_S_NS_158_112__L5F0B0S1',     # 5r
+        'T_S_NS_158_112__L5F0B0S2',     # 5v
+        'T_S_NS_158_112__L6_7F0B0S1',   # 6r
+        'T_S_NS_158_112__L6_7F0B0S2',   # 6v
+        'T_S_NS_158_112__L8F0B0S1',     # 8r — NO CUDL canvas
+        'T_S_NS_158_112__L8F0B0S2',     # 8v — NO CUDL canvas
+    ]
+
+    TS_NS_158_112_CUDL_CANVASES = [
+        {'label': '1r', 'url': 'https://x/1r', 'folio_num': 1, 'folio_side': 'r'},
+        {'label': '1v', 'url': 'https://x/1v', 'folio_num': 1, 'folio_side': 'v'},
+        {'label': '2r', 'url': 'https://x/2r', 'folio_num': 2, 'folio_side': 'r'},
+        {'label': '2v', 'url': 'https://x/2v', 'folio_num': 2, 'folio_side': 'v'},
+        {'label': '3r', 'url': 'https://x/3r', 'folio_num': 3, 'folio_side': 'r'},
+        {'label': '3v', 'url': 'https://x/3v', 'folio_num': 3, 'folio_side': 'v'},
+        {'label': '4r', 'url': 'https://x/4r', 'folio_num': 4, 'folio_side': 'r'},
+        {'label': '4v', 'url': 'https://x/4v', 'folio_num': 4, 'folio_side': 'v'},
+        {'label': '5r', 'url': 'https://x/5r', 'folio_num': 5, 'folio_side': 'r'},
+        {'label': '5v', 'url': 'https://x/5v', 'folio_num': 5, 'folio_side': 'v'},
+        {'label': '6r', 'url': 'https://x/6r', 'folio_num': 6, 'folio_side': 'r'},
+        {'label': '6v', 'url': 'https://x/6v', 'folio_num': 6, 'folio_side': 'v'},
+    ]
+
+    @pytest.fixture
+    def ts_ns_158_112_svc(self, tmp_path):
+        """Bare-schema SQLite fixture: 14 nli_images rows for T-S NS 158.112.
+
+        Plan Task 1 Step 0 verified: NliCrossrefService.__init__ only
+        opens the file; is_available() returns True for a bare schema
+        with empty `meta` and a populated `nli_images` table. If that
+        changes in future, seed ('version','0.0.0-test') into meta here.
+        """
+        db_path = tmp_path / "nli_crossref.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE meta (key TEXT, value TEXT)")
+        conn.execute(
+            "CREATE TABLE nli_images (NLI_AlmaId TEXT, FGPImageNumberId TEXT, "
+            "FGPNumber TEXT, ImageName TEXT, ImageSourceName TEXT, "
+            "Shelfmark TEXT, Material TEXT DEFAULT '', NumFolio TEXT "
+            "DEFAULT '', NumBifolio TEXT DEFAULT '', Size TEXT DEFAULT '', "
+            "LibraryAbbrev TEXT DEFAULT '', LibraryNameEng TEXT DEFAULT '', "
+            "CatalogEntry TEXT DEFAULT '', CollectionName TEXT DEFAULT '', "
+            "OBBox TEXT DEFAULT '', OBVolume TEXT DEFAULT '', OBFolio TEXT "
+            "DEFAULT '', PartOf TEXT DEFAULT '', See TEXT DEFAULT '', "
+            "BifolioWith TEXT DEFAULT '')"
+        )
+        for idx, img_name in enumerate(self.TS_NS_158_112_IMAGE_NAMES):
+            conn.execute(
+                "INSERT INTO nli_images (NLI_AlmaId, FGPImageNumberId, "
+                "FGPNumber, ImageName, ImageSourceName, Shelfmark) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("990051537270205171", f"FGP{idx}", str(idx), img_name, "",
+                 "T-S NS 158.112"),
+            )
+        conn.commit()
+        conn.close()
+        svc = NliCrossrefService(db_path=str(db_path))
+        # Smoke-check before any resolver test — if this fails, every
+        # resolver test below would silently return {'degraded': True}
+        # and assertions would all pass wrong.
+        assert svc.is_available(), (
+            "Fixture sqlite is_available() must be True. If False, seed "
+            "a meta.version row or inspect __init__."
+        )
+        assert len(svc.get_folio_images("990051537270205171")) == 14
+        yield svc
+        svc.close()
+
+    @pytest.mark.parametrize("page,expected_canvas_idx,expected_folio,expected_side", [
+        (0, 0, 1, 'r'),
+        (1, 1, 1, 'v'),
+        (2, 2, 2, 'r'),
+        (3, 3, 2, 'v'),
+        (4, 4, 3, 'r'),
+        (5, 5, 3, 'v'),
+        (6, 6, 4, 'r'),
+        (7, 7, 4, 'v'),
+        (8, 8, 5, 'r'),
+        (9, 9, 5, 'v'),
+        (10, 10, 6, 'r'),
+        (11, 11, 6, 'v'),
+    ])
+    def test_resolves_exact_canvas_for_pages_0_through_11(
+        self, ts_ns_158_112_svc, page, expected_canvas_idx,
+        expected_folio, expected_side,
+    ):
+        from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
+        out = resolve_cambridge_canvas_for_page(
+            "990051537270205171", page,
+            self.TS_NS_158_112_CUDL_CANVASES,
+            svc=ts_ns_158_112_svc,
+        )
+        assert out == {
+            'canvas_index': expected_canvas_idx,
+            'folio_num': expected_folio,
+            'side': expected_side,
+        }
+
+    def test_returns_none_for_page_12_folio_8r_no_canvas(self, ts_ns_158_112_svc):
+        """Page 12 → folio 8r; no CUDL canvas → None (NLI fallback)."""
+        from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
+        out = resolve_cambridge_canvas_for_page(
+            "990051537270205171", 12,
+            self.TS_NS_158_112_CUDL_CANVASES,
+            svc=ts_ns_158_112_svc,
+        )
+        assert out is None
+
+    def test_returns_none_for_page_13_folio_8v_no_canvas(self, ts_ns_158_112_svc):
+        """Page 13 → folio 8v; no CUDL canvas → None (NLI fallback)."""
+        from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
+        out = resolve_cambridge_canvas_for_page(
+            "990051537270205171", 13,
+            self.TS_NS_158_112_CUDL_CANVASES,
+            svc=ts_ns_158_112_svc,
+        )
+        assert out is None
+
+    def test_degraded_when_sys_id_unknown(self, ts_ns_158_112_svc):
+        """Unknown sys_id returns {'degraded': True} (caller uses legacy positional)."""
+        from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
+        out = resolve_cambridge_canvas_for_page(
+            "UNKNOWN_SYS_ID", 0,
+            self.TS_NS_158_112_CUDL_CANVASES,
+            svc=ts_ns_158_112_svc,
+        )
+        assert out == {'degraded': True}
+
+    def test_bare_numeric_label_matches_recto_only(self, ts_ns_158_112_svc):
+        """A canvas with folio_num=1 and folio_side=None (bare '1' label)
+        matches target (1, 'r') but NOT (1, 'v')."""
+        from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
+        side_less_canvases = [
+            {'label': '1', 'url': 'https://x/1', 'folio_num': 1, 'folio_side': None},
+        ]
+        # Page 0 = 1r → should match side-less canvas (bare-numeric = recto)
+        out_recto = resolve_cambridge_canvas_for_page(
+            "990051537270205171", 0, side_less_canvases, svc=ts_ns_158_112_svc,
+        )
+        # Page 1 = 1v → verso target does NOT match side-less canvas → None
+        out_verso = resolve_cambridge_canvas_for_page(
+            "990051537270205171", 1, side_less_canvases, svc=ts_ns_158_112_svc,
+        )
+        assert out_recto == {'canvas_index': 0, 'folio_num': 1, 'side': 'r'}
+        assert out_verso is None

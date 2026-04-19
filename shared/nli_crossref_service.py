@@ -925,3 +925,128 @@ def reset_nli_crossref_service():
     if _default_service is not None:
         _default_service.close()
         _default_service = None
+
+
+# ── Folio+side canvas resolver (260419-cfx) ────────────────────────────
+#
+# CUDL IIIF manifests sometimes expose fewer canvases than a manuscript
+# has transcription pages (e.g. T-S NS 158.112: 12 CUDL canvases vs 14
+# transcription pages). Positional indexing `images_ext[page]` therefore
+# returns the wrong canvas past the shortfall, and paired-leaf bifolios
+# shift the ordering earlier. The resolver below maps a transcription
+# page index → the exact CUDL canvas that matches the (folio_num, side)
+# of the N-th nli_images row; callers serve an NLI fallback when no
+# CUDL canvas matches.
+#
+# NEVER construct NLI IIIF URLs from NliCrossrefService.get_images()'s
+# `fgp_image_number_id` column — that is a Friedberg photo number, not
+# an NLI IIIF FL id; they are different numbering systems (see
+# .planning/research/PITFALLS.md Pitfall 6). FL ids come from the NLI
+# IIIF manifest's canvas_map (web: web.api.fetch_fl_ids_from_nli;
+# desktop: GenizahSearchEngine.fetch_iiif_manifest[canvas_map]).
+
+_DEGRADED: dict = {'degraded': True}
+_SIDE_FROM_LABEL_RE = re.compile(r'^(\d+)([rv])?$', re.IGNORECASE)
+
+
+def _extract_side_from_nli_label(folio_label: str) -> Optional[str]:
+    """Return 'r' or 'v' from a label like '1r' or '8v'; None otherwise.
+
+    This is a lightweight last-character check; the resolver uses the
+    stricter _SIDE_FROM_LABEL_RE for full parsing.
+    """
+    if not folio_label:
+        return None
+    last = folio_label[-1].lower()
+    if last in ('r', 'v'):
+        return last
+    return None
+
+
+def resolve_cambridge_canvas_for_page(
+    sys_id: str,
+    page: int,
+    images_ext: list,
+    *,
+    svc: Optional['NliCrossrefService'] = None,
+) -> Optional[dict]:
+    """Map a transcription page index → CUDL canvas index using (folio, side).
+
+    Args:
+        sys_id: Manuscript Alma/system ID.
+        page: 0-based transcription page index.
+        images_ext: The CUDL canvas list for this manuscript (each entry
+            carries 'folio_num' and 'folio_side' — produced by
+            GenizahSearchEngine.fetch_external_iiif_data).
+        svc: Optional NliCrossrefService. When None, the module-level
+            singleton is used.
+
+    Returns:
+        - {'canvas_index': int, 'folio_num': int, 'side': 'r'|'v'} on a
+          successful (folio, side) match. Caller uses images_ext[canvas_index].
+        - None when the resolver identified a target (folio, side) but no
+          CUDL canvas matches. Caller should serve the NLI image for
+          this page (e.g. via fetch_fl_ids_from_nli(sys_id)[page]).
+        - {'degraded': True} when the sidecar is unavailable OR the
+          sys_id has no nli_images rows. Caller should fall back to
+          legacy positional behavior (images_ext[page]) and log WARN
+          once per sys_id.
+
+    The resolver NEVER constructs NLI IIIF URLs from FGPImageNumberId.
+    It only consults the sorted (leaf, side) order of the NLI ImageNames
+    for this sys_id; the caller is responsible for producing the NLI
+    image bytes when the resolver returns None (and MUST source FL ids
+    from the NLI IIIF manifest canvas_map, not from nli_crossref).
+    """
+    if svc is None:
+        svc = get_nli_crossref_service(thread_safe=True)
+    if svc is None or not svc.is_available():
+        return dict(_DEGRADED)
+    try:
+        folio_rows = svc.get_folio_images(sys_id)
+    except Exception as e:
+        logger.warning(f"resolve_cambridge_canvas_for_page: get_folio_images error for {sys_id}: {e}")
+        return dict(_DEGRADED)
+    if not folio_rows:
+        return dict(_DEGRADED)
+    if page < 0 or page >= len(folio_rows):
+        # Out of nli_images range — caller may still attempt NLI fallback
+        # (which will also fail for pages past manifest length, and that
+        # is fine: the endpoint returns 404 in that case).
+        return None
+
+    target = folio_rows[page]
+    target_folio_label = target.get('folio_label', '') or ''
+    m = _SIDE_FROM_LABEL_RE.match(target_folio_label)
+    if not m:
+        return None
+    try:
+        target_folio = int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+    side_raw = m.group(2)
+    # Convention: bare numeric target folio label defaults to recto.
+    target_side = side_raw.lower() if side_raw else 'r'
+
+    # 1. Exact (folio_num, side) match.
+    for idx, c in enumerate(images_ext or []):
+        if c.get('folio_num') == target_folio and c.get('folio_side') == target_side:
+            return {
+                'canvas_index': idx,
+                'folio_num': target_folio,
+                'side': target_side,
+            }
+
+    # 2. Side-less canvas (bare-numeric label like '1', folio_side=None):
+    #    only matches when target is recto. Verso targets fall through
+    #    to NLI fallback.
+    if target_side == 'r':
+        for idx, c in enumerate(images_ext or []):
+            if c.get('folio_num') == target_folio and not c.get('folio_side'):
+                return {
+                    'canvas_index': idx,
+                    'folio_num': target_folio,
+                    'side': 'r',
+                }
+
+    return None

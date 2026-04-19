@@ -119,6 +119,41 @@ def _get_folio_image_index(meta, folio_num, side_offset=0):
     return base_idx
 
 
+def _get_folio_side_image_index(meta, folio_num, side):
+    """Return images_ext index matching both (folio_num, side), or None.
+
+    This is the side-aware sibling of _get_folio_image_index. Unlike the
+    legacy helper (which falls back to the nearest folio when an exact
+    index is not available), this returns None when no exact (folio_num,
+    side) match exists — so callers can trigger an NLI fallback.
+
+    'side' is 'r' or 'v'. A canvas whose folio_side is None (e.g. a bare
+    numeric CUDL label '1' with no r/v suffix) matches only when side
+    is 'r' (bare-numeric = recto convention).
+
+    Args:
+        meta: Dict carrying 'images_ext' (preferred) or 'images' list.
+        folio_num: Integer folio number to match. None returns None.
+        side: 'r' or 'v'. Any other value returns None.
+
+    Returns:
+        int index into meta['images_ext'] (or 'images'), or None.
+    """
+    if not meta or folio_num is None or side not in ('r', 'v'):
+        return None
+    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+    # 1. Exact (folio_num, side) match.
+    for idx, img in enumerate(images):
+        if img.get('folio_num') == folio_num and img.get('folio_side') == side:
+            return idx
+    # 2. Side-less canvas (folio_side None) matches recto only.
+    if side == 'r':
+        for idx, img in enumerate(images):
+            if img.get('folio_num') == folio_num and not img.get('folio_side'):
+                return idx
+    return None
+
+
 def _get_initial_image_index(meta, page_num):
     if page_num is None:
         return 0

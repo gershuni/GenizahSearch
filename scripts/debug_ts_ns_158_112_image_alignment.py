@@ -274,6 +274,16 @@ def format_table(rows: list[list[str]], headers: list[str]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--sys-id", default=DEFAULT_SYS_ID)
+    ap.add_argument(
+        "--verify-resolver",
+        action="store_true",
+        help=(
+            "After the existing alignment table, run "
+            "resolve_cambridge_canvas_for_page for pages 0..N-1 and "
+            "print a RESOLVER TABLE with one verdict line per page "
+            "plus a single VERIFIED/BROKEN summary line (260419-cfx)."
+        ),
+    )
     args = ap.parse_args()
     sys_id = args.sys_id
 
@@ -462,6 +472,126 @@ def main() -> int:
                 f"{empty[:3]!r}"
             )
     print(parse_verdict)
+
+    # ─── Optional: post-fix resolver verification (260419-cfx) ────────
+    if args.verify_resolver:
+        print()
+        print("RESOLVER TABLE (260419-cfx)")
+        print("-" * 40)
+        try:
+            from shared.nli_crossref_service import (
+                resolve_cambridge_canvas_for_page,
+                get_nli_crossref_service,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"ERROR: could not import resolver: {e}")
+            print("RESOLVER CUL-canvas-fix BROKEN — resolver import failed")
+            elapsed = time.time() - started
+            print(f"\n(diagnostic completed in {elapsed:.1f}s)")
+            return 2
+
+        # Build the images_ext CUDL canvas list from the fetched CUDL
+        # labels (purely local; no extra network). Parse folio_num and
+        # folio_side from each label so the resolver can match.
+        def _parse_cudl_label_for_verify(lbl: str) -> tuple[int | None, str | None]:
+            if not lbl:
+                return (None, None)
+            m = re.match(r'^\s*(?:f\.?\s*)?(\d+)\s*([rv])?\b', lbl.strip(), re.IGNORECASE)
+            if not m:
+                return (None, None)
+            try:
+                fn = int(m.group(1))
+            except (TypeError, ValueError):
+                return (None, None)
+            side = m.group(2).lower() if m.group(2) else 'r'
+            return (fn, side)
+
+        images_ext_for_verify = []
+        for lbl in cudl_labels:
+            fn, fs = _parse_cudl_label_for_verify(lbl)
+            images_ext_for_verify.append({
+                'label': lbl,
+                'url': f'https://synthetic.cudl/{lbl}',
+                'folio_num': fn,
+                'folio_side': fs,
+            })
+
+        svc = None
+        try:
+            svc = get_nli_crossref_service(thread_safe=False)
+            if not svc.is_available():
+                print("WARN: nli_crossref sidecar not available; resolver will be degraded")
+        except Exception as e:  # noqa: BLE001
+            print(f"WARN: could not construct NliCrossrefService: {e}")
+
+        # Iterate pages. Primary range = nli_images row count (authoritative
+        # transcription-page mapping after 260419-nwv sort fix).
+        n_pages = len(nli_rows) if nli_rows else len(trans_entries)
+        verdicts_per_page: list[tuple[int, str]] = []
+        # Invariants for the summary:
+        #  (a) every page in [0, min(len(cudl_canvases), len(nli_rows)))
+        #      MUST resolve to a canvas_index (exact match)
+        #  (b) every page outside that range (in [min, len(nli_rows)))
+        #      MUST resolve to NLI_FALLBACK (None from resolver)
+        in_range_expected_matches = min(len(cudl_labels), n_pages)
+        for p in range(n_pages):
+            # Folio label (for human-readable "folio=Xr|v" tag) from nli_rows.
+            folio_tag = "?"
+            if p < len(nli_rows):
+                img_name = nli_rows[p].get("ImageName", "") or ""
+                parsed = parse_folio_label(img_name)
+                if parsed:
+                    folio_tag = parsed
+
+            out = resolve_cambridge_canvas_for_page(
+                sys_id, p, images_ext_for_verify, svc=svc,
+            )
+            if out is None:
+                verdicts_per_page.append(
+                    (p, f"p={p} (folio={folio_tag}) → NLI_FALLBACK")
+                )
+            elif isinstance(out, dict) and out.get('degraded'):
+                verdicts_per_page.append(
+                    (p, f"p={p} (folio={folio_tag}) → DEGRADED (sidecar unavailable)")
+                )
+            else:
+                ci = out.get('canvas_index')
+                verdicts_per_page.append(
+                    (p, f"p={p} (folio={folio_tag}) → canvas_index={ci}")
+                )
+
+        for _, line in verdicts_per_page:
+            print(f"  {line}")
+
+        # Summary verdict.
+        broken_reason: str | None = None
+        if not nli_rows:
+            broken_reason = "no nli_images rows to verify against"
+        elif not cudl_labels:
+            broken_reason = "no CUDL canvases fetched (manifest unavailable?)"
+        else:
+            for p, _ in verdicts_per_page:
+                out = resolve_cambridge_canvas_for_page(
+                    sys_id, p, images_ext_for_verify, svc=svc,
+                )
+                if p < in_range_expected_matches:
+                    if not (isinstance(out, dict) and out.get('canvas_index') is not None):
+                        broken_reason = (
+                            f"page {p} expected exact canvas match but got "
+                            f"{out!r}"
+                        )
+                        break
+                else:
+                    if out is not None:
+                        broken_reason = (
+                            f"page {p} expected NLI_FALLBACK but got {out!r}"
+                        )
+                        break
+
+        if broken_reason is None:
+            print("RESOLVER CUL-canvas-fix VERIFIED")
+        else:
+            print(f"RESOLVER CUL-canvas-fix BROKEN — {broken_reason}")
 
     elapsed = time.time() - started
     print(f"\n(diagnostic completed in {elapsed:.1f}s)")
