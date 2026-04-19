@@ -4,8 +4,8 @@ milestone: v7.9
 milestone_name: Decomposition
 status: complete
 stopped_at: v7.9 milestone complete — ready for release handoff
-last_updated: "2026-04-17T14:30:00.000Z"
-last_activity: 2026-04-17 -- Phase 76 Documentation Close complete; v7.9 milestone closed; release handoff next
+last_updated: "2026-04-19T00:00:00.000Z"
+last_activity: 2026-04-19 -- Completed quick task 260419-nwv: parse_folio_label bifolio regex fix (CUL image-text mismatch bug); CUL positional follow-up logged in OPEN_ISSUES.md
 progress:
   total_phases: 10
   completed_phases: 10
@@ -65,6 +65,12 @@ See PROJECT.md Key Decisions table for full history.
 
 - DESK-03/DESK-02 shared image helpers: ManuscriptViewerWidget and PuzzleCanvasWindow may share IIIF fetch / image adjustment code. Phase 69 discuss-phase must map this surface before extraction.
 - WEBM-03 architectural risk: page-scoped state refactor changes runtime data flow, not just file layout. Phases 72-73 splits should be stable before attempting.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260419-nwv | Bug: images don't fit the text on paired-leaf CUL shelfmarks (T-S NS 158.112) — parse_folio_label regex fix; CUL positional follow-up logged | 2026-04-19 | 5e87f55d | [260419-nwv-bug-with-some-shelfmarks-images-esp-cul-](./quick/260419-nwv-bug-with-some-shelfmarks-images-esp-cul-/) |
 
 ## Session Continuity
 
