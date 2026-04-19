@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 Milestone: v7.9 Decomposition — COMPLETE (2026-04-17)
 Phases: 10 of 10 complete (67, 68, 69, 70, 71, 72, 73, 74, 75, 76)
 Plans: 23 of 23 complete
-Last activity: 2026-04-17 -- Phase 76 Documentation Close landed CODE_INDEX.md v7.9 section + AST section generator; check_docs green
+Last activity: 2026-04-19 - Completed quick task 260419-cfx: CUL CUDL positional canvas mismatch fixed via folio+side resolver with NLI fallback (web + desktop); H3 retracted
 
 Progress: [██████████] 100%
 
@@ -68,9 +68,10 @@ See PROJECT.md Key Decisions table for full history.
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260419-nwv | Bug: images don't fit the text on paired-leaf CUL shelfmarks (T-S NS 158.112) — parse_folio_label regex fix; CUL positional follow-up logged | 2026-04-19 | 5e87f55d | [260419-nwv-bug-with-some-shelfmarks-images-esp-cul-](./quick/260419-nwv-bug-with-some-shelfmarks-images-esp-cul-/) |
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260419-nwv | Bug: images don't fit the text on paired-leaf CUL shelfmarks (T-S NS 158.112) — parse_folio_label regex fix; CUL positional follow-up logged | 2026-04-19 | 5e87f55d | | [260419-nwv-bug-with-some-shelfmarks-images-esp-cul-](./quick/260419-nwv-bug-with-some-shelfmarks-images-esp-cul-/) |
+| 260419-cfx | CUL CUDL positional canvas mismatch fix (H1) — folio+side resolver + NLI fallback in web `/api/cambridge_image` and desktop browse; H3 retracted (text-layer vs image-layer FL ids, not an IE bug) | 2026-04-19 | a854a5ee | Needs Review | [260419-cfx-cul-cudl-folio-side-mapping](./quick/260419-cfx-cul-cudl-folio-side-mapping/) |
 
 ## Session Continuity
 
