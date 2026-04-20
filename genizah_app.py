@@ -7180,7 +7180,15 @@ class GenizahGUI(QMainWindow):
                     elif _offset < len(all_ext):
                         display_meta['images_ext'] = all_ext[_offset:]
                     if display_meta.get('images_ext'):
-                        display_meta['images'] = display_meta['images_ext']
+                        # 260419-cfx follow-up: prefer NLI when CUDL canvas count
+                        # mismatches NLI/transcription count. CUDL stays available
+                        # for manual switch but is not the implicit default.
+                        _ext_list = display_meta.get('images_ext') or []
+                        _nli_list = display_meta.get('images_nli') or []
+                        if _nli_list and len(_ext_list) != len(_nli_list):
+                            display_meta['images'] = _nli_list
+                        else:
+                            display_meta['images'] = _ext_list
 
             folio_num = _get_folio_number_from_shelfmark(shelf)
             # 260419-cfx: when the active source is Cambridge CUDL, consult
@@ -9003,9 +9011,13 @@ class GenizahGUI(QMainWindow):
             container_layout.addWidget(header)
 
             # Get image URLs
+            # 260419-cfx follow-up: prefer NLI when external count mismatches
             images_nli = meta.get('images_nli', [])
             images_ext = meta.get('images_ext', [])
-            image_list = images_ext if images_ext else images_nli
+            if images_ext and images_nli and len(images_ext) != len(images_nli):
+                image_list = images_nli
+            else:
+                image_list = images_ext if images_ext else images_nli
 
             if not image_list:
                 # Try FL ID fallback
@@ -9359,10 +9371,17 @@ class GenizahGUI(QMainWindow):
                     display_meta['images_ext'] = all_ext[offset:]
 
         # If no external images, use NLI; otherwise prefer external
-        if not display_meta.get('images_ext'):
-            display_meta['images'] = display_meta.get('images_nli', [])
+        # 260419-cfx follow-up: when CUDL canvas count mismatches NLI/transcription
+        # count, default to NLI for the whole manuscript (positional CUDL mapping
+        # would be unreliable). CUDL remains available for manual switch.
+        _ext_list = display_meta.get('images_ext') or []
+        _nli_list = display_meta.get('images_nli') or []
+        if not _ext_list:
+            display_meta['images'] = _nli_list
+        elif _nli_list and len(_ext_list) != len(_nli_list):
+            display_meta['images'] = _nli_list
         else:
-            display_meta['images'] = display_meta['images_ext']
+            display_meta['images'] = _ext_list
 
         # Reload images in viewer
         if hasattr(self, 'browse_viewer') and not self.browse_reading_desk_active:

@@ -3896,8 +3896,16 @@ class MetadataManager:
         if nli_iiif_data.get('canvas_map'):
             current_meta['canvas_map'] = nli_iiif_data['canvas_map']
 
-        # Prioritize External if available, but keep both sets
-        current_meta['images'] = images_ext if images_ext else images_nli
+        # Prioritize External if available, but keep both sets.
+        # 260419-cfx follow-up: when both lists are populated but their counts
+        # disagree (typically Cambridge CUDL vs NLI), default 'images' to NLI
+        # because transcription text is aligned to NLI canvas order. CUDL stays
+        # in images_ext so UI can still offer it as a manual switch.
+        if images_ext and images_nli and len(images_ext) != len(images_nli):
+            current_meta['images'] = images_nli
+            current_meta['external_count_mismatch'] = True
+        else:
+            current_meta['images'] = images_ext if images_ext else images_nli
         current_meta['images_nli'] = images_nli
         current_meta['images_ext'] = images_ext
         current_meta['external_meta'] = external_meta

@@ -3437,7 +3437,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.active_source = 'jts'
                 if _has_manchester_images and state.active_source == 'nli' and not state.source_user_override:
                     state.active_source = 'manchester'
-                if _has_cambridge_images and state.active_source == 'nli' and not state.source_user_override:
+                # 260419-cfx follow-up: only auto-default to Cambridge when CUDL canvas
+                # count matches transcription page count. When they differ (binding
+                # canvases, missing folios, paired-leaf mismatches), positional mapping
+                # is unreliable — prefer NLI as default. User can still manually
+                # switch to Cambridge via the source toggle.
+                _cam_count_matches = (
+                    _has_cambridge_images
+                    and page.total_pages
+                    and len(page.cambridge_images or []) == page.total_pages
+                )
+                if _cam_count_matches and state.active_source == 'nli' and not state.source_user_override:
                     state.active_source = 'cambridge'
 
                 if state.active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
