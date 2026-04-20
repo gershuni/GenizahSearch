@@ -7196,7 +7196,20 @@ class GenizahGUI(QMainWindow):
             # fallback canvas on a shallow copy of display_meta for
             # transcription pages with no matching CUDL canvas (e.g.
             # T-S NS 158.112 pages 13–14 → folios 8r/8v).
-            if self._is_cambridge_display(display_meta) and display_meta.get('images_ext'):
+            # 260419-cfx follow-up: skip the resolver when CUDL canvas count
+            # mismatches NLI count — in that case the viewer defaults to NLI
+            # as a whole and per-page resolution is unnecessary (and would
+            # synthesize images_ext entries that defeat the NLI default).
+            _ext_count = len(display_meta.get('images_ext') or [])
+            _nli_count = len(display_meta.get('images_nli') or [])
+            _skip_cambridge_resolver = (
+                _nli_count > 0 and _ext_count > 0 and _ext_count != _nli_count
+            )
+            if (
+                self._is_cambridge_display(display_meta)
+                and display_meta.get('images_ext')
+                and not _skip_cambridge_resolver
+            ):
                 display_meta, idx = self._resolve_cambridge_page_or_fallback(
                     self.current_browse_sid, self.current_browse_p, display_meta, folio_num,
                 )
@@ -9389,7 +9402,18 @@ class GenizahGUI(QMainWindow):
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
             # 260419-cfx: folio+side resolver for CUDL shelfmarks. See
             # _resolve_cambridge_page_or_fallback docstring.
-            if self._is_cambridge_display(display_meta) and display_meta.get('images_ext'):
+            # 260419-cfx follow-up: skip the resolver when CUDL canvas count
+            # mismatches NLI count (viewer defaults to NLI in that case).
+            _ext_count = len(display_meta.get('images_ext') or [])
+            _nli_count = len(display_meta.get('images_nli') or [])
+            _skip_cambridge_resolver = (
+                _nli_count > 0 and _ext_count > 0 and _ext_count != _nli_count
+            )
+            if (
+                self._is_cambridge_display(display_meta)
+                and display_meta.get('images_ext')
+                and not _skip_cambridge_resolver
+            ):
                 display_meta, idx = self._resolve_cambridge_page_or_fallback(
                     sid, self.current_browse_p, display_meta, folio_num,
                 )
@@ -21283,8 +21307,13 @@ class GenizahGUI(QMainWindow):
             # the resolver can inject a synthetic NLI-fallback entry. The
             # Oxford folio_range branch (L21266-21269) is UNCHANGED — it
             # is gated on oxford_part_id which is never set on CUL CUDL.
+            # 260419-cfx follow-up: also require the viewer to be actively
+            # displaying ext source — when counts mismatch the viewer
+            # defaults to NLI (current_source='nli'), and the Cambridge
+            # resolver would be incorrect routing.
             is_cambridge_nav = (
                 getattr(self.browse_viewer, 'external_provider', None) == 'cambridge'
+                and getattr(self.browse_viewer, 'current_source', None) == 'ext'
             )
             if not folio_in_viewer and folio_num is not None and meta:
                 # Check if this is Oxford with folio_range that includes this folio
@@ -22821,8 +22850,12 @@ class GenizahGUI(QMainWindow):
             # 260419-cfx: composition-summary nav mirrors the browse nav
             # resolver wiring. Cambridge CUDL may need a synthetic NLI
             # fallback when the target folio is outside CUDL coverage.
+            # 260419-cfx follow-up: also require current_source=='ext'; when
+            # counts mismatch the viewer defaults to NLI and the Cambridge
+            # resolver would be incorrect routing.
             is_cambridge_nav = (
                 getattr(self.browse_viewer, 'external_provider', None) == 'cambridge'
+                and getattr(self.browse_viewer, 'current_source', None) == 'ext'
             )
             if is_cambridge_nav:
                 nav_meta, image_idx = self._resolve_cambridge_navigation_index(

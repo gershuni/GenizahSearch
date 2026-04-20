@@ -909,11 +909,27 @@ class ManuscriptViewerWidget(QWidget):
                 ext_label = "JTS/Princeton"
             else:
                 ext_label = "External"
-            self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)} pages)", "ext")
-            if self.images_nli:
+            # 260419-cfx follow-up: when external canvas count mismatches NLI
+            # count, default to NLI (transcription aligns with NLI canvases).
+            # Both sources still appear in the combo so the user can manually
+            # switch. Oxford is exempt — it doesn't have a parallel NLI list
+            # in the same sense and its positional mapping is handled elsewhere.
+            _count_mismatch = (
+                self.external_provider != "oxford"
+                and self.images_nli
+                and len(self.images_ext) != len(self.images_nli)
+            )
+            if _count_mismatch:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)} pages)", "nli")
-            self.active_list = self.images_ext
-            self.current_source = "ext"
+                self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)} pages)", "ext")
+                self.active_list = self.images_nli
+                self.current_source = "nli"
+            else:
+                self.combo_source.addItem(f"{ext_label} ({len(self.images_ext)} pages)", "ext")
+                if self.images_nli:
+                    self.combo_source.addItem(f"NLI ({len(self.images_nli)} pages)", "nli")
+                self.active_list = self.images_ext
+                self.current_source = "ext"
         elif self.images_nli:
             self.combo_source.addItem(f"NLI ({len(self.images_nli)} pages)", "nli")
             self.active_list = self.images_nli
