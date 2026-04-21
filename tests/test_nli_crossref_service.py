@@ -903,6 +903,75 @@ def test_get_jts_dpul_url_base_fallback(service):
     assert url == "https://dpul.princeton.edu/cairo_geniza/catalog/def456"
 
 
+# ── Ms./MS. prefix handling (260421-aln L81 fix) ──────────────────
+
+
+def test_get_jts_manifest_url_strips_ms_prefix(service):
+    """NLI MARC 942$z prepends ``Ms. `` to JTS shelfmarks but jts_dpul
+    stores the bare form. Lookup must match after stripping."""
+    url = service.get_jts_manifest_url("Ms. ENA 2345.1")
+    assert url == "https://figgy.princeton.edu/concern/scanned_resources/abc123/manifest"
+
+
+def test_get_jts_manifest_url_strips_ms_caps_prefix(service):
+    """Uppercase ``MS. `` prefix also stripped."""
+    url = service.get_jts_manifest_url("MS. ENA 2345.1")
+    assert url == "https://figgy.princeton.edu/concern/scanned_resources/abc123/manifest"
+
+
+def test_get_jts_manifest_url_ms_prefix_plus_leaf_strip(service):
+    """Combination: ``Ms. ENA 9999.5`` → strips prefix, then falls back to base."""
+    url = service.get_jts_manifest_url("Ms. ENA 9999.5")
+    assert url == "https://figgy.princeton.edu/concern/scanned_resources/def456/manifest"
+
+
+def test_get_jts_dpul_url_strips_ms_prefix(service):
+    """DPUL URL lookup mirrors manifest URL lookup — Ms. prefix tolerated."""
+    url = service.get_jts_dpul_url("Ms. ENA 2345.1")
+    assert url == "https://dpul.princeton.edu/cairo_geniza/catalog/abc123"
+
+
+def test_jts_shelfmark_variants_order():
+    """Variant order is most-specific first, de-duplicated."""
+    from shared.nli_crossref_service import _jts_shelfmark_variants
+    assert _jts_shelfmark_variants("Ms. ENA 1052.1") == [
+        "Ms. ENA 1052.1", "ENA 1052.1", "Ms. ENA 1052", "ENA 1052",
+    ]
+    assert _jts_shelfmark_variants("ENA 1052.1") == ["ENA 1052.1", "ENA 1052"]
+    assert _jts_shelfmark_variants("") == []
+
+
+def test_jts_shelfmark_variants_no_ms_no_suffix():
+    """Bare shelfmark with no Ms. prefix and no leaf suffix → single entry."""
+    from shared.nli_crossref_service import _jts_shelfmark_variants
+    assert _jts_shelfmark_variants("ENA 2345") == ["ENA 2345"]
+
+
+def test_get_jts_urls_for_sys_id_joins_nli_images(service):
+    """Single-JOIN sys_id lookup finds JTS manifest without iterating
+    user-facing shelfmark variants. Matches when nli_images.Shelfmark
+    exactly matches a jts_dpul.shelfmark row."""
+    # Fixture A002 has nli_images.Shelfmark='ENA 2345.1' (see test_db fixture)
+    # which exactly matches jts_dpul PK 'ENA 2345.1'.
+    out = service.get_jts_urls_for_sys_id("A002")
+    assert out is not None
+    assert out['shelfmark'] == "ENA 2345.1"
+    assert out['manifest_url'] == "https://figgy.princeton.edu/concern/scanned_resources/abc123/manifest"
+    assert out['dpul_url'] == "https://dpul.princeton.edu/cairo_geniza/catalog/abc123"
+
+
+def test_get_jts_urls_for_sys_id_no_match(service):
+    """Sys_id with nli_images but no jts_dpul row → None."""
+    # A001 has Shelfmark 'T-S 12.123' which isn't in jts_dpul
+    assert service.get_jts_urls_for_sys_id("A001") is None
+
+
+def test_get_jts_urls_for_sys_id_empty_input(service):
+    """Guards: empty sys_id or missing DB connection."""
+    assert service.get_jts_urls_for_sys_id("") is None
+    assert service.get_jts_urls_for_sys_id("UNKNOWN_SYS") is None
+
+
 def test_get_jts_dpul_url_not_found(service):
     """Returns None for unknown shelfmark."""
     assert service.get_jts_dpul_url("UNKNOWN 000") is None

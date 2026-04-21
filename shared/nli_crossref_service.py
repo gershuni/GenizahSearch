@@ -558,11 +558,16 @@ class NliCrossrefService:
         """
         Get JTS Figgy IIIF manifest URL for a shelfmark.
 
-        Tries the full shelfmark first, then strips any trailing leaf suffix
-        (e.g., '.1', '.2') and retries with the base shelfmark.
+        Tries each variant in turn: the full shelfmark as given, the
+        shelfmark without a leading ``Ms. `` / ``MS. `` prefix (NLI MARC
+        942$z uses this prefix for JTS holdings, e.g. ``Ms. ENA 1052.1``,
+        while ``jts_dpul.shelfmark`` stores the bare form ``ENA 1052.1``),
+        and finally each of the above with any trailing ``.N`` leaf
+        suffix stripped.
 
         Args:
-            shelfmark: JTS shelfmark (e.g., 'ENA 2573.1' or 'ENA 2573').
+            shelfmark: JTS shelfmark (e.g., 'ENA 2573.1', 'ENA 2573',
+                'Ms. ENA 1052.1').
 
         Returns:
             Figgy manifest URL string or None if not found / table missing.
@@ -570,39 +575,67 @@ class NliCrossrefService:
         if self._conn is None or not shelfmark:
             return None
         try:
-            # Try full shelfmark first
-            cursor = self._conn.execute(
-                "SELECT manifest_url FROM jts_dpul WHERE shelfmark = ?",
-                (shelfmark,),
-            )
-            row = cursor.fetchone()
-            if row:
-                return row["manifest_url"]
-
-            # Try base shelfmark (strip trailing .N leaf suffix)
-            base = re.sub(r'\.\d+$', '', shelfmark)
-            if base != shelfmark:
+            for variant in _jts_shelfmark_variants(shelfmark):
                 cursor = self._conn.execute(
                     "SELECT manifest_url FROM jts_dpul WHERE shelfmark = ?",
-                    (base,),
+                    (variant,),
                 )
                 row = cursor.fetchone()
                 if row:
                     return row["manifest_url"]
-
             return None
         except Exception as e:
             logger.debug(f"NliCrossrefService.get_jts_manifest_url error: {e}")
+            return None
+
+    def get_jts_urls_for_sys_id(self, sys_id: str) -> Optional[dict]:
+        """Find JTS manifest + DPUL URLs using the canonical
+        ``nli_images.Shelfmark`` for ``sys_id``, not the user-facing
+        shelfmark string.
+
+        ``jts_dpul.shelfmark`` stores the bare JTS form (e.g.
+        ``"ENA 1052.1"``), which is also what ``nli_images.Shelfmark``
+        carries. csv_bank-derived shelfmarks pass through abbreviation
+        prefixes (``"Ms. 1052.1"``) or catalog-wrapper strings
+        (``"The Jewish Theological Seminary... Ms. ENA 1052.1"``) that
+        won't match; iterating every call_number variant is wasteful.
+        One JOIN keyed on sys_id is enough.
+
+        Returns ``{"shelfmark", "manifest_url", "dpul_url"}`` for the
+        first matching nli_images row, or None when no match exists.
+        """
+        if self._conn is None or not sys_id:
+            return None
+        try:
+            row = self._conn.execute(
+                "SELECT j.shelfmark, j.manifest_url, j.dpul_url "
+                "FROM nli_images n JOIN jts_dpul j "
+                "ON n.Shelfmark = j.shelfmark "
+                "WHERE n.NLI_AlmaId = ? LIMIT 1",
+                (sys_id,),
+            ).fetchone()
+            if row:
+                return {
+                    'shelfmark': row['shelfmark'],
+                    'manifest_url': row['manifest_url'],
+                    'dpul_url': row['dpul_url'],
+                }
+            return None
+        except Exception as e:
+            logger.debug(f"NliCrossrefService.get_jts_urls_for_sys_id error: {e}")
             return None
 
     def get_jts_dpul_url(self, shelfmark: str) -> Optional[str]:
         """
         Get JTS/Princeton DPUL catalog page URL for a shelfmark.
 
-        Same base/full shelfmark logic as get_jts_manifest_url.
+        Same variant-matching logic as get_jts_manifest_url: tries the
+        shelfmark as given, with any leading ``Ms. ``/``MS. `` stripped,
+        and with trailing ``.N`` leaf suffixes stripped.
 
         Args:
-            shelfmark: JTS shelfmark (e.g., 'ENA 2573.1' or 'ENA 2573').
+            shelfmark: JTS shelfmark (e.g., 'ENA 2573.1', 'ENA 2573',
+                'Ms. ENA 1052.1').
 
         Returns:
             DPUL catalog URL string or None if not found / table missing.
@@ -610,26 +643,14 @@ class NliCrossrefService:
         if self._conn is None or not shelfmark:
             return None
         try:
-            # Try full shelfmark first
-            cursor = self._conn.execute(
-                "SELECT dpul_url FROM jts_dpul WHERE shelfmark = ?",
-                (shelfmark,),
-            )
-            row = cursor.fetchone()
-            if row:
-                return row["dpul_url"]
-
-            # Try base shelfmark (strip trailing .N leaf suffix)
-            base = re.sub(r'\.\d+$', '', shelfmark)
-            if base != shelfmark:
+            for variant in _jts_shelfmark_variants(shelfmark):
                 cursor = self._conn.execute(
                     "SELECT dpul_url FROM jts_dpul WHERE shelfmark = ?",
-                    (base,),
+                    (variant,),
                 )
                 row = cursor.fetchone()
                 if row:
                     return row["dpul_url"]
-
             return None
         except Exception as e:
             logger.debug(f"NliCrossrefService.get_jts_dpul_url error: {e}")
@@ -947,6 +968,50 @@ def reset_nli_crossref_service():
 
 _DEGRADED: dict = {'degraded': True}
 _SIDE_FROM_LABEL_RE = re.compile(r'^(\d+)([rv])?$', re.IGNORECASE)
+
+# NLI MARC 942$z returns JTS shelfmarks with a leading ``Ms. `` / ``MS. ``
+# abbreviation (e.g. ``Ms. ENA 1052.1``), but jts_dpul.shelfmark stores
+# the bare form (``ENA 1052.1``). Strip these prefixes so the exact-match
+# lookup in get_jts_manifest_url / get_jts_dpul_url does not miss.
+_MS_PREFIX_RE = re.compile(r'^\s*ms\.?\s+', re.IGNORECASE)
+
+
+def _jts_shelfmark_variants(shelfmark: str) -> list[str]:
+    """Yield lookup variants for a JTS shelfmark, most-specific first.
+
+    For ``"Ms. ENA 1052.1"`` returns::
+
+        ["Ms. ENA 1052.1", "ENA 1052.1", "Ms. ENA 1052", "ENA 1052"]
+
+    For ``"ENA 1052.1"`` returns::
+
+        ["ENA 1052.1", "ENA 1052"]
+
+    Duplicates are removed while preserving order. Callers iterate and
+    query each variant against jts_dpul.shelfmark in turn.
+    """
+    if not shelfmark:
+        return []
+    variants: list[str] = []
+
+    def _add(s: str) -> None:
+        if s and s not in variants:
+            variants.append(s)
+
+    raw = shelfmark.strip()
+    _add(raw)
+
+    # Strip leading "Ms. " / "MS. " / "Ms " / "MS "
+    no_ms = _MS_PREFIX_RE.sub('', raw).strip()
+    _add(no_ms)
+
+    # For each form so far, add the base (trailing ".N" leaf stripped)
+    for v in list(variants):
+        base = re.sub(r'\.\d+$', '', v)
+        if base != v:
+            _add(base)
+
+    return variants
 
 
 def _extract_side_from_nli_label(folio_label: str) -> Optional[str]:
