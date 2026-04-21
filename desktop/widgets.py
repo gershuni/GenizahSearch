@@ -91,7 +91,30 @@ def _get_folio_number_from_shelfmark(shelfmark):
         return None
 
 
-def _get_folio_image_index(meta, folio_num, side_offset=0):
+def _get_folio_image_index(meta, folio_num=None, side_offset=0, *, page_num=None):
+    """Return the image index for (folio_num, side_offset), or positional
+    page_num when the caller has no folio.
+
+    260421-aln follow-up: callers previously passed
+    ``folio_num if folio_num is not None else self.current_browse_p`` in
+    the ``folio_num`` position, which caused the helper to folio-search
+    with a value that was actually a 1-indexed page number. New callers
+    should pass ``folio_num`` and ``page_num`` separately; the helper
+    uses folio_num when available and falls back to positional page_num
+    otherwise. side_offset is ignored in the positional branch because
+    the page number already encodes the side (odd = recto, even = verso
+    for manuscripts that start at recto).
+    """
+    if folio_num is None and page_num is not None:
+        images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+        try:
+            idx = max(int(page_num) - 1, 0)
+        except (TypeError, ValueError):
+            return 0
+        if images and idx >= len(images):
+            idx = len(images) - 1
+        return idx
+
     base_idx = _get_initial_image_index(meta, folio_num)
     if side_offset <= 0:
         return base_idx
@@ -154,37 +177,77 @@ def _get_folio_side_image_index(meta, folio_num, side):
     return None
 
 
-def _get_initial_image_index(meta, page_num):
-    if page_num is None:
-        return 0
-    try:
-        p_num = int(page_num)
-    except (TypeError, ValueError):
-        return 0
+def _get_initial_image_index(meta, folio_num=None, *, page_num=None):
+    """Find the canvas index for a target folio or transcription page.
 
-    images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
-    folio_entries = []
-    for idx, img in enumerate(images):
-        folio_num = img.get('folio_num')
-        if folio_num is None:
-            continue
+    260421-aln follow-up: the old single-parameter signature
+    (``page_num``) was a misnomer — callers were passing folio numbers
+    (from shelfmark extraction, e.g. ``T-S 12.34.2`` → 2) while the
+    body interpreted them semantically as page numbers, but simultaneously
+    searched the image list for ``folio_num == p_num``. When a caller
+    DID pass a 1-indexed transcription page number as a fallback (because
+    the shelfmark had no folio), the function searched images_ext for
+    a canvas with matching folio_num — returning the wrong image for
+    manuscripts where transcription page N ≠ folio N (e.g. T-S NS 158.112
+    where transcription page 3 = folio 2r).
+
+    New signature: either ``folio_num`` (search image list by folio) or
+    ``page_num`` (positional 1-indexed), never both. The second positional
+    arg is still ``folio_num`` for backward compatibility with existing
+    callers, but new callers should be explicit.
+
+    Args:
+        meta: metadata dict (uses ``images_ext`` or ``images``).
+        folio_num: Folio number extracted from a shelfmark (e.g. 2 from
+            "T-S 12.34.2"). Searches the image list for a matching
+            ``folio_num``; falls back to the nearest prior folio, then
+            the first folio.
+        page_num: 1-indexed transcription page number. Returns
+            ``max(page_num - 1, 0)`` — positional behavior, no folio
+            lookup.
+
+    Returns:
+        Canvas index in ``images_ext`` / ``images`` (clamped to list
+        bounds implicitly by the positional path; folio search returns
+        a valid index into the populated folio_entries list).
+    """
+    if folio_num is not None:
         try:
-            folio_entries.append((idx, int(folio_num)))
+            fn = int(folio_num)
         except (TypeError, ValueError):
-            continue
+            return 0
 
-    if not folio_entries:
-        return max(p_num - 1, 0)
+        images = (meta or {}).get('images_ext') or (meta or {}).get('images') or []
+        folio_entries = []
+        for idx, img in enumerate(images):
+            fnum = img.get('folio_num')
+            if fnum is None:
+                continue
+            try:
+                folio_entries.append((idx, int(fnum)))
+            except (TypeError, ValueError):
+                continue
 
-    for idx, folio_num in folio_entries:
-        if folio_num == p_num:
-            return idx
+        if not folio_entries:
+            return max(fn - 1, 0)
 
-    prior = [(idx, folio_num) for idx, folio_num in folio_entries if folio_num <= p_num]
-    if prior:
-        return max(prior, key=lambda pair: pair[1])[0]
+        for idx, fnum in folio_entries:
+            if fnum == fn:
+                return idx
 
-    return min(folio_entries, key=lambda pair: pair[1])[0]
+        prior = [(idx, f) for idx, f in folio_entries if f <= fn]
+        if prior:
+            return max(prior, key=lambda pair: pair[1])[0]
+
+        return min(folio_entries, key=lambda pair: pair[1])[0]
+
+    if page_num is not None:
+        try:
+            return max(int(page_num) - 1, 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return 0
 
 
 class ShelfmarkCompleter(QCompleter):
