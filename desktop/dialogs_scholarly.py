@@ -438,6 +438,7 @@ class FjmsCatalogDialog(QDialog):
             for team in teams:
                 folios = [self._fmt_int(r.get("num_folio")) for r in team["records"]
                           if r.get("num_folio") and str(r["num_folio"]).strip() and str(r["num_folio"]).strip() != '0']
+                folios = self._dedup_preserve_order(folios)
                 folio_vals.append(', '.join(folios) if folios else '')
             html_parts.append(self._field_row(tr('Number of Folios'), folio_vals, is_heb))
 
@@ -446,6 +447,7 @@ class FjmsCatalogDialog(QDialog):
             for team in teams:
                 bifolios = [self._fmt_int(r.get("num_bifolio")) for r in team["records"]
                             if r.get("num_bifolio") and str(r["num_bifolio"]).strip() and str(r["num_bifolio"]).strip() != '0']
+                bifolios = self._dedup_preserve_order(bifolios)
                 bifolio_vals.append(', '.join(bifolios) if bifolios else '')
             html_parts.append(self._field_row(tr('Number of Bifolios'), bifolio_vals, is_heb))
 
@@ -473,6 +475,7 @@ class FjmsCatalogDialog(QDialog):
                                 display_parts.append(content)
                             if display_parts:
                                 categories.append(' '.join(display_parts))
+                categories = self._dedup_preserve_order(categories)
                 domain_vals.append('; '.join(categories) if categories else '')
             html_parts.append(self._field_row(tr('Domain'), domain_vals, is_heb))
 
@@ -494,6 +497,7 @@ class FjmsCatalogDialog(QDialog):
             rt_vals = []
             for team in teams:
                 titles = []
+                seen_rt_origs = set()
                 for rec in team["records"]:
                     rec_id = rec.get("unit_catalog_rec_id")
                     if rec_id and rec_id in running_titles:
@@ -501,6 +505,9 @@ class FjmsCatalogDialog(QDialog):
                             rt_text = rt.get("running_title", "")
                             if rt_text and str(rt_text).strip():
                                 orig = str(rt_text).strip()
+                                if orig in seen_rt_origs:
+                                    continue
+                                seen_rt_origs.add(orig)
                                 _trans_entry = _rt_trans_map.get(rec_id) if _rt_trans_map else None
                                 trans = ''
                                 _trans_dir = None
@@ -546,6 +553,7 @@ class FjmsCatalogDialog(QDialog):
                 dc_vals = []
                 for team in teams:
                     frames = []
+                    seen_tf_origs = set()
                     for rec in team["records"]:
                         rec_id = rec.get("unit_catalog_rec_id")
                         if rec_id and rec_id in textual_frames:
@@ -559,6 +567,9 @@ class FjmsCatalogDialog(QDialog):
                                 if not text or not str(text).strip():
                                     continue
                                 orig = str(text).strip()
+                                if orig in seen_tf_origs:
+                                    continue
+                                seen_tf_origs.add(orig)
                                 # In EN UI, try to find he2en translation for Hebrew text
                                 _tf_entry = _tf_trans_map.get(str(heb_text).strip()) if heb_text and _tf_trans_map else None
                                 if _tf_entry and not is_heb:
@@ -589,6 +600,7 @@ class FjmsCatalogDialog(QDialog):
             gt_vals = []
             for team in teams:
                 titles = []
+                seen_gt_origs = set()
                 for rec in team["records"]:
                     gt_org = rec.get("genizah_title_org")
                     gt_eng = rec.get("genizah_title_eng")
@@ -598,6 +610,9 @@ class FjmsCatalogDialog(QDialog):
                         gt = gt_eng if gt_eng and str(gt_eng).strip() else gt_org
                     if gt and str(gt).strip():
                         orig = str(gt).strip()
+                        if orig in seen_gt_origs:
+                            continue
+                        seen_gt_origs.add(orig)
                         # In EN UI with Hebrew title (no gt_eng), try he2en translation
                         _gt_entry = None
                         if not is_heb and gt_org and not (gt_eng and str(gt_eng).strip()):
@@ -642,6 +657,7 @@ class FjmsCatalogDialog(QDialog):
                                         name = m.get("mention", "")
                                         if name and str(name).strip():
                                             names.append(str(name).strip())
+                        names = self._dedup_preserve_order(names)
                         mn_vals.append(', '.join(names) if names else '')
                     html_parts.append(self._field_row(tr(mention_type), mn_vals, is_heb))
 
@@ -662,6 +678,7 @@ class FjmsCatalogDialog(QDialog):
             for team in teams:
                 rows = [str(r.get("num_row", "")).strip() for r in team["records"]
                         if r.get("num_row") and str(r["num_row"]).strip() and str(r["num_row"]).strip() != '0']
+                rows = self._dedup_preserve_order(rows)
                 row_vals.append(', '.join(rows) if rows else '')
             html_parts.append(self._field_row(tr('Number of Lines'), row_vals, is_heb))
 
@@ -670,6 +687,7 @@ class FjmsCatalogDialog(QDialog):
             for team in teams:
                 cols = [str(r.get("num_column", "")).strip() for r in team["records"]
                         if r.get("num_column") and str(r["num_column"]).strip() and str(r["num_column"]).strip() != '0']
+                cols = self._dedup_preserve_order(cols)
                 col_vals.append(', '.join(cols) if cols else '')
             html_parts.append(self._field_row(tr('Number of Columns'), col_vals, is_heb))
 
@@ -697,6 +715,7 @@ class FjmsCatalogDialog(QDialog):
                                     dim += f" ({tr('Inner Size')}: {self._fmt_num(isx)} \u00d7 {self._fmt_num(isy)})"
                                 dim += " mm"
                                 size_parts.append(dim)
+                size_parts = self._dedup_preserve_order(size_parts)
                 size_vals.append('; '.join(size_parts) if size_parts else '')
             html_parts.append(self._field_row(tr('Size'), size_vals, is_heb))
 
@@ -841,6 +860,29 @@ class FjmsCatalogDialog(QDialog):
             f'padding:8px; color:{c["section_text"]}; font-size:13px;">{title}</td></tr>'
         )
 
+    @staticmethod
+    def _dedup_preserve_order(values):
+        """Return a list with consecutive/global string duplicates removed,
+        preserving first-occurrence order. Empty/whitespace values are
+        dropped. Used so that per-record loops that emit the same value
+        N times (e.g. 5 Uri Ehrlich records all carrying NumFolio=6 /
+        Material='קלף' / 'Qiddus, Psalms and tahanun.') render as one
+        value, not a ``6, 6, 6, 6, 6`` visual repeat.
+        """
+        seen = set()
+        out = []
+        for v in values:
+            if v is None:
+                continue
+            sv = str(v).strip()
+            if not sv:
+                continue
+            if sv in seen:
+                continue
+            seen.add(sv)
+            out.append(sv)
+        return out
+
     def _field_row(self, label: str, values: list, is_heb: bool) -> str:
         """Build a field row: label + value columns. RTL: values first, label last.
         Qt handles text alignment via app-level layout direction. Returns '' if all values empty."""
@@ -874,6 +916,7 @@ class FjmsCatalogDialog(QDialog):
                             val = fv.get("value") or fv.get("value_heb")
                         if val and str(val).strip():
                             field_vals.append(str(val).strip())
+            field_vals = self._dedup_preserve_order(field_vals)
             vals.append('; '.join(field_vals) if field_vals else '')
         return self._field_row(label, vals, is_heb)
 
