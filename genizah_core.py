@@ -3560,6 +3560,40 @@ class MetadataManager:
 
     # Separate manifest cache keyed by (sys_id, suffix) — does NOT touch nli_cache
     _iiif_manifest_cache = {}
+    # 260421 follow-up (L81 lag): per-sys_id negative cache + global
+    # circuit breaker for NLI. The negative cache prevents re-trying the
+    # SAME failed sys_id within TTL; the circuit breaker trips after 3
+    # consecutive failures across ANY sys_id and skips NLI entirely for
+    # CIRCUIT_WINDOW seconds, so navigating through a batch of JTS
+    # manuscripts doesn't re-burn the timeout on each one when NLI's
+    # host is down.
+    _iiif_manifest_fail_cache: dict = {}  # {(sys_id, suffix): timestamp}
+    _marc_fail_cache: dict = {}  # {sys_id: timestamp}
+    _NLI_FAIL_TTL = 60  # seconds
+    _nli_consecutive_failures = 0
+    _nli_circuit_open_until = 0.0
+    _NLI_CIRCUIT_THRESHOLD = 3
+    _NLI_CIRCUIT_WINDOW = 60  # seconds
+
+    @classmethod
+    def _nli_circuit_is_open(cls) -> bool:
+        """True when the circuit breaker has tripped and NLI should be skipped."""
+        import time
+        return time.time() < cls._nli_circuit_open_until
+
+    @classmethod
+    def _nli_record_failure(cls) -> None:
+        """Count an NLI failure. Trips the circuit when threshold reached."""
+        import time
+        cls._nli_consecutive_failures += 1
+        if cls._nli_consecutive_failures >= cls._NLI_CIRCUIT_THRESHOLD:
+            cls._nli_circuit_open_until = time.time() + cls._NLI_CIRCUIT_WINDOW
+
+    @classmethod
+    def _nli_record_success(cls) -> None:
+        """Reset the failure counter after a successful NLI call."""
+        cls._nli_consecutive_failures = 0
+        cls._nli_circuit_open_until = 0.0
 
     def fetch_iiif_manifest(self, system_id, suffix=1):
         """Fetch and parse IIIF manifest for physical description, attribution, and image labels.
@@ -3568,10 +3602,22 @@ class MetadataManager:
             system_id: NLI system ID
             suffix: IE suffix for multi-volume manuscripts (1=primary, 2=second IE, etc.)
         """
+        import time
         # Check manifest-only cache first
         cache_key = (system_id, suffix)
         if cache_key in self._iiif_manifest_cache:
             return self._iiif_manifest_cache[cache_key]
+
+        # Circuit breaker: if NLI has been failing consistently, skip
+        # entirely without burning another timeout on this sys_id.
+        if self._nli_circuit_is_open():
+            return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
+
+        # Negative cache: if this sys_id recently timed out, return empty
+        # without re-trying. TTL lets the cache age out so recovery works.
+        fail_ts = self._iiif_manifest_fail_cache.get(cache_key)
+        if fail_ts is not None and time.time() - fail_ts < self._NLI_FAIL_TTL:
+            return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
 
         url = f"{Config.NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
         headers = Config.HTTP_HEADERS
@@ -3579,7 +3625,7 @@ class MetadataManager:
         result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
         try:
             session = self._make_session()
-            resp = session.get(url, headers=headers, timeout=10, verify=True)
+            resp = session.get(url, headers=headers, timeout=5, verify=True)
             if resp.status_code == 200:
                 data = resp.json()
 
@@ -3610,13 +3656,18 @@ class MetadataManager:
                                 result['canvas_map'][fl_digits] = label
 
             self._iiif_manifest_cache[cache_key] = result
+            self._iiif_manifest_fail_cache.pop(cache_key, None)
+            self._nli_record_success()
             return result
         except Exception as e:
             LOGGER.warning(f"IIIF fetch failed for {system_id} (suffix={suffix}): {e}")
+            self._iiif_manifest_fail_cache[cache_key] = time.time()
+            self._nli_record_failure()
             return result
 
     def fetch_marc_data(self, system_id):
         """Fetch and parse MARC XML for bibliography, notes, and extended metadata."""
+        import time
         # Use the specific IIIF/MARC endpoint which is more reliable
         url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
         headers = Config.HTTP_HEADERS
@@ -3637,9 +3688,19 @@ class MetadataManager:
             'external_iiif_link': None
         }
 
+        # 260421 follow-up (L81 lag): circuit breaker + per-sys_id negative
+        # cache so failed MARC fetches don't re-burn timeout on every
+        # navigation. Circuit breaker trips across ALL sys_ids after 3
+        # consecutive failures so a dead NLI host doesn't gate navigation.
+        if self._nli_circuit_is_open():
+            return result
+        fail_ts = self._marc_fail_cache.get(system_id)
+        if fail_ts is not None and time.time() - fail_ts < self._NLI_FAIL_TTL:
+            return result
+
         try:
             session = self._make_session()
-            resp = session.get(url, headers=headers, timeout=10)
+            resp = session.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:
                 # Remove namespaces to simplify parsing
                 xml_content = re.sub(r'\sxmlns="[^"]+"', '', resp.text, count=1)
@@ -3709,15 +3770,41 @@ class MetadataManager:
 
                     elif tag == '942': # Alt Shelfmark
                         val = get_sub('z')
-                        if val: result['shelfmark_alt'] = val
+                        # NLI MARC has multiple 942 datafields: one for the
+                        # owning library (holds the real shelfmark, e.g.
+                        # "Ms. ENA 1052.1") and one for FGP (holds a
+                        # numeric photo ID like "4677401"). Prefer the
+                        # first non-numeric $z so we do not clobber the
+                        # shelfmark with the FGP ID.
+                        if val and not result.get('shelfmark_alt'):
+                            result['shelfmark_alt'] = val
+                        elif val and val.isdigit():
+                            # Numeric $z is an FGP/ARK id, not a shelfmark.
+                            # Skip when we already have a non-numeric one.
+                            prior = result.get('shelfmark_alt', '')
+                            if prior and not prior.isdigit():
+                                pass  # keep the real shelfmark
+                            else:
+                                result['shelfmark_alt'] = val
+                        elif val:
+                            # Non-numeric $z and we already had something.
+                            # Prefer the most-recent non-numeric (unlikely
+                            # to have two real shelfmarks, but if we do,
+                            # the later one usually wins for consistency
+                            # with older behavior).
+                            result['shelfmark_alt'] = val
 
                     elif tag == '597': # Image credit / attribution
                         val = get_sub('a')
                         if val: result['attribution'] = val
 
+            self._marc_fail_cache.pop(system_id, None)
+            self._nli_record_success()
             return result
         except Exception as e:
             LOGGER.warning(f"MARC fetch failed for {system_id}: {e}")
+            self._marc_fail_cache[system_id] = time.time()
+            self._nli_record_failure()
             return result
 
     def enrich_metadata(self, system_id, suffix=1):
@@ -3816,18 +3903,22 @@ class MetadataManager:
                 ext_link = '__manchester_direct__'
                 LOGGER.info(f"Using {len(manchester_canvases)} Manchester LUNA canvases for {system_id}")
 
-        # 2a-jts: if no external link yet, try JTS Figgy manifest via crossref sidecar
+        # 2a-jts: if no external link yet, try JTS Figgy manifest via crossref sidecar.
+        # 260421 follow-up (L81): look up by sys_id (single JOIN on
+        # nli_images ↔ jts_dpul) rather than iterating user-facing
+        # call_number variants. The nli_images.Shelfmark column already
+        # stores the canonical bare form ("ENA 1052.1") that jts_dpul
+        # is keyed on, so one query replaces up to 16 variant lookups.
         if not ext_link and crossref_svc and crossref_svc.is_available():
-            jts_shelfmark = current_meta.get('shelfmark', '')
-            if jts_shelfmark:
-                jts_manifest = crossref_svc.get_jts_manifest_url(jts_shelfmark)
-                if jts_manifest:
-                    ext_link = jts_manifest
-                    # external_url should be the catalog page, not the manifest
-                    jts_dpul_page = crossref_svc.get_jts_dpul_url(jts_shelfmark)
-                    current_meta['external_url'] = jts_dpul_page or ext_link
-                    current_meta['external_provider'] = 'jts'
-                    LOGGER.info(f"Using JTS Figgy manifest for {system_id}")
+            jts_urls = crossref_svc.get_jts_urls_for_sys_id(system_id)
+            if jts_urls and jts_urls.get('manifest_url'):
+                ext_link = jts_urls['manifest_url']
+                current_meta['external_url'] = jts_urls.get('dpul_url') or ext_link
+                current_meta['external_provider'] = 'jts'
+                LOGGER.info(
+                    f"Using JTS Figgy manifest for {system_id} "
+                    f"(nli_images.Shelfmark={jts_urls.get('shelfmark')!r})"
+                )
 
         # 2a. Fetch External IIIF (Cambridge / JTS — Manchester already resolved above)
         if ext_link and ext_link != '__manchester_direct__':
@@ -4030,7 +4121,10 @@ class MetadataManager:
 
         try:
             session = self._make_session()
-            resp = session.get(manifest_url, timeout=10)
+            # 260421 follow-up (L81 lag): 10s was overkill — Figgy/CUDL
+            # normally respond in <2s. Shorten so a slow external host
+            # does not gate the whole browse navigation.
+            resp = session.get(manifest_url, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
 
