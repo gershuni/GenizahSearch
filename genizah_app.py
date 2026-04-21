@@ -7180,30 +7180,47 @@ class GenizahGUI(QMainWindow):
                     elif _offset < len(all_ext):
                         display_meta['images_ext'] = all_ext[_offset:]
                     if display_meta.get('images_ext'):
-                        # 260419-cfx follow-up: prefer NLI when CUDL canvas count
-                        # mismatches NLI/transcription count. CUDL stays available
-                        # for manual switch but is not the implicit default.
+                        # 260419-cfx / 260421-aln: prefer NLI when CUDL is
+                        # misaligned per classify_cambridge_alignment (count
+                        # OR per-position mismatch). CUDL stays available for
+                        # manual switch. Fall back to legacy length check
+                        # when the verdict was not computed (non-CUL Cambridge
+                        # or sidecar unavailable).
                         _ext_list = display_meta.get('images_ext') or []
                         _nli_list = display_meta.get('images_nli') or []
-                        if _nli_list and len(_ext_list) != len(_nli_list):
+                        _align = display_meta.get('cambridge_alignment') or {}
+                        _misaligned = (
+                            _align.get('verdict') == 'misaligned'
+                            or (
+                                not _align
+                                and _nli_list
+                                and len(_ext_list) != len(_nli_list)
+                            )
+                        )
+                        if _misaligned:
                             display_meta['images'] = _nli_list
                         else:
                             display_meta['images'] = _ext_list
 
             folio_num = _get_folio_number_from_shelfmark(shelf)
-            # 260419-cfx: when the active source is Cambridge CUDL, consult
-            # the folio+side resolver. It may inject a synthetic NLI
-            # fallback canvas on a shallow copy of display_meta for
-            # transcription pages with no matching CUDL canvas (e.g.
-            # T-S NS 158.112 pages 13–14 → folios 8r/8v).
-            # 260419-cfx follow-up: skip the resolver when CUDL canvas count
-            # mismatches NLI count — in that case the viewer defaults to NLI
-            # as a whole and per-page resolution is unnecessary (and would
-            # synthesize images_ext entries that defeat the NLI default).
+            # 260419-cfx / 260421-aln: when the active source is Cambridge
+            # CUDL, consult the folio+side resolver. It may inject a
+            # synthetic NLI fallback canvas on a shallow copy of
+            # display_meta for transcription pages with no matching CUDL
+            # canvas (e.g. T-S NS 158.112 pages 13–14 → folios 8r/8v).
+            # Skip the resolver when CUDL is misaligned at the manuscript
+            # level — the viewer defaults to NLI in that case and per-page
+            # resolution is unnecessary (and would synthesize images_ext
+            # entries that defeat the NLI default).
             _ext_count = len(display_meta.get('images_ext') or [])
             _nli_count = len(display_meta.get('images_nli') or [])
+            _align = display_meta.get('cambridge_alignment') or {}
             _skip_cambridge_resolver = (
-                _nli_count > 0 and _ext_count > 0 and _ext_count != _nli_count
+                _align.get('verdict') == 'misaligned'
+                or (
+                    not _align
+                    and _nli_count > 0 and _ext_count > 0 and _ext_count != _nli_count
+                )
             )
             if (
                 self._is_cambridge_display(display_meta)
@@ -9384,14 +9401,21 @@ class GenizahGUI(QMainWindow):
                     display_meta['images_ext'] = all_ext[offset:]
 
         # If no external images, use NLI; otherwise prefer external
-        # 260419-cfx follow-up: when CUDL canvas count mismatches NLI/transcription
-        # count, default to NLI for the whole manuscript (positional CUDL mapping
-        # would be unreliable). CUDL remains available for manual switch.
+        # 260419-cfx / 260421-aln: when CUDL is misaligned per the
+        # cambridge_alignment verdict (count OR per-position mismatch),
+        # default to NLI for the whole manuscript. CUDL remains available
+        # for manual switch. Legacy length fallback kept for metadata
+        # that predates the verdict (non-CUL Cambridge, sidecar missing).
         _ext_list = display_meta.get('images_ext') or []
         _nli_list = display_meta.get('images_nli') or []
+        _align = display_meta.get('cambridge_alignment') or {}
+        _misaligned = (
+            _align.get('verdict') == 'misaligned'
+            or (not _align and _nli_list and _ext_list and len(_ext_list) != len(_nli_list))
+        )
         if not _ext_list:
             display_meta['images'] = _nli_list
-        elif _nli_list and len(_ext_list) != len(_nli_list):
+        elif _misaligned:
             display_meta['images'] = _nli_list
         else:
             display_meta['images'] = _ext_list
@@ -9400,15 +9424,12 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'browse_viewer') and not self.browse_reading_desk_active:
             shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
             folio_num = _get_folio_number_from_shelfmark(shelfmark)
-            # 260419-cfx: folio+side resolver for CUDL shelfmarks. See
-            # _resolve_cambridge_page_or_fallback docstring.
-            # 260419-cfx follow-up: skip the resolver when CUDL canvas count
-            # mismatches NLI count (viewer defaults to NLI in that case).
-            _ext_count = len(display_meta.get('images_ext') or [])
-            _nli_count = len(display_meta.get('images_nli') or [])
-            _skip_cambridge_resolver = (
-                _nli_count > 0 and _ext_count > 0 and _ext_count != _nli_count
-            )
+            # 260419-cfx / 260421-aln: folio+side resolver for CUDL
+            # shelfmarks. Skip when the alignment verdict says the manuscript
+            # is misaligned — viewer defaults to NLI in that case and the
+            # resolver would synthesize images_ext entries that defeat the
+            # NLI default.
+            _skip_cambridge_resolver = _misaligned
             if (
                 self._is_cambridge_display(display_meta)
                 and display_meta.get('images_ext')

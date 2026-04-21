@@ -909,15 +909,27 @@ class ManuscriptViewerWidget(QWidget):
                 ext_label = "JTS/Princeton"
             else:
                 ext_label = "External"
-            # 260419-cfx follow-up: when external canvas count mismatches NLI
-            # count, default to NLI (transcription aligns with NLI canvases).
-            # Both sources still appear in the combo so the user can manually
+            # 260419-cfx / 260421-aln: when external is misaligned with NLI
+            # (count OR per-position mismatch via classify_cambridge_alignment),
+            # default to NLI (transcription aligns with NLI canvases). Both
+            # sources still appear in the combo so the user can manually
             # switch. Oxford is exempt — it doesn't have a parallel NLI list
             # in the same sense and its positional mapping is handled elsewhere.
+            # For non-CUL external providers (Manchester, JTS, non-CUL Cambridge)
+            # the alignment verdict is not computed; legacy length check is
+            # kept as a defensive fallback.
+            _align = (meta or {}).get('cambridge_alignment') or {}
+            _verdict_misaligned = _align.get('verdict') == 'misaligned'
+            _legacy_count_mismatch = (
+                not _align
+                and self.external_provider != "oxford"
+                and self.images_nli
+                and len(self.images_ext) != len(self.images_nli)
+            )
             _count_mismatch = (
                 self.external_provider != "oxford"
                 and self.images_nli
-                and len(self.images_ext) != len(self.images_nli)
+                and (_verdict_misaligned or _legacy_count_mismatch)
             )
             if _count_mismatch:
                 self.combo_source.addItem(f"NLI ({len(self.images_nli)} pages)", "nli")

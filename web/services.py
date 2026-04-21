@@ -114,6 +114,7 @@ class BrowsePage:
     folio_images: List[Dict] = field(default_factory=list)  # Folio sequence from NliCrossrefService
     cambridge_images: List[Dict] = field(default_factory=list)  # Cambridge IIIF canvas URLs from nli_cache images_ext
     external_provider: str = ''  # Which library provided images_ext: 'manchester', 'jts', or '' (Cambridge)
+    cambridge_alignment: Optional[Dict] = None  # 260421-aln: CUDL↔NLI alignment verdict (see shared.nli_crossref_service.classify_cambridge_alignment)
     physical_metadata: Optional[Dict] = None  # {material, num_folio, num_bifolio, size} from NLI crossref
     library_viewer_url: Optional[Dict] = None  # {url, label, library_abbrev} for holding library link
     # Volume-aware browse (multi-IE manuscripts)

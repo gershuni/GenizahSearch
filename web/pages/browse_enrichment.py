@@ -243,6 +243,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                         logger.warning("Browse enrichment enrich_metadata error: %s", e)
                 result['cambridge_images'] = cached.get('images_ext', [])
                 result['external_provider'] = cached.get('external_provider', '')
+                result['cambridge_alignment'] = cached.get('cambridge_alignment')
 
             return result
 
@@ -347,6 +348,8 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 pg.cambridge_images = browse_enrich['cambridge_images']
             if browse_enrich.get('external_provider'):
                 pg.external_provider = browse_enrich['external_provider']
+            if browse_enrich.get('cambridge_alignment') is not None:
+                pg.cambridge_alignment = browse_enrich['cambridge_alignment']
             # Derived fl_id for metadata-only records
             if browse_enrich.get('derived_fl_id') and not pg.fl_id:
                 from web.services import get_thumbnail_url, get_full_image_url

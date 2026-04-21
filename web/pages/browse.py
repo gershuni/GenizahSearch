@@ -3437,17 +3437,29 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.active_source = 'jts'
                 if _has_manchester_images and state.active_source == 'nli' and not state.source_user_override:
                     state.active_source = 'manchester'
-                # 260419-cfx follow-up: only auto-default to Cambridge when CUDL canvas
-                # count matches transcription page count. When they differ (binding
-                # canvases, missing folios, paired-leaf mismatches), positional mapping
-                # is unreliable — prefer NLI as default. User can still manually
-                # switch to Cambridge via the source toggle.
-                _cam_count_matches = (
+                # 260419-cfx / 260421-aln: only auto-default to Cambridge CUDL
+                # when the per-position (folio,side) verdict from
+                # classify_cambridge_alignment says 'aligned'. A 'misaligned'
+                # verdict (count or position mismatch) OR a missing verdict
+                # entry (CUDL+NLI both present but not yet classified) keeps
+                # NLI as default — positional CUDL mapping is unreliable in
+                # those cases. User can still switch manually via the source
+                # toggle. For legacy/backward compat, also accept a match when
+                # the verdict is absent but CUDL count matches total_pages
+                # (e.g. pages loaded before enrich_metadata finished).
+                _cam_verdict = (page.cambridge_alignment or {}).get('verdict') if page.cambridge_alignment else None
+                _cam_safe_default = (
                     _has_cambridge_images
-                    and page.total_pages
-                    and len(page.cambridge_images or []) == page.total_pages
+                    and (
+                        _cam_verdict == 'aligned'
+                        or (
+                            _cam_verdict is None
+                            and page.total_pages
+                            and len(page.cambridge_images or []) == page.total_pages
+                        )
+                    )
                 )
-                if _cam_count_matches and state.active_source == 'nli' and not state.source_user_override:
+                if _cam_safe_default and state.active_source == 'nli' and not state.source_user_override:
                     state.active_source = 'cambridge'
 
                 if state.active_source == 'cambridge' and _has_cambridge_images and not is_oxford:

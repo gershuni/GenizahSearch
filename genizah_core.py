@@ -3897,11 +3897,30 @@ class MetadataManager:
             current_meta['canvas_map'] = nli_iiif_data['canvas_map']
 
         # Prioritize External if available, but keep both sets.
-        # 260419-cfx follow-up: when both lists are populated but their counts
-        # disagree (typically Cambridge CUDL vs NLI), default 'images' to NLI
-        # because transcription text is aligned to NLI canvas order. CUDL stays
-        # in images_ext so UI can still offer it as a manual switch.
-        if images_ext and images_nli and len(images_ext) != len(images_nli):
+        # 260419-cfx / 260421-aln: when both lists are populated, classify CUDL
+        # alignment per (folio_num, side) rather than just length. Misaligned
+        # CUL/Cambridge manuscripts (count or position mismatch) default to
+        # NLI; CUDL stays in images_ext so UI can still offer it as a manual
+        # switch. Non-CUL Cambridge (Mosseri, Gaster, private collections) is
+        # intentionally exempt — those have NLI stubs that 503, so images_ext
+        # must remain primary there (see gui_threads.py / web/pages/puzzle.py).
+        ext_provider = current_meta.get('external_provider', '')
+        lib_code = self.csv_bank.get(system_id, {}).get('library_code', '')
+        cambridge_alignment = None
+        if (
+            images_ext and images_nli
+            and ext_provider == 'cambridge' and lib_code == 'CUL'
+        ):
+            from shared.nli_crossref_service import classify_cambridge_alignment
+            cambridge_alignment = classify_cambridge_alignment(
+                system_id, images_ext, svc=crossref_svc,
+            )
+            current_meta['cambridge_alignment'] = cambridge_alignment
+
+        misaligned = bool(
+            cambridge_alignment and cambridge_alignment.get('verdict') == 'misaligned'
+        )
+        if misaligned:
             current_meta['images'] = images_nli
             current_meta['external_count_mismatch'] = True
         else:
