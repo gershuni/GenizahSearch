@@ -6984,7 +6984,8 @@ class GenizahGUI(QMainWindow):
             # Could not build an NLI URL → legacy positional.
             idx = _get_initial_image_index(
                 display_meta,
-                folio_num if folio_num is not None else page_idx,
+                folio_num=folio_num,
+                page_num=page_idx if folio_num is None else None,
             )
             return (display_meta, idx)
 
@@ -6992,9 +6993,99 @@ class GenizahGUI(QMainWindow):
         # → legacy positional behavior.
         idx = _get_initial_image_index(
             display_meta,
-            folio_num if folio_num is not None else page_idx,
+            folio_num=folio_num,
+            page_num=page_idx if folio_num is None else None,
         )
         return (display_meta, idx)
+
+    def _switch_browse_viewer_to_nli_for_page(self, page_1indexed):
+        """Flip the browse viewer to NLI and jump to a positional page.
+
+        260421-aln: used when the user is on CUDL and navigates to a
+        transcription page past CUDL's canvas count (e.g. T-S NS 158.112
+        pages 13-14, folios 8r/8v which CUDL doesn't photograph). In that
+        case the viewer should fall back to the NLI image for the page,
+        and the source combo should be hidden since there's no
+        alternative source at this page.
+
+        Sets ``viewer._nli_fallback_active = True`` so that navigating
+        BACK to a CUDL-covered page will restore CUDL (handled by
+        ``_restore_browse_viewer_to_ext``).
+
+        Returns True when the switch happened, False when the viewer
+        doesn't have an NLI list to fall back to.
+        """
+        viewer = getattr(self, 'browse_viewer', None)
+        if viewer is None or not getattr(viewer, 'images_nli', None):
+            return False
+
+        try:
+            zero_idx = max(int(page_1indexed) - 1, 0)
+        except (TypeError, ValueError):
+            zero_idx = 0
+        if zero_idx >= len(viewer.images_nli):
+            zero_idx = len(viewer.images_nli) - 1
+
+        # Flip the combo without firing _on_source_changed (we update
+        # active_list/current_idx ourselves).
+        viewer.combo_source.blockSignals(True)
+        for i in range(viewer.combo_source.count()):
+            if viewer.combo_source.itemData(i) == 'nli':
+                viewer.combo_source.setCurrentIndex(i)
+                break
+        viewer.combo_source.blockSignals(False)
+
+        # Hide the source combo for this page — there is no alternate
+        # source to switch to (CUDL has nothing at this folio).
+        viewer.combo_source.setVisible(False)
+
+        viewer.active_list = viewer.images_nli
+        viewer.current_source = 'nli'
+        viewer.current_idx = zero_idx
+        viewer._nli_fallback_active = True
+        viewer.set_page(zero_idx)
+        return True
+
+    def _restore_browse_viewer_to_ext(self, page_1indexed):
+        """Restore the browse viewer to CUDL after an auto-fallback.
+
+        Called when navigating back to a transcription page within CUDL
+        coverage after ``_switch_browse_viewer_to_nli_for_page`` flipped
+        the viewer to NLI. Re-enables the combo and re-selects ext.
+
+        Returns True when the restore happened, False when the viewer
+        has no ext list or no fallback was active.
+        """
+        viewer = getattr(self, 'browse_viewer', None)
+        if viewer is None or not getattr(viewer, 'images_ext', None):
+            return False
+        if not getattr(viewer, '_nli_fallback_active', False):
+            return False
+
+        try:
+            zero_idx = max(int(page_1indexed) - 1, 0)
+        except (TypeError, ValueError):
+            zero_idx = 0
+        if zero_idx >= len(viewer.images_ext):
+            zero_idx = len(viewer.images_ext) - 1
+
+        viewer.combo_source.blockSignals(True)
+        for i in range(viewer.combo_source.count()):
+            if viewer.combo_source.itemData(i) == 'ext':
+                viewer.combo_source.setCurrentIndex(i)
+                break
+        viewer.combo_source.blockSignals(False)
+
+        viewer.combo_source.setVisible(
+            len(viewer.images_nli) > 0 and len(viewer.images_ext) > 0
+        )
+
+        viewer.active_list = viewer.images_ext
+        viewer.current_source = 'ext'
+        viewer.current_idx = zero_idx
+        viewer._nli_fallback_active = False
+        viewer.set_page(zero_idx)
+        return True
 
     def _resolve_cambridge_navigation_index(self, sys_id, viewer_images, folio_num, side_offset):
         """Side-aware index lookup for prev/next navigation on CUDL.
@@ -7007,9 +7098,15 @@ class GenizahGUI(QMainWindow):
                            caller calls load_images(nav_meta, idx, ...).
           - (None, None) — no match AND no NLI URL; caller uses legacy
                            _get_folio_image_index + set_page.
+
+        260421-aln follow-up: out-of-CUDL navigation (folio_num=None, page
+        past images_ext end) is handled by the CALLER via
+        ``_switch_browse_viewer_to_nli_page`` — this resolver only handles
+        the folio_num!=None case.
         """
         if folio_num is None or not viewer_images:
             return (None, None)
+
         target_side = 'v' if side_offset == 1 else 'r'
 
         # 1. Exact (folio, side) match in the current viewer list.
@@ -7021,7 +7118,6 @@ class GenizahGUI(QMainWindow):
 
         # 2. Build NLI fallback. Use the current transcription page index
         # (already set by prev/next navigation before this helper runs).
-        page_idx = getattr(self, 'current_browse_p', None)
         if page_idx is None:
             return (None, None)
         nli_url = self._build_nli_iiif_url_for_page(sys_id, page_idx)
@@ -7233,7 +7329,8 @@ class GenizahGUI(QMainWindow):
             else:
                 idx = _get_initial_image_index(
                     display_meta,
-                    folio_num if folio_num is not None else self.current_browse_p,
+                    folio_num=folio_num,
+                    page_num=self.current_browse_p if folio_num is None else None,
                 )
             self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
 
@@ -9441,7 +9538,8 @@ class GenizahGUI(QMainWindow):
             else:
                 idx = _get_initial_image_index(
                     display_meta,
-                    folio_num if folio_num is not None else self.current_browse_p,
+                    folio_num=folio_num,
+                    page_num=self.current_browse_p if folio_num is None else None,
                 )
             self.browse_viewer.load_images(display_meta, idx, target_folio=folio_num)
 
@@ -21357,13 +21455,53 @@ class GenizahGUI(QMainWindow):
                             self.browse_viewer.load_images(nav_meta, idx, target_folio=folio_num)
                         else:
                             # No NLI URL available — fall back to legacy.
-                            idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                            idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num=folio_num, side_offset=side_offset, page_num=self.current_browse_p if folio_num is None else None)
                             self.browse_viewer.set_page(idx)
                     else:
-                        idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                        idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num=folio_num, side_offset=side_offset, page_num=self.current_browse_p if folio_num is None else None)
                         self.browse_viewer.set_page(idx)
             elif viewer_images:
-                if is_cambridge_nav:
+                # 260421-aln: handle CUL CUDL fallback transitions when the
+                # shelfmark has no folio (e.g. T-S NS 158.112). Two cases:
+                #   (a) past-CUDL: user was on CUDL and navigated to a page
+                #       with no CUDL canvas → flip to NLI, hide combo.
+                #   (b) auto-restore: user was on an NLI auto-fallback page
+                #       and navigated back into CUDL coverage → flip back
+                #       to CUDL, show combo.
+                _cul_cambridge_provider = (
+                    getattr(self.browse_viewer, 'external_provider', None) == 'cambridge'
+                )
+                _ext_images = getattr(self.browse_viewer, 'images_ext', None) or []
+                _fallback_active = getattr(self.browse_viewer, '_nli_fallback_active', False)
+                _page_zero_idx = None
+                if folio_num is None and self.current_browse_p is not None:
+                    try:
+                        _page_zero_idx = max(int(self.current_browse_p) - 1, 0)
+                    except (TypeError, ValueError):
+                        _page_zero_idx = None
+
+                if (
+                    is_cambridge_nav
+                    and folio_num is None
+                    and _page_zero_idx is not None
+                    and _page_zero_idx >= len(viewer_images)
+                ):
+                    # Case (a): past-CUDL — flip to NLI.
+                    if self._switch_browse_viewer_to_nli_for_page(self.current_browse_p):
+                        pass
+                    else:
+                        idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num=folio_num, side_offset=side_offset, page_num=self.current_browse_p if folio_num is None else None)
+                        self.browse_viewer.set_page(idx)
+                elif (
+                    _fallback_active
+                    and _cul_cambridge_provider
+                    and folio_num is None
+                    and _page_zero_idx is not None
+                    and _page_zero_idx < len(_ext_images)
+                ):
+                    # Case (b): auto-restore CUDL.
+                    self._restore_browse_viewer_to_ext(self.current_browse_p)
+                elif is_cambridge_nav:
                     nav_meta, idx = self._resolve_cambridge_navigation_index(
                         self.current_browse_sid, viewer_images, folio_num, side_offset,
                     )
@@ -21372,10 +21510,10 @@ class GenizahGUI(QMainWindow):
                     elif nav_meta is not None:
                         self.browse_viewer.load_images(nav_meta, idx, target_folio=folio_num)
                     else:
-                        idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                        idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num=folio_num, side_offset=side_offset, page_num=self.current_browse_p if folio_num is None else None)
                         self.browse_viewer.set_page(idx)
                 else:
-                    idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num if folio_num is not None else self.current_browse_p, side_offset=side_offset)
+                    idx = _get_folio_image_index({'images_ext': viewer_images}, folio_num=folio_num, side_offset=side_offset, page_num=self.current_browse_p if folio_num is None else None)
                     self.browse_viewer.set_page(idx)
         # -------------------------------
 

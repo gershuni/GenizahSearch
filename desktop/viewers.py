@@ -632,6 +632,7 @@ class ManuscriptViewerWidget(QWidget):
         self.images_ext = []
         self.active_list = []
         self.current_idx = 0
+        self._nli_fallback_active = False  # 260421-aln: True when auto-flipped to NLI for a past-CUDL page
         self._load_generation = 0  # increments on each set_page/load_images to reject stale callbacks
         self.loader_thread = None
         self.preload_worker = None
@@ -873,6 +874,11 @@ class ManuscriptViewerWidget(QWidget):
         self.images_nli = list(meta.get('images_nli', []))
         self.images_ext = list(meta.get('images_ext', []))
 
+        # 260421-aln: new manuscript / full reload clears any prior
+        # auto-fallback-to-NLI state. _on_source_changed and the nav
+        # block manage the flag after this point.
+        self._nli_fallback_active = False
+
         # For Oxford: check if target_folio is missing and add dynamic images
         if target_folio is not None and self.images_ext:
             folio_in_list = any(img.get('folio_num') == target_folio for img in self.images_ext)
@@ -1012,6 +1018,11 @@ class ManuscriptViewerWidget(QWidget):
         else:
             self.active_list = self.images_ext
             self.current_source = "ext"
+
+        # 260421-aln: user clicked the combo — this is an explicit choice,
+        # so clear any auto-fallback-to-NLI state so that the nav block
+        # stops trying to restore CUDL on page change.
+        self._nli_fallback_active = False
 
         # Try to keep index within bounds
         if self.current_idx >= len(self.active_list):
