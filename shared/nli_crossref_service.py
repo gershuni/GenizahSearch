@@ -1050,3 +1050,150 @@ def resolve_cambridge_canvas_for_page(
                 }
 
     return None
+
+
+def classify_cambridge_alignment(
+    sys_id: str,
+    images_ext: list,
+    *,
+    svc: Optional['NliCrossrefService'] = None,
+) -> dict:
+    """Classify whether a CUDL canvas list aligns with NLI folio order.
+
+    The 260419-cfx fix only flipped the default image source to NLI when
+    ``len(images_ext) != len(images_nli)``. That count heuristic misses
+    manuscripts where CUDL and NLI have the same length but different
+    canvas order (e.g. CUDL prepends a binding canvas and drops a folio,
+    or CUDL uses a different foliation model entirely — see Or.2245,
+    sys_id 990001332980205171). In those cases positional indexing still
+    serves a wrong-leaf image silently.
+
+    This helper is a single source of truth for the per-position
+    alignment check. Callers (``enrich_metadata`` and each UI default-
+    source site) should consume the returned verdict instead of
+    recomputing their own length check.
+
+    Args:
+        sys_id: Manuscript Alma/system ID.
+        images_ext: CUDL canvas list (each entry expected to carry
+            ``folio_num`` and ``folio_side`` — produced by
+            ``GenizahSearchEngine.fetch_external_iiif_data`` via
+            ``_parse_cudl_label``).
+        svc: Optional NliCrossrefService; the module singleton is used
+            when None.
+
+    Returns:
+        A dict with keys:
+
+        - ``verdict``: ``'aligned'`` (safe to keep CUDL as default),
+          ``'misaligned'`` (caller should default to NLI), or
+          ``'unknown'`` (insufficient info — caller should keep legacy
+          default behavior).
+        - ``reason``: ``'ok'``, ``'count_mismatch'``,
+          ``'position_mismatch'``, ``'no_sidecar'``, ``'no_ext'``.
+        - ``ext_count`` / ``nli_count``: integers for logging.
+        - ``first_mismatch_index``: int when ``reason == 'position_mismatch'``,
+          else None.
+
+    Scope: callers are responsible for gating on
+    ``external_provider == 'cambridge' and lib_code == 'CUL'``. The
+    helper itself does not inspect the library code; it only examines
+    the canvas ordering.
+
+    Per Codex 2026-04-21 review caveats:
+    - Unparseable CUDL canvases at position i (``folio_num is None``
+      or ``folio_side is None``) are skipped rather than forced into a
+      mismatch. Binding/cover canvases in an otherwise aligned list
+      should not flip the whole manuscript to NLI.
+    - Unparseable NLI folio labels at position i are likewise skipped.
+    - A concrete ``(folio_num, side)`` disagreement at any comparable
+      position still triggers ``misaligned / position_mismatch``.
+    """
+    if not images_ext:
+        return {
+            'verdict': 'unknown',
+            'reason': 'no_ext',
+            'ext_count': 0,
+            'nli_count': 0,
+            'first_mismatch_index': None,
+        }
+
+    if svc is None:
+        svc = get_nli_crossref_service(thread_safe=True)
+    if svc is None or not svc.is_available():
+        return {
+            'verdict': 'unknown',
+            'reason': 'no_sidecar',
+            'ext_count': len(images_ext),
+            'nli_count': 0,
+            'first_mismatch_index': None,
+        }
+
+    try:
+        folio_rows = svc.get_folio_images(sys_id)
+    except Exception as e:
+        logger.warning(
+            f"classify_cambridge_alignment: get_folio_images error for {sys_id}: {e}"
+        )
+        return {
+            'verdict': 'unknown',
+            'reason': 'no_sidecar',
+            'ext_count': len(images_ext),
+            'nli_count': 0,
+            'first_mismatch_index': None,
+        }
+
+    ext_count = len(images_ext)
+    nli_count = len(folio_rows or [])
+
+    if nli_count == 0:
+        return {
+            'verdict': 'unknown',
+            'reason': 'no_sidecar',
+            'ext_count': ext_count,
+            'nli_count': 0,
+            'first_mismatch_index': None,
+        }
+
+    if ext_count != nli_count:
+        return {
+            'verdict': 'misaligned',
+            'reason': 'count_mismatch',
+            'ext_count': ext_count,
+            'nli_count': nli_count,
+            'first_mismatch_index': None,
+        }
+
+    for i, (ext_c, nli_r) in enumerate(zip(images_ext, folio_rows)):
+        ext_folio = ext_c.get('folio_num')
+        ext_side = ext_c.get('folio_side')
+        if ext_folio is None or ext_side is None:
+            continue
+
+        nli_label = nli_r.get('folio_label', '') or ''
+        m = _SIDE_FROM_LABEL_RE.match(nli_label)
+        if not m:
+            continue
+        try:
+            nli_folio = int(m.group(1))
+        except (TypeError, ValueError):
+            continue
+        side_raw = m.group(2)
+        nli_side = side_raw.lower() if side_raw else 'r'
+
+        if ext_folio != nli_folio or ext_side != nli_side:
+            return {
+                'verdict': 'misaligned',
+                'reason': 'position_mismatch',
+                'ext_count': ext_count,
+                'nli_count': nli_count,
+                'first_mismatch_index': i,
+            }
+
+    return {
+        'verdict': 'aligned',
+        'reason': 'ok',
+        'ext_count': ext_count,
+        'nli_count': nli_count,
+        'first_mismatch_index': None,
+    }

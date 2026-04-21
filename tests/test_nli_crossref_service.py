@@ -8,6 +8,8 @@ graceful degradation, and edge cases.
 """
 
 import sqlite3
+from pathlib import Path
+
 import pytest
 
 from shared.nli_crossref_service import NliCrossrefService, get_nli_crossref_service, parse_folio_label
@@ -1260,3 +1262,229 @@ class TestFolioSideResolver:
         )
         assert out_recto == {'canvas_index': 0, 'folio_num': 1, 'side': 'r'}
         assert out_verso is None
+
+
+# ── classify_cambridge_alignment (260421-aln) ─────────────────────
+
+
+class TestClassifyCambridgeAlignment:
+    """Per-position alignment verdict for CUL Cambridge manuscripts.
+
+    Covers the three real-world verdicts and edge cases surfaced by
+    Codex review 2026-04-21:
+
+    - ``aligned / ok``          — CUDL positions match NLI folio order
+    - ``misaligned / count_mismatch``       — e.g. T-S NS 158.112 (14 NLI vs 12 CUDL)
+    - ``misaligned / position_mismatch``    — e.g. Or.2245 (42 vs 42 but position 2 diverges)
+    - ``unknown / no_ext``      — no CUDL list at all
+    - ``unknown / no_sidecar``  — sidecar unavailable or sys_id has no NLI rows
+    - unparseable positions (binding canvas, garbled NLI label) are skipped
+      rather than forced into a mismatch
+    """
+
+    @pytest.fixture
+    def aligned_svc(self, tmp_path):
+        """Six NLI rows 1r..3v for sys_id ALIGN001."""
+        db_path = tmp_path / "nli_crossref.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE meta (key TEXT, value TEXT)")
+        conn.execute(
+            "CREATE TABLE nli_images (NLI_AlmaId TEXT, FGPImageNumberId TEXT, "
+            "FGPNumber TEXT, ImageName TEXT, ImageSourceName TEXT, "
+            "Shelfmark TEXT, Material TEXT DEFAULT '', NumFolio TEXT "
+            "DEFAULT '', NumBifolio TEXT DEFAULT '', Size TEXT DEFAULT '', "
+            "LibraryAbbrev TEXT DEFAULT '', LibraryNameEng TEXT DEFAULT '', "
+            "CatalogEntry TEXT DEFAULT '', CollectionName TEXT DEFAULT '', "
+            "OBBox TEXT DEFAULT '', OBVolume TEXT DEFAULT '', OBFolio TEXT "
+            "DEFAULT '', PartOf TEXT DEFAULT '', See TEXT DEFAULT '', "
+            "BifolioWith TEXT DEFAULT '')"
+        )
+        for idx, name in enumerate([
+            'ALIGN_001__L1F0B0S1', 'ALIGN_001__L1F0B0S2',
+            'ALIGN_001__L2F0B0S1', 'ALIGN_001__L2F0B0S2',
+            'ALIGN_001__L3F0B0S1', 'ALIGN_001__L3F0B0S2',
+        ]):
+            conn.execute(
+                "INSERT INTO nli_images (NLI_AlmaId, FGPImageNumberId, "
+                "FGPNumber, ImageName, ImageSourceName, Shelfmark) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("ALIGN001", f"FGP{idx}", str(idx), name, "", "Dummy-S 1.1"),
+            )
+        conn.commit()
+        conn.close()
+        svc = NliCrossrefService(db_path=str(db_path))
+        assert svc.is_available()
+        yield svc
+        svc.close()
+
+    def test_aligned_when_positions_match(self, aligned_svc):
+        from shared.nli_crossref_service import classify_cambridge_alignment
+        cudl = [
+            {'folio_num': 1, 'folio_side': 'r'},
+            {'folio_num': 1, 'folio_side': 'v'},
+            {'folio_num': 2, 'folio_side': 'r'},
+            {'folio_num': 2, 'folio_side': 'v'},
+            {'folio_num': 3, 'folio_side': 'r'},
+            {'folio_num': 3, 'folio_side': 'v'},
+        ]
+        out = classify_cambridge_alignment("ALIGN001", cudl, svc=aligned_svc)
+        assert out == {
+            'verdict': 'aligned', 'reason': 'ok',
+            'ext_count': 6, 'nli_count': 6,
+            'first_mismatch_index': None,
+        }
+
+    def test_misaligned_count_mismatch_ts_ns_158_112(self):
+        """T-S NS 158.112 fixture: 14 NLI rows vs 12 CUDL canvases."""
+        from shared.nli_crossref_service import classify_cambridge_alignment
+        # Reuse the TestFolioSideResolver fixtures via a fresh svc
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            db_path = Path(tmp.name) / "nli_crossref.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("CREATE TABLE meta (key TEXT, value TEXT)")
+            conn.execute(
+                "CREATE TABLE nli_images (NLI_AlmaId TEXT, FGPImageNumberId TEXT, "
+                "FGPNumber TEXT, ImageName TEXT, ImageSourceName TEXT, "
+                "Shelfmark TEXT, Material TEXT DEFAULT '', NumFolio TEXT "
+                "DEFAULT '', NumBifolio TEXT DEFAULT '', Size TEXT DEFAULT '', "
+                "LibraryAbbrev TEXT DEFAULT '', LibraryNameEng TEXT DEFAULT '', "
+                "CatalogEntry TEXT DEFAULT '', CollectionName TEXT DEFAULT '', "
+                "OBBox TEXT DEFAULT '', OBVolume TEXT DEFAULT '', OBFolio TEXT "
+                "DEFAULT '', PartOf TEXT DEFAULT '', See TEXT DEFAULT '', "
+                "BifolioWith TEXT DEFAULT '')"
+            )
+            for idx, name in enumerate(TestFolioSideResolver.TS_NS_158_112_IMAGE_NAMES):
+                conn.execute(
+                    "INSERT INTO nli_images (NLI_AlmaId, FGPImageNumberId, "
+                    "FGPNumber, ImageName, ImageSourceName, Shelfmark) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    ("990051537270205171", f"FGP{idx}", str(idx), name, "",
+                     "T-S NS 158.112"),
+                )
+            conn.commit()
+            conn.close()
+            svc = NliCrossrefService(db_path=str(db_path))
+            out = classify_cambridge_alignment(
+                "990051537270205171",
+                TestFolioSideResolver.TS_NS_158_112_CUDL_CANVASES,
+                svc=svc,
+            )
+            svc.close()
+            assert out['verdict'] == 'misaligned'
+            assert out['reason'] == 'count_mismatch'
+            assert out['ext_count'] == 12
+            assert out['nli_count'] == 14
+            assert out['first_mismatch_index'] is None
+        finally:
+            tmp.cleanup()
+
+    def test_misaligned_position_mismatch_or_2245(self, aligned_svc):
+        """Or.2245 pattern: same count but position 2 diverges.
+
+        Codex's bounded live sample found Or.2245 (sys_id 990001332980205171)
+        has 42 NLI rows vs 42 CUDL canvases but position 2 is NLI=2r /
+        CUDL=1v. Reduced to 6 rows for the fixture: CUDL has a leading
+        binding duplicate.
+        """
+        from shared.nli_crossref_service import classify_cambridge_alignment
+        # NLI sequence from aligned_svc: 1r, 1v, 2r, 2v, 3r, 3v
+        # CUDL: 1r, 1v, 1v (duplicate), 2r, 2v, 3r — same length, position 2 diverges
+        cudl = [
+            {'folio_num': 1, 'folio_side': 'r'},
+            {'folio_num': 1, 'folio_side': 'v'},
+            {'folio_num': 1, 'folio_side': 'v'},  # expected 2r — diverges here
+            {'folio_num': 2, 'folio_side': 'r'},
+            {'folio_num': 2, 'folio_side': 'v'},
+            {'folio_num': 3, 'folio_side': 'r'},
+        ]
+        out = classify_cambridge_alignment("ALIGN001", cudl, svc=aligned_svc)
+        assert out['verdict'] == 'misaligned'
+        assert out['reason'] == 'position_mismatch'
+        assert out['first_mismatch_index'] == 2
+        assert out['ext_count'] == 6
+        assert out['nli_count'] == 6
+
+    def test_unparseable_cudl_position_skipped(self, aligned_svc):
+        """A binding/cover canvas at an otherwise aligned position must not
+        force the whole manuscript to NLI. folio_num=None is skipped."""
+        from shared.nli_crossref_service import classify_cambridge_alignment
+        # Same length (6) as NLI, but canvas[0] is a binding (unparseable)
+        # which happens to coincide with NLI[0]=1r. Skipping it lets the
+        # remaining 5 positions disagree... so to truly test "skip not
+        # force mismatch", keep the rest aligned by shifting labels:
+        # NLI:  1r 1v 2r 2v 3r 3v
+        # CUDL: ?  1v 2r 2v 3r 3v  (CUDL[0] unparseable, rest aligned with NLI[1..])
+        # Per helper semantics the unparseable [0] is skipped (no mismatch);
+        # positions [1..5] compared: (1v vs 1v)(2r vs 2r)... no mismatch.
+        # BUT that ignores [0] alignment — this is the documented trade-off
+        # (binding/cover skipping). So result is 'aligned / ok'.
+        cudl = [
+            {'folio_num': None, 'folio_side': None},  # binding
+            {'folio_num': 1, 'folio_side': 'v'},
+            {'folio_num': 2, 'folio_side': 'r'},
+            {'folio_num': 2, 'folio_side': 'v'},
+            {'folio_num': 3, 'folio_side': 'r'},
+            {'folio_num': 3, 'folio_side': 'v'},
+        ]
+        out = classify_cambridge_alignment("ALIGN001", cudl, svc=aligned_svc)
+        # Position 1 now compares CUDL(1v) with NLI[1]=1v → match.
+        # Position 2 compares CUDL(2r) with NLI[2]=2r → match. Etc.
+        # So the verdict is aligned, as documented.
+        assert out['verdict'] == 'aligned'
+        assert out['reason'] == 'ok'
+
+    def test_unparseable_cudl_does_not_mask_real_mismatch(self, aligned_svc):
+        """An unparseable canvas is skipped, but a real (folio, side)
+        disagreement later in the list must still be reported."""
+        from shared.nli_crossref_service import classify_cambridge_alignment
+        cudl = [
+            {'folio_num': None, 'folio_side': None},  # binding (skipped)
+            {'folio_num': 1, 'folio_side': 'v'},
+            {'folio_num': 2, 'folio_side': 'r'},
+            {'folio_num': 9, 'folio_side': 'v'},      # NLI[3]=2v → mismatch
+            {'folio_num': 3, 'folio_side': 'r'},
+            {'folio_num': 3, 'folio_side': 'v'},
+        ]
+        out = classify_cambridge_alignment("ALIGN001", cudl, svc=aligned_svc)
+        assert out['verdict'] == 'misaligned'
+        assert out['reason'] == 'position_mismatch'
+        assert out['first_mismatch_index'] == 3
+
+    def test_unknown_no_ext_when_cudl_empty(self, aligned_svc):
+        from shared.nli_crossref_service import classify_cambridge_alignment
+        out = classify_cambridge_alignment("ALIGN001", [], svc=aligned_svc)
+        assert out['verdict'] == 'unknown'
+        assert out['reason'] == 'no_ext'
+        assert out['ext_count'] == 0
+        assert out['nli_count'] == 0
+
+    def test_unknown_no_sidecar_when_svc_degraded(self, tmp_path):
+        """If the sidecar has no rows for this sys_id, caller must keep
+        legacy default behavior — not force NLI."""
+        db_path = tmp_path / "empty.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE meta (key TEXT, value TEXT)")
+        conn.execute(
+            "CREATE TABLE nli_images (NLI_AlmaId TEXT, FGPImageNumberId TEXT, "
+            "FGPNumber TEXT, ImageName TEXT, ImageSourceName TEXT, "
+            "Shelfmark TEXT, Material TEXT DEFAULT '', NumFolio TEXT "
+            "DEFAULT '', NumBifolio TEXT DEFAULT '', Size TEXT DEFAULT '', "
+            "LibraryAbbrev TEXT DEFAULT '', LibraryNameEng TEXT DEFAULT '', "
+            "CatalogEntry TEXT DEFAULT '', CollectionName TEXT DEFAULT '', "
+            "OBBox TEXT DEFAULT '', OBVolume TEXT DEFAULT '', OBFolio TEXT "
+            "DEFAULT '', PartOf TEXT DEFAULT '', See TEXT DEFAULT '', "
+            "BifolioWith TEXT DEFAULT '')"
+        )
+        conn.commit()
+        conn.close()
+        svc = NliCrossrefService(db_path=str(db_path))
+        from shared.nli_crossref_service import classify_cambridge_alignment
+        cudl = [{'folio_num': 1, 'folio_side': 'r'}]
+        out = classify_cambridge_alignment("MISSING_SYS", cudl, svc=svc)
+        svc.close()
+        assert out['verdict'] == 'unknown'
+        assert out['reason'] == 'no_sidecar'
+        assert out['ext_count'] == 1
+        assert out['nli_count'] == 0
