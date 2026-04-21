@@ -86,6 +86,21 @@ async def _inject_font_display_swap(request, call_next):
     )
 
 
+@app.middleware('http')
+async def _mark_framework_assets_noindex(request, call_next):
+    """Mark internal NiceGUI framework assets as non-indexable.
+
+    These ``/_nicegui/...`` URLs are implementation-detail JavaScript assets,
+    not user-facing documents. Search Console can still surface them when
+    crawlers request internal ESM paths, so return an explicit X-Robots-Tag
+    while keeping the assets crawlable for rendering.
+    """
+    response = await call_next(request)
+    if str(request.url.path).startswith('/_nicegui/'):
+        response.headers.setdefault('X-Robots-Tag', 'noindex')
+    return response
+
+
 # NOTE: Tried to defer quasar.unimportant.prod.css via a media-print preload
 # rewrite, but NiceGUI 3.6 emits it as an `@import` inside an inline <style>
 # with CSS layers (layer(quasar)) rather than a <link rel="stylesheet"> tag,
