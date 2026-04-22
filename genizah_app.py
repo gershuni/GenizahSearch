@@ -7140,7 +7140,8 @@ class GenizahGUI(QMainWindow):
 
         # 2. Build NLI fallback. Use the current transcription page index
         # (already set by prev/next navigation before this helper runs).
-        if page_idx is None:
+        page_idx = (self.current_browse_p or 0) - 1
+        if page_idx < 0:
             return (None, None)
         nli_url = self._build_nli_iiif_url_for_page(sys_id, page_idx)
         if not nli_url:
