@@ -6606,7 +6606,7 @@ class GenizahGUI(QMainWindow):
         self._browse_rd_syncing = False  # prevents infinite scroll sync loop
         self._rd_text_sync_handler = None  # stored ref for targeted disconnect
         self._rd_image_sync_handler = None  # stored ref for targeted disconnect
-        self._browse_rd_enrich_threads = []  # active EnrichMetadataThreads for desk entries
+        self._browse_rd_enrich_threads = {}  # sys_id -> EnrichMetadataThread
 
         return panel
 
@@ -8729,16 +8729,24 @@ class GenizahGUI(QMainWindow):
         # reading desk image rendering reads from meta_mgr.nli_cache[sid]. Without
         # this, fragments added straight from a list / top shelfmark / green-bar
         # input that were never browsed previously show "No images available".
+        # Carry the current-browse volume when the sid matches the loaded ms so
+        # multi-IE fragments backfill the correct volume's images.
+        current_vol = getattr(self, 'current_browse_volume_ie', None)
         for sid in sys_ids:
-            self._browse_rd_enrich_entry(sid)
+            vol = current_vol if sid == (self.current_browse_sid or '') else None
+            self._browse_rd_enrich_entry(sid, volume_ie=vol)
 
-    def _browse_rd_enrich_entry(self, sys_id):
+    def _browse_rd_enrich_entry(self, sys_id, volume_ie=None):
         """Ensure meta_mgr.nli_cache[sys_id] has image metadata for the reading desk.
 
         If the fragment already has image lists in nli_cache, returns immediately.
-        Otherwise launches an EnrichMetadataThread and triggers an image re-render
-        when it completes. Threads are tracked in self._browse_rd_enrich_threads
-        so they can be cleaned up on exit.
+        If an enrichment thread for this sys_id is already running, returns without
+        double-starting. Otherwise launches an EnrichMetadataThread resolved against
+        the supplied volume_ie (or the currently browsed manuscript's volume, when
+        sys_id matches it) and triggers an image re-render when it completes.
+
+        Threads are tracked in ``self._browse_rd_enrich_threads`` keyed by sys_id
+        so they can be deduped on add and waited/terminated on exit or window close.
         """
         if not sys_id:
             return
@@ -8746,19 +8754,39 @@ class GenizahGUI(QMainWindow):
         if meta.get('images_nli') or meta.get('images_ext'):
             return
 
+        # Initialise the tracking dict lazily — create_browse_tab also does this
+        # but callers can reach this helper before the browse tab is finalised.
+        if not hasattr(self, '_browse_rd_enrich_threads') or self._browse_rd_enrich_threads is None:
+            self._browse_rd_enrich_threads = {}
+        # Backward-compat: earlier builds stored a list; migrate if we see one.
+        if isinstance(self._browse_rd_enrich_threads, list):
+            self._browse_rd_enrich_threads = {}
+
+        # Dedupe: skip if we already have a running enrichment for this sys_id.
+        existing = self._browse_rd_enrich_threads.get(sys_id)
+        if existing is not None and existing.isRunning():
+            return
+
+        # Prefer the caller-supplied volume_ie; fall back to the currently browsed
+        # manuscript's volume when the sid matches. Otherwise let resolve_volume_suffix
+        # pick the primary IE — this is a best-effort for fragments added by shelfmark
+        # where the desk does not know which volume the user wants.
+        effective_volume_ie = volume_ie
+        if effective_volume_ie is None and sys_id == (self.current_browse_sid or ''):
+            effective_volume_ie = getattr(self, 'current_browse_volume_ie', None)
+
         from genizah_core import resolve_volume_suffix
-        suffix = resolve_volume_suffix(sys_id, None) or 1
+        suffix = resolve_volume_suffix(sys_id, effective_volume_ie) or 1
 
         thread = EnrichMetadataThread(self.meta_mgr, sys_id, suffix=suffix)
-        if not hasattr(self, '_browse_rd_enrich_threads') or self._browse_rd_enrich_threads is None:
-            self._browse_rd_enrich_threads = []
-        self._browse_rd_enrich_threads.append(thread)
+        self._browse_rd_enrich_threads[sys_id] = thread
 
         def _on_enriched(_sid, _data, _t=thread):
             try:
-                if _t in self._browse_rd_enrich_threads:
-                    self._browse_rd_enrich_threads.remove(_t)
-            except (ValueError, AttributeError):
+                tracked = self._browse_rd_enrich_threads.get(_sid)
+                if tracked is _t:
+                    self._browse_rd_enrich_threads.pop(_sid, None)
+            except (AttributeError, KeyError):
                 pass
             if self.browse_reading_desk_active:
                 try:
@@ -8803,15 +8831,23 @@ class GenizahGUI(QMainWindow):
                 pass
             self._browse_rd_worker = None
 
-        # Disconnect any pending enrichment threads (they may still be running,
-        # but we no longer want their re-render callbacks). Threads free themselves
-        # via finished_signal; we just drop references and clear the list.
-        for t in list(getattr(self, '_browse_rd_enrich_threads', []) or []):
+        # Disconnect callbacks and then wait/terminate any pending enrichment
+        # threads so a stale re-render can't fire into a torn-down viewer and
+        # QThreads are never destroyed while still running.
+        threads_map = getattr(self, '_browse_rd_enrich_threads', None) or {}
+        # Tolerate the legacy list shape from prior builds.
+        threads_iter = threads_map.values() if isinstance(threads_map, dict) else threads_map
+        for t in list(threads_iter):
             try:
                 t.finished_signal.disconnect()
             except (TypeError, RuntimeError):
                 pass
-        self._browse_rd_enrich_threads = []
+            if t.isRunning():
+                if not t.wait(1500):
+                    logger.warning("Reading desk enrichment thread did not finish in 1.5s, terminating")
+                    t.terminate()
+                    t.wait()
+        self._browse_rd_enrich_threads = {}
 
         # Clean up image widgets
         self._browse_rd_image_widgets = []
@@ -8983,7 +9019,9 @@ class GenizahGUI(QMainWindow):
 
         # Ensure image metadata is populated so the viewer pane can render
         # images for manuscripts that haven't been browsed yet this session.
-        self._browse_rd_enrich_entry(sys_id)
+        # Carry the current volume when the added sid matches the loaded ms.
+        _vol = getattr(self, 'current_browse_volume_ie', None) if sys_id == (self.current_browse_sid or '') else None
+        self._browse_rd_enrich_entry(sys_id, volume_ie=_vol)
 
         # Re-render immediately with V0.8 text (PGP will update when worker finishes)
         self._browse_rd_render()
@@ -22836,6 +22874,20 @@ class GenizahGUI(QMainWindow):
                 t.cancel()
                 if not t.wait(2000):
                     logger.warning("Browse image thread did not finish in 2s, terminating")
+                    t.terminate()
+                    t.wait()
+
+            # Stop reading desk enrichment threads so they don't outlive the
+            # main window and trigger 'QThread destroyed while still running'.
+            rd_threads = getattr(self, '_browse_rd_enrich_threads', None) or {}
+            rd_iter = rd_threads.values() if isinstance(rd_threads, dict) else rd_threads
+            for t in list(rd_iter):
+                try:
+                    t.finished_signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                if t.isRunning() and not t.wait(1500):
+                    logger.warning("Reading desk enrichment thread did not finish in 1.5s, terminating")
                     t.terminate()
                     t.wait()
         finally:

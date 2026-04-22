@@ -513,6 +513,7 @@ def create_layout():
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
                 ui.label(tr('New: Browse different volumes in multi-scan manuscripts — fixes image-to-text mismatch, and Visual Similarity suggestions for discovering related manuscripts.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
+                    # Explicit user dismiss (X button): persist the flag unconditionally.
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     try:
                         whats_new_banner.delete()
@@ -523,8 +524,17 @@ def create_layout():
                 # slot and raises 'parent_slot has been deleted' RuntimeError in
                 # journalctl when the user navigates away before the 10s fires.
                 def _auto_dismiss_whats_new():
+                    # Only persist the dismissed flag when the banner is still
+                    # alive and we successfully hide it. If the user navigated
+                    # away before the timer fired, .delete() raises and we must
+                    # not mark the banner as "seen" — otherwise leaving within
+                    # the first 10s permanently hides the banner on reload.
                     try:
-                        dismiss_whats_new()
+                        whats_new_banner.delete()
+                    except Exception:
+                        return
+                    try:
+                        app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
                     except Exception:
                         pass
                 try:

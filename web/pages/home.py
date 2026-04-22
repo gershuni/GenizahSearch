@@ -32,6 +32,7 @@ def create_page():
                 ui.label(tr('Computer-read manuscripts — expect some reading errors!')).classes('text-xs flex-1').style('color: var(--text-secondary);')
                 ui.link(tr('Learn more →'), '/about').classes('text-xs').style('color: var(--primary-600); text-decoration: none;')
                 def dismiss_banner():
+                    # Explicit user dismiss (X button): persist unconditionally.
                     app.storage.user['ocr_disclaimer_dismissed'] = True
                     try:
                         ocr_banner.delete()
@@ -42,8 +43,16 @@ def create_page():
                 # banner slot and raises RuntimeError if the user navigates away
                 # before the auto-dismiss fires.
                 def _auto_dismiss_ocr():
+                    # Persist the dismissed flag only if the banner is still alive
+                    # and we actually hide it. If the user left /home before 10s,
+                    # .delete() raises and we must not mark the disclaimer as seen
+                    # — otherwise navigating away inside 10s permanently hides it.
                     try:
-                        dismiss_banner()
+                        ocr_banner.delete()
+                    except Exception:
+                        return
+                    try:
+                        app.storage.user['ocr_disclaimer_dismissed'] = True
                     except Exception:
                         pass
                 try:
