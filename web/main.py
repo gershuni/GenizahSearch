@@ -13,6 +13,7 @@ Run with: python -m web.main (from project root)
 import asyncio
 import logging
 import os
+import re as _re
 import sys
 
 # Load environment variables first (for Supabase configuration)
@@ -107,7 +108,6 @@ async def _mark_framework_assets_noindex(request, call_next):
 # so a simple link rewrite was a no-op and moving it out of the layer would
 # disturb cascade order. Leaving the font-display middleware as the sole
 # CSS-level perf fix for now.
-import re as _re
 
 
 # ---------------------------------------------------------------------------

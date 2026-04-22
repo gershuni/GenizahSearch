@@ -40,7 +40,7 @@ class GlobalAuthState:
         """Get the current user info."""
         try:
             return app.storage.user.get(cls.USER_KEY)
-        except (AssertionError, Exception):
+        except Exception:
             return None
 
     @classmethod
@@ -48,7 +48,7 @@ class GlobalAuthState:
         """Get the current user's profile."""
         try:
             return app.storage.user.get(cls.PROFILE_KEY)
-        except (AssertionError, Exception):
+        except Exception:
             return None
 
     @classmethod

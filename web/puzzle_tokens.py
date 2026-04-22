@@ -61,4 +61,5 @@ def verify_upload_token(token: str, fl_id: str) -> bool:
             return False
         return True
     except Exception:
-        return False  # Puzzle operation failed; continue with defaults
+        # Malformed/expired token or bad payload: deny the upload.
+        return False
