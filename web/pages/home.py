@@ -33,9 +33,23 @@ def create_page():
                 ui.link(tr('Learn more →'), '/about').classes('text-xs').style('color: var(--primary-600); text-decoration: none;')
                 def dismiss_banner():
                     app.storage.user['ocr_disclaimer_dismissed'] = True
-                    ocr_banner.delete()
+                    try:
+                        ocr_banner.delete()
+                    except Exception:
+                        pass  # Already dismissed / parent slot gone
                 ui.button(icon='close', on_click=dismiss_banner).props(f'flat dense round size=xs aria-label="{tr("Dismiss")}"')
-                ui.timer(10.0, dismiss_banner, once=True)
+                # asyncio.call_later instead of ui.timer: ui.timer binds to the
+                # banner slot and raises RuntimeError if the user navigates away
+                # before the auto-dismiss fires.
+                def _auto_dismiss_ocr():
+                    try:
+                        dismiss_banner()
+                    except Exception:
+                        pass
+                try:
+                    asyncio.get_event_loop().call_later(10.0, _auto_dismiss_ocr)
+                except RuntimeError:
+                    pass
 
         # === Hero Section (compact) ===
         with ui.element('div').classes('w-full px-6 py-3').style(
@@ -218,8 +232,17 @@ def create_page():
             for j, dot in enumerate(_dots):
                 dot.style(f'color: {"var(--primary-600)" if j == _carousel["index"] else "var(--border-light)"}; font-size: 8px;')
 
-        # Auto-rotate every 15 seconds
-        ui.timer(15.0, _next_slide)
+        # Auto-rotate every 15 seconds. asyncio task instead of ui.timer so the
+        # callback does not raise 'parent_slot has been deleted' RuntimeError
+        # when the user navigates away from /home before the interval fires.
+        async def _auto_rotate():
+            while True:
+                await asyncio.sleep(15.0)
+                try:
+                    _next_slide()
+                except Exception:
+                    return  # Carousel slots gone; stop rotating cleanly
+        asyncio.ensure_future(_auto_rotate())
 
         # === Seasonal banner (Pesach/other themes) — hidden until next seasonal activation ===
         # The Pesach banner code is preserved in git history and the supporting module

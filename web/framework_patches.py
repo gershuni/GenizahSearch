@@ -16,6 +16,20 @@ import nicegui as _nicegui
 logger = logging.getLogger(__name__)
 _NV = _V(_nicegui.__version__)
 
+# Patches below are guarded against NiceGUI versions they were tested against.
+# When the running version exceeds this threshold, all patches are skipped and
+# this module logs a WARNING asking the dev to re-audit whether the upstream
+# bugs (ESM is_file handler, missing <html lang>) were actually fixed upstream
+# before removing the patch files. Bump this constant deliberately after audit.
+_PATCH_AUDIT_THRESHOLD = _V('3.8.0')
+if _NV > _PATCH_AUDIT_THRESHOLD:
+    logger.warning(
+        'NiceGUI %s exceeds framework_patches audit threshold %s. '
+        'Re-audit upstream fixes for ESM is_file handler and <html lang> '
+        'template, then bump _PATCH_AUDIT_THRESHOLD or remove obsolete patches.',
+        _NV, _PATCH_AUDIT_THRESHOLD,
+    )
+
 
 def _patch_nicegui_esm_handler() -> None:
     """Add is_file() guard to NiceGUI's ESM route handler.
@@ -30,8 +44,8 @@ def _patch_nicegui_esm_handler() -> None:
     Still needed as of NiceGUI 3.8.0 -- track upstream for fix.
     See also: .planning/debug/aggrid-dist-not-a-file.md
     """
-    # Guard: ESM is_file bug confirmed present in NiceGUI <= 3.8.0
-    if _NV > _V('3.8.0'):
+    # Guard: ESM is_file bug confirmed present in NiceGUI <= _PATCH_AUDIT_THRESHOLD
+    if _NV > _PATCH_AUDIT_THRESHOLD:
         logger.debug('ESM is_file patch skipped (NiceGUI %s >= fix threshold)', _NV)
         return
 
@@ -70,8 +84,8 @@ def _patch_html_lang_attribute() -> None:
 
     Still needed as of NiceGUI 3.8.0 -- no upstream lang= support yet.
     """
-    # Guard: html lang attribute not supported natively in NiceGUI <= 3.8.0
-    if _NV > _V('3.8.0'):
+    # Guard: html lang attribute not supported natively in NiceGUI <= _PATCH_AUDIT_THRESHOLD
+    if _NV > _PATCH_AUDIT_THRESHOLD:
         logger.debug('HTML lang patch skipped (NiceGUI %s >= fix threshold)', _NV)
         return
 

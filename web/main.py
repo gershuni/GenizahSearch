@@ -514,9 +514,23 @@ def create_layout():
                 ui.label(tr('New: Browse different volumes in multi-scan manuscripts — fixes image-to-text mismatch, and Visual Similarity suggestions for discovering related manuscripts.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
-                    whats_new_banner.delete()
+                    try:
+                        whats_new_banner.delete()
+                    except Exception:
+                        pass  # Already dismissed / parent slot gone
                 ui.button(icon='close', on_click=dismiss_whats_new).props(f'flat dense round size=xs aria-label="{tr("Dismiss")}"')
-                ui.timer(10.0, dismiss_whats_new, once=True)
+                # Use asyncio instead of ui.timer — ui.timer binds to the banner
+                # slot and raises 'parent_slot has been deleted' RuntimeError in
+                # journalctl when the user navigates away before the 10s fires.
+                def _auto_dismiss_whats_new():
+                    try:
+                        dismiss_whats_new()
+                    except Exception:
+                        pass
+                try:
+                    asyncio.get_event_loop().call_later(10.0, _auto_dismiss_whats_new)
+                except RuntimeError:
+                    pass  # No running loop in this context
 
     def toggle_drawer():
         """Toggle drawer and save state."""
