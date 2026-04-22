@@ -260,15 +260,30 @@ class WhatsNewDialog(QDialog):
             tr('Volume-aware community data — corrections and comments are now tagged per volume, so notes on Volume 2 only appear when browsing Volume 2.'),
         ]
         align = 'right' if is_heb else 'left'
-        dir_attr = "dir='rtl'" if is_heb else ""
-        lines = ''.join(f"<p {dir_attr} style='margin: 8px 0; text-align: {align};'><b>\u2022 {item}</b></p>" for item in items)
-        features_html = f"<div style='font-size: 14px; line-height: 1.8;'>{lines}</div>"
+        dir_attr = "rtl" if is_heb else "ltr"
+        lines = ''.join(
+            f"<p dir='{dir_attr}' align='{align}' style='margin: 8px 0; text-align: {align};'>"
+            f"<b>\u2022 {item}</b></p>"
+            for item in items
+        )
+        features_html = (
+            f"<div dir='{dir_attr}' align='{align}' "
+            f"style='font-size: 14px; line-height: 1.8; text-align: {align};'>"
+            f"{lines}</div>"
+        )
 
         features_label = QLabel(features_html)
         features_label.setWordWrap(True)
         features_label.setTextFormat(Qt.TextFormat.RichText)
         if is_heb:
             features_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            features_label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+            )
+        else:
+            features_label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+            )
         layout.addWidget(features_label)
 
         layout.addStretch()
@@ -6472,12 +6487,18 @@ class GenizahGUI(QMainWindow):
         self.browse_rd_toolbar.setStyleSheet(
             "background-color: #2d6a4f; border-radius: 4px;"
         )
+        # Without a Fixed vertical policy the QWidget expands inside text_layout
+        # and the green bar looks enormous even when the inner scroll row is short.
+        self.browse_rd_toolbar.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
         rd_outer = QVBoxLayout(self.browse_rd_toolbar)
         rd_outer.setContentsMargins(0, 0, 0, 0)
         rd_outer.setSpacing(0)
 
         rd_toolbar_layout = QHBoxLayout()
-        rd_toolbar_layout.setContentsMargins(10, 5, 10, 5)
+        rd_toolbar_layout.setContentsMargins(8, 2, 8, 2)
+        rd_toolbar_layout.setSpacing(6)
 
         rd_label = QLabel(f"<b style='color: white;'>{tr('Reading Desk')}</b>")
         rd_toolbar_layout.addWidget(rd_label)
@@ -6486,7 +6507,7 @@ class GenizahGUI(QMainWindow):
         self.browse_rd_count_label.setStyleSheet("color: #a7d8c0; font-weight: bold;")
         rd_toolbar_layout.addWidget(self.browse_rd_count_label)
 
-        rd_toolbar_layout.addSpacing(10)
+        rd_toolbar_layout.addSpacing(6)
 
         rd_shelf_label = QLabel(f"<span style='color: white;'>{tr('Shelfmark:')}</span>")
         rd_toolbar_layout.addWidget(rd_shelf_label)
@@ -6499,16 +6520,16 @@ class GenizahGUI(QMainWindow):
 
         btn_rd_add = QPushButton(tr("Add to Desk"))
         btn_rd_add.setStyleSheet(
-            "background-color: #40916c; color: white; padding: 3px 10px; border-radius: 3px;"
+            "background-color: #40916c; color: white; padding: 1px 8px; border-radius: 3px;"
         )
         btn_rd_add.clicked.connect(self._browse_rd_add_by_shelfmark)
         rd_toolbar_layout.addWidget(btn_rd_add)
 
-        rd_toolbar_layout.addSpacing(10)
+        rd_toolbar_layout.addSpacing(6)
 
         btn_rd_add_from_list = QPushButton(tr("Add from List"))
         btn_rd_add_from_list.setStyleSheet(
-            "background-color: #52b788; color: white; padding: 3px 10px; border-radius: 3px;"
+            "background-color: #52b788; color: white; padding: 1px 8px; border-radius: 3px;"
         )
         btn_rd_add_from_list.clicked.connect(self._browse_rd_add_from_list)
         rd_toolbar_layout.addWidget(btn_rd_add_from_list)
@@ -6517,7 +6538,7 @@ class GenizahGUI(QMainWindow):
 
         btn_rd_exit = QPushButton(tr("Exit Reading Desk"))
         btn_rd_exit.setStyleSheet(
-            "background-color: #c0392b; color: white; padding: 3px 10px; border-radius: 3px;"
+            "background-color: #c0392b; color: white; padding: 1px 8px; border-radius: 3px;"
         )
         btn_rd_exit.clicked.connect(self._browse_exit_reading_desk)
         rd_toolbar_layout.addWidget(btn_rd_exit)
@@ -6585,6 +6606,7 @@ class GenizahGUI(QMainWindow):
         self._browse_rd_syncing = False  # prevents infinite scroll sync loop
         self._rd_text_sync_handler = None  # stored ref for targeted disconnect
         self._rd_image_sync_handler = None  # stored ref for targeted disconnect
+        self._browse_rd_enrich_threads = []  # active EnrichMetadataThreads for desk entries
 
         return panel
 
@@ -8663,6 +8685,20 @@ class GenizahGUI(QMainWindow):
         # Show reading desk toolbar
         self.browse_rd_toolbar.show()
 
+        # Pre-populate shelfmark input with the last entry actually added, so
+        # the user sees what is currently in the desk and can tweak/press Enter
+        # to add a variant (discoverability for the Add-to-Desk workflow).
+        last_shelf = ''
+        if state.entries:
+            last_shelf = state.entries[-1].shelfmark or ''
+        if not last_shelf and self.current_browse_sid:
+            last_shelf, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+            if not last_shelf or last_shelf == "Unknown":
+                last_shelf = self.current_browse_sid
+        if last_shelf:
+            self.browse_rd_shelf_input.setText(last_shelf)
+            self.browse_rd_shelf_input.selectAll()
+
         # Create image scroll area ONCE (will be repopulated on each render)
         if self._browse_rd_image_scroll is None:
             self._browse_rd_image_scroll = QScrollArea()
@@ -8688,6 +8724,50 @@ class GenizahGUI(QMainWindow):
                 lambda msg: logger.debug("ReadingDeskWorker error: %s", msg)
             )
             self._browse_rd_worker.start()
+
+        # Kick off metadata enrichment for any fragments not yet in nli_cache —
+        # reading desk image rendering reads from meta_mgr.nli_cache[sid]. Without
+        # this, fragments added straight from a list / top shelfmark / green-bar
+        # input that were never browsed previously show "No images available".
+        for sid in sys_ids:
+            self._browse_rd_enrich_entry(sid)
+
+    def _browse_rd_enrich_entry(self, sys_id):
+        """Ensure meta_mgr.nli_cache[sys_id] has image metadata for the reading desk.
+
+        If the fragment already has image lists in nli_cache, returns immediately.
+        Otherwise launches an EnrichMetadataThread and triggers an image re-render
+        when it completes. Threads are tracked in self._browse_rd_enrich_threads
+        so they can be cleaned up on exit.
+        """
+        if not sys_id:
+            return
+        meta = self.meta_mgr.nli_cache.get(sys_id, {})
+        if meta.get('images_nli') or meta.get('images_ext'):
+            return
+
+        from genizah_core import resolve_volume_suffix
+        suffix = resolve_volume_suffix(sys_id, None) or 1
+
+        thread = EnrichMetadataThread(self.meta_mgr, sys_id, suffix=suffix)
+        if not hasattr(self, '_browse_rd_enrich_threads') or self._browse_rd_enrich_threads is None:
+            self._browse_rd_enrich_threads = []
+        self._browse_rd_enrich_threads.append(thread)
+
+        def _on_enriched(_sid, _data, _t=thread):
+            try:
+                if _t in self._browse_rd_enrich_threads:
+                    self._browse_rd_enrich_threads.remove(_t)
+            except (ValueError, AttributeError):
+                pass
+            if self.browse_reading_desk_active:
+                try:
+                    self._browse_rd_render_images()
+                except Exception as exc:
+                    logger.debug("reading desk image rerender failed: %s", exc)
+
+        thread.finished_signal.connect(_on_enriched)
+        thread.start()
 
     def _browse_rd_on_sources_loaded(self, results):
         """Handle PGP sources loaded from ReadingDeskWorker."""
@@ -8723,6 +8803,16 @@ class GenizahGUI(QMainWindow):
                 pass
             self._browse_rd_worker = None
 
+        # Disconnect any pending enrichment threads (they may still be running,
+        # but we no longer want their re-render callbacks). Threads free themselves
+        # via finished_signal; we just drop references and clear the list.
+        for t in list(getattr(self, '_browse_rd_enrich_threads', []) or []):
+            try:
+                t.finished_signal.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        self._browse_rd_enrich_threads = []
+
         # Clean up image widgets
         self._browse_rd_image_widgets = []
 
@@ -8743,21 +8833,75 @@ class GenizahGUI(QMainWindow):
             self.browse_load_page()
 
     def _browse_add_to_view(self):
-        """Handle 'Add to View' button click -- enter reading desk or add current manuscript."""
-        if not self.current_browse_sid:
+        """Handle 'Add to View' button click -- enter reading desk or add a manuscript.
+
+        If the top shelfmark / sys_id inputs contain a value that differs from
+        the currently loaded manuscript, resolve and add that one (user typed a
+        new target without pressing Go). Otherwise fall back to the currently
+        loaded manuscript.
+        """
+        sid = None
+        shelfmark = ''
+
+        typed_sys = self.browse_sys_input.text().strip() if hasattr(self, 'browse_sys_input') else ''
+        typed_shelf = self.browse_shelf_input.text().strip() if hasattr(self, 'browse_shelf_input') else ''
+
+        if typed_sys and typed_sys != (self.current_browse_sid or ''):
+            sid = typed_sys
+        elif typed_shelf:
+            cur_shelf = ''
+            if self.current_browse_sid:
+                cur_shelf, _ = self.meta_mgr.get_meta_for_id(self.current_browse_sid)
+            if typed_shelf and typed_shelf != (cur_shelf or ''):
+                shelf_res = self.meta_mgr.resolve_system_by_shelfmark(typed_shelf)
+                resolved = shelf_res.get('sys_id')
+                if not resolved and shelf_res.get('options'):
+                    options = shelf_res['options']
+                    if len(options) == 1:
+                        resolved = options[0]['sys_id']
+                        typed_shelf = options[0].get('shelfmark', typed_shelf)
+                    else:
+                        display_options = []
+                        for idx, opt in enumerate(options):
+                            base = opt['shelfmark']
+                            title = (opt.get('title') or "").strip()
+                            if title:
+                                base = f"{base} | {title}"
+                            label = f"{idx + 1}. {base}"
+                            if len(label) > 60:
+                                label = label[:57] + "..."
+                            display_options.append(label)
+                        choice, ok = QInputDialog.getItem(
+                            self, tr("Shelfmark"), tr("Multiple shelfmarks found. Select one:"),
+                            display_options, 0, False
+                        )
+                        if not ok:
+                            return
+                        if choice in display_options:
+                            chosen_idx = display_options.index(choice)
+                            resolved = options[chosen_idx]['sys_id']
+                            typed_shelf = options[chosen_idx].get('shelfmark', typed_shelf)
+                if not resolved:
+                    QMessageBox.warning(self, tr("Not Found"), tr("Shelfmark not found: {}").format(typed_shelf))
+                    return
+                sid = resolved
+                shelfmark = typed_shelf
+
+        if not sid:
+            sid = self.current_browse_sid
+
+        if not sid:
             return
 
-        sid = self.current_browse_sid
-        shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
+        if not shelfmark:
+            shelfmark, _ = self.meta_mgr.get_meta_for_id(sid)
         if not shelfmark or shelfmark == "Unknown":
             shelfmark = sid
 
         if not self.browse_reading_desk_active:
-            # Start reading desk with current manuscript
             frag_info = [{'sys_id': sid, 'shelfmark': shelfmark, 'sequence_order': 0}]
             self._browse_enter_reading_desk(frag_info)
         else:
-            # Add current manuscript to existing reading desk
             self._browse_rd_add_entry(sid, shelfmark)
 
     def _browse_add_to_puzzle(self):
@@ -8836,6 +8980,10 @@ class GenizahGUI(QMainWindow):
             lambda msg: logger.debug("ReadingDeskWorker error: %s", msg)
         )
         self._browse_rd_worker.start()
+
+        # Ensure image metadata is populated so the viewer pane can render
+        # images for manuscripts that haven't been browsed yet this session.
+        self._browse_rd_enrich_entry(sys_id)
 
         # Re-render immediately with V0.8 text (PGP will update when worker finishes)
         self._browse_rd_render()
