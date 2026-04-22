@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.9.1
+# Genizah Search Pro 7.9.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,15 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.9.1?
+## What's New in Version 7.9.2?
+
+### v7.9.2: PGP Data Refresh
+
+Our bundled Princeton Geniza Project data is now current through April 2026. Hundreds of new documents, transcriptions, and scholarly references added.
+
+- **PGP data refreshed** — +147 documents, +159 transcriptions and translations, +211 scholarly footnotes
+- **Web browse source buttons** — Oxford/NLI source-toggle restored
+- **Desktop Cambridge nav** — crash fix
 
 ### v7.9.1: Catalog Attribution & Reading Desk Polish
 
@@ -146,7 +154,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.9.1_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.9.2_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

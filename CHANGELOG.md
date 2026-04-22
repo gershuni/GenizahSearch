@@ -4,6 +4,21 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.9.2] - PGP Data Refresh - 2026-04-22
+
+Refreshes our bundled Princeton Geniza Project metadata (last imported February). Plus two small post-7.9.1 fixes.
+
+### Data
+
+- **PGP metadata refresh**: re-imported from [princetongenizalab/pgp-metadata](https://github.com/princetongenizalab/pgp-metadata). +147 documents, +159 source editions/translations, +211 footnotes, +345 fragment links. `pgp.db` rebuilt (148.6 MB).
+
+### Bug Fixes
+
+- **Web browse source buttons**: Oxford and NLI source-toggle buttons on `/browse` restored (regressed post-7.9.1). (web)
+- **Desktop Cambridge nav**: fixed undefined `page_idx` in the Cambridge nav helper (ruff F821). (desktop)
+
+---
+
 ## [7.9.1] - Catalog Attribution & Reading Desk Polish - 2026-04-22
 
 Data-quality fixes across FJMS source attribution, JTS and Cambridge image alignment, plus Reading Desk UX polish on the desktop. Also ships Phase 64/65 code-review follow-ups, security hardening, and web log hygiene.

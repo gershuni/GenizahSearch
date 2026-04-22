@@ -220,7 +220,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Browse different volumes in multi-scan manuscripts — fixes image-to-text mismatch, and Visual Similarity suggestions for discovering related manuscripts."))
+        self.lbl_msg.setText(tr("Updated PGP data, catalog sources for 30,000 manuscripts, and Cambridge image alignment."))
         self.show()
 
     def on_learn_more(self):
@@ -254,10 +254,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr('Volume-Aware Browse — manuscripts with multiple microfilm scans now show a volume selector. This fixes a bug where images did not match the transcription text. Each volume displays its own images and text, with navigation that stays within the active volume.'),
-            tr('Visual Similarity — a new button in Browse shows similar manuscripts based on the FJMS (Friedberg Genizah Project) visual analysis algorithm, with similarity score, domain, and library. You can search within the suggestions or add to puzzle.'),
-            tr('Auto-default to available images — when NLI images are unavailable, the system automatically loads from Manchester, Cambridge, or JTS sources.'),
-            tr('Volume-aware community data — corrections and comments are now tagged per volume, so notes on Volume 2 only appear when browsing Volume 2.'),
+            tr('Updated Princeton Geniza Project (PGP) data — hundreds of new documents, transcriptions, and scholarly footnotes.'),
+            tr('Catalog dialog — about 30,000 manuscripts that previously showed empty dialogs now display proper sources (GRU Cambridge, Schocken-Zulay, Fleischer Piyut Project, and more).'),
+            tr('Bug fixes for navigation and image display on Cambridge and JTS manuscripts.'),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "rtl" if is_heb else "ltr"
