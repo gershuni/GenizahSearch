@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.9.0
+# Genizah Search Pro 7.9.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,21 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.7.2?
+## What's New in Version 7.9.1?
+
+### v7.9.1: Catalog Attribution & Reading Desk Polish
+
+A data-quality release with targeted bug fixes across FJMS catalog attribution, JTS and Cambridge image alignment, and Reading Desk UX polish on the desktop app.
+
+- **Catalog source attribution** — ~30,000 manuscripts previously showed empty `Catalog Information` dialogs because their source was labeled `Instatution` (a generic placeholder). They now render proper institutional attributions: GRU – Cambridge, Schocken-Zulay Poetry Catalog, The Fleischer Piyut Project, Yad Harav Herzog, Uri Ehrlich, and more (both apps)
+- **JTS manuscript images** — ENA manuscripts like `ENA 1052.1` now correctly toggle to their Princeton DPUL catalog images, and navigation between JTS manuscripts is ~5x faster thanks to NLI request timeouts and a circuit breaker (both apps)
+- **Cambridge image alignment** — bifolio manuscripts (e.g., T-S NS 158.112) and CUL manuscripts where CUDL canvases are misordered now display the correct leaf for each transcription page, falling back to NLI images automatically when CUDL is unreliable (both apps)
+- **Reading Desk polish (desktop)** — Add to View respects typed shelfmark/sys_id in the top bar instead of silently re-adding the current manuscript; the green toolbar is slimmer; fragments added from any source now load their images whether or not the manuscript was browsed earlier in the session; What's New dialog Hebrew alignment is right-edge clean
+- **Security & stability** — hardened PostgREST filter sanitization in the desktop Supabase client; unified Supabase config via shared provider; eliminated recurring `parent_slot has been deleted` log spam on web
+
+### v7.9.0: Structural Foundation + Decomposition
+
+Internal refactor — CI pipeline (Ubuntu + Windows matrix), dependency pinning (`requirements.txt` + lock), Supabase auth migration (`gotrue` → `supabase_auth`), `desktop/` package extraction, web page decomposition. Plus back-navigation state-loss bugfix and CUL paired-leaf folio-label fix. Zero user-visible behavior changes except the two bugfixes.
 
 ### v7.7.2: PageSpeed Quick Wins (A11y + Perf)
 
@@ -132,7 +146,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.9.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.9.1_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

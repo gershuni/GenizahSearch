@@ -4,6 +4,46 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.9.1] - Catalog Attribution & Reading Desk Polish - 2026-04-22
+
+Data-quality fixes across FJMS source attribution, JTS and Cambridge image alignment, plus Reading Desk UX polish on the desktop. Also ships Phase 64/65 code-review follow-ups, security hardening, and web log hygiene.
+
+### Bug Fixes
+
+- **FJMS empty catalog dialogs**: ~30K manuscripts that previously rendered empty `Catalog Information` dialogs (source label was `Instatution` — an export typo suppressed by 5 of 6 `GENERIC_SOURCE_NAMES` consumers) now show real institutional attributions. Local `CODE_Institution` join rewrote 267,104 `catalog` rows and 47,800 `catalog_free_desc` rows across 8 SubIds — top by volume: GRU – Cambridge (161K), Schocken-Zulay (51K), Fleischer Piyut Project (30K), Yad Harav Herzog (15K), Uri Ehrlich (8K). 100% resolution; 4 new regression tests. (both apps)
+- **JTS browse source-switch button**: ENA manuscripts like `ENA 1052.1` (sys_id 990053572370205171) couldn't toggle to Princeton DPUL images. Stack of 4 bugs: (1) MARC 942$z parser now prefers first non-numeric value, avoiding FGP photo-ID clobber of the real shelfmark; (2) new `_jts_shelfmark_variants` helper tolerates `Ms.`/`MS.` prefix mismatch; (3) new `get_jts_urls_for_sys_id(sys_id)` resolves via `nli_images.Shelfmark ↔ jts_dpul.shelfmark` JOIN in one query, replacing up to 16 variant lookups; (4) NLI IIIF/MARC/Figgy timeouts tightened 10s→5s + per-sys_id negative cache + class-level circuit breaker (3 consecutive NLI failures → 60s skip), cutting JTS navigation lag ~25s → ~5s per hop. (both apps)
+- **CUL CUDL/NLI image alignment**: Bifolio, binding-canvas, and count-matched-but-order-mismatched CUDL manifests (e.g., T-S NS 158.112 with 14 transcription pages vs 12 CUDL canvases; Or.2245 with same-count but index-2 divergence) could display a wrong-leaf image. New `classify_cambridge_alignment()` helper returns `aligned | misaligned | unknown` + reason; `enrich_metadata` computes the verdict once and 5 previously-duplicated decision sites consume it, defaulting the whole manuscript to NLI when misaligned. CUL-only scope preserves non-CUL Cambridge (Mosseri, Gaster, private CUDL). 7 new regression tests. (both apps)
+- **CUL paired-leaf folio labels**: `_FOLIO_PATTERN` now accepts `L{first}_{second}F...S{side}` bifolio notation — bifolio CUL manuscripts now show folio labels (1r, 1v, 2r, 2v) in the picker instead of flat page numbers. (both apps)
+- **Desktop past-CUDL auto-fallback**: Viewer auto-flips to NLI images when navigating past the last CUDL page, auto-restores CUDL on return. Also disambiguates `folio_num` vs 1-indexed `page_num` across 6 image-index call sites. 18 regression tests. (desktop)
+- **Reading Desk "No images available"**: Fragments added from a list, the top shelfmark field, or the green-bar input that hadn't been browsed earlier in the session showed no images, because the viewer reads from `meta_mgr.nli_cache[sid]` which is only populated by metadata enrichment. New `_browse_rd_enrich_entry(sys_id, volume_ie=None)` helper launches enrichment on add and re-renders on completion. Threads deduped in a sys_id-keyed dict with `wait(1500)`-then-terminate on exit and window close. Volume-aware: when the added fragment matches the currently-browsed manuscript, its `volume_ie` is carried through so multi-IE fragments backfill the correct volume. (desktop)
+- **Reading Desk green toolbar too tall**: Green bar used to stretch vertically because its `QWidget` used the default size policy. Now `QSizePolicy(Preferred, Fixed)` pins it to its inner scroll-row height; margins/padding also slimmed. (desktop)
+- **Reading Desk "Add to View" ignored typed input**: Clicking Add to View with a new shelfmark typed in the top bar silently re-added the currently-loaded manuscript. Now resolves typed shelfmark/sys_id via `resolve_system_by_shelfmark` (with multi-match dialog + not-found warning) and adds that target. (desktop)
+- **Reading Desk field empty on entry**: Green toolbar's shelfmark input was empty when the desk opened. Now pre-populates with the last-added entry so the user can tweak and press Enter to add a variant. (desktop)
+- **What's New dialog RTL alignment**: Hebrew bullet paragraphs were left-edge aligned. Now the wrapping `<div>` carries `dir='rtl' align='right'` and the `QLabel` is set to `AlignRight | AlignTop` in Hebrew. (desktop)
+- **Banner auto-dismiss ordering**: Site-wide "What's New" banner and `/home` OCR disclaimer previously persisted the dismissed flag before deleting the banner, so navigating away within 10s permanently hid the banner on next reload without user interaction. Now the flag is persisted only on successful `.delete()`. (web)
+
+### Improvements
+
+- **FJMS catalog within-source dedup**: Duplicate rows from the same SourceName no longer appear as separate entries. (desktop)
+- **Web `/_nicegui/` framework assets marked noindex**: `X-Robots-Tag: noindex` header so internal ESM/module URLs don't surface as Search Console "pages". Still crawlable for rendering. (web)
+- **Journalctl log hygiene**: 3 `ui.timer()` callsites in ephemeral containers (What's New banner, OCR disclaimer, `/home` carousel) converted to `asyncio.call_later` / `ensure_future`, eliminating recurring `RuntimeError: The parent slot of the element has been deleted` spam. (web)
+
+### Security
+
+- **PostgREST `.or_()` ilike sanitization**: Added `_sanitize_ilike_pattern(value)` helper that strips PostgREST filter separators (`,` `(` `)` `*`), LIKE wildcards (`%` `_`), backslashes, and newlines. Applied at 4 `supabase_corrections_client.py` callsites: `list_corrections`, `get_connected_fragments`, `list_all_fragment_joins`, `list_user_fragment_joins`. Closes Phase 64 CR-02. (desktop)
+- **Supabase config unified via shared provider**: `supabase_corrections_client.py` now imports `SUPABASE_URL` / `SUPABASE_ANON_KEY` from `shared/supabase_provider.py`. Provider opportunistically calls `load_dotenv()` at import (non-fatal if missing), so desktop entry points pick up `.env` without their own call. Closes Phase 64 CR-01. (desktop)
+
+### Data
+
+- **`fjms_enrichment.db` upload** (1.6 GB, 2026-04-21 build): bundles the Instatution migration above plus Shivtiel transliteration fix (ת→ט across 14,608 rows), Sussmann Supplement translation (111 rows), and 36 empty "צוות 500" placeholder records removed.
+
+### Internal
+
+- **`/_internal/memstat`** diagnostic endpoint (gated by `MEMSTAT_SECRET` header) added for leak investigation post-v7.9.0. (web)
+- **Phase 65 code-review cleanup**: WR-01 `import re as _re` moved to top of `web/main.py`; WR-02 misleading exception comment in `puzzle_tokens.py:verify_upload_token` corrected; IN-01 redundant `except (AssertionError, Exception)` simplified in `auth_state.py`; IN-02 NiceGUI upgrade threshold extracted to `_PATCH_AUDIT_THRESHOLD` constant with module-load WARNING on exceed.
+
+---
+
 ## [7.9.0] - Structural Foundation + Decomposition - 2026-04-19
 
 Bundles the two internal GSD milestones `v7.8` (Structural Foundation, 2026-04-15) and `v7.9` (Decomposition, 2026-04-17) into a shippable release, plus a back-navigation bugfix caught during Phase 75 verification and a CUL paired-leaf folio-label fix. Zero user-visible behavior changes except the two bug fixes below.
