@@ -3401,7 +3401,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # NLI IIIF base URL for direct browser access (bypasses server blocking)
                 NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
 
-                if is_oxford and page.sys_id:
+                if is_oxford and page.sys_id and state.active_source != 'nli':
                     has_image = True
                     # For multi-IE Oxford manuscripts, each volume = next folio in sequence
                     # e.g., d.50/19 Volume 1 = folio 19, Volume 2 = folio 20
@@ -3425,11 +3425,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{_suffix_param}{cache_bust_api}"
                     fallback_url = None
 
-                # External source override: if user switched to Cambridge/Manchester/JTS and images are available
+                # External source override: if user switched to Cambridge/Manchester/JTS/Oxford and images are available
                 _has_ext_images = bool(page.cambridge_images)
                 _has_cambridge_images = _has_ext_images and page.external_provider not in ('manchester', 'jts')
                 _has_manchester_images = _has_ext_images and page.external_provider == 'manchester'
                 _has_jts_images = _has_ext_images and page.external_provider == 'jts'
+                # Oxford manuscripts always have a Bodleian direct/proxy path — treat
+                # it as an external source like Cambridge/JTS so the user can switch
+                # between it and the NLI IIIF view of the same manuscript.
+                _has_oxford_images = bool(is_oxford and page.sys_id)
 
                 # Auto-default to external sources when available (before image URL construction)
                 # When NLI IIIF is down, these ensure images load from alternate providers
@@ -3437,6 +3441,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.active_source = 'jts'
                 if _has_manchester_images and state.active_source == 'nli' and not state.source_user_override:
                     state.active_source = 'manchester'
+                if _has_oxford_images and state.active_source == 'nli' and not state.source_user_override:
+                    state.active_source = 'oxford'
                 # 260419-cfx / 260421-aln: only auto-default to Cambridge CUDL
                 # when the per-position (folio,side) verdict from
                 # classify_cambridge_alignment says 'aligned'. A 'misaligned'
@@ -3501,12 +3507,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _has_jts = _src_info.get('jts', False)
 
                 # Source switching setup -- any external source with NLI enables toggling
-                _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images
+                _any_ext_images = _has_cambridge_images or _has_manchester_images or _has_jts_images or _has_oxford_images
                 _both_sources = _has_nli and _any_ext_images
                 _is_nli_active = state.active_source == 'nli' or not _any_ext_images
                 _is_cambridge_active = state.active_source == 'cambridge' and _has_cambridge_images
                 _is_manchester_active = state.active_source == 'manchester' and _has_manchester_images
                 _is_jts_active = state.active_source == 'jts' and _has_jts_images
+                _is_oxford_active = state.active_source == 'oxford' and _has_oxford_images
 
                 async def switch_to_nli():
                     state.active_source = 'nli'
@@ -3525,6 +3532,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 async def switch_to_jts():
                     state.active_source = 'jts'
+                    state.source_user_override = True
+                    await load_page(direction=0)
+
+                async def switch_to_oxford():
+                    state.active_source = 'oxford'
                     state.source_user_override = True
                     await load_page(direction=0)
 
@@ -3663,12 +3675,28 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         'flat round dense size=xs'
                                     ).style(f'min-width: 20px; min-height: 20px; color: {jts_color}; opacity: 0.8;').tooltip(tr('Open in Princeton Digital Library'))
 
-                            if page.is_oxford and page.external_url:
-                                ui.button('Oxford', on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                    'flat dense size=sm no-caps'
-                                ).classes('text-xs px-2 py-0').style(
-                                    'border: 1.5px solid #ff9800; border-radius: 12px; min-height: 22px; color: #ff9800; font-weight: 600;'
-                                ).tooltip(tr('Open in Bodleian Libraries'))
+                            if page.is_oxford:
+                                oxford_color = '#8e44ad'
+                                ox_style = (
+                                    f'background: {oxford_color}; color: white; border: 1.5px solid {oxford_color}; border-radius: 12px; min-height: 22px; font-weight: 600;'
+                                    if _is_oxford_active else
+                                    f'border: 1.5px solid {oxford_color}; border-radius: 12px; min-height: 22px; color: {oxford_color}; font-weight: 600;'
+                                )
+                                if _has_nli and _has_oxford_images:
+                                    ui.button('Oxford', on_click=switch_to_oxford).props(
+                                        'flat dense size=sm no-caps'
+                                    ).classes('text-xs px-2 py-0').style(ox_style).tooltip(
+                                        tr('View Oxford images') if not _is_oxford_active else tr('Viewing Oxford images')
+                                    )
+                                # External link to Bodleian detail page
+                                if page.external_url:
+                                    if not (_has_nli and _has_oxford_images):
+                                        ui.button('Oxford', on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                            'flat dense size=sm no-caps'
+                                        ).classes('text-xs px-2 py-0').style(ox_style).tooltip(tr('Open in Bodleian Libraries'))
+                                    ui.button(icon='open_in_new', on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
+                                        'flat round dense size=xs'
+                                    ).style(f'min-width: 20px; min-height: 20px; color: {oxford_color}; opacity: 0.8;').tooltip(tr('Open in Bodleian Libraries'))
 
                             # === Bibliography & Catalog Buttons (inline, deferred) ===
                             bib_catalog_el = ui.element('span').classes('inline-flex items-center gap-1')
@@ -3967,19 +3995,25 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ):
                                     ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
                                     credit_text = page.attribution
-                                    # Route credit link based on image source
-                                    if page.is_oxford:
+                                    # Route credit link based on the actively viewed source,
+                                    # not just the manuscript's native source. If the user
+                                    # switched to NLI on an Oxford manuscript, the credit
+                                    # should link to NLI/Ktiv, not to Bodleian.
+                                    _nli_credit_url = f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}'
+                                    if _is_nli_active:
+                                        credit_link = _nli_credit_url
+                                    elif _is_oxford_active or (page.is_oxford and state.active_source != 'nli'):
                                         credit_link = 'https://digital.bodleian.ox.ac.uk/'
-                                    elif page.external_provider == 'manchester':
+                                    elif _is_manchester_active or page.external_provider == 'manchester':
                                         credit_link = 'https://luna.manchester.ac.uk/'
-                                    elif page.is_cambridge:
+                                    elif _is_cambridge_active or page.is_cambridge:
                                         credit_link = 'https://cudl.lib.cam.ac.uk/'
-                                    elif page.external_provider == 'jts':
+                                    elif _is_jts_active or page.external_provider == 'jts':
                                         credit_link = 'https://dpul.princeton.edu/cairo_geniza'
                                     elif page.library_code == 'BL':
                                         credit_link = 'https://searcharchives.bl.uk/'
                                     else:
-                                        credit_link = f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}'
+                                        credit_link = _nli_credit_url
                                     with ui.link(target=credit_link, new_tab=True).style('text-decoration: none;'):
                                         ui.label(credit_text).classes('text-xs').style(
                                             'color: #aaa; font-style: italic;'
