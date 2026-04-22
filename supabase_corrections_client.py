@@ -59,24 +59,29 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # ============================================================================
 
-# Load from environment variables or use defaults
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supabase.co')
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsY3BnbHd4b21wd2pjdWZkZW16Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Njc0NzUsImV4cCI6MjA4NTM0MzQ3NX0.xKzlyKrBV0MxADYHqD0lyyymoVxTX91hyI4T6TGchpE')
+# Credentials come from the shared provider so web and desktop stay in sync and
+# the default URL/key is only hard-coded in one place. `shared.supabase_provider`
+# calls `load_dotenv()` itself if python-dotenv is installed, so desktop entry
+# points do not need their own .env parser.
+from shared.supabase_provider import SUPABASE_URL, SUPABASE_ANON_KEY
 
-# Try to load from .env file if not in environment
-if not SUPABASE_ANON_KEY:
-    env_file = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_file):
-        try:
-            with open(env_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('SUPABASE_ANON_KEY='):
-                        SUPABASE_ANON_KEY = line.split('=', 1)[1].strip().strip('"\'')
-                    elif line.startswith('SUPABASE_URL='):
-                        SUPABASE_URL = line.split('=', 1)[1].strip().strip('"\'')
-        except Exception as e:
-            logger.warning(f"Failed to load .env file: {e}")
+
+def _sanitize_ilike_pattern(value) -> str:
+    """Sanitize a user string for interpolation into a PostgREST `.ilike` pattern.
+
+    PostgREST parses ``.or_(f'col.ilike.%{value}%,...')`` filters at the top
+    level by commas and parentheses; the inner LIKE pattern treats ``%`` and
+    ``_`` as wildcards. Untrusted input containing any of those characters
+    can alter filter semantics or break parsing, so we strip the PostgREST
+    separators and the LIKE wildcards rather than trying to escape them
+    (PostgREST does not expose a portable `ESCAPE` clause inside `.or_()`).
+    """
+    if value is None:
+        return ''
+    s = str(value)
+    for ch in (',', '(', ')', '*', '%', '_', '\\', '\n', '\r'):
+        s = s.replace(ch, ' ')
+    return s.strip()
 
 
 # ============================================================================
@@ -947,11 +952,13 @@ class SupabaseCorrectionsClient:
             if document_id:
                 query = query.eq('sys_id', document_id)
             if search_text:
-                query = query.or_(
-                    f'original_text.ilike.%{search_text}%,'
-                    f'corrected_text.ilike.%{search_text}%,'
-                    f'notes.ilike.%{search_text}%'
-                )
+                safe_search = _sanitize_ilike_pattern(search_text)
+                if safe_search:
+                    query = query.or_(
+                        f'original_text.ilike.%{safe_search}%,'
+                        f'corrected_text.ilike.%{safe_search}%,'
+                        f'notes.ilike.%{safe_search}%'
+                    )
 
             offset = (page - 1) * page_size
             response = query.order('created_at', desc=True).range(offset, offset + page_size - 1).execute()
@@ -1380,9 +1387,18 @@ class SupabaseCorrectionsClient:
 
         try:
             # Find all joins involving this shelfmark
+            safe_shelf = _sanitize_ilike_pattern(shelfmark)
+            if not safe_shelf:
+                return ConnectedFragments(
+                    shelfmark=shelfmark,
+                    shelfmark_normalized=normalize_shelfmark(shelfmark),
+                    fragments=[shelfmark] if shelfmark else [],
+                    total_fragments=1 if shelfmark else 0,
+                    total_joins=0,
+                )
             response = client.table('fragment_joins').select('*').or_(
-                f'fragment_a_shelfmark.ilike.%{shelfmark}%,'
-                f'fragment_b_shelfmark.ilike.%{shelfmark}%'
+                f'fragment_a_shelfmark.ilike.%{safe_shelf}%,'
+                f'fragment_b_shelfmark.ilike.%{safe_shelf}%'
             ).execute()
 
             if not response.data:
@@ -1491,10 +1507,12 @@ class SupabaseCorrectionsClient:
             q = client.table('fragment_joins').select('*', count='exact')
 
             if query:
-                q = q.or_(
-                    f'fragment_a_shelfmark.ilike.%{query}%,'
-                    f'fragment_b_shelfmark.ilike.%{query}%'
-                )
+                safe_query = _sanitize_ilike_pattern(query)
+                if safe_query:
+                    q = q.or_(
+                        f'fragment_a_shelfmark.ilike.%{safe_query}%,'
+                        f'fragment_b_shelfmark.ilike.%{safe_query}%'
+                    )
             if relationship_type:
                 q = q.eq('join_type', _map_join_type(relationship_type))
 
@@ -1525,10 +1543,12 @@ class SupabaseCorrectionsClient:
             q = client.table('fragment_joins').select('*', count='exact').eq('user_id', self.current_user._uuid)
 
             if query:
-                q = q.or_(
-                    f'fragment_a_shelfmark.ilike.%{query}%,'
-                    f'fragment_b_shelfmark.ilike.%{query}%'
-                )
+                safe_query = _sanitize_ilike_pattern(query)
+                if safe_query:
+                    q = q.or_(
+                        f'fragment_a_shelfmark.ilike.%{safe_query}%,'
+                        f'fragment_b_shelfmark.ilike.%{safe_query}%'
+                    )
             if relationship_type:
                 q = q.eq('join_type', _map_join_type(relationship_type))
 

@@ -258,13 +258,13 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 | `CACHE_TTL = 300` | `api.py:46` | ג… Fixed (2026-02-04) | Now uses `NLI_CACHE_TTL` / `IMAGE_CACHE_TTL` env vars |
 | Timeouts & retries | `auth_state.py:17-20` | ג Deferred | Low priority - defaults are reasonable |
 
-| **Supabase URL + anon key defaults** | `supabase_corrections_client.py:62-63` | ❌ Open | Should use `shared/supabase_provider.py` like web client. Phase 64 code review CR-01. |
+| **Supabase URL + anon key defaults** | `supabase_corrections_client.py:62-63` | ✅ Fixed (2026-04-22) | Desktop now imports `SUPABASE_URL` / `SUPABASE_ANON_KEY` from `shared/supabase_provider.py` (same single source the web uses), dropping the duplicated `os.environ.get(...)` defaults + the ~15-line manual `.env` file parser. To keep desktop entry points working without needing their own `load_dotenv()` call, `shared/supabase_provider.py` now opportunistically calls `load_dotenv()` at module import (wrapped in try/except so missing `python-dotenv` is non-fatal). `load_dotenv()` does not override existing env vars, so the web path that already calls it earlier is unaffected. Closes Phase 64 CR-01. |
 
 ### Input Sanitization
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **ilike injection via unescaped user input** | `supabase_corrections_client.py:950,1384,1494,1528` | ❌ Open | User strings interpolated into PostgREST `.or_()` filters. Phase 64 code review CR-02. |
+| **ilike injection via unescaped user input** | `supabase_corrections_client.py:950,1384,1494,1528` | ✅ Fixed (2026-04-22) | Added `_sanitize_ilike_pattern(value)` helper next to the client module's configuration block. Strips PostgREST filter separators (`,` `(` `)` `*`), the LIKE wildcards (`%` `_`), backslashes, and newlines, since PostgREST's `.or_(...)` filter has no portable `ESCAPE` clause to safely pass these through. All 4 callsites now sanitize before interpolation: `list_corrections` (search_text across original/corrected/notes), `get_connected_fragments` (shelfmark), `list_all_fragment_joins` and `list_user_fragment_joins` (query across fragment_a/b shelfmarks). Empty-post-sanitize inputs are treated as no-filter (not a wildcard match). `get_connected_fragments` short-circuits to an empty `ConnectedFragments(shelfmark=..., shelfmark_normalized=...)` response on empty-post-sanitize. Normal shelfmark queries (`T-S NS 37.2`) pass through unchanged. Closes Phase 64 CR-02. |
 
 ### v7.8 Code Review Findings (Phase 65)
 

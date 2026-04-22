@@ -11,6 +11,16 @@ import os
 from typing import Optional
 from supabase import create_client, Client
 
+# Load .env file if present, so desktop entry points (which do not call
+# load_dotenv() themselves) still pick up credentials. Idempotent — web
+# calls load_dotenv() earlier, and python-dotenv does not override existing
+# process env vars, so this is safe regardless of import order.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; caller must set env vars directly
+
 # Configuration from environment variables with development defaults
 SUPABASE_URL = os.environ.get(
     'SUPABASE_URL',
