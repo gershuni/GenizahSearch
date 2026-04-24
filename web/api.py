@@ -598,7 +598,7 @@ def init_api_routes():
     _cambridge_degraded_warned = set()
 
     @app.get('/api/cambridge_image/{sys_id}')
-    def cambridge_image(sys_id: str, page: int = 0):
+    def cambridge_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Cambridge IIIF image by System ID with folio+side matching.
 
@@ -620,14 +620,15 @@ def init_api_routes():
         # Imported locally to avoid adding a hot-path import at module load.
         from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
 
-        cache_key = (_CAMBRIDGE_CACHE_VERSION, sys_id, page)
+        width = max(100, min(int(width or 2000), 2000))
+        cache_key = (_CAMBRIDGE_CACHE_VERSION, sys_id, page, width)
 
         def _base_headers():
             """Resolver-version metadata on every response (success, fallback,
             legacy). ETag lets clients revalidate after a deploy."""
             return {
                 "Cache-Control": "public, max-age=600",
-                "ETag": f'"{sys_id}-p{page}-{_CAMBRIDGE_ETAG_VERSION}"',
+                "ETag": f'"{sys_id}-p{page}-w{width}-{_CAMBRIDGE_ETAG_VERSION}"',
                 "X-Image-Resolver-Version": str(_CAMBRIDGE_CACHE_VERSION),
             }
 
@@ -706,7 +707,7 @@ def init_api_routes():
             # scope per CONTEXT.md). Multi-IE CUL shelfmarks (rare) may
             # therefore receive the wrong volume's NLI image on the web
             # fallback path. Desktop does NOT have this limitation.
-            got = _fetch_nli_image_bytes(sys_id, page, width=2000, suffix=1)
+            got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=1)
             if got is None:
                 return Response(content="Image not found", status_code=404)
             content, ct, resolved_fl_id = got
@@ -727,7 +728,7 @@ def init_api_routes():
         if not canvas_url:
             return Response(content="No canvas URL for this page", status_code=404)
 
-        img_url = f"{canvas_url}/full/2000,/0/default.jpg"
+        img_url = f"{canvas_url}/full/{width},/0/default.jpg"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://cudl.lib.cam.ac.uk/',
@@ -762,13 +763,14 @@ def init_api_routes():
     _manchester_image_cache = {}
 
     @app.get('/api/manchester_image/{sys_id}')
-    def manchester_image(sys_id: str, page: int = 0):
+    def manchester_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Manchester IIIF image by System ID.
         Uses images_ext from nli_cache populated by enrich_metadata via LUNA IIIF manifest.
         """
         import time as _time
-        cache_key = (sys_id, page)
+        width = max(100, min(int(width or 2000), 2000))
+        cache_key = (sys_id, page, width)
 
         # Check cache
         if cache_key in _manchester_image_cache:
@@ -796,7 +798,7 @@ def init_api_routes():
             return Response(content="No canvas URL for this page", status_code=404)
 
         # Build IIIF Image API URL from canvas base URL
-        img_url = f"{canvas_url}/full/2000,/0/default.jpg"
+        img_url = f"{canvas_url}/full/{width},/0/default.jpg"
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -819,13 +821,14 @@ def init_api_routes():
     _jts_image_cache = {}
 
     @app.get('/api/jts_image/{sys_id}')
-    def jts_image(sys_id: str, page: int = 0):
+    def jts_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch JTS/Princeton IIIF image by System ID.
         Uses images_ext from nli_cache populated by enrich_metadata via Figgy IIIF manifest.
         """
         import time as _time
-        cache_key = (sys_id, page)
+        width = max(100, min(int(width or 2000), 2000))
+        cache_key = (sys_id, page, width)
 
         # Check cache
         if cache_key in _jts_image_cache:
@@ -853,7 +856,7 @@ def init_api_routes():
             return Response(content="No canvas URL for this page", status_code=404)
 
         # Build IIIF Image API URL from canvas base URL
-        img_url = f"{canvas_url}/full/2000,/0/default.jpg"
+        img_url = f"{canvas_url}/full/{width},/0/default.jpg"
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -881,13 +884,14 @@ def init_api_routes():
         return 0
 
     @app.get('/api/oxford_image/{sys_id}')
-    def oxford_image(sys_id: str, page: int = 0):
+    def oxford_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Oxford image by System ID using CodicologicalManager.
         Automatically finds the correct folio image based on shelfmark.
         """
         import time as _time
-        cache_key = (sys_id, page)
+        width = max(100, min(int(width or 2000), 2000))
+        cache_key = (sys_id, page, width)
 
         # Check image cache first
         if cache_key in _oxford_image_cache:
@@ -963,7 +967,11 @@ def init_api_routes():
             img_data = images[page]
 
         if not img_url and img_data:
-            img_url = img_data.get('full_url', '')
+            thumb_url = img_data.get('thumb_url', '')
+            if thumb_url and width <= 600:
+                img_url = thumb_url
+            else:
+                img_url = img_data.get('full_url', '')
 
         if not img_url:
             return Response(content="No image URL available", status_code=404)

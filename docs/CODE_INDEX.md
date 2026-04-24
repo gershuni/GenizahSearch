@@ -1421,10 +1421,13 @@ have shifted; use them as a guide to intent rather than current anchors.
 
 ## web/components/visual_similarity_dialog.py
 
-- **Function** `_fetch_original_info` (Line 27) — Fetch image URL and text snippet for the original manuscript.
-- **Function** `_fetch_suggestion_text` (Line 67) — Fetch text snippet for a suggestion manuscript.
-- **Function** `show_visual_similarity_dialog` (Line 85) — Show visual similarity suggestions dialog for a manuscript.
-- **Function** `_render_suggestion_row` (Line 354) — Render a single suggestion row with expandable detail section.
+- **Function** `_pick_preview_image_url` (Line 31) — Choose the same best-effort preview source family as the browse page.
+- **Function** `_resolve_preview_image_url_sync` (Line 62) — Populate browse metadata on demand, then pick the preview image URL.
+- **Function** `_fetch_original_info` (Line 90) — Fetch image URL and text snippet for the original manuscript.
+- **Function** `_fetch_preview_image_url` (Line 129) — Resolve the best preview image URL without blocking the UI event loop.
+- **Function** `_fetch_suggestion_text` (Line 137) — Fetch text snippet for a suggestion manuscript.
+- **Function** `show_visual_similarity_dialog` (Line 155) — Show visual similarity suggestions dialog for a manuscript.
+- **Function** `_render_suggestion_row` (Line 433) — Render a single suggestion row with expandable detail section.
 
 ## web/main.py
 

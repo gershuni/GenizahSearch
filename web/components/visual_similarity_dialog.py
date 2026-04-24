@@ -14,17 +14,85 @@ Orange color scheme (#e65100 / #ff9800) distinct from other enrichment dialogs.
 Data sourced from visual_similarity.db sidecar via VisualSimilarityService.
 """
 
-from nicegui import ui, run
-from web.translations import tr, get_language
+import asyncio
 import logging
+
+from nicegui import ui, run
+
+from web.services import get_oxford_direct_image_url, is_oxford_manuscript
+from web.translations import tr, get_language
 
 logger = logging.getLogger(__name__)
 
 # Number of suggestions to show per batch
 _PAGE_SIZE = 20
+_PREVIEW_IMAGE_WIDTH = 600
 
 
-async def _fetch_original_info(sys_id: str) -> dict:
+def _pick_preview_image_url(
+    sys_id: str,
+    *,
+    shelfmark: str = '',
+    library_code: str = '',
+    cached: dict | None = None,
+) -> str | None:
+    """Choose the same best-effort preview source family as the browse page."""
+    cached = cached or {}
+    images_ext = cached.get('images_ext') or []
+    ext_provider = str(cached.get('external_provider') or '').strip().lower()
+    cambridge_alignment = cached.get('cambridge_alignment') or {}
+    width_param = f'&width={_PREVIEW_IMAGE_WIDTH}'
+
+    if is_oxford_manuscript(shelfmark, library_code):
+        thumb_url = (images_ext[0] or {}).get('thumb_url') if images_ext else ''
+        if thumb_url:
+            return thumb_url
+        direct = get_oxford_direct_image_url(shelfmark, 0, folio_offset=0)
+        return direct or f"/api/oxford_image/{sys_id}?page=0{width_param}"
+
+    if ext_provider == 'jts' and images_ext:
+        return f"/api/jts_image/{sys_id}?page=0{width_param}"
+
+    if ext_provider == 'manchester' and images_ext:
+        return f"/api/manchester_image/{sys_id}?page=0{width_param}"
+
+    if images_ext:
+        if library_code == 'CUL' and cambridge_alignment.get('verdict') == 'misaligned':
+            return f"/api/nli_image_by_sysid/{sys_id}?page=0&width={_PREVIEW_IMAGE_WIDTH}"
+        return f"/api/cambridge_image/{sys_id}?page=0{width_param}"
+
+    return f"/api/nli_image_by_sysid/{sys_id}?page=0&width={_PREVIEW_IMAGE_WIDTH}"
+
+
+def _resolve_preview_image_url_sync(sys_id: str, shelfmark: str = '') -> str | None:
+    """Populate browse metadata on demand, then pick the preview image URL."""
+    from web.state import state
+
+    meta_mgr = getattr(state, 'meta_mgr', None)
+    if not meta_mgr:
+        return f"/api/nli_image_by_sysid/{sys_id}?page=0&width={_PREVIEW_IMAGE_WIDTH}"
+
+    csv_meta = meta_mgr.csv_bank.get(sys_id, {}) if getattr(meta_mgr, 'csv_bank', None) else {}
+    library_code = csv_meta.get('library_code', '')
+    shelfmark = shelfmark or csv_meta.get('shelfmark', '')
+
+    cached = meta_mgr.nli_cache.get(sys_id, {}) if getattr(meta_mgr, 'nli_cache', None) else {}
+    if not cached.get('images_ext') and not cached.get('image_source_info'):
+        try:
+            meta_mgr.enrich_metadata(sys_id)
+            cached = meta_mgr.nli_cache.get(sys_id, {})
+        except Exception as e:
+            logger.debug("VS dialog: enrich_metadata error for %s: %s", sys_id, e)
+
+    return _pick_preview_image_url(
+        sys_id,
+        shelfmark=shelfmark,
+        library_code=library_code,
+        cached=cached,
+    )
+
+
+async def _fetch_original_info(sys_id: str, shelfmark: str = '') -> dict:
     """Fetch image URL and text snippet for the original manuscript."""
     info = {'image_url': None, 'text_snippet': '', 'fl_ids': []}
 
@@ -42,8 +110,7 @@ async def _fetch_original_info(sys_id: str) -> dict:
         except Exception as e:
             logger.debug(f"VS dialog: NLI crossref error for {sys_id}: {e}")
 
-        # Use server proxy as image URL (most reliable)
-        result['image_url'] = f"/api/nli_image_by_sysid/{sys_id}?page=0"
+        result['image_url'] = _resolve_preview_image_url_sync(sys_id, shelfmark)
 
         # Get text snippet from Tantivy
         try:
@@ -62,6 +129,14 @@ async def _fetch_original_info(sys_id: str) -> dict:
     except Exception:
         pass  # Dialog operation failed; continue with available data
     return info
+
+
+async def _fetch_preview_image_url(sys_id: str, shelfmark: str = '') -> str | None:
+    """Resolve the best preview image URL without blocking the UI event loop."""
+    try:
+        return await run.io_bound(_resolve_preview_image_url_sync, sys_id, shelfmark)
+    except Exception:
+        return f"/api/nli_image_by_sysid/{sys_id}?page=0&width={_PREVIEW_IMAGE_WIDTH}"
 
 
 async def _fetch_suggestion_text(alma_id: str) -> str:
@@ -223,7 +298,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                     orig_text_container = ui.column().classes('w-full')
 
                     async def _load_original():
-                        info = await _fetch_original_info(sys_id)
+                        info = await _fetch_original_info(sys_id, shelfmark)
                         orig_img_container.clear()
                         with orig_img_container:
                             if info.get('image_url'):
@@ -248,7 +323,6 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                                 )
 
                     # Fire async load without blocking dialog render
-                    import asyncio
                     asyncio.ensure_future(_load_original())
 
                 # ── Right pane: Suggestion list ──
@@ -257,9 +331,10 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                 ):
                     rows_container = ui.column().classes('w-full gap-0 p-0')
 
-            # Track expanded rows and their text-loading state
+            # Track expanded rows and their lazy-loaded preview state
             expanded_rows = set()
-            text_cache = {}  # alma_id -> text snippet
+            text_cache = {}   # alma_id -> text snippet
+            image_cache = {}  # sys_id -> best preview image URL
 
             def _get_filtered():
                 """Apply filters and sorting, return full filtered list."""
@@ -292,7 +367,16 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                         return
 
                     for s in display:
-                        _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, original_sys_id=sys_id, original_shelfmark=shelfmark)
+                        _render_suggestion_row(
+                            s,
+                            dialog,
+                            expanded_rows,
+                            text_cache,
+                            image_cache,
+                            is_heb,
+                            original_sys_id=sys_id,
+                            original_shelfmark=shelfmark,
+                        )
 
                     remaining = len(filtered) - filter_state['visible_count']
                     if remaining > 0:
@@ -351,7 +435,16 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
     return dialog
 
 
-def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, original_sys_id=None, original_shelfmark=None):
+def _render_suggestion_row(
+    s,
+    dialog,
+    expanded_rows,
+    text_cache,
+    image_cache,
+    is_heb,
+    original_sys_id=None,
+    original_shelfmark=None,
+):
     """Render a single suggestion row with expandable detail section."""
     alma_id = s['alma_id']
     browse_url = f'/browse?sys_id={alma_id}'
@@ -387,41 +480,75 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, origina
             ):
                 # Image thumbnail
                 with ui.column().classes('shrink-0 items-center').style('width: 180px;'):
-                    img_url = f"/api/nli_image_by_sysid/{aid}?page=0"
-                    ui.image(img_url).classes(
-                        'w-full max-h-[160px] object-contain rounded'
-                    )
+                    img_container = ui.column().classes('w-full items-center')
+                    with img_container:
+                        ui.spinner('dots', size='sm').style('color: #ff9800;')
 
                 # Text snippet (lazy loaded)
                 with ui.column().classes('flex-1 gap-1'):
-                    if aid in text_cache and text_cache[aid]:
+                    cached_text = text_cache.get(aid, '')
+                    has_cached_image = aid in image_cache
+                    cached_image_url = image_cache.get(aid) if has_cached_image else None
+
+                    if cached_text:
                         dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
-                        ui.label(text_cache[aid]).classes('text-xs').style(
+                        ui.label(cached_text).classes('text-xs').style(
                             f'color: var(--text-secondary); line-height: 1.5; {dir_style}'
                         )
                     else:
                         spinner = ui.spinner('dots', size='sm').style('color: #ff9800;')
                         text_label_container = ui.column().classes('w-full')
 
-                        # Fetch text async
-                        text = await _fetch_suggestion_text(aid)
-                        text_cache[aid] = text
-
-                        # Remove spinner, show text
-                        try:
-                            spinner.delete()
-                        except Exception:
-                            pass  # Cache operation failed; continue without cached data
-                        with text_label_container:
-                            if text:
-                                dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
-                                ui.label(text).classes('text-xs').style(
-                                    f'color: var(--text-secondary); line-height: 1.5; {dir_style}'
+                    if has_cached_image:
+                        img_container.clear()
+                        with img_container:
+                            if cached_image_url:
+                                ui.image(cached_image_url).classes(
+                                    'w-full max-h-[160px] object-contain rounded'
                                 )
                             else:
-                                ui.label(tr('No text available')).classes('text-xs').style(
-                                    'color: var(--text-muted); font-style: italic;'
-                                )
+                                ui.icon('hide_image').classes('text-2xl').style('color: var(--text-muted);')
+
+                    text_task = None if cached_text else _fetch_suggestion_text(aid)
+                    image_task = None if has_cached_image else _fetch_preview_image_url(aid, s.get('shelfmark', ''))
+
+                    if text_task or image_task:
+                        if text_task and image_task:
+                            image_url, text = await asyncio.gather(image_task, text_task)
+                        elif text_task:
+                            text = await text_task
+                            image_url = cached_image_url
+                        else:
+                            image_url = await image_task
+                            text = cached_text
+
+                        if image_task:
+                            image_cache[aid] = image_url
+                            img_container.clear()
+                            with img_container:
+                                if image_url:
+                                    ui.image(image_url).classes(
+                                        'w-full max-h-[160px] object-contain rounded'
+                                    )
+                                else:
+                                    ui.icon('hide_image').classes('text-2xl').style('color: var(--text-muted);')
+
+                        if text_task:
+                            text_cache[aid] = text
+                            try:
+                                spinner.delete()
+                            except Exception:
+                                pass  # Cache operation failed; continue without cached data
+                            with text_label_container:
+                                if text:
+                                    dir_style = 'direction: rtl; text-align: right;' if is_heb else ''
+                                    ui.label(text).classes('text-xs').style(
+                                        f'color: var(--text-secondary); line-height: 1.5; {dir_style}'
+                                    )
+                                else:
+                                    ui.label(tr('No text available')).classes('text-xs').style(
+                                        'color: var(--text-muted); font-style: italic;'
+                                    )
 
     with row_el:
         # Main row (always visible)
