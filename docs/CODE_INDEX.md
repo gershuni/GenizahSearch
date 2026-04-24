@@ -1,6 +1,6 @@
 # Codebase Index
 
-> Last updated: 2026-04-17
+> Last updated: 2026-04-24
 
 Auto-generated index of classes and methods. New sections for modules can be
 appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
@@ -1418,6 +1418,13 @@ have shifted; use them as a guide to intent rather than current anchors.
 - **Function** `create_comment_card` (Line 277)
 - **Function** `create_reply_item` (Line 327)
 - **Function** `create_notes_button` (Line 355)
+
+## web/components/visual_similarity_dialog.py
+
+- **Function** `_fetch_original_info` (Line 27) — Fetch image URL and text snippet for the original manuscript.
+- **Function** `_fetch_suggestion_text` (Line 67) — Fetch text snippet for a suggestion manuscript.
+- **Function** `show_visual_similarity_dialog` (Line 85) — Show visual similarity suggestions dialog for a manuscript.
+- **Function** `_render_suggestion_row` (Line 354) — Render a single suggestion row with expandable detail section.
 
 ## web/main.py
 

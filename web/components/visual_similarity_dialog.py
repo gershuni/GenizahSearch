@@ -252,7 +252,9 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                     asyncio.ensure_future(_load_original())
 
                 # ── Right pane: Suggestion list ──
-                with ui.scroll_area().style('flex: 1 1 0; min-width: 0;'):
+                with ui.element('div').style(
+                    'flex: 1 1 0; min-width: 0; min-height: 0; height: 100%; overflow-y: auto;'
+                ):
                     rows_container = ui.column().classes('w-full gap-0 p-0')
 
             # Track expanded rows and their text-loading state
@@ -352,6 +354,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
 def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, original_sys_id=None, original_shelfmark=None):
     """Render a single suggestion row with expandable detail section."""
     alma_id = s['alma_id']
+    browse_url = f'/browse?sys_id={alma_id}'
 
     # Row container
     row_el = ui.column().classes('w-full gap-0').style(
@@ -435,17 +438,13 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, origina
                 'color=deep-orange-1 text-color=deep-orange-9'
             ).classes('text-xs')
 
-            # Clickable shelfmark
-            def _nav_browse(aid=alma_id):
-                ui.navigate.to(f'/browse?sys_id={aid}')
-                dialog.close()
-
-            ui.button(
+            # Real anchor: selectable text + browser-native Ctrl/Cmd-click and middle-click.
+            ui.link(
                 s['shelfmark'],
-                on_click=_nav_browse,
-            ).props('flat dense no-caps size=sm').classes('text-sm font-semibold').style(
-                'color: var(--primary-700);'
-            )
+                browse_url,
+            ).classes('text-sm font-semibold').style(
+                'color: var(--primary-700); text-decoration: none; user-select: text;'
+            ).on('click', lambda e: e.stop_propagation()).tooltip(tr('Browse manuscript'))
 
             # Domain
             ui.label(s.get('domain', '--')).classes('text-xs').style(
@@ -472,15 +471,16 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, origina
             ui.element('div').classes('flex-grow')
 
             # Action buttons
-            ui.button(
-                icon='open_in_new',
-                on_click=lambda aid=alma_id: (ui.navigate.to(f'/browse?sys_id={aid}'), dialog.close()),
-            ).props('flat dense round size=sm').tooltip(tr('Browse manuscript'))
+            with ui.link(target=browse_url, new_tab=True).classes('no-underline').on(
+                'click', lambda e: e.stop_propagation()
+            ).tooltip(tr('Browse manuscript')):
+                ui.button(icon='open_in_new').props('flat dense round size=sm')
 
             ui.button(
                 icon='extension',
-                on_click=lambda aid=alma_id: (ui.navigate.to(f'/puzzle?add={aid}'), dialog.close()),
-            ).props('flat dense round size=sm').tooltip(tr('Add to puzzle'))
+            ).props('flat dense round size=sm').on(
+                'click.stop', lambda aid=alma_id: (ui.navigate.to(f'/puzzle?add={aid}'), dialog.close())
+            ).tooltip(tr('Add to puzzle'))
 
             # Add to List button
             def _add_to_list(aid=alma_id, sm=s['shelfmark']):
@@ -498,8 +498,9 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, origina
 
             ui.button(
                 icon='star_border',
-                on_click=_add_to_list,
-            ).props('flat dense round size=sm').tooltip(tr('Add to List'))
+            ).props('flat dense round size=sm').on(
+                'click.stop', _add_to_list
+            ).tooltip(tr('Add to List'))
 
             # Add as Join button
             if original_sys_id:
@@ -515,8 +516,9 @@ def _render_suggestion_row(s, dialog, expanded_rows, text_cache, is_heb, origina
 
                 ui.button(
                     icon='add_link',
-                    on_click=_add_as_join,
-                ).props('flat dense round size=sm').style('color: #388e3c;').tooltip(tr('Add as Join'))
+                ).props('flat dense round size=sm').style('color: #388e3c;').on(
+                    'click.stop', _add_as_join
+                ).tooltip(tr('Add as Join'))
 
         # Expandable detail section (below the main row)
         detail_container = ui.column().classes('w-full gap-2 px-4 pb-3')

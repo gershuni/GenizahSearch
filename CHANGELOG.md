@@ -4,6 +4,22 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.9.3] - Visual Similarity Dialog Fixes - 2026-04-24
+
+A small web-only patch fixing three usability bugs in the Visual Similarity dialog, all surfaced by the same user report.
+
+### Bug Fixes
+
+- **Firefox: `Show more` unreachable past 20 results**: the right-pane Quasar `scroll_area` did not scroll reliably in Firefox, so the pagination control below the initial 20 suggestions could not be reached (Chrome was unaffected). Replaced the wrapper with a plain `div` using `overflow-y: auto; height: 100%`. (web)
+- **Ctrl/Cmd-click and middle-click opened in the same tab**: shelfmarks and the `open_in_new` icon were `ui.button`s navigating programmatically via `ui.navigate.to()`, so browser-native modifier-click never fired. Converted shelfmarks to real `ui.link('/browse?sys_id=...')` anchors and wrapped the `open_in_new` icon in `ui.link(..., new_tab=True)`. (web)
+- **Shelfmarks missing from copy-paste**: Quasar's `q-btn` sets `user-select: none`, so manually selecting the suggestion list excluded the shelfmark column — the most important field. `ui.link` uses a plain anchor with `user-select: text`, so shelfmarks now copy with the rest of the row. (web)
+
+### Internal
+
+- Remaining per-row action buttons (Add to Puzzle, Add to List, Add as Join) moved to `click.stop` handlers so they don't also trigger the row-expansion toggle. (web)
+
+---
+
 ## [7.9.2] - PGP Data Refresh - 2026-04-22
 
 Refreshes our bundled Princeton Geniza Project metadata (last imported February). Plus two small post-7.9.1 fixes.

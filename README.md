@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.9.2
+# Genizah Search Pro 7.9.3
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,15 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.9.2?
+## What's New in Version 7.9.3?
+
+### v7.9.3: Visual Similarity Dialog Fixes
+
+A small web-only patch fixing three usability bugs in the Visual Similarity dialog, all from the same user report.
+
+- **Firefox `Show more` button** — past the first 20 results, the pagination control is now reachable in Firefox (was broken only in Firefox; Chrome was unaffected)
+- **Open-in-new-tab works** — Ctrl/Cmd-click and middle-click on a suggestion now open the manuscript in a second tab without losing the list you're browsing
+- **Copyable shelfmarks** — manually selecting the suggestion list now includes the shelfmark column (previously excluded because the shelfmark rendered as a button)
 
 ### v7.9.2: PGP Data Refresh
 
@@ -154,7 +162,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.9.2_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.9.3_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
