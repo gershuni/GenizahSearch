@@ -58,7 +58,7 @@ Present drafts for whichever items the user wants. The full menu is:
 
 5. **Desktop What's New dialog** (`genizah_app.py` `WhatsNewDialog`) — 3-5 bullet points in Hebrew (`<li>` items), shown when user clicks "Learn More".
 
-6. **GitHub Release draft** — Title + body for the GitHub release. Include:
+6. **GitHub Release draft** — *(skip for web-only releases — no GitHub release will be created)*. Title + body for the GitHub release. Include:
    - Release title: `vX.Y.Z: <theme>`
    - Summary paragraph
    - Key changes (bullet points)
@@ -198,14 +198,19 @@ After user confirms:
    - Check that the response body contains the new version string (X.Y.Z)
    - If the smoke test fails, alert the user immediately and suggest rollback (see Phase 9)
 
-6. **Create GitHub Release** (if desktop or both):
-   ```
-   gh release create vX.Y.Z --title "vX.Y.Z: <theme>" --notes-file -
-   ```
-   - If desktop installer was built, upload it:
-   ```
-   gh release upload vX.Y.Z <installer-path>
-   ```
+6. **Create GitHub Release** — **DESKTOP OR BOTH ONLY. NEVER for web-only releases.**
+
+   **Why this matters:** the installed desktop app polls `https://api.github.com/repos/gershuni/GenizahSearch/releases/latest` (`UpdateCheckerThread` in `gui_threads.py:445`) and prompts every desktop user to update whenever a new tag becomes `latest`. A web-only GitHub release has no installer attached, so the prompt sends users to a release page they cannot install from. **Past incident: v7.9.3 (web-only) created a release, every desktop user was prompted to "update" to a no-installer page.**
+
+   - **If web-only:** SKIP this step entirely. Do NOT run `gh release create`. The git tag itself is fine (tags do not appear in `/releases/latest`); only the GitHub Release object triggers the desktop update prompt.
+   - **If desktop or both:**
+     ```
+     gh release create vX.Y.Z --title "vX.Y.Z: <theme>" --notes-file -
+     ```
+     - Then upload the installer (required — a release without one strands desktop users):
+     ```
+     gh release upload vX.Y.Z <installer-path>
+     ```
 
 7. **Post-deploy verification**:
    - For web: confirm smoke test passed, suggest user also checks manually
