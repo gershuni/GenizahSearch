@@ -1358,7 +1358,12 @@ class LabEngine:
                                 'is_text_filtered': False,
                                 # Boundary tracking - use set to count each boundary only once
                                 'boundary_chunk_scores': [],
-                                'crossed_boundaries': set()
+                                'crossed_boundaries': set(),
+                                # Phase 77 D-13: per-chunk attribution for parallels JSON
+                                # matches[]. Tuples are (chunk_index_0_based, source_chunk_text,
+                                # match_score, manuscript_snippet). Used by
+                                # shared/search_serializer.serialize_parallels_payload.
+                                'chunk_hits': [],
                             }
                         rec = results_map[uid]
 
@@ -1378,6 +1383,11 @@ class LabEngine:
                         if matches:
                             rec['ms_matches'].append((matches[start_m]['start'], matches[end_m]['end']))
                             for m in matches[start_m : end_m + 1]: rec['all_found_words'].add(m['word'])
+                            # Phase 77 D-13: per-chunk attribution for parallels matches[].
+                            # i is the 0-based chunk index from the outer enumerate(chunks_data) loop.
+                            # The manuscript snippet is the same substring used for ms_matches.
+                            ms_snip = content[matches[start_m]['start']:matches[end_m]['end']]
+                            rec['chunk_hits'].append((i, chunk_text, match_score, ms_snip))
                     except (KeyError, IndexError, TypeError): pass
         except InterruptedError:
             was_interrupted = True
