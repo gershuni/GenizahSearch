@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 77 context gathered
-last_updated: "2026-04-27T16:27:23.688Z"
-last_activity: 2026-04-27 -- Phase 77 planning complete
+stopped_at: Plan 77-01 complete; ready for Plan 77-02 (lab_composition_search chunk_hits)
+last_updated: "2026-04-27T16:49:18Z"
+last_activity: 2026-04-27 -- Plan 77-01 complete (3 commits, 22 RED tests scaffolded, ~8 min)
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 3
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.10 Search API — roadmap complete (Phases 77-82), Phase 77 next
+**Current focus:** Phase 77 — serializer-json-export
 
 ## Current Position
 
-Phase: 77 (Serializer & JSON Export) — Not started
-Plan: —
-Status: Ready to execute
-Last activity: 2026-04-27 -- Phase 77 planning complete
+Phase: 77 (serializer-json-export) — EXECUTING
+Plan: 2 of 5 (next; 77-01 complete)
+Status: Executing Phase 77
+Last activity: 2026-04-27 -- Plan 77-01 complete (envelope-echo state + Wave 0 RED tests)
 
-Progress: [          ] 0% (0/6 phases complete)
+Progress: [          ] 3% (0/6 phases complete; 1/5 Phase 77 plans complete)
 
 **Phase queue (v7.10):**
 
@@ -70,6 +70,14 @@ See PROJECT.md Key Decisions table for full history.
 - API-05 (drill-down locator) is mapped to Phase 78 only; Phase 79 inherits the locator on parallels responses as a behavioral consequence reflected in its success criteria. This keeps every requirement single-mapped while preserving the cross-phase obligation.
 - The Claude skill (Phase 81) is the milestone's acceptance harness — it must run end-to-end against a live deployment before documentation closeout in Phase 82, so the docs reflect what shipped, not what was planned.
 
+**Plan 77-01 decisions (2026-04-27):**
+
+- Filter dict shape locked to **10 keys** matching the live snapshot at search.py:4232-4242 (HIGH-02 fix — earlier 6-key dict was incomplete, would not survive replay through search history restore).
+- Search history restore extends to populate **state.last_results AND envelope-echo fields** drawn from the snapshot's stored query/mode/gap/filters (HIGH-01) — restored exports are now byte-identical-shape to live exports.
+- Parallels history restore uses **state_snapshot['source_text'] + params dict** as canonical source, NOT inferred from p_state.results[0]['source_ctx'] (HIGH-03 — result rows lose chunk_size/mode/filters fidelity).
+- Side-effect: `state.current_search_query` latent bug (declared at web/state.py:27, never assigned per RESEARCH §Pitfall 2) fixed at all 3 search-execute paths. Excel/Word filenames will produce meaningful filenames as a ride-along benefit.
+- Wave 0 TDD: 22 RED tests written before implementation module exists. `pytest tests/test_search_serializer.py --collect-only` succeeds (file syntactically valid); each test fails with `ModuleNotFoundError: No module named 'shared.search_serializer'` until Plan 03 lands.
+
 ### Pending Todos
 
 - Migrate desktop corrections fetch to shared corrections_service
@@ -92,6 +100,12 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-27T10:59:22.871Z
-Stopped at: Phase 77 context gathered
-Resume file: .planning/phases/77-serializer-json-export/77-CONTEXT.md
+Last session: 2026-04-27T16:49:18Z
+Stopped at: Plan 77-01 complete; ready for Plan 77-02 (lab_composition_search chunk_hits, D-13 Path A)
+Resume file: .planning/phases/77-serializer-json-export/77-02-PLAN.md
+
+## Performance Metrics — Phase 77
+
+| Plan | Duration | Tasks | Files | Commits |
+|------|----------|-------|-------|---------|
+| 77-01 | ~8 min | 3 | 4 | cdd91928, 2c5e94d5, d64ccb2b |

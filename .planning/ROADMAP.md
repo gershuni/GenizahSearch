@@ -241,7 +241,7 @@ back-nav bugfix.
   4. Each downloaded payload includes the drill-down locator on every result item (uid preferred, `{sys_id, volume_ie, p_num}` fallback), proving the locator contract works before /api/browse consumes it in Phase 80.
 **Phase gate**: pytest green, CI green, manual download spot-check on /search and /parallels.
 **Plans:** 5 plans
-- [ ] 77-01-PLAN.md -- AppState envelope-echo fields + state-population sites + Wave 0 RED test scaffolding
+- [x] 77-01-PLAN.md -- AppState envelope-echo fields + state-population sites + Wave 0 RED test scaffolding (complete 2026-04-27)
 - [ ] 77-02-PLAN.md -- genizah_core.lab_composition_search chunk_hits extension (D-13 Path A)
 - [ ] 77-03-PLAN.md -- shared/search_serializer.py module (single source of truth, all 21 tests GREEN)
 - [ ] 77-04-PLAN.md -- web/api.py JSON handlers + toolbar buttons on /search and /parallels
@@ -314,7 +314,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 77. Serializer & JSON Export | 0/5 | Plans created (2026-04-27) | - |
+| 77. Serializer & JSON Export | 1/5 | Plan 77-01 complete (2026-04-27) | - |
 | 78. /api/search + Hardening Shell | 0/0 | Not started | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
@@ -323,4 +323,4 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-27 -- Phase 77 plans created (5 plans across 4 waves; D-13 Path A locked; domain plural / chunk_index 0-based / image URL server-relative deviations from CONTEXT.md documented in 77-01-PLAN); v7.10 Search API milestone added (Phases 77-82)*
+*Last updated: 2026-04-27 -- Plan 77-01 complete: 5 AppState envelope-echo fields populated at 6 search/parallels execute-time sites + 22 RED tests scaffolded for shared.search_serializer; latent state.current_search_query bug fixed at all 3 search-execute paths*
