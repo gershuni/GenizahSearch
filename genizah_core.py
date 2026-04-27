@@ -1491,7 +1491,13 @@ class LabEngine:
                 # Boundary metadata
                 'has_boundary_matches': has_boundary_matches,
                 'boundary_match_count': len(data.get('crossed_boundaries', set())),
-                'boundary_quality': boundary_quality_normalized
+                'boundary_quality': boundary_quality_normalized,
+                # Phase 77 D-13: surface per-chunk attribution to consumers
+                # (serialize_parallels_payload, /api/parallels). Each tuple is
+                # (chunk_index_0_based, source_chunk_text, match_score,
+                # manuscript_snippet). May be empty if no chunks matched
+                # (defensive default for forward compatibility).
+                'chunk_hits': data.get('chunk_hits', []),
             }
             raw_final_items.append(item)
 
