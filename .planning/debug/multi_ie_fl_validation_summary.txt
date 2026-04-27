@@ -1,0 +1,32 @@
+======================================================================
+Phase 0 Validation: Multi-IE FL Coverage Analysis
+Date: 2026-03-31 06:00
+Mode: LOCAL (transcription analysis only)
+======================================================================
+
+TRANSCRIPTION STATISTICS
+  Total sys_ids in corpus:           216,911
+  Multi-IE sys_ids:                    3,193
+  Single-IE sys_ids:                 213,718
+  Transcription pages lost (dedup):     31,610
+
+FL-ID UNIQUENESS
+  Total unique FL-IDs:               905,607
+  Same-sys_id intra-IE overlap:            0
+  Cross-sys_id FL duplicates:          1,134
+
+IE DISTRIBUTION (multi-IE only)
+  2 IEs:  2,656 manuscripts
+  3 IEs:    427 manuscripts
+  4 IEs:     80 manuscripts
+  5 IEs:     22 manuscripts
+  6 IEs:      5 manuscripts
+  7 IEs:      2 manuscripts
+  28 IEs:      1 manuscripts
+
+OUTPUT FILES
+  CSV: C:\GenizahSearch\.planning\debug\multi_ie_fl_validation.csv
+  Summary: C:\GenizahSearch\.planning\debug\multi_ie_fl_validation_summary.txt
+
+NEXT STEP: Run with --server on EC2 to complete manifest comparison.
+======================================================================
