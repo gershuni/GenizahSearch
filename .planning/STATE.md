@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Plan 77-01 complete; ready for Plan 77-02 (lab_composition_search chunk_hits)
-last_updated: "2026-04-27T16:49:18Z"
-last_activity: 2026-04-27 -- Plan 77-01 complete (3 commits, 22 RED tests scaffolded, ~8 min)
+stopped_at: Plan 77-02 complete; ready for Plan 77-03 (shared/search_serializer.py GREEN)
+last_updated: "2026-04-27T17:02:09Z"
+last_activity: 2026-04-27 -- Plan 77-02 complete (3 commits, chunk_hits D-13 Path A, ~6 min)
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
-  percent: 3
+  completed_plans: 2
+  percent: 7
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 77 (serializer-json-export) — EXECUTING
-Plan: 2 of 5 (next; 77-01 complete)
+Plan: 3 of 5 (next; 77-01 and 77-02 complete)
 Status: Executing Phase 77
-Last activity: 2026-04-27 -- Plan 77-01 complete (envelope-echo state + Wave 0 RED tests)
+Last activity: 2026-04-27 -- Plan 77-02 complete (chunk_hits D-13 Path A on lab_composition_search, 5 tests added)
 
-Progress: [          ] 3% (0/6 phases complete; 1/5 Phase 77 plans complete)
+Progress: [#         ] 7% (0/6 phases complete; 2/5 Phase 77 plans complete)
 
 **Phase queue (v7.10):**
 
@@ -78,6 +78,13 @@ See PROJECT.md Key Decisions table for full history.
 - Side-effect: `state.current_search_query` latent bug (declared at web/state.py:27, never assigned per RESEARCH §Pitfall 2) fixed at all 3 search-execute paths. Excel/Word filenames will produce meaningful filenames as a ride-along benefit.
 - Wave 0 TDD: 22 RED tests written before implementation module exists. `pytest tests/test_search_serializer.py --collect-only` succeeds (file syntactically valid); each test fails with `ModuleNotFoundError: No module named 'shared.search_serializer'` until Plan 03 lands.
 
+**Plan 77-02 decisions (2026-04-27):**
+
+- D-13 Path A landed: `lab_composition_search` populates `chunk_hits` per uid as `(chunk_index_0_based, source_chunk_text, match_score, manuscript_snippet)` tuples — additive change, existing readers of `total_score`/`hits_count`/`ms_matches` unaffected.
+- Rule 2 deviation: `chunk_hits` also surfaced onto the per-uid `item` dict at lines 1479-1497 (the dict callers actually receive via the returned `main`/`filtered`/`known` lists). Without this surface, the field would be internal-only — Plan 03's `serialize_parallels_payload` could not consume it. Plan 01's RED fixture `sample_parallels_results` already assumed each row carries `chunk_hits`, confirming this is the intended end-to-end contract.
+- Behavioral test strategy (HIGH-04 fix): `LabEngine.__new__(LabEngine)` to bypass heavy `__init__`, real `LabSettings()` (constructable with no args) + lowered `comp_min_score=1` and `min_should_match=50` so synthetic match_score=100 with fingerprint-aligned matches passes the production filter gates. Monkeypatched `lab_index.parse_query`, `lab_searcher.search/.doc`, `_calculate_match_metrics`, `_is_phrase_statistically_weak` to drive the real loop end-to-end without a Tantivy index.
+- Plan stub signature corrected: `_calculate_match_metrics` returns `(match_score, matches, best_window)` (score-first), not `(matches, best_window, match_score)` as the plan's prose suggested. Confirmed via `genizah_core.py:892` (`return 0, [], (0, 0)`) and the destructure at `:1343` before writing the test stub.
+
 ### Pending Todos
 
 - Migrate desktop corrections fetch to shared corrections_service
@@ -100,12 +107,13 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-27T16:49:18Z
-Stopped at: Plan 77-01 complete; ready for Plan 77-02 (lab_composition_search chunk_hits, D-13 Path A)
-Resume file: .planning/phases/77-serializer-json-export/77-02-PLAN.md
+Last session: 2026-04-27T17:02:09Z
+Stopped at: Plan 77-02 complete; ready for Plan 77-03 (shared/search_serializer.py GREEN — turn 22 RED tests into PASSING)
+Resume file: .planning/phases/77-serializer-json-export/77-03-PLAN.md
 
 ## Performance Metrics — Phase 77
 
 | Plan | Duration | Tasks | Files | Commits |
 |------|----------|-------|-------|---------|
 | 77-01 | ~8 min | 3 | 4 | cdd91928, 2c5e94d5, d64ccb2b |
+| 77-02 | ~6 min | 2 (3 commits) | 2 | 6ebefb71, e0259e6f, 25a4f769 |

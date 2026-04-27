@@ -242,7 +242,7 @@ back-nav bugfix.
 **Phase gate**: pytest green, CI green, manual download spot-check on /search and /parallels.
 **Plans:** 5 plans
 - [x] 77-01-PLAN.md -- AppState envelope-echo fields + state-population sites + Wave 0 RED test scaffolding (complete 2026-04-27)
-- [ ] 77-02-PLAN.md -- genizah_core.lab_composition_search chunk_hits extension (D-13 Path A)
+- [x] 77-02-PLAN.md -- genizah_core.lab_composition_search chunk_hits extension (D-13 Path A) (complete 2026-04-27)
 - [ ] 77-03-PLAN.md -- shared/search_serializer.py module (single source of truth, all 21 tests GREEN)
 - [ ] 77-04-PLAN.md -- web/api.py JSON handlers + toolbar buttons on /search and /parallels
 - [ ] 77-05-PLAN.md -- docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check
@@ -314,7 +314,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 77. Serializer & JSON Export | 1/5 | Plan 77-01 complete (2026-04-27) | - |
+| 77. Serializer & JSON Export | 2/5 | Plan 77-02 complete (2026-04-27) | - |
 | 78. /api/search + Hardening Shell | 0/0 | Not started | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
@@ -323,4 +323,4 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-27 -- Plan 77-01 complete: 5 AppState envelope-echo fields populated at 6 search/parallels execute-time sites + 22 RED tests scaffolded for shared.search_serializer; latent state.current_search_query bug fixed at all 3 search-execute paths*
+*Last updated: 2026-04-27 -- Plan 77-02 complete: lab_composition_search now populates results_map[uid]['chunk_hits'] per-chunk and surfaces it on returned items so Plan 03's serialize_parallels_payload can emit truthful matches[] arrays per D-13 Path A; 5 tests added (3 static contract + 2 behavioral, monkeypatch-driven, no Tantivy index required) per HIGH-04*
