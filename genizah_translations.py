@@ -1586,6 +1586,8 @@ TRANSLATIONS = {
     "Searches more candidates for comprehensive results": "מחפש יותר מועמדים לתוצאות מקיפות",
     "Export Word": "יצא Word",
     "Export Excel": "יצא Excel",
+    "Export JSON": "יצוא ל-JSON",
+    "Download JSON": "הורד JSON",
     "Advanced Filters": "סינונים מתקדמים",
     "Search only in...": "...חפש רק ב",
     "Include": "כלול",
