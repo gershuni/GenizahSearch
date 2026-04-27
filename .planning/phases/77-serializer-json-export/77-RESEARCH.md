@@ -791,32 +791,39 @@ def serialize_parallels_payload(
 
 **A1, A2, A3, A4 are the high-risk ones — planner must lock or escalate to discuss-phase.**
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All five questions resolved during planning; decisions are locked in `77-01-PLAN.md` `<plan_locked_decisions>` and `77-02-PLAN.md` `<plan_locked_decisions>`. Inline `RESOLVED:` markers below propagate the locked answers verbatim.
 
 1. **D-13 path: A (extend core), B (degenerate), or C (re-discuss)?**
    - What we know: Core's `lab_composition_search` does not track per-chunk attribution.
    - What's unclear: Whether user accepts ~30 lines of additive core change to satisfy D-13 fidelity.
    - Recommendation: **Path A** — add `'chunk_hits': []` to `results_map[uid]` and append `(i, chunk_text, match_score, ms_snip_for_chunk)` per hit. Backwards compatible. Phase 80 benefits. Add a single core test asserting populated `chunk_hits`. If plan-checker objects to core scope creep, fall back to Path B with explicit response-shape doc note.
+   - **RESOLVED:** Path A — Plan 02 extends `lab_composition_search` to track `chunk_hits` per uid (additive, backwards-compatible). One static-contract test in `tests/test_lab_composition_chunk_hits.py` locks the append signature `(i, chunk_text, match_score, ms_snip)`.
 
 2. **Image URL: emit at all, or null + locator?**
    - What we know: D-01 says emit `image_url`; CONTEXT.md says use `display['img']` (which is a page number).
    - What's unclear: Whether the consumer wants a working URL or just the locator.
    - Recommendation: Emit a server-relative URL (`/api/nli_image_by_sysid/{sys_id}?page={p_num-1}`) — Claude skill running against the same web app can resolve it; metadata-only hits emit `null`. Don't add Oxford or volume-suffix complexity (Phase 79's job).
+   - **RESOLVED:** Emit server-relative `/api/nli_image_by_sysid/{sys_id}?page={p_num-1}` for transcription-mode hits where `p_num` is non-null; emit `null` for metadata-only / Oxford-only hits. No multi-IE branching this phase.
 
 3. **Filter echo: where does the dict come from?**
    - What we know: Filters live in page-scoped `search_state.filter_*`, not in global `state`.
    - What's unclear: Whether to mirror to `state.last_filters_applied` (clean) or read via `app.storage.user` (existing precedent for parallels source_text).
    - Recommendation: Mirror to `state.last_filters_applied` at the same line that sets `state.last_results`. Cleaner, testable, decoupled from NiceGUI session.
+   - **RESOLVED:** Mirror to `state.last_filters_applied: dict` at search-time (Plan 01 Task 2, immediately before `state.last_results = results` at `web/pages/search.py:~4076`). Serializer reads from `state` only (not `app.storage.user`).
 
 4. **`primary_domain` vs `domains: [str, ...]` array?**
    - What we know: D-01 says singular `domain`. UI shows multiple domain badges.
    - What's unclear: Whether singular is enough for the Claude skill consumer.
    - Recommendation: Singular for now (matches CONTEXT.md), but add a comment in the serializer flagging this — future plans may upgrade to array without breaking existing consumers if the field becomes `domain: str | None` → `domain: str | None | list[str]` is a breaking change. Better to pick `domains: list[str]` early. Escalate.
+   - **RESOLVED:** Emit `domains: list[str]` (empty list when no domains known). This is a deliberate **deviation from CONTEXT.md D-01** documented in `77-01-PLAN.md` `<plan_locked_decisions>` item 7 — plural is forward-compatible; singular would be a breaking change to upgrade later.
 
 5. **Score aggregation for parallels (D-13 footnote): MAX or SUM?**
    - What we know: UI sorts by `max_score` across uids per sys_id, but each item's `score` is already SUM of chunk hits.
    - What's unclear: At the manuscript-group level, what the "manuscript-level top-line score" should be.
    - Recommendation: SUM (across uids in same sys_id) — preserves D-13 footnote "planner picks aggregate rule from existing UI logic — e.g., max or sum". UI logic shows MAX as the sort key but card-shown score is already SUM. Document choice in plan.
+   - **RESOLVED:** SUM (across uids in same sys_id). Matches the per-card score the existing UI already displays. Locked in `77-01-PLAN.md` `<plan_locked_decisions>` item 5; asserted by `tests/test_search_serializer.py::test_parallels_score_aggregate_is_sum`.
 
 ## Environment Availability
 

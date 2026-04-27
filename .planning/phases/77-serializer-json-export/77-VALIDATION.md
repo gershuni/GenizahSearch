@@ -42,9 +42,11 @@ created: 2026-04-27
 | Requirement / Decision | Behavior | Test Type | Automated Command | File Exists | Status |
 |------------------------|----------|-----------|-------------------|-------------|--------|
 | EXPORT-01 | `serialize_search_payload` returns well-formed envelope | unit | `pytest tests/test_search_serializer.py::test_search_envelope_shape -x` | ❌ Wave 0 | ⬜ pending |
-| EXPORT-01 | `/api/export/json` returns 400 when `state.last_results` empty | unit (handler error path) | `pytest tests/test_search_serializer.py::test_export_json_handler_empty -x` | ❌ Wave 0 | ⬜ pending |
+| EXPORT-01 | `/api/export/json` returns 400 when `state.last_results` empty | behavior (FastAPI TestClient) | `pytest tests/test_api_export_json.py::test_export_json_handler_empty -x` | ❌ Plan 04 | ⬜ pending |
 | EXPORT-01 | Filename includes ISO timestamp + `genizah-search-` prefix | unit (filename helper) | `pytest tests/test_search_serializer.py::test_filename_format -x` | ❌ Wave 0 | ⬜ pending |
 | EXPORT-02 | `serialize_parallels_payload` returns well-formed envelope | unit | `pytest tests/test_search_serializer.py::test_parallels_envelope_shape -x` | ❌ Wave 0 | ⬜ pending |
+| EXPORT-02 | `/api/export/parallels/json` returns 400 when `state.parallels_results` AND `state.parallels_filtered` both empty | behavior (FastAPI TestClient) | `pytest tests/test_api_export_json.py::test_export_parallels_json_handler_empty -x` | ❌ Plan 04 | ⬜ pending |
+| EXPORT-01/02 | Both new JSON handlers return 200 + Content-Disposition + valid JSON body when state is populated | behavior (FastAPI TestClient) | `pytest tests/test_api_export_json.py::test_export_json_handler_populated tests/test_api_export_json.py::test_export_parallels_json_handler_populated -x` | ❌ Plan 04 | ⬜ pending |
 | EXPORT-02 | `results` and `filtered` are separate top-level arrays (D-11) | unit | `pytest tests/test_search_serializer.py::test_parallels_filtered_separation -x` | ❌ Wave 0 | ⬜ pending |
 | EXPORT-02 | One result per manuscript with `matches[]` array (D-13) | unit | `pytest tests/test_search_serializer.py::test_parallels_groups_by_manuscript -x` | ❌ Wave 0 | ⬜ pending |
 | EXPORT-03 | Both serialize functions reach into the same `_serialize_item` helper | unit (structural introspection) | `pytest tests/test_search_serializer.py::test_serializers_share_serialize_item -x` | ❌ Wave 0 | ⬜ pending |
