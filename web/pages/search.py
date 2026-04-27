@@ -3741,6 +3741,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = state_snapshot['results']
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
+            # Phase 77 (HIGH-01): also populate global state so JSON export after restore
+            # is identical-shape to live export. The snapshot already carries query
+            # (entry['query'] read into query_input.value at line 3687) and params
+            # (mode/gap/filters at line 3684). See 77-REVIEWS.md HIGH-01.
+            state.last_results = state_snapshot['results']
+            state.current_search_query = entry.get('query', '') or ''
+            state.current_search_mode = params.get('mode') or 'text'
+            try:
+                state.current_search_gap = int(params['gap']) if params.get('gap') is not None else None
+            except (ValueError, TypeError):
+                state.current_search_gap = None
+            # Snapshot's filters dict already has the 10-key shape constructed at
+            # search.py:4232-4242. Pass it through verbatim (None when no active filters).
+            state.last_filters_applied = params.get('filters')
+            state.last_search_warnings = ['restored-from-history']
             # Update count display
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
             # Re-render with restored exclusions (manuscript exclusions first if active)
@@ -4022,6 +4037,28 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = results
             search_state.domain_excluded_results = []
 
+            # Phase 77 (HIGH-01): populate envelope-echo state on the cancelled-partial
+            # path too. Without this, partial-result exports inherit stale query/mode/gap/
+            # filters from the previous completed search. See 77-REVIEWS.md HIGH-01.
+            state.current_search_query = clean_query
+            state.current_search_mode = mode
+            try:
+                state.current_search_gap = int(gap_input.value) if gap_input.value else None
+            except (ValueError, TypeError):
+                state.current_search_gap = None
+            state.last_filters_applied = {
+                'domains': list(getattr(search_state, 'filter_domains', None) or []),
+                'authors': list(getattr(search_state, 'filter_authors', None) or []),
+                'works': list(getattr(search_state, 'filter_works', None) or []),
+                'include_mode': getattr(search_state, 'filter_include_mode', True),
+                'date_from': getattr(search_state, 'filter_date_from', None),
+                'date_to': getattr(search_state, 'filter_date_to', None),
+                'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
+                'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
+                'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
+                'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
+            }
+            state.last_search_warnings = ['partial-results']  # signal partial-result fidelity to consumers
             # Still save results for display
             state.last_results = results
 
@@ -4073,6 +4110,34 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             except Exception:
                 pass  # Translation lookup failed; continue without translation
 
+        # Phase 77: populate state for JSON export envelope echo (D-06) and filename.
+        # Fixes latent bug where state.current_search_query was declared in web/state.py
+        # but never assigned — Excel/Word filenames silently defaulted to "genizah.xlsx".
+        # See .planning/phases/77-serializer-json-export/77-RESEARCH.md §Pitfall 2.
+        state.current_search_query = clean_query
+        state.current_search_mode = mode
+        try:
+            state.current_search_gap = int(gap_input.value) if gap_input.value else None
+        except (ValueError, TypeError):
+            state.current_search_gap = None
+        # Mirror page-scoped filters into global state so the JSON download handler can
+        # echo them in the envelope. The 10-key shape mirrors the existing live snapshot
+        # at web/pages/search.py:4232-4242 (search history) so envelope replay matches
+        # what the search-history restore branch will reconstruct. List() copies prevent
+        # mutation-after-search bugs. Per HIGH-02 review feedback.
+        state.last_filters_applied = {
+            'domains': list(getattr(search_state, 'filter_domains', None) or []),
+            'authors': list(getattr(search_state, 'filter_authors', None) or []),
+            'works': list(getattr(search_state, 'filter_works', None) or []),
+            'include_mode': getattr(search_state, 'filter_include_mode', True),
+            'date_from': getattr(search_state, 'filter_date_from', None),
+            'date_to': getattr(search_state, 'filter_date_to', None),
+            'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
+            'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
+            'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
+            'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
+        }
+        state.last_search_warnings = []  # Phase 78 will populate; Phase 77 always [] per D-07
         # Finalize search state for immediate display
         state.last_results = results
         search_state.is_running = False

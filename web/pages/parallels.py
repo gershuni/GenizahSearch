@@ -1894,6 +1894,20 @@ def create_parallels_page(initial_text: str = None):
             # Update global state for export
             state.parallels_results = p_state.results
             state.parallels_filtered = p_state.filtered_results
+            # Phase 77 (HIGH-03): rebuild envelope-echo metadata from the snapshot's
+            # canonical fields (state_snapshot['source_text'] at line 2216, params dict
+            # at line 1834). Do NOT reconstruct from result rows — that loses fidelity
+            # (params.chunk_size/mode/filters are not necessarily present on result rows).
+            # See 77-REVIEWS.md HIGH-03.
+            state.parallels_search_meta = {
+                'source_text': state_snapshot.get('source_text', '') or '',
+                'chunk_size': params.get('chunk_size'),
+                'mode': params.get('mode'),
+                'max_freq': None,  # Not stored on snapshot; explicit null for replay
+                'filters': params.get('filters'),  # 10-key shape from parallels.py:2202-2213
+                'boundary_options': None,
+                'warnings': ['restored-from-history'],
+            }
 
             # Update header and render
             results_header.text = f"{len(p_state.results)} {tr('parallels found')}"
@@ -1941,6 +1955,7 @@ def create_parallels_page(initial_text: str = None):
         # Also clear from global state
         state.parallels_results = []
         state.parallels_filtered = []
+        state.parallels_search_meta = None  # Phase 77: clear envelope-echo metadata on reset
         ui.notify(tr('Composition reset'), type='info', timeout=2000)
 
     async def execute_parallels():
@@ -2181,6 +2196,36 @@ def create_parallels_page(initial_text: str = None):
                     # Store in global state (for API export endpoints)
                     state.parallels_results = main_results
                     state.parallels_filtered = filtered_results
+                    # Phase 77: capture envelope-echo metadata for JSON export (D-06).
+                    # Variable provenance (verified live in web/pages/parallels.py):
+                    #   captured_chunk_size      — line 2032, int(chunk_size.value) or 5
+                    #   captured_freq_threshold  — line 2030, int(freq_threshold.value) or 50
+                    #   captured_mode            — line 2033, mode_select.value
+                    #   text_input.value         — NiceGUI textarea, source text
+                    # HIGH-02 fix: also capture the active filter dict (same 10-key shape
+                    # as the live snapshot at parallels.py:2202-2213) so envelope replay
+                    # matches what history-restore reconstructs.
+                    _parallels_filters = {
+                        'domains': list(getattr(p_state, 'filter_domains', None) or []),
+                        'authors': list(getattr(p_state, 'filter_authors', None) or []),
+                        'works': list(getattr(p_state, 'filter_works', None) or []),
+                        'include_mode': getattr(p_state, 'filter_include_mode', True),
+                        'date_from': getattr(p_state, 'filter_date_from', None),
+                        'date_to': getattr(p_state, 'filter_date_to', None),
+                        'material_exclude': list(getattr(p_state, 'filter_material_exclude', None) or []),
+                        'text_all': list(getattr(p_state, 'filter_text_all', None) or []),
+                        'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
+                        'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
+                    } if _has_active_filters() else None
+                    state.parallels_search_meta = {
+                        'source_text': text_input.value or '',
+                        'chunk_size': captured_chunk_size,
+                        'mode': captured_mode,
+                        'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
+                        'filters': _parallels_filters,
+                        'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
+                        'warnings': [],  # Phase 78 will populate
+                    }
                     # Also store in user storage (for UI persistence across page reloads)
                     app.storage.user['parallels_results'] = main_results
                     app.storage.user['parallels_filtered'] = filtered_results
