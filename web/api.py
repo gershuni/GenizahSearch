@@ -1970,16 +1970,23 @@ def init_api_routes(app_override=None):
 
         parallels_results = state.parallels_results or []
         filtered_results = state.parallels_filtered or []
-        meta = getattr(state, 'parallels_search_meta', None) or {}
-        # Fallback: source_text from app.storage.user (matches existing Excel/Word path)
-        source_text = (
-            meta.get('source_text')
-            or nicegui_app.storage.user.get('parallels_source_text', '')
-            or ''
-        )
 
+        # Empty-state check first - avoids touching app.storage.user when there's
+        # nothing to export (storage requires a NiceGUI request context which is
+        # absent in tests / non-NiceGUI callers).
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
+
+        meta = getattr(state, 'parallels_search_meta', None) or {}
+        # Fallback: source_text from app.storage.user (matches existing Excel/Word path).
+        # Storage access can raise outside a NiceGUI request context (tests); fall
+        # back to the meta-supplied value when storage is unavailable.
+        storage_source_text = ''
+        try:
+            storage_source_text = nicegui_app.storage.user.get('parallels_source_text', '') or ''
+        except Exception:
+            storage_source_text = ''
+        source_text = (meta.get('source_text') or storage_source_text or '')
 
         try:
             payload = serialize_parallels_payload(
