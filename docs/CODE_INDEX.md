@@ -1,10 +1,16 @@
 # Codebase Index
 
-> Last updated: 2026-04-24
+> Last updated: 2026-04-27
 
 Auto-generated index of classes and methods. New sections for modules can be
 appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
 Python AST and emits markdown in the existing style).
+
+**Phase 77 (Serializer & JSON Export) added** `shared/search_serializer.py` —
+single source of truth for the Claude-friendly JSON payload shape consumed by
+the new `/api/export/json` and `/api/export/parallels/json` download handlers
+(and Phase 78+ `/api/search` / `/api/parallels`). See its dedicated section
+below alongside the other `shared/` service modules.
 
 **v7.9 decomposition (Phases 67–74) added the following modules** — see the
 "v7.9 Decomposed Modules" section below for their class / function indexes:
@@ -1492,6 +1498,32 @@ have shifted; use them as a guide to intent rather than current anchors.
     - Property `row_factory` (Line 114)
     - Method `close` (Line 126) — close all connections and reset state
     - Method `__bool__` (Line 138) — truthy for availability checks
+
+## shared/search_serializer.py
+
+Phase 77 single-source-of-truth serializer for the "Claude-friendly JSON" payload shape. One module powers both download handlers (`/api/export/json`, `/api/export/parallels/json`) and Phase 78+ API responses (`/api/search`, `/api/parallels`); modifying `_serialize_item()` updates download AND API in lockstep per EXPORT-03.
+
+**Module-level constants:**
+- `SCHEMA_VERSION = 1` (Line 52) — bump on incompatible envelope/item shape changes
+- `NLI_RESOLVABLE_LIBRARY_CODES` (Line 61) — frozenset whitelist of providers with NLI IIIF coverage (CUL/JTS/BL/Manchester/RNL/AIU/Mosseri/Gaster/Halper); Oxford and other providers get `image_url=null` per HIGH-07
+- `_filename_counter` (Line 72) — module-level `itertools.count()` for filename uniqueness without `time.sleep` per HIGH-06
+
+**Public API (5 exports):**
+- **Function** `serialize_search_payload` — emit envelope `{schema_version, source: 'search', query, mode, gap, filters, count, total, warnings, generated_at, results: [...]}` for /search results
+- **Function** `serialize_parallels_payload` — emit envelope with separate top-level `results[]` and `filtered[]` arrays per D-11; one result per manuscript with `matches: [{chunk_index, source_chunk_text, manuscript_snippet, score}, ...]` per D-13 Path A; aggregate_score is SUM across uids
+- **Function** `build_search_filename` — `genizah-search-{ISO timestamp with ms}_{counter}.json`
+- **Function** `build_parallels_filename` — `genizah-parallels-{ISO timestamp with ms}_{counter}.json`
+
+**Private helpers (single source of truth):**
+- **Function** `_serialize_item` — THE per-item shape; emits `{uid, locator: {sys_id, volume_ie, p_num}, score, shelfmark, title, library: {code, name}, domains: [...], dating, snippet, excerpt, match_terms: [...], image_url}`. Both top-level functions reach into this — `serialize_parallels_payload` via `_to_parallels_envelope_item` which adds `matches: [...]` on top. `tests/test_search_serializer.py::test_serializers_share_serialize_item` enforces structurally via `dir()` introspection (no `_serialize_search_item` / `_serialize_parallels_item` shadows allowed)
+- **Function** `_extract_match_terms` — D-03 dedup-in-order from `*term*` markers
+- **Function** `_build_image_url` — server-relative `/api/nli_image_by_sysid/{sys_id}?page={p_num-1}` or null when library_code not in whitelist (HIGH-07)
+- **Function** `_safe_library_name` — graceful-degrade lookup via `genizah_core.get_library_display`
+- **Function** `_safe_fjms_lookups` — graceful FJMS singleton consumer; **does NOT call .close()** (HIGH-05; close is reserved for `reset_fjms_service()`)
+- **Function** `_group_parallels_by_sys_id`, `_to_parallels_envelope_item` — D-13 Path A grouping
+- **Function** `_filename_timestamp_with_ms`, `_utc_iso_now` — separate concerns: filename ms+counter vs envelope second-resolution
+
+Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /api/export/parallels/json` (Line ~1957). Future Phase 78 `POST /api/search` and Phase 80 `POST /api/parallels` inherit the same envelope/item shape via the same imports.
 
 
 ---
