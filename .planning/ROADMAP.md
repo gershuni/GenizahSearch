@@ -240,7 +240,12 @@ back-nav bugfix.
   3. The exported JSON for both pages is produced by exactly one serializer module; modifying the result-item shape in that module changes both downloads (and, in later phases, the API response) in lockstep — no parallel implementation exists.
   4. Each downloaded payload includes the drill-down locator on every result item (uid preferred, `{sys_id, volume_ie, p_num}` fallback), proving the locator contract works before /api/browse consumes it in Phase 80.
 **Phase gate**: pytest green, CI green, manual download spot-check on /search and /parallels.
-**Plans**: TBD
+**Plans:** 5 plans
+- [ ] 77-01-PLAN.md -- AppState envelope-echo fields + state-population sites + Wave 0 RED test scaffolding
+- [ ] 77-02-PLAN.md -- genizah_core.lab_composition_search chunk_hits extension (D-13 Path A)
+- [ ] 77-03-PLAN.md -- shared/search_serializer.py module (single source of truth, all 21 tests GREEN)
+- [ ] 77-04-PLAN.md -- web/api.py JSON handlers + toolbar buttons on /search and /parallels
+- [ ] 77-05-PLAN.md -- docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check
 **UI hint**: yes
 
 ### Phase 78: /api/search + Hardening Shell
@@ -309,7 +314,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 77. Serializer & JSON Export | 0/0 | Not started | - |
+| 77. Serializer & JSON Export | 0/5 | Plans created (2026-04-27) | - |
 | 78. /api/search + Hardening Shell | 0/0 | Not started | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
@@ -318,4 +323,4 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-27 -- v7.10 Search API milestone added (Phases 77-82); v7.9 Decomposition collapsed into milestone summary; Codex review pass applied — phases 79/80 swapped (browse before parallels), 78 gate adds explicit 429/soak check, locator obligation timeline (77→78→79) documented*
+*Last updated: 2026-04-27 -- Phase 77 plans created (5 plans across 4 waves; D-13 Path A locked; domain plural / chunk_index 0-based / image URL server-relative deviations from CONTEXT.md documented in 77-01-PLAN); v7.10 Search API milestone added (Phases 77-82)*
