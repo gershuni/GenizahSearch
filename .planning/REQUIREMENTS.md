@@ -15,7 +15,7 @@ Auth posture: open + rate-limit + capped result count + capped query length. No 
 
 ### API Endpoints
 
-- [ ] **API-01**: `POST /api/search` accepts exactly `{query, mode, gap?, limit?, filters?}` where `mode` is an explicit enum (text / Title / Shelfmark / Responsa) and `filters` is the exact supported subset (domain, author, work, date_from, date_to, material — no others in v1). Each response item includes the drill-down locator (see API-05) plus fixed ranking fields: `score`, `shelfmark`, `title`, `snippet`, `excerpt` (short text), key metadata (library, domain, dating).
+- [ ] **API-01**: `POST /api/search` accepts exactly `{query, mode, gap?, limit?, filters?}` where `mode` is an explicit enum (text / Title / Shelfmark / Responsa) and `filters` is the exact supported subset (domain, author, work, date_from, date_to, material — no others in v1). Each response item includes the drill-down locator (see API-05) plus fixed ranking fields: `score`, `shelfmark`, `title`, `snippet`, `excerpt` (short text), key metadata (library, `domains: list[str]` *(plural; supersedes prior singular `domain` phrasing — locked at Phase 77 plan time, MED-01)*, dating). `image_url` is server-relative `/api/nli_image_by_sysid/{sys_id}?page={p_num-1}` for NLI-resolvable providers, `null` for non-NLI providers (e.g. Oxford-only) per Phase 77 HIGH-07.
 - [ ] **API-02**: `POST /api/parallels` accepts the v7.10 subset actually needed by the consumer: `text`, `chunk_size`, `mode`, `max_freq?`, optional same filter subset as API-01, optional boundary options. Response defines whether filtered / high-frequency hits are returned separately (under a `filtered` key) or omitted; the chosen behavior is documented in the response shape.
 - [ ] **API-03**: `GET /api/browse` resolves a specific manuscript page by `uid` (preferred) or by `sys_id + volume_ie + page` (fallback). Page indexing is explicit (1-based or 0-based, whichever core uses, documented in the response). Response is a minimal fixed shape: text (transcription if available, snippet otherwise), metadata (PGP/FJMS/NLI subset documented in DOC-01), image URLs. Not browse-page parity — the contract is "what the Claude skill needs to rank," not "everything browse renders."
 - [ ] **API-04**: The three search-helper endpoints validate inputs (max query length, max result count, allowed enum values, allowed filter keys) and return a consistent error envelope `{error: {code, message}}` rather than raw FastAPI 422 dumps. Existing `/api/*` routes are unaffected.
@@ -25,10 +25,10 @@ Auth posture: open + rate-limit + capped result count + capped query length. No 
 
 ### JSON Export
 
-- [ ] **EXPORT-01**: `/search` page has a toolbar button that downloads the current result set as Claude-friendly JSON. Payload uses the same field shape as `POST /api/search` responses.
+- [ ] **EXPORT-01**: `/search` page has a toolbar button that downloads the current result set as Claude-friendly JSON. Payload uses the same field shape as `POST /api/search` responses, including `domains: list[str]` (plural; the singular `domain` phrasing in any earlier discussion is superseded — Phase 77 MED-01).
 - [ ] **EXPORT-02**: `/parallels` page has the same export button; payload matches `POST /api/parallels` responses.
 - [ ] **EXPORT-03**: Export payload shape and API payload shape share a single source of truth (one serializer module) so they cannot drift.
-- [ ] **EXPORT-04**: Export filename includes a timestamp + page identifier (e.g. `genizah-search-2026-04-27T1530.json`) so multiple downloads do not silently overwrite.
+- [ ] **EXPORT-04**: Export filename includes a timestamp + page identifier (e.g. `genizah-search-2026-04-27T1530.json`) so multiple downloads do not silently overwrite. Phase 77 implementation uses millisecond resolution + monotonic counter (HIGH-06) to guarantee distinct filenames on consecutive same-second clicks.
 
 ### Hardening
 
@@ -48,83 +48,3 @@ Auth posture: open + rate-limit + capped result count + capped query length. No 
 
 - [ ] **DOC-01**: One `docs/SEARCH_API.md` page documenting the three endpoints, exact payload shapes, env vars, and the explicit "internal, no stability promise" disclaimer. Not linked from the public site.
 - [ ] **DOC-02**: `CLAUDE.md` updated with the new env vars (`SEARCH_API_MODE`, rate-limit knobs). Public-facing `README.md` is intentionally not updated — the API is internal.
-
-## Future Requirements
-
-Deferred to later milestones.
-
-| Requirement | Defer reason |
-|-------------|--------------|
-| API keys / auth tokens | Defer until a second consumer appears or open + rate-limit proves insufficient |
-| Versioned routes (`/api/v1/*`) | Premature; v7.10 explicitly disclaims long-term stability — re-introduce when the contract starts to matter externally |
-| OpenAPI / public docs | Out of scope by design — would invite usage we are not committing to support |
-| Full search-page filter parity | Expand on demand from the Claude skill experience, not all at once |
-| Desktop app exposing the API | Web-only for v7.10; the desktop already calls `genizah_core` directly |
-| Streaming responses / SSE | Narrow consumer does not need it |
-| Cursor-based pagination | Offset+limit is sufficient for capped result counts |
-| Multi-tenant / per-user rate limits | Single shared rate limit is enough at current traffic |
-| Refinement chain through API | Refinement chain stays UI-only in v7.10; consumer can replay multi-step search itself if needed |
-
-## Out of Scope
-
-| Feature | Reason |
-|---------|--------|
-| Public marketing of the API | Helper surface, not platform — public docs invite obligations we are not taking on |
-| GraphQL endpoint | Massive scope for the Claude-skill use case; REST + JSON is sufficient |
-| WebSocket / streaming search | Search is fast enough to return in one shot at the capped result count |
-| Allowing arbitrary SQL / filter DSL through the API | SSRF-style abuse risk and engine misuse risk; only the explicit filter subset is exposed |
-| Returning full transcription text without snippet bounds | License and attribution constraints; excerpts only, attribution preserved |
-| Bypassing existing exclusion / refinement chain semantics | Not in v1 — keep the API at the core search level |
-| Touching existing `/api/*` routes (image proxies, puzzle uploads, NLI proxies) | Out of milestone scope — adding rate-limit / observability there is its own future decision |
-
-## Traceability
-
-Every v7.10 requirement maps to exactly one phase. Phase numbering continues from v7.9 (last phase 76); v7.10 phases are 77-82.
-
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| API-01 | Phase 78 | Pending |
-| API-02 | Phase 80 | Pending |
-| API-03 | Phase 79 | Pending |
-| API-04 | Phase 78 | Pending |
-| API-05 | Phase 78 | Pending |
-| API-06 | Phase 78 | Pending |
-| API-07 | Phase 78 | Pending |
-| EXPORT-01 | Phase 77 | Pending |
-| EXPORT-02 | Phase 77 | Pending |
-| EXPORT-03 | Phase 77 | Pending |
-| EXPORT-04 | Phase 77 | Pending |
-| HARDEN-01 | Phase 78 | Pending |
-| HARDEN-02 | Phase 78 | Pending |
-| HARDEN-03 | Phase 78 | Pending |
-| HARDEN-04 | Phase 78 | Pending |
-| HARDEN-05 | Phase 78 | Pending |
-| SKILL-01 | Phase 81 | Pending |
-| SKILL-02 | Phase 81 | Pending |
-| SKILL-03 | Phase 81 | Pending |
-| DOC-01 | Phase 82 | Pending |
-| DOC-02 | Phase 82 | Pending |
-
-**Per-phase requirement counts:**
-
-| Phase | Requirements | Count |
-|-------|--------------|-------|
-| Phase 77: Serializer & JSON Export | EXPORT-01, EXPORT-02, EXPORT-03, EXPORT-04 | 4 |
-| Phase 78: /api/search + Hardening Shell | API-01, API-04, API-05, API-06, API-07, HARDEN-01, HARDEN-02, HARDEN-03, HARDEN-04, HARDEN-05 | 10 |
-| Phase 79: /api/browse Drill-Down | API-03 | 1 |
-| Phase 80: /api/parallels | API-02 | 1 |
-| Phase 81: Claude Skill Consumer | SKILL-01, SKILL-02, SKILL-03 | 3 |
-| Phase 82: Internal Documentation | DOC-01, DOC-02 | 2 |
-| **Total** | | **21** |
-
-**Coverage:**
-- v7.10 requirements: 21 total (7 API + 4 EXPORT + 5 HARDEN + 3 SKILL + 2 DOC)
-- Mapped to phases: 21 ✓
-- Unmapped: 0 ✓
-- Double-mapped: 0 ✓
-
-**Cross-phase note on API-05 (drill-down locator):** API-05 is *owned* by Phase 78 because that is where the locator's response shape is first established on `/api/search`. The locator obligation actually spans **Phase 77 → 78 → 79 → 80**: Phase 77 (export) embeds it in downloaded JSON; Phase 78 (`/api/search`) emits it; Phase 79 (`/api/browse`) *consumes* it and validates the round-trip end-to-end; Phase 80 (`/api/parallels`) inherits the same locator on its responses. The requirement is mapped once to Phase 78 for traceability; the cross-phase obligations are captured in each downstream phase's success criteria, not by re-mapping. Phase 79 (browse) is sequenced before Phase 80 (parallels) per Codex review so the locator round-trip is validated by a real consumer before a second producer is added.
-
----
-*Requirements defined: 2026-04-27*
-*Last updated: 2026-04-27 — v7.10 traceability populated by roadmapper; Codex review pass swapped Phase 79 (browse) ↔ Phase 80 (parallels)*
