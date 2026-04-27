@@ -1233,6 +1233,9 @@ def create_parallels_page(initial_text: str = None):
                     export_excel_btn = ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/parallels/excel')).props(
                         'flat round dense disable'
                     ).tooltip(tr('Export Excel'))
+                    export_json_btn = ui.button(icon='data_object', on_click=lambda: ui.download('/api/export/parallels/json')).props(
+                        'flat round dense disable'
+                    ).tooltip(tr('Export JSON'))
 
             results_container = ui.column().classes('w-full gap-4')
 
@@ -1936,6 +1939,7 @@ def create_parallels_page(initial_text: str = None):
         # Disable export buttons (no results)
         export_word_btn.props('disable')
         export_excel_btn.props('disable')
+        export_json_btn.props('disable')
         # Clear results container
         results_container.clear()
         with results_container:
@@ -2652,6 +2656,7 @@ def create_parallels_page(initial_text: str = None):
         if not results and not filtered_results:
             export_word_btn.props('disable')
             export_excel_btn.props('disable')
+            export_json_btn.props('disable')
             with results_container:
                 show_empty_state()
             return
@@ -2659,6 +2664,7 @@ def create_parallels_page(initial_text: str = None):
         # Enable export buttons now that we have results
         export_word_btn.props(remove='disable')
         export_excel_btn.props(remove='disable')
+        export_json_btn.props(remove='disable')
 
         # Show partial results warning banner at top
         if is_partial:

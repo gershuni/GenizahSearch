@@ -1444,6 +1444,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
                         'flat round dense size=sm'
                     ).tooltip(tr('Export Excel'))
+                    ui.button(icon='data_object', on_click=lambda: ui.download('/api/export/json')).props(
+                        'flat round dense size=sm'
+                    ).tooltip(tr('Export JSON'))
 
             # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
             refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
