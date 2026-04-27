@@ -166,14 +166,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-**Milestone v7.9: Decomposition**
+**Milestone v7.10: Search API**
 
-Goal: Reduce structural debt by decomposing the largest source files (genizah_app.py ~32.8K lines, web/pages/search.py ~6.7K, web/pages/browse.py ~5.1K) into focused modules — leveraging the v7.8 CI safety net. Zero user-visible behavior changes.
+Goal: Add a thin internal HTTP/JSON surface over the existing search, parallels, and browse pipelines so external automation (first consumer: a Claude skill that sorts/ranks results) can drive GenizahSearch. Helper surface, not platform — narrow endpoints, no public docs, no long-term stability promise.
 
 Target features:
-- Desktop: Extract ResultDialog, PuzzleCanvasWindow + puzzle classes, ManuscriptViewerWidget + image viewers, ExcludeDialog + filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules; GenizahGUI stays in genizah_app.py as orchestrator
-- Web: Split web/pages/search.py and web/pages/browse.py into state/UI/logic modules; reduce app.storage.user sprawl and detached asyncio.ensure_future flows via page-scoped state objects
-- Non-regression: pytest baseline green throughout + qualitative search/browse responsiveness preserved
+- JSON export from /search and /parallels (button downloads current results as Claude-friendly JSON, no new endpoint required)
+- POST /api/search — narrow internal endpoint over SearchEngine.execute_search with only the fields the consumer needs (query, mode, gap, limit, small filter subset) returning a one-shot Claude-friendly payload (sys_id, shelfmark, title, snippet, short text excerpt, key metadata)
+- POST /api/parallels — companion endpoint for composition/parallels search using the same payload conventions
+- GET /api/browse — drill-down by sys_id + page returning text + metadata + image URLs in one shot (no follow-up calls)
+- Claude skill consumer — first consumer skill that uses search → browse to sort/rank with full text, validating the payload shape end-to-end
+- Auth posture: open + rate-limit + capped result count + capped query length; revisit if abuse appears
 
 ### Out of Scope
 
@@ -274,4 +277,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-15 — v7.9 Decomposition: Phase 67 (ResultDialog Extraction) complete*
+*Last updated: 2026-04-27 — v7.10 Search API milestone started*

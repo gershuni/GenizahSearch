@@ -1,38 +1,38 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.9
-milestone_name: Decomposition
-status: complete
-stopped_at: v7.9 milestone complete — ready for release handoff
-last_updated: "2026-04-19T00:00:00.000Z"
-last_activity: 2026-04-19 -- Completed quick task 260419-nwv: parse_folio_label bifolio regex fix (CUL image-text mismatch bug); CUL positional follow-up logged in OPEN_ISSUES.md
+milestone: v7.10
+milestone_name: Search API
+status: defining
+stopped_at: Defining requirements for v7.10 Search API
+last_updated: "2026-04-27T00:00:00.000Z"
+last_activity: 2026-04-27 -- v7.10 Search API milestone started; PROJECT.md updated, requirements + roadmap pending
 progress:
-  total_phases: 10
-  completed_phases: 10
-  total_plans: 23
-  completed_plans: 23
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-15)
+See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.9 milestone COMPLETE — release handoff next
+**Current focus:** v7.10 Search API — defining requirements
 
 ## Current Position
 
-Milestone: v7.9 Decomposition — COMPLETE (2026-04-17)
-Phases: 10 of 10 complete (67, 68, 69, 70, 71, 72, 73, 74, 75, 76)
-Plans: 23 of 23 complete
-Last activity: 2026-04-19 - Completed quick task 260419-cfx: CUL CUDL positional canvas mismatch fixed via folio+side resolver with NLI fallback (web + desktop); H3 retracted
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-27 — Milestone v7.10 Search API started
 
-Progress: [██████████] 100%
+Progress: [          ] 0%
 
-Next step: `/release` to version-bump (likely 7.8.0 minor for the internal refactor + back-nav bugfix headline), draft What's New, code review, build, deploy, cut GitHub release. Release bundles: (a) v7.9 decomposition (internally invisible file reorg), (b) back-nav state loss fix from 75-03 (user-visible bugfix, regression origin commit 829cd7cf 2026-03-27). If server translation batch is complete, optionally bundle deduped fjms_enrichment.db + RunningTitle/FullText wiring per memory `project_bib_dedup_and_release.md`.
+Next step: define REQUIREMENTS.md, then spawn roadmapper to create ROADMAP.md (phases continue from v7.9's last phase 76 → first phase of v7.10 is phase 77).
 
 ## Performance Metrics
 
