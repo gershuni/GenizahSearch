@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Plan 77-02 complete; ready for Plan 77-03 (shared/search_serializer.py GREEN)
-last_updated: "2026-04-27T17:02:09Z"
-last_activity: 2026-04-27 -- Plan 77-02 complete (3 commits, chunk_hits D-13 Path A, ~6 min)
+stopped_at: Plan 77-03 complete; ready for Plan 77-04 (web/api.py JSON handlers + toolbar buttons)
+last_updated: "2026-04-27T17:11:15Z"
+last_activity: 2026-04-27 -- Plan 77-03 complete (1 commit, 22 RED tests turned GREEN, shared/search_serializer.py 556 lines, ~3 min)
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
-  percent: 7
+  completed_plans: 3
+  percent: 10
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 77 (serializer-json-export) — EXECUTING
-Plan: 3 of 5 (next; 77-01 and 77-02 complete)
+Plan: 4 of 5 (next; 77-01, 77-02, 77-03 complete)
 Status: Executing Phase 77
-Last activity: 2026-04-27 -- Plan 77-02 complete (chunk_hits D-13 Path A on lab_composition_search, 5 tests added)
+Last activity: 2026-04-27 -- Plan 77-03 complete (shared/search_serializer.py 556 lines, 22 RED tests turned GREEN, full suite 1167 → 1189 passed)
 
-Progress: [#         ] 7% (0/6 phases complete; 2/5 Phase 77 plans complete)
+Progress: [#         ] 10% (0/6 phases complete; 3/5 Phase 77 plans complete)
 
 **Phase queue (v7.10):**
 
@@ -85,6 +85,16 @@ See PROJECT.md Key Decisions table for full history.
 - Behavioral test strategy (HIGH-04 fix): `LabEngine.__new__(LabEngine)` to bypass heavy `__init__`, real `LabSettings()` (constructable with no args) + lowered `comp_min_score=1` and `min_should_match=50` so synthetic match_score=100 with fingerprint-aligned matches passes the production filter gates. Monkeypatched `lab_index.parse_query`, `lab_searcher.search/.doc`, `_calculate_match_metrics`, `_is_phrase_statistically_weak` to drive the real loop end-to-end without a Tantivy index.
 - Plan stub signature corrected: `_calculate_match_metrics` returns `(match_score, matches, best_window)` (score-first), not `(matches, best_window, match_score)` as the plan's prose suggested. Confirmed via `genizah_core.py:892` (`return 0, [], (0, 0)`) and the destructure at `:1343` before writing the test stub.
 
+**Plan 77-03 decisions (2026-04-27):**
+
+- shared/search_serializer.py is the single source of truth for Claude-friendly JSON: 5 public exports (SCHEMA_VERSION=1, serialize_search_payload, serialize_parallels_payload, build_search_filename, build_parallels_filename) and one private `_serialize_item` shared structurally by both top-level functions per D-14 / EXPORT-03; `test_serializers_share_serialize_item` enforces no shadow `_serialize_search_item` / `_serialize_parallels_item` exists via `dir()` introspection — shape divergence is impossible without removing tests.
+- HIGH-05 fix preserved: `_safe_fjms_lookups` retrieves the FJMS singleton via `get_fjms_service(thread_safe=True)` and does NOT call `.close()` on it — closing the module-level singleton at `shared/fjms_service.py:3164` would break every subsequent caller (search/browse/parallels enrichment, FjmsCatalogDialog) until process restart. Close remains owned exclusively by `reset_fjms_service()` (sidecar swap).
+- HIGH-06 fix preserved: filename builders combine `%H%M%S` + `microsecond//1000` ms suffix + `next(itertools.count())` monotonic counter — `test_filename_uniqueness_consecutive` runs without `time.sleep` and still asserts distinct outputs. Format `genizah-search-2026-04-27T153042_837_n.json` is grep-friendly and time-sortable.
+- HIGH-07 fix preserved: `_build_image_url(sys_id, p_num, library_code)` returns `None` when `library_code not in NLI_RESOLVABLE_LIBRARY_CODES` (frozenset of CUL/JTS/BL/Manchester/RNL/AIU/Mosseri/Gaster/Halper). Oxford-only hits emit null even with sys_id+p_num populated, preventing leaked /api/nli_image_by_sysid URLs that would 404. Phase 79 /api/browse owns Oxford image canonicalization.
+- Lazy imports for `shared_export_utils.remove_highlight_markers`, `genizah_core.get_library_display`, `shared.fjms_service.get_fjms_service` keep the module fast to import and resilient when optional deps are missing or sidecars unconfigured. Top-level uses only stdlib (itertools, logging, re, datetime, typing).
+- Path B fallback for parallels matches[]: when an item arrives without `chunk_hits` (future-proofing if a caller bypasses Plan 02), emit a single degenerate match using `source_ctx`/`text`/`score`. Plan 02's surface guarantees real callers always populate `chunk_hits`, but the fallback keeps the contract behaviorally graceful.
+- Score rounding at 4 decimals applied uniformly: per-item `score`, parallels group `aggregate_score` (SUM then round), per-match `score` in `matches[]`. Test `test_score_rounded_to_4_decimals` asserts `0.873112948 → 0.8731`.
+
 ### Pending Todos
 
 - Migrate desktop corrections fetch to shared corrections_service
@@ -107,9 +117,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-27T17:02:09Z
-Stopped at: Plan 77-02 complete; ready for Plan 77-03 (shared/search_serializer.py GREEN — turn 22 RED tests into PASSING)
-Resume file: .planning/phases/77-serializer-json-export/77-03-PLAN.md
+Last session: 2026-04-27T17:11:15Z
+Stopped at: Plan 77-03 complete; ready for Plan 77-04 (web/api.py JSON download handlers + toolbar buttons on /search and /parallels)
+Resume file: .planning/phases/77-serializer-json-export/77-04-PLAN.md
 
 ## Performance Metrics — Phase 77
 
@@ -117,3 +127,4 @@ Resume file: .planning/phases/77-serializer-json-export/77-03-PLAN.md
 |------|----------|-------|-------|---------|
 | 77-01 | ~8 min | 3 | 4 | cdd91928, 2c5e94d5, d64ccb2b |
 | 77-02 | ~6 min | 2 (3 commits) | 2 | 6ebefb71, e0259e6f, 25a4f769 |
+| 77-03 | ~3 min | 1 | 1 | 78edec4b |

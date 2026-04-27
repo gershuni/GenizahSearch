@@ -243,7 +243,7 @@ back-nav bugfix.
 **Plans:** 5 plans
 - [x] 77-01-PLAN.md -- AppState envelope-echo fields + state-population sites + Wave 0 RED test scaffolding (complete 2026-04-27)
 - [x] 77-02-PLAN.md -- genizah_core.lab_composition_search chunk_hits extension (D-13 Path A) (complete 2026-04-27)
-- [ ] 77-03-PLAN.md -- shared/search_serializer.py module (single source of truth, all 21 tests GREEN)
+- [x] 77-03-PLAN.md -- shared/search_serializer.py module (single source of truth, all 22 tests GREEN) (complete 2026-04-27)
 - [ ] 77-04-PLAN.md -- web/api.py JSON handlers + toolbar buttons on /search and /parallels
 - [ ] 77-05-PLAN.md -- docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check
 **UI hint**: yes
@@ -314,7 +314,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 77. Serializer & JSON Export | 2/5 | Plan 77-02 complete (2026-04-27) | - |
+| 77. Serializer & JSON Export | 3/5 | Plan 77-03 complete (2026-04-27) | - |
 | 78. /api/search + Hardening Shell | 0/0 | Not started | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
@@ -323,4 +323,4 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-27 -- Plan 77-02 complete: lab_composition_search now populates results_map[uid]['chunk_hits'] per-chunk and surfaces it on returned items so Plan 03's serialize_parallels_payload can emit truthful matches[] arrays per D-13 Path A; 5 tests added (3 static contract + 2 behavioral, monkeypatch-driven, no Tantivy index required) per HIGH-04*
+*Last updated: 2026-04-27 -- Plan 77-03 complete: shared/search_serializer.py is now the single source of truth for Claude-friendly JSON (5 public exports, one private _serialize_item shared structurally by both top-level functions per D-14/EXPORT-03); all 22 RED contract tests turn GREEN, full pytest suite 1167 → 1189 passed; HIGH-05 (FJMS singleton not closed), HIGH-06 (millisecond+counter filename uniqueness without sleep), HIGH-07 (Oxford-only image_url null) all preserved*
