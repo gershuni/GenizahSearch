@@ -171,13 +171,23 @@ def _save_nli_persistent_cache(
         except Exception:
             pass  # Cache operation failed; continue without cached data
 
-def init_api_routes():
-    """Register API routes for image proxy and exports."""
+def init_api_routes(app_override=None):
+    """Register API routes for image proxy and exports.
+
+    Args:
+        app_override: Optional FastAPI/Starlette app to register routes onto.
+                      When None (default, production), registers onto the
+                      module-level NiceGUI singleton ``app``. When a bare app
+                      is passed (test fixtures), registers onto that instead -
+                      keeps the NiceGUI singleton clean across multiple
+                      TestClient setups. See 77-REVIEWS.md HIGH-08.
+    """
     # NOTE: Backend database and routers removed - using Supabase now
+    target_app = app_override if app_override is not None else app
     logger.info("API routes initialized (Supabase mode)")
 
     # ── SEO: robots.txt and sitemap.xml ──────────────────────────────
-    @app.get('/robots.txt')
+    @target_app.get('/robots.txt')
     def robots_txt():
         # /search and /parallels are crawlable (not disallowed) so bots can
         # see their <meta name="robots" content="noindex"> tags.  Blocking
@@ -216,7 +226,7 @@ def init_api_routes():
         # csv_bank not ready yet — return empty without caching so we retry next request
         return []
 
-    @app.get('/sitemap.xml')
+    @target_app.get('/sitemap.xml')
     def sitemap_index():
         """Sitemap index pointing to sub-sitemaps."""
         sitemaps = [
@@ -240,7 +250,7 @@ def init_api_routes():
         )
         return Response(content=xml, media_type="application/xml")
 
-    @app.get('/sitemap-static.xml')
+    @target_app.get('/sitemap-static.xml')
     def sitemap_static():
         """Static/editorial pages sitemap."""
         pages = [
@@ -270,7 +280,7 @@ def init_api_routes():
         )
         return Response(content=xml, media_type="application/xml")
 
-    @app.get('/sitemap-manuscripts-{chunk}.xml')
+    @target_app.get('/sitemap-manuscripts-{chunk}.xml')
     def sitemap_manuscripts(chunk: int):
         """Dynamic manuscript sitemap chunk (up to 40K URLs per file)."""
         chunk_size = 40000
@@ -440,13 +450,13 @@ def init_api_routes():
             _nli_cache_time[cache_key] = _time.time()
         return []
 
-    @app.get('/api/fl_ids/{sys_id}')
+    @target_app.get('/api/fl_ids/{sys_id}')
     def get_fl_ids(sys_id: str):
         """Return manifest FL IDs for a sys_id (cached). Used by NLI viewer deep links."""
         fl_ids = fetch_fl_ids_from_nli(sys_id)
         return fl_ids
 
-    @app.get('/api/nli_image/{fl_id}')
+    @target_app.get('/api/nli_image/{fl_id}')
     def nli_image(fl_id: str):
         """
         Fetch NLI image by FL ID. Tries IIIF first (for valid IDs), then Rosetta.
@@ -560,7 +570,7 @@ def init_api_routes():
 
         return None
 
-    @app.get('/api/nli_image_by_sysid/{sys_id}')
+    @target_app.get('/api/nli_image_by_sysid/{sys_id}')
     def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
         """
         Fetch NLI image by System ID. Dynamically gets FL IDs from NLI IIIF manifest.
@@ -597,7 +607,7 @@ def init_api_routes():
     # WARNING (once per process lifetime, per sys_id — not per request).
     _cambridge_degraded_warned = set()
 
-    @app.get('/api/cambridge_image/{sys_id}')
+    @target_app.get('/api/cambridge_image/{sys_id}')
     def cambridge_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Cambridge IIIF image by System ID with folio+side matching.
@@ -762,7 +772,7 @@ def init_api_routes():
     # Manchester image cache: (sys_id, page) -> (content, content_type, timestamp)
     _manchester_image_cache = {}
 
-    @app.get('/api/manchester_image/{sys_id}')
+    @target_app.get('/api/manchester_image/{sys_id}')
     def manchester_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Manchester IIIF image by System ID.
@@ -820,7 +830,7 @@ def init_api_routes():
     # JTS image cache: (sys_id, page) -> (content, content_type, timestamp)
     _jts_image_cache = {}
 
-    @app.get('/api/jts_image/{sys_id}')
+    @target_app.get('/api/jts_image/{sys_id}')
     def jts_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch JTS/Princeton IIIF image by System ID.
@@ -883,7 +893,7 @@ def init_api_routes():
             return int(match.group(1))
         return 0
 
-    @app.get('/api/oxford_image/{sys_id}')
+    @target_app.get('/api/oxford_image/{sys_id}')
     def oxford_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Oxford image by System ID using CodicologicalManager.
@@ -1003,7 +1013,7 @@ def init_api_routes():
             logger.error(f"Oxford proxy exception for {sys_id} page={page}: {e}; redirecting to direct URL")
             return RedirectResponse(url=img_url, status_code=307)
 
-    @app.get('/api/oxford_image_url/{sys_id}')
+    @target_app.get('/api/oxford_image_url/{sys_id}')
     def oxford_image_url(sys_id: str, page: int = 0):
         """
         Get the direct Oxford URL for an image (no proxy).
@@ -1058,7 +1068,7 @@ def init_api_routes():
 
         return {"url": img_url, "folio": folio_num, "page": page, "part_id": part_id}
 
-    @app.get('/api/oxford_images/{sys_id}')
+    @target_app.get('/api/oxford_images/{sys_id}')
     def oxford_images_list(sys_id: str):
         """
         Get list of available Oxford images for a system ID.
@@ -1092,7 +1102,7 @@ def init_api_routes():
             ]
         }
 
-    @app.get('/api/oxford_debug')
+    @target_app.get('/api/oxford_debug')
     def oxford_debug():
         """
         Debug endpoint to check Oxford mapping status.
@@ -1116,7 +1126,7 @@ def init_api_routes():
             "sample_mappings": list(codico.folio_to_part.items())[:5] if codico.folio_to_part else [],
         }
 
-    @app.get('/api/browse_debug/{sys_id}')
+    @target_app.get('/api/browse_debug/{sys_id}')
     def browse_debug(sys_id: str):
         """
         Debug endpoint to check browse data for a specific sys_id.
@@ -1161,7 +1171,7 @@ def init_api_routes():
 
     # === Puzzle Canvas API (Phase 49) ===
 
-    @app.get('/api/puzzle_image')
+    @target_app.get('/api/puzzle_image')
     def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800,
                      processed: bool = True, is_cul: bool = False):
         """Serve processed/original fragment image for puzzle canvas.
@@ -1214,7 +1224,7 @@ def init_api_routes():
             _puzzle_rate_limits[client_ip] = (1, now)
         return None
 
-    @app.post('/api/puzzle_process')
+    @target_app.post('/api/puzzle_process')
     async def puzzle_process(request: Request):
         """Process client-fetched image bytes with background removal.
         Fallback endpoint: client fetches IIIF image in the browser, POSTs
@@ -1315,7 +1325,7 @@ def init_api_routes():
         return Response(content=result_bytes, media_type=content_type,
                         headers={"Cache-Control": "public, max-age=3600"})
 
-    @app.post('/api/puzzle_upload_derivative')
+    @target_app.post('/api/puzzle_upload_derivative')
     async def puzzle_upload_derivative(request: Request):
         """Accept pre-processed PNG bytes from desktop app or extension.
         Saves directly to server cache without re-processing.
@@ -1393,7 +1403,7 @@ def init_api_routes():
         else:
             return Response(content=f"Unknown provider: {provider}", status_code=400)
 
-    @app.get('/api/puzzle_ext_image')
+    @target_app.get('/api/puzzle_ext_image')
     def puzzle_ext_image(sys_id: str, page: int = 0, provider: str = '',
                          threshold: float = 30.0, size: int = 800,
                          processed: bool = True):
@@ -1460,7 +1470,7 @@ def init_api_routes():
         return Response(content=result_bytes, media_type=content_type,
                         headers={"Cache-Control": "public, max-age=3600"})
 
-    @app.get('/api/puzzle_folios/{sys_id}')
+    @target_app.get('/api/puzzle_folios/{sys_id}')
     def puzzle_folios(sys_id: str):
         """Get ordered folio list for a manuscript (for prev/next navigation).
 
@@ -1521,14 +1531,14 @@ def init_api_routes():
 
     # === Puzzle Document CRUD + Export (Phase 50) ===
 
-    @app.get('/api/puzzle_documents')
+    @target_app.get('/api/puzzle_documents')
     def puzzle_documents_list():
         """List all saved puzzle documents."""
         from shared.puzzle_service import get_puzzle_service
         svc = get_puzzle_service(thread_safe=True)
         return svc.list_documents()
 
-    @app.get('/api/puzzle_document/{doc_id}')
+    @target_app.get('/api/puzzle_document/{doc_id}')
     def puzzle_document_get(doc_id: str):
         """Load a specific puzzle document."""
         from shared.puzzle_service import get_puzzle_service
@@ -1554,7 +1564,7 @@ def init_api_routes():
             'created_at': doc.created_at, 'updated_at': doc.updated_at
         }
 
-    @app.post('/api/puzzle_document')
+    @target_app.post('/api/puzzle_document')
     async def puzzle_document_save(request: Request):
         """Save or update a puzzle document."""
         from shared.puzzle_service import get_puzzle_service
@@ -1585,7 +1595,7 @@ def init_api_routes():
         from starlette.responses import JSONResponse
         return JSONResponse({'error': 'save failed'}, status_code=500)
 
-    @app.delete('/api/puzzle_document/{doc_id}')
+    @target_app.delete('/api/puzzle_document/{doc_id}')
     def puzzle_document_delete(doc_id: str):
         """Delete a puzzle document."""
         from shared.puzzle_service import get_puzzle_service
@@ -1596,7 +1606,7 @@ def init_api_routes():
         from starlette.responses import JSONResponse
         return JSONResponse({'error': 'not found'}, status_code=404)
 
-    @app.post('/api/puzzle_export')
+    @target_app.post('/api/puzzle_export')
     async def puzzle_export(request: Request):
         """Export composite PNG from fragment data."""
         from shared.puzzle_model import PuzzleFragment
@@ -1625,7 +1635,7 @@ def init_api_routes():
             headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"'}
         )
 
-    @app.get('/api/puzzle_thumbnail/{doc_id}')
+    @target_app.get('/api/puzzle_thumbnail/{doc_id}')
     def puzzle_thumbnail(doc_id: str):
         """Serve thumbnail image for a document."""
         from shared.puzzle_service import get_puzzle_service
@@ -1647,7 +1657,7 @@ def init_api_routes():
             media_type='image/png'
         )
 
-    @app.get('/api/proxy_image')
+    @target_app.get('/api/proxy_image')
     def proxy_image(url: str):
         """
         Proxy image requests to NLI to bypass Referer checks.
@@ -1695,7 +1705,7 @@ def init_api_routes():
     # ── Visual Similarity Suggestions ─────────────────────────────
     # NOTE: /version route MUST come before /{sys_id} to avoid wildcard capture
 
-    @app.get('/api/visual_suggestions/version')
+    @target_app.get('/api/visual_suggestions/version')
     def visual_suggestions_version():
         """Return VS database version metadata for cache staleness detection.
 
@@ -1708,7 +1718,7 @@ def init_api_routes():
             return {'version': '', 'import_date': '', 'pair_count': '0', 'manuscript_count': '0'}
         return svc.get_db_version()
 
-    @app.get('/api/visual_similarity_db')
+    @target_app.get('/api/visual_similarity_db')
     def visual_similarity_db_download():
         """Serve the full visual_similarity.db for optional download (D-03).
         Includes Content-Length and X-Checksum-SHA256 headers for client validation."""
@@ -1738,7 +1748,7 @@ def init_api_routes():
             }
         )
 
-    @app.post('/api/visual_suggestions/batch_check')
+    @target_app.post('/api/visual_suggestions/batch_check')
     async def visual_suggestions_batch_check(request: Request):
         """Check which sys_ids have visual suggestions.
         Body: {"sys_ids": [...]} -- max 500 IDs per request.
@@ -1754,7 +1764,7 @@ def init_api_routes():
             return {sid: False for sid in sys_ids}
         return svc.batch_has_suggestions(sys_ids)
 
-    @app.get('/api/visual_suggestions/{sys_id}')
+    @target_app.get('/api/visual_suggestions/{sys_id}')
     def visual_suggestions_api(sys_id: str, limit: int = 200):
         """Return ranked visual similarity suggestions for a manuscript.
 
@@ -1803,7 +1813,7 @@ def init_api_routes():
 
         return suggestions
 
-    @app.get('/api/export/excel')
+    @target_app.get('/api/export/excel')
     def export_excel():
         """Export search results to Excel format using unified export service."""
         if not state.last_results:
@@ -1826,7 +1836,7 @@ def init_api_routes():
             logger.error(f"Export Excel error: {e}")
             return Response("Export failed", status_code=500)
 
-    @app.get('/api/export/word')
+    @target_app.get('/api/export/word')
     def export_word():
         """Export search results to Word format using unified export service."""
         if not state.last_results:
@@ -1849,7 +1859,7 @@ def init_api_routes():
             logger.error(f"Export Word error: {e}")
             return Response("Export failed", status_code=500)
 
-    @app.get('/api/export/parallels/excel')
+    @target_app.get('/api/export/parallels/excel')
     def export_parallels_excel():
         """Export parallels results to Excel using unified export service."""
         from nicegui import app as nicegui_app
@@ -1878,7 +1888,7 @@ def init_api_routes():
             logger.error(f"Export Parallels Excel error: {e}")
             return Response("Export failed", status_code=500)
 
-    @app.get('/api/export/parallels/word')
+    @target_app.get('/api/export/parallels/word')
     def export_parallels_word():
         """Export parallels results to Word using unified export service."""
         from nicegui import app as nicegui_app
@@ -1907,7 +1917,94 @@ def init_api_routes():
             logger.error(f"Export Parallels Word error: {e}")
             return Response("Export failed", status_code=500)
 
-    @app.get('/api/export/browse/word')
+    @target_app.get('/api/export/json')
+    def export_json():
+        """Phase 77 EXPORT-01/03/04: search results as Claude-friendly JSON.
+
+        Stateful download (mirrors existing /api/export/excel pattern). Reads
+        state.last_results + envelope-echo fields populated at web/pages/search.py
+        execute-time. Phase 78 /api/search is the stateless POST counterpart.
+        """
+        from starlette.responses import JSONResponse
+        from shared.search_serializer import (
+            serialize_search_payload, build_search_filename,
+        )
+
+        if not state.last_results:
+            return Response("No results to export", status_code=400)
+
+        try:
+            payload = serialize_search_payload(
+                state.last_results,
+                meta_mgr=state.meta_mgr,
+                query=getattr(state, 'current_search_query', '') or '',
+                mode=getattr(state, 'current_search_mode', 'text') or 'text',
+                gap=getattr(state, 'current_search_gap', None),
+                filters=getattr(state, 'last_filters_applied', None),
+                warnings=getattr(state, 'last_search_warnings', None) or [],
+            )
+            filename = build_search_filename()
+            return JSONResponse(
+                payload,
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
+            )
+        except ValueError as e:
+            return Response(str(e), status_code=400)
+        except Exception as e:
+            logger.error(f"Export JSON error: {e}")
+            return Response("Export failed", status_code=500)
+
+    @target_app.get('/api/export/parallels/json')
+    def export_parallels_json():
+        """Phase 77 EXPORT-02/03/04: parallels results as Claude-friendly JSON.
+
+        Stateful download (mirrors existing /api/export/parallels/excel pattern).
+        Reads state.parallels_results + state.parallels_filtered + state.parallels_search_meta.
+        Phase 80 /api/parallels is the stateless POST counterpart.
+        """
+        from starlette.responses import JSONResponse
+        from nicegui import app as nicegui_app
+        from shared.search_serializer import (
+            serialize_parallels_payload, build_parallels_filename,
+        )
+
+        parallels_results = state.parallels_results or []
+        filtered_results = state.parallels_filtered or []
+        meta = getattr(state, 'parallels_search_meta', None) or {}
+        # Fallback: source_text from app.storage.user (matches existing Excel/Word path)
+        source_text = (
+            meta.get('source_text')
+            or nicegui_app.storage.user.get('parallels_source_text', '')
+            or ''
+        )
+
+        if not parallels_results and not filtered_results:
+            return Response("No parallels results to export", status_code=400)
+
+        try:
+            payload = serialize_parallels_payload(
+                parallels_results,
+                filtered_results,
+                meta_mgr=state.meta_mgr,
+                source_text=source_text,
+                chunk_size=meta.get('chunk_size', 5),
+                mode=meta.get('mode', 'exact') or 'exact',
+                max_freq=meta.get('max_freq'),
+                boundary_options=meta.get('boundary_options'),
+                warnings=meta.get('warnings') or [],
+            )
+            filename = build_parallels_filename()
+            return JSONResponse(
+                payload,
+                headers={"Content-Disposition": encode_filename_for_header(filename)}
+            )
+        except ValueError as e:
+            return Response(str(e), status_code=400)
+        except Exception as e:
+            logger.error(f"Export Parallels JSON error: {e}")
+            return Response("Export failed", status_code=500)
+
+    @target_app.get('/api/export/browse/word')
     def export_browse_word():
         """Export current browse page to Word using unified export service."""
         from nicegui import app as nicegui_app
@@ -1930,7 +2027,7 @@ def init_api_routes():
             logger.error(f"Export Browse Word error: {e}")
             return Response("Export failed", status_code=500)
 
-    @app.get('/api/export/list/{list_id}/excel')
+    @target_app.get('/api/export/list/{list_id}/excel')
     def export_list_excel(list_id: str):
         """Export a specific list to Excel using unified export service."""
         if not state.lists_mgr:
