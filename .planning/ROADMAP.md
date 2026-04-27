@@ -18,6 +18,7 @@
 - **v7.7 Volume-Aware Browse** -- Phases 58-61 (shipped 2026-04-01)
 - **v7.8 Structural Foundation** -- Phases 63-66 (shipped 2026-04-15)
 - **v7.9 Decomposition** -- Phases 67-76 (complete 2026-04-17)
+- **v7.10 Search API** -- Phases 77-82 (active, started 2026-04-27)
 
 ## Phases
 
@@ -196,196 +197,125 @@ Zero user-visible behavior changes.
 
 </details>
 
-### v7.9 Decomposition (Complete 2026-04-17)
+<details>
+<summary>v7.9 Decomposition (Phases 67-76) -- COMPLETE 2026-04-17</summary>
 
-**Milestone Goal:** Reduce structural debt by decomposing the largest source files -- `genizah_app.py` (~32,800 lines), `web/pages/search.py` (~6,700 lines), `web/pages/browse.py` (~5,100 lines) -- into focused modules. Zero user-visible behavior changes. Leverages v7.8 CI safety net (ruff + pytest on Ubuntu + Windows).
-**Per-phase gate:** current pytest baseline remains green, CI green (Ubuntu + Windows) after each phase.
-**Milestone-level gate:** `scripts/check_docs.py` green at milestone close (Phase 76).
+10 phases, 23 plans.
+Decomposition of largest source files into focused modules. Desktop split: ResultDialog,
+filter/scholarly dialogs, image viewers (ManuscriptViewerWidget, FullscreenImageWindow),
+puzzle canvas, VS cache, widgets extracted into desktop/ package. Web split:
+search.py -> search_state.py + search_results.py; browse.py -> browse_state.py + browse_enrichment.py.
+Page-scoped state refactor reducing app.storage.user sprawl. Back-navigation state-loss bugfix
+(regression from 2026-03-27 commit 829cd7cf). Zero user-visible behavior change except the
+back-nav bugfix.
 
-- [x] **Phase 67: ResultDialog Extraction** - Extract ResultDialog class from genizah_app.py into desktop/result_dialog.py (completed 2026-04-15)
-- [x] **Phase 68: Desktop Dialog Extractions** - Extract ExcludeDialog, filter dialogs, FJMS/NLI/bibliography dialogs into dedicated modules (completed 2026-04-16)
-- [x] **Phase 69: Image Viewer Extraction** - Extract ManuscriptViewerWidget, FullscreenImageWindow, and image viewer classes into desktop/viewers.py (completed 2026-04-16)
-- [x] **Phase 70: Puzzle Extraction** - Extract PuzzleCanvasWindow and puzzle-related classes into desktop/puzzle.py (completed 2026-04-16)
-- [x] **Phase 71: GenizahGUI Consolidation & Smoke Tests** - Verify GenizahGUI is a clean orchestrator importing from extracted modules; run desktop smoke-test suite (completed 2026-04-16)
-- [x] **Phase 72: Search Page Split** - Split web/pages/search.py into state, UI, and results modules (completed 2026-04-16)
-- [x] **Phase 73: Browse Page Split** - Split web/pages/browse.py into state, UI, and enrichment modules (completed 2026-04-16; housekeeping committed 2026-04-17)
-- [x] **Phase 74: Page-Scoped State Refactor** - Reduce app.storage.user sprawl and detached asyncio.ensure_future with page-scoped state objects (completed 2026-04-17)
-- [x] **Phase 75: Non-Regression Verification** - Manual qualitative verification of search/browse responsiveness in both apps (completed 2026-04-17)
-- [x] **Phase 76: Documentation Close** - Refresh CODE_INDEX.md, OPEN_ISSUES.md, and path references for all moved files (completed 2026-04-17 — added scripts/gen_code_index_section.py AST generator + v7.9 module index; check_docs green)
+</details>
+
+### v7.10 Search API (Active, started 2026-04-27)
+
+**Milestone Goal:** Add a thin internal HTTP/JSON surface over existing search, parallels, and browse pipelines so external automation (first consumer: a Claude skill that sorts/ranks results) can drive GenizahSearch. Helper surface, not platform — narrow endpoints, no public docs, no long-term stability promise. Hardening, observability, and access-mode controls apply to the **three new search-helper endpoints only** (`/api/search`, `/api/parallels`, `/api/browse`); existing `/api/*` routes (image proxies, puzzle uploads, NLI proxies) are explicitly out of scope.
+
+**Per-phase gate:** pytest baseline remains green; CI green (Ubuntu + Windows); existing `/api/*` routes return identical responses to pre-milestone (verified by spot-check on image proxy + puzzle upload routes after each phase that touches `web/api.py`).
+
+**Milestone-level gate:** Claude skill (Phase 81) drives end-to-end search → browse loop against a live deployment without crashing on rate-limit / timeout / partial-data conditions; `scripts/check_docs.py` green at milestone close.
+
+**Phase summary checklist:**
+
+- [ ] **Phase 77: Serializer & JSON Export** — Single-source-of-truth serializer module powering toolbar JSON downloads on /search and /parallels, ahead of any API endpoint
+- [ ] **Phase 78: /api/search + Hardening Shell** — First search-helper endpoint plus the cross-cutting hardening primitives (rate limit, mode flag, query/result caps, error envelope, PostHog) all three endpoints reuse
+- [ ] **Phase 79: /api/browse Drill-Down** — Stateless drill-down endpoint resolving locators from /api/search responses to text + metadata + image URLs; first real consumer of the locator contract, proves the search → browse vertical slice
+- [ ] **Phase 80: /api/parallels** — Companion search-side endpoint reusing the locator and hardening shell, sequenced after browse so the locator round-trip is already validated before a second producer is added
+- [ ] **Phase 81: Claude Skill Consumer** — Reference skill exercising the search → browse loop end-to-end as the v7.10 acceptance harness
+- [ ] **Phase 82: Internal Documentation** — `docs/SEARCH_API.md` and `CLAUDE.md` env-var updates capturing the as-shipped contract
 
 ## Phase Details
 
-### Phase 67: ResultDialog Extraction
-**Goal**: ResultDialog and its helper classes live in their own module, imported by genizah_app.py
-**Depends on**: Nothing (first phase of milestone; CI safety net from v7.8 is prerequisite)
-**Requirements**: DESK-01
+### Phase 77: Serializer & JSON Export
+**Goal**: A single serializer module owns the "Claude-friendly JSON" payload shape, and /search and /parallels pages let users download the current results in that shape — establishing the contract before any HTTP endpoint consumes it.
+**Depends on**: Nothing (first phase of milestone; v7.9 decomposition provides clean web/pages/search.py and web/pages/browse.py module boundaries to hook the export buttons into).
+**Requirements**: EXPORT-01, EXPORT-02, EXPORT-03, EXPORT-04
 **Success Criteria** (what must be TRUE):
-  1. `ResultDialog` class is defined in a new `desktop/result_dialog.py` module (not in `genizah_app.py`)
-  2. `genizah_app.py` imports `ResultDialog` from the new module and all existing call sites work unchanged
-  3. Any helper classes/functions used exclusively by ResultDialog move with it; shared helpers remain accessible
-  4. current pytest baseline remains green
-**Phase gate**: pytest green, CI green
-**Plans**: 3 plans
-Plans:
-- [x] 67-01-PLAN.md -- Create desktop/ package, move ActionsHoverWidget + _format_add_to_list_label to widgets.py
-- [x] 67-02-PLAN.md -- Delete browse dead code, move helpers to cohesive modules, extract ResultDialog (additive copy then cut-over), update tests
-- [x] 67-03-PLAN.md -- Rename self.parent() to self._app + manual desktop smoke test
-**Risk**: ResultDialog likely references GenizahGUI methods (e.g., for browse navigation callbacks). These cross-references need careful handling -- callback injection or signal-based decoupling. Discuss during planning.
-
-### Phase 68: Desktop Dialog Extractions
-**Goal**: All filter and scholarly dialogs live in dedicated modules, not in genizah_app.py
-**Depends on**: Phase 67 (establishes extraction pattern and module layout)
-**Requirements**: DESK-04, DESK-05
-**Success Criteria** (what must be TRUE):
-  1. `ExcludeDialog` and filter dialog classes are defined in a new `desktop/dialogs_filter.py` module (not in `genizah_app.py`)
-  2. FJMS catalog dialog, NLI crossref dialog, bibliography dialog, and measurement dialog classes are defined in a new `desktop/dialogs_scholarly.py` module (not in `genizah_app.py`)
-  3. `genizah_app.py` imports all dialog classes from their new modules and all existing call sites work unchanged
-  4. current pytest baseline remains green
-**Phase gate**: pytest green, CI green
-**Plans**: 2 plans
-Plans:
-- [x] 68-01-PLAN.md -- Extract 4 scholarly dialogs to desktop/dialogs_scholarly.py, retarget result_dialog.py lazy imports, add re-exports
-- [x] 68-02-PLAN.md -- Move FilterCountWorker to gui_threads.py, extract 3 filter dialogs to desktop/dialogs_filter.py, delete self-imports, add re-exports
-**Note**: These are leaf dialogs with minimal cross-dependencies -- grouping them is safe. If any dialog has unexpected coupling to ResultDialog or viewers, split into a separate plan.
-
-### Phase 69: Image Viewer Extraction
-**Goal**: All manuscript image viewing classes live in their own module
-**Depends on**: Phase 68 (dialog extractions complete, reducing genizah_app.py surface area)
-**Requirements**: DESK-03
-**Success Criteria** (what must be TRUE):
-  1. `ManuscriptViewerWidget`, `FullscreenImageWindow`, and related image viewer classes are defined in a new `desktop/viewers.py` module (not in `genizah_app.py`)
-  2. Image-loading helper functions shared between viewers and puzzle are accessible from the new module (or extracted to a shared `desktop/image_utils.py`)
-  3. `genizah_app.py` imports viewer classes from the new module and all existing call sites work unchanged
-  4. current pytest baseline remains green
-**Phase gate**: pytest green, CI green
-**Plans**: 1 plan
-Plans:
-- [x] 69-01-PLAN.md -- Extract 3 image viewer classes to desktop/viewers.py, retarget result_dialog.py lazy import, add re-exports
-**Note**: Smaller scope than Phase 68 (3 classes, ~1160 lines, single target module). D-02 confirmed no shared image helpers exist between viewers and puzzle -- no desktop/image_utils.py needed.
-
-### Phase 70: Puzzle Extraction
-**Goal**: All puzzle/join canvas classes live in their own module
-**Depends on**: Phase 69 (image viewer extraction resolves shared image helper placement)
-**Requirements**: DESK-02
-**Success Criteria** (what must be TRUE):
-  1. `PuzzleCanvasWindow` and all puzzle-related classes (fragment items, toolbar, etc.) are defined in a new `desktop/puzzle.py` module (not in `genizah_app.py`)
-  2. Puzzle classes import image helpers from `desktop/viewers.py` or `desktop/image_utils.py` (no circular imports)
-  3. `genizah_app.py` imports puzzle classes from the new module and all existing call sites work unchanged
-  4. current pytest baseline remains green
-**Phase gate**: pytest green, CI green
-**Plans**: 1 plan
-Plans:
-- [x] 70-01-PLAN.md -- Extract 5 puzzle classes to desktop/puzzle.py, add re-exports
-**Note**: Largest single extraction (~2642 lines, 5 classes). D-10 confirmed no viewer dependency -- no circular import risk. ShelfmarkCompleter imported lazily from genizah_app.py (D-04).
-
-### Phase 71: GenizahGUI Consolidation & Smoke Tests
-**Goal**: genizah_app.py is a clean orchestrator and all desktop extractions pass smoke tests
-**Depends on**: Phase 70 (all desktop extractions complete)
-**Requirements**: DESK-06, DESK-07
-**Success Criteria** (what must be TRUE):
-  1. `genizah_app.py` contains `GenizahGUI` as the top-level coordinator, with all dialog/viewer/puzzle implementations imported from `desktop/` modules
-  2. All substantial dialog, viewer, and puzzle implementations are extracted to `desktop/` modules; small coordination helpers and thin wrappers may remain alongside `GenizahGUI`
-  3. Desktop smoke-test suite passes: app starts, basic search executes, browse navigation changes pages, ResultDialog opens/closes, puzzle window opens and loads a fragment
-  4. current pytest baseline remains green
-  5. No import cycles between `desktop/` modules (verified by ruff or manual inspection)
-**Phase gate**: pytest green, CI green, smoke tests pass
-**Plans:** 2/2 plans complete
-Plans:
-- [x] 71-01-PLAN.md -- Extract DesktopVSCache trio to desktop/vs_cache.py, fix OPEN_ISSUES path
-- [x] 71-02-PLAN.md -- Create desktop smoke checklist, user walkthrough verification
-
-### Phase 72: Search Page Split
-**Goal**: web/pages/search.py is decomposed into focused modules for state, UI, and results
-**Depends on**: Phase 71 (desktop complete; web phases are independent but sequenced after desktop to avoid context switching)
-**Requirements**: WEBM-01
-**Success Criteria** (what must be TRUE):
-  1. Search state management (query parameters, refinement chain, session persistence) lives in a dedicated module (e.g., `web/pages/search_state.py`)
-  2. Search results rendering (result cards, pagination, export) lives in a dedicated module (e.g., `web/pages/search_results.py`)
-  3. `web/pages/search.py` remains the entry point / page registration but delegates to the split modules
-  4. current pytest baseline remains green
-**Phase gate**: pytest green, CI green
+  1. From `/search` after running any query, a toolbar button downloads the visible result set as a JSON file whose filename contains the page identifier and an ISO timestamp (e.g. `genizah-search-2026-04-27T1530.json`); two consecutive downloads produce two distinct files.
+  2. From `/parallels` after running a composition search, the same export button downloads results in the parallels-shaped payload — never silently overwriting a prior download.
+  3. The exported JSON for both pages is produced by exactly one serializer module; modifying the result-item shape in that module changes both downloads (and, in later phases, the API response) in lockstep — no parallel implementation exists.
+  4. Each downloaded payload includes the drill-down locator on every result item (uid preferred, `{sys_id, volume_ie, p_num}` fallback), proving the locator contract works before /api/browse consumes it in Phase 80.
+**Phase gate**: pytest green, CI green, manual download spot-check on /search and /parallels.
+**Plans**: TBD
 **UI hint**: yes
-**Plans:** 2/2 plans complete
-Plans:
-- [x] 72-01-PLAN.md -- Extract SearchUIState, AdvancedViewState, SearchPageRefs, search history helpers to search_state.py
-- [x] 72-02-PLAN.md -- Extract toggle_expansion, render_results, create_result_card, open_advanced_dialog to search_results.py + web smoke test
 
-### Phase 73: Browse Page Split
-**Goal**: web/pages/browse.py is decomposed into focused modules for state, UI, and enrichment
-**Depends on**: Phase 72 (establishes web split pattern)
-**Requirements**: WEBM-02
+### Phase 78: /api/search + Hardening Shell
+**Goal**: `POST /api/search` returns Claude-friendly results from `SearchEngine.execute_search` over a hardened transport (rate-limited, capped, mode-gated, observable, with a uniform error envelope) — and that hardening shell is built once so Phases 79 and 80 inherit it without reimplementation.
+**Depends on**: Phase 77 (serializer module owns response item shape).
+**Requirements**: API-01, API-04, API-05, API-06, API-07, HARDEN-01, HARDEN-02, HARDEN-03, HARDEN-04, HARDEN-05
 **Success Criteria** (what must be TRUE):
-  1. Browse state management (current manuscript, volume, navigation history) lives in a dedicated module (e.g., `web/pages/browse_state.py`)
-  2. Browse enrichment logic (Phase A/B deferred loading, crossref, Oxford, Cambridge) lives in a dedicated module (e.g., `web/pages/browse_enrichment.py`)
-  3. `web/pages/browse.py` remains the entry point / page registration but delegates to the split modules
-  4. current pytest baseline remains green
-**Phase gate**: pytest green, CI green
-**UI hint**: yes
-**Plans:** 2 plans
-Plans:
-- [x] 73-01-PLAN.md -- Extract BrowseState, BrowsePageRefs, _crossref_cache to browse_state.py
-- [ ] 73-02-PLAN.md -- Extract enrichment functions to browse_enrichment.py + web smoke test
+  1. `POST /api/search` with a valid `{query, mode, gap?, limit?, filters?}` body returns ranked results matching the Phase 77 serializer shape, including the drill-down locator on every item, in a single HTTP round-trip; identical requests return identical bodies regardless of whether a NiceGUI browser session exists.
+  2. Invalid input (unknown mode, oversized limit, unknown filter key, query exceeding the length cap) returns the uniform `{error: {code, message}}` envelope — never a raw FastAPI 422 dump — and existing `/api/*` routes (image proxies, puzzle uploads, NLI proxies) return their original responses unchanged on spot-check.
+  3. Filter values submitted by API clients flow through the same FJMS `restrict_sys_ids` pipeline the UI uses; a filter value the pipeline cannot resolve is rejected at the endpoint with the error envelope, never silently dropped.
+  4. Sustained traffic above the per-IP rate limit returns HTTP 429 with a `Retry-After` header; setting `SEARCH_API_MODE=disabled` (or `localhost-only`) takes effect on next request without a code change; neither toggle affects existing `/api/*` routes.
+  5. When the Responsa combinatorial cascade or query-length cap downgrades a query, the response surfaces the adjustment in a top-level `warnings` array (or `query_adjustments`) — never hidden inside the first result item — and a PostHog event fires per request capturing endpoint, mode, latency bucket, result-count bucket, and IP-hash with no payload contents logged.
+**Phase gate**: pytest green, CI green, integration test exercising error envelope + warnings array + mode-flag (open/localhost-only/disabled); explicit soak check sustaining traffic above the per-IP rate limit until 429 + `Retry-After` are observed (per Codex review — covers the rate-limiter end-to-end without a standalone stress phase).
+**Plans**: TBD
 
-### Phase 74: Page-Scoped State Refactor
-**Goal**: Search and browse pages use page-scoped state objects instead of app.storage.user sprawl and detached async flows
-**Depends on**: Phase 73 (split modules provide clean boundaries for state refactoring)
-**Requirements**: WEBM-03
+### Phase 79: /api/browse Drill-Down
+**Goal**: `GET /api/browse` resolves a single manuscript page from a locator returned by `/api/search` and returns text + metadata + image URLs in one shot — no follow-up calls, no session state. Sequenced ahead of `/api/parallels` so the locator contract is *consumed* (not just emitted) before a second producer is added — this closes the search → browse vertical slice the Claude skill needs.
+**Depends on**: Phase 78 (locator contract from API-05; hardening shell).
+**Requirements**: API-03
 **Success Criteria** (what must be TRUE):
-  1. Search page state is managed through a page-scoped object rather than scattered `app.storage.user` keys for live page state (session persistence keys may remain in app.storage.user)
-  2. Browse page state is managed through a page-scoped object rather than scattered `app.storage.user` keys for live page state
-  3. Detached `asyncio.ensure_future` calls in search and browse are replaced with page-scoped handlers or NiceGUI background_tasks where practical (some may remain with justification)
-  4. current pytest baseline remains green
-  5. Web smoke check: app starts; `/` search page loads; a basic search returns results; `/browse` loads for at least one manuscript; shelfmark navigation between manuscripts works
-**Phase gate**: pytest green, CI green, web smoke check passes
-**UI hint**: yes
-**Note**: This is the most architectural web change in the milestone. It touches the runtime behavior of state management, not just file organization. Plan carefully -- the split modules from Phases 72-73 provide natural boundaries, but the state refactoring changes how data flows at runtime. Page-scoped objects should be lightweight wrappers, not a state management framework. The web smoke check catches behavioral regressions earlier than Phase 75's full verification.
+  1. `GET /api/browse?uid=…` (preferred) or `GET /api/browse?sys_id=…&volume_ie=…&page=…` (fallback) returns a fixed-shape JSON body with text (transcription if available, snippet otherwise), the documented PGP/FJMS/NLI metadata subset, and image URLs — with the page-indexing convention (1-based or 0-based, whichever core uses) explicit in the response itself.
+  2. Given a locator copied verbatim from a Phase 78 `/api/search` response item, `/api/browse` returns the corresponding manuscript page without any disambiguation step; the round-trip works for at least one multi-IE manuscript and one single-IE manuscript.
+  3. The endpoint is stateless: identical query strings produce identical bodies regardless of `app.storage.user`, refinement chain, or any prior UI action; image URLs continue to be served (not inlined) and degrade gracefully when NLI is unavailable rather than failing the whole response.
+  4. Rate limiting, mode gating, error envelope, and PostHog observability inherited from Phase 78 apply identically; existing `/api/*` image-proxy and puzzle routes are unchanged on spot-check.
+**Phase gate**: pytest green, CI green, locator round-trip test against single-IE and multi-IE manuscripts; closes the locator obligation that begins in Phase 77 (export embeds locator) → Phase 78 (search emits locator) → Phase 79 (browse consumes locator).
+**Plans**: TBD
 
-### Phase 75: Non-Regression Verification
-**Goal**: Both apps behave identically to pre-refactor in all user-facing interactions
-**Depends on**: Phase 74 (all code changes complete)
-**Requirements**: NREG-01
+### Phase 80: /api/parallels
+**Goal**: `POST /api/parallels` exposes the composition/parallels pipeline through the same payload, locator, error-envelope, and hardening conventions as `/api/search`. Sequenced after `/api/browse` so the locator round-trip is already validated end-to-end before a second producer emits the same contract.
+**Depends on**: Phase 78 (hardening shell, error envelope, serializer wiring, locator contract); Phase 79 (locator round-trip validated through `/api/browse`).
+**Requirements**: API-02
 **Success Criteria** (what must be TRUE):
-  1. Web search: initial render, result paging, result interaction (expand, browse, export) show no obvious slowdown versus pre-refactor
-  2. Web browse: manuscript loading, enrichment panel population, volume switching show no obvious slowdown versus pre-refactor
-  3. Desktop search: basic search, composition search, result dialog interaction show no obvious slowdown versus pre-refactor
-  4. Desktop browse: page navigation, image loading, folio switching show no obvious slowdown versus pre-refactor
-  5. `pytest tests/` baseline green (1067 passed, 8 skipped)
-**Phase gate**: pytest green, qualitative sign-off from user
-**Verification method**: Manual checklist only -- no benchmark suite. Executor walks through the web and desktop surfaces listed in criteria 1-4, then the user signs off on each surface (explicit yes/no per surface). No quantitative thresholds; the bar is "no obvious slowdown vs pre-refactor."
-**Plans**: 2 plans
-Plans:
-- [x] 75-01-PLAN.md -- Pre-populate 75-UAT.md with YAML frontmatter, locked test sys_ids, and 5 test sections (autonomous)
-- [x] 75-02-PLAN.md -- Walk user through 4 user-facing surfaces, record per-surface sign-off, run pytest baseline last, finalize UAT status (non-autonomous)
+  1. `POST /api/parallels` accepts the v7.10 subset (`text`, `chunk_size`, `mode`, `max_freq?`, optional same filter subset as /api/search, optional boundary options) and returns Claude-friendly results that share the Phase 77 serializer item shape including the drill-down locator.
+  2. The response shape documents whether filtered or high-frequency hits appear under a separate `filtered` key or are omitted entirely — and that documented behavior is applied consistently across at least three sample compositions covering text, gap, and Responsa modes.
+  3. Rate limiting, result caps, query-length cap, error envelope, `SEARCH_API_MODE` gating, and the PostHog observability event from Phase 78 apply to `/api/parallels` with no per-endpoint reimplementation; flipping a knob in one place changes both endpoints.
+  4. Locators emitted by `/api/parallels` round-trip through `/api/browse` (built in Phase 79) without any per-producer adjustment; this is verified with at least one parallels result feeding a successful `/api/browse` call.
+**Phase gate**: pytest green, CI green, parity check confirming Phase 78 hardening behaviors apply unchanged to /api/parallels; locator round-trip via /api/browse.
+**Plans**: TBD
 
-### Phase 76: Documentation Close
-**Goal**: Project documentation accurately reflects the decomposed codebase
-**Depends on**: Phase 75 (all code and verification complete)
-**Requirements**: (milestone deliverable, not a numbered requirement)
+### Phase 81: Claude Skill Consumer
+**Goal**: A runnable Claude skill drives `/api/search` → `/api/browse` end-to-end and proves the v7.10 contract by ranking real manuscripts against real queries — the milestone's acceptance harness.
+**Depends on**: Phase 78 (search), Phase 79 (browse drill-down — completes the search → browse vertical slice the skill exercises), Phase 80 (parallels — broadens skill coverage).
+**Requirements**: SKILL-01, SKILL-02, SKILL-03
 **Success Criteria** (what must be TRUE):
-  1. `docs/CODE_INDEX.md` lists all new `desktop/` modules and updated `web/pages/` module structure with accurate descriptions
-  2. `docs/OPEN_ISSUES.md` includes any decomposition findings, deferred cleanup items, or import-cycle concerns discovered during execution
-  3. Any docs that reference specific file paths or line numbers in `genizah_app.py`, `web/pages/search.py`, or `web/pages/browse.py` are updated to reflect new locations
-  4. `scripts/check_docs.py` passes green
-**Phase gate**: check_docs green, CI green
+  1. The skill's base URL is configurable (env var or argument), defaults to the production deployment, and the skill is runnable from a clean checkout — its filesystem location is environment-specific and not pinned to a specific repo path.
+  2. Running the skill on a representative scholarly query produces a ranked list of N candidates with brief justifications grounded in the text fetched via `/api/browse`; reviewing any single justification, the cited evidence is traceable back to a specific browse response.
+  3. Triggering a 429 from the rate limiter, a request timeout, or a partial `/api/browse` response (NLI image unavailable) does not crash the conversation; the skill surfaces each failure in plain terms and continues processing remaining candidates where possible.
+**Phase gate**: live end-to-end run against the production deployment with the user observing; user-signed-off ranking against at least one scholarly query.
+**Plans**: TBD
+
+### Phase 82: Internal Documentation
+**Goal**: As-shipped contract is captured in one internal page and the new env-var surface is discoverable by future maintainers — without inviting external usage.
+**Depends on**: Phases 78, 79, 80, 81 (must reflect what actually shipped, not what was planned).
+**Requirements**: DOC-01, DOC-02
+**Success Criteria** (what must be TRUE):
+  1. `docs/SEARCH_API.md` documents the three search-helper endpoints with their exact request and response shapes (including the locator, the `warnings` array, and the error envelope), the env vars (`SEARCH_API_MODE`, rate-limit knobs), and an explicit "internal helper, no stability promise" disclaimer; the page is not linked from the public site or `README.md`.
+  2. `CLAUDE.md` lists the new env vars (`SEARCH_API_MODE` and the rate-limit knobs) in its environment-variables section so future agents discover them through the standard project context; `README.md` is intentionally untouched.
+  3. A reader unfamiliar with v7.10 can, using only `docs/SEARCH_API.md`, send a valid `/api/search` request, follow the locator to `/api/browse`, and predict the error envelope returned by an invalid filter — without reading the source code.
+**Phase gate**: scripts/check_docs.py green; doc walkthrough by a reader who did not implement the milestone.
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 67 -> 68 -> 69 -> 70 -> 71 -> 72 -> 73 -> 74 -> 75 -> 76
+Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 67. ResultDialog Extraction | 3/3 | Complete    | 2026-04-15 |
-| 68. Desktop Dialog Extractions | 2/2 | Complete    | 2026-04-16 |
-| 69. Image Viewer Extraction | 1/1 | Complete    | 2026-04-16 |
-| 70. Puzzle Extraction | 1/1 | Complete    | 2026-04-16 |
-| 71. GenizahGUI Consolidation & Smoke Tests | 2/2 | Complete    | 2026-04-16 |
-| 72. Search Page Split | 2/2 | Complete    | 2026-04-16 |
-| 73. Browse Page Split | 2/2 | Complete    | 2026-04-16 |
-| 74. Page-Scoped State Refactor | 3/3 | Complete    | 2026-04-17 |
-| 75. Non-Regression Verification | 3/3 | Complete   | 2026-04-17 |
-| 76. Documentation Close | 1/1 | Complete    | 2026-04-17 |
+| 77. Serializer & JSON Export | 0/0 | Not started | - |
+| 78. /api/search + Hardening Shell | 0/0 | Not started | - |
+| 79. /api/browse Drill-Down | 0/0 | Not started | - |
+| 80. /api/parallels | 0/0 | Not started | - |
+| 81. Claude Skill Consumer | 0/0 | Not started | - |
+| 82. Internal Documentation | 0/0 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-17 -- Phase 75 planned (2 plans in 2 waves)*
+*Last updated: 2026-04-27 -- v7.10 Search API milestone added (Phases 77-82); v7.9 Decomposition collapsed into milestone summary; Codex review pass applied — phases 79/80 swapped (browse before parallels), 78 gate adds explicit 429/soak check, locator obligation timeline (77→78→79) documented*

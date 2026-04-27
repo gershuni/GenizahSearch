@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
-status: defining
-stopped_at: Defining requirements for v7.10 Search API
+status: roadmap-complete
+stopped_at: Roadmap complete; ready to plan Phase 77 (Serializer & JSON Export)
 last_updated: "2026-04-27T00:00:00.000Z"
-last_activity: 2026-04-27 -- v7.10 Search API milestone started; PROJECT.md updated, requirements + roadmap pending
+last_activity: 2026-04-27 -- v7.10 Search API roadmap created (Phases 77-82, 21/21 requirements mapped)
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,18 +21,26 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.10 Search API — defining requirements
+**Current focus:** v7.10 Search API — roadmap complete (Phases 77-82), Phase 77 next
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 77 (Serializer & JSON Export) — Not started
 Plan: —
-Status: Defining requirements
-Last activity: 2026-04-27 — Milestone v7.10 Search API started
+Status: Roadmap complete; awaiting plan-phase for Phase 77
+Last activity: 2026-04-27 — v7.10 Search API roadmap created
 
-Progress: [          ] 0%
+Progress: [          ] 0% (0/6 phases complete)
 
-Next step: define REQUIREMENTS.md, then spawn roadmapper to create ROADMAP.md (phases continue from v7.9's last phase 76 → first phase of v7.10 is phase 77).
+**Phase queue (v7.10):**
+1. **Phase 77** — Serializer & JSON Export (EXPORT-01..04) ← next
+2. Phase 78 — /api/search + Hardening Shell (API-01,04,05,06,07 + HARDEN-01..05)
+3. Phase 79 — /api/browse Drill-Down (API-03) — Codex-recommended: validates locator round-trip via real consumer before a second producer
+4. Phase 80 — /api/parallels (API-02)
+5. Phase 81 — Claude Skill Consumer (SKILL-01..03)
+6. Phase 82 — Internal Documentation (DOC-01, DOC-02)
+
+Next step: `/gsd-plan-phase 77` to decompose Phase 77 into plans.
 
 ## Performance Metrics
 
@@ -43,9 +51,9 @@ Next step: define REQUIREMENTS.md, then spawn roadmapper to create ROADMAP.md (p
 
 **Recent Trend:**
 
+- v7.9: 10 phases, 23 plans (complete 2026-04-17, internal milestone)
 - v7.8: 4 phases, 9 plans (shipped 2026-04-15, ~14 hours wall clock)
 - v7.7: 4 phases, 8 plans
-- v7.6: 5 phases, 17 plans
 - Trend: Stable
 
 ## Accumulated Context
@@ -53,6 +61,12 @@ Next step: define REQUIREMENTS.md, then spawn roadmapper to create ROADMAP.md (p
 ### Decisions
 
 See PROJECT.md Key Decisions table for full history.
+
+**v7.10 roadmap-time decisions:**
+- Serializer module is built **first** (Phase 77) so the JSON export and API responses share a single source of truth from day one — preventing drift before any consumer exists.
+- Hardening primitives (rate limit, mode flag, error envelope, query/result caps, PostHog) bundle into the **first** API endpoint phase (Phase 78) rather than a separate hardening phase, so /api/parallels and /api/browse inherit them by reuse rather than retrofit.
+- API-05 (drill-down locator) is mapped to Phase 78 only; Phase 79 inherits the locator on parallels responses as a behavioral consequence reflected in its success criteria. This keeps every requirement single-mapped while preserving the cross-phase obligation.
+- The Claude skill (Phase 81) is the milestone's acceptance harness — it must run end-to-end against a live deployment before documentation closeout in Phase 82, so the docs reflect what shipped, not what was planned.
 
 ### Pending Todos
 
@@ -65,6 +79,7 @@ See PROJECT.md Key Decisions table for full history.
 
 - DESK-03/DESK-02 shared image helpers: ManuscriptViewerWidget and PuzzleCanvasWindow may share IIIF fetch / image adjustment code. Phase 69 discuss-phase must map this surface before extraction.
 - WEBM-03 architectural risk: page-scoped state refactor changes runtime data flow, not just file layout. Phases 72-73 splits should be stable before attempting.
+- v7.10 watch: existing `/api/*` routes (image proxies, puzzle uploads, NLI proxies) must remain unchanged through every phase touching `web/api.py`. Each phase gate spot-checks at least the image proxy + puzzle upload routes for response parity.
 
 ### Quick Tasks Completed
 
@@ -75,6 +90,6 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-17T11:21:20.287Z
-Stopped at: Phase 75 context gathered
-Resume file: .planning/phases/75-non-regression-verification/75-CONTEXT.md
+Last session: 2026-04-27T00:00:00.000Z
+Stopped at: v7.10 Search API roadmap complete (Phases 77-82, 21/21 requirements mapped)
+Resume file: .planning/ROADMAP.md (v7.10 Search API section)

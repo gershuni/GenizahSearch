@@ -79,17 +79,52 @@ Deferred to later milestones.
 
 ## Traceability
 
-Empty — populated during roadmap creation.
+Every v7.10 requirement maps to exactly one phase. Phase numbering continues from v7.9 (last phase 76); v7.10 phases are 77-82.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmapper) | | |
+| API-01 | Phase 78 | Pending |
+| API-02 | Phase 80 | Pending |
+| API-03 | Phase 79 | Pending |
+| API-04 | Phase 78 | Pending |
+| API-05 | Phase 78 | Pending |
+| API-06 | Phase 78 | Pending |
+| API-07 | Phase 78 | Pending |
+| EXPORT-01 | Phase 77 | Pending |
+| EXPORT-02 | Phase 77 | Pending |
+| EXPORT-03 | Phase 77 | Pending |
+| EXPORT-04 | Phase 77 | Pending |
+| HARDEN-01 | Phase 78 | Pending |
+| HARDEN-02 | Phase 78 | Pending |
+| HARDEN-03 | Phase 78 | Pending |
+| HARDEN-04 | Phase 78 | Pending |
+| HARDEN-05 | Phase 78 | Pending |
+| SKILL-01 | Phase 81 | Pending |
+| SKILL-02 | Phase 81 | Pending |
+| SKILL-03 | Phase 81 | Pending |
+| DOC-01 | Phase 82 | Pending |
+| DOC-02 | Phase 82 | Pending |
+
+**Per-phase requirement counts:**
+
+| Phase | Requirements | Count |
+|-------|--------------|-------|
+| Phase 77: Serializer & JSON Export | EXPORT-01, EXPORT-02, EXPORT-03, EXPORT-04 | 4 |
+| Phase 78: /api/search + Hardening Shell | API-01, API-04, API-05, API-06, API-07, HARDEN-01, HARDEN-02, HARDEN-03, HARDEN-04, HARDEN-05 | 10 |
+| Phase 79: /api/browse Drill-Down | API-03 | 1 |
+| Phase 80: /api/parallels | API-02 | 1 |
+| Phase 81: Claude Skill Consumer | SKILL-01, SKILL-02, SKILL-03 | 3 |
+| Phase 82: Internal Documentation | DOC-01, DOC-02 | 2 |
+| **Total** | | **21** |
 
 **Coverage:**
 - v7.10 requirements: 21 total (7 API + 4 EXPORT + 5 HARDEN + 3 SKILL + 2 DOC)
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 21 ⚠️
+- Mapped to phases: 21 ✓
+- Unmapped: 0 ✓
+- Double-mapped: 0 ✓
+
+**Cross-phase note on API-05 (drill-down locator):** API-05 is *owned* by Phase 78 because that is where the locator's response shape is first established on `/api/search`. The locator obligation actually spans **Phase 77 → 78 → 79 → 80**: Phase 77 (export) embeds it in downloaded JSON; Phase 78 (`/api/search`) emits it; Phase 79 (`/api/browse`) *consumes* it and validates the round-trip end-to-end; Phase 80 (`/api/parallels`) inherits the same locator on its responses. The requirement is mapped once to Phase 78 for traceability; the cross-phase obligations are captured in each downstream phase's success criteria, not by re-mapping. Phase 79 (browse) is sequenced before Phase 80 (parallels) per Codex review so the locator round-trip is validated by a real consumer before a second producer is added.
 
 ---
 *Requirements defined: 2026-04-27*
-*Last updated: 2026-04-27 — v7.10 Search API after Codex review pass*
+*Last updated: 2026-04-27 — v7.10 traceability populated by roadmapper; Codex review pass swapped Phase 79 (browse) ↔ Phase 80 (parallels)*
