@@ -25,10 +25,23 @@ class AppState:
 
         self.last_results: List[Dict[str, Any]] = []
         self.current_search_query: str = ""
+        # Phase 77: search-context echo for JSON export envelope (D-06) and Excel/Word filename
+        # (current_search_query was declared above but never assigned — fixed by web/pages/search.py
+        # in the same plan). These mirror the page-scoped search_state into the global singleton
+        # so the stateful FastAPI download handlers in web/api.py can read them without coupling
+        # to NiceGUI session lifecycle.
+        self.current_search_mode: str = "text"
+        self.current_search_gap: Optional[int] = None
+        self.last_filters_applied: Optional[Dict[str, Any]] = None
+        self.last_search_warnings: List[str] = []
 
         # Parallels results (for export functionality)
         self.parallels_results: List[Dict[str, Any]] = []
         self.parallels_filtered: List[Dict[str, Any]] = []
+        # Phase 77: parallels-context echo for JSON export envelope (D-06)
+        # Shape: {'source_text': str, 'chunk_size': int, 'mode': str, 'max_freq': Optional[float],
+        #         'filters': Optional[dict], 'boundary_options': Optional[dict], 'warnings': List[str]}
+        self.parallels_search_meta: Optional[Dict[str, Any]] = None
 
     @property
     def lists_mgr(self):
