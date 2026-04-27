@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Plan 77-03 complete; ready for Plan 77-04 (web/api.py JSON handlers + toolbar buttons)
-last_updated: "2026-04-27T17:11:15Z"
-last_activity: 2026-04-27 -- Plan 77-03 complete (1 commit, 22 RED tests turned GREEN, shared/search_serializer.py 556 lines, ~3 min)
+stopped_at: Plan 77-04 complete; ready for Plan 77-05 (docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check)
+last_updated: "2026-04-27T17:25:51Z"
+last_activity: 2026-04-27 -- Plan 77-04 complete (4 commits, 5 new tests GREEN, HTTP handlers + toolbar buttons + Hebrew translations, ~6 min)
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
-  percent: 10
+  completed_plans: 4
+  percent: 13
 ---
 
 # Project State
@@ -26,15 +26,15 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 77 (serializer-json-export) — EXECUTING
-Plan: 4 of 5 (next; 77-01, 77-02, 77-03 complete)
+Plan: 5 of 5 (next; 77-01, 77-02, 77-03, 77-04 complete)
 Status: Executing Phase 77
-Last activity: 2026-04-27 -- Plan 77-03 complete (shared/search_serializer.py 556 lines, 22 RED tests turned GREEN, full suite 1167 → 1189 passed)
+Last activity: 2026-04-27 -- Plan 77-04 complete (HTTP handlers /api/export/json + /api/export/parallels/json; toolbar buttons on /search and /parallels; init_api_routes app_override refactor for HIGH-08; 5 new tests GREEN; full suite 1189 → 1194 passed)
 
-Progress: [#         ] 10% (0/6 phases complete; 3/5 Phase 77 plans complete)
+Progress: [#         ] 13% (0/6 phases complete; 4/5 Phase 77 plans complete)
 
 **Phase queue (v7.10):**
 
-1. **Phase 77** — Serializer & JSON Export (EXPORT-01..04) ← next
+1. **Phase 77** — Serializer & JSON Export (EXPORT-01..04) ← in progress (4/5 plans complete)
 2. Phase 78 — /api/search + Hardening Shell (API-01,04,05,06,07 + HARDEN-01..05)
 3. Phase 79 — /api/browse Drill-Down (API-03) — Codex-recommended: validates locator round-trip via real consumer before a second producer
 4. Phase 80 — /api/parallels (API-02)
@@ -95,6 +95,15 @@ See PROJECT.md Key Decisions table for full history.
 - Path B fallback for parallels matches[]: when an item arrives without `chunk_hits` (future-proofing if a caller bypasses Plan 02), emit a single degenerate match using `source_ctx`/`text`/`score`. Plan 02's surface guarantees real callers always populate `chunk_hits`, but the fallback keeps the contract behaviorally graceful.
 - Score rounding at 4 decimals applied uniformly: per-item `score`, parallels group `aggregate_score` (SUM then round), per-match `score` in `matches[]`. Test `test_score_rounded_to_4_decimals` asserts `0.873112948 → 0.8731`.
 
+**Plan 77-04 decisions (2026-04-27):**
+
+- HIGH-08 fix landed: `init_api_routes(app_override=None)` accepts an optional FastAPI app instance; tests register routes onto a bare app per fixture, the NiceGUI singleton is provably untouched (`test_init_api_routes_does_not_mutate_nicegui_singleton` asserts `nicegui_app.routes` count unchanged after `init_api_routes(bare)`).
+- Mechanical decorator rename inside `init_api_routes`: 37 `@app.X` → `@target_app.X` (where `target_app = app_override if app_override is not None else app`); zero module-level `@app.` decorators existed, so module scope was untouched.
+- Two new GET handlers: `/api/export/json` (consumes `state.last_results` + envelope-echo fields) and `/api/export/parallels/json` (consumes `state.parallels_results` + `state.parallels_filtered` + `state.parallels_search_meta`); both return `JSONResponse` with `Content-Disposition` filename from Plan 03's `build_search_filename` / `build_parallels_filename`.
+- Rule 1 fix (auto-applied during Task 2 test execution): `export_parallels_json` originally crashed in non-NiceGUI request contexts because `app.storage.user.get(...)` requires a session cookie. Fix: empty-state check moved BEFORE storage access (empty path never touches storage), and storage access for the populated path wrapped in `try/except` so the handler degrades gracefully. Production behavior with active NiceGUI session is unchanged.
+- Toolbar UX divergence preserved: search-page button is always-enabled (matches existing Excel/Word neighbors); parallels-page button captured into `export_json_btn` with full lifecycle gating (3 wiring sites: `_reset_parallels` line 1942, render-empty line 2659, render-populated line 2667).
+- LOW-01 closed: Hebrew translations `"Export JSON" → "יצוא ל-JSON"` and `"Download JSON" → "הורד JSON"` added adjacent to existing `"Export Word" / "Export Excel"` entries in `genizah_translations.py:1589-1590`.
+
 ### Pending Todos
 
 - Migrate desktop corrections fetch to shared corrections_service
@@ -117,9 +126,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-27T17:11:15Z
-Stopped at: Plan 77-03 complete; ready for Plan 77-04 (web/api.py JSON download handlers + toolbar buttons on /search and /parallels)
-Resume file: .planning/phases/77-serializer-json-export/77-04-PLAN.md
+Last session: 2026-04-27T17:25:51Z
+Stopped at: Plan 77-04 complete; ready for Plan 77-05 (docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check)
+Resume file: .planning/phases/77-serializer-json-export/77-05-PLAN.md
 
 ## Performance Metrics — Phase 77
 
@@ -128,3 +137,4 @@ Resume file: .planning/phases/77-serializer-json-export/77-04-PLAN.md
 | 77-01 | ~8 min | 3 | 4 | cdd91928, 2c5e94d5, d64ccb2b |
 | 77-02 | ~6 min | 2 (3 commits) | 2 | 6ebefb71, e0259e6f, 25a4f769 |
 | 77-03 | ~3 min | 1 | 1 | 78edec4b |
+| 77-04 | ~6 min | 4 | 5 | 20972e66, f8b508de, 2c1fa26c, 01e18602 |

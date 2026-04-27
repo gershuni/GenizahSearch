@@ -244,7 +244,7 @@ back-nav bugfix.
 - [x] 77-01-PLAN.md -- AppState envelope-echo fields + state-population sites + Wave 0 RED test scaffolding (complete 2026-04-27)
 - [x] 77-02-PLAN.md -- genizah_core.lab_composition_search chunk_hits extension (D-13 Path A) (complete 2026-04-27)
 - [x] 77-03-PLAN.md -- shared/search_serializer.py module (single source of truth, all 22 tests GREEN) (complete 2026-04-27)
-- [ ] 77-04-PLAN.md -- web/api.py JSON handlers + toolbar buttons on /search and /parallels
+- [x] 77-04-PLAN.md -- web/api.py JSON handlers + toolbar buttons on /search and /parallels (complete 2026-04-27)
 - [ ] 77-05-PLAN.md -- docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check
 **UI hint**: yes
 
@@ -314,7 +314,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 77. Serializer & JSON Export | 3/5 | Plan 77-03 complete (2026-04-27) | - |
+| 77. Serializer & JSON Export | 4/5 | Plan 77-04 complete (2026-04-27) | - |
 | 78. /api/search + Hardening Shell | 0/0 | Not started | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
@@ -323,4 +323,4 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-27 -- Plan 77-03 complete: shared/search_serializer.py is now the single source of truth for Claude-friendly JSON (5 public exports, one private _serialize_item shared structurally by both top-level functions per D-14/EXPORT-03); all 22 RED contract tests turn GREEN, full pytest suite 1167 → 1189 passed; HIGH-05 (FJMS singleton not closed), HIGH-06 (millisecond+counter filename uniqueness without sleep), HIGH-07 (Oxford-only image_url null) all preserved*
+*Last updated: 2026-04-27 -- Plan 77-04 complete: HTTP transport layer for the JSON contract is live -- two new GET handlers (/api/export/json, /api/export/parallels/json) wired to toolbar buttons on /search and /parallels; init_api_routes refactored with optional app_override parameter (HIGH-08) so 5 new behavioral tests register on a bare FastAPI app instead of mutating the NiceGUI singleton; full pytest suite 1189 → 1194 passed; LOW-01 Hebrew translations added; only Plan 77-05 (manual smoke + docs) remains*
