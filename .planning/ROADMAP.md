@@ -259,7 +259,11 @@ back-nav bugfix.
   4. Sustained traffic above the per-IP rate limit returns HTTP 429 with a `Retry-After` header; setting `SEARCH_API_MODE=disabled` (or `localhost-only`) takes effect on next request without a code change; neither toggle affects existing `/api/*` routes.
   5. When the Responsa combinatorial cascade or query-length cap downgrades a query, the response surfaces the adjustment in a top-level `warnings` array (or `query_adjustments`) — never hidden inside the first result item — and a PostHog event fires per request capturing endpoint, mode, latency bucket, result-count bucket, and IP-hash with no payload contents logged.
 **Phase gate**: pytest green, CI green, integration test exercising error envelope + warnings array + mode-flag (open/localhost-only/disabled); explicit soak check sustaining traffic above the per-IP rate limit until 429 + `Retry-After` are observed (per Codex review — covers the rate-limiter end-to-end without a standalone stress phase).
-**Plans**: TBD
+**Plans:** 4 plans
+- [ ] 78-01-PLAN.md -- Wave 0 RED test scaffold (D-21 + D-23 surface)
+- [ ] 78-02-PLAN.md -- web/api_hardening.py (RateLimiter, mode gate, error handlers, PostHog server-side capture)
+- [ ] 78-03-PLAN.md -- web/search_api.py (POST /api/search handler + Pydantic models) + shared/fjms_service.validate_filter_values
+- [ ] 78-04-PLAN.md -- bootstrap wiring in web/main.py + soak test + soak script + CLAUDE.md env-vars
 
 ### Phase 79: /api/browse Drill-Down
 **Goal**: `GET /api/browse` resolves a single manuscript page from a locator returned by `/api/search` and returns text + metadata + image URLs in one shot — no follow-up calls, no session state. Sequenced ahead of `/api/parallels` so the locator contract is *consumed* (not just emitted) before a second producer is added — this closes the search → browse vertical slice the Claude skill needs.
@@ -315,7 +319,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 77. Serializer & JSON Export | 5/5 | Ready for /gsd-verify-work (2026-04-28) | - |
-| 78. /api/search + Hardening Shell | 0/0 | Not started | - |
+| 78. /api/search + Hardening Shell | 0/4 | Plans created (2026-04-28) | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
 | 81. Claude Skill Consumer | 0/0 | Not started | - |
