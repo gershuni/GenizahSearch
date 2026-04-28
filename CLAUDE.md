@@ -142,6 +142,10 @@ SUPABASE_ANON_KEY=eyJ...
 POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
 WEB_PUZZLE_ENABLED=true (default: true; set to false to disable web puzzle page)
 PUZZLE_UPLOAD_SECRET=xxx (optional - HMAC secret for puzzle upload tokens; auto-generated if unset)
+SEARCH_API_MODE=open (one of: open | localhost-only | disabled; default: open; flippable per request without restart)
+SEARCH_API_RATE_LIMIT=30 (per-IP requests per minute; default: 30)
+POSTHOG_IP_SALT=xxx (optional - HMAC salt for hashing client IPs in server-side PostHog events; auto-generated if unset, but production should set explicitly so hashes survive restarts)
+SEARCH_API_POSTHOG_SAMPLE_N=1 (optional - capture every Nth API request to PostHog; default: 1 = every request)
 ```
 
 ## Testing
