@@ -262,7 +262,7 @@ back-nav bugfix.
 **Plans:** 4 plans
 - [x] 78-01-PLAN.md -- Wave 0 RED test scaffold (D-21 + D-23 surface) (complete 2026-04-28; 3 test files, 82 tests, intended RED)
 - [x] 78-02-PLAN.md -- web/api_hardening.py (RateLimiter, mode gate, error handlers, PostHog server-side capture) (complete 2026-04-28; shared/api_errors.py + web/api_hardening.py, 39/39 hardening tests GREEN)
-- [ ] 78-03-PLAN.md -- web/search_api.py (POST /api/search handler + Pydantic models) + shared/fjms_service.validate_filter_values
+- [x] 78-03-PLAN.md -- web/search_api.py (POST /api/search handler + Pydantic models) + shared/fjms_service.validate_filter_values (complete 2026-04-28; 82/82 Phase 78 tests GREEN, 1295 passed in wider suite)
 - [ ] 78-04-PLAN.md -- bootstrap wiring in web/main.py + soak test + soak script + CLAUDE.md env-vars
 
 ### Phase 79: /api/browse Drill-Down
@@ -319,7 +319,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 77. Serializer & JSON Export | 5/5 | Ready for /gsd-verify-work (2026-04-28) | - |
-| 78. /api/search + Hardening Shell | 0/4 | Plans created (2026-04-28) | - |
+| 78. /api/search + Hardening Shell | 3/4 | Plan 03 GREEN (2026-04-28; 82 tests across the 3 Phase 78 test files) | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
 | 81. Claude Skill Consumer | 0/0 | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 78 Plan 02 complete (hardening shell GREEN)
-last_updated: "2026-04-28T18:55:00.000Z"
-last_activity: 2026-04-28 -- Phase 78 Plan 02 complete (web/api_hardening.py + shared/api_errors.py; 39/39 hardening tests GREEN; Plan 03 owns search_api + filter validator)
+stopped_at: Phase 78 Plan 03 complete (POST /api/search end-to-end GREEN)
+last_updated: "2026-04-28T20:30:00.000Z"
+last_activity: 2026-04-28 -- Phase 78 Plan 03 complete (web/search_api.py 373 lines + shared/fjms_service validate_filter_values fail-closed rewrite + genizah_core.py thread-local cascade signal; 82/82 Phase 78 tests GREEN, 1295 passed in wider suite; Plan 04 owns wiring init_search_api into web/main.py + soak test)
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 11
-  completed_plans: 8
-  percent: 73
+  completed_plans: 9
+  percent: 82
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 78 (api-search-hardening-shell) — EXECUTING (Plans 01+02 complete)
-Plan: 2/4 complete (78-01 RED scaffold + 78-02 hardening shell GREEN; 78-03 next)
-Status: Hardening shell GREEN (39/39); Plan 03 owns search_api endpoint + filter validator
-Last activity: 2026-04-28 -- Phase 78 Plan 02 complete (web/api_hardening.py + shared/api_errors.py; 39/39 hardening tests GREEN)
+Phase: 78 (api-search-hardening-shell) — EXECUTING (Plans 01+02+03 complete)
+Plan: 3/4 complete (78-01 RED scaffold + 78-02 hardening shell GREEN + 78-03 POST /api/search GREEN; 78-04 next)
+Status: POST /api/search end-to-end GREEN (82/82 Phase 78 tests; 1295 passed in wider suite); Plan 04 owns wiring init_search_api into web/main.py + soak test
+Last activity: 2026-04-28 -- Phase 78 Plan 03 complete (web/search_api.py 373 lines + shared/fjms_service validate_filter_values fail-closed rewrite + genizah_core.py thread-local cascade signal)
 
-Progress: [###       ] 27% (1/6 phases complete; Phase 78 2/4 plans complete; Phase 77 awaiting verify)
+Progress: [####      ] 33% (1/6 phases complete; Phase 78 3/4 plans complete; Phase 77 awaiting verify)
 
 **Phase queue (v7.10):**
 
@@ -41,7 +41,7 @@ Progress: [###       ] 27% (1/6 phases complete; Phase 78 2/4 plans complete; Ph
 5. Phase 81 — Claude Skill Consumer (SKILL-01..03)
 6. Phase 82 — Internal Documentation (DOC-01, DOC-02)
 
-Next step: `/gsd-execute-phase 78` continues with Plan 78-02 (web/api_hardening.py) and Plan 78-03 (web/search_api.py + filter validator). Plans 02+03 together flip the RED scaffold to GREEN. Phase 77 verify remains queued.
+Next step: `/gsd-execute-phase 78` continues with Plan 78-04 (wire `init_search_api()` into web/main.py + soak test + CLAUDE.md env-vars). The route is registered but not yet mounted on the live NiceGUI app. Phase 77 verify remains queued.
 
 ## Performance Metrics
 
@@ -104,6 +104,22 @@ See PROJECT.md Key Decisions table for full history.
 - Toolbar UX divergence preserved: search-page button is always-enabled (matches existing Excel/Word neighbors); parallels-page button captured into `export_json_btn` with full lifecycle gating (3 wiring sites: `_reset_parallels` line 1942, render-empty line 2659, render-populated line 2667).
 - LOW-01 closed: Hebrew translations `"Export JSON" → "יצוא ל-JSON"` and `"Download JSON" → "הורד JSON"` added adjacent to existing `"Export Word" / "Export Excel"` entries in `genizah_translations.py:1589-1590`.
 
+**Plan 78-03 decisions (2026-04-28):**
+
+- Wave 2 GREEN gate: web/search_api.py (373 lines NEW) + shared/fjms_service.py (+251 lines for validate_filter_values fail-closed rewrite + helpers + module-level shorthands) + genizah_core.py (+48 lines for thread-local cascade signal) + shared/api_errors.py (+1 line for 'filter_vocabulary_unavailable') flip 40/40 tests in tests/test_search_api.py and 3/3 tests in tests/test_api_legacy_unchanged.py from RED to GREEN. tests/test_api_hardening.py (39 tests) remained GREEN — no regressions from FjmsService changes or genizah_core thread-local additions.
+- Concern #6 thread-local design: per-thread one-shot signal with consume-on-entry (R2-#1) at the top of `SearchEngine.execute_search`, set inside `if responsa_warning:` guard at the cascade decision site (preserves the legacy `deduped[0]['responsa_warning']` attachment), consumed by the handler on the success path AND in a defensive finally-block drain. At-most-once delivery semantics; stale signals from crashed prior requests cannot leak across requests on the same worker thread.
+- R2-#3 fail-closed: validate_filter_values rewritten to NEVER silently allow-all when the vocabulary cannot be loaded. Materials empty vocabulary, domain loader exception, authors/works `_conn is None` all → APIError(http_status=503, code='filter_vocabulary_unavailable'). Unknown token in a loaded vocabulary → APIError(http_status=400, code='unresolvable_filter_value'). New helper `is_valid_domain_token` canonicalizes via `unqualify_domain_name` + checks `Domain = ? OR ParentDomain = ?` (matches the UNION used in get_filter_sys_ids on bare tokens; fixes the round-1 bug where qualified-domain forms like 'Other (Bible)' and parent-domain tokens like 'Liturgy' were falsely rejected by a bare get_all_domains() membership check).
+- R2-#2 idempotency marker: `target_app.state.search_api_initialized` instead of round-1's module-global `_INITIALIZED_APPS: set[int]`. Per-app state, GC-safe, no test-isolation pollution. Second FastAPI app does NOT inherit the flag (verified by test_init_search_api_uses_app_state_not_module_global).
+- Concern #2 lock-in: init_search_api does NOT install global exception handlers. The endpoint catches APIError, RequestValidationError, PydanticValidationError, and generic Exception in its own try/except branches and routes through `_build_envelope_response(request, exc)` from inside each branch. Legacy /api/* validation envelope shape (`{detail: [...]}`) is preserved (verified by test_legacy_validation_failure_envelope_unchanged against a typed-int path param on /sitemap-manuscripts-{chunk}.xml).
+- Concern #12 PostHog capture: PydanticValidationError is caught inside the body BEFORE the outer except branch runs. The body pins status_code=400 + error_code='invalid_request' BEFORE re-raising, so the finally-block `capture_api_event` fires with the right labels. Verified by test_pydantic_structural_error_captures_posthog_invalid_request_event.
+- Two non-content deviations (one Rule 2, one Rule 1):
+  1. Rule 2 (missing critical functionality): Module-level `get_filter_sys_ids(**kwargs)` shorthand added to `shared/fjms_service.py` so test fixtures can monkeypatch the call site (mirrors the validate_filter_values shorthand). The plan's example body called `fjms.get_filter_sys_ids(...)` (bound method) which would have bypassed the test's `monkeypatch.setattr('shared.fjms_service.get_filter_sys_ids', ...)`. Handler now uses late-bound `from shared import fjms_service as _fjms_module; _fjms_module.get_filter_sys_ids(...)`.
+  2. Rule 1 (acceptance-grep correctness): Pydantic config switched from dict literal `model_config = {'extra': 'forbid'}` (per plan's example) to canonical `model_config = ConfigDict(extra='forbid')`. Equivalent behavior; matches the plan's `extra='forbid'` keyword-arg-style acceptance grep.
+- Two non-modification deviations (documented, runtime contract correct, plan grep overly strict):
+  1. `Literal['text', 'Title', 'Shelfmark', 'Responsa']` uses PEP-8 spacing; the plan's grep regex `Literal\\[.text.,.Title.,.Shelfmark.,.Responsa.\\]` doesn't match (would need `, ` after each comma). Test-suite enforces the runtime contract.
+  2. `Retry-After` header is propagated by Plan 78-02's RateLimiter (raises APIError with `headers={'Retry-After': N}`) → `_build_envelope_response` propagates headers. Handler doesn't construct the header itself, but documentation comments reference it; grep-count satisfied via comments.
+- Cumulative Phase 78 commit count: 8 (3 RED scaffold + 2 hardening shell + 1 hardening close-out + 3 plan 03; close-out commit forthcoming).
+
 **Plan 78-02 decisions (2026-04-28):**
 
 - Wave 1 GREEN gate: `shared/api_errors.py` (76 lines, neutral pure-Python exception module — Concern #3 fix; ZERO imports from web/nicegui/fastapi) + `web/api_hardening.py` (632 lines) flip 39/39 tests in tests/test_api_hardening.py from RED to GREEN. tests/test_search_api.py (40) and tests/test_api_legacy_unchanged.py (3) remain RED with `ModuleNotFoundError: No module named 'web.search_api'` — that is expected; Plan 03 owns those.
@@ -156,9 +172,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-28T19:00:00.000Z
-Stopped at: Phase 78 Plan 02 complete (hardening shell GREEN)
-Resume file: .planning/phases/78-api-search-hardening-shell/78-03-PLAN.md
+Last session: 2026-04-28T20:30:00.000Z
+Stopped at: Phase 78 Plan 03 complete (POST /api/search end-to-end GREEN; 82/82 Phase 78 tests; 1295 passed in wider suite)
+Resume file: .planning/phases/78-api-search-hardening-shell/78-04-PLAN.md
 
 ## Performance Metrics — Phase 77
 
@@ -177,3 +193,4 @@ Resume file: .planning/phases/78-api-search-hardening-shell/78-03-PLAN.md
 |------|----------|-------|-------|---------|
 | 78-01 | ~12 min | 3 (5 logical bundled into 3 commits) | 3 | 9f47025d (test_search_api.py 40 tests), 58d09a3c (test_api_hardening.py 39 tests), 1a38158c (test_api_legacy_unchanged.py 3 tests) |
 | 78-02 | ~5 min | 4 (Tasks 2+3 bundled) | 3 | ebbc584c (shared/api_errors.py 76 lines), cd264d9c (web/api_hardening.py 632 lines + _secrets/.gitignore; 39/39 hardening tests GREEN) |
+| 78-03 | ~10 min | 3 | 4 | 9af320b3 (genizah_core.py thread-local cascade signal; +48 lines), f68f4d4f (shared/fjms_service.py validate_filter_values fail-closed rewrite + helpers + module shorthands + shared/api_errors.py 'filter_vocabulary_unavailable'; +252 lines), ae1787b3 (web/search_api.py POST /api/search 373 lines NEW + shared/fjms_service get_filter_sys_ids module shorthand; 82/82 Phase 78 tests GREEN, 1295 passed in wider suite) |
