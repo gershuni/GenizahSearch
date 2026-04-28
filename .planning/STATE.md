@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Plan 77-04 complete; ready for Plan 77-05 (docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check)
-last_updated: "2026-04-27T17:25:51Z"
-last_activity: 2026-04-27 -- Plan 77-04 complete (4 commits, 5 new tests GREEN, HTTP handlers + toolbar buttons + Hebrew translations, ~6 min)
+stopped_at: Plan 77-05 complete; Phase 77 ready for /gsd-verify-work (5/5 plans complete; manual smoke-check PASSED with 4 follow-on chunk_hits collision fixes; 1201 passed / 8 skipped)
+last_updated: "2026-04-28T07:05:00Z"
+last_activity: 2026-04-28 -- Plan 77-05 complete; Phase 77 close-out done; 4 follow-on commits during smoke check fixed chunk_hits field-name collision (Plan 02 list-of-tuples vs pre-existing int counter in standard-mode); final test count 1201 passed / 8 skipped (was 1162 at phase start → +39 new tests across the 5 plans); cumulative phase commit count 20 (14 plan-scope + 6 follow-on smoke-check fixes)
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 4
-  percent: 13
+  completed_plans: 5
+  percent: 17
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 77 (serializer-json-export) — EXECUTING
-Plan: 5 of 5 (next; 77-01, 77-02, 77-03, 77-04 complete)
-Status: Executing Phase 77
-Last activity: 2026-04-27 -- Plan 77-04 complete (HTTP handlers /api/export/json + /api/export/parallels/json; toolbar buttons on /search and /parallels; init_api_routes app_override refactor for HIGH-08; 5 new tests GREEN; full suite 1189 → 1194 passed)
+Phase: 77 (serializer-json-export) — READY FOR VERIFY
+Plan: 5/5 complete (77-01, 77-02, 77-03, 77-04, 77-05 all complete)
+Status: Phase 77 close-out done; awaiting /gsd-verify-work 77
+Last activity: 2026-04-28 -- Plan 77-05 complete; manual smoke-check PASSED on /search and /parallels JSON downloads after 4 follow-on commits (baf481fb, c24fcc48, 2e2d2b75, 327aea31) fixed a chunk_hits field-name collision uncovered during smoke verification; final test count 1201 passed / 8 skipped (was 1194 → +7 new tests landed during smoke-check polish); cumulative Phase 77 commits: 20 (14 plan-scope + 6 follow-on)
 
-Progress: [#         ] 13% (0/6 phases complete; 4/5 Phase 77 plans complete)
+Progress: [##        ] 17% (0/6 phases complete; 5/5 Phase 77 plans complete; phase ready for verify)
 
 **Phase queue (v7.10):**
 
@@ -104,6 +104,16 @@ See PROJECT.md Key Decisions table for full history.
 - Toolbar UX divergence preserved: search-page button is always-enabled (matches existing Excel/Word neighbors); parallels-page button captured into `export_json_btn` with full lifecycle gating (3 wiring sites: `_reset_parallels` line 1942, render-empty line 2659, render-populated line 2667).
 - LOW-01 closed: Hebrew translations `"Export JSON" → "יצוא ל-JSON"` and `"Download JSON" → "הורד JSON"` added adjacent to existing `"Export Word" / "Export Excel"` entries in `genizah_translations.py:1589-1590`.
 
+**Plan 77-05 decisions (2026-04-28):**
+
+- **Field-name collision Rule 1 fix during manual smoke check:** `chunk_hits` field-name collision between Plan 02's list-of-tuples (D-13 Path A) on `lab_composition_search` and the pre-existing int counter on `search_composition_logic` (standard-mode parallels, since 2026-03-12). Both producers wrote to the same per-uid item dict, so the serializer's `_to_parallels_envelope_item` crashed with `'int' object is not iterable` on standard-mode parallels results. Resolved in 4 follow-on commits during smoke verification: `baf481fb` (defensive isinstance guard + logger.exception in JSON handlers), `c24fcc48` (extended standard-mode to mirror Plan 02 list-of-tuples shape; renamed int counter to `chunk_count`; fixed parallels rep-field mapping; +4 tests), `2e2d2b75` (surfaced Tantivy score on search results — was 0.0 because results.append at genizah_core.py:7542+:7559 never recorded score var; per-uid `_chunk_hit_keys` dedup), `327aea31` (group-level dedup keyed on `(chunk_index, manuscript_snippet)` for cross-uid duplicates from NLI multi-uid cataloging like Karaite prayer books; matches[] sorted by chunk_index ascending; +2 tests).
+- **Lesson learned (added to docs/OPEN_ISSUES.md as a permanent record):** when extending a multi-producer field, audit ALL producers writing to the same per-uid item dict — not just the one the new feature targets. The `chunk_hits` name had been claimed by the standard path 6 weeks before Plan 02 borrowed it for D-13. Avoid reusing field names across producers when downstream consumers iterate the field.
+- **Smoke check approval:** implicit (user provided final clean JSON output showing dedupted matches, sorted chunk indices, populated snippet/excerpt/match_terms, meaningful Tantivy scores; instructed orchestrator to wrap up). No re-prompt issued; treated as approved.
+- **Commit-scope attribution:** the 4 follow-on commits use scope `(77-04)` because they fix the parallels JSON handler shipped in Plan 04. They belong in the Plan 05 narrative timeline since they were uncovered AND landed during Plan 05's manual smoke check. Plan 05's plan-scope commits (`db586467` Task 1 + `015b17d5` close-out) are the only commits in scope `77-05`.
+- **Result 1 in user's smoke-check sample (32 matches across 17 chunks for a single sys_id) is correct grouping, NOT a bug**: two distinct uids on the same sys_id had genuinely different manuscript content (different IEs / volumes / fragment slices). Group-level dedup collapses only entries sharing BOTH chunk_index AND manuscript_snippet — distinct snippets correctly stay separate matches.
+- **chunk_count rename is a Plan 05 deviation from Plan 02's plan text**: Plan 02 left the standard-mode int counter at `item['chunk_hits']`. Plan 05 renamed it to `item['chunk_count']` to free the field name. Verified that no other code in the repo reads `chunk_hits` as an int (the standard-mode rendering at the parallels page uses `len(rec.get('chunks', []))` instead).
+- **Cumulative Phase 77 commit count: 20** (14 plan-scope: 3+3+1+4+2 across plans 01-05 + 6 follow-on smoke-check fixes; 4 of those 6 are commit-scoped 77-04, 2 are 77-05 docs).
+
 ### Pending Todos
 
 - Migrate desktop corrections fetch to shared corrections_service
@@ -126,9 +136,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-27T17:25:51Z
-Stopped at: Plan 77-04 complete; ready for Plan 77-05 (docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check)
-Resume file: .planning/phases/77-serializer-json-export/77-05-PLAN.md
+Last session: 2026-04-28T07:05:00Z
+Stopped at: Plan 77-05 complete; Phase 77 ready for /gsd-verify-work (5/5 plans complete; 1201 passed / 8 skipped; cumulative phase commits: 20)
+Resume file: None — orchestrator should display phase-complete banner and offer /gsd-verify-work 77 as next step
 
 ## Performance Metrics — Phase 77
 
@@ -138,3 +148,5 @@ Resume file: .planning/phases/77-serializer-json-export/77-05-PLAN.md
 | 77-02 | ~6 min | 2 (3 commits) | 2 | 6ebefb71, e0259e6f, 25a4f769 |
 | 77-03 | ~3 min | 1 | 1 | 78edec4b |
 | 77-04 | ~6 min | 4 | 5 | 20972e66, f8b508de, 2c1fa26c, 01e18602 |
+| 77-04 (smoke fixes) | n/a | 4 | 3 | baf481fb, c24fcc48, 2e2d2b75, 327aea31 (smoke-check follow-on; +7 tests) |
+| 77-05 | 1d (cross-day) | 2 | 2 | db586467 (Task 1 docs), 015b17d5 (Task 2 close-out docs) |

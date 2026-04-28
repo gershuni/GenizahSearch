@@ -245,7 +245,7 @@ back-nav bugfix.
 - [x] 77-02-PLAN.md -- genizah_core.lab_composition_search chunk_hits extension (D-13 Path A) (complete 2026-04-27)
 - [x] 77-03-PLAN.md -- shared/search_serializer.py module (single source of truth, all 22 tests GREEN) (complete 2026-04-27)
 - [x] 77-04-PLAN.md -- web/api.py JSON handlers + toolbar buttons on /search and /parallels (complete 2026-04-27)
-- [ ] 77-05-PLAN.md -- docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check
+- [x] 77-05-PLAN.md -- docs/OPEN_ISSUES + docs/CODE_INDEX update + manual smoke check (complete 2026-04-28; 4 follow-on commits during smoke check fixed chunk_hits field-name collision)
 **UI hint**: yes
 
 ### Phase 78: /api/search + Hardening Shell
@@ -314,7 +314,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 77. Serializer & JSON Export | 4/5 | Plan 77-04 complete (2026-04-27) | - |
+| 77. Serializer & JSON Export | 5/5 | Ready for /gsd-verify-work (2026-04-28) | - |
 | 78. /api/search + Hardening Shell | 0/0 | Not started | - |
 | 79. /api/browse Drill-Down | 0/0 | Not started | - |
 | 80. /api/parallels | 0/0 | Not started | - |
@@ -323,4 +323,4 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-27 -- Plan 77-04 complete: HTTP transport layer for the JSON contract is live -- two new GET handlers (/api/export/json, /api/export/parallels/json) wired to toolbar buttons on /search and /parallels; init_api_routes refactored with optional app_override parameter (HIGH-08) so 5 new behavioral tests register on a bare FastAPI app instead of mutating the NiceGUI singleton; full pytest suite 1189 → 1194 passed; LOW-01 Hebrew translations added; only Plan 77-05 (manual smoke + docs) remains*
+*Last updated: 2026-04-28 -- Plan 77-05 complete; Phase 77 ready for /gsd-verify-work. Manual smoke-check on /search and /parallels JSON downloads PASSED after 4 follow-on commits resolved a chunk_hits field-name collision uncovered during smoke verification (Plan 02 had extended lab_composition_search to populate chunk_hits per uid as a list-of-tuples (D-13 Path A), but search_composition_logic had used chunk_hits since 2026-03-12 as an int counter — both producers wrote to the same per-uid item dict, so the serializer crashed with `'int' object is not iterable` on standard-mode parallels results). Fix chain: baf481fb (defensive isinstance guard + logger.exception), c24fcc48 (mirrored list-of-tuples shape into standard-mode + renamed int counter to chunk_count + fixed parallels rep-field mapping; +4 tests), 2e2d2b75 (surfaced Tantivy score on search results — was 0.0 in JSON because results.append at genizah_core.py:7542+:7559 never recorded score var; per-uid _chunk_hit_keys dedup), 327aea31 (group-level dedup keyed on (chunk_index, manuscript_snippet) for cross-uid duplicates from NLI multi-uid cataloging like Karaite prayer books; matches[] sorted by chunk_index ascending; +2 tests). Final test count: 1201 passed / 8 skipped (was 1162 at phase start → +39 new tests across the 5 plans). Cumulative phase commit count: 20 (14 plan-scope + 6 follow-on smoke-check fixes). Phase gate satisfied: pytest green, CI green (assumed pending push), manual download spot-check on /search and /parallels signed off.*
