@@ -53,6 +53,44 @@ except ImportError:
     UNIFIED_VARIANT_PAIRS = []
     def get_top_pairs(n): return []
 
+# --- Phase 78 (Concern #6): thread-local cascade-downgrade signal ---
+# When a Responsa query triggers MAX_EXPANDED_TERMS downgrade, the cascade
+# code sets this AND ALSO attaches responsa_warning to deduped[0] (legacy
+# path, preserved for callers that read result rows). The /api/search handler
+# reads this thread-local instead so warnings survive empty result sets.
+#
+# Naming: prefixed with _LAST_ to make obvious it's a one-shot signal that the
+# next consumer should consume (read-and-clear). Per-thread because the search
+# engine may be invoked concurrently from FastAPI threads.
+_LAST_RESPONSA_DOWNGRADE = threading.local()
+
+
+def _set_last_responsa_downgrade(message: str) -> None:
+    """Record a Responsa downgrade signal on the current thread.
+
+    Phase 78 Concern #6: called from the cascade decision site so the
+    /api/search handler can surface the warning even when results == [].
+    """
+    _LAST_RESPONSA_DOWNGRADE.value = message
+
+
+def _consume_last_responsa_downgrade() -> Optional[str]:
+    """Read-and-clear the per-thread downgrade signal. Returns None if unset.
+
+    Phase 78 Concern #6: called once per /api/search invocation in the finally
+    branch of the response builder. Read-and-clear semantics ensure the signal
+    is attributed to exactly one request.
+    """
+    msg = getattr(_LAST_RESPONSA_DOWNGRADE, 'value', None)
+    if msg is not None:
+        # Clear by deleting the attribute so subsequent calls return None.
+        try:
+            del _LAST_RESPONSA_DOWNGRADE.value
+        except AttributeError:
+            pass
+    return msg
+
+
 # --- Shmidman Rare-Letter Helpers ---
 HEBREW_FREQ = {
     'י': 1, 'ו': 2, 'ה': 3, 'ל': 4, 'א': 5, 'ר': 6, 'מ': 7, 'ת': 8, 
@@ -7209,6 +7247,11 @@ class SearchEngine:
         return results
 
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None):
+        # R2-#1: discard any stale per-thread downgrade signal from a prior
+        # invocation (e.g., a prior request that crashed before consuming).
+        # Keeps the signal one-shot per execute_search call, so it cannot
+        # leak across requests on the same worker thread.
+        _consume_last_responsa_downgrade()
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
@@ -7608,6 +7651,11 @@ class SearchEngine:
         LOGGER.debug(f"Results after dedup & filtering: {len(deduped)}")
 
         # --- Attach Responsa explosion guard warning to first result ---
+        # Phase 78 Concern #6: ALSO record on the thread-local so the
+        # /api/search handler can surface the warning even when deduped is
+        # empty (the legacy results[0] attachment is preserved as a fallback).
+        if responsa_warning:
+            _set_last_responsa_downgrade(responsa_warning)
         if responsa_warning and deduped:
             deduped[0]['responsa_warning'] = responsa_warning
 
