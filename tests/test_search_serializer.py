@@ -482,11 +482,48 @@ class TestParallelsEnvelope:
         chunk_idxs = sorted(m['chunk_index'] for m in result_99_11['matches'])
         assert chunk_idxs == [0, 2, 4]
 
+    def test_parallels_populates_snippet_excerpt_match_terms_from_text(self, mock_meta_mgr):
+        """Plan 02 fixup: parallels items use 'text' (with *term* markers), not
+        'snippet'. _to_parallels_envelope_item now maps text -> synth['snippet']
+        before _serialize_item runs, so snippet (stripped) + match_terms
+        (extracted) + excerpt (from full_text or text) populate properly.
+        """
+        from shared.search_serializer import serialize_parallels_payload
+        # Standard-mode parallels rep: 'text' carries snippet WITH markers; no 'snippet' key
+        results = [{
+            'uid': 'parallels_uid_1',
+            'raw_header': 'CUL_T-S_NS_001_1r',
+            'sort_score': 1.0,
+            'score': 1.0,
+            'source_ctx': 'source ctx',
+            'text': 'foo *bar* baz *qux* quux',  # parallels rep field
+            # No 'snippet', no 'full_text' (standard mode shape)
+            'chunk_hits': [(0, 'foo bar', 1.0, 'foo *bar* baz')],
+            'display': {
+                'id': '9911111111111111',
+                'shelfmark': 'T-S NS 001',
+                'title': 'Test',
+                'library_code': 'CUL',
+            },
+        }]
+        payload = serialize_parallels_payload(
+            results, [], meta_mgr=mock_meta_mgr,
+            source_text='x', chunk_size=5, mode='exact',
+        )
+        result = payload['results'][0]
+        # snippet stripped of markers (from rep['text'])
+        assert result['snippet'] == 'foo bar baz qux quux'
+        # match_terms extracted from the markers in text
+        assert result['match_terms'] == ['bar', 'qux']
+        # excerpt non-empty (falls back to text when full_text is missing)
+        assert result['excerpt']
+        assert 'bar' in result['excerpt']  # markers preserved in raw text source
+
     def test_parallels_chunk_hits_int_falls_back_to_path_b(self, mock_meta_mgr):
-        """Regression: search_composition_logic stores chunk_hits as an int counter
-        (genizah_core.py:7651, 7740, 7854) rather than the list-of-tuples
-        lab_composition_search uses (Plan 02 D-13 Path A). The serializer must not
-        iterate over an int — degrade gracefully to Path B single-match.
+        """Regression: forward-compat guard. If a future caller passes a parallels
+        item with chunk_hits as an int (older standard-mode shape, before the
+        Phase 77 chunk_count rename in search_composition_logic), the serializer
+        must not iterate the int — degrade gracefully to Path B single-match.
         """
         from shared.search_serializer import serialize_parallels_payload
         # Mirror the standard-mode shape: chunk_hits is an int counter, not a list

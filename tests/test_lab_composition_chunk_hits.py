@@ -318,3 +318,62 @@ class TestChunkHitsBehavior:
         assert "has_boundary_matches" in target
         # And the new field is present alongside
         assert "chunk_hits" in target
+
+
+class TestSearchCompositionLogicStaticContract:
+    """Phase 77 D-13: search_composition_logic (standard-mode parallels) must
+    emit the same chunk_hits list-of-tuples shape as lab_composition_search.
+
+    The original int counter was renamed to 'chunk_count' to avoid the
+    serializer collision that produced "'int' object is not iterable" on
+    /api/export/parallels/json downloads. Static-source assertions lock this
+    rename so a future refactor can't quietly reintroduce the bug.
+    """
+
+    def test_chunk_count_replaces_old_int_counter(self):
+        """The int counter must be 'chunk_count', not 'chunk_hits'."""
+        with open("genizah_core.py", encoding="utf-8") as f:
+            src = f.read()
+        # The doc_hits defaultdict in search_composition_logic uses chunk_count
+        # for the int counter; the inner increment uses chunk_count.
+        assert "'chunk_count': 0" in src, (
+            "search_composition_logic doc_hits defaultdict must init "
+            "'chunk_count' (was 'chunk_hits' before Phase 77 rename)"
+        )
+        assert "rec['chunk_count'] += 1" in src, (
+            "Per-chunk increment must use chunk_count (was chunk_hits before rename)"
+        )
+        assert "'chunk_count': data.get('chunk_count', 0)" in src, (
+            "build_items output must surface chunk_count int counter on items"
+        )
+
+    def test_chunk_hits_list_appended_per_chunk(self):
+        """The list-of-tuples chunk_hits must be appended with the same shape
+        Plan 02 uses (i, chunk_text, score, ms_snip).
+        """
+        with open("genizah_core.py", encoding="utf-8") as f:
+            src = f.read()
+        # The defaultdict initializes chunk_hits as a list (not int)
+        assert "'chunk_hits': []" in src, (
+            "doc_hits must init chunk_hits as a list (parallel to "
+            "lab_composition_search at line 1366)"
+        )
+        # The per-chunk loop appends a 4-tuple
+        assert "rec['chunk_hits'].append(" in src, (
+            "search_composition_logic per-chunk loop must append to chunk_hits"
+        )
+        # The shape mirrors lab_composition_search
+        assert "(i, ' '.join(chunk), float(score), ms_snip)" in src, (
+            "chunk_hits tuple must use shape (chunk_index, chunk_text, score, snippet)"
+        )
+
+    def test_chunk_hits_surfaced_on_returned_items_in_standard_mode(self):
+        """build_items at the end of search_composition_logic must surface
+        chunk_hits onto the returned-item dict so the serializer can read it.
+        """
+        with open("genizah_core.py", encoding="utf-8") as f:
+            src = f.read()
+        assert "'chunk_hits': data.get('chunk_hits', [])" in src, (
+            "build_items output must surface data['chunk_hits'] (list) for "
+            "shared.search_serializer.serialize_parallels_payload to consume"
+        )

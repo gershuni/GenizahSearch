@@ -449,6 +449,21 @@ def _to_parallels_envelope_item(
             'library_code': lib_code,
         }
 
+    # Map parallels-shape fields to search-shape so _serialize_item produces
+    # a meaningful snippet/excerpt/match_terms. Parallels items use 'text'
+    # (manuscript snippet WITH *term* markers) and either 'full_text' (lab
+    # mode, line 1488) or 'content' (standard mode does not surface this) --
+    # fall back to 'text' when neither is present so excerpt is non-empty.
+    if not synth.get('snippet'):
+        synth['snippet'] = rep.get('text', '') or ''
+    if not synth.get('full_text'):
+        synth['full_text'] = (
+            rep.get('full_text', '')
+            or rep.get('content', '')
+            or rep.get('text', '')
+            or ''
+        )
+
     item = _serialize_item(
         synth,
         meta_mgr=meta_mgr,

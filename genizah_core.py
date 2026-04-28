@@ -7648,7 +7648,11 @@ class SearchEngine:
         doc_hits = defaultdict(lambda: {
             'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
             'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set(),
-            'chunk_hits': 0,  # Number of distinct chunks that matched this document
+            'chunk_count': 0,  # Number of distinct chunks that matched this document
+            # Phase 77 D-13: per-chunk attribution mirrors lab_composition_search
+            # at line 1366. Same tuple shape (chunk_index, chunk_text, score, snippet)
+            # so shared.search_serializer consumes both producers uniformly.
+            'chunk_hits': [],
             'is_filtered': False  # True if ANY match came from filtered chunk
         })
 
@@ -7733,11 +7737,28 @@ class SearchEngine:
                             rec['content'] = content
                             # Use original content span if possible, fall back to stripped
                             _orig_m = regex.search(content)
-                            rec['matches'].append((_orig_m or regex.search(match_content)).span())
+                            _ms_match = _orig_m or regex.search(match_content)
+                            rec['matches'].append(_ms_match.span())
                             # Save indices of found words in *source* text
                             rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
                             rec['patterns'].add(regex.pattern)
-                            rec['chunk_hits'] += 1
+                            rec['chunk_count'] += 1
+
+                            # Phase 77 D-13: per-chunk attribution mirrors
+                            # lab_composition_search at line 1390. ms_snip is a
+                            # 60-char window around the match for parallels JSON
+                            # matches[*].manuscript_snippet (chunk_index is the
+                            # 0-based outer-loop variable i).
+                            try:
+                                _ms_s, _ms_e = _ms_match.span()
+                                _snip_s = max(0, _ms_s - 60)
+                                _snip_e = min(len(content), _ms_e + 60)
+                                ms_snip = content[_snip_s:_ms_s] + f"*{content[_ms_s:_ms_e]}*" + content[_ms_e:_snip_e]
+                            except Exception:
+                                ms_snip = ''
+                            rec['chunk_hits'].append(
+                                (i, ' '.join(chunk), float(score), ms_snip)
+                            )
 
                             # Track boundary-crossing matches - each boundary counted once
                             if chunk_crossed_bounds:
@@ -7851,7 +7872,12 @@ class SearchEngine:
                     'has_boundary_matches': has_boundary_matches,
                     'boundary_match_count': len(data.get('crossed_boundaries', set())),
                     'boundary_quality': boundary_quality_normalized,
-                    'chunk_hits': data.get('chunk_hits', 0),
+                    # Phase 77: chunk_count is the int counter (was 'chunk_hits'
+                    # before the D-13 rename). chunk_hits is now a list of
+                    # (chunk_index, chunk_text, score, ms_snip) tuples for
+                    # serialize_parallels_payload matches[].
+                    'chunk_count': data.get('chunk_count', 0),
+                    'chunk_hits': data.get('chunk_hits', []),
                     # Filtering flag and reason
                     'is_filtered': data.get('is_filtered', False),
                     'filter_reason': data.get('filter_reason', '')
@@ -7877,7 +7903,7 @@ class SearchEngine:
         # In 'boundary'/'combined' modes, this filters on actual boundary crossings
         if min_boundary_matches > 0:
             if boundary_mode == 'full':
-                all_items = [item for item in all_items if item.get('chunk_hits', 0) >= min_boundary_matches]
+                all_items = [item for item in all_items if item.get('chunk_count', 0) >= min_boundary_matches]
             else:
                 all_items = [item for item in all_items if item.get('boundary_match_count', 0) >= min_boundary_matches]
 
