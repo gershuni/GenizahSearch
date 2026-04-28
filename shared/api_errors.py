@@ -29,6 +29,7 @@ ERROR_CODES = frozenset({
     'limit_too_high',
     'unknown_filter_key',
     'unresolvable_filter_value',
+    'filter_vocabulary_unavailable',  # R2-#3: fail-closed when vocabulary loader fails
     'rate_limited',
     'disabled',
     'localhost_only',

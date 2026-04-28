@@ -24,6 +24,10 @@ from pathlib import Path
 from typing import Optional
 
 from shared.thread_local_db import ThreadLocalConnection
+# Phase 78 (Concern #3): APIError from neutral shared module — NOT from web layer.
+# Plan 03 R2-#3: validate_filter_values uses APIError to fail closed when
+# filter vocabulary cannot be loaded.
+from shared.api_errors import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +416,76 @@ def unqualify_domain_name(qualified: str) -> tuple[str, str]:
     return (qualified, '')
 
 
+# ---------------------------------------------------------------------------
+# Phase 78 Plan 03 (R2-#3): fail-closed filter validation helpers.
+# ---------------------------------------------------------------------------
+
+def _domain_vocabulary_is_loadable() -> bool:
+    """R2-#3 predicate: returns False when the FJMS domain vocabulary cannot
+    be loaded (sidecar absent, conn None, query raises, or table empty).
+
+    Used by validate_filter_values to choose between rejecting an unknown
+    token (HTTP 400) vs failing closed because we cannot tell (HTTP 503).
+    """
+    try:
+        svc = get_fjms_service(thread_safe=True)
+    except Exception:
+        return False
+    if getattr(svc, '_conn', None) is None:
+        return False
+    try:
+        rows = svc.get_all_domains()
+    except Exception:
+        return False
+    return bool(rows)
+
+
+def is_valid_domain_token(token: str) -> bool:
+    """R2-#3: returns True iff `token` is a domain value that get_filter_sys_ids
+    would accept. Canonicalizes through unqualify_domain_name and checks BOTH
+    Domain and ParentDomain columns of the domains table — matching the UNION
+    used in get_filter_sys_ids on bare tokens.
+
+    Round-2 fix: previous validator only checked get_all_domains() bare values,
+    which falsely rejected qualified domain forms like "Other (Bible)" and
+    parent-domain tokens like "Liturgy".
+
+    Returns False for empty input or when the sidecar connection is None.
+    Re-raises any underlying loader exception so the caller (validate_filter_values)
+    can route to APIError(503) — fail closed, not silent allow.
+    """
+    if not token:
+        return False
+    bare, parent = unqualify_domain_name(token)
+    svc = get_fjms_service(thread_safe=True)
+    if getattr(svc, '_conn', None) is None:
+        # Caller (validate_filter_values) is responsible for distinguishing
+        # "unknown token" from "vocabulary unavailable" via _domain_vocabulary_is_loadable.
+        return False
+    try:
+        if parent:
+            # Qualified form: must match BOTH Domain AND ParentDomain.
+            cur = svc._conn.execute(
+                "SELECT 1 FROM domains WHERE Domain = ? AND ParentDomain = ? LIMIT 1",
+                (bare, parent),
+            )
+            return cur.fetchone() is not None
+        # Bare form: matches if it's a Domain OR a ParentDomain (per the
+        # UNION in get_filter_sys_ids).
+        cur = svc._conn.execute(
+            "SELECT 1 FROM domains WHERE Domain = ? OR ParentDomain = ? LIMIT 1",
+            (bare, bare),
+        )
+        return cur.fetchone() is not None
+    except Exception as exc:
+        logger.error(f"is_valid_domain_token({token!r}) failed: {exc}")
+        # Loader-level exception: caller MUST treat as fail-closed.
+        # We can't return True (would falsely accept). Returning False alone
+        # would be ambiguous (caller might treat as 'just unknown'). Re-raise
+        # so validate_filter_values routes us to APIError(503).
+        raise
+
+
 def _find_project_root() -> Optional[Path]:
     """Find the project root by looking for libraries.csv up from this file."""
     current = Path(__file__).resolve().parent
@@ -638,6 +712,10 @@ class FjmsService:
         self._unclassified_lock = threading.Lock()
         self._has_persons_titles: bool = False  # Set True if v5+ tables exist
         self._has_bib_extended: bool = False  # Set True if extended bib columns exist
+        # R2-#3: cache of distinct catalog_fields.FieldValue for FragmentMaterial.
+        # None = not yet computed. Empty set = computed but vocabulary is empty
+        # (which validate_filter_values treats as fail-closed, NOT allow-all).
+        self._materials_cache: Optional[set] = None
 
         # Resolve db_path
         if db_path is None:
@@ -1263,6 +1341,181 @@ class FjmsService:
         except Exception as e:
             logger.error(f"FjmsService.get_filter_sys_ids error: {e}")
             return set()
+
+    # ------------------------------------------------------------------
+    # Phase 78 Plan 03 (D-17, API-07, R2-#3): fail-closed filter validation.
+    # ------------------------------------------------------------------
+
+    def _discover_valid_materials(self) -> set:
+        """Return the set of distinct FragmentMaterial values present in
+        catalog_fields. Cached after first call. Returns empty set if
+        self._conn is None — caller (validate_filter_values) MUST treat
+        empty as fail-closed (R2-#3); previously the implementation
+        degraded to allow-all when valid_materials was empty, which is
+        the API-07 regression the round-2 review flagged.
+        """
+        if getattr(self, '_materials_cache', None) is not None:
+            return self._materials_cache
+        if self._conn is None:
+            self._materials_cache = set()
+            return self._materials_cache
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT FieldValue FROM catalog_fields "
+                "WHERE FieldCategory = 'FragmentMaterial' AND FieldValue IS NOT NULL"
+            )
+            materials = {row[0] for row in cursor if row[0]}
+            self._materials_cache = materials
+            return materials
+        except Exception as e:
+            logger.error(f"FjmsService._discover_valid_materials error: {e}")
+            self._materials_cache = set()
+            return self._materials_cache
+
+    def validate_filter_values(self, filters: dict) -> None:
+        """Probe each filter value against FJMS lookup tables (R2-#3 policy).
+
+        - Unknown token in a loaded vocabulary → APIError(http_status=400,
+          code='unresolvable_filter_value').
+        - Vocabulary cannot be loaded (sidecar absent / loader raises /
+          empty set when shouldn't be) → APIError(http_status=503,
+          code='filter_vocabulary_unavailable').
+        - The historical "if vocabulary empty, allow all" pattern is GONE
+          (was the API-07 regression).
+
+        Args:
+            filters: dict with optional keys 'domains', 'authors', 'works',
+                     'materials', 'date_from', 'date_to' (D-15 shape, post-
+                     Pydantic validation).
+        """
+        if not filters:
+            return
+
+        # ---- Domains: route through is_valid_domain_token + _domain_vocabulary_is_loadable.
+        domains = filters.get('domains')
+        if domains:
+            if not _domain_vocabulary_is_loadable():
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Domain filter vocabulary is unavailable; refusing to process filtered request',
+                    http_status=503,
+                )
+            for v in domains:
+                try:
+                    ok = is_valid_domain_token(v)
+                except Exception as exc:
+                    # Loader-level exception during the lookup itself → fail-closed.
+                    raise APIError(
+                        'filter_vocabulary_unavailable',
+                        'Domain filter vocabulary lookup failed',
+                        http_status=503,
+                    ) from exc
+                if not ok:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter domains={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Authors.
+        authors = filters.get('authors')
+        if authors:
+            try:
+                rows = self.get_browse_authors() or []
+            except Exception as exc:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Authors filter vocabulary lookup failed',
+                    http_status=503,
+                ) from exc
+            if not rows:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Authors filter vocabulary is empty',
+                    http_status=503,
+                )
+            valid_person_ids: set = set()
+            valid_eng_descs: set = set()
+            for a in rows:
+                pid = a.get("person_id")
+                if pid is not None:
+                    valid_person_ids.add(str(pid))
+                ed = a.get("eng_desc")
+                if ed:
+                    valid_eng_descs.add(ed)
+            for v in authors:
+                v_str = str(v)
+                ok = (v_str in valid_person_ids) if v_str.isdigit() else (v_str in valid_eng_descs)
+                if not ok:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter authors={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Works: same shape as authors.
+        works = filters.get('works')
+        if works:
+            try:
+                rows = self.get_browse_works() or []
+            except Exception as exc:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Works filter vocabulary lookup failed',
+                    http_status=503,
+                ) from exc
+            if not rows:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Works filter vocabulary is empty',
+                    http_status=503,
+                )
+            valid_title_ids: set = set()
+            valid_org_titles: set = set()
+            for w in rows:
+                tid = w.get("title_id")
+                if tid is not None:
+                    valid_title_ids.add(str(tid))
+                ot = w.get("org_title")
+                if ot:
+                    valid_org_titles.add(ot)
+            for v in works:
+                v_str = str(v)
+                ok = (v_str in valid_title_ids) if v_str.isdigit() else (v_str in valid_org_titles)
+                if not ok:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter works={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Materials: R2-#3 — empty vocabulary MUST fail closed, NOT allow-all.
+        materials = filters.get('materials')
+        if materials:
+            try:
+                valid_materials = self._discover_valid_materials()
+            except Exception as exc:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Materials filter vocabulary lookup failed',
+                    http_status=503,
+                ) from exc
+            if not valid_materials:
+                # PREVIOUS BUG: `if valid_materials and v not in valid_materials`
+                # no-oped here. R2-#3 fix: empty vocabulary is fail-closed.
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    'Materials filter vocabulary is unavailable or empty',
+                    http_status=503,
+                )
+            for v in materials:
+                if v not in valid_materials:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter materials={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+        # date_from / date_to: any int is a valid token; range matching is FJMS's job.
 
     def get_all_domains(self) -> list[dict]:
         """
@@ -3180,3 +3433,13 @@ def reset_fjms_service():
     if _default_service is not None:
         _default_service.close()
         _default_service = None
+
+
+def validate_filter_values(filters: dict) -> None:
+    """Module-level shorthand for FjmsService.validate_filter_values.
+
+    Phase 78 Plan 03 (D-17, API-07, R2-#3 fail-closed). Uses the
+    thread-safe singleton — see FjmsService.validate_filter_values
+    for the policy contract.
+    """
+    return get_fjms_service(thread_safe=True).validate_filter_values(filters)
