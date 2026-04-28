@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Plan 77-05 complete; Phase 77 ready for /gsd-verify-work (5/5 plans complete; manual smoke-check PASSED with 4 follow-on chunk_hits collision fixes; 1201 passed / 8 skipped)
-last_updated: "2026-04-28T07:05:00Z"
-last_activity: 2026-04-28 -- Plan 77-05 complete; Phase 77 close-out done; 4 follow-on commits during smoke check fixed chunk_hits field-name collision (Plan 02 list-of-tuples vs pre-existing int counter in standard-mode); final test count 1201 passed / 8 skipped (was 1162 at phase start → +39 new tests across the 5 plans); cumulative phase commit count 20 (14 plan-scope + 6 follow-on smoke-check fixes)
+stopped_at: Plan 77-06 (gap-closure) complete; Phase 77 6/6 plans done; ready for /gsd-verify-work (1213 passed / 8 skipped)
+last_updated: "2026-04-28T08:30:00Z"
+last_activity: 2026-04-28 -- Plan 77-06 gap-closure complete; closes UAT gaps #1 (New Search not clearing export envelope state) and #2 (exports ignoring row-checkbox selection, pre-existing OPEN_ISSUES L81); added AppState.last_selected_uids field + compute_selected_uids helper, mirrored from 3 callsites, filtered all 3 search-side export handlers (parallels handlers untouched), filename gets -selected-N suffix when filtered; +12 regression tests (1201→1213); 6 new commits (8a95cf9d, 4944880c, d5f603b5, 55543316, ff620251, 7f93b7eb); cumulative Phase 77 commits: 26
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 6
+  completed_plans: 6
   percent: 17
 ---
 
@@ -25,23 +25,23 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 77 (serializer-json-export) — READY FOR VERIFY
-Plan: 5/5 complete (77-01, 77-02, 77-03, 77-04, 77-05 all complete)
-Status: Phase 77 close-out done; awaiting /gsd-verify-work 77
-Last activity: 2026-04-28 -- Plan 77-05 complete; manual smoke-check PASSED on /search and /parallels JSON downloads after 4 follow-on commits (baf481fb, c24fcc48, 2e2d2b75, 327aea31) fixed a chunk_hits field-name collision uncovered during smoke verification; final test count 1201 passed / 8 skipped (was 1194 → +7 new tests landed during smoke-check polish); cumulative Phase 77 commits: 20 (14 plan-scope + 6 follow-on)
+Phase: 77 (serializer-json-export) — READY FOR VERIFY (gap-closure done)
+Plan: 6/6 complete (77-01..77-05 + 77-06 gap-closure)
+Status: Phase 77 fully closed-out including UAT gap-closure; awaiting /gsd-verify-work 77
+Last activity: 2026-04-28 -- Plan 77-06 gap-closure complete; closes Gap #1 (New Search not clearing export envelope state) + Gap #2 (exports ignoring row-checkbox selection, pre-existing OPEN_ISSUES L81); 6 new commits (8a95cf9d, 4944880c, d5f603b5, 55543316, ff620251, 7f93b7eb); test count 1201→1213 (+12 regression tests); all 4 grep invariants confirmed; OPEN_ISSUES L81 flipped to ✅ Fixed; cumulative Phase 77 commits: 26
 
-Progress: [##        ] 17% (0/6 phases complete; 5/5 Phase 77 plans complete; phase ready for verify)
+Progress: [##        ] 17% (0/6 phases complete; 6/6 Phase 77 plans complete; phase ready for verify)
 
 **Phase queue (v7.10):**
 
-1. **Phase 77** — Serializer & JSON Export (EXPORT-01..04) ← in progress (4/5 plans complete)
+1. **Phase 77** — Serializer & JSON Export (EXPORT-01..04) ← 6/6 plans complete; awaiting `/gsd-verify-work 77`
 2. Phase 78 — /api/search + Hardening Shell (API-01,04,05,06,07 + HARDEN-01..05)
 3. Phase 79 — /api/browse Drill-Down (API-03) — Codex-recommended: validates locator round-trip via real consumer before a second producer
 4. Phase 80 — /api/parallels (API-02)
 5. Phase 81 — Claude Skill Consumer (SKILL-01..03)
 6. Phase 82 — Internal Documentation (DOC-01, DOC-02)
 
-Next step: `/gsd-plan-phase 77` to decompose Phase 77 into plans.
+Next step: `/gsd-verify-work 77` to validate phase goal achievement (then `/gsd-ship` for release).
 
 ## Performance Metrics
 
