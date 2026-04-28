@@ -152,6 +152,7 @@ def _memstat_endpoint(x_memstat_secret: str = Header(default='')):
 logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
+from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
@@ -164,6 +165,8 @@ APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
 init_api_routes()
+# Initialize Phase 78 search-helper API routes (POST /api/search; Phases 79/80 will add browse + parallels here)
+init_search_api()
 
 # Serve static files for SEO images
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
