@@ -3443,3 +3443,14 @@ def validate_filter_values(filters: dict) -> None:
     for the policy contract.
     """
     return get_fjms_service(thread_safe=True).validate_filter_values(filters)
+
+
+def get_filter_sys_ids(**kwargs):
+    """Module-level shorthand for FjmsService.get_filter_sys_ids.
+
+    Phase 78 Plan 03: callers in web/search_api.py invoke through this
+    function (rather than the bound method) so test fixtures can
+    monkeypatch shared.fjms_service.get_filter_sys_ids to inject empty
+    intersections without spinning up the real FJMS sidecar.
+    """
+    return get_fjms_service(thread_safe=True).get_filter_sys_ids(**kwargs)
