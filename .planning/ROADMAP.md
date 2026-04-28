@@ -261,7 +261,7 @@ back-nav bugfix.
 **Phase gate**: pytest green, CI green, integration test exercising error envelope + warnings array + mode-flag (open/localhost-only/disabled); explicit soak check sustaining traffic above the per-IP rate limit until 429 + `Retry-After` are observed (per Codex review — covers the rate-limiter end-to-end without a standalone stress phase).
 **Plans:** 4 plans
 - [x] 78-01-PLAN.md -- Wave 0 RED test scaffold (D-21 + D-23 surface) (complete 2026-04-28; 3 test files, 82 tests, intended RED)
-- [ ] 78-02-PLAN.md -- web/api_hardening.py (RateLimiter, mode gate, error handlers, PostHog server-side capture)
+- [x] 78-02-PLAN.md -- web/api_hardening.py (RateLimiter, mode gate, error handlers, PostHog server-side capture) (complete 2026-04-28; shared/api_errors.py + web/api_hardening.py, 39/39 hardening tests GREEN)
 - [ ] 78-03-PLAN.md -- web/search_api.py (POST /api/search handler + Pydantic models) + shared/fjms_service.validate_filter_values
 - [ ] 78-04-PLAN.md -- bootstrap wiring in web/main.py + soak test + soak script + CLAUDE.md env-vars
 

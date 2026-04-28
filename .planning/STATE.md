@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 78 Plan 01 RED scaffold complete
-last_updated: "2026-04-28T19:00:00.000Z"
-last_activity: 2026-04-28 -- Phase 78 Plan 01 complete (Wave 0 RED scaffold, 82 tests across 3 files, intended RED until Plans 02+03 land)
+stopped_at: Phase 78 Plan 02 complete (hardening shell GREEN)
+last_updated: "2026-04-28T18:55:00.000Z"
+last_activity: 2026-04-28 -- Phase 78 Plan 02 complete (web/api_hardening.py + shared/api_errors.py; 39/39 hardening tests GREEN; Plan 03 owns search_api + filter validator)
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 11
-  completed_plans: 7
-  percent: 64
+  completed_plans: 8
+  percent: 73
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 78 (api-search-hardening-shell) — EXECUTING (Plan 01 complete)
-Plan: 1/4 complete (78-01 RED scaffold landed; 78-02..78-04 next)
-Status: Wave 0 RED locked; Plans 02+03 needed to flip CI to GREEN
-Last activity: 2026-04-28 -- Phase 78 Plan 01 complete (3 RED test files, 82 tests)
+Phase: 78 (api-search-hardening-shell) — EXECUTING (Plans 01+02 complete)
+Plan: 2/4 complete (78-01 RED scaffold + 78-02 hardening shell GREEN; 78-03 next)
+Status: Hardening shell GREEN (39/39); Plan 03 owns search_api endpoint + filter validator
+Last activity: 2026-04-28 -- Phase 78 Plan 02 complete (web/api_hardening.py + shared/api_errors.py; 39/39 hardening tests GREEN)
 
-Progress: [##        ] 18% (1/6 phases complete; Phase 78 1/4 plans complete; Phase 77 awaiting verify)
+Progress: [###       ] 27% (1/6 phases complete; Phase 78 2/4 plans complete; Phase 77 awaiting verify)
 
 **Phase queue (v7.10):**
 
@@ -104,6 +104,18 @@ See PROJECT.md Key Decisions table for full history.
 - Toolbar UX divergence preserved: search-page button is always-enabled (matches existing Excel/Word neighbors); parallels-page button captured into `export_json_btn` with full lifecycle gating (3 wiring sites: `_reset_parallels` line 1942, render-empty line 2659, render-populated line 2667).
 - LOW-01 closed: Hebrew translations `"Export JSON" → "יצוא ל-JSON"` and `"Download JSON" → "הורד JSON"` added adjacent to existing `"Export Word" / "Export Excel"` entries in `genizah_translations.py:1589-1590`.
 
+**Plan 78-02 decisions (2026-04-28):**
+
+- Wave 1 GREEN gate: `shared/api_errors.py` (76 lines, neutral pure-Python exception module — Concern #3 fix; ZERO imports from web/nicegui/fastapi) + `web/api_hardening.py` (632 lines) flip 39/39 tests in tests/test_api_hardening.py from RED to GREEN. tests/test_search_api.py (40) and tests/test_api_legacy_unchanged.py (3) remain RED with `ModuleNotFoundError: No module named 'web.search_api'` — that is expected; Plan 03 owns those.
+- Three Rule 1 deviations from plan text — tests are the load-bearing contract, not plan-text signatures:
+  1. `RateLimiter.check()` raises `APIError('rate_limited', 429, headers={'Retry-After': N})` on limit hit, instead of plan's tuple-return `(allowed, retry_after)`. Tests at tests/test_api_hardening.py:174-203 use `pytest.raises(APIError)` with `headers.get('Retry-After')` access from the raised exception.
+  2. `_build_envelope_response` is sync (no await) and accepts BOTH `(exc)` and `(request, exc)` signatures via `len(args)` dispatch. Helper-level test at line 332 calls `_build_envelope_response(e)` with a single arg. wrap_endpoint internally passes (request, exc) for future correlation-ID enrichment.
+  3. `_evict_stale` prunes deques across ALL buckets during the sweep, not just empty ones. The plan's draft only checked `if not dq` for already-empty deques, but a one-shot scanner's bucket would never become empty until something accessed it — so eviction never fired. Fixed to iterate every bucket, prune against the 60s cutoff, then evict empty-and-stale. test_rate_limiter_evicts_stale_buckets seeds 100 IPs and asserts ≤2 remain after TTL.
+- Algorithm spec for `_resolve_rate_limit_key` locked verbatim in module docstring (R2-#4): "Walk the X-Forwarded-For entries from right to left. Skip entries that are in `_TRUSTED_PROXIES`. Return the first non-trusted entry encountered. If no non-trusted entry exists, return `request.client.host`. If the direct peer is itself NOT in `_TRUSTED_PROXIES`, ignore the XFF header entirely and return the direct peer."
+- All 5 review-driven concern tests confirmed GREEN: rightmost_xff (Concern #1), spoof_127_then_external_rejected (Concern #4), evicts_stale_buckets (Concern #5), dropped_event_counter_increments (Concern #9), apierror_imported_from_shared_api_errors_not_web (Concern #3).
+- `register_exception_handlers` (global handler installer) NOT present in api_hardening.py per Concern #2. wrap_endpoint owns the try/except/finally + envelope + PostHog capture pattern (R2-#6 — was no-op marker, now full reusable surface).
+- Salt persisted to `web/_secrets/posthog_ip_salt`. Directory has `.gitignore` with `*` + `!.gitignore` so auto-generated salts never get committed.
+
 **Plan 78-01 decisions (2026-04-28):**
 
 - Wave 0 RED scaffold for /api/search + hardening shell. 3 test files, 82 test functions total. All fail at collection time with ModuleNotFoundError on `web.search_api`, `web.api_hardening`, `shared.api_errors` — that is the intended RED state per the plan's `commit_strategy` (CI between Plan 01 commit and Plan 03 commit is expected RED; Phase 78 is not shippable mid-stream by design).
@@ -145,8 +157,8 @@ See PROJECT.md Key Decisions table for full history.
 ## Session Continuity
 
 Last session: 2026-04-28T19:00:00.000Z
-Stopped at: Phase 78 Plan 01 complete (RED scaffold)
-Resume file: .planning/phases/78-api-search-hardening-shell/78-02-PLAN.md
+Stopped at: Phase 78 Plan 02 complete (hardening shell GREEN)
+Resume file: .planning/phases/78-api-search-hardening-shell/78-03-PLAN.md
 
 ## Performance Metrics — Phase 77
 
@@ -164,3 +176,4 @@ Resume file: .planning/phases/78-api-search-hardening-shell/78-02-PLAN.md
 | Plan | Duration | Tasks | Files | Commits |
 |------|----------|-------|-------|---------|
 | 78-01 | ~12 min | 3 (5 logical bundled into 3 commits) | 3 | 9f47025d (test_search_api.py 40 tests), 58d09a3c (test_api_hardening.py 39 tests), 1a38158c (test_api_legacy_unchanged.py 3 tests) |
+| 78-02 | ~5 min | 4 (Tasks 2+3 bundled) | 3 | ebbc584c (shared/api_errors.py 76 lines), cd264d9c (web/api_hardening.py 632 lines + _secrets/.gitignore; 39/39 hardening tests GREEN) |
