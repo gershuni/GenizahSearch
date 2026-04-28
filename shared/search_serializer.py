@@ -456,11 +456,17 @@ def _to_parallels_envelope_item(
         catalog_batch=catalog_batch,
     )
 
-    # D-13 matches[] -- consume Plan 02's chunk_hits when present, else degenerate.
+    # D-13 matches[] -- consume Plan 02's chunk_hits when it is a list of
+    # per-chunk tuples (lab_composition_search path). Two collision cases fall
+    # through to the Path B degenerate single-match:
+    #   1. chunk_hits is missing/empty (legacy callers, future producers).
+    #   2. chunk_hits is an int -- search_composition_logic uses the same key
+    #      name for a chunk-COUNT counter (genizah_core.py:7651, 7740, 7854).
+    #      Iterating an int raises TypeError; defensively skip and degrade.
     matches: list[dict] = []
     for sub in group['items']:
         chunk_hits = sub.get('chunk_hits')
-        if chunk_hits:
+        if isinstance(chunk_hits, list) and chunk_hits:
             for tup in chunk_hits:
                 # Tuple shape: (chunk_index, source_chunk_text, score, manuscript_snippet)
                 if len(tup) < 4:
@@ -473,8 +479,9 @@ def _to_parallels_envelope_item(
                     'score': round(float(ch_score or 0), 4),
                 })
         else:
-            # Path B fallback (degenerate single match) -- kept for graceful behavior
-            # if a future caller passes raw items without Plan 02's chunk_hits.
+            # Path B fallback (degenerate single match) -- triggers for callers
+            # without Plan 02 attribution AND for the standard-mode int-counter
+            # collision described above.
             matches.append({
                 'chunk_index': None,
                 'source_chunk_text': sub.get('source_ctx', '') or '',

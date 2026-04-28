@@ -1951,7 +1951,7 @@ def init_api_routes(app_override=None):
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            logger.error(f"Export JSON error: {e}")
+            logger.exception(f"Export JSON error: {e}")
             return Response("Export failed", status_code=500)
 
     @target_app.get('/api/export/parallels/json')
@@ -2008,7 +2008,7 @@ def init_api_routes(app_override=None):
         except ValueError as e:
             return Response(str(e), status_code=400)
         except Exception as e:
-            logger.error(f"Export Parallels JSON error: {e}")
+            logger.exception(f"Export Parallels JSON error: {e}")
             return Response("Export failed", status_code=500)
 
     @target_app.get('/api/export/browse/word')

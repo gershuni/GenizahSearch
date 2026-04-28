@@ -482,6 +482,44 @@ class TestParallelsEnvelope:
         chunk_idxs = sorted(m['chunk_index'] for m in result_99_11['matches'])
         assert chunk_idxs == [0, 2, 4]
 
+    def test_parallels_chunk_hits_int_falls_back_to_path_b(self, mock_meta_mgr):
+        """Regression: search_composition_logic stores chunk_hits as an int counter
+        (genizah_core.py:7651, 7740, 7854) rather than the list-of-tuples
+        lab_composition_search uses (Plan 02 D-13 Path A). The serializer must not
+        iterate over an int — degrade gracefully to Path B single-match.
+        """
+        from shared.search_serializer import serialize_parallels_payload
+        # Mirror the standard-mode shape: chunk_hits is an int counter, not a list
+        results = [{
+            'uid': 'std_mode_uid',
+            'raw_header': 'CUL_T-S_NS_001_1r',
+            'sort_score': 2.5,
+            'score': 2.5,
+            'src_lbl': 'src',
+            'source_ctx': 'source chunk text',
+            'text': 'manuscript snippet',
+            'full_text': 'full ms text',
+            'chunk_hits': 3,  # int counter, NOT a list
+            'display': {
+                'id': '9911111111111111',
+                'shelfmark': 'T-S NS 001',
+                'title': 'Test',
+                'library_code': 'CUL',
+            },
+        }]
+        # Must not raise 'int' object is not iterable
+        payload = serialize_parallels_payload(
+            results, [], meta_mgr=mock_meta_mgr,
+            source_text='x', chunk_size=5, mode='exact',
+        )
+        assert payload['count'] == 1
+        result = payload['results'][0]
+        # Path B fallback: single degenerate match with chunk_index=None
+        assert len(result['matches']) == 1
+        assert result['matches'][0]['chunk_index'] is None
+        assert result['matches'][0]['source_chunk_text'] == 'source chunk text'
+        assert result['matches'][0]['manuscript_snippet'] == 'manuscript snippet'
+
     def test_parallels_score_aggregate_is_sum(self, mock_meta_mgr, sample_parallels_results):
         """Plan 01 lock: manuscript-level score is SUM (matches existing UI per-card score)."""
         from shared.search_serializer import serialize_parallels_payload
