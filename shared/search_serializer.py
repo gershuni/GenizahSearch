@@ -478,7 +478,22 @@ def _to_parallels_envelope_item(
     #   2. chunk_hits is an int -- search_composition_logic uses the same key
     #      name for a chunk-COUNT counter (genizah_core.py:7651, 7740, 7854).
     #      Iterating an int raises TypeError; defensively skip and degrade.
+    # Group-level dedup: NLI sometimes catalogs the same physical manuscript
+    # under multiple Alma uids on the same sys_id. Per-uid dedup in core can't
+    # catch this because each uid has its own rec. Keep the highest-scoring
+    # match per (chunk_index, stripped_snippet) within the group.
+    seen: dict[tuple[Optional[int], str], int] = {}
     matches: list[dict] = []
+
+    def _push_match(entry: dict) -> None:
+        key = (entry.get('chunk_index'), entry.get('manuscript_snippet') or '')
+        existing_idx = seen.get(key)
+        if existing_idx is None:
+            seen[key] = len(matches)
+            matches.append(entry)
+        elif entry.get('score', 0) > matches[existing_idx].get('score', 0):
+            matches[existing_idx] = entry
+
     for sub in group['items']:
         chunk_hits = sub.get('chunk_hits')
         if isinstance(chunk_hits, list) and chunk_hits:
@@ -487,7 +502,7 @@ def _to_parallels_envelope_item(
                 if len(tup) < 4:
                     continue
                 ch_idx, ch_text, ch_score, ms_snip = tup[0], tup[1], tup[2], tup[3]
-                matches.append({
+                _push_match({
                     'chunk_index': int(ch_idx) if isinstance(ch_idx, (int, float)) else None,
                     'source_chunk_text': ch_text or '',
                     'manuscript_snippet': remove_highlight_markers(ms_snip or ''),
@@ -497,12 +512,14 @@ def _to_parallels_envelope_item(
             # Path B fallback (degenerate single match) -- triggers for callers
             # without Plan 02 attribution AND for the standard-mode int-counter
             # collision described above.
-            matches.append({
+            _push_match({
                 'chunk_index': None,
                 'source_chunk_text': sub.get('source_ctx', '') or '',
                 'manuscript_snippet': remove_highlight_markers(sub.get('text', '') or ''),
                 'score': round(float(sub.get('score', 0.0) or 0.0), 4),
             })
+    # Sort by chunk_index (ascending; None goes first) for stable, readable output.
+    matches.sort(key=lambda m: (m.get('chunk_index') is not None, m.get('chunk_index') or 0))
     item['matches'] = matches
     return item
 

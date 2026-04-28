@@ -519,6 +519,89 @@ class TestParallelsEnvelope:
         assert result['excerpt']
         assert 'bar' in result['excerpt']  # markers preserved in raw text source
 
+    def test_parallels_group_dedup_same_chunk_same_snippet_across_uids(self, mock_meta_mgr):
+        """Group-level dedup: NLI sometimes catalogs the same physical manuscript
+        under multiple Alma uids on the same sys_id. Per-uid dedup in core can't
+        catch the cross-uid duplicate because each uid has its own rec. The
+        serializer dedups by (chunk_index, manuscript_snippet) at group level,
+        keeping the highest-scoring entry.
+        """
+        from shared.search_serializer import serialize_parallels_payload
+        # Two different uids on the same sys_id, both producing identical
+        # chunk_hits (chunk_index=14, same ms_snip) -- the visual duplicate
+        # case observed in production for Karaite prayer books.
+        results = [
+            {
+                'uid': 'uid_a_first_record',
+                'raw_header': 'CUL_T-S_NS_001_1r',
+                'sort_score': 100.0,
+                'score': 100.0,
+                'source_ctx': 'src',
+                'text': 'ms text',
+                'chunk_hits': [(14, 'shared chunk text', 177.7, 'shared *snip*')],
+                'display': {
+                    'id': '9911111111111111', 'shelfmark': 'T-S NS 001',
+                    'title': 'Test', 'library_code': 'CUL',
+                },
+            },
+            {
+                'uid': 'uid_b_duplicate_record',
+                'raw_header': 'CUL_T-S_NS_001_1r',
+                'sort_score': 50.0,
+                'score': 50.0,
+                'source_ctx': 'src',
+                'text': 'ms text',
+                # Same chunk_index + same ms_snip → cross-uid duplicate
+                'chunk_hits': [(14, 'shared chunk text', 77.1, 'shared *snip*')],
+                'display': {
+                    'id': '9911111111111111', 'shelfmark': 'T-S NS 001',
+                    'title': 'Test', 'library_code': 'CUL',
+                },
+            },
+        ]
+        payload = serialize_parallels_payload(
+            results, [], meta_mgr=mock_meta_mgr,
+            source_text='x', chunk_size=5, mode='exact',
+        )
+        # Both uids on same sys_id → one grouped result
+        assert payload['count'] == 1
+        result = payload['results'][0]
+        # Cross-uid duplicate dedup'd to a single entry
+        assert len(result['matches']) == 1
+        # Highest-scoring entry wins
+        assert result['matches'][0]['score'] == 177.7
+        assert result['matches'][0]['chunk_index'] == 14
+
+    def test_parallels_matches_sorted_by_chunk_index(self, mock_meta_mgr):
+        """Matches array is sorted by chunk_index (ascending) for readable JSON output."""
+        from shared.search_serializer import serialize_parallels_payload
+        results = [{
+            'uid': 'uid_x',
+            'raw_header': 'CUL_T-S_NS_001_1r',
+            'sort_score': 1.0,
+            'score': 1.0,
+            'source_ctx': 'src',
+            'text': 'ms text',
+            # Out-of-order chunk_indices on input
+            'chunk_hits': [
+                (5, 'chunk five', 1.0, 'snip 5'),
+                (2, 'chunk two', 1.0, 'snip 2'),
+                (0, 'chunk zero', 1.0, 'snip 0'),
+                (3, 'chunk three', 1.0, 'snip 3'),
+            ],
+            'display': {
+                'id': '9911111111111111', 'shelfmark': 'T-S NS 001',
+                'title': 'Test', 'library_code': 'CUL',
+            },
+        }]
+        payload = serialize_parallels_payload(
+            results, [], meta_mgr=mock_meta_mgr,
+            source_text='x', chunk_size=5, mode='exact',
+        )
+        result = payload['results'][0]
+        idxs = [m['chunk_index'] for m in result['matches']]
+        assert idxs == [0, 2, 3, 5]
+
     def test_parallels_chunk_hits_int_falls_back_to_path_b(self, mock_meta_mgr):
         """Regression: forward-compat guard. If a future caller passes a parallels
         item with chunk_hits as an int (older standard-mode shape, before the
