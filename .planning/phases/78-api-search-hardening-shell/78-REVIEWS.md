@@ -1,162 +1,204 @@
 ---
 phase: 78
 reviewers: [gemini, codex]
-reviewed_at: 2026-04-28T09:13:58Z
+reviewed_at: 2026-04-28T10:35:00Z
 plans_reviewed:
   - 78-01-PLAN.md
   - 78-02-PLAN.md
   - 78-03-PLAN.md
   - 78-04-PLAN.md
+revision_round: 2
 note: |
-  Claude CLI was skipped per user-feedback memory (we ARE Claude — review independence
-  requires a different model). Gemini and Codex both run with their default models
-  (no review.models.* override in .planning/config.json).
+  Second cross-AI review pass — invoked after `/gsd-plan-phase 78 --reviews` rewrote the
+  plans to address the first round of feedback. Claude CLI skipped per project memory
+  (we ARE Claude — review independence requires a different model). Gemini and Codex
+  both run with their default models (no review.models.* override in .planning/config.json).
+
+  Headline result: Gemini APPROVES (LOW risk). Codex flags MEDIUM risk with one HIGH
+  concern (filter-validation pipeline alignment) plus 4 MEDIUM follow-ups. The two
+  HIGH structural blockers from round 1 (global handler scope, shared→web inversion)
+  are confirmed resolved by both reviewers. Round-2 issues are mostly *new* gaps
+  introduced or sharpened by the revision, not residual round-1 issues.
 ---
 
-# Cross-AI Plan Review — Phase 78
+# Cross-AI Plan Review — Phase 78 (Revision Round 2)
 
 ## Gemini Review
 
-These implementation plans for **Phase 78** are exceptionally well-structured and reflect a mature, security-first approach to API development. The separation of the "Hardening Shell" into a reusable module (`api_hardening.py`) is a strategic win that will simplify the implementation of Phases 79 and 80. The TDD Wave 0 approach ensures that the contract is locked before code is written, which is essential for a milestone introducing a new public-facing (albeit internal-helper) interface.
-
 ### Summary
-Phase 78 delivers a hardened `POST /api/search` endpoint using a **Research -> Strategy -> Execution** lifecycle. By building a generic security layer (sliding-window rate limiting, loopback-aware mode gating, and server-side observability) upfront, the plans ensure that all subsequent API endpoints inherit these protections without code duplication. The use of Pydantic for strict schema enforcement and a dedicated FJMS filter validator addresses the core requirements for input integrity and statelessness.
+The revised implementation plans for **Phase 78** are excellent. The revision land cleanly, and all four **HIGH structural concerns** from the previous review have been definitively resolved in the plan text through specific architectural improvements.
+
+The introduction of `shared/api_errors.py` correctly decouples the exception layer from the web framework, and the per-endpoint envelope-wrapping strategy provides a robust solution for preserving legacy route behavior while hardening the new API. The two-helper approach to IP resolution (`_resolve_rate_limit_key` and `_is_loopback_request`) demonstrates high security maturity, correctly handling trusted proxy chains and strict loopback gating.
 
 ### Strengths
-*   **Reusable Hardening Shell:** Isolating rate limiting, mode gating, and PostHog logic into `web/api_hardening.py` is excellent architectural foresight.
-*   **Honest Sliding-Window Rate Limiter:** Moving away from the project's legacy fixed-window pattern to a `deque`-based sliding window provides a mathematically correct `Retry-After` header, which is critical for well-behaved API clients.
-*   **Strict Pydantic Enforcement:** Using `extra='forbid'` on both the request and filter models is a strong defensive measure against mass-assignment and unexpected input.
-*   **Non-Blocking Observability:** The use of a background daemon thread and a thread-safe queue for PostHog events ensures that telemetry does not add latency to the search pipeline.
-*   **Comprehensive TDD:** The 24+ tests planned in Wave 0 cover not only happy paths but also edge cases like loopback spoofing, combinatorial cascades, and statelessness (via byte-identical comparisons).
+*   **Dependency Inversion Fix:** Moving `APIError` to a neutral `shared/api_errors.py` module is a textbook fix for the `shared -> web` back-reference issue, ensuring the dual-app architecture remains clean.
+*   **Surgical Hardening:** Replacing global exception handlers with the per-endpoint `_build_envelope_response` helper (invoked inside manual JSON parsing blocks) ensures zero impact on legacy `/api/*` routes while maintaining strict schema control for the new Search API.
+*   **Robust Proxy Handling:** The right-most-untrusted-XFF algorithm in `_resolve_rate_limit_key` and the every-entry-loopback requirement in `_is_loopback_request` are professionally designed and resilient against common XFF spoofing attacks.
+*   **Full Spectrum Observability:** The addition of `get_dropped_event_count()` and the explicit capture of structural validation errors in PostHog fulfil **HARDEN-05** much more comprehensively than the previous iteration.
+*   **Resilient Core Surface:** The use of a thread-local signal in `genizah_core.py` is an elegant way to ensure that combinatorial cascade warnings are surfaced even when a query yields zero results, closing a significant requirement gap.
+*   **Conservative Test Strategy:** The revision to `pyproject.toml` correctly preserves the project's default test behavior while still allowing for a strict-markers-compliant slow-test opt-in.
 
 ### Concerns
 
-*   **[MEDIUM] X-Forwarded-For (XFF) Spoofing in `localhost-only` mode:**
-    *   **Decision D-03** and **Plan 78-02 Task 1** use `.split(',')[0]` to check the "first hop" of the XFF header.
-    *   **Risk:** If the app is behind an Nginx proxy that *appends* to XFF (the default `$proxy_add_x_forwarded_for` behavior), an external attacker can send a request with `X-Forwarded-For: 127.0.0.1`. Nginx will append the attacker's real IP (e.g., `127.0.0.1, 203.0.113.5`), but your code will see the first hop as `127.0.0.1` and incorrectly grant access.
-    *   **Severity:** Medium (only affects the `localhost-only` restriction).
+*   **[LOW] `_LAST_RESPONSA_DOWNGRADE` Cleanup:**
+    *   While the `_consume` helper correctly clears the thread-local attribute, if a search crashes *before* the handler can consume the signal, the value might technically persist on that worker thread.
+    *   **Severity:** Low (unlikely to cause meaningful cross-request leakage in a standard FastAPI/uvicorn pool).
 
-*   **[LOW] PostHog Capture Missing for Structural Validation Errors:**
-    *   The `capture_api_event` call is placed inside the `search_endpoint` handler (Plan 78-03).
-    *   **Risk:** Structural errors (e.g., sending an integer where a string is expected) are caught by Pydantic/FastAPI before the handler is entered. These `invalid_request` events will be returned to the user but will **not** be recorded in PostHog.
-    *   **Severity:** Low (telemetry gap, not a security risk).
-
-*   **[LOW] RateLimiter Memory Growth:**
-    *   The `_buckets` dictionary in `RateLimiter` grows with every unique IP and is never pruned.
-    *   **Risk:** Over a long-running process exposed to many IPs, this could lead to slow memory growth. For an internal helper API, this is likely negligible, but worth noting for long-term maintenance.
-    *   **Severity:** Low.
-
-*   **[LOW] Salt Persistence Race Condition:**
-    *   `_resolve_posthog_ip_salt` (Plan 78-02 Task 2) attempts to atomically write the salt using a `.tmp` file and `os.replace`.
-    *   **Risk:** On some Windows environments or network drives, `os.replace` can behave inconsistently if the target file is being read. The best-effort `os.chmod` is also correctly identified as a no-op on Windows.
-    *   **Severity:** Low.
+*   **[LOW] Module-level state in tests:**
+    *   The `_INITIALIZED_APPS` set in `web/search_api.py` persists across tests. While the `bare_app` fixture creates fresh instances, the module-level set will grow throughout the test session.
+    *   **Severity:** Low (negligible memory impact).
 
 ### Suggestions
 
-*   **Fix the XFF Check:** In `web/api_hardening.py:_is_loopback_request`, instead of checking just the first hop, you should verify that **every** IP in the comma-separated XFF header is a loopback address. If the list contains any non-loopback IP, it originated from or passed through an external source.
-*   **Unified Observability:** Consider moving the `capture_api_event` call into the `register_exception_handlers` function or a simple middleware. This ensures that even Pydantic `RequestValidationError` events are captured in PostHog, fulfilling **HARDEN-05** more comprehensively.
-*   **Prune the RateLimiter:** Add a simple task (or check during `check()`) to occasionally clear keys from `_buckets` if their deque is empty and hasn't been touched in, say, 1 hour.
-*   **Clarify IP Salt Path:** Ensure the `web/_secrets/` directory is created with appropriate permissions before writing the salt.
+*   **Proactive Thread-Local Reset:** Consider calling `_consume_last_responsa_downgrade()` (or a new internal reset helper) at the very beginning of `SearchEngine.execute_search`. This ensures a clean state and prevents any stale warning from a previous failed/unconsumed request from being "inherited" by a new query on the same thread.
+*   **Pydantic Model Documentation:** Since the search endpoint now uses `await request.json()` followed by `SearchRequest.model_validate`, the standard FastAPI/Swagger UI will not automatically detect the request schema. This is acceptable for an internal helper API, but a manual `openapi_extra` or similar hint could be added in Phase 82 if documentation parity is ever desired.
 
 ### Risk Assessment: LOW
-The implementation risk is very low. The design is conservative, stays within existing architectural patterns (NiceGUI/FastAPI), and uses a proven TDD harness. The "hardening" components are actually more robust than the project's existing legacy `/api` routes. As long as the XFF spoofing concern is addressed in the implementation of the `_is_loopback_request` helper, the security posture is excellent for an internal research tool.
+The implementation risk is now **LOW**. The revised plans have successfully converted every high-severity architectural risk into a proven pattern. The Wave 0 TDD approach ensures that the strict IP resolution and legacy-parity contracts are verified before the implementation is finalized. The design is well-isolated, observable, and strictly follows the project's engineering standards.
 
-**Verdict:** The plans are approved. Proceed with execution, taking note of the XFF spoofing suggestion during the implementation of Plan 78-02.
+**Verdict:** APPROVED. Proceed with execution. No further revisions required.
 
 ---
 
 ## Codex Review
 
-**Summary**
+### Summary
 
-These plans are thoughtful and unusually explicit, but as written they do **not yet reliably deliver the phase goal**. The biggest problem is that two core mechanisms meant to be "generic hardening" are mis-scoped: the rate limiter keys on the **direct peer** instead of the real client IP under nginx, and the exception handlers are registered **app-wide**, which can change legacy route behavior even though the phase explicitly promises not to. Those two issues alone put HARDEN-01 and the "existing `/api/*` unchanged" success criterion at risk. The rest of the design is strong, but the plan needs a small round of architectural correction before implementation starts.
+The revision is materially better and it does resolve the two biggest prior blockers cleanly: the legacy-route/global-handler problem is addressed by moving envelope handling into the new endpoint, and the `shared -> web` dependency inversion is fixed by introducing `shared/api_errors.py`. The XFF/rate-limit redesign is also pointed in the right direction, but it does not land fully cleanly in plan text because the revised tests/specs are internally inconsistent about multi-hop XFF semantics, and the new filter-validation design introduces a fresh API-07 risk. So the four prior HIGH concerns are mostly addressed, but not all of them are fully closed without ambiguity.
 
-**Strengths**
+### Strengths
 
-- The phase boundary is clear. `web/api_hardening.py` vs `web/search_api.py` is the right split in principle.
-- D-01/D-03/D-07 are well locked. The plans don't leave important semantics to chance.
-- The plans are explicit about what is out of scope, especially not touching `web/api.py`.
-- The test surface is strong overall, especially the separation between unit tests, handler tests, and live soak tooling.
-- The warnings requirement is handled intentionally instead of being left buried in result rows.
-- The `app_override` registrar pattern is a good choice for test isolation and future reuse in Phases 79/80.
-- The PostHog payload discipline is good: low-cardinality buckets, no payload contents, explicit IP hashing.
-- The empty-intersection short-circuit in Plan 03 is the right read of API-07 and avoids accidental "empty set means unrestricted" bugs.
+- The `shared/api_errors.py` split is the right fix. It is genuinely framework-free and removes the bad `shared -> web` import direction.
+- Replacing global exception-handler installation with per-endpoint envelope handling is the correct response to the legacy-route regression concern.
+- Separating `_resolve_rate_limit_key()` from `_is_loopback_request()` is the right architectural correction. Those are different trust decisions and should not share one helper.
+- The strict loopback rule for `localhost-only` is directionally correct and matches the intended semantics better than the earlier RFC1918 approach.
+- Adding rate-limit bucket eviction and a dropped-PostHog-event counter meaningfully improves the original hardening design.
+- Removing the repo-wide `addopts = -m "not slow"` default-exclude was the right call; that would have been an unnecessary project-wide behavior change.
+- The revised legacy smoke test now explicitly targets validation-failure behavior, which is exactly the gap the previous review called out.
 
-**Concerns**
+### Concerns
 
-- **HIGH**: Plan 02's `get_client_ip(request)` is incompatible with HARDEN-01 under the deployment model described in D-03. The plan explicitly says rate limiting uses the **direct peer only**, and XFF is ignored except for localhost checks. Behind nginx, that means many or all requests may collapse to `127.0.0.1`, turning a per-IP limiter into a global limiter. This is a direct conflict between Plan 02 Task 1 and D-03/HARDEN-01.
-- **HIGH**: `register_exception_handlers(target_app)` is app-global, not route-scoped. Plan 03 calls it from `init_search_api()`, which means existing routes on the NiceGUI/FastAPI app can now get the new `RequestValidationError` and `APIError` behavior. That undermines Success Criterion 2 and D-18's "legacy routes unchanged" claim. The smoke in `tests/test_api_legacy_unchanged.py` is too shallow to catch this.
-- **HIGH**: The `localhost-only` trust model is only safe if nginx **overwrites/sanitizes** `X-Forwarded-For`. The plans assume "nginx is the only proxy in front" but never state or test the proxy-header sanitization requirement. If nginx passes through attacker-supplied XFF, `X-Forwarded-For: 127.0.0.1` can become a bypass candidate.
-- **HIGH**: Plan 03's `shared/fjms_service.validate_filter_values()` lazily imports `web.api_hardening.APIError`. That creates a bad `shared -> web` dependency inversion. It may work technically, but it weakens the service-layer boundary and makes future desktop/shared reuse worse.
-- **MEDIUM**: HARDEN-03 is only partially covered. Plan 03 hoists `responsa_warning` from `results[0]`, but if a Responsa downgrade occurs and the query yields zero results, the warning is still lost. Requirement 5 says the downgrade must surface whenever it happens.
-- **MEDIUM**: `RateLimiter._buckets` grows forever by unique IP key. Each deque is bounded by time, but the dict itself has no eviction policy. For an internet-facing helper endpoint, that is a real memory-growth vector under scans or abuse.
-- **MEDIUM**: The PostHog queue intentionally drops on `queue.Full`, but there is no counter/log for dropped events. Best-effort is fine; silent loss at scale is harder to diagnose.
-- **MEDIUM**: Plan 04's `pyproject.toml` change is repo-wide behavior change. It may be correct, but it affects all existing slow tests, not just Phase 78. The plan does not show CI invocation changes proving those tests still run where intended.
-- **MEDIUM**: The "legacy unchanged" testing is underpowered. One export route and one puzzle-image status check do not meaningfully cover the app-wide handler regression risk. In particular, there is no legacy-route test that exercises **validation failure**, which is exactly where the new global handler changes behavior.
-- **LOW**: `init_search_api()` is not described as idempotent. In dev reload or repeated mounting on the same app, duplicate route/handler registration may happen.
-- **LOW**: The RED strategy in 78-01 is intentionally noisy. It's defensible, but it guarantees branch CI stays red between Plans 01 and 03, which is process friction if anyone needs to stack work or review incrementally.
-- **LOW**: The statelessness test (`byte-identical modulo timestamp`) is useful but not sufficient by itself. It proves one path is stable; it does not fully prove absence of hidden session/global influences.
+- **[HIGH] The new `validate_filter_values()` design is not actually aligned with the real FJMS filter pipeline, so API-07 is still at risk.**
+  - `shared/fjms_service.get_filter_sys_ids()` already accepts qualified domain names and parent-domain matching via `unqualify_domain_name(...)`, but the planned validator checks only `get_all_domains()` bare `domain` values. That will falsely reject valid filter tokens such as qualified/UI-facing domain forms.
+  - The materials branch is worse: the plan explicitly says `if valid_materials and v not in valid_materials`, which means an empty material vocabulary becomes "allow all." Combined with `get_filter_sys_ids()` returning `None` when `_conn is None`, a materials-only filter can silently become unfiltered search, which is exactly what API-07 says must not happen.
 
-**Suggestions**
+- **[MEDIUM] The XFF/rate-limit fix is still internally inconsistent in the revised plans.**
+  - The plan text and examples disagree on the multi-hop case. One part says `client_ip` should win; another example asserts `hop2.ip`; the helper definition says "right-most untrusted entry."
+  - For the current single-nginx deployment, "right-most untrusted" is fine. The problem is that the RED tests and explanatory comments do not consistently lock that rule, so the implementation target is still fuzzy.
 
-- Split "client identity for rate limiting" from "loopback eligibility for localhost-only."
-- For rate limiting, use a **trusted real-client IP resolver** that only consults XFF when the direct peer is a trusted proxy. Do not reuse the current direct-peer-only `get_client_ip()` for HARDEN-01.
-- Do not install validation/APIError handlers globally on the shared app if legacy isolation matters. Use a dedicated router/sub-app, or perform envelope rewriting inside the new endpoints only.
-- Move `APIError` out of `web.api_hardening` into a neutral/shared location, or make `validate_filter_values()` return structured failure info instead of raising a web-layer exception.
-- Add a test for "legacy route validation failure remains unchanged" if the app-global handler approach survives.
-- Add a test for the proxy trust boundary: loopback peer + attacker-controlled XFF should fail unless the proxy sanitization contract is explicitly guaranteed.
-- Add eviction for stale rate-limit buckets, even if coarse. A periodic sweep or size cap is enough for v1.
-- Add a test for the zero-results Responsa downgrade case. If core cannot currently surface it, note that as a requirement gap instead of assuming it away.
-- For PostHog, keep silent failure on network errors, but count/log dropped events when `_event_queue` is full.
-- Reconsider the repo-wide `addopts` change unless CI config is updated in the same phase.
+- **[MEDIUM] The new thread-local Responsa warning channel can leak between requests.**
+  - The plan introduces `_LAST_RESPONSA_DOWNGRADE` as thread-local, which is the right scope class, but the planned `web/search_api.py` only consumes it on the success path.
+  - If `execute_search()` sets the downgrade signal and then raises before the handler consumes it, the same worker thread can carry that stale warning into the next request.
+  - This should be cleared before each search and/or consumed in a `finally`, not only after successful result processing.
 
-**Risk Assessment**
+- **[MEDIUM] `init_search_api()` idempotency via `_INITIALIZED_APPS: set[int]` is brittle, and the global limiter state will make tests flaky.**
+  - `id(app)` can be reused after GC, so a fresh bare FastAPI app in tests can theoretically be mistaken for an already-initialized one.
+  - `_rate_limiter` is module-global, so bucket state persists across test apps unless explicitly reset. The revised plans do not account for that.
+  - This is a new issue introduced by the idempotency/test-isolation fix.
 
-**HIGH**. The plans are close, but two structural issues are serious: the current per-IP strategy likely fails under nginx, and the current exception-handler strategy likely affects routes the phase promises not to touch. Those are not polish issues; they strike at requirement compliance. Fix those two areas and the rest of the phase becomes much more likely to land cleanly.
+- **[MEDIUM] Plan 04 is still contradictory about slow-test behavior.**
+  - The revised plan correctly removes repo-wide `addopts`, but then claims the new soak tests are "opt-in via `-m slow`."
+  - They are not opt-in. With marker registration only, `tests/test_search_api_soak.py` will run in the default `pytest tests/` path and therefore in current CI unless the workflow is updated.
+  - Existing `tests/e2e/test_performance.py` was already in default collection; the newly introduced soak tests are the real CI-behavior change.
+
+- **[LOW] `wrap_endpoint()` is effectively a no-op marker, so the "build once, inherit thrice" goal is only partially met.**
+  - The real reusable piece is `_build_envelope_response()`.
+  - As written, Phases 79/80 still need to hand-roll the same `try/except/finally` structure in each endpoint, which creates drift risk.
+
+- **[LOW] The route-level localhost tests still do not fully pin the intended behavior.**
+  - `test_mode_gate_localhost_only_clean_xff_chain` explicitly allows either `200` or `403`.
+  - `test_mode_gate_localhost_only_loopback_direct` patches `_is_loopback_request` instead of exercising the real integration.
+  - Helper-level tests are good, but the endpoint-level contract is still under-specified.
+
+- **[LOW] Several verification commands are Unix-oriented (`grep`, `awk`, `head`, `tail`) despite the stated PowerShell/Windows environment.**
+  - That is execution friction, not a design blocker, but it should be cleaned up.
+
+### Suggestions
+
+- Make `validate_filter_values()` normalize through the same domain logic as `get_filter_sys_ids()` instead of validating against `get_all_domains()` raw output. At minimum, support qualified domains and parent-domain names explicitly.
+- Do not allow materials validation to degrade to "allow all" when the material vocabulary cannot be loaded. Reject the request instead, or reject all filter-based requests when FJMS is unavailable.
+- Clear the Responsa thread-local at request start and consume/clear it again in a `finally` after `execute_search()`.
+- Replace `_INITIALIZED_APPS: set[int]` with an app-bound marker (`target_app.state`) or a `weakref.WeakSet`, and provide a test-reset path for the module-global rate limiter.
+- Clean up the XFF rule everywhere so the prose, RED tests, and helper implementation all describe the same algorithm. If multi-hop is out of scope, say so and drop the contradictory test/comments.
+- Decide CI behavior for the new soak tests explicitly. Either:
+  - keep them in default test runs and stop calling them opt-in, or
+  - update the workflow so the main pytest step excludes `slow` and a dedicated job runs `-m slow`.
+- Make the route-level localhost tests deterministic instead of accepting both pass and fail.
+
+### Risk Assessment
+
+**MEDIUM.** The revision fixed the most dangerous structural problems from the prior review, especially the global-handler scope issue and the `shared -> web` dependency inversion. That drops the overall risk substantially. The remaining problems are not as fundamental, but they are still real: the filter-validation plan can violate API-07, the new thread-local warning path can leak across requests, and the slow-test story is still internally inconsistent. This is close to execution-ready, but I would want one more revision pass on those points before calling it clean.
 
 ---
 
 ## Consensus Summary
 
-The two reviewers diverge on overall risk (Gemini: LOW; Codex: HIGH). Gemini reads the plans as security-conscious and well-structured; Codex zooms in on two architectural mismatches that put core success criteria at risk. The substantive concerns are dominated by Codex; Gemini's review functions as a sanity check confirming the design is sound *if* Codex's structural issues are resolved.
+Gemini and Codex agree the revision **resolved the two biggest structural blockers** from round 1 (global handler scope, `shared → web` inversion) and that the new architecture is fundamentally sound. They diverge on overall risk: Gemini reads as APPROVED / LOW; Codex reads as MEDIUM with one residual HIGH concern (filter-validation pipeline alignment) and four MEDIUM follow-ups. As in round 1, Codex zooms in on requirement-compliance details that Gemini's higher-altitude review treats as out of scope.
 
 ### Agreed Strengths (both reviewers)
-- **Reusable hardening shell** — clean split between `web/api_hardening.py` (generic infra) and `web/search_api.py` (route-specific).
-- **Sliding-window rate limiter** with honest `Retry-After` is a real upgrade over the existing fixed-window puzzle limiter.
-- **Strict Pydantic enforcement** (`extra='forbid'`) on both request and filter models — strong defense against mass-assignment.
-- **Non-blocking PostHog observability** via daemon thread + queue — telemetry never blocks a request.
-- **Test surface scope** — Wave 0 RED tests + soak + legacy spot check + handler unit tests is thorough.
-- **No payload contents logged** to PostHog — D-14 discipline holds across the design.
+
+- **`shared/api_errors.py` split** — Concern #3 fixed cleanly. Both reviewers explicitly call out the dependency-inversion correction as the right architectural move.
+- **Per-endpoint envelope handling** — Concern #2 fixed. Both reviewers confirm legacy `/api/*` routes are no longer at risk from a global handler installer.
+- **Two-helper IP resolution** — `_resolve_rate_limit_key` (rate limit) vs `_is_loopback_request` (mode gate) is the right architectural separation. Both endorse.
+- **Strict every-XFF-entry-must-be-loopback rule** — Concern #4 fixed in principle. Both endorse.
+- **RateLimiter bucket eviction (TTL + last_seen)** and **PostHog dropped-event counter** — both reviewers endorse as meaningful hardening upgrades.
+- **`pyproject.toml addopts` revert** — both endorse the decision NOT to apply repo-wide default-exclude (Concern #7 correctly addressed).
 
 ### Agreed Concerns (raised by both)
-1. **XFF / proxy trust under nginx** (Gemini MEDIUM, Codex HIGH×2). Both reviewers flag the `localhost-only` mode's `.split(',')[0]` first-hop check as exploitable if nginx does not sanitize/overwrite client-supplied `X-Forwarded-For`. Codex extends this concern to rate-limiting itself: behind nginx, `request.client.host` is `127.0.0.1` for every external request, so the per-IP limiter would collapse to a global limiter (HARDEN-01 break). **Fix scope: redesign the client-IP resolver to consult XFF when and only when the direct peer is a trusted proxy.**
-2. **RateLimiter._buckets unbounded growth** (Gemini LOW, Codex MEDIUM). The dict has no eviction; over time, unique-IP keys accumulate. **Fix scope: periodic sweep or size cap; trivial to add.**
 
-### Codex-Only HIGH Concerns (action required)
-3. **`register_exception_handlers(target_app)` is app-global, not route-scoped.** Calling it from `init_search_api()` mounts the new `RequestValidationError` / `APIError` handlers on the SAME FastAPI app that hosts every legacy `/api/*` route. Any existing endpoint that currently produces a raw 422 dump on validation failure would now produce the new error envelope. This silently violates Success Criterion 2 ("existing `/api/*` routes unchanged") and D-18 ("Phase 78 does NOT modify `web/api.py`"). The legacy-immutability spot check (D-23) only tests happy paths and headers — it cannot catch this regression. **Fix scope: either (a) use a dedicated `APIRouter` / sub-app for the new handlers, OR (b) handle envelope rewriting INSIDE the new endpoints only (no global handler install), OR (c) keep the global handler but add a legacy-route validation-failure test that proves behavioral parity. Each option is non-trivial.**
-4. **`shared -> web` dependency inversion in `validate_filter_values`.** `shared/fjms_service.validate_filter_values()` would need to raise `APIError` from `web.api_hardening`. Service-layer code importing web-layer exceptions weakens the dual-app architecture (desktop also imports `shared/fjms_service`). **Fix scope: move `APIError` to a neutral location (e.g., `shared/api_errors.py`), OR make `validate_filter_values()` return a structured `Optional[FilterValidationFailure]` and let the handler raise.**
+1. **Thread-local Responsa downgrade signal can leak across requests** (Gemini LOW, Codex MEDIUM). Both reviewers flag the same root cause: `_LAST_RESPONSA_DOWNGRADE` is set unconditionally inside `execute_search` but consumed only on the success path in `web/search_api.py`. If `execute_search` raises before the handler reads it, the next request on the same worker thread inherits a stale warning. **Fix scope:** clear the thread-local at request start AND consume/clear in a `finally` block, not only after successful result processing. Gemini's specific suggestion: call `_consume_last_responsa_downgrade()` (or a new internal reset helper) at the very beginning of `SearchEngine.execute_search`.
+
+2. **`_INITIALIZED_APPS` module-level state** (Gemini LOW, Codex MEDIUM). Both reviewers flag the persistence-across-tests issue. Codex extends with the correctness concern: `id(app)` can be reused after GC, theoretically letting a fresh bare FastAPI app inherit the "already initialized" flag from a destroyed one. **Fix scope:** replace `set[int]` with `weakref.WeakSet` (auto-cleans GC'd apps), or store an attribute on `target_app.state` for app-bound idempotency. Add a test-reset path for the module-global `_rate_limiter` while we're there.
+
+### Codex-Only HIGH Concern (action required)
+
+3. **`validate_filter_values()` is misaligned with the real FJMS pipeline — API-07 still at risk.** Two sub-issues:
+   - **Domain validation is too narrow.** `shared/fjms_service.get_filter_sys_ids()` already supports qualified domain names and parent-domain matching via `unqualify_domain_name(...)`, but the planned validator checks only `get_all_domains()` bare values. Valid UI-facing qualified domain forms would be falsely rejected.
+   - **Materials validation degrades unsafely.** The planned `if valid_materials and v not in valid_materials` means an empty material vocabulary becomes "allow all." Combined with `get_filter_sys_ids()` returning `None` when `_conn is None`, a materials-only filter can silently become unfiltered search. API-07 explicitly says this must not happen.
+
+   **Fix scope (Plan 78-03):** rewrite the validator to (a) normalize through the same domain logic as `get_filter_sys_ids()` (support qualified + parent-domain forms), and (b) reject — not silently degrade — when material vocabulary cannot be loaded or when FJMS is unavailable.
 
 ### Codex-Only MEDIUM Concerns
-5. **HARDEN-03 zero-results gap.** The current plan hoists the `query_downgraded` warning from `results[0]`, but if a Responsa cascade fires AND the query then yields zero results, the warning is lost. Requirement 5 ("never hidden inside the first result item") implicitly requires the warning surface even with empty results.
-6. **Repo-wide `pyproject.toml addopts` impact.** Adding `addopts = -m 'not slow'` globally changes default test invocation for the whole project, not just Phase 78's soak test. CI invocation handling needs to be confirmed.
-7. **Legacy-unchanged test underpowered.** Two routes covered (export/json + puzzle_image), neither exercising validation failure — the exact path Codex's #3 concern would regress.
-8. **PostHog queue.Full silent drop.** No counter/log for dropped events; hard to diagnose under load.
 
-### Gemini-Only LOW Concerns (already partially mitigated)
-9. **PostHog capture for structural validation errors** (Pydantic-caught): events fire only inside the handler, so `invalid_request` errors from Pydantic don't generate PostHog events. Gemini's suggestion to centralize capture in the global handler dovetails with Codex's #3 (and is blocked by it — fixing one informs the other).
-10. **Salt persistence race on Windows.** `os.replace` semantics on some Windows environments. Edge case; current tmp+rename pattern is acceptable for v7.10.
-11. **`init_search_api()` not declared idempotent.** Re-mounting on dev-reload could double-register routes.
+4. **XFF rate-limit rule is internally inconsistent across plan text.** The prose, RED tests, and helper definition disagree on the multi-hop case (one example says `client_ip`, another says `hop2.ip`, the helper says "right-most untrusted entry"). For single-nginx deployment "right-most untrusted" is fine, but the contradictions leave the implementation target fuzzy.
+   **Fix scope (Plan 78-01 + 78-02):** pick one rule, propagate to every test and comment. If multi-hop is out of scope, say so and drop the contradictory test/comments.
+
+5. **Soak-test CI story is still inconsistent.** Plan 04 removed the repo-wide `addopts = -m 'not slow'`, but text still claims the new soak tests are "opt-in via `-m slow`." Without the global filter, `tests/test_search_api_soak.py` runs in default `pytest tests/`. The phase needs to either (a) accept that and stop calling it opt-in, or (b) update the CI workflow to add a separate `-m slow` job.
+   **Fix scope (Plan 78-04):** decide explicitly. Recommended: option (b) — update CI in the same plan and document a dedicated slow-test job.
+
+### Codex-Only LOW Concerns
+
+6. **`wrap_endpoint()` is a no-op marker.** The real reusable piece is `_build_envelope_response()`. Phases 79/80 still need to hand-roll `try/except/finally` per endpoint, creating drift risk. *Could* be tightened to actually own the boilerplate, but acceptable for v1.
+
+7. **Route-level localhost tests under-specified.** `test_mode_gate_localhost_only_clean_xff_chain` accepts `200 OR 403`; another test patches `_is_loopback_request` instead of exercising the real integration. Helper-level tests are solid; endpoint-level contract is fuzzy.
+
+8. **Verification commands are Unix-oriented** (`grep`, `awk`) despite stated Windows environment. Execution friction, not a design blocker.
+
+### Gemini-Only LOW Concern
+
+9. **Pydantic schema not exposed to FastAPI/Swagger UI** because the endpoint uses `await request.json()` + manual `model_validate`. Acceptable for an internal helper API; future Phase 82 polish.
 
 ### Divergent Views
-- **Overall risk.** Gemini: LOW (design is conservative; XFF is the only meaningful concern). Codex: HIGH (two structural issues threaten requirement compliance). The divergence is real but resolvable: Gemini's reading is correct *if* Codex's structural fixes land; Codex's reading is correct *as the plans currently stand*. Treating Codex's #3 (global handler scope) and #1 (rate-limit IP source) as blockers gives a converged answer.
-- **The TDD RED strategy** (78-01). Codex flags as LOW process-friction. Gemini does not mention it. Defensible either way; not a phase-blocker.
 
-### Recommendation for `/gsd-plan-phase 78 --reviews`
-Treat as **revision required** before execution. The two HIGH structural concerns (Codex #3 global handler scope, Codex #1 rate-limit client-IP source) must be resolved in the plans before Wave 1 implementation begins. The XFF-sanitization concern (both reviewers, agreed concern #1 above) can be addressed inside Plan 02 Task 1 with a stricter `_is_loopback_request` (require ALL XFF entries loopback; drop the "first hop only" rule). The `shared -> web` dependency inversion (Codex HIGH #4) is also a planning-level fix — moving `APIError` to `shared/api_errors.py` is a one-line decision.
+- **Overall risk.** Gemini APPROVED / LOW; Codex MEDIUM with one HIGH (filter-validation). The pattern matches round 1: Gemini operates at the architectural-pattern level (where the revision is genuinely clean); Codex operates at the requirement-compliance level (where the filter-validation gap directly threatens API-07). Both readings are internally consistent. **Resolution:** treat Codex's HIGH (filter-validation pipeline alignment) as a blocker for round 3; the MEDIUM/LOW items can be folded in alongside.
 
-The remaining MEDIUM/LOW items are pragmatic execution-time fixes that can be folded into the revision pass:
-- RateLimiter eviction (size cap or periodic sweep)
-- Zero-result Responsa warning hoist (move from `results[0]` to a dedicated meta channel)
-- Legacy-validation-failure test (one new test in `test_api_legacy_unchanged.py`)
-- PostHog drop counter (one `_dropped_events: int = 0` field on the queue manager)
-- `pyproject.toml addopts` impact note in CI invocation
+### Recommendation for `/gsd-plan-phase 78 --reviews` (round 3)
+
+Treat as **revision required** before execution, but the surface is much smaller than round 1:
+
+**Required (HIGH + agreed-MED):**
+- Codex HIGH #3 — filter-validation pipeline alignment with `get_filter_sys_ids()`; reject (don't degrade) on missing vocabulary
+- Agreed concern #1 — Responsa thread-local clear on request start + `finally`
+- Agreed concern #2 — `_INITIALIZED_APPS` via `weakref.WeakSet` or `target_app.state`; rate-limiter test-reset path
+
+**Recommended (Codex MEDIUM):**
+- #4 — lock one XFF rule across plan text, RED tests, and comments
+- #5 — decide CI soak-test story explicitly (recommended: update CI workflow in Plan 04)
+
+**Optional (LOW polish):**
+- #6 — make `wrap_endpoint` actually own the boilerplate (or document acceptance of duplication)
+- #7 — tighten route-level localhost tests to deterministic outcomes
+- #8 — Windows-friendly verification command alternates
+- #9 — Pydantic schema docs (defer to Phase 82)
+
+A focused round-3 revision pass should resolve the HIGH and the two agreed MEDs in a single iteration. The rest is polish.
