@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 78 context gathered
-last_updated: "2026-04-28T18:17:09.546Z"
-last_activity: 2026-04-28 -- Phase 78 planning complete
+stopped_at: Phase 78 Plan 01 RED scaffold complete
+last_updated: "2026-04-28T19:00:00.000Z"
+last_activity: 2026-04-28 -- Phase 78 Plan 01 complete (Wave 0 RED scaffold, 82 tests across 3 files, intended RED until Plans 02+03 land)
 progress:
   total_phases: 6
   completed_phases: 1
-  total_plans: 10
-  completed_plans: 6
-  percent: 60
+  total_plans: 11
+  completed_plans: 7
+  percent: 64
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 78 (api-search-hardening-shell) — READY TO EXECUTE
-Plan: 0/4 complete (78-01..78-04 planned + verified)
-Status: Ready to execute
-Last activity: 2026-04-28 -- Phase 78 planning complete
+Phase: 78 (api-search-hardening-shell) — EXECUTING (Plan 01 complete)
+Plan: 1/4 complete (78-01 RED scaffold landed; 78-02..78-04 next)
+Status: Wave 0 RED locked; Plans 02+03 needed to flip CI to GREEN
+Last activity: 2026-04-28 -- Phase 78 Plan 01 complete (3 RED test files, 82 tests)
 
-Progress: [##        ] 17% (1/6 phases complete; Phase 78 0/4 plans, ready to execute; Phase 77 awaiting verify)
+Progress: [##        ] 18% (1/6 phases complete; Phase 78 1/4 plans complete; Phase 77 awaiting verify)
 
 **Phase queue (v7.10):**
 
@@ -41,7 +41,7 @@ Progress: [##        ] 17% (1/6 phases complete; Phase 78 0/4 plans, ready to ex
 5. Phase 81 — Claude Skill Consumer (SKILL-01..03)
 6. Phase 82 — Internal Documentation (DOC-01, DOC-02)
 
-Next step: `/gsd-verify-work 77` to validate phase goal achievement (then `/gsd-ship` for release).
+Next step: `/gsd-execute-phase 78` continues with Plan 78-02 (web/api_hardening.py) and Plan 78-03 (web/search_api.py + filter validator). Plans 02+03 together flip the RED scaffold to GREEN. Phase 77 verify remains queued.
 
 ## Performance Metrics
 
@@ -104,6 +104,14 @@ See PROJECT.md Key Decisions table for full history.
 - Toolbar UX divergence preserved: search-page button is always-enabled (matches existing Excel/Word neighbors); parallels-page button captured into `export_json_btn` with full lifecycle gating (3 wiring sites: `_reset_parallels` line 1942, render-empty line 2659, render-populated line 2667).
 - LOW-01 closed: Hebrew translations `"Export JSON" → "יצוא ל-JSON"` and `"Download JSON" → "הורד JSON"` added adjacent to existing `"Export Word" / "Export Excel"` entries in `genizah_translations.py:1589-1590`.
 
+**Plan 78-01 decisions (2026-04-28):**
+
+- Wave 0 RED scaffold for /api/search + hardening shell. 3 test files, 82 test functions total. All fail at collection time with ModuleNotFoundError on `web.search_api`, `web.api_hardening`, `shared.api_errors` — that is the intended RED state per the plan's `commit_strategy` (CI between Plan 01 commit and Plan 03 commit is expected RED; Phase 78 is not shippable mid-stream by design).
+- Tasks 4 + 5 (round-2 RED appends to test_search_api.py and test_api_hardening.py) bundled into Tasks 1 + 2's single commits per file rather than separate atomic commits, because they are append-only test additions to the same files. All 9 R2 tests are present with correct names; final test counts (40, 39, 3) exceed the plan's targets (≥36, ≥31, ≥3). Process deviation only, not a content deviation.
+- Single content deviation: `from web.api_hardening import APIError as WebReexportedAPIError` exists at tests/test_search_api.py:144 inside test_apierror_imported_from_shared_api_errors_module. The plan's example body explicitly contains this import to assert re-export identity (`A is B`), but the plan's strict acceptance criterion forbids any occurrence. The plan body is load-bearing — the re-export-identity check is a higher-value assertion than absence-only. Rule 1 deviation, fully documented in 78-01-SUMMARY.md.
+- Locked contract names that Plans 02+03 must produce verbatim: `web.search_api.{init_search_api, FiltersModel, SearchRequest, _consume_last_responsa_downgrade}`; `web.api_hardening.{RateLimiter, enforce_mode_gate, wrap_endpoint, _build_envelope_response, _resolve_rate_limit_key, _is_loopback_request, hash_ip, latency_bucket, result_count_bucket, capture_api_event, get_dropped_event_count, LOOPBACK_IPS, ERROR_CODES, RATE_LIMIT_BUCKET_TTL, _event_queue, _TRUSTED_PROXIES, APIError (re-export)}`; `shared.api_errors.APIError`; `shared.fjms_service.{validate_filter_values, is_valid_domain_token, _domain_vocabulary_is_loadable}`; `genizah_core._set_last_responsa_downgrade`.
+- Legacy validation parity test (Concern #2/#8) targets `/sitemap-manuscripts-{chunk}.xml` (typed int path param at web/api.py:283-284) with non-int chunk to drive RequestValidationError; falls back to `/api/cambridge_image/{sys_id}?page=not_an_int` if sitemap returns 404. Either path drives a standard FastAPI 422 `{detail:[...]}` response that Plan 02 must NOT wrap globally.
+
 **Plan 77-05 decisions (2026-04-28):**
 
 - **Field-name collision Rule 1 fix during manual smoke check:** `chunk_hits` field-name collision between Plan 02's list-of-tuples (D-13 Path A) on `lab_composition_search` and the pre-existing int counter on `search_composition_logic` (standard-mode parallels, since 2026-03-12). Both producers wrote to the same per-uid item dict, so the serializer's `_to_parallels_envelope_item` crashed with `'int' object is not iterable` on standard-mode parallels results. Resolved in 4 follow-on commits during smoke verification: `baf481fb` (defensive isinstance guard + logger.exception in JSON handlers), `c24fcc48` (extended standard-mode to mirror Plan 02 list-of-tuples shape; renamed int counter to `chunk_count`; fixed parallels rep-field mapping; +4 tests), `2e2d2b75` (surfaced Tantivy score on search results — was 0.0 because results.append at genizah_core.py:7542+:7559 never recorded score var; per-uid `_chunk_hit_keys` dedup), `327aea31` (group-level dedup keyed on `(chunk_index, manuscript_snippet)` for cross-uid duplicates from NLI multi-uid cataloging like Karaite prayer books; matches[] sorted by chunk_index ascending; +2 tests).
@@ -136,9 +144,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-28T08:19:19.758Z
-Stopped at: Phase 78 context gathered
-Resume file: .planning/phases/78-api-search-hardening-shell/78-CONTEXT.md
+Last session: 2026-04-28T19:00:00.000Z
+Stopped at: Phase 78 Plan 01 complete (RED scaffold)
+Resume file: .planning/phases/78-api-search-hardening-shell/78-02-PLAN.md
 
 ## Performance Metrics — Phase 77
 
@@ -150,3 +158,9 @@ Resume file: .planning/phases/78-api-search-hardening-shell/78-CONTEXT.md
 | 77-04 | ~6 min | 4 | 5 | 20972e66, f8b508de, 2c1fa26c, 01e18602 |
 | 77-04 (smoke fixes) | n/a | 4 | 3 | baf481fb, c24fcc48, 2e2d2b75, 327aea31 (smoke-check follow-on; +7 tests) |
 | 77-05 | 1d (cross-day) | 2 | 2 | db586467 (Task 1 docs), 015b17d5 (Task 2 close-out docs) |
+
+## Performance Metrics — Phase 78
+
+| Plan | Duration | Tasks | Files | Commits |
+|------|----------|-------|-------|---------|
+| 78-01 | ~12 min | 3 (5 logical bundled into 3 commits) | 3 | 9f47025d (test_search_api.py 40 tests), 58d09a3c (test_api_hardening.py 39 tests), 1a38158c (test_api_legacy_unchanged.py 3 tests) |

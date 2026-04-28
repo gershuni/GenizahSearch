@@ -260,7 +260,7 @@ back-nav bugfix.
   5. When the Responsa combinatorial cascade or query-length cap downgrades a query, the response surfaces the adjustment in a top-level `warnings` array (or `query_adjustments`) — never hidden inside the first result item — and a PostHog event fires per request capturing endpoint, mode, latency bucket, result-count bucket, and IP-hash with no payload contents logged.
 **Phase gate**: pytest green, CI green, integration test exercising error envelope + warnings array + mode-flag (open/localhost-only/disabled); explicit soak check sustaining traffic above the per-IP rate limit until 429 + `Retry-After` are observed (per Codex review — covers the rate-limiter end-to-end without a standalone stress phase).
 **Plans:** 4 plans
-- [ ] 78-01-PLAN.md -- Wave 0 RED test scaffold (D-21 + D-23 surface)
+- [x] 78-01-PLAN.md -- Wave 0 RED test scaffold (D-21 + D-23 surface) (complete 2026-04-28; 3 test files, 82 tests, intended RED)
 - [ ] 78-02-PLAN.md -- web/api_hardening.py (RateLimiter, mode gate, error handlers, PostHog server-side capture)
 - [ ] 78-03-PLAN.md -- web/search_api.py (POST /api/search handler + Pydantic models) + shared/fjms_service.validate_filter_values
 - [ ] 78-04-PLAN.md -- bootstrap wiring in web/main.py + soak test + soak script + CLAUDE.md env-vars
