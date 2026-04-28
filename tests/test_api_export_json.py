@@ -62,6 +62,7 @@ def populated_search_state(mock_meta_mgr):
         'current_search_gap': getattr(state, 'current_search_gap', None),
         'last_filters_applied': getattr(state, 'last_filters_applied', None),
         'last_search_warnings': getattr(state, 'last_search_warnings', []),
+        'last_selected_uids': getattr(state, 'last_selected_uids', None),
         'meta_mgr': state.meta_mgr,
     }
     state.meta_mgr = mock_meta_mgr
@@ -78,6 +79,7 @@ def populated_search_state(mock_meta_mgr):
         'full_text': 'lorem ipsum',
         'sort_score': 0.5,
     }]
+    state.last_selected_uids = None
     state.current_search_query = 'foo'
     state.current_search_mode = 'text'
     state.current_search_gap = None
