@@ -12,6 +12,7 @@ A comprehensive search interface with:
 
 from nicegui import ui, run, app
 from web.state import state
+from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h2, h3, h4
 from web.components.filter_panel import (
@@ -2029,6 +2030,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         clear_search_snapshot()
         app.storage.user['search_query'] = ''
         app.storage.user['search_mode'] = 'exact'
+        # Phase 77 gap-closure (Plan 06, Gap #1): mirror the page-scoped
+        # search_state clear into the global state singleton that the FastAPI
+        # export handlers (web/api.py:1816-1955) read from. Plan 01 populated
+        # these fields at execute-time; this reset path was missed in that
+        # plan's coverage. Mirrors the precedent at parallels.py:1959-1962.
+        state.last_results = []
+        state.current_search_query = ''
+        state.current_search_mode = 'exact'
+        state.current_search_gap = None
+        state.last_filters_applied = None
+        state.last_search_warnings = []
+        # Phase 77 gap-closure (Plan 06, Gap #2): drop any uid selection
+        # carried over from the prior search so a new export defaults to
+        # "full result set" (which is now empty — handlers return 400).
+        state.last_selected_uids = None
         ui.notify(tr('Search reset'), type='info', timeout=2000)
 
     # === Bulk Operations ===
@@ -2047,6 +2063,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _display = _apply_measurement_post_filters(search_state.results, search_state)
         render_results(_display)
         update_selection_ui()
+        # Phase 77 gap-closure (Plan 06, Gap #2): mirror the bulk-toggle
+        # selection to the global state singleton so /api/export/* handlers
+        # see the change.
+        state.last_selected_uids = compute_selected_uids(search_state)
 
     def update_selection_ui():
         """Update selection counter and bulk actions visibility."""

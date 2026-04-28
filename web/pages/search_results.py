@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from nicegui import ui, run, app
 from web.state import state
+from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.components.filter_panel import persist_value
@@ -365,6 +366,10 @@ def create_result_card(search_state, refs, index, result):
                     else:
                         search_state.selected_indices.discard(idx)
                     refs.update_selection_ui()
+                    # Phase 77 gap-closure (Plan 06, Gap #2): mirror the per-row
+                    # selection change to the global state singleton so
+                    # /api/export/* handlers see the change.
+                    state.last_selected_uids = compute_selected_uids(search_state)
 
                 result_checkbox = ui.checkbox(
                     value=index in search_state.selected_indices,
