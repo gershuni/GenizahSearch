@@ -358,13 +358,19 @@ class TestSearchCompositionLogicStaticContract:
             "doc_hits must init chunk_hits as a list (parallel to "
             "lab_composition_search at line 1366)"
         )
-        # The per-chunk loop appends a 4-tuple
+        # The per-chunk loop appends a 4-tuple (now wrapped in dedup logic)
         assert "rec['chunk_hits'].append(" in src, (
             "search_composition_logic per-chunk loop must append to chunk_hits"
         )
-        # The shape mirrors lab_composition_search
-        assert "(i, ' '.join(chunk), float(score), ms_snip)" in src, (
+        # The shape mirrors lab_composition_search: (chunk_index, chunk_text, score, snippet).
+        # _new_score is the inlined float(score) the dedup helper reuses.
+        assert "(i, ' '.join(chunk), _new_score, ms_snip)" in src, (
             "chunk_hits tuple must use shape (chunk_index, chunk_text, score, snippet)"
+        )
+        # Dedup is in place — same (chunk_index, snippet) doesn't double-emit.
+        assert "_chunk_hit_keys" in src, (
+            "Per-rec dedup map (_chunk_hit_keys) must guard against duplicate "
+            "Tantivy segments returning the same uid"
         )
 
     def test_chunk_hits_surfaced_on_returned_items_in_standard_mode(self):

@@ -1387,7 +1387,17 @@ class LabEngine:
                             # i is the 0-based chunk index from the outer enumerate(chunks_data) loop.
                             # The manuscript snippet is the same substring used for ms_matches.
                             ms_snip = content[matches[start_m]['start']:matches[end_m]['end']]
-                            rec['chunk_hits'].append((i, chunk_text, match_score, ms_snip))
+                            # Dedup: same (chunk_index, ms_snip) can arise from
+                            # multiple Tantivy segments returning the same uid.
+                            # Keep the highest-scoring entry per key.
+                            _seen = rec.setdefault('_chunk_hit_keys', {})
+                            _key = (i, ms_snip)
+                            _existing_idx = _seen.get(_key)
+                            if _existing_idx is None:
+                                _seen[_key] = len(rec['chunk_hits'])
+                                rec['chunk_hits'].append((i, chunk_text, match_score, ms_snip))
+                            elif match_score > rec['chunk_hits'][_existing_idx][2]:
+                                rec['chunk_hits'][_existing_idx] = (i, chunk_text, match_score, ms_snip)
                     except (KeyError, IndexError, TypeError): pass
         except InterruptedError:
             was_interrupted = True
@@ -7549,7 +7559,10 @@ class SearchEngine:
                             'highlight_pattern': pattern_str,
                             'page_highlights': page_highlights,
                             'cross_page': span_map.get('cross_page', False),
-                            'scope': scope
+                            'scope': scope,
+                            # Phase 77 D-01: surface Tantivy relevance score so
+                            # serialize_search_payload emits non-zero scores.
+                            'score': float(score),
                         })
                     else:
                         hl_c = self.highlight(content, regex, False)
@@ -7560,7 +7573,9 @@ class SearchEngine:
                                 'display': meta, 'snippet': hl_c, 'full_text': content,
                                 'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
                                 'raw_file_hl': hl_f, 'highlight_pattern': pattern_str,
-                                'scope': scope
+                                'scope': scope,
+                                # Phase 77 D-01: Tantivy relevance score for JSON.
+                                'score': float(score),
                             })
                 except Exception as e:
                     LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
@@ -7756,9 +7771,22 @@ class SearchEngine:
                                 ms_snip = content[_snip_s:_ms_s] + f"*{content[_ms_s:_ms_e]}*" + content[_ms_e:_snip_e]
                             except Exception:
                                 ms_snip = ''
-                            rec['chunk_hits'].append(
-                                (i, ' '.join(chunk), float(score), ms_snip)
-                            )
+                            # Dedup: Tantivy can return the same uid twice from
+                            # different segments — keep the highest-scoring entry
+                            # per (chunk_index, ms_snip) instead of appending duplicates.
+                            _seen = rec.setdefault('_chunk_hit_keys', {})
+                            _key = (i, ms_snip)
+                            _existing_idx = _seen.get(_key)
+                            _new_score = float(score)
+                            if _existing_idx is None:
+                                _seen[_key] = len(rec['chunk_hits'])
+                                rec['chunk_hits'].append(
+                                    (i, ' '.join(chunk), _new_score, ms_snip)
+                                )
+                            elif _new_score > rec['chunk_hits'][_existing_idx][2]:
+                                rec['chunk_hits'][_existing_idx] = (
+                                    i, ' '.join(chunk), _new_score, ms_snip
+                                )
 
                             # Track boundary-crossing matches - each boundary counted once
                             if chunk_crossed_bounds:
