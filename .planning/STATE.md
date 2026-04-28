@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
-status: executing
-stopped_at: Plan 77-06 (gap-closure) complete; Phase 77 6/6 plans done; ready for /gsd-verify-work (1213 passed / 8 skipped)
-last_updated: "2026-04-28T08:30:00Z"
-last_activity: 2026-04-28 -- Plan 77-06 gap-closure complete; closes UAT gaps #1 (New Search not clearing export envelope state) and #2 (exports ignoring row-checkbox selection, pre-existing OPEN_ISSUES L81); added AppState.last_selected_uids field + compute_selected_uids helper, mirrored from 3 callsites, filtered all 3 search-side export handlers (parallels handlers untouched), filename gets -selected-N suffix when filtered; +12 regression tests (1201→1213); 6 new commits (8a95cf9d, 4944880c, d5f603b5, 55543316, ff620251, 7f93b7eb); cumulative Phase 77 commits: 26
+status: verifying
+stopped_at: Phase 78 context gathered
+last_updated: "2026-04-28T08:19:19.763Z"
+last_activity: "2026-04-28 -- Plan 77-06 gap-closure complete; closes Gap #1 (New Search not clearing export envelope state) + Gap #2 (exports ignoring row-checkbox selection, pre-existing OPEN_ISSUES L81); 6 new commits (8a95cf9d, 4944880c, d5f603b5, 55543316, ff620251, 7f93b7eb); test count 1201→1213 (+12 regression tests); all 4 grep invariants confirmed; OPEN_ISSUES L81 flipped to ✅ Fixed; cumulative Phase 77 commits: 26"
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
   completed_plans: 6
-  percent: 17
+  percent: 100
 ---
 
 # Project State
@@ -136,9 +136,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-28T07:05:00Z
-Stopped at: Plan 77-05 complete; Phase 77 ready for /gsd-verify-work (5/5 plans complete; 1201 passed / 8 skipped; cumulative phase commits: 20)
-Resume file: None — orchestrator should display phase-complete banner and offer /gsd-verify-work 77 as next step
+Last session: 2026-04-28T08:19:19.758Z
+Stopped at: Phase 78 context gathered
+Resume file: .planning/phases/78-api-search-hardening-shell/78-CONTEXT.md
 
 ## Performance Metrics — Phase 77
 
