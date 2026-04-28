@@ -39,3 +39,22 @@ jobs:
       # pytest and ruff are CI-only dev tools, not runtime deps
       - run: pip install pytest
       - run: pytest tests/
+
+  slow-tests:
+    needs: lint-and-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Qt runtime deps
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      # R2-#5 (78-REVIEWS.md): dedicated slow-tests gate. Runs Phase 78 soak tests
+      # plus any other @pytest.mark.slow tests. Concern #7 preserved: the default
+      # `tests` job above continues to run `pytest tests/` (no addopts filter), so
+      # the existing tests/e2e/test_performance.py also runs there. This job is
+      # ADDITIONAL coverage, NOT a replacement.
+      - run: pytest -m slow tests/
