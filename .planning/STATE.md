@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
-status: verifying
-stopped_at: Phase 78 context gathered
-last_updated: "2026-04-28T08:19:19.763Z"
-last_activity: "2026-04-28 -- Plan 77-06 gap-closure complete; closes Gap #1 (New Search not clearing export envelope state) + Gap #2 (exports ignoring row-checkbox selection, pre-existing OPEN_ISSUES L81); 6 new commits (8a95cf9d, 4944880c, d5f603b5, 55543316, ff620251, 7f93b7eb); test count 1201→1213 (+12 regression tests); all 4 grep invariants confirmed; OPEN_ISSUES L81 flipped to ✅ Fixed; cumulative Phase 77 commits: 26"
+status: ready_to_execute
+stopped_at: Phase 78 planned (4 plans, 4 waves) — ready for /gsd-execute-phase 78
+last_updated: "2026-04-28T12:00:00.000Z"
+last_activity: "2026-04-28 -- Phase 78 planned: 4 plans (78-01..78-04) covering 11 tasks across 4 waves. Coverage: API-01,04,05,06,07 + HARDEN-01..05 (10/10). All 24 CONTEXT decisions mapped. Plan-checker: VERIFICATION PASSED on iteration 2 after revising 4 blockers + 5 warnings. Pattern map produced via gsd-pattern-mapper before planning. Research skipped (CONTEXT.md exceptionally detailed; external Codex review provided what research would surface)."
 progress:
   total_phases: 6
   completed_phases: 1
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 77 (serializer-json-export) — READY FOR VERIFY (gap-closure done)
-Plan: 6/6 complete (77-01..77-05 + 77-06 gap-closure)
-Status: Phase 77 fully closed-out including UAT gap-closure; awaiting /gsd-verify-work 77
-Last activity: 2026-04-28 -- Plan 77-06 gap-closure complete; closes Gap #1 (New Search not clearing export envelope state) + Gap #2 (exports ignoring row-checkbox selection, pre-existing OPEN_ISSUES L81); 6 new commits (8a95cf9d, 4944880c, d5f603b5, 55543316, ff620251, 7f93b7eb); test count 1201→1213 (+12 regression tests); all 4 grep invariants confirmed; OPEN_ISSUES L81 flipped to ✅ Fixed; cumulative Phase 77 commits: 26
+Phase: 78 (api-search-hardening-shell) — READY TO EXECUTE
+Plan: 0/4 complete (78-01..78-04 planned + verified)
+Status: Phase 78 plans created and plan-checker passed (iteration 2). Awaiting /gsd-execute-phase 78. Phase 77 is in parallel state (6/6 complete, awaiting /gsd-verify-work 77).
+Last activity: 2026-04-28 -- Phase 78 planned: 4 plans, 11 tasks, 4 waves. Coverage 10/10 reqs (API-01,04,05,06,07 + HARDEN-01..05). All 24 CONTEXT decisions mapped. Plan-checker: VERIFICATION PASSED on iteration 2 after revising 4 blockers + 5 warnings (call-site grep precision, fixed-string route grep, single canonical empty-set branch with execute_search-not-called test, pyproject.toml for default soak exclusion, verified FJMS keys against shared/fjms_service.py, finally-block locals captured pre-raise instead of sys.exc_info).
 
-Progress: [##        ] 17% (0/6 phases complete; 6/6 Phase 77 plans complete; phase ready for verify)
+Progress: [##        ] 17% (1/6 phases complete; Phase 78 0/4 plans, ready to execute; Phase 77 awaiting verify)
 
 **Phase queue (v7.10):**
 
