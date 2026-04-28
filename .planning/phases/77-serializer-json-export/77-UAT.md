@@ -1,5 +1,5 @@
 ---
-status: passed
+status: complete
 phase: 77-serializer-json-export
 source: [77-01-SUMMARY.md, 77-02-SUMMARY.md, 77-03-SUMMARY.md, 77-04-SUMMARY.md, 77-05-SUMMARY.md, 77-06-SUMMARY.md]
 started: 2026-04-28
