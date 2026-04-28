@@ -1,6 +1,6 @@
 # Codebase Index
 
-> Last updated: 2026-04-27
+> Last updated: 2026-04-28
 
 Auto-generated index of classes and methods. New sections for modules can be
 appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
@@ -1520,10 +1520,13 @@ Phase 77 single-source-of-truth serializer for the "Claude-friendly JSON" payloa
 - **Function** `_build_image_url` — server-relative `/api/nli_image_by_sysid/{sys_id}?page={p_num-1}` or null when library_code not in whitelist (HIGH-07)
 - **Function** `_safe_library_name` — graceful-degrade lookup via `genizah_core.get_library_display`
 - **Function** `_safe_fjms_lookups` — graceful FJMS singleton consumer; **does NOT call .close()** (HIGH-05; close is reserved for `reset_fjms_service()`)
-- **Function** `_group_parallels_by_sys_id`, `_to_parallels_envelope_item` — D-13 Path A grouping
+- **Function** `_group_parallels_by_sys_id`, `_to_parallels_envelope_item` — D-13 Path A grouping; per Plan 05 smoke-check fixes (commits `c24fcc48`, `327aea31`): rep-field mapping uses `synth['snippet']` / `synth['full_text']` so parallels items get populated `snippet`/`excerpt`/`match_terms`, AND group-level dedup keyed on `(chunk_index, manuscript_snippet)` collapses cross-uid duplicates that NLI's multi-uid cataloging emits (e.g. Karaite prayer books with multiple Alma uids on one sys_id) — highest-scoring entry wins, matches[] then sorted by `chunk_index` ascending for stable output. The `for ch_idx, src_text, score, ms_snippet in item.get('chunk_hits', [])` loop is wrapped in `isinstance(chunk_hits, list)` guard (commit `baf481fb`) so future shape regressions fall back to Path B (single degenerate match) instead of crashing
 - **Function** `_filename_timestamp_with_ms`, `_utc_iso_now` — separate concerns: filename ms+counter vs envelope second-resolution
 
-Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /api/export/parallels/json` (Line ~1957). Future Phase 78 `POST /api/search` and Phase 80 `POST /api/parallels` inherit the same envelope/item shape via the same imports.
+**Companion shape contract in `genizah_core.py` (Plan 02 + Plan 05 smoke-check):**
+- Both `lab_composition_search` (lab path, Plan 02 commit `6ebefb71`) AND `search_composition_logic` (standard path, Plan 05 commit `c24fcc48`) now populate per-uid `chunk_hits` as a list-of-tuples `[(chunk_index_0_based, source_chunk_text, match_score, manuscript_snippet), ...]` consumed by `_to_parallels_envelope_item`. The pre-existing int counter on the standard path was renamed `chunk_count` to free the field name (avoid future collisions). Both paths apply per-uid `_chunk_hit_keys` dedup (commit `2e2d2b75`) so the same Tantivy uid does not emit duplicate (chunk_index, ms_snippet) entries when returned from multiple segments. Search results in `search_text_tantivy` (genizah_core.py:7542 + :7559) now record the `score` variable into the result dict so JSON exports carry the Tantivy relevance score (was always 0.0 prior to commit `2e2d2b75`).
+
+Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /api/export/parallels/json` (Line ~1957) — both upgraded to `logger.exception` (was `logger.error`) per Plan 05 smoke-check commit `baf481fb` so future serializer crashes surface stack traces in production logs. Future Phase 78 `POST /api/search` and Phase 80 `POST /api/parallels` inherit the same envelope/item shape via the same imports.
 
 
 ---
