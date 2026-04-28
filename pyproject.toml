@@ -1,0 +1,15 @@
+[tool.pytest.ini_options]
+# Phase 78 (Concern #7 fix): register the `slow` marker so --strict-markers tooling
+# accepts @pytest.mark.slow without UnknownMark warnings.
+#
+# DELIBERATELY OMITTED: a repo-wide default-exclude addopts filter. Adding one
+# would silently exclude slow tests for every developer + CI invocation, which
+# changes behavior for tests/e2e/test_performance.py and any future slow tests
+# unrelated to Phase 78.
+#
+# Run slow tests explicitly with:  pytest -m slow tests/test_search_api_soak.py
+# See tests/README.md for full slow-test invocation documentation.
+markers = [
+    "slow: marks tests as slow; run with `pytest -m slow`",
+    "e2e: marks tests requiring Selenium/ChromeDriver (paired with slow)",
+]
