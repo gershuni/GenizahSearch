@@ -1819,12 +1819,30 @@ def init_api_routes(app_override=None):
         if not state.last_results:
             return Response("No results to export", status_code=400)
 
+        # Phase 77 gap-closure (Plan 06, Gap #2): honor row-checkbox selection.
+        # The selection-uid field is None when no selection (export all);
+        # non-empty list when user has checked specific rows. Empty list `[]`
+        # is treated as None defensively (helper never produces it, but a
+        # future regression that sets it shouldn't silently emit zero rows).
+        _sel = state.last_selected_uids
+        if _sel:
+            _sel_set = set(_sel)
+            _results = [r for r in state.last_results if r.get('uid', '') in _sel_set]
+        else:
+            _results = state.last_results
+
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_search_results_excel(
-                state.last_results,
+                _results,
                 state.current_search_query or ""
             )
+            # Phase 77 gap-closure (Plan 06, Gap #2): suffix filename when filtered
+            # by selection so full vs. partial exports disambiguate at the OS level.
+            if _sel and len(_results) < len(state.last_results):
+                # filename ends in '.xlsx' — splice the suffix before the dot.
+                root, _, ext = filename.rpartition('.')
+                filename = f"{root}-selected-{len(_results)}.{ext}" if root else filename
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1842,12 +1860,24 @@ def init_api_routes(app_override=None):
         if not state.last_results:
             return Response("No results to export", status_code=400)
 
+        # Phase 77 gap-closure (Plan 06, Gap #2): honor row-checkbox selection.
+        _sel = state.last_selected_uids
+        if _sel:
+            _sel_set = set(_sel)
+            _results = [r for r in state.last_results if r.get('uid', '') in _sel_set]
+        else:
+            _results = state.last_results
+
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_search_results_word(
-                state.last_results,
+                _results,
                 state.current_search_query or ""
             )
+            # Phase 77 gap-closure (Plan 06, Gap #2): suffix filename when filtered.
+            if _sel and len(_results) < len(state.last_results):
+                root, _, ext = filename.rpartition('.')
+                filename = f"{root}-selected-{len(_results)}.{ext}" if root else filename
             return Response(
                 content=content,
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1933,9 +1963,17 @@ def init_api_routes(app_override=None):
         if not state.last_results:
             return Response("No results to export", status_code=400)
 
+        # Phase 77 gap-closure (Plan 06, Gap #2): honor row-checkbox selection.
+        _sel = state.last_selected_uids
+        if _sel:
+            _sel_set = set(_sel)
+            _results = [r for r in state.last_results if r.get('uid', '') in _sel_set]
+        else:
+            _results = state.last_results
+
         try:
             payload = serialize_search_payload(
-                state.last_results,
+                _results,
                 meta_mgr=state.meta_mgr,
                 query=getattr(state, 'current_search_query', '') or '',
                 mode=getattr(state, 'current_search_mode', 'text') or 'text',
@@ -1944,6 +1982,10 @@ def init_api_routes(app_override=None):
                 warnings=getattr(state, 'last_search_warnings', None) or [],
             )
             filename = build_search_filename()
+            # Phase 77 gap-closure (Plan 06, Gap #2): suffix filename when filtered.
+            if _sel and len(_results) < len(state.last_results):
+                root, _, ext = filename.rpartition('.')
+                filename = f"{root}-selected-{len(_results)}.{ext}" if root else filename
             return JSONResponse(
                 payload,
                 headers={"Content-Disposition": encode_filename_for_header(filename)}
