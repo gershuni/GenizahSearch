@@ -1,7 +1,7 @@
 ---
-status: partial
+status: passed
 phase: 77-serializer-json-export
-source: [77-01-SUMMARY.md, 77-02-SUMMARY.md, 77-03-SUMMARY.md, 77-04-SUMMARY.md, 77-05-SUMMARY.md]
+source: [77-01-SUMMARY.md, 77-02-SUMMARY.md, 77-03-SUMMARY.md, 77-04-SUMMARY.md, 77-05-SUMMARY.md, 77-06-SUMMARY.md]
 started: 2026-04-28
 updated: 2026-04-28
 ---
@@ -9,7 +9,7 @@ updated: 2026-04-28
 ## Current Test
 <!-- OVERWRITE each test - shows where we are -->
 
-[testing complete — 2 issues recorded; awaiting diagnosis + gap-closure planning]
+[testing complete — Tests 8 + 9 fixed by Plan 06 gap-closure (commits 8a95cf9d..7f93b7eb); manual smoke 2026-04-28 confirmed both gaps resolved on /search JSON + xlsx; Test 6 covered programmatically by `test_reset_clears_global_state_then_export_returns_400` in `tests/test_export_state_selection.py`; Test 7 baseline now 1213 passed / 8 skipped (was 1201 → +12 regression tests from Plan 06)]
 
 ## Tests
 
@@ -39,39 +39,40 @@ result: pass
 ### 6. Empty-state guards
 expected: |
   GET /api/export/json before any search has run → 400 with body "No results to export". GET /api/export/parallels/json before any parallels search has run → 400 with body "No parallels results to export". (Or, if accessed via UI buttons: search-page button is always-enabled but returns 400 cleanly when nothing's been searched; parallels button stays disabled so the path isn't reachable from UI in the empty case.)
-result: skipped
-reason: "Couldn't be tested because of bug in test 8 — state pollution from previous search prevented exercising the empty-state path via the search UI"
+result: pass
+notes: "Originally skipped because Test 8 state pollution blocked the empty-state path. Plan 06 closed Gap #1, and the empty-state behavior is now covered programmatically by `tests/test_export_state_selection.py::test_reset_clears_global_state_then_export_returns_400` (Plan 06 commit 55543316) — exercises the exact 7-assignment block `_reset_search` runs and asserts the follow-up `/api/export/json` GET returns 400 with body 'No results to export'."
 
 ### 7. pytest baseline
 expected: `python -m pytest tests/` returns 1201 passed, 8 skipped (started Phase 77 at 1162 + 39 new tests across the 5 plans). Zero failures, zero new skips.
-result: skipped
-reason: "Did not run during this UAT session"
+result: pass
+notes: "Final baseline: 1213 passed / 8 skipped (was 1162 at phase start → +51 new tests across the 6 plans, +12 from Plan 06 gap-closure). Confirmed 2026-04-28 by gsd-executor and independent spot-check."
 
 ### 8. New Search button clears export state on /search
 expected: After clicking "New Search" on /search, subsequent Excel/Word/JSON exports return the cleared/empty state (or 400), NOT the previous search's results. Envelope-echo state (state.last_results, state.current_search_query, state.last_filters_applied, state.last_search_warnings) must be cleared at the New-Search reset path — Plan 01 covered 5 execute-time sites but the New-Search reset was not one of them.
-result: issue
-reported: "I clicked 'new search' and the exports still export the old search"
-severity: major
+result: pass
+fixed_by: "Plan 06 (commit 4944880c) — `_reset_search` now mirrors 7 fields (6 envelope-echo + last_selected_uids) into the global state singleton at the end of the function, mirroring the precedent at parallels.py:1959-1962."
+verified: "Manual smoke 2026-04-28 (user confirmed); regression coverage in `tests/test_export_state_selection.py::test_reset_clears_global_state_then_export_returns_400`."
 
 ### 9. Export honors row checkbox selection (pre-existing P2 from Phase 75)
 expected: When one or more result rows are checked on /search, Export (Excel/Word/JSON) emits ONLY the checked rows, not the entire current result set. Currently exports emit the full list regardless of checkbox state.
-result: issue
-reported: "old bug (see OPEN_ISSUES.md) that checked results are not the only ones being exported but all results always"
-severity: major
-notes: "Documented in docs/OPEN_ISSUES.md line 81 as ❌ Open — Surfaced 2026-04-17 during Phase 75 walkthrough (surface 1 item e), confirmed pre-existing on live website, NOT a v7.9 decomposition regression. Phase 77's new JSON export inherits the same bug because all three handlers (Excel/Word/JSON) read from state.last_results which holds the full result set, ignoring per-row checkbox selection. Fix should land at the export-handler layer in web/api.py and apply to all three formats uniformly."
+result: pass
+fixed_by: "Plan 06 (commits 8a95cf9d → d5f603b5) — new `AppState.last_selected_uids` field + `compute_selected_uids` helper mirrored from `toggle_select_all`, `toggle_card_selection`, and `_reset_search`. All 3 search-side handlers in `web/api.py` filter `state.last_results` by uid when `state.last_selected_uids` is truthy; filename gets `-selected-N` suffix when filtered."
+verified: "Manual smoke 2026-04-28 (user verified JSON + xlsx with 1-of-2 selection — count flipped from 2 to 1 with only the JTS Ms. 2922 row in the filtered file); 8 regression tests in `tests/test_export_state_selection.py` cover all 3 formats × 3 selection scenarios + filename-suffix invariants."
+notes: "Pre-existing OPEN_ISSUES.md L81 issue (Surfaced 2026-04-17 during Phase 75 walkthrough, confirmed pre-existing on live website, NOT a v7.9 decomposition regression). OPEN_ISSUES.md line 81 flipped to ✅ Fixed (2026-04-28) in commit ff620251."
 
 ## Summary
 
 total: 9
-passed: 5
-issues: 2
+passed: 9
+issues: 0
 pending: 0
-skipped: 2
+skipped: 0
 
 ## Gaps
 
 - truth: "After New Search on /search, subsequent exports return cleared state, not previous search's data"
-  status: failed
+  status: resolved
+  resolved_by: "Plan 06 commit 4944880c (2026-04-28); manual smoke verified by user 2026-04-28"
   reason: "User reported: I clicked 'new search' and the exports still export the old search"
   severity: major
   test: 8
@@ -87,7 +88,8 @@ skipped: 2
     - "Add a regression test in tests/ that exercises the reset path: run a search → assert state.last_results populated → call _reset_search → assert state.last_results == [] and the 5 envelope-echo fields are at their default values"
 
 - truth: "Export honors row checkbox selection — checked rows only, not full list"
-  status: failed
+  status: resolved
+  resolved_by: "Plan 06 commits 8a95cf9d → d5f603b5 (2026-04-28); manual smoke verified by user 2026-04-28 (JSON + xlsx); OPEN_ISSUES.md L81 flipped to ✅ Fixed"
   reason: "User reported pre-existing OPEN_ISSUES.md line 81 bug — checked results are not the only ones being exported, all results always"
   severity: major
   test: 9
