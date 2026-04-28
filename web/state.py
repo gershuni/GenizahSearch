@@ -34,6 +34,12 @@ class AppState:
         self.current_search_gap: Optional[int] = None
         self.last_filters_applied: Optional[Dict[str, Any]] = None
         self.last_search_warnings: List[str] = []
+        # Phase 77 gap-closure (Plan 06): per-row checkbox selection mirrored from
+        # SearchUIState.selected_indices. None means "no selection — export full
+        # state.last_results". Non-empty list means "filter state.last_results by
+        # these uids in the export handlers". Empty list `[]` is treated as None
+        # by the handlers (defensive — see web/api.py export handlers).
+        self.last_selected_uids: Optional[List[str]] = None
 
         # Parallels results (for export functionality)
         self.parallels_results: List[Dict[str, Any]] = []
