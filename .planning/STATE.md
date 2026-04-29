@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 79 context locked after Codex external review (10 revisions applied)
-last_updated: "2026-04-29T02:00:00.000Z"
-last_activity: 2026-04-29 -- Phase 79 Codex review APPLIED (R-01..R-10): 5 pushback items + 5 affirming refinements adopted into CONTEXT.md. Decisions LOCKED. Ready for /gsd-plan-phase 79.
+stopped_at: Phase 78 Plan 03 complete (POST /api/search end-to-end GREEN; 82/82 Phase 78 tests; 1295 passed in wider suite)
+last_updated: "2026-04-29T14:07:33.626Z"
+last_activity: 2026-04-29 -- Phase 79 planning complete
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 11
+  total_plans: 14
   completed_plans: 10
-  percent: 91
+  percent: 71
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 Phase: 79 (api-browse-drill-down) — CONTEXT LOCKED (Codex review applied)
 Plan: 0/0 — context phase done; planning next
-Status: 79-CONTEXT.md locked. Codex CLI external review applied 2026-04-29 (R-01..R-10): 5 pushback items + 5 affirming refinements adopted. 79-REVIEWS.md captures full response. Affirmed: sys_id required, library-aware image picker, graceful degrade, separate per-IP buckets, namespaced metadata grouping. Revised: 1s enrichment timeout, NEW core-fetch timeout, no-silent-conflict locator validation, post-resolution uid verify, fl_id in response locator, sources[] kind+fl_id+folio_label, sources[] may be [], strict null-or-stable metadata shape, ?text_cap override with 10000 ceiling, operational notes on executor starvation + per-IP doubling.
-Last activity: 2026-04-29 -- Phase 79 Codex review applied; decisions locked
+Status: Ready to execute
+Last activity: 2026-04-29 -- Phase 79 planning complete
 
 Progress: [#####     ] 50% (2/6 phases complete; Phase 79 ready to plan; Phase 77 still awaiting verify)
 
