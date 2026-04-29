@@ -275,7 +275,11 @@ back-nav bugfix.
   3. The endpoint is stateless: identical query strings produce identical bodies regardless of `app.storage.user`, refinement chain, or any prior UI action; image URLs continue to be served (not inlined) and degrade gracefully when NLI is unavailable rather than failing the whole response.
   4. Rate limiting, mode gating, error envelope, and PostHog observability inherited from Phase 78 apply identically; existing `/api/*` image-proxy and puzzle routes are unchanged on spot-check.
 **Phase gate**: pytest green, CI green, locator round-trip test against single-IE and multi-IE manuscripts; closes the locator obligation that begins in Phase 77 (export embeds locator) → Phase 78 (search emits locator) → Phase 79 (browse consumes locator).
-**Plans**: TBD
+**Plans:** 4 plans
+- [ ] 79-01-PLAN.md -- Foundation: extend api_errors ERROR_CODES + serialize_browse_payload skeleton + CLAUDE.md env vars
+- [ ] 79-02-PLAN.md -- shared/browse_service.py: pure-data enrichment fan-out (D-23 extraction)
+- [ ] 79-03-PLAN.md -- web/search_api.py: GET /api/browse handler + BrowseRequest model + separate rate-limit bucket
+- [ ] 79-04-PLAN.md -- tests/test_browse_api.py + tests/test_api_legacy_unchanged.py extension
 
 ### Phase 80: /api/parallels
 **Goal**: `POST /api/parallels` exposes the composition/parallels pipeline through the same payload, locator, error-envelope, and hardening conventions as `/api/search`. Sequenced after `/api/browse` so the locator round-trip is already validated end-to-end before a second producer emits the same contract.
@@ -320,7 +324,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 |-------|----------------|--------|-----------|
 | 77. Serializer & JSON Export | 5/5 | Ready for /gsd-verify-work (2026-04-28) | - |
 | 78. /api/search + Hardening Shell | 3/4 | Plan 03 GREEN (2026-04-28; 82 tests across the 3 Phase 78 test files) | - |
-| 79. /api/browse Drill-Down | 0/0 | Not started | - |
+| 79. /api/browse Drill-Down | 0/4 | Planned (2026-04-29) | - |
 | 80. /api/parallels | 0/0 | Not started | - |
 | 81. Claude Skill Consumer | 0/0 | Not started | - |
 | 82. Internal Documentation | 0/0 | Not started | - |
