@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 79 context gathered (27 decisions, 6 Codex open questions)
-last_updated: "2026-04-29T01:00:00.000Z"
-last_activity: 2026-04-29 -- Phase 79 CONTEXT.md captured (locator resolution, response shape, image URLs, enrichment latency); Codex external review queued per Phase 78 precedent
+stopped_at: Phase 79 context locked after Codex external review (10 revisions applied)
+last_updated: "2026-04-29T02:00:00.000Z"
+last_activity: 2026-04-29 -- Phase 79 Codex review APPLIED (R-01..R-10): 5 pushback items + 5 affirming refinements adopted into CONTEXT.md. Decisions LOCKED. Ready for /gsd-plan-phase 79.
 progress:
   total_phases: 6
   completed_phases: 2
@@ -25,14 +25,14 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 79 (api-browse-drill-down) — CONTEXT CAPTURED (27 decisions, Codex review queued)
-Plan: 0/0 — context phase only; planning next
-Status: 79-CONTEXT.md committed; 6 open questions awaiting external Codex review per Phase 78 precedent. Decisions provisional until Codex round.
-Last activity: 2026-04-29 -- Phase 79 discuss complete (locator resolution, response shape, image URLs, enrichment latency)
+Phase: 79 (api-browse-drill-down) — CONTEXT LOCKED (Codex review applied)
+Plan: 0/0 — context phase done; planning next
+Status: 79-CONTEXT.md locked. Codex CLI external review applied 2026-04-29 (R-01..R-10): 5 pushback items + 5 affirming refinements adopted. 79-REVIEWS.md captures full response. Affirmed: sys_id required, library-aware image picker, graceful degrade, separate per-IP buckets, namespaced metadata grouping. Revised: 1s enrichment timeout, NEW core-fetch timeout, no-silent-conflict locator validation, post-resolution uid verify, fl_id in response locator, sources[] kind+fl_id+folio_label, sources[] may be [], strict null-or-stable metadata shape, ?text_cap override with 10000 ceiling, operational notes on executor starvation + per-IP doubling.
+Last activity: 2026-04-29 -- Phase 79 Codex review applied; decisions locked
 
-Progress: [#####     ] 50% (2/6 phases complete; Phase 79 in planning lead-up; Phase 77 still awaiting verify)
+Progress: [#####     ] 50% (2/6 phases complete; Phase 79 ready to plan; Phase 77 still awaiting verify)
 
-Next step: Run Codex external review on the 6 open questions in `.planning/phases/79-api-browse-drill-down/79-CONTEXT.md`, apply recommendations, then `/gsd-plan-phase 79`. Or skip Codex and `/gsd-plan-phase 79` directly to lock the recommended choices.
+Next step: `/gsd-plan-phase 79` — break Phase 79 into plans grounded in the locked CONTEXT.md.
 
 **Phase queue (v7.10):**
 
