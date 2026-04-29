@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 78 Plan 03 complete (POST /api/search end-to-end GREEN)
-last_updated: "2026-04-28T20:30:00.000Z"
-last_activity: 2026-04-28 -- Phase 78 Plan 03 complete (web/search_api.py 373 lines + shared/fjms_service validate_filter_values fail-closed rewrite + genizah_core.py thread-local cascade signal; 82/82 Phase 78 tests GREEN, 1295 passed in wider suite; Plan 04 owns wiring init_search_api into web/main.py + soak test)
+stopped_at: Phase 78 plans complete (4/4) — awaiting verifier
+last_updated: "2026-04-29T00:00:00.000Z"
+last_activity: 2026-04-29 -- Phase 78 Plan 04 complete (web/main.py wires init_search_api after init_api_routes; tests/test_search_api_soak.py 3 @pytest.mark.slow tests; scripts/soak_search_api.py CLI; pyproject.toml registers slow+e2e markers WITHOUT addopts default-exclude per Concern #7; tests/README.md documents pytest -m slow invocation; CLAUDE.md +4 env vars; .github/workflows/ci.yml adds slow-tests job per R2-#5; all Phase 78 tests GREEN, default tests job behavior preserved at CI level)
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 11
-  completed_plans: 9
-  percent: 82
+  completed_plans: 10
+  percent: 91
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 78 (api-search-hardening-shell) — EXECUTING (Plans 01+02+03 complete)
-Plan: 3/4 complete (78-01 RED scaffold + 78-02 hardening shell GREEN + 78-03 POST /api/search GREEN; 78-04 next)
-Status: POST /api/search end-to-end GREEN (82/82 Phase 78 tests; 1295 passed in wider suite); Plan 04 owns wiring init_search_api into web/main.py + soak test
-Last activity: 2026-04-28 -- Phase 78 Plan 03 complete (web/search_api.py 373 lines + shared/fjms_service validate_filter_values fail-closed rewrite + genizah_core.py thread-local cascade signal)
+Phase: 78 (api-search-hardening-shell) — ALL PLANS COMPLETE (4/4); awaiting verifier
+Plan: 4/4 complete (78-01 RED scaffold + 78-02 hardening shell GREEN + 78-03 POST /api/search GREEN + 78-04 wiring + soak)
+Status: POST /api/search wired into web/main.py; soak suite registered (3 @pytest.mark.slow tests); CI slow-tests job added (R2-#5); CLAUDE.md env vars staged; pyproject.toml registers markers without addopts default-exclude (Concern #7)
+Last activity: 2026-04-29 -- Phase 78 Plan 04 complete (7 commits across web/main.py wiring + soak suite + CLI + pyproject.toml + tests/README.md + CLAUDE.md + ci.yml slow-tests job)
 
-Progress: [####      ] 33% (1/6 phases complete; Phase 78 3/4 plans complete; Phase 77 awaiting verify)
+Progress: [#####     ] 50% (1/6 phases complete; Phase 78 4/4 plans complete; Phases 77 + 78 awaiting verify)
 
 **Phase queue (v7.10):**
 

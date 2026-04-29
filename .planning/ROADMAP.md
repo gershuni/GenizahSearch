@@ -263,7 +263,7 @@ back-nav bugfix.
 - [x] 78-01-PLAN.md -- Wave 0 RED test scaffold (D-21 + D-23 surface) (complete 2026-04-28; 3 test files, 82 tests, intended RED)
 - [x] 78-02-PLAN.md -- web/api_hardening.py (RateLimiter, mode gate, error handlers, PostHog server-side capture) (complete 2026-04-28; shared/api_errors.py + web/api_hardening.py, 39/39 hardening tests GREEN)
 - [x] 78-03-PLAN.md -- web/search_api.py (POST /api/search handler + Pydantic models) + shared/fjms_service.validate_filter_values (complete 2026-04-28; 82/82 Phase 78 tests GREEN, 1295 passed in wider suite)
-- [ ] 78-04-PLAN.md -- bootstrap wiring in web/main.py + soak test + soak script + CLAUDE.md env-vars
+- [x] 78-04-PLAN.md -- bootstrap wiring in web/main.py + soak test + soak script + CLAUDE.md env-vars (complete 2026-04-28; 7 commits, 4 files created + 3 modified, 3 slow soak tests register, all Phase 78 tests GREEN)
 
 ### Phase 79: /api/browse Drill-Down
 **Goal**: `GET /api/browse` resolves a single manuscript page from a locator returned by `/api/search` and returns text + metadata + image URLs in one shot — no follow-up calls, no session state. Sequenced ahead of `/api/parallels` so the locator contract is *consumed* (not just emitted) before a second producer is added — this closes the search → browse vertical slice the Claude skill needs.
