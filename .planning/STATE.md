@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 78 plans complete (4/4) — awaiting verifier
+stopped_at: Phase 78 complete and verified (16/16 must-haves passed)
 last_updated: "2026-04-29T00:00:00.000Z"
-last_activity: 2026-04-29 -- Phase 78 Plan 04 complete (web/main.py wires init_search_api after init_api_routes; tests/test_search_api_soak.py 3 @pytest.mark.slow tests; scripts/soak_search_api.py CLI; pyproject.toml registers slow+e2e markers WITHOUT addopts default-exclude per Concern #7; tests/README.md documents pytest -m slow invocation; CLAUDE.md +4 env vars; .github/workflows/ci.yml adds slow-tests job per R2-#5; all Phase 78 tests GREEN, default tests job behavior preserved at CI level)
+last_activity: 2026-04-29 -- Phase 78 verified passed (16/16 must-haves; 82 default + 3 slow tests GREEN; 1298 wider regression GREEN; all 18 cross-AI review concerns confirmed resolved)
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 11
   completed_plans: 10
   percent: 91
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 78 (api-search-hardening-shell) — ALL PLANS COMPLETE (4/4); awaiting verifier
-Plan: 4/4 complete (78-01 RED scaffold + 78-02 hardening shell GREEN + 78-03 POST /api/search GREEN + 78-04 wiring + soak)
-Status: POST /api/search wired into web/main.py; soak suite registered (3 @pytest.mark.slow tests); CI slow-tests job added (R2-#5); CLAUDE.md env vars staged; pyproject.toml registers markers without addopts default-exclude (Concern #7)
-Last activity: 2026-04-29 -- Phase 78 Plan 04 complete (7 commits across web/main.py wiring + soak suite + CLI + pyproject.toml + tests/README.md + CLAUDE.md + ci.yml slow-tests job)
+Phase: 78 (api-search-hardening-shell) — COMPLETE & VERIFIED (16/16 must-haves)
+Plan: 4/4 complete; phase verified
+Status: Phase 78 done — POST /api/search hardened endpoint live in web/main.py bootstrap; all review concerns resolved; ready for Phase 79 (/api/browse drill-down)
+Last activity: 2026-04-29 -- Phase 78 verified passed; 82 default + 3 slow tests GREEN; 1298 wider regression GREEN
 
-Progress: [#####     ] 50% (1/6 phases complete; Phase 78 4/4 plans complete; Phases 77 + 78 awaiting verify)
+Progress: [#####     ] 50% (2/6 phases complete; Phase 79 next; Phase 77 still awaiting verify)
 
 **Phase queue (v7.10):**
 

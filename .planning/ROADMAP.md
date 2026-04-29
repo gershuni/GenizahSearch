@@ -222,7 +222,7 @@ back-nav bugfix.
 **Phase summary checklist:**
 
 - [ ] **Phase 77: Serializer & JSON Export** — Single-source-of-truth serializer module powering toolbar JSON downloads on /search and /parallels, ahead of any API endpoint
-- [ ] **Phase 78: /api/search + Hardening Shell** — First search-helper endpoint plus the cross-cutting hardening primitives (rate limit, mode flag, query/result caps, error envelope, PostHog) all three endpoints reuse
+- [x] **Phase 78: /api/search + Hardening Shell** (complete 2026-04-29) — First search-helper endpoint plus the cross-cutting hardening primitives (rate limit, mode flag, query/result caps, error envelope, PostHog) all three endpoints reuse
 - [ ] **Phase 79: /api/browse Drill-Down** — Stateless drill-down endpoint resolving locators from /api/search responses to text + metadata + image URLs; first real consumer of the locator contract, proves the search → browse vertical slice
 - [ ] **Phase 80: /api/parallels** — Companion search-side endpoint reusing the locator and hardening shell, sequenced after browse so the locator round-trip is already validated before a second producer is added
 - [ ] **Phase 81: Claude Skill Consumer** — Reference skill exercising the search → browse loop end-to-end as the v7.10 acceptance harness
