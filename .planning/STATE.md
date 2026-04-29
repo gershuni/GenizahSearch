@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 78 complete and verified (16/16 must-haves passed)
-last_updated: "2026-04-29T00:00:00.000Z"
-last_activity: 2026-04-29 -- Phase 78 verified passed (16/16 must-haves; 82 default + 3 slow tests GREEN; 1298 wider regression GREEN; all 18 cross-AI review concerns confirmed resolved)
+stopped_at: Phase 79 context gathered (27 decisions, 6 Codex open questions)
+last_updated: "2026-04-29T01:00:00.000Z"
+last_activity: 2026-04-29 -- Phase 79 CONTEXT.md captured (locator resolution, response shape, image URLs, enrichment latency); Codex external review queued per Phase 78 precedent
 progress:
   total_phases: 6
   completed_phases: 2
@@ -25,12 +25,14 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 78 (api-search-hardening-shell) — COMPLETE & VERIFIED (16/16 must-haves)
-Plan: 4/4 complete; phase verified
-Status: Phase 78 done — POST /api/search hardened endpoint live in web/main.py bootstrap; all review concerns resolved; ready for Phase 79 (/api/browse drill-down)
-Last activity: 2026-04-29 -- Phase 78 verified passed; 82 default + 3 slow tests GREEN; 1298 wider regression GREEN
+Phase: 79 (api-browse-drill-down) — CONTEXT CAPTURED (27 decisions, Codex review queued)
+Plan: 0/0 — context phase only; planning next
+Status: 79-CONTEXT.md committed; 6 open questions awaiting external Codex review per Phase 78 precedent. Decisions provisional until Codex round.
+Last activity: 2026-04-29 -- Phase 79 discuss complete (locator resolution, response shape, image URLs, enrichment latency)
 
-Progress: [#####     ] 50% (2/6 phases complete; Phase 79 next; Phase 77 still awaiting verify)
+Progress: [#####     ] 50% (2/6 phases complete; Phase 79 in planning lead-up; Phase 77 still awaiting verify)
+
+Next step: Run Codex external review on the 6 open questions in `.planning/phases/79-api-browse-drill-down/79-CONTEXT.md`, apply recommendations, then `/gsd-plan-phase 79`. Or skip Codex and `/gsd-plan-phase 79` directly to lock the recommended choices.
 
 **Phase queue (v7.10):**
 
