@@ -1,7 +1,23 @@
 # Phase 79: /api/browse Drill-Down - Context
 
 **Gathered:** 2026-04-29
-**Status:** Ready for planning (Codex external review pending — see open questions at bottom)
+**Status:** Ready for planning. Codex external review applied 2026-04-29 (5 pushback items adopted; see revision log below).
+
+<!--
+Revision applied 2026-04-29 from 79-REVIEWS.md (Codex CLI review):
+- R-01 (Q2/Pushback#3-#4): Lowered enrichment timeout default 2s → 1s. ADDED core-fetch timeout (was previously exempt). Affects D-15, D-16, D-17.
+- R-02 (Q1/Pushback#2): No silent acceptance of conflicting pin forms. Mismatched uid + p_num/volume_ie/fl_id → 400 'locator_conflict' (was: warnings + uid wins). Affects D-02, D-03.
+- R-03 (Q1 pitfall): When both sys_id AND uid supplied, verify the resolved page's uid equals the requested uid; mismatch → 404 'manuscript_page_not_found'. New D-03b.
+- R-04 (Pushback#1): Added `fl_id` to top-level response `locator`. Round-trips even when NLI enrichment is null/timed-out. Affects D-06.
+- R-05 (Q4 pitfall): Added `kind: 'image' | 'viewer'` and `fl_id` / `folio_label` per `sources[]` entry. Clients distinguish directly-renderable images from viewer landing pages. Affects D-13.
+- R-06 (Pushback#5): `image.sources[]` MAY be empty `[]` when no usable URL exists; dropped "always non-empty" promise. Affects D-13.
+- R-07 (Q5 pitfall): Each metadata group is null OR a stable object shape with all keys present (values may be null) — never `{}`. Affects D-06, D-07, D-08, D-09.
+- R-08 (Q6): Added opt-in `?text_cap=N` query param; hard server-side ceiling 10000 chars (lowered from 20000 considered earlier). Affects D-11.
+- R-09 (Q2 pitfall): Operational note — `asyncio.wait_for()` around threaded sync work doesn't kill the underlying worker thread. Risk: executor pool starvation under repeated hangs. Captured in Claude's Discretion + flagged for monitoring.
+- R-10 (Q3 pitfall): Aggregate per-IP allowance roughly doubles when /api/search and /api/browse have separate buckets at same ceiling. Captured as monitoring obligation; no contract change in v7.10.
+
+Codex AFFIRMED locked decisions: D-01 (sys_id required), D-12 (library-aware image.url picker), D-14 (graceful image degrade), D-18 (separate per-IP buckets per endpoint), D-26 (envelope conventions reused via serialize_browse_payload). Q5 grouping (metadata.{pgp,fjms,nli}) ALSO affirmed.
+-->
 
 <domain>
 ## Phase Boundary
@@ -35,28 +51,29 @@ Build `GET /api/browse` — a stateless drill-down endpoint that takes a locator
 ### Locator Resolution
 
 - **D-01:** **`sys_id` is REQUIRED in every `/api/browse` request.** The roadmap goal phrases the locator as "uid (preferred) or sys_id+volume_ie+page (fallback)", but practically every `/api/search` response item already carries `{uid, sys_id, volume_ie, p_num}` together (Phase 77 D-04 — both fields always populated). Requiring `sys_id` always means the handler can call `state.searcher.get_browse_page(sys_id, ...)` directly with no reverse-map lookup. **uid is treated as an authoritative IE-pinning + page-pinning token** that, when present, supersedes the `volume_ie` and `p_num` query params. **Skill workflow stays no-disambiguation** because skill copies the full locator object verbatim from `/api/search`.
-- **D-02:** Three accepted page-pinning forms (in priority order), all alongside the required `sys_id`:
-  - `uid=IE{N}_P{M}_FL{K}` — parse it. The `IE{N}` component pins `volume_ie`; the `P{M}` component pins `p_num`. When `uid` is supplied, any explicit `volume_ie` / `p_num` / `fl_id` query params are ignored (with a `warnings: ['locator_redundant_fields_ignored']` note if they conflict).
+- **D-02:** Three accepted page-pinning forms (in priority order), all alongside the required `sys_id`. **R-02 (Codex Q1/Pushback#2):** when `uid` is supplied alongside `volume_ie` / `p_num` / `fl_id`, the handler MUST verify they identify the same page (parse uid into IE+P+FL components and compare). Mismatch → **400 `locator_conflict`** (NOT a warning + silent override). Reasoning: silent acceptance hides upstream bugs in skill code that build malformed locators.
+  - `uid=IE{N}_P{M}_FL{K}` — parse it. The `IE{N}` component pins `volume_ie`; the `P{M}` component pins `p_num`; the `FL{K}` component pins `fl_id`. When uid is supplied alone, no extra fields needed.
   - `p_num=N&volume_ie=IE{X}` (or `p_num=N` alone for single-IE manuscripts) — pure-coordinate access. `volume_ie` defaults to the manuscript's primary IE (suffix=1) when omitted on a multi-IE manuscript; emit `warnings: ['volume_ie_defaulted: <IE>']` so the skill knows the default fired.
   - `fl_id=FL{K}` — direct folio access via existing `state.searcher.get_browse_page_by_fl(fl_id, sys_id=...)`. Mirrors the internal browse-UI affordance.
 - **D-03:** Locator validator (Pydantic `BrowseRequest` model with `extra='forbid'`):
   - Required: `sys_id: str`.
-  - Optional, mutually exclusive with priority order: `uid: str | None`, `p_num: int | None` (1-based), `volume_ie: str | None`, `fl_id: str | None`.
+  - Optional with mutual-consistency check: `uid: str | None`, `p_num: int | None` (1-based), `volume_ie: str | None`, `fl_id: str | None`.
   - If NONE of `uid` / `p_num` / `fl_id` is supplied → 400 `invalid_request` "locator missing: provide uid, p_num, or fl_id alongside sys_id".
-  - If both `uid` and `p_num` are supplied AND they disagree (after parsing uid) → strip the redundant fields and emit `warnings: ['locator_redundant_fields_ignored: p_num contradicts uid']`. Do NOT error — uid wins.
+  - **R-02 — conflict detection:** if `uid` is supplied AND any of `volume_ie` / `p_num` / `fl_id` is also supplied AND they disagree with uid's parsed components → 400 `locator_conflict` with message naming the offending field(s). NO silent override; NO warning + win behavior.
   - `p_num` must parse to int >= 1 (1-based, per page_indexing convention). Negative or zero → 400 `invalid_request`.
+- **D-03b (NEW per R-03 — Codex Q1 pitfall):** Post-resolution verification — when the request supplies `uid`, after `state.searcher.get_browse_page(...)` returns, the handler MUST compare the resolved page's `uid` (always populated by core) against the requested `uid`. Mismatch → **404 `manuscript_page_not_found`** with message "uid resolved to different page; check sys_id + uid pair". Catches the case where a client sends sys_id from manuscript A together with uid from manuscript B (e.g., copy-paste from wrong search result).
 - **D-04:** **Multi-IE without `uid` and without `volume_ie`** → default to the manuscript's primary IE (suffix=1). The page resolves via `get_browse_page(sys_id, p_num, volume_ie=None)` which already auto-detects via `get_volumes_for_sys_id`. Surface `warnings: ['volume_ie_defaulted: <resolved IE>']` so the skill knows a default was applied.
 - **D-05:** Page indexing in the response — **echo `p_num` as int + add a top-level string field `"page_indexing": "1-based"`** to every response. The roadmap goal explicitly requires the convention be "explicit in the response itself" (#1).
 
 ### Response Shape
 
-- **D-06:** Top-level envelope (flat with namespaced metadata groups). Mirrors Phase 77/78 conventions:
+- **D-06:** Top-level envelope (flat with namespaced metadata groups). Mirrors Phase 77/78 conventions. **R-04:** `fl_id` is now part of the top-level `locator` echo (not just buried under `metadata.nli.folio`) — guarantees a complete locator round-trips even when NLI enrichment is null/timed-out. **R-07:** every `metadata.{pgp,fjms,nli}` group is either `null` (source unavailable) or a stable object with ALL declared keys present (values may be null). Never `{}`. Skill can branch on `metadata.pgp is None` cleanly without checking each field's presence.
   ```json
   {
     "schema_version": 1,
     "source": "browse",
     "generated_at": "2026-04-29T12:34:56Z",
-    "locator": {"uid": "...", "sys_id": "...", "volume_ie": "...", "p_num": 3},
+    "locator": {"uid": "...", "sys_id": "...", "volume_ie": "...", "p_num": 3, "fl_id": "FL12345"},
     "page_indexing": "1-based",
     "shelfmark": "T-S 12.123",
     "title": "...",
@@ -65,11 +82,11 @@ Build `GET /api/browse` — a stateless drill-down endpoint that takes a locator
     "text_source": "pgp_transcription" | "snippet" | "none",
     "text_truncated": false,
     "metadata": {
-      "pgp": {...},
-      "fjms": {...},
-      "nli": {...}
+      "pgp": {...} | null,    // R-07: full object or null, never {}
+      "fjms": {...} | null,
+      "nli": {...} | null
     },
-    "image": {"url": "...", "provider": "cambridge", "sources": [...]},
+    "image": {"url": "..." | null, "provider": "cambridge" | null, "sources": [...]},  // sources MAY be []
     "warnings": []
   }
   ```
@@ -99,10 +116,10 @@ Build `GET /api/browse` — a stateless drill-down endpoint that takes a locator
   2. If unavailable, falls back to the page's snippet from `BrowsePage.text` (Tantivy).
   3. If both unavailable, returns `text: ""` with `text_source: "none"`.
   - `text_source` enum: `"pgp_transcription"`, `"snippet"`, `"none"`.
-- **D-11:** Transcription char cap — **4000 characters**, configurable via env var `SEARCH_API_BROWSE_TEXT_CAP`. Truncate at last word boundary ≤ cap; append `…` (single character ellipsis, not three dots). When truncated:
+- **D-11:** Transcription char cap — **4000 characters default**, configurable via env var `SEARCH_API_BROWSE_TEXT_CAP`. **R-08 (Codex Q6):** clients may also override per-request via `?text_cap=N` query param — bounded by a hard server-side ceiling of **10000 chars** (lower than the 20000 considered earlier; payload-inflation risk). Resolution priority: `?text_cap` (clamped to [100, 10000]) > env var > default 4000. Truncate at last word boundary ≤ effective cap; append `…` (single ellipsis char). When truncated:
   - `text_truncated: true`
-  - `warnings[].append({"code": "transcription_truncated", "message": "transcription text truncated at <CAP> chars"})`
-  Otherwise `text_truncated: false`. The cap is applied AFTER PGP page-section scoping — most pages already fit comfortably under 4000 chars.
+  - `warnings[].append({"code": "transcription_truncated", "message": "transcription text truncated at <effective_cap> chars"})`
+  Otherwise `text_truncated: false`. The cap is applied AFTER PGP page-section scoping — most pages already fit comfortably under 4000 chars. Pydantic validates `text_cap`: int in [100, 10000] inclusive; outside range → 400 `invalid_request`.
 
 ### Image URLs + Graceful Degrade
 
@@ -113,28 +130,33 @@ Build `GET /api/browse` — a stateless drill-down endpoint that takes a locator
   - Oxford → `/api/oxford_image/{shelfmark}/{p_num-1}` (existing route shape; planner verifies the exact signature in Plan 03 against `web/api.py`)
   - Default → `/api/nli_image_by_sysid/{sys_id}?page={p_num-1}`
   - Page indexing on the proxy URL stays **0-based** — that's the existing internal convention (Phase 77 D-04 image URL emission). The response's `page_indexing: "1-based"` documents the field; the proxy URL semantics are server-internal.
-- **D-13:** `image.sources[]` is a list of `{url, provider, role}` entries. Always populated (≥1 entry — at minimum the canonical `image.url` repeated):
-  - `role: "iiif_proxy"` — our proxy routes (NLI, Cambridge, Manchester, JTS, Oxford) — one per available source.
-  - `role: "external_viewer"` — direct library viewer URLs (Cambridge CUDL viewer page, Bodleian viewer page, JTS DPUL catalog page, etc.) extracted from `BrowsePage.external_url`.
-  - `role: "companion_folio"` — additional CUDL bifolio companions when `cambridge_images[]` has multiple entries for one `p_num`. Each entry pins which folio it represents (`fl_id`, `folio_label`).
-  - The `image.provider` field at the top level reflects which provider `image.url` came from (matches one of the `image.sources[]` entries).
+- **D-13:** `image.sources[]` is a list of `{url, provider, role, kind, fl_id, folio_label}` entries. **R-06:** MAY be `[]` when the manuscript genuinely has no available image or viewer target (e.g., a metadata-only sys_id with no NLI/Cambridge/Oxford coverage). Dropped the "always non-empty" promise — empty `[]` is more honest than a synthetic placeholder. Each entry's fields:
+  - `url: str` — the URL itself (proxy or direct external).
+  - `provider: str` — `'nli'` | `'cambridge'` | `'manchester'` | `'jts'` | `'oxford'` | `'cudl_viewer'` | `'bodleian_viewer'` | `'dpul'` | etc.
+  - `role: str` — `'iiif_proxy'` | `'external_viewer'` | `'companion_folio'` (one of three).
+  - **R-05 — `kind: 'image' | 'viewer'`** — distinguishes a directly-renderable image URL from a landing-page URL. Skill can `<img src=...>` only entries with `kind: 'image'`; viewer entries open in a browser tab. Defaults: `iiif_proxy` and `companion_folio` → `kind: 'image'`; `external_viewer` → `kind: 'viewer'`.
+  - **R-05 — `fl_id: str | null` and `folio_label: str | null`** per source — for bifolios specifically, lets the skill pin which physical folio each companion image represents (recto/verso, e.g., '1r', '1v'). For single-folio pages, `fl_id` matches the page's primary folio; `folio_label` may be empty.
+  - The top-level `image.provider` field reflects which provider `image.url` came from (matches one of the `image.sources[]` entries when sources is non-empty; null when sources is empty).
 - **D-14:** Graceful image degrade — **`image.url = null` + `warnings[].append({"code": "image_unavailable", "message": "<provider> proxy returned <status>"})`**. Mirrors Phase 78's warnings array convention. Response body still 200; metadata + text still returned. Upstream proxy 5xx, timeout, or empty body all map to this path. `image.sources[]` may still be populated with viable alternates (the skill can retry against a different source).
 
 ### Enrichment Pipeline
 
-- **D-15:** Enrichment fan-out — single `asyncio.gather` across:
-  1. `state.searcher.get_browse_page(sys_id, p_num=..., volume_ie=..., fl_id=...)` (core; not optional — must succeed for the response to be possible).
+- **D-15:** Enrichment fan-out — single `asyncio.gather` across **all 4 sources** (core is no longer exempt per R-01):
+  1. `state.searcher.get_browse_page(sys_id, p_num=..., volume_ie=..., fl_id=...)` (core; mandatory — its result determines whether the response is possible at all). Wrapped in `asyncio.wait_for(fetch, timeout=SEARCH_API_BROWSE_CORE_TIMEOUT)` (default **2.0s**, env-overridable). **R-01 (Codex Q2):** core was previously timeout-exempt; that's a deadlock-vector. A hung Tantivy reader or stuck csv_bank lock should surface as a fast 504 instead of pinning an executor thread indefinitely.
   2. PGP fetch (`get_pgp_for_sys_id` + page-section scoping).
   3. FJMS fetch (catalog source_names, measurements/visual-suggestions flags).
   4. NLI crossref fetch (physical_metadata + active-page folio info).
-  Each non-core source wrapped in `asyncio.wait_for(fetch, timeout=SEARCH_API_BROWSE_TIMEOUT)` (default **2 seconds**, env-overridable).
+  Each non-core source wrapped in `asyncio.wait_for(fetch, timeout=SEARCH_API_BROWSE_TIMEOUT)`. **R-01: default lowered 2.0s → 1.0s.** These are local sidecar SQLite lookups; sub-100ms is typical, so 1s is generous and prevents the skill's 5–10x browse calls per query from inflating its tail latency.
 - **D-16:** Per-source failure mode:
-  - **Core fails** (locator unresolvable, manuscript-page-not-found) → 404 `manuscript_page_not_found` envelope; no further enrichment. The skill must see hard 404 here; it cannot rank against a non-existent page.
+  - **Core fails — page not found** (locator returned None) → 404 `manuscript_page_not_found`; no further enrichment.
+  - **Core times out** (R-01) → 504 `core_timeout` "core resolver did not return within <timeout>s"; no further enrichment. Logged via `logger.exception` for ops triage.
+  - **Core raises** → 500 `internal_error` (Phase 78 catch-all posture).
   - **Enrichment source times out** → that source's slot is `null`; `warnings[].append({"code": "enrichment_timeout", "source": "<pgp|fjms|nli>"})`. Response body still 200.
-  - **Enrichment source raises** → that source's slot is `null`; `warnings[].append({"code": "enrichment_failed", "source": "<source>"})`. Logged via `logger.exception` server-side; never includes traceback in response (Phase 78 D-07 `internal_error` posture). Response body still 200.
-- **D-17:** New env vars (two new for Phase 79, both inheriting Phase 78's "read on every request" pattern from D-02 of Phase 78):
-  - `SEARCH_API_BROWSE_TIMEOUT` (float seconds, default `2.0`) — per-source enrichment timeout.
-  - `SEARCH_API_BROWSE_TEXT_CAP` (int chars, default `4000`) — transcription truncation cap.
+  - **Enrichment source raises** → that source's slot is `null`; `warnings[].append({"code": "enrichment_failed", "source": "<source>"})`. Logged via `logger.exception`; traceback never in response. Response body still 200.
+- **D-17:** New env vars (three new for Phase 79, all inheriting Phase 78's "read on every request" pattern from D-02 of Phase 78):
+  - `SEARCH_API_BROWSE_TIMEOUT` (float seconds, default `1.0`) — per-source enrichment timeout (PGP, FJMS, NLI). **R-01: lowered from 2.0s.**
+  - `SEARCH_API_BROWSE_CORE_TIMEOUT` (float seconds, default `2.0`) — core BrowsePage fetch timeout. NEW per R-01; previously no core timeout existed.
+  - `SEARCH_API_BROWSE_TEXT_CAP` (int chars, default `4000`) — transcription truncation cap. Per-request `?text_cap` overrides bounded by [100, 10000].
   - Documented in CLAUDE.md (Phase 79 owns adding them; Phase 82 makes them canonical in `docs/SEARCH_API.md`).
 
 ### Rate Limit Bucket Topology
@@ -171,6 +193,11 @@ Build `GET /api/browse` — a stateless drill-down endpoint that takes a locator
 
 - **D-26:** Phase 79 does NOT call `serialize_search_payload`. The browse response shape is *different* from the search response (single page vs ranked list of items). However, Phase 79 reuses the **same envelope conventions** — `schema_version`, `source`, `generated_at`, `locator`, `warnings: []` always present, error envelope shape — implemented as a sibling function `serialize_browse_payload(...)` in `shared/search_serializer.py`. Planner places it next to the existing serializers; both expose a clean `source` field (`'search'` vs `'browse'`).
 - **D-27:** Cross-phase integrity — Phase 80 (`/api/parallels`) inherits the SAME locator emission from `/api/search` (Phase 77 D-04) and the SAME hardening shell (Phase 78 D-01..D-13). Phase 79 verifies the locator round-trips end-to-end; Phase 80 then knows it can emit the same shape and `/api/browse` will accept it without per-producer adjustment. The Plan 04 verification step explicitly tests "locator from /api/search → /api/browse → 200 with text + metadata" against multiple manuscripts.
+
+### Operational Notes (R-09, R-10 — Codex pitfalls captured)
+
+- **R-09 (Codex Q2 pitfall):** `asyncio.wait_for()` around threaded synchronous work (run.io_bound, executor-pool tasks) cancels the *await*, NOT the underlying worker thread. If PGP/FJMS/NLI sidecars hang, the executor pool can starve under repeated requests even though individual handlers return clean 200s with `enrichment_timeout` warnings. **Mitigation in plan-phase:** monitor `asyncio` default executor pool size; consider bumping to 32+ workers for browse handler; add a process-level metric for "active executor tasks" exposed via `/internal/health` (Phase 79's responsibility to surface; Phase 80/81 may operationalize the alarm).
+- **R-10 (Codex Q3 pitfall):** Separate per-IP buckets across `/api/search` and `/api/browse` (D-18) means a client's effective per-IP allowance is roughly **2x** the env-var ceiling (search bucket + browse bucket). Acceptable for v7.10 because the realistic skill workflow `search 1× → browse 10×` already approximates this distribution. **Monitoring obligation:** if `_dropped_events` from Phase 78's PostHog drop counter (Concern #9) starts climbing OR if PostHog `search_api_request` counts show sustained ratios that look like abuse, add a coarse upstream global rate-limit (nginx `limit_req`). Captured as a deferred operational concern, not a contract change.
 
 ### Claude's Discretion
 
@@ -307,13 +334,18 @@ None — no pending todos matched Phase 79 scope.
 </deferred>
 
 <open_questions_for_codex_review>
-## Open Questions for Codex External Review
+## Codex External Review — APPLIED 2026-04-29
 
-Per Phase 78 precedent, the user requested external review of infra/contract decisions before locking. The decisions above are **provisional**; Codex review may revise any of them. Run via:
+**Status:** ✓ Reviewed by Codex CLI. Full response in `79-REVIEWS.md`. Recommendations adopted: 5 pushback items (R-01..R-05) + 5 affirming refinements (R-06..R-10) applied to D-XX entries above. The 6 questions below are kept for audit-trail / planner reference. **Decisions above are now LOCKED**; planner reads CONTEXT.md as the contract.
 
-```
-echo "<question>" | codex --model gpt-5
-```
+Codex AFFIRMED the core architecture: sys_id required (D-01), library-aware image picker (D-12), graceful image degrade (D-14), separate per-IP buckets (D-18), envelope conventions reused (D-26), namespaced metadata grouping (D-06).
+
+Codex PUSHED BACK on 5 items, all adopted as revisions:
+- **R-01 (Q2):** 2s enrichment timeout → 1s; ADD core-fetch timeout (was exempt)
+- **R-02 (Q1):** No silent uid+other-fields conflict — verify or 400 `locator_conflict`
+- **R-03 (Q1):** Verify resolved page's uid matches requested uid; mismatch → 404
+- **R-04 (Q5):** Add `fl_id` to top-level response locator (round-trip preservation)
+- **R-05 (Q4):** Add `kind: 'image'|'viewer'` + `fl_id`/`folio_label` per `sources[]` entry; `image.sources[]` MAY be `[]`
 
 ### Q1 — Locator design (D-01, D-02, D-03)
 
@@ -362,4 +394,4 @@ echo "<question>" | codex --model gpt-5
 
 *Phase: 79-api-browse-drill-down*
 *Context gathered: 2026-04-29*
-*External review via Codex CLI: pending — see open questions above. Recommendations applied during plan-phase will produce the locked CONTEXT.md revision.*
+*External review via Codex CLI 2026-04-29: APPLIED. R-01..R-10 in revision log at top of file; full response in 79-REVIEWS.md. Decisions above are LOCKED.*
