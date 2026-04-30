@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 79 Plan 03 complete (route handler — GET /api/browse registered with @wrap_endpoint(endpoint_name='browse'); BrowseRequest model + NormalizedLocator dataclass + locator helpers added to web/search_api.py; 108/108 Phase 77/78 targeted tests GREEN; 1298 passed in wider suite)
-last_updated: "2026-04-30T05:00:00.000Z"
-last_activity: 2026-04-30 -- Phase 79 Plan 03 executed (1 task, 1 commit 6fc64d60; web/search_api.py +309/-1 lines)
+stopped_at: Phase 79 Plan 04 complete (test surface — tests/test_browse_api.py 38 D-24 tests + D-25 legacy spot check; uncovered + fixed wrap_endpoint signature regression in web/api_hardening.py that was returning 422 on every /api/browse request; 1336 passed / 9 skipped — all four 79 plans land)
+last_updated: "2026-04-30T13:00:00.000Z"
+last_activity: 2026-04-30 -- Phase 79 Plan 04 executed (1 commit 1fe494ef; tests/test_browse_api.py +1002 lines, tests/test_api_legacy_unchanged.py +38 lines, web/api_hardening.py -3 lines)
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 18
-  completed_plans: 13
-  percent: 72
+  completed_plans: 14
+  percent: 78
 ---
 
 # Project State
@@ -25,14 +25,14 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 79 (api-browse-drill-down) — Plan 03 COMPLETE (route handler GET /api/browse)
-Plan: 3/4 — foundations + browse_service.py + route handler landed; Plan 04 (tests) is next.
-Status: Ready to execute Plan 04
-Last activity: 2026-04-30 -- Phase 79 Plan 03 executed (1 commit: 6fc64d60)
+Phase: 79 (api-browse-drill-down) — Plan 04 COMPLETE (test surface + signature regression fix)
+Plan: 4/4 — all plans landed; phase ready for verification.
+Status: Ready for `/gsd-verify-work 79` (or runs as part of /gsd-execute-phase 79 verify_phase_goal step)
+Last activity: 2026-04-30 -- Phase 79 Plan 04 executed (1 commit: 1fe494ef)
 
-Progress: [#######   ] 72% (2/6 phases complete; 13/18 plans complete; Plan 79-03 done)
+Progress: [########  ] 78% (2/6 phases complete; 14/18 plans complete; Phase 79 ready to verify)
 
-Next step: `/gsd-execute-phase 79` continues with Plan 79-04 (tests — tests/test_browse_api.py). Phase 77 verify still queued.
+Next step: gsd-verifier on Phase 79 (must_haves: locator round-trip, statelessness, image graceful degrade, transcription cap, separate rate-limit bucket; REQUIREMENTS.md: API-03 + API-04 + API-05 + API-06 + HARDEN-01 + HARDEN-04 + HARDEN-05). Phase 77 verify remains queued.
 
 **Phase queue (v7.10):**
 

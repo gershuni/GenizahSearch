@@ -279,7 +279,7 @@ back-nav bugfix.
 - [x] 79-01-PLAN.md -- Foundation: extend api_errors ERROR_CODES + serialize_browse_payload skeleton + CLAUDE.md env vars (complete 2026-04-30; commits 2419067e/ef60581d/bc1f6158; 108/108 Phase 77/78 tests green)
 - [x] 79-02-PLAN.md -- shared/browse_service.py: pure-data enrichment fan-out (D-23 extraction) (complete 2026-04-30; commit 0fbafdb3; 333 lines NEW; 1298 passed in wider suite)
 - [x] 79-03-PLAN.md -- web/search_api.py: GET /api/browse handler + BrowseRequest model + separate rate-limit bucket (complete 2026-04-30; commit 6fc64d60; +309/-1 lines; 108/108 Phase 77/78 tests green; 1298 passed in wider suite)
-- [ ] 79-04-PLAN.md -- tests/test_browse_api.py + tests/test_api_legacy_unchanged.py extension
+- [x] 79-04-PLAN.md -- tests/test_browse_api.py + tests/test_api_legacy_unchanged.py extension (complete 2026-04-30; commit 1fe494ef; 38 D-24 tests + D-25 spot check; uncovered + fixed wrap_endpoint signature regression in web/api_hardening.py — FastAPI was binding *args/**kwargs as required query params; 1336 passed / 9 skipped wider suite)
 
 ### Phase 80: /api/parallels
 **Goal**: `POST /api/parallels` exposes the composition/parallels pipeline through the same payload, locator, error-envelope, and hardening conventions as `/api/search`. Sequenced after `/api/browse` so the locator round-trip is already validated end-to-end before a second producer emits the same contract.
