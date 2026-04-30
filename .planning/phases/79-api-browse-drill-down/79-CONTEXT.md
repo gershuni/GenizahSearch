@@ -1,10 +1,21 @@
 # Phase 79: /api/browse Drill-Down - Context
 
 **Gathered:** 2026-04-29
-**Status:** Ready for planning. Codex external review applied 2026-04-29 (5 pushback items adopted; see revision log below).
+**Status:** Ready for planning (revised). Codex external review applied 2026-04-29 (5 pushback items adopted; see revision log below). Plan-level cross-AI review (Gemini + Codex) applied 2026-04-29 against the four PLAN.md files; D-14 reopened (R-PR-01) and four design-level fixes (R-PR-02..R-PR-05) feed into replanning.
 
 <!--
-Revision applied 2026-04-29 from 79-REVIEWS.md (Codex CLI review):
+Revision applied 2026-04-29 from PLAN-level cross-AI review (79-REVIEWS.md, Gemini + Codex):
+- R-PR-01 (Codex HIGH on PLANs): D-14 REOPENED. Original "image_unavailable" warning + image.url=null on proxy failure required server-side availability probing — too expensive (50–500ms per /api/browse, multiplied by skill's 5–10x browse calls per query). NEW contract: image.url is best-effort; clients SHOULD attempt the URL and fall back to entries in image.sources[] on failure; no server-side probe. Affects D-14, D-13, ROADMAP success criterion #3 (rewording).
+- R-PR-02 (Gemini + Codex HIGH): Plan 02 _fetch_core must NOT call state.searcher.get_browse_page (returns minimal dict from genizah_core.py:8246). It MUST call WebDataService.get_browse_page / get_browse_page_by_fl from web/services.py:294, which returns the hydrated BrowsePage with shelfmark/title/library_code/library_viewer_url/volumes/cambridge_images/fl_id. Drop SimpleNamespace wrap.
+- R-PR-03 (Gemini HIGH / Codex LOW — adopt as HIGH): Plan 03 must use @wrap_endpoint(endpoint='browse') from web/api_hardening.py rather than hand-rolling try/except/finally + capture_api_event. CONTEXT canonical_refs explicitly mandate reuse.
+- R-PR-04 (Codex HIGH): _validate_locator must return a normalized locator (effective_p_num, effective_volume_ie, effective_fl_id) derived from uid when present — not just raise on conflicts. Plan 03 Block C consumes the normalized form when calling fetch_browse_bundle.
+- R-PR-05 (Codex MEDIUM): _pgp_sync / _fjms_sync / _nli_sync must let exceptions propagate; _wrap_with_timeout owns ALL warning emission (timeout AND failed). Inner try/except suppression of the warnings the wrapper exists to emit is removed.
+- R-PR-06 (Codex MEDIUM): Plan 04's primary round-trip test does a real HTTP POST /api/search → GET /api/browse. The serializer-direct shortcut becomes a separate explicit unit test, not a fallback inside the round-trip test.
+- R-PR-07 (Codex MEDIUM): Plan 04 adds at least one integration-style test that exercises the real SearchEngine.get_browse_page shape (post-R-PR-02 fix path), not the over-mocked enriched-dict shape.
+- R-PR-08 (Codex LOW): Plan 02 depends_on: [79-01] (implicit dep on core_timeout ERROR_CODE addition).
+- R-PR-09 (Gemini LOW): serialize_browse_payload drops unused requested_uid/requested_fl_id parameters.
+
+Revision applied 2026-04-29 from 79-REVIEWS-context.md (Codex CLI review of CONTEXT.md):
 - R-01 (Q2/Pushback#3-#4): Lowered enrichment timeout default 2s → 1s. ADDED core-fetch timeout (was previously exempt). Affects D-15, D-16, D-17.
 - R-02 (Q1/Pushback#2): No silent acceptance of conflicting pin forms. Mismatched uid + p_num/volume_ie/fl_id → 400 'locator_conflict' (was: warnings + uid wins). Affects D-02, D-03.
 - R-03 (Q1 pitfall): When both sys_id AND uid supplied, verify the resolved page's uid equals the requested uid; mismatch → 404 'manuscript_page_not_found'. New D-03b.
@@ -16,7 +27,7 @@ Revision applied 2026-04-29 from 79-REVIEWS.md (Codex CLI review):
 - R-09 (Q2 pitfall): Operational note — `asyncio.wait_for()` around threaded sync work doesn't kill the underlying worker thread. Risk: executor pool starvation under repeated hangs. Captured in Claude's Discretion + flagged for monitoring.
 - R-10 (Q3 pitfall): Aggregate per-IP allowance roughly doubles when /api/search and /api/browse have separate buckets at same ceiling. Captured as monitoring obligation; no contract change in v7.10.
 
-Codex AFFIRMED locked decisions: D-01 (sys_id required), D-12 (library-aware image.url picker), D-14 (graceful image degrade), D-18 (separate per-IP buckets per endpoint), D-26 (envelope conventions reused via serialize_browse_payload). Q5 grouping (metadata.{pgp,fjms,nli}) ALSO affirmed.
+Codex AFFIRMED locked decisions: D-01 (sys_id required), D-12 (library-aware image.url picker), D-18 (separate per-IP buckets per endpoint), D-26 (envelope conventions reused via serialize_browse_payload). Q5 grouping (metadata.{pgp,fjms,nli}) ALSO affirmed. (D-14 was originally affirmed but is reopened per R-PR-01 above.)
 -->
 
 <domain>
@@ -127,7 +138,7 @@ Build `GET /api/browse` — a stateless drill-down endpoint that takes a locator
   - CUL → `/api/cambridge_image/{sys_id}?page={p_num-1}`
   - Manchester → `/api/manchester_image/{sys_id}?page={p_num-1}`
   - JTS → `/api/jts_image/{sys_id}?page={p_num-1}`
-  - Oxford → `/api/oxford_image/{shelfmark}/{p_num-1}` (existing route shape; planner verifies the exact signature in Plan 03 against `web/api.py`)
+  - Oxford → `/api/oxford_image/{sys_id}?page={p_num-1}` (sys_id-keyed; pattern-mapper verified at `web/api.py:896` against the original CONTEXT note that incorrectly said shelfmark-keyed)
   - Default → `/api/nli_image_by_sysid/{sys_id}?page={p_num-1}`
   - Page indexing on the proxy URL stays **0-based** — that's the existing internal convention (Phase 77 D-04 image URL emission). The response's `page_indexing: "1-based"` documents the field; the proxy URL semantics are server-internal.
 - **D-13:** `image.sources[]` is a list of `{url, provider, role, kind, fl_id, folio_label}` entries. **R-06:** MAY be `[]` when the manuscript genuinely has no available image or viewer target (e.g., a metadata-only sys_id with no NLI/Cambridge/Oxford coverage). Dropped the "always non-empty" promise — empty `[]` is more honest than a synthetic placeholder. Each entry's fields:
@@ -137,7 +148,7 @@ Build `GET /api/browse` — a stateless drill-down endpoint that takes a locator
   - **R-05 — `kind: 'image' | 'viewer'`** — distinguishes a directly-renderable image URL from a landing-page URL. Skill can `<img src=...>` only entries with `kind: 'image'`; viewer entries open in a browser tab. Defaults: `iiif_proxy` and `companion_folio` → `kind: 'image'`; `external_viewer` → `kind: 'viewer'`.
   - **R-05 — `fl_id: str | null` and `folio_label: str | null`** per source — for bifolios specifically, lets the skill pin which physical folio each companion image represents (recto/verso, e.g., '1r', '1v'). For single-folio pages, `fl_id` matches the page's primary folio; `folio_label` may be empty.
   - The top-level `image.provider` field reflects which provider `image.url` came from (matches one of the `image.sources[]` entries when sources is non-empty; null when sources is empty).
-- **D-14:** Graceful image degrade — **`image.url = null` + `warnings[].append({"code": "image_unavailable", "message": "<provider> proxy returned <status>"})`**. Mirrors Phase 78's warnings array convention. Response body still 200; metadata + text still returned. Upstream proxy 5xx, timeout, or empty body all map to this path. `image.sources[]` may still be populated with viable alternates (the skill can retry against a different source).
+- **D-14 (REOPENED 2026-04-29 per R-PR-01):** Image URLs are **best-effort, not probed**. The handler emits the library-aware `image.url` from `BrowsePage.library_code` and the alternates in `image.sources[]` without verifying upstream availability. Clients (Phase 81 skill, future consumers) MUST treat `image.url` as a candidate URL and SHOULD attempt the alternates in `image.sources[]` if the primary fails. **Why reopened:** the original D-14 contract (`image.url=null` + `warnings: ['image_unavailable']` on proxy failure) requires a server-side HEAD probe or short-TTL availability cache, which adds 50–500ms per `/api/browse` call. Multiplied by the skill's 5–10× browse calls per query, that's a meaningful tail-latency hit on the most-cited endpoint in the v7.10 surface. Punting availability detection to the client is a more honest contract: the client can probe lazily (only when it actually wants to render the image), cache its own results, and apply consumer-specific fallback strategies. The `warnings: ['image_unavailable']` code is **removed** from the warning taxonomy. **Trade-off accepted:** clients see occasional broken image URLs and must handle them. This is acceptable for v7.10 because the v7.10 client (Phase 81 skill) cites image URLs in citations, not renders them inline. Future consumers that need pre-validated URLs can add probing client-side or motivate a Phase-XX `/api/browse?probe=true` opt-in.
 
 ### Enrichment Pipeline
 
