@@ -278,7 +278,7 @@ back-nav bugfix.
 **Plans:** 4 plans
 - [x] 79-01-PLAN.md -- Foundation: extend api_errors ERROR_CODES + serialize_browse_payload skeleton + CLAUDE.md env vars (complete 2026-04-30; commits 2419067e/ef60581d/bc1f6158; 108/108 Phase 77/78 tests green)
 - [x] 79-02-PLAN.md -- shared/browse_service.py: pure-data enrichment fan-out (D-23 extraction) (complete 2026-04-30; commit 0fbafdb3; 333 lines NEW; 1298 passed in wider suite)
-- [ ] 79-03-PLAN.md -- web/search_api.py: GET /api/browse handler + BrowseRequest model + separate rate-limit bucket
+- [x] 79-03-PLAN.md -- web/search_api.py: GET /api/browse handler + BrowseRequest model + separate rate-limit bucket (complete 2026-04-30; commit 6fc64d60; +309/-1 lines; 108/108 Phase 77/78 tests green; 1298 passed in wider suite)
 - [ ] 79-04-PLAN.md -- tests/test_browse_api.py + tests/test_api_legacy_unchanged.py extension
 
 ### Phase 80: /api/parallels
