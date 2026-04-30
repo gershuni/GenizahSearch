@@ -29,7 +29,10 @@ or request cookies).
 """
 
 import logging
+import os
+import re as _re
 import time
+from dataclasses import dataclass
 from typing import Literal, Optional, List
 
 from nicegui import app
@@ -44,15 +47,26 @@ from web.api_hardening import (
     _resolve_rate_limit_key,
     capture_api_event,
     _build_envelope_response,
+    wrap_endpoint,  # Phase 79 R-PR-03: now reused for browse_endpoint.
 )
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
+# Phase 79 imports.
+from shared.browse_service import fetch_browse_bundle
+from shared.search_serializer import serialize_browse_payload
 
 logger = logging.getLogger(__name__)
 
 
 # Module-level RateLimiter; Phases 79/80 import this same instance.
 _rate_limiter = RateLimiter(default_limit=30)
+
+# Phase 79 D-18: SEPARATE per-IP bucket from /api/search.
+# Same SEARCH_API_RATE_LIMIT env-var ceiling -- RateLimiter._current_limit() reads
+# the env on every check(). A client doing search-once + browse-N-times does NOT
+# exhaust the search bucket. (R-10: aggregate per-IP allowance is roughly 2x the
+# ceiling -- captured as monitoring obligation, no contract change in v7.10.)
+_browse_rate_limiter = RateLimiter(default_limit=30)
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +115,181 @@ class SearchRequest(BaseModel):
 QUERY_LENGTH_CAP = 1000
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+
+# Phase 79 D-11 / R-08 -- transcription char cap.
+DEFAULT_BROWSE_TEXT_CAP = 4000
+MIN_BROWSE_TEXT_CAP = 100
+MAX_BROWSE_TEXT_CAP = 10000
+
+
+# ---------------------------------------------------------------------------
+# Phase 79 -- BrowseRequest model + NormalizedLocator + locator helpers.
+# ---------------------------------------------------------------------------
+
+
+class BrowseRequest(BaseModel):
+    """Phase 79 D-21 -- query-param model for GET /api/browse.
+
+    `sys_id` is REQUIRED (D-01). At least one of (uid, p_num, fl_id) must
+    be supplied (D-03). FastAPI does not auto-bind GET query params to a
+    Pydantic model when the route handler takes a Request object directly,
+    so the handler constructs `BrowseRequest(**dict(request.query_params))`
+    inside the body -- the wrap_endpoint decorator catches PydanticValidationError.
+    """
+    model_config = ConfigDict(extra='forbid')
+    sys_id: str
+    uid: Optional[str] = None
+    p_num: Optional[int] = None
+    volume_ie: Optional[str] = None
+    fl_id: Optional[str] = None
+    text_cap: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class NormalizedLocator:
+    """Phase 79 R-PR-04 -- output of _validate_locator(req).
+
+    The handler passes `effective_*` fields to fetch_browse_bundle.
+    When the request supplied `uid`, the effective fields are derived
+    from parsing the uid (IE{N}_P{M}_FL{K}). When uid was absent, the
+    effective fields mirror the request fields directly.
+    """
+    sys_id: str
+    requested_uid: Optional[str]            # original uid string, for D-03b post-resolution check
+    effective_p_num: Optional[int]
+    effective_volume_ie: Optional[str]
+    effective_fl_id: Optional[str]
+    text_cap: Optional[int]
+
+
+_UID_PATTERN = _re.compile(r'^(IE\d+)_(P\d+)_(FL\d+)$')
+
+
+def _parse_uid(uid: str) -> Optional[dict]:
+    """Parse uid='IE{N}_P{M}_FL{K}' into components.
+
+    Returns dict with keys 'volume_ie' (str e.g. 'IE12345'), 'p_num' (int,
+    1-based) and 'fl_id' (str e.g. 'FL999'), or None if the uid does not
+    match the expected shape.
+    """
+    if not uid or not isinstance(uid, str):
+        return None
+    m = _UID_PATTERN.match(uid.strip())
+    if not m:
+        return None
+    ie_part, p_part, fl_part = m.group(1), m.group(2), m.group(3)
+    try:
+        p_num_val = int(p_part[1:])  # strip 'P' prefix
+    except ValueError:
+        return None
+    if p_num_val < 1:
+        return None
+    return {'volume_ie': ie_part, 'p_num': p_num_val, 'fl_id': fl_part}
+
+
+def _validate_locator(req: 'BrowseRequest') -> 'NormalizedLocator':
+    """D-03 / R-02 / D-03b -- strict locator semantics. R-PR-04 update: returns
+    a NormalizedLocator with effective_* fields derived from uid when present.
+
+    Rules:
+    - sys_id always required (Pydantic enforces; this is documentation).
+    - At least one of (uid, p_num, fl_id) must be supplied. None -> 400.
+    - p_num must be int >= 1.
+    - text_cap, when supplied, must be int in [MIN_BROWSE_TEXT_CAP, MAX_BROWSE_TEXT_CAP].
+    - If uid AND any of (volume_ie, p_num, fl_id) supplied AND parsed
+      components disagree -> 400 `locator_conflict`.
+    - When uid is supplied: effective_p_num / effective_volume_ie /
+      effective_fl_id are derived from parsing the uid.
+    - When uid is absent: effective_* fields mirror the request fields.
+    """
+    if not (req.uid or req.p_num is not None or req.fl_id):
+        raise APIError(
+            'invalid_request',
+            'locator missing: provide uid, p_num, or fl_id alongside sys_id',
+            http_status=400,
+        )
+    if req.p_num is not None and req.p_num < 1:
+        raise APIError(
+            'invalid_request',
+            f'p_num must be >= 1 (got {req.p_num})',
+            http_status=400,
+        )
+    if req.text_cap is not None and not (
+        MIN_BROWSE_TEXT_CAP <= req.text_cap <= MAX_BROWSE_TEXT_CAP
+    ):
+        raise APIError(
+            'invalid_request',
+            f'text_cap must be in [{MIN_BROWSE_TEXT_CAP}, {MAX_BROWSE_TEXT_CAP}] '
+            f'(got {req.text_cap})',
+            http_status=400,
+        )
+
+    # uid path: parse + check conflicts + derive effective fields.
+    if req.uid:
+        parsed = _parse_uid(req.uid)
+        if parsed is None:
+            raise APIError(
+                'locator_conflict',
+                f'uid is malformed (expected IE{{N}}_P{{M}}_FL{{K}}; got {req.uid!r})',
+                http_status=400,
+            )
+        # R-02 conflict detection.
+        if req.volume_ie is not None and req.volume_ie != parsed['volume_ie']:
+            raise APIError(
+                'locator_conflict',
+                f'uid implies volume_ie={parsed["volume_ie"]!r} but request '
+                f'supplied volume_ie={req.volume_ie!r}',
+                http_status=400,
+            )
+        if req.p_num is not None and req.p_num != parsed['p_num']:
+            raise APIError(
+                'locator_conflict',
+                f'uid implies p_num={parsed["p_num"]} but request supplied '
+                f'p_num={req.p_num}',
+                http_status=400,
+            )
+        if req.fl_id is not None and req.fl_id != parsed['fl_id']:
+            raise APIError(
+                'locator_conflict',
+                f'uid implies fl_id={parsed["fl_id"]!r} but request supplied '
+                f'fl_id={req.fl_id!r}',
+                http_status=400,
+            )
+        # Effective fields derived from uid (R-PR-04).
+        return NormalizedLocator(
+            sys_id=req.sys_id,
+            requested_uid=req.uid,
+            effective_p_num=parsed['p_num'],
+            effective_volume_ie=parsed['volume_ie'],
+            effective_fl_id=parsed['fl_id'],
+            text_cap=req.text_cap,
+        )
+
+    # No uid: effective fields mirror request fields.
+    return NormalizedLocator(
+        sys_id=req.sys_id,
+        requested_uid=None,
+        effective_p_num=req.p_num,
+        effective_volume_ie=req.volume_ie,
+        effective_fl_id=req.fl_id,
+        text_cap=req.text_cap,
+    )
+
+
+def _resolve_text_cap(requested: Optional[int]) -> int:
+    """R-08 priority: ?text_cap > env > DEFAULT_BROWSE_TEXT_CAP. Caller has
+    already validated bounds via _validate_locator.
+    """
+    if requested is not None:
+        return requested
+    raw = os.environ.get('SEARCH_API_BROWSE_TEXT_CAP')
+    if raw:
+        try:
+            v = int(raw)
+            return max(MIN_BROWSE_TEXT_CAP, min(MAX_BROWSE_TEXT_CAP, v))
+        except (ValueError, TypeError):
+            pass
+    return DEFAULT_BROWSE_TEXT_CAP
 
 
 # ---------------------------------------------------------------------------
@@ -370,4 +559,123 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                     'thread-local downgrade drain failed in finally',
                 )
 
-    logger.info("Search API routes initialized: POST /api/search")
+    @target_app.get('/api/browse')
+    @wrap_endpoint(endpoint_name='browse')
+    async def browse_endpoint(request: Request, *, captured_state: dict):
+        """GET /api/browse -- Phase 79 drill-down endpoint.
+
+        R-PR-03: decorated with @wrap_endpoint(endpoint_name='browse') from
+        web/api_hardening.py. The decorator owns try/except/finally + envelope
+        rewriting + capture_api_event. The handler body holds ONLY business
+        logic -- no hand-rolled boilerplate.
+
+        captured_state contract (set by handler, read by decorator's finally):
+        - 'mode': None for browse (no mode field)
+        - 'result_count': 1 on success, None on error/early-return paths
+
+        Statelessness D-22: handler MUST NOT touch any per-session/refinement
+        surfaces (last results, current query, browser-storage user dict, or
+        request cookies).
+        """
+        # Browse has no mode; pin to None so PostHog event has the right shape.
+        captured_state['mode'] = None
+
+        # 0. Parse query params + Pydantic validation. The decorator catches
+        #    PydanticValidationError; we just construct the model.
+        params = dict(request.query_params)
+        # Coerce known int fields explicitly -- bad casts surface as APIError
+        # 'invalid_request' which the decorator converts to a 400 envelope.
+        for k in ('p_num', 'text_cap'):
+            if k in params and params[k] != '':
+                try:
+                    params[k] = int(params[k])
+                except ValueError:
+                    raise APIError(
+                        'invalid_request',
+                        f'{k} must be an integer (got {params[k]!r})',
+                        http_status=400,
+                    )
+        req = BrowseRequest(**params)
+
+        # 1. Mode gate (D-04 disabled / D-03 localhost-only -- same as search).
+        enforce_mode_gate(request)
+
+        # 2. Rate limit (D-18 -- DIFFERENT instance from search bucket).
+        client_ip = _resolve_rate_limit_key(request)
+        _browse_rate_limiter.check(client_ip)
+
+        # 3. Locator validation + normalization (D-01 / D-03 / R-02 / R-PR-04).
+        loc = _validate_locator(req)
+
+        # 4. Resolve effective text_cap (R-08 priority).
+        effective_text_cap = _resolve_text_cap(loc.text_cap)
+
+        # 5. Enrichment fan-out (Plan 02). Pass NORMALIZED fields -- fetch_browse_bundle
+        #    does NOT accept uid (R-PR-04). Core fetch is also timed (R-01).
+        #    fetch_browse_bundle raises APIError('core_timeout', 504) on
+        #    core timeout; otherwise returns a bundle (page may be None).
+        bundle, warnings_list = await fetch_browse_bundle(
+            sys_id=loc.sys_id,
+            p_num=loc.effective_p_num,
+            volume_ie=loc.effective_volume_ie,
+            fl_id=loc.effective_fl_id,
+        )
+
+        # 6. Core resolution failure -> 404 (D-16).
+        if bundle.page is None:
+            raise APIError(
+                'manuscript_page_not_found',
+                f'no page for sys_id={loc.sys_id!r} '
+                f'p_num={loc.effective_p_num} volume_ie={loc.effective_volume_ie!r} '
+                f'fl_id={loc.effective_fl_id!r}',
+                http_status=404,
+            )
+
+        # 7. R-03 / D-03b -- post-resolution uid verification.
+        #    Compare the resolved BrowsePage.uid to the ORIGINAL requested uid
+        #    (not the effective fields -- those agree by construction in
+        #    _validate_locator). This catches the case where sys_id from
+        #    manuscript A is paired with uid from manuscript B.
+        if loc.requested_uid:
+            resolved_uid = getattr(bundle.page, 'uid', None) or ''
+            if resolved_uid and resolved_uid != loc.requested_uid:
+                raise APIError(
+                    'manuscript_page_not_found',
+                    f'uid resolved to different page (requested {loc.requested_uid!r}, '
+                    f'resolved {resolved_uid!r}); check sys_id + uid pair',
+                    http_status=404,
+                )
+
+        # 8. D-04 -- multi-IE without volume_ie defaulted; surface a warning.
+        if (
+            loc.requested_uid is None
+            and loc.effective_fl_id is None
+            and loc.effective_volume_ie is None
+            and getattr(bundle.page, 'volume_ie', None)
+            and len(getattr(bundle.page, 'volumes', []) or []) > 1
+        ):
+            warnings_list.append({
+                'code': 'volume_ie_defaulted',
+                'volume_ie': bundle.page.volume_ie,
+            })
+
+        # 9. Statelessness check (D-22). Forbidden reads -- none below.
+        #    Verified by grep at acceptance time.
+
+        # 10. Serialize via sibling serializer (D-26). R-PR-09: no
+        #     locator-echo parameters (those were dropped from the signature).
+        envelope = serialize_browse_payload(
+            page=bundle.page,
+            pgp=bundle.pgp,
+            fjms=bundle.fjms,
+            nli=bundle.nli,
+            text_cap=effective_text_cap,
+            warnings=warnings_list,
+        )
+
+        # 11. Tell the decorator's finally block what to log to PostHog.
+        captured_state['result_count'] = 1
+
+        return envelope
+
+    logger.info("Search API routes initialized: POST /api/search, GET /api/browse")
