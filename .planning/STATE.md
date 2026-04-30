@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
 status: executing
-stopped_at: Phase 78 Plan 03 complete (POST /api/search end-to-end GREEN; 82/82 Phase 78 tests; 1295 passed in wider suite)
-last_updated: "2026-04-30T03:47:49.633Z"
-last_activity: 2026-04-30 -- Phase 79 planning complete
+stopped_at: Phase 79 Plan 01 complete (foundations — ERROR_CODES + serialize_browse_payload + CLAUDE.md env vars; 108/108 Phase 77/78 tests GREEN; 1298 passed in wider suite)
+last_updated: "2026-04-30T07:05:00.000Z"
+last_activity: 2026-04-30 -- Phase 79 Plan 01 executed (3 tasks, 3 commits)
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 14
-  completed_plans: 10
-  percent: 71
+  total_plans: 18
+  completed_plans: 11
+  percent: 61
 ---
 
 # Project State
@@ -25,14 +25,14 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 79 (api-browse-drill-down) — CONTEXT LOCKED (Codex review applied)
-Plan: 0/0 — context phase done; planning next
-Status: Ready to execute
-Last activity: 2026-04-30 -- Phase 79 planning complete
+Phase: 79 (api-browse-drill-down) — Plan 01 COMPLETE (foundations)
+Plan: 1/4 — foundations landed; Plan 02 (service-layer extraction) is next.
+Status: Ready to execute Plan 02
+Last activity: 2026-04-30 -- Phase 79 Plan 01 executed (3 commits: 2419067e, ef60581d, bc1f6158)
 
-Progress: [#####     ] 50% (2/6 phases complete; Phase 79 ready to plan; Phase 77 still awaiting verify)
+Progress: [######    ] 61% (2/6 phases complete; 11/18 plans complete; Plan 79-01 done)
 
-Next step: `/gsd-plan-phase 79` — break Phase 79 into plans grounded in the locked CONTEXT.md.
+Next step: `/gsd-execute-phase 79` continues with Plan 79-02 (service-layer extraction). Phase 77 verify still queued.
 
 **Phase queue (v7.10):**
 
@@ -134,6 +134,14 @@ See PROJECT.md Key Decisions table for full history.
 - `register_exception_handlers` (global handler installer) NOT present in api_hardening.py per Concern #2. wrap_endpoint owns the try/except/finally + envelope + PostHog capture pattern (R2-#6 — was no-op marker, now full reusable surface).
 - Salt persisted to `web/_secrets/posthog_ip_salt`. Directory has `.gitignore` with `*` + `!.gitignore` so auto-generated salts never get committed.
 
+**Plan 79-01 decisions (2026-04-30):**
+
+- Foundation plan landed: 3 modified files (shared/api_errors.py, shared/search_serializer.py, CLAUDE.md), 3 commits (2419067e, ef60581d, bc1f6158), ~271 lines added total. Plan 02 (service-layer extraction) and Plan 03 (route handler) now have all primitives they need: 3 new ERROR_CODES (locator_conflict / manuscript_page_not_found / core_timeout), serialize_browse_payload importable from shared.search_serializer, env vars documented.
+- R-PR-01 honored end-to-end (D-14 reopened): the literal string `image_unavailable` does NOT appear in shared/search_serializer.py at all (grep returns 0). Even the rationale-explaining comments use the synonym "probe-failure warning" to keep the strict acceptance grep clean. R-PR-09 honored: serialize_browse_payload's signature contains NO requested_uid / requested_fl_id parameters; locator block reads exclusively from BrowsePage attributes.
+- Oxford route correction applied: CONTEXT.md D-12 had it as shelfmark-keyed, pattern-mapper verified web/api.py:896 is sys_id-keyed. _BROWSE_PROXY_BY_LIBRARY uses the corrected sys_id+query-param form with an inline comment block calling out the audit trail.
+- Test discipline preserved: 108/108 Phase 77/78 tests GREEN (test_search_serializer 26 + test_api_hardening 39 + test_search_api 40 + test_api_legacy_unchanged 3); wider suite 1298 passed / 8 skipped (no regression vs baseline 1295). check_docs.py exits 0 (with PYTHONIOENCODING=utf-8 wrapper to bypass an unrelated cp1255 console encoding bug in the script's emoji output).
+- Minor wording deviation only: rewrote three docstring/comment lines in shared/search_serializer.py to remove the literal forbidden tokens (image_unavailable / requested_uid / requested_fl_id) from the file body, since the strict acceptance grep counts every occurrence regardless of "explicitly NOT included" prose context. Semantics unchanged; comments now use synonymous phrasing.
+
 **Plan 78-01 decisions (2026-04-28):**
 
 - Wave 0 RED scaffold for /api/search + hardening shell. 3 test files, 82 test functions total. All fail at collection time with ModuleNotFoundError on `web.search_api`, `web.api_hardening`, `shared.api_errors` — that is the intended RED state per the plan's `commit_strategy` (CI between Plan 01 commit and Plan 03 commit is expected RED; Phase 78 is not shippable mid-stream by design).
@@ -174,9 +182,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-28T20:30:00.000Z
-Stopped at: Phase 78 Plan 03 complete (POST /api/search end-to-end GREEN; 82/82 Phase 78 tests; 1295 passed in wider suite)
-Resume file: .planning/phases/78-api-search-hardening-shell/78-04-PLAN.md
+Last session: 2026-04-30T07:05:00.000Z
+Stopped at: Phase 79 Plan 01 complete (foundations — ERROR_CODES + serialize_browse_payload + CLAUDE.md env vars; 108/108 Phase 77/78 tests GREEN; 1298 passed in wider suite)
+Resume file: .planning/phases/79-api-browse-drill-down/79-02-PLAN.md
 
 ## Performance Metrics — Phase 77
 
@@ -196,3 +204,9 @@ Resume file: .planning/phases/78-api-search-hardening-shell/78-04-PLAN.md
 | 78-01 | ~12 min | 3 (5 logical bundled into 3 commits) | 3 | 9f47025d (test_search_api.py 40 tests), 58d09a3c (test_api_hardening.py 39 tests), 1a38158c (test_api_legacy_unchanged.py 3 tests) |
 | 78-02 | ~5 min | 4 (Tasks 2+3 bundled) | 3 | ebbc584c (shared/api_errors.py 76 lines), cd264d9c (web/api_hardening.py 632 lines + _secrets/.gitignore; 39/39 hardening tests GREEN) |
 | 78-03 | ~10 min | 3 | 4 | 9af320b3 (genizah_core.py thread-local cascade signal; +48 lines), f68f4d4f (shared/fjms_service.py validate_filter_values fail-closed rewrite + helpers + module shorthands + shared/api_errors.py 'filter_vocabulary_unavailable'; +252 lines), ae1787b3 (web/search_api.py POST /api/search 373 lines NEW + shared/fjms_service get_filter_sys_ids module shorthand; 82/82 Phase 78 tests GREEN, 1295 passed in wider suite) |
+
+## Performance Metrics — Phase 79
+
+| Plan | Duration | Tasks | Files | Commits |
+|------|----------|-------|-------|---------|
+| 79-01 | ~12 min | 3 | 3 | 2419067e (shared/api_errors.py +4 lines: locator_conflict, manuscript_page_not_found, core_timeout), ef60581d (shared/search_serializer.py +264 lines: serialize_browse_payload + _build_browse_image_url + _BROWSE_PROXY_BY_LIBRARY + R-07 metadata-shape helpers; R-PR-01 + R-PR-09 honored), bc1f6158 (CLAUDE.md +3 lines: SEARCH_API_BROWSE_TIMEOUT/CORE_TIMEOUT/TEXT_CAP env-var docs); 108/108 Phase 77/78 tests GREEN, 1298 passed in wider suite |

@@ -276,7 +276,7 @@ back-nav bugfix.
   4. Rate limiting, mode gating, error envelope, and PostHog observability inherited from Phase 78 apply identically; existing `/api/*` image-proxy and puzzle routes are unchanged on spot-check.
 **Phase gate**: pytest green, CI green, locator round-trip test against single-IE and multi-IE manuscripts; closes the locator obligation that begins in Phase 77 (export embeds locator) → Phase 78 (search emits locator) → Phase 79 (browse consumes locator).
 **Plans:** 4 plans
-- [ ] 79-01-PLAN.md -- Foundation: extend api_errors ERROR_CODES + serialize_browse_payload skeleton + CLAUDE.md env vars
+- [x] 79-01-PLAN.md -- Foundation: extend api_errors ERROR_CODES + serialize_browse_payload skeleton + CLAUDE.md env vars (complete 2026-04-30; commits 2419067e/ef60581d/bc1f6158; 108/108 Phase 77/78 tests green)
 - [ ] 79-02-PLAN.md -- shared/browse_service.py: pure-data enrichment fan-out (D-23 extraction)
 - [ ] 79-03-PLAN.md -- web/search_api.py: GET /api/browse handler + BrowseRequest model + separate rate-limit bucket
 - [ ] 79-04-PLAN.md -- tests/test_browse_api.py + tests/test_api_legacy_unchanged.py extension
