@@ -10,8 +10,10 @@ def _make_storage():
 def test_persist_and_restore_round_trip():
     """runtime_only fields are pristine; restorable fields survive."""
     storage = _make_storage()
+    tab_storage = {}
     with patch('web.pages.search_state.app') as mock_app:
         mock_app.storage.user = storage
+        mock_app.storage.tab = tab_storage
 
         from web.pages.search_state import (
             SearchUIState,
@@ -26,6 +28,8 @@ def test_persist_and_restore_round_trip():
         state.expanded_index = 3      # runtime_only - must NOT survive
 
         persist_search_snapshot(state)
+        assert storage['search_results'] == []
+        assert tab_storage['search_active_snapshot']['results'] == [{'display': {'id': 'abc'}}]
 
         fresh_state = SearchUIState()
         fresh_state.is_running = False
@@ -53,13 +57,16 @@ def test_clear_snapshot_wipes_all_keys():
         'domain_exclusions': ['foo'],
         'search_snapshot_schema_version': 1,
     }
+    tab_storage = {'search_active_snapshot': {'version': 1, 'results': [{'id': 'tab'}]}}
     with patch('web.pages.search_state.app') as mock_app:
         mock_app.storage.user = storage
+        mock_app.storage.tab = tab_storage
         from web.pages.search_state import clear_search_snapshot
         clear_search_snapshot()
         # Snapshot fields are reset to safe defaults:
         assert storage.get('search_results') == []
         assert storage.get('domain_exclusions') == []
+        assert 'search_active_snapshot' not in tab_storage
         # Bootstrap-input keys are NOT touched by the helper:
         assert storage.get('search_query') == 'survives'
         assert storage.get('search_mode') == 'exact'
@@ -79,6 +86,7 @@ def test_missing_stamp_adopts_legacy_payload():
     }
     with patch('web.pages.search_state.app') as mock_app:
         mock_app.storage.user = storage
+        mock_app.storage.tab = {}
         from web.pages.search_state import SearchUIState, restore_search_snapshot
 
         state = SearchUIState()
@@ -115,6 +123,7 @@ def test_clear_search_filters_preserves_live_search_state():
     }
     with patch('web.pages.search_state.app') as mock_app:
         mock_app.storage.user = storage
+        mock_app.storage.tab = {}
         from web.pages.search_state import clear_search_filters
 
         clear_search_filters()
@@ -144,9 +153,58 @@ def test_stale_version_discards_snapshot():
     }
     with patch('web.pages.search_state.app') as mock_app:
         mock_app.storage.user = storage
+        mock_app.storage.tab = {}
         from web.pages.search_state import SearchUIState, restore_search_snapshot
 
         state = SearchUIState()
         restore_search_snapshot(state)
         # Default, not restored - stale version was discarded.
         assert state.results == []
+
+
+def test_restore_prefers_tab_snapshot_over_legacy_user_results():
+    """Active same-tab snapshot wins over compacted legacy user storage."""
+    storage = {
+        'search_results': [{'display': {'id': 'legacy'}}],
+        'search_snapshot_schema_version': 1,
+    }
+    tab_storage = {
+        'search_active_snapshot': {
+            'version': 1,
+            'results': [{'display': {'id': 'tab'}}],
+            'printed_filter': 'only_printed',
+            'domain_exclusions': ['foo'],
+            'search_refinement_chain': [],
+            'search_exclusion_sources': [],
+        }
+    }
+    with patch('web.pages.search_state.app') as mock_app:
+        mock_app.storage.user = storage
+        mock_app.storage.tab = tab_storage
+        from web.pages.search_state import SearchUIState, restore_search_snapshot
+
+        state = SearchUIState()
+        restore_search_snapshot(state)
+
+        assert state.results == [{'display': {'id': 'tab'}}]
+        assert state.printed_filter == 'only_printed'
+        assert state.domain_exclusions == {'foo'}
+
+
+def test_search_history_compacts_embedded_results():
+    """History entries must not persist heavyweight results."""
+    storage = {'session_persistence_enabled': True, 'search_history_limit': 20}
+    with patch('web.pages.search_state.app') as mock_app:
+        mock_app.storage.user = storage
+        mock_app.storage.tab = {}
+        from web.pages.search_state import add_to_search_history
+
+        add_to_search_history(
+            query='abc',
+            result_count=3,
+            mode='exact',
+            params={},
+            state_snapshot={'results': [{'id': 'heavy'}], 'printed_filter': 'all'},
+        )
+
+        assert storage['search_history'][0]['state'] == {'printed_filter': 'all'}

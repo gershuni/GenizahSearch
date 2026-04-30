@@ -205,6 +205,8 @@ class SearchPageRefs:
 # Phase 74 (D-03, D-05, D-08).
 
 _SEARCH_SNAPSHOT_VERSION = 1
+_SEARCH_ACTIVE_TAB_VERSION = 1
+_SEARCH_ACTIVE_TAB_KEY = 'search_active_snapshot'
 
 # Legacy keys owned by these helpers (D-08 - no format change).
 # Bootstrap-input keys (search_mode, search_query, search_preset,
@@ -238,6 +240,91 @@ _SEARCH_FILTER_MEASUREMENT_KEYS = (
 )
 
 
+def _get_tab_storage():
+    """Return tab storage when available, else None."""
+    try:
+        return app.storage.tab
+    except Exception:
+        return None
+
+
+def _compact_result_rows(results: list) -> list:
+    """Strip heavy text fields before persisting result rows."""
+    compacted = []
+    for r in results or []:
+        sr = dict(r) if isinstance(r, dict) else r
+        if isinstance(sr, dict):
+            sr.pop('full_text', None)
+            disp = sr.get('display')
+            if disp and isinstance(disp, dict):
+                d = dict(disp)
+                d.pop('full_text', None)
+                sr['display'] = d
+        compacted.append(sr)
+    return compacted
+
+
+def get_search_active_snapshot() -> dict:
+    """Return the current same-tab active search snapshot, if present."""
+    tab = _get_tab_storage()
+    if tab is None:
+        return {}
+    raw = tab.get(_SEARCH_ACTIVE_TAB_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    if raw.get('version') != _SEARCH_ACTIVE_TAB_VERSION:
+        return {}
+    return raw
+
+
+def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
+    """Restore active same-tab search state from tab storage."""
+    raw = get_search_active_snapshot()
+    if not raw:
+        return False
+    state.results = raw.get('results', []) or []
+    state.printed_filter = raw.get('printed_filter', 'all')
+    _de = raw.get('domain_exclusions')
+    state.domain_exclusions = set(_de) if _de else set()
+    from shared.refinement import RefinementStep
+    raw_chain = raw.get('search_refinement_chain', []) or []
+    try:
+        state.refinement_chain = [RefinementStep.from_dict(d) for d in raw_chain]
+    except Exception:
+        state.refinement_chain = []
+    state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    return True
+
+
+def persist_search_active_snapshot(state: 'SearchUIState') -> None:
+    """Persist active same-tab search results outside long-lived user storage."""
+    tab = _get_tab_storage()
+    if tab is None:
+        return
+    try:
+        tab[_SEARCH_ACTIVE_TAB_KEY] = {
+            'version': _SEARCH_ACTIVE_TAB_VERSION,
+            'results': _compact_result_rows((state.results or [])[:1000]),
+            'printed_filter': state.printed_filter,
+            'domain_exclusions': list(state.domain_exclusions or []),
+            'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
+            'search_exclusion_sources': list(state.exclusion_sources or []),
+        }
+    except Exception:
+        pass
+
+
+def clear_search_active_snapshot() -> None:
+    """Drop transient same-tab search state."""
+    tab = _get_tab_storage()
+    if tab is None:
+        return
+    try:
+        tab.pop(_SEARCH_ACTIVE_TAB_KEY, None)
+    except Exception:
+        pass
+
+
 def restore_search_snapshot(state: 'SearchUIState') -> None:
     """Hydrate page-scoped state from app.storage.user snapshot.
 
@@ -268,6 +355,8 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
 
     try:
         # Restorable scalar/list fields (match RESEARCH §1.1 bucket).
+        if restore_search_active_snapshot(state):
+            return
         state.results = app.storage.user.get('search_results', []) or []
         state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
         _de = app.storage.user.get('domain_exclusions')
@@ -300,22 +389,8 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
         return
     try:
         app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
-        # Cap at 1000 results and strip heavy full_text fields before writing
-        # to app.storage.user (browser WS message size limit) -- matches the
-        # pre-Phase-74 inline behavior at search.py:4171-4190.
-        capped = (state.results or [])[:1000]
-        storage_results = []
-        for r in capped:
-            sr = dict(r) if isinstance(r, dict) else r
-            if isinstance(sr, dict):
-                sr.pop('full_text', None)
-                disp = sr.get('display')
-                if disp and isinstance(disp, dict):
-                    d = dict(disp)
-                    d.pop('full_text', None)
-                    sr['display'] = d
-            storage_results.append(sr)
-        app.storage.user['search_results'] = storage_results
+        persist_search_active_snapshot(state)
+        app.storage.user['search_results'] = []
         app.storage.user['search_printed_filter'] = state.printed_filter
         app.storage.user['domain_exclusions'] = list(state.domain_exclusions or [])
         # refinement_chain (list[RefinementStep] -> list[dict])
@@ -368,6 +443,7 @@ def clear_search_snapshot() -> None:
             app.storage.user.pop(key, None)
         except Exception:
             pass
+    clear_search_active_snapshot()
     # Filter keys (match search.py:806-832 reset block).
     # Defaults match LIVE field types verified in web/pages/search_state.py:60, :82
     # and web/components/filter_panel.py:248, :271 (review-revision: Codex HIGH #2):
@@ -446,13 +522,16 @@ def add_to_search_history(query: str, result_count: int, mode: str, params: dict
             existing_idx = i
             break
 
+    compact_state = dict(state_snapshot or {})
+    compact_state.pop('results', None)
+
     entry = {
         'query': query,
         'result_count': result_count,
         'mode': mode,
         'timestamp': datetime.now().isoformat(),
         'params': params,
-        'state': state_snapshot,
+        'state': compact_state,
     }
 
     if existing_idx is not None:

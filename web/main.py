@@ -118,6 +118,8 @@ async def _mark_framework_assets_noindex(request, call_next):
 from fastapi import Header, HTTPException
 from fastapi.responses import JSONResponse
 import time as _memstat_time
+from nicegui.client import Client as _NiceGUIClient
+from web.storage_diagnostics import summarize_nicegui_storage
 
 _MEMSTAT_SECRET = os.environ.get('MEMSTAT_SECRET', '').strip()
 
@@ -146,6 +148,10 @@ def _memstat_endpoint(x_memstat_secret: str = Header(default='')):
         stats['version'] = _v
     except Exception:
         pass
+    try:
+        stats.update(summarize_nicegui_storage(app.storage, _NiceGUIClient.instances.values()))
+    except Exception:
+        stats['nicegui_storage_summary_error'] = True
     return JSONResponse(stats)
 
 
@@ -408,7 +414,7 @@ def create_layout():
                     """Heartbeat: check server readiness and update dot color."""
                     try:
                         if status_dot.is_deleted or status_text.is_deleted:
-                            return
+                            return False
                         if state.is_ready():
                             status_dot.classes('bg-green-400', remove='bg-yellow-400 animate-pulse')
                             status_text.text = tr('Ready')
@@ -417,7 +423,8 @@ def create_layout():
                             status_dot.classes('bg-yellow-400 animate-pulse', remove='bg-green-400')
                             status_text.text = tr('Loading...')
                     except RuntimeError:
-                        pass  # Element/client deleted
+                        return False
+                    return True
 
                 # Run heartbeat every 10 seconds to monitor connection health
                 # Use asyncio to avoid parent_slot RuntimeError on navigation
@@ -425,7 +432,8 @@ def create_layout():
                     await asyncio.sleep(2.0)
                     while True:
                         try:
-                            await update_status()
+                            if not await update_status():
+                                break
                         except RuntimeError:
                             break  # Element deleted — stop loop
                         except Exception:
