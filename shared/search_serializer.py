@@ -63,6 +63,19 @@ NLI_RESOLVABLE_LIBRARY_CODES = frozenset({
 })
 
 
+# Phase 79 D-12: library codes that have specialized proxy routes in web/api.py.
+# Anything else falls back to the NLI proxy via /api/nli_image_by_sysid.
+# CORRECTION (per pattern-mapper, web/api.py:896): Oxford route is sys_id-keyed
+# /api/oxford_image/{sys_id}?page=N (NOT shelfmark-keyed as CONTEXT.md D-12 originally phrased).
+_BROWSE_PROXY_BY_LIBRARY = {
+    'CUL':        ('/api/cambridge_image',   'cambridge'),
+    'Manchester': ('/api/manchester_image',  'manchester'),
+    'JTS':        ('/api/jts_image',         'jts'),
+    'Oxford':     ('/api/oxford_image',      'oxford'),
+}
+_BROWSE_DEFAULT_PROXY = ('/api/nli_image_by_sysid', 'nli')
+
+
 # -----------------------------------------------------------------------------
 # Filename uniqueness counter (HIGH-06)
 # -----------------------------------------------------------------------------
@@ -124,6 +137,37 @@ def _build_image_url(
     except (ValueError, TypeError):
         return None
     return f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}"
+
+
+def _build_browse_image_url(
+    sys_id: Optional[str],
+    p_num: Optional[Any],
+    library_code: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Phase 79 D-12: library-aware proxy URL picker for /api/browse.
+
+    Returns (url, provider). Returns (None, None) only when sys_id is falsy or
+    p_num is None/0/negative/non-int (input-shape failure). NEVER probes upstream
+    availability — per R-PR-01 (D-14 reopened) the URL is best-effort.
+
+    Library matching is case-sensitive; the keys are the exact library_code
+    values populated by genizah_core.LIBRARY_CODES. Unmatched codes fall through
+    to /api/nli_image_by_sysid (BL/RNL/AIU/Mosseri/Gaster/Halper/CentralArch/etc.).
+
+    Page indexing on the proxy URL stays 0-based per the existing internal
+    convention (the response field `page_indexing: '1-based'` documents the
+    response semantics; the proxy URL semantics are server-internal).
+    """
+    if not sys_id:
+        return (None, None)
+    try:
+        page_idx = int(p_num) - 1
+    except (ValueError, TypeError):
+        return (None, None)
+    if page_idx < 0:
+        return (None, None)
+    base, provider = _BROWSE_PROXY_BY_LIBRARY.get(library_code or '', _BROWSE_DEFAULT_PROXY)
+    return (f"{base}/{sys_id}?page={page_idx}", provider)
 
 
 def _safe_library_name(code: Optional[str]) -> str:
@@ -368,6 +412,226 @@ def serialize_search_payload(
         'warnings': list(warnings) if warnings else [],
         'generated_at': _utc_iso_now(),
         'results': items,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Phase 79: serialize_browse_payload (sibling serializer per D-26)
+# -----------------------------------------------------------------------------
+#
+# Same envelope conventions as serialize_search_payload (schema_version, source,
+# generated_at, locator, warnings always present). Different `source` value
+# ('browse' vs 'search') and a different shape (single page vs ranked list).
+#
+# R-PR-01 (D-14 reopened 2026-04-29): image.url is emitted UNCONDITIONALLY based
+# on library_code. The serializer NEVER probes upstream availability and NEVER
+# emits a probe-failure warning. Image URLs are best-effort; clients handle
+# proxy failures via image.sources[] alternates.
+#
+# R-PR-09: serialize_browse_payload's signature is keyword-only. The locator
+# block is built entirely from the resolved BrowsePage attributes; Plan 03's
+# normalized locator is the source of truth before this call.
+
+
+def _truncate_text_at_word_boundary(text: str, cap: int) -> tuple[str, bool]:
+    """Truncate text at last word boundary <= cap; append U+2026 ellipsis.
+
+    Returns (truncated_text, was_truncated). When len(text) <= cap, returns
+    (text, False). Otherwise slices to cap, trims back to last whitespace
+    boundary if one exists, and appends a single '…' character (NOT three dots).
+    """
+    if len(text) <= cap:
+        return (text, False)
+    sliced = text[:cap]
+    # Trim back to last whitespace boundary if one exists.
+    space_idx = sliced.rfind(' ')
+    if space_idx > 0:
+        sliced = sliced[:space_idx]
+    return (sliced + '…', True)
+
+
+def _build_pgp_subset(pgp: dict) -> dict:
+    """R-07 stable shape (10 keys, never missing)."""
+    return {
+        'description':           pgp.get('description'),
+        'tags':                  list(pgp.get('tags') or []),
+        'document_type':         pgp.get('document_type'),
+        'languages_primary':     list(pgp.get('languages_primary') or []),
+        'languages_secondary':   list(pgp.get('languages_secondary') or []),
+        'doc_date_original':     pgp.get('doc_date_original'),
+        'doc_date_standard':     pgp.get('doc_date_standard'),
+        'inferred_date_display': pgp.get('inferred_date_display'),
+        'pgpid':                 pgp.get('pgpid'),
+        'pgp_url':               pgp.get('pgp_url'),
+    }
+
+
+def _build_fjms_subset(fjms: dict) -> dict:
+    """R-07 stable shape (3 keys, D-08)."""
+    return {
+        'source_names':           list(fjms.get('source_names') or []),
+        'has_measurements':       bool(fjms.get('has_measurements')),
+        'has_visual_suggestions': bool(fjms.get('has_visual_suggestions')),
+    }
+
+
+def _build_nli_subset(nli: dict, page: Any) -> dict:
+    """R-07 stable shape (2 keys, D-09).
+
+    `physical_metadata` is a dict-or-None pre-shaped by shared/nli_crossref_service.
+    `folio` is built upstream in Plan 02's service layer ({fl_id, folio_label, thumb_url}).
+    Both inner values may be None — but the outer metadata.nli object is non-empty.
+    """
+    return {
+        'physical_metadata': nli.get('physical_metadata'),
+        'folio':             nli.get('folio'),
+    }
+
+
+def _build_browse_image(page: Any) -> dict:
+    """Phase 79 D-13 image block. R-PR-01: NO upstream probe; NO probe-failure warning.
+
+    image.url is always emitted when sys_id+p_num are valid (best-effort URL).
+    image.sources[] MAY be [] when no usable URL exists (R-06).
+    Each source entry has keys: url, provider, role, kind, fl_id, folio_label.
+    role ∈ {iiif_proxy, external_viewer, companion_folio}; kind ∈ {image, viewer}.
+    """
+    url, provider = _build_browse_image_url(
+        getattr(page, 'sys_id', None),
+        getattr(page, 'p_num', None),
+        getattr(page, 'library_code', None),
+    )
+    sources: list[dict] = []
+    if url:
+        sources.append({
+            'url': url,
+            'provider': provider,
+            'role': 'iiif_proxy',
+            'kind': 'image',
+            'fl_id': getattr(page, 'fl_id', None),
+            'folio_label': getattr(page, 'folio_label', None) or None,
+        })
+    # Companion folios — BrowsePage.cambridge_images is list of {url, fl_id, folio_label, ...}.
+    for img in (getattr(page, 'cambridge_images', None) or []):
+        if not isinstance(img, dict) or not img.get('url'):
+            continue
+        sources.append({
+            'url': img['url'],
+            'provider': getattr(page, 'external_provider', None) or 'cambridge',
+            'role': 'companion_folio',
+            'kind': 'image',
+            'fl_id': img.get('fl_id'),
+            'folio_label': img.get('folio_label'),
+        })
+    # External viewer (CUDL / Bodleian landing page) — kind=viewer per R-05.
+    viewer = getattr(page, 'library_viewer_url', None)
+    if isinstance(viewer, dict) and viewer.get('url'):
+        sources.append({
+            'url': viewer['url'],
+            'provider': (viewer.get('library_abbrev') or 'external').lower() + '_viewer',
+            'role': 'external_viewer',
+            'kind': 'viewer',
+            'fl_id': None,
+            'folio_label': None,
+        })
+    return {'url': url, 'provider': provider, 'sources': sources}
+
+
+def serialize_browse_payload(
+    *,
+    page: Any,
+    pgp: Optional[dict],
+    fjms: Optional[dict],
+    nli: Optional[dict],
+    text_cap: int = 4000,
+    warnings: Optional[list] = None,
+) -> dict:
+    """Phase 79 D-26 sibling serializer — same envelope conventions as serialize_search_payload.
+
+    The `page` argument MUST be a `web.services.BrowsePage` dataclass instance
+    (Plan 02 returns these from WebDataService.get_browse_page / _by_fl). The
+    serializer reads attributes directly; no dict duck-typing.
+
+    R-PR-01 (D-14 reopened): image.url is emitted unconditionally based on
+    library_code. NO availability probe. NO probe-failure warning emission.
+    Clients handle proxy failures via image.sources[] alternates.
+
+    R-PR-09: signature is keyword-only with no requested-locator parameters.
+    The locator block is built entirely from the resolved page's attributes.
+    Plan 03's normalized locator is the source of truth before this call.
+
+    Args:
+        page: BrowsePage dataclass instance (web.services.BrowsePage).
+        pgp: PGP enrichment dict or None — None means PGP unavailable for this sys_id.
+            When dict, may contain 'page_section_text' for text-source override (D-10).
+        fjms: FJMS catalog enrichment dict or None.
+        nli: NLI crossref enrichment dict or None.
+        text_cap: char cap for the text field (D-11). Default 4000; Plan 03 may
+            override per-request via ?text_cap=N (clamped to [100, 10000]).
+        warnings: caller-supplied warnings (e.g., enrichment_timeout, volume_ie_defaulted).
+            transcription_truncated is appended internally on truncation.
+
+    Returns:
+        Envelope dict per D-06 with keys: schema_version, source='browse',
+        generated_at, locator (uid/sys_id/volume_ie/p_num/fl_id), page_indexing,
+        shelfmark, title, library, text, text_source, text_truncated, metadata
+        (pgp/fjms/nli), image, warnings.
+    """
+    warnings_list = list(warnings) if warnings else []
+
+    # Locator (R-04: fl_id always echoed). Read from resolved BrowsePage.
+    locator = {
+        'uid':       getattr(page, 'uid', None) or None,
+        'sys_id':    getattr(page, 'sys_id', None) or None,
+        'volume_ie': getattr(page, 'volume_ie', None),
+        'p_num':     getattr(page, 'p_num', None),
+        'fl_id':     getattr(page, 'fl_id', None),
+    }
+
+    # Text + text_source (D-10). PGP page-scoped transcription wins; else snippet; else none.
+    raw_text = getattr(page, 'text', None) or ''
+    if pgp and pgp.get('page_section_text'):
+        raw_text = pgp['page_section_text']
+        text_source = 'pgp_transcription'
+    elif raw_text:
+        text_source = 'snippet'
+    else:
+        text_source = 'none'
+    text, text_truncated = _truncate_text_at_word_boundary(raw_text, text_cap)
+    if text_truncated:
+        warnings_list.append({
+            'code': 'transcription_truncated',
+            'message': f'transcription text truncated at {text_cap} chars',
+        })
+
+    # Metadata groups (R-07: each is None or fully-populated; never {}).
+    metadata = {
+        'pgp':  _build_pgp_subset(pgp)       if pgp  is not None else None,
+        'fjms': _build_fjms_subset(fjms)     if fjms is not None else None,
+        'nli':  _build_nli_subset(nli, page) if nli  is not None else None,
+    }
+
+    # Image (D-12, D-13, D-14 REOPENED — best-effort URL, no probe).
+    image = _build_browse_image(page)
+
+    return {
+        'schema_version':  SCHEMA_VERSION,
+        'source':          'browse',
+        'generated_at':    _utc_iso_now(),
+        'locator':         locator,
+        'page_indexing':   '1-based',
+        'shelfmark':       getattr(page, 'shelfmark', None) or '',
+        'title':           getattr(page, 'title', None) or '',
+        'library': {
+            'code': getattr(page, 'library_code', None) or '',
+            'name': _safe_library_name(getattr(page, 'library_code', None)),
+        },
+        'text':            text,
+        'text_source':     text_source,
+        'text_truncated':  text_truncated,
+        'metadata':        metadata,
+        'image':           image,
+        'warnings':        warnings_list,
     }
 
 
