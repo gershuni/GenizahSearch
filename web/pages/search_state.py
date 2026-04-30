@@ -207,6 +207,7 @@ class SearchPageRefs:
 _SEARCH_SNAPSHOT_VERSION = 1
 _SEARCH_ACTIVE_TAB_VERSION = 1
 _SEARCH_ACTIVE_TAB_KEY = 'search_active_snapshot'
+_SEARCH_ACTIVE_USER_FALLBACK_LIMIT = 250
 
 # Legacy keys owned by these helpers (D-08 - no format change).
 # Bootstrap-input keys (search_mode, search_query, search_preset,
@@ -390,7 +391,9 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
     try:
         app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
         persist_search_active_snapshot(state)
-        app.storage.user['search_results'] = []
+        app.storage.user['search_results'] = _compact_result_rows(
+            (state.results or [])[:_SEARCH_ACTIVE_USER_FALLBACK_LIMIT]
+        )
         app.storage.user['search_printed_filter'] = state.printed_filter
         app.storage.user['domain_exclusions'] = list(state.domain_exclusions or [])
         # refinement_chain (list[RefinementStep] -> list[dict])

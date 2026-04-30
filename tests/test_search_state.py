@@ -28,7 +28,7 @@ def test_persist_and_restore_round_trip():
         state.expanded_index = 3      # runtime_only - must NOT survive
 
         persist_search_snapshot(state)
-        assert storage['search_results'] == []
+        assert storage['search_results'] == [{'display': {'id': 'abc'}}]
         assert tab_storage['search_active_snapshot']['results'] == [{'display': {'id': 'abc'}}]
 
         fresh_state = SearchUIState()
@@ -189,6 +189,27 @@ def test_restore_prefers_tab_snapshot_over_legacy_user_results():
         assert state.results == [{'display': {'id': 'tab'}}]
         assert state.printed_filter == 'only_printed'
         assert state.domain_exclusions == {'foo'}
+
+
+def test_restore_falls_back_to_compact_user_snapshot_when_tab_missing():
+    """Compact user snapshot must still restore visible results if tab snapshot is absent."""
+    storage = {
+        'search_results': [{'display': {'id': 'user'}}],
+        'search_printed_filter': 'hide_printed',
+        'domain_exclusions': ['bar'],
+        'search_snapshot_schema_version': 1,
+    }
+    with patch('web.pages.search_state.app') as mock_app:
+        mock_app.storage.user = storage
+        mock_app.storage.tab = {}
+        from web.pages.search_state import SearchUIState, restore_search_snapshot
+
+        state = SearchUIState()
+        restore_search_snapshot(state)
+
+        assert state.results == [{'display': {'id': 'user'}}]
+        assert state.printed_filter == 'hide_printed'
+        assert state.domain_exclusions == {'bar'}
 
 
 def test_search_history_compacts_embedded_results():

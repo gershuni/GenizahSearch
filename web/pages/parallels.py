@@ -197,6 +197,7 @@ def create_parallels_page(initial_text: str = None):
     p_state = ParallelsState()
     _PARALLELS_ACTIVE_TAB_KEY = 'parallels_active_snapshot'
     _PARALLELS_ACTIVE_TAB_VERSION = 1
+    _PARALLELS_ACTIVE_USER_FALLBACK_LIMIT = 250
 
     def _get_tab_storage():
         try:
@@ -2302,8 +2303,12 @@ def create_parallels_page(initial_text: str = None):
                         'warnings': [],  # Phase 78 will populate
                     }
                     # Also store in user storage (for UI persistence across page reloads)
-                    app.storage.user['parallels_results'] = []
-                    app.storage.user['parallels_filtered'] = []
+                    app.storage.user['parallels_results'] = _compact_result_rows(
+                        main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                    )
+                    app.storage.user['parallels_filtered'] = _compact_result_rows(
+                        (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                    )
                     _persist_active_snapshot()
                 except Exception:
                     pass  # Browser storage operation failed; preference not persisted
