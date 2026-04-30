@@ -362,7 +362,7 @@ def wrap_endpoint(*, endpoint_name: str):
         the branch above.
     """
     def _decorator(handler: Callable[..., Awaitable]) -> Callable[..., Awaitable]:
-        async def _wrapped(request: Request, *args, **kwargs):
+        async def _wrapped(request: Request):
             t0 = time.monotonic()
             client_ip = _resolve_rate_limit_key(request)
             captured_state: dict = {'mode': None, 'result_count': None}
@@ -370,8 +370,8 @@ def wrap_endpoint(*, endpoint_name: str):
             error_code: Optional[str] = None
             try:
                 result = await handler(
-                    request, *args,
-                    captured_state=captured_state, **kwargs,
+                    request,
+                    captured_state=captured_state,
                 )
                 return result
             except APIError as exc:

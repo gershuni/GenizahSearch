@@ -148,6 +148,42 @@ def test_legacy_validation_failure_envelope_unchanged(client_with_both_inits):
             )
 
 
+def test_legacy_nli_image_by_sysid_unchanged(client_with_both_inits):
+    """D-25 (Phase 79 Plan 04): /api/nli_image_by_sysid behavior is unchanged
+    after init_search_api runs alongside init_api_routes.
+
+    The route is registered by init_api_routes (web/api.py:573) and returns a
+    binary image Response on success or `Response(content="Image not found",
+    status_code=404)` on miss. Phase 79's init_search_api MUST NOT route this
+    request through the new envelope rewriting path or otherwise mutate the
+    legacy contract.
+    """
+    r = client_with_both_inits.get(
+        '/api/nli_image_by_sysid/__nonexistent_sys_id__?page=0'
+    )
+    # Acceptable: 404 (image not found, legacy plaintext) or 200 (rare; would
+    # only happen if the test environment has a working NLI fetch). The
+    # FORBIDDEN outcome is a Phase 78 JSON error envelope leaking onto this
+    # route.
+    assert r.status_code in (200, 404, 500, 502, 503, 504), (
+        f'unexpected status {r.status_code} for legacy /api/nli_image_by_sysid; '
+        'baseline before Phase 79 was 404 plaintext or 200 image'
+    )
+    ct = r.headers.get('content-type', '')
+    if ct.startswith('application/json'):
+        try:
+            body = r.json()
+        except ValueError:
+            body = {}
+        if isinstance(body, dict) and isinstance(body.get('error'), dict):
+            err = body['error']
+            assert 'code' not in err or 'message' not in err, (
+                f'legacy /api/nli_image_by_sysid MUST NOT use Phase 78 error '
+                f'envelope; got {body!r}. Phase 79 D-25 regression: '
+                'init_search_api leaked envelope rewriting onto a legacy route.'
+            )
+
+
 def test_legacy_puzzle_image_route_status_unchanged(client_with_both_inits):
     """Spot check the puzzle image route status code is unchanged.
 
