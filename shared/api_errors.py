@@ -34,6 +34,10 @@ ERROR_CODES = frozenset({
     'disabled',
     'localhost_only',
     'internal_error',
+    # Phase 79 (/api/browse) additions:
+    'locator_conflict',
+    'manuscript_page_not_found',
+    'core_timeout',
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
