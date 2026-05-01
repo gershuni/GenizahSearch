@@ -38,10 +38,17 @@ ERROR_CODES = frozenset({
     'locator_conflict',
     'manuscript_page_not_found',
     'core_timeout',
+    # Phase 80 (/api/parallels) additions:
+    'composition_required',     # D-06: text.strip() empty
+    'composition_too_long',     # D-06: len(text.strip()) > COMPOSITION_LENGTH_CAP (20000)
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
-WARNING_CODES = frozenset({'query_downgraded'})
+WARNING_CODES = frozenset({
+    'query_downgraded',
+    # Phase 80 (/api/parallels) additions:
+    'truncated_to_200',         # D-07: parallels group count exceeds 200; top 200 returned
+})
 
 
 class APIError(Exception):
