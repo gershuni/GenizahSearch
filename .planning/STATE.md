@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
-status: executing
-stopped_at: Phase 79 Plan 04 complete (test surface — tests/test_browse_api.py 38 D-24 tests + D-25 legacy spot check; uncovered + fixed wrap_endpoint signature regression in web/api_hardening.py that was returning 422 on every /api/browse request; 1336 passed / 9 skipped — all four 79 plans land)
-last_updated: "2026-04-30T13:00:00.000Z"
-last_activity: 2026-04-30 -- Phase 79 Plan 04 executed (1 commit 1fe494ef; tests/test_browse_api.py +1002 lines, tests/test_api_legacy_unchanged.py +38 lines, web/api_hardening.py -3 lines)
+status: Phase 80 closed. POST /api/parallels live with the same hardening shell as /api/search and /api/browse.
+stopped_at: phase 80 verification PASSED (2026-05-01)
+last_updated: "2026-05-01T12:00:00.000Z"
+last_activity: 2026-05-01 -- Phase 80 (4 plans) executed and VERIFIED PASSED (4/4 SCs). 1384 passed / 10 skipped (39 new tests). Code review clean (0 blockers/high/medium; 4 info).
 progress:
   total_phases: 6
-  completed_phases: 2
-  total_plans: 18
-  completed_plans: 14
-  percent: 78
+  completed_phases: 4
+  total_plans: 22
+  completed_plans: 18
+  percent: 82
 ---
 
 # Project State
@@ -21,29 +21,29 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 77 — serializer-json-export
+**Current focus:** Phase 81 — Claude Skill Consumer (next planning target)
 
 ## Current Position
 
-Phase: 79 (api-browse-drill-down) — Plan 04 COMPLETE (test surface + signature regression fix)
-Plan: 4/4 — all plans landed; phase ready for verification.
-Status: Ready for `/gsd-verify-work 79` (or runs as part of /gsd-execute-phase 79 verify_phase_goal step)
-Last activity: 2026-04-30 -- Phase 79 Plan 04 executed (1 commit: 1fe494ef)
+Phase: 80 (api-parallels) — VERIFIED ✅ (2026-05-01)
+Plan: 4/4 plans landed; gsd-verifier reported PASSED (4/4 success criteria). VERIFICATION.md: `.planning/phases/80-api-parallels/80-VERIFICATION.md`. Code review clean: `.planning/phases/80-api-parallels/80-REVIEW.md` (0 blockers/high/medium; 4 info).
+Status: Phase 80 closed. POST /api/parallels live with the same hardening shell as /api/search and /api/browse.
+Last activity: 2026-05-01 -- Phase 80 (4 plans) executed and VERIFIED PASSED. 1384 passed / 10 skipped (39 new tests added by Plan 80-04).
 
-Progress: [########  ] 78% (2/6 phases complete; 14/18 plans complete; Phase 79 ready to verify)
+Progress: [##########] 82% (4/6 phases verified; 18/22 plans complete)
 
-Next step: gsd-verifier on Phase 79 (must_haves: locator round-trip, statelessness, image graceful degrade, transcription cap, separate rate-limit bucket; REQUIREMENTS.md: API-03 + API-04 + API-05 + API-06 + HARDEN-01 + HARDEN-04 + HARDEN-05). Phase 77 verify remains queued.
+Next step: `/gsd-plan-phase 81` for Claude Skill Consumer (SKILL-01..03). All three search-helper endpoints (/api/search, /api/browse, /api/parallels) are now live with shared hardening; the skill phase can begin consuming them.
 
 **Phase queue (v7.10):**
 
-1. **Phase 77** — Serializer & JSON Export (EXPORT-01..04) ← 6/6 plans complete; awaiting `/gsd-verify-work 77`
-2. Phase 78 — /api/search + Hardening Shell (API-01,04,05,06,07 + HARDEN-01..05)
-3. Phase 79 — /api/browse Drill-Down (API-03) — Codex-recommended: validates locator round-trip via real consumer before a second producer
-4. Phase 80 — /api/parallels (API-02)
-5. Phase 81 — Claude Skill Consumer (SKILL-01..03)
+1. ✅ **Phase 77** — Serializer & JSON Export (EXPORT-01..04) — VERIFIED 2026-04-28 (77-VERIFICATION.md, 4/4 SCs)
+2. ✅ **Phase 78** — /api/search + Hardening Shell (API-01,04,05,06,07 + HARDEN-01..05) — VERIFIED 2026-04-29 (78-VERIFICATION.md)
+3. ✅ **Phase 79** — /api/browse Drill-Down (API-03) — VERIFIED 2026-05-01 (79-VERIFICATION.md)
+4. ✅ **Phase 80** — /api/parallels (API-02) — VERIFIED 2026-05-01 (80-VERIFICATION.md, 4/4 SCs)
+5. **Phase 81** — Claude Skill Consumer (SKILL-01..03) ← next planning target
 6. Phase 82 — Internal Documentation (DOC-01, DOC-02)
 
-Next step: `/gsd-execute-phase 78` continues with Plan 78-04 (wire `init_search_api()` into web/main.py + soak test + CLAUDE.md env-vars). The route is registered but not yet mounted on the live NiceGUI app. Phase 77 verify remains queued.
+Recommended next: `/gsd-plan-phase 81`.
 
 ## Performance Metrics
 
@@ -196,9 +196,9 @@ See PROJECT.md Key Decisions table for full history.
 
 ## Session Continuity
 
-Last session: 2026-04-30T04:15:00.000Z
-Stopped at: Phase 79 Plan 02 complete (service-layer extraction — shared/browse_service.py with fetch_browse_bundle + BrowseEnrichmentBundle; 105/105 Phase 77/78 targeted tests GREEN; 1298 passed in wider suite)
-Resume file: .planning/phases/79-api-browse-drill-down/79-03-PLAN.md
+Last session: 2026-05-01T03:45:47.524Z
+Stopped at: context exhaustion at 91% (2026-05-01)
+Resume file: None
 
 ## Performance Metrics — Phase 77
 

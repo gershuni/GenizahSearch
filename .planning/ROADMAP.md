@@ -224,7 +224,7 @@ back-nav bugfix.
 - [ ] **Phase 77: Serializer & JSON Export** — Single-source-of-truth serializer module powering toolbar JSON downloads on /search and /parallels, ahead of any API endpoint
 - [x] **Phase 78: /api/search + Hardening Shell** (complete 2026-04-29) — First search-helper endpoint plus the cross-cutting hardening primitives (rate limit, mode flag, query/result caps, error envelope, PostHog) all three endpoints reuse
 - [ ] **Phase 79: /api/browse Drill-Down** — Stateless drill-down endpoint resolving locators from /api/search responses to text + metadata + image URLs; first real consumer of the locator contract, proves the search → browse vertical slice
-- [ ] **Phase 80: /api/parallels** — Companion search-side endpoint reusing the locator and hardening shell, sequenced after browse so the locator round-trip is already validated before a second producer is added
+- [x] **Phase 80: /api/parallels** (complete 2026-05-01) — Companion search-side endpoint reusing the locator and hardening shell, sequenced after browse so the locator round-trip is already validated before a second producer is added
 - [ ] **Phase 81: Claude Skill Consumer** — Reference skill exercising the search → browse loop end-to-end as the v7.10 acceptance harness
 - [ ] **Phase 82: Internal Documentation** — `docs/SEARCH_API.md` and `CLAUDE.md` env-var updates capturing the as-shipped contract
 
@@ -291,7 +291,11 @@ back-nav bugfix.
   3. Rate limiting, result caps, query-length cap, error envelope, `SEARCH_API_MODE` gating, and the PostHog observability event from Phase 78 apply to `/api/parallels` with no per-endpoint reimplementation; flipping a knob in one place changes both endpoints.
   4. Locators emitted by `/api/parallels` round-trip through `/api/browse` (built in Phase 79) without any per-producer adjustment; this is verified with at least one parallels result feeding a successful `/api/browse` call.
 **Phase gate**: pytest green, CI green, parity check confirming Phase 78 hardening behaviors apply unchanged to /api/parallels; locator round-trip via /api/browse.
-**Plans**: TBD
+**Plans**: 4 plans
+- [x] 80-01-PLAN.md -- shared/api_errors.py + CLAUDE.md docs (composition_required, composition_too_long, truncated_to_200) (complete 2026-05-01)
+- [x] 80-02-PLAN.md -- shared/parallels_service.py: ParallelsResultBundle + fetch_parallels_results (200-group cap) (complete 2026-05-01)
+- [x] 80-03-PLAN.md -- web/search_api.py: ParallelsRequest + parallels_endpoint with @wrap_endpoint + _parallels_rate_limiter (complete 2026-05-01)
+- [x] 80-04-PLAN.md -- tests/test_parallels_api.py (39 passed / 1 skipped env-gated PRIMARY round-trip) (complete 2026-05-01)
 
 ### Phase 81: Claude Skill Consumer
 **Goal**: A runnable Claude skill drives `/api/search` → `/api/browse` end-to-end and proves the v7.10 contract by ranking real manuscripts against real queries — the milestone's acceptance harness.
