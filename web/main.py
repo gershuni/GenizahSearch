@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nicegui import ui, app, run
 from web.framework_patches import apply_all_patches
+from web.crawler_visibility import should_block_archive_request, should_mark_noindex
 apply_all_patches()
 
 
@@ -88,17 +89,19 @@ async def _inject_font_display_swap(request, call_next):
 
 
 @app.middleware('http')
-async def _mark_framework_assets_noindex(request, call_next):
-    """Mark internal NiceGUI framework assets as non-indexable.
-
-    These ``/_nicegui/...`` URLs are implementation-detail JavaScript assets,
-    not user-facing documents. Search Console can still surface them when
-    crawlers request internal ESM paths, so return an explicit X-Robots-Tag
-    while keeping the assets crawlable for rendering.
-    """
+async def _mark_non_document_paths_noindex(request, call_next):
+    """Keep implementation-detail URLs out of search and archive indexes."""
+    path = str(request.url.path)
+    if should_block_archive_request(path, request.headers.get('user-agent')):
+        return _StarletteResponse(
+            content='Not Found',
+            status_code=404,
+            media_type='text/plain',
+            headers={'X-Robots-Tag': 'noindex, noarchive'},
+        )
     response = await call_next(request)
-    if str(request.url.path).startswith('/_nicegui/'):
-        response.headers.setdefault('X-Robots-Tag', 'noindex')
+    if should_mark_noindex(path):
+        response.headers.setdefault('X-Robots-Tag', 'noindex, noarchive')
     return response
 
 
@@ -195,7 +198,7 @@ def page_meta(
     _t = _html.escape(title)
     _d = _html.escape(description)
     url = f'{_SITE_URL}{path}'
-    robots = '<meta name="robots" content="noindex, follow">\n' if noindex else ''
+    robots = '<meta name="robots" content="noindex, noarchive, follow">\n' if noindex else ''
     return f'''
 <!-- Meta Tags -->
 {robots}<meta name="description" content="{_d}">
@@ -922,7 +925,7 @@ def dashboard_page():
     except (AssertionError, KeyError, Exception):
         current_theme = 'light'
     ui.add_head_html(page_meta('/'))
-    # Structured data: WebSite schema with SearchAction for homepage
+    # Structured data: WebSite schema for homepage
     ui.add_head_html('''
     <script type="application/ld+json">
     {
@@ -933,14 +936,6 @@ def dashboard_page():
         "url": "https://genizahsearch.com",
         "description": "חיפוש מלא בכתבי יד מהגניזה הקהירית — טקסטים, תמונות, קטלוג ומטא-דאטה מ-255,000 קטעי גניזת קהיר.",
         "inLanguage": ["he", "en"],
-        "potentialAction": {
-            "@type": "SearchAction",
-            "target": {
-                "@type": "EntryPoint",
-                "urlTemplate": "https://genizahsearch.com/search?q={search_term_string}"
-            },
-            "query-input": "required name=search_term_string"
-        },
         "publisher": {
             "@type": "Organization",
             "name": "Dicta — The Israel Center for Text Analysis",

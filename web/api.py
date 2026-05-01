@@ -14,6 +14,7 @@ import os
 import threading
 from genizah_core import Config
 from urllib.parse import urlparse
+from web.crawler_visibility import ARCHIVE_DISALLOWED_PATHS, ARCHIVE_USER_AGENT_TOKENS
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,14 @@ def init_api_routes(app_override=None):
         # /search and /parallels are crawlable (not disallowed) so bots can
         # see their <meta name="robots" content="noindex"> tags.  Blocking
         # them here would prevent Google from ever reading the noindex directive.
+        archive_user_agents = ''.join(
+            f"User-agent: {agent}\n"
+            for agent in ARCHIVE_USER_AGENT_TOKENS
+        )
+        archive_disallows = ''.join(
+            f"Disallow: {path}\n"
+            for path in ARCHIVE_DISALLOWED_PATHS
+        )
         content = (
             "User-agent: *\n"
             "Allow: /\n"
@@ -204,6 +213,11 @@ def init_api_routes(app_override=None):
             "Disallow: /lists\n"
             "Disallow: /reset-hints\n"
             "Disallow: /api/\n"
+            "\n"
+            "# Keep Wayback captures focused on user-facing pages, not app internals.\n"
+            f"{archive_user_agents}"
+            "Allow: /\n"
+            f"{archive_disallows}"
             "\n"
             "Sitemap: https://genizahsearch.com/sitemap.xml\n"
         )
