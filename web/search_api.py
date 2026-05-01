@@ -38,7 +38,7 @@ from typing import Literal, Optional, List
 from nicegui import app
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, ValidationError as PydanticValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError
 
 from web.state import state
 from web.api_hardening import (
@@ -53,7 +53,9 @@ from web.api_hardening import (
 from shared.api_errors import APIError
 # Phase 79 imports.
 from shared.browse_service import fetch_browse_bundle
-from shared.search_serializer import serialize_browse_payload
+from shared.search_serializer import serialize_browse_payload, serialize_parallels_payload
+# Phase 80 imports.
+from shared.parallels_service import fetch_parallels_results, ParallelsResultBundle
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,13 @@ _rate_limiter = RateLimiter(default_limit=30)
 # exhaust the search bucket. (R-10: aggregate per-IP allowance is roughly 2x the
 # ceiling -- captured as monitoring obligation, no contract change in v7.10.)
 _browse_rate_limiter = RateLimiter(default_limit=30)
+
+# Phase 80 D-05: SEPARATE per-IP bucket from /api/search and /api/browse.
+# Same SEARCH_API_RATE_LIMIT env-var ceiling — RateLimiter._current_limit()
+# reads the env on every check(). A client doing search-once + browse-N-times
+# + parallels-once does NOT exhaust the search or browse buckets. Independence
+# is verified by tests/test_parallels_api.py::test_parallels_rate_limit_independence.
+_parallels_rate_limiter = RateLimiter(default_limit=30)
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +130,12 @@ DEFAULT_BROWSE_TEXT_CAP = 4000
 MIN_BROWSE_TEXT_CAP = 100
 MAX_BROWSE_TEXT_CAP = 10000
 
+# Phase 80 D-06 — composition text length cap. Composition body can legitimately
+# be much longer than a search query (whole piyutim, parts of liturgy). Cap at
+# 20000 chars (~3000 Hebrew words) after .strip(). Above cap → 400
+# 'composition_too_long'. Empty after .strip() → 400 'composition_required'.
+COMPOSITION_LENGTH_CAP = 20000
+
 
 # ---------------------------------------------------------------------------
 # Phase 79 -- BrowseRequest model + NormalizedLocator + locator helpers.
@@ -143,6 +158,34 @@ class BrowseRequest(BaseModel):
     volume_ie: Optional[str] = None
     fl_id: Optional[str] = None
     text_cap: Optional[int] = None
+
+
+class ParallelsRequest(BaseModel):
+    """Phase 80 D-01 — POST /api/parallels request body.
+
+    Field semantics:
+    - `text` is the composition source. Maps to `full_text` arg of
+      search_composition_logic. Stripped before length validation; empty
+      → 'composition_required', > COMPOSITION_LENGTH_CAP → 'composition_too_long'
+      (both 400).
+    - `chunk_size`: integer in [2, 20]; UI default is 5.
+    - `mode`: locked enum 'exact' | 'variants' | 'fuzzy' (D-02). Lab Engine
+      path is OUT OF SCOPE for v7.10.
+    - `max_freq`: optional float; when set, chunks whose match frequency
+      exceeds the threshold get diverted to filtered[]. When None, no
+      high-freq filtering — all hits in results[], filtered: [].
+    - `boundary_mode`: only boundary knob exposed in v7.10 (D-03). Other 4
+      core knobs use existing defaults.
+    - `filters`: reuse Phase 78 FiltersModel verbatim.
+    """
+    model_config = ConfigDict(extra='forbid')
+
+    text: str
+    chunk_size: int = Field(default=5, ge=2, le=20)
+    mode: Literal['exact', 'variants', 'fuzzy'] = 'exact'
+    max_freq: Optional[float] = None
+    boundary_mode: Literal['full', 'boundary', 'combined'] = 'full'
+    filters: Optional[FiltersModel] = None
 
 
 @dataclass(frozen=True)
@@ -678,4 +721,136 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
 
         return envelope
 
-    logger.info("Search API routes initialized: POST /api/search, GET /api/browse")
+    @target_app.post('/api/parallels')
+    @wrap_endpoint(endpoint_name='parallels')
+    async def parallels_endpoint(request: Request, *, captured_state: dict):
+        """POST /api/parallels — Phase 80 composition/parallels endpoint.
+
+        R-PR-03 precedent (Phase 79): decorated with @wrap_endpoint(endpoint_name='parallels').
+        The decorator owns try/except/finally + envelope rewriting + capture_api_event.
+        Handler body holds ONLY business logic.
+
+        captured_state contract (set by handler, read by decorator's finally):
+        - 'mode': req.mode for the PostHog event (D-09 — parallels-specific
+          mode value space; same property key as /api/search disambiguated by
+          endpoint='parallels').
+        - 'result_count': len(bundle.main_results) on success.
+
+        Statelessness D-20: handler MUST NOT touch state.last_results /
+        state.parallels_results / state.current_search_query / app.storage /
+        request.cookies.
+        """
+        # 0. Manual JSON parse so malformed JSON flows through wrap_endpoint
+        #    envelope instead of FastAPI's 422 default. FastAPI body injection
+        #    is intentionally NOT used here (would bypass envelope shape).
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise APIError(
+                'invalid_request',
+                f'request body must be valid JSON: {exc}',
+                http_status=400,
+            )
+        if isinstance(body, dict):
+            req = ParallelsRequest(**body)
+        else:
+            req = ParallelsRequest.model_validate(body)
+
+        # PostHog mode property (D-09) — parallels-specific value space.
+        captured_state['mode'] = req.mode
+
+        # 1. Mode gate (same as search/browse).
+        enforce_mode_gate(request)
+
+        # 2. Rate limit (D-05 — DIFFERENT instance from search and browse buckets).
+        client_ip = _resolve_rate_limit_key(request)
+        _parallels_rate_limiter.check(client_ip)
+
+        # 3. Composition text validation (D-06).
+        text = (req.text or '').strip()
+        if not text:
+            raise APIError(
+                'composition_required',
+                'text is required and cannot be empty after stripping whitespace',
+                http_status=400,
+            )
+        if len(text) > COMPOSITION_LENGTH_CAP:
+            raise APIError(
+                'composition_too_long',
+                f'text exceeds cap (max {COMPOSITION_LENGTH_CAP} chars; '
+                f'submitted {len(text)})',
+                http_status=400,
+            )
+
+        # 4. Filter resolution (API-07, D-15/D-17 inherited from Phase 78).
+        #    Late-binding via the module attribute so test fixtures can
+        #    monkeypatch shared.fjms_service.{validate_filter_values, get_filter_sys_ids}.
+        restrict_sys_ids: Optional[set] = None
+        filters_dict: Optional[dict] = None
+        short_circuit_empty = False
+
+        if req.filters is not None:
+            filters_dict = req.filters.model_dump(exclude_none=True)
+            from shared import fjms_service as _fjms_module
+            _fjms_module.validate_filter_values(filters_dict)
+            restrict_sys_ids = _fjms_module.get_filter_sys_ids(
+                domains=filters_dict.get('domains'),
+                authors=filters_dict.get('authors'),
+                works=filters_dict.get('works'),
+                material_include=filters_dict.get('materials'),
+                date_from=filters_dict.get('date_from'),
+                date_to=filters_dict.get('date_to'),
+            )
+            if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
+                short_circuit_empty = True
+
+        # 5. Statelessness check (D-20). Forbidden reads — none below.
+
+        # 6. Execute via service layer OR short-circuit on empty intersection.
+        warnings_list: list = []
+        if short_circuit_empty:
+            bundle = ParallelsResultBundle(
+                main_results=[],
+                filtered_results=[],
+                boundary_options={
+                    'boundary_mode': req.boundary_mode,
+                    'boundary_delimiter': '\n',
+                    'boundary_boost': 1.5,
+                    'min_boundary_matches': 0,
+                    'min_delimiter_distance': 3,
+                },
+                truncated_to_200=False,
+            )
+        else:
+            bundle = await fetch_parallels_results(
+                text=text,
+                chunk_size=req.chunk_size,
+                mode=req.mode,
+                max_freq=req.max_freq,
+                boundary_mode=req.boundary_mode,
+                restrict_sys_ids=restrict_sys_ids,
+            )
+
+        # 7. Surface group-cap warning (D-07).
+        if bundle.truncated_to_200:
+            warnings_list.append('truncated_to_200')
+
+        # 8. Serialize — Phase 77 D-14 SOLE producer of envelope shape.
+        envelope = serialize_parallels_payload(
+            bundle.main_results,
+            bundle.filtered_results,
+            meta_mgr=state.meta_mgr,
+            source_text=text,
+            chunk_size=req.chunk_size,
+            mode=req.mode,
+            max_freq=req.max_freq,
+            boundary_options=bundle.boundary_options,
+            warnings=warnings_list,
+        )
+
+        # 9. Tell the decorator's finally block what to log to PostHog.
+        captured_state['result_count'] = len(bundle.main_results)
+
+        return envelope
+
+    logger.info("Search API routes initialized: POST /api/search, GET /api/browse, POST /api/parallels")
