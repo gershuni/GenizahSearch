@@ -2184,6 +2184,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             /puzzle?doc=... query parameter (used by fork flow and deep links).
     """
     # Add Fabric.js CDN and page-specific styles
+    page_client = ui.context.client
     ui.add_head_html(FABRIC_JS_CDN)
     ui.add_head_html(PUZZLE_STYLES)
     ui.add_body_html(PUZZLE_CANVAS_JS)
@@ -3897,10 +3898,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     async def _periodic_save_loop():
         while True:
             await asyncio.sleep(30)
+            if getattr(page_client, '_deleted', False):
+                break
             try:
                 await save_state()
             except Exception:
-                break  # Page navigated away
+                if getattr(page_client, '_deleted', False):
+                    break
+                await asyncio.sleep(1.0)
 
     asyncio.ensure_future(_periodic_save_loop())
 

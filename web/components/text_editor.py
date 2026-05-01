@@ -455,6 +455,8 @@ def create_edit_text_dialog(
             async def _auto_save_loop():
                 while True:
                     await asyncio.sleep(AUTO_SAVE_INTERVAL)
+                    if dialog.is_deleted or edited_textarea.is_deleted or notes_textarea.is_deleted:
+                        break
                     try:
                         do_auto_save()
                     except Exception:

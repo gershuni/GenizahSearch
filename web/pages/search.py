@@ -28,6 +28,7 @@ from web.pages.search_state import (
     delete_search_history_entry, clear_search_history,
     domain_display_name,
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
+    get_search_active_snapshot, restore_search_snapshot,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -108,7 +109,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # count combined with URL `q` matching saved_query means the browser restored
     # a URL this session stamped via history.replaceState at end of a successful
     # search. Without this signal, Back would fire a fresh search and lose state.
-    _saved_results = app.storage.user.get('search_results', []) or []
+    _saved_active_snapshot = get_search_active_snapshot()
+    _saved_results = (
+        _saved_active_snapshot.get('results', [])
+        if _saved_active_snapshot else
+        (app.storage.user.get('search_results', []) or [])
+    )
     try:
         _saved_results_count = len(_saved_results)
     except TypeError:
@@ -249,12 +255,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     '''
 
     # Restore previous results (transcription lookup deferred to after UI renders)
-    if restore_saved_results and 'search_results' in app.storage.user:
+    if restore_saved_results:
         try:
-            _sr = app.storage.user.get('search_results')
-            search_state.results = _sr if _sr is not None else []
+            restore_search_snapshot(search_state)
         except Exception:
-            pass  # Browser storage operation failed; preference not persisted
+            pass  # Snapshot restore failed; page starts empty
 
 
     # === UI Layout ===
@@ -2306,7 +2311,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 else:
                     progress_bar.classes(add='opacity-0')
         except Exception:
-            pass  # Client may have been deleted
+            return False  # Client may have been deleted
         return True
 
     # Use asyncio loop for progress updates instead of ui.timer to avoid
@@ -3793,8 +3798,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _restored = _apply_measurement_post_filters(search_state.results, search_state)
                 render_results(_restored, page=0)
 
-        ui.notify(tr('Search restored from history'), type='info', timeout=2000)
         history_menu.close()
+        if state_snapshot.get('results'):
+            ui.notify(tr('Search restored from history'), type='info', timeout=2000)
+            return
+
+        ui.notify(tr('Re-running search from history'), type='info', timeout=2000)
+        await execute_search()
 
 
     # === SearchPageRefs construction (Phase 72-02) ===
@@ -4297,16 +4307,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Search history -- D-15: Refined searches don't enter history
         if not search_state.refinement_chain:
             try:
-                hist_results = []
-                for r in results[:500]:
-                    hr = dict(r)
-                    hr.pop('full_text', None)
-                    d = hr.get('display')
-                    if d and isinstance(d, dict):
-                        d = dict(d)
-                        d.pop('full_text', None)
-                        hr['display'] = d
-                    hist_results.append(hr)
                 add_to_search_history(
                     query=query_input.value or '',
                     result_count=len(results),
@@ -4330,7 +4330,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         } if _has_active_filters() else None,
                     },
                     state_snapshot={
-                        'results': hist_results,
                         'domain_exclusions': sorted(search_state.domain_exclusions),
                         'printed_filter': search_state.printed_filter,
                     },

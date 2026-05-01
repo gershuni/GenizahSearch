@@ -19,6 +19,7 @@ from web.components.typography import h1, h2, h3
 
 def create_page():
     """Create the research dashboard home page."""
+    page_client = ui.context.client
 
     with ui.column().classes('w-full max-w-7xl mx-auto gap-3 fade-in'):
 
@@ -247,6 +248,8 @@ def create_page():
         async def _auto_rotate():
             while True:
                 await asyncio.sleep(15.0)
+                if getattr(page_client, '_deleted', False):
+                    return
                 try:
                     _next_slide()
                 except Exception:

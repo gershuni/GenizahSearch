@@ -195,6 +195,57 @@ def create_parallels_page(initial_text: str = None):
             self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
 
     p_state = ParallelsState()
+    _PARALLELS_ACTIVE_TAB_KEY = 'parallels_active_snapshot'
+    _PARALLELS_ACTIVE_TAB_VERSION = 1
+    _PARALLELS_ACTIVE_USER_FALLBACK_LIMIT = 250
+
+    def _get_tab_storage():
+        try:
+            return app.storage.tab
+        except Exception:
+            return None
+
+    def _compact_result_rows(rows: list) -> list:
+        compacted = []
+        for row in rows or []:
+            compacted.append(dict(row) if isinstance(row, dict) else row)
+        return compacted
+
+    def _get_active_snapshot() -> dict:
+        tab = _get_tab_storage()
+        if not tab:
+            return {}
+        raw = tab.get(_PARALLELS_ACTIVE_TAB_KEY)
+        if not isinstance(raw, dict):
+            return {}
+        if raw.get('version') != _PARALLELS_ACTIVE_TAB_VERSION:
+            return {}
+        return raw
+
+    def _persist_active_snapshot() -> None:
+        tab = _get_tab_storage()
+        if not tab:
+            return
+        try:
+            tab[_PARALLELS_ACTIVE_TAB_KEY] = {
+                'version': _PARALLELS_ACTIVE_TAB_VERSION,
+                'results': _compact_result_rows(p_state.results[:500]),
+                'filtered_results': _compact_result_rows((p_state.filtered_results or [])[:500]),
+                'domain_exclusions': sorted(p_state.domain_exclusions),
+                'excluded_manuscript_ids': sorted(p_state.excluded_manuscript_ids),
+                'source_text': text_input.value if 'text_input' in locals() else decoded_text,
+            }
+        except Exception:
+            pass
+
+    def _clear_active_snapshot() -> None:
+        tab = _get_tab_storage()
+        if not tab:
+            return
+        try:
+            tab.pop(_PARALLELS_ACTIVE_TAB_KEY, None)
+        except Exception:
+            pass
 
     # --- Incoming filters from catalog browse (Path B: browse -> parallels) ---
     _filters_from_browse = consume_incoming_filters(p_state, 'parallels', require_from_browse=False)
@@ -216,10 +267,21 @@ def create_parallels_page(initial_text: str = None):
     p_state.domain_exclusions = set(_pde) if _pde is not None else set()
 
     # Restore previous results
-    if 'parallels_results' in app.storage.user:
+    _active_snapshot = _get_active_snapshot()
+    if _active_snapshot:
+        try:
+            p_state.results = _active_snapshot.get('results', []) or []
+            p_state.filtered_results = _active_snapshot.get('filtered_results', []) or []
+            p_state.domain_exclusions = set(_active_snapshot.get('domain_exclusions', []))
+            p_state.excluded_manuscript_ids = set(_active_snapshot.get('excluded_manuscript_ids', []))
+            state.parallels_results = p_state.results
+            state.parallels_filtered = p_state.filtered_results
+        except Exception:
+            pass  # Snapshot restore failed; page falls back to empty
+    elif 'parallels_results' in app.storage.user:
         try:
             p_state.results = app.storage.user.get('parallels_results', [])
-            # Also restore to global state for export functionality
+            # Legacy fallback for pre-fix sessions only
             state.parallels_results = p_state.results
             state.parallels_filtered = app.storage.user.get('parallels_filtered', [])
         except Exception:
@@ -238,7 +300,7 @@ def create_parallels_page(initial_text: str = None):
             decoded_text = initial_text  # Operation failed; use fallback value
     else:
         # Try to restore from storage
-        decoded_text = app.storage.user.get('parallels_source_text', '')
+        decoded_text = _active_snapshot.get('source_text') or app.storage.user.get('parallels_source_text', '')
 
     # Auto-exclude source manuscript when launched from another module
     if initial_text and state.meta_mgr:
@@ -272,12 +334,16 @@ def create_parallels_page(initial_text: str = None):
                 existing_idx = i
                 break
 
+        compact_state = dict(state_snapshot or {})
+        compact_state.pop('results', None)
+        compact_state.pop('filtered_results', None)
+
         entry = {
             'title': title,
             'result_count': result_count,
             'timestamp': datetime.now().isoformat(),
             'params': params,
-            'state': state_snapshot,
+            'state': compact_state,
         }
 
         if existing_idx is not None:
@@ -1916,8 +1982,13 @@ def create_parallels_page(initial_text: str = None):
             results_header.text = f"{len(p_state.results)} {tr('parallels found')}"
             render_results(p_state.results, p_state.filtered_results)
 
-        ui.notify(tr('Composition restored from history'), type='info', timeout=2000)
         comp_history_menu.close()
+        if state_snapshot.get('results'):
+            ui.notify(tr('Composition restored from history'), type='info', timeout=2000)
+            return
+
+        ui.notify(tr('Re-running composition from history'), type='info', timeout=2000)
+        await execute_parallels()
 
     def _reset_parallels():
         """Reset all composition search state, clear results, filters, exclusions, and persistent storage."""
@@ -1956,6 +2027,7 @@ def create_parallels_page(initial_text: str = None):
         app.storage.user['parallels_source_text'] = ''
         app.storage.user['parallels_domain_exclusions'] = []
         app.storage.user['parallels_excluded_manuscript_ids'] = []
+        _clear_active_snapshot()
         # Also clear from global state
         state.parallels_results = []
         state.parallels_filtered = []
@@ -2231,8 +2303,13 @@ def create_parallels_page(initial_text: str = None):
                         'warnings': [],  # Phase 78 will populate
                     }
                     # Also store in user storage (for UI persistence across page reloads)
-                    app.storage.user['parallels_results'] = main_results
-                    app.storage.user['parallels_filtered'] = filtered_results
+                    app.storage.user['parallels_results'] = _compact_result_rows(
+                        main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                    )
+                    app.storage.user['parallels_filtered'] = _compact_result_rows(
+                        (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                    )
+                    _persist_active_snapshot()
                 except Exception:
                     pass  # Browser storage operation failed; preference not persisted
 
@@ -2263,8 +2340,6 @@ def create_parallels_page(initial_text: str = None):
                         },
                         state_snapshot={
                             'source_text': source_text,
-                            'results': main_results[:500],
-                            'filtered_results': filtered_results[:500] if filtered_results else [],
                             'domain_exclusions': sorted(p_state.domain_exclusions),
                             'excluded_manuscript_ids': sorted(p_state.excluded_manuscript_ids),
                         },
