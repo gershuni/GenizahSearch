@@ -1,7 +1,7 @@
 # Phase 81: Claude Skill Consumer — Context
 
 **Gathered:** 2026-05-01
-**Status:** Ready for planning
+**Status:** ⚠ SUPERSEDED (provisionally) by `81-RESCOPE.md` pending user sign-off. After sign-off this file moves to `81B-claude-skill-consumer/81B-CONTEXT.md` with overrides from RESCOPE §4 applied.
 
 <domain>
 ## Phase Boundary

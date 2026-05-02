@@ -217,7 +217,7 @@ back-nav bugfix.
 
 **Per-phase gate:** pytest baseline remains green; CI green (Ubuntu + Windows); existing `/api/*` routes return identical responses to pre-milestone (verified by spot-check on image proxy + puzzle upload routes after each phase that touches `web/api.py`).
 
-**Milestone-level gate:** Claude skill (Phase 81) drives end-to-end search → browse loop against a live deployment without crashing on rate-limit / timeout / partial-data conditions; `scripts/check_docs.py` green at milestone close.
+**Milestone-level gate:** Claude skill (Phase 81B) drives end-to-end search → browse loop against a live deployment without crashing on rate-limit / timeout / partial-data conditions; `scripts/check_docs.py` green at milestone close.
 
 **Phase summary checklist:**
 
@@ -225,8 +225,10 @@ back-nav bugfix.
 - [x] **Phase 78: /api/search + Hardening Shell** (complete 2026-04-29) — First search-helper endpoint plus the cross-cutting hardening primitives (rate limit, mode flag, query/result caps, error envelope, PostHog) all three endpoints reuse
 - [ ] **Phase 79: /api/browse Drill-Down** — Stateless drill-down endpoint resolving locators from /api/search responses to text + metadata + image URLs; first real consumer of the locator contract, proves the search → browse vertical slice
 - [x] **Phase 80: /api/parallels** (complete 2026-05-01) — Companion search-side endpoint reusing the locator and hardening shell, sequenced after browse so the locator round-trip is already validated before a second producer is added
-- [ ] **Phase 81: Claude Skill Consumer** — Reference skill exercising the search → browse loop end-to-end as the v7.10 acceptance harness
-- [ ] **Phase 82: Internal Documentation** — `docs/SEARCH_API.md` and `CLAUDE.md` env-var updates capturing the as-shipped contract
+- [ ] **Phase 81A: Minimal API Contract Expansion** — UI-aligned `search_mode` enum (exact / variants / regex / responsa / title / shelfmark) + Responsa option flags; conservative guardrails; `request` echo block. Replaces conflated `mode` field. Internal/undocumented; breaking change. (Rescoped from original Phase 81 on 2026-05-02 — see `.planning/phases/81B-claude-skill-consumer/81-RESCOPE.md`.)
+- [ ] **Phase 81B: Claude Skill Consumer** — Reference Anthropic Skill (SKILL.md + scripts) using staged phrase discovery via expanded `/api/search` + `/api/browse` drill-down with honest `text_source` reporting. v7.10 acceptance harness.
+- [ ] **Phase 82: Internal Documentation** — `docs/SEARCH_API.md` and `CLAUDE.md` env-var updates capturing the as-shipped contract (including 81A surface and the temporary `/api/parallels.mode` ↔ `/api/search.search_mode` inconsistency)
+- ⏸ *Phase 81C — Long-Running Parallels Job API: deferred to v7.11 unless explicitly promoted. Sketched in `81-RESCOPE.md` §5.*
 
 ## Phase Details
 
@@ -297,32 +299,47 @@ back-nav bugfix.
 - [x] 80-03-PLAN.md -- web/search_api.py: ParallelsRequest + parallels_endpoint with @wrap_endpoint + _parallels_rate_limiter (complete 2026-05-01)
 - [x] 80-04-PLAN.md -- tests/test_parallels_api.py (39 passed / 1 skipped env-gated PRIMARY round-trip) (complete 2026-05-01)
 
-### Phase 81: Claude Skill Consumer
-**Goal**: A runnable Claude skill drives `/api/search` → `/api/browse` end-to-end and proves the v7.10 contract by ranking real manuscripts against real queries — the milestone's acceptance harness.
-**Depends on**: Phase 78 (search), Phase 79 (browse drill-down — completes the search → browse vertical slice the skill exercises), Phase 80 (parallels — broadens skill coverage).
-**Requirements**: SKILL-01, SKILL-02, SKILL-03
+### Phase 81A: Minimal API Contract Expansion
+**Goal**: Replace the conflated `/api/search` `mode` field with a UI-aligned `search_mode` enum (`exact | variants | regex | responsa | title | shelfmark`) plus a Responsa-only `responsa_options: {variants, ja, flex_spacing, bidirectional}` flag bag. Add a `request` echo block to envelope. Lower limit ceiling to 100 (from 200). Internal/undocumented; breaking change. Replaces the original Phase 81 scope after live testing showed the API was not expressive enough to power witness-discovery skills (see `.planning/phases/81B-claude-skill-consumer/81-RESCOPE.md`).
+**Depends on**: Phase 78 (search hardening), Phase 79 (browse), Phase 80 (parallels).
+**Requirements**: API-EXPAND-01..API-EXPAND-08
+**Success Criteria** (what must be TRUE):
+  1. `/api/search` accepts the new shape and rejects the old `mode` field with `invalid_request`.
+  2. All 6 `search_mode` values produce non-empty results on at least one fixture query each; all 4 `responsa_options` flags produce a measurable behavioral change on at least one Responsa fixture query each.
+  3. Cross-field invalid combinations (`responsa_options` with non-responsa mode; `gap > 0` with title/shelfmark; `regex` with responsa_options) return 400 `invalid_combination`.
+  4. Response envelope echoes a `request` block: `search_mode` always identical to client request (never silently downgraded), `responsa_options` and `responsa_options_effective` (when applicable), `gap`, `limit`, `limit_effective`, `filters`. Responsa cascade case shows `responsa_options != responsa_options_effective` AND surfaces disabled options in `warnings[]`.
+  5. Existing Phase 78/79/80 hardening behaviors hold (rate limit, mode gate, error envelope, PostHog capture, statelessness, per-bucket independence).
+  6. `/api/parallels` envelope gains the `request` echo block; existing Phase 80 tests pass unchanged. The `mode` field name is preserved on `/api/parallels` (not renamed to `search_mode`) — the temporary inconsistency is documented in Phase 82.
+**Phase gate**: pytest green (~50–60 new test cases across the search-mode × responsa-options × invalid-combination matrix); CI green; existing 1156-test baseline still passes.
+**Plans**: TBD
+
+### Phase 81B: Claude Skill Consumer
+**Goal**: A runnable Anthropic Skill (SKILL.md + scripts) drives `/api/search` → `/api/browse` end-to-end via staged phrase discovery (multiple search calls, merge by uid, browse drill-down), producing ranked candidate witnesses with justifications grounded in browse text and honest reporting of `text_source='snippet'` and image-unavailability conditions. The v7.10 acceptance harness.
+**Depends on**: Phase 81A (expanded `search_mode` enum + `responsa_options` flags + `request` echo block), Phase 79 (browse drill-down + locator round-trip), Phase 80 (parallels — exercised only for short text in v7.10).
+**Requirements**: SKILL-01, SKILL-02, SKILL-03, SKILL-04, SKILL-05, SKILL-06
 **Success Criteria** (what must be TRUE):
   1. The skill's base URL is configurable (env var or argument), defaults to the production deployment, and the skill is runnable from a clean checkout — its filesystem location is environment-specific and not pinned to a specific repo path.
-  2. Running the skill on a representative scholarly query produces a ranked list of N candidates with brief justifications grounded in the text fetched via `/api/browse`; reviewing any single justification, the cited evidence is traceable back to a specific browse response.
-  3. Triggering a 429 from the rate limiter, a request timeout, or a partial `/api/browse` response (NLI image unavailable) does not crash the conversation; the skill surfaces each failure in plain terms and continues processing remaining candidates where possible.
-**Phase gate**: live end-to-end run against the production deployment with the user observing; user-signed-off ranking against at least one scholarly query.
+  2. Skill accepts `query` OR `base_text`, optional `known_witnesses[]`, optional `known_witness_policy='flag'|'exclude'` (default `'flag'`). Running on a representative scholarly query produces a ranked candidate list with shelfmark, library, catalog title, tier (A/B/C), known-witness flag, matching phrases, justification grounded in browse text, browse URL, and image URL or `(no image available)` note.
+  3. Triggering a 429, timeout, or partial `/api/browse` response (NLI image unavailable, `text_source='snippet'`) does not crash the conversation; the skill surfaces each failure in plain terms and continues processing. When `text_source != 'full'`, the candidate's justification appends `"(full text unavailable; based on snippet of N chars)"`.
+  4. Skill self-paces using a token-bucket throttle, separate buckets per endpoint, default ≤24 req/min per bucket. A single skill run with 15 search + 10 browse calls completes without triggering its own rate limit.
+**Phase gate**: live end-to-end run against the production deployment with the user observing; user-signed-off ranking against at least one scholarly query, with browse-honesty annotations verified.
 **Plans**: TBD
 
 ### Phase 82: Internal Documentation
 **Goal**: As-shipped contract is captured in one internal page and the new env-var surface is discoverable by future maintainers — without inviting external usage.
-**Depends on**: Phases 78, 79, 80, 81 (must reflect what actually shipped, not what was planned).
+**Depends on**: Phases 78, 79, 80, 81A, 81B (must reflect what actually shipped, not what was planned).
 **Requirements**: DOC-01, DOC-02
 **Success Criteria** (what must be TRUE):
-  1. `docs/SEARCH_API.md` documents the three search-helper endpoints with their exact request and response shapes (including the locator, the `warnings` array, and the error envelope), the env vars (`SEARCH_API_MODE`, rate-limit knobs), and an explicit "internal helper, no stability promise" disclaimer; the page is not linked from the public site or `README.md`.
+  1. `docs/SEARCH_API.md` documents the three search-helper endpoints with their exact request and response shapes (including the 81A `search_mode` enum, `responsa_options`, the `request` echo block, the locator, the `warnings` array, and the error envelope), the env vars (`SEARCH_API_MODE`, rate-limit knobs, `GENIZAH_SKILL_REQ_PER_MIN`), the temporary `/api/parallels.mode` ↔ `/api/search.search_mode` naming inconsistency, and an explicit "internal helper, no stability promise" disclaimer; the page is not linked from the public site or `README.md`.
   2. `CLAUDE.md` lists the new env vars (`SEARCH_API_MODE` and the rate-limit knobs) in its environment-variables section so future agents discover them through the standard project context; `README.md` is intentionally untouched.
-  3. A reader unfamiliar with v7.10 can, using only `docs/SEARCH_API.md`, send a valid `/api/search` request, follow the locator to `/api/browse`, and predict the error envelope returned by an invalid filter — without reading the source code.
+  3. A reader unfamiliar with v7.10 can, using only `docs/SEARCH_API.md`, send a valid `/api/search` request with `search_mode` and (where applicable) `responsa_options`, follow the locator to `/api/browse`, and predict the error envelope returned by an invalid filter or invalid combination — without reading the source code.
 **Phase gate**: scripts/check_docs.py green; doc walkthrough by a reader who did not implement the milestone.
 **Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
+Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81A -> 81B -> 82
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -330,9 +347,12 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81 -> 82
 | 78. /api/search + Hardening Shell | 3/4 | Plan 03 GREEN (2026-04-28; 82 tests across the 3 Phase 78 test files) | - |
 | 79. /api/browse Drill-Down | 0/4 | Planned (2026-04-29) | - |
 | 80. /api/parallels | 0/0 | Not started | - |
-| 81. Claude Skill Consumer | 0/0 | Not started | - |
+| 81A. Minimal API Contract Expansion | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
+| 81B. Claude Skill Consumer | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
 | 82. Internal Documentation | 0/0 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-04-28 -- Plan 77-05 complete; Phase 77 ready for /gsd-verify-work. Manual smoke-check on /search and /parallels JSON downloads PASSED after 4 follow-on commits resolved a chunk_hits field-name collision uncovered during smoke verification (Plan 02 had extended lab_composition_search to populate chunk_hits per uid as a list-of-tuples (D-13 Path A), but search_composition_logic had used chunk_hits since 2026-03-12 as an int counter — both producers wrote to the same per-uid item dict, so the serializer crashed with `'int' object is not iterable` on standard-mode parallels results). Fix chain: baf481fb (defensive isinstance guard + logger.exception), c24fcc48 (mirrored list-of-tuples shape into standard-mode + renamed int counter to chunk_count + fixed parallels rep-field mapping; +4 tests), 2e2d2b75 (surfaced Tantivy score on search results — was 0.0 in JSON because results.append at genizah_core.py:7542+:7559 never recorded score var; per-uid _chunk_hit_keys dedup), 327aea31 (group-level dedup keyed on (chunk_index, manuscript_snippet) for cross-uid duplicates from NLI multi-uid cataloging like Karaite prayer books; matches[] sorted by chunk_index ascending; +2 tests). Final test count: 1201 passed / 8 skipped (was 1162 at phase start → +39 new tests across the 5 plans). Cumulative phase commit count: 20 (14 plan-scope + 6 follow-on smoke-check fixes). Phase gate satisfied: pytest green, CI green (assumed pending push), manual download spot-check on /search and /parallels signed off.*
+*Last updated: 2026-05-02 -- Phase 81 rescoped into Phase 81A (Minimal API Contract Expansion) + Phase 81B (Claude Skill Consumer) after live testing showed the API was not expressive enough to power witness-discovery skills. Phase 81C (long-running parallels job API) deferred to v7.11. Milestone phase count 6 → 7. Full rationale, decisions, and acceptance criteria in `.planning/phases/81B-claude-skill-consumer/81-RESCOPE.md` (rev 3, APPROVED 2026-05-02).*
+
+*Previous update: 2026-04-28 -- Plan 77-05 complete; Phase 77 ready for /gsd-verify-work. Manual smoke-check on /search and /parallels JSON downloads PASSED after 4 follow-on commits resolved a chunk_hits field-name collision uncovered during smoke verification (Plan 02 had extended lab_composition_search to populate chunk_hits per uid as a list-of-tuples (D-13 Path A), but search_composition_logic had used chunk_hits since 2026-03-12 as an int counter — both producers wrote to the same per-uid item dict, so the serializer crashed with `'int' object is not iterable` on standard-mode parallels results). Fix chain: baf481fb (defensive isinstance guard + logger.exception), c24fcc48 (mirrored list-of-tuples shape into standard-mode + renamed int counter to chunk_count + fixed parallels rep-field mapping; +4 tests), 2e2d2b75 (surfaced Tantivy score on search results — was 0.0 in JSON because results.append at genizah_core.py:7542+:7559 never recorded score var; per-uid _chunk_hit_keys dedup), 327aea31 (group-level dedup keyed on (chunk_index, manuscript_snippet) for cross-uid duplicates from NLI multi-uid cataloging like Karaite prayer books; matches[] sorted by chunk_index ascending; +2 tests). Final test count: 1201 passed / 8 skipped (was 1162 at phase start → +39 new tests across the 5 plans). Cumulative phase commit count: 20 (14 plan-scope + 6 follow-on smoke-check fixes). Phase gate satisfied: pytest green, CI green (assumed pending push), manual download spot-check on /search and /parallels signed off.*
