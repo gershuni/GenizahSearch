@@ -26,10 +26,10 @@ must_haves:
   truths:
     - "Client cannot POST /api/search with old `mode` field — receives 400 invalid_request with message naming both `mode` and `search_mode`."
     - "Client can POST /api/search with `search_mode` ∈ {exact, variants, responsa, title, shelfmark} and the request validates."
-    - "Client posting `search_mode='regex'` receives a 422 Pydantic enum-constraint error (regex dropped per D-09)."
+    - "Client posting `search_mode='regex'` receives 400 `invalid_request` (Pydantic enum-constraint routed through `web/api_hardening.py:326` envelope wrapper, which returns HTTP 400 for ALL PydanticValidationErrors — regex dropped per D-09)."
     - "Client posting non-responsa mode together with non-null `responsa_options` receives 400 invalid_combination."
     - "Client posting `search_mode='title'` or `'shelfmark'` together with non-zero `gap` receives 400 invalid_combination."
-    - "Client posting `limit > 100` or `limit < 1` receives 422; default limit is 50."
+    - "Client posting `limit > 100` or `limit < 1` receives HTTP 400 with `body['error']['code']=='invalid_request'` (Pydantic Field constraint routed through Phase 78 envelope wrapper at `web/api_hardening.py:326`); default limit is 50."
     - "ResponsaOptions accepts only the four boolean fields (variants, ja, flex_spacing, bidirectional); any extra field is rejected by extra='forbid'."
     - "`search_mode='exact'` and `search_mode='variants'` produce DIFFERENT result sets (or different scoring/count) — they map to internal `mode='exact'` vs `mode='variants'` respectively, which `var_mgr.get_variants(term, mode)` and `build_tantivy_query(terms, mode)` consume to drive variant expansion (genizah_core.py:6467, 7473)."
     - "`shared/api_errors.py` ERROR_CODES contains `'invalid_combination'`."
@@ -62,6 +62,8 @@ must_haves:
 Replace the conflated `mode` field on `/api/search`'s `SearchRequest` with a UI-aligned `search_mode` enum (5 values) and add a new `ResponsaOptions` Pydantic model. Add two cross-field `@model_validator(mode='after')` validators (responsa-mode coupling, gap-mode coupling). Lower the `limit` ceiling from 200 → 100. Map the new fields onto the existing internal `responsa_options` dict so `state.searcher.execute_search` and the legacy `mode` value space are preserved unchanged.
 
 **Variants wiring (per revision 1, addressing Blocker 2):** `search_mode='exact'` and `search_mode='variants'` MUST produce a measurable behavioral difference — they map to internal `mode='exact'` and `mode='variants'` respectively (NOT both to `'text'`). The variant pipeline is wired automatically because `genizah_core.py:7471` (`_get_or_compute_variants(terms, mode)`) and `genizah_core.py:7473` (`build_tantivy_query(terms, mode)` → `var_mgr.get_variants(term, mode, limit=200)` at line 6467) consume the `mode` argument as the variant-tier knob. This mirrors the desktop UI's variants checkbox semantics.
+
+**Pydantic error status code (verified against live code 2026-05-03):** `web/api_hardening.py:299-326` `_build_envelope_response` returns HTTP **400** with `code='invalid_request'` for ALL `PydanticValidationError` and `RequestValidationError` instances — including `Field(le=100, ge=1)` violations and `Literal[...]` enum violations. This is the Phase 78 envelope contract; 81A does NOT modify it. All assertions in this plan, Plan 04, and Plan 05 use HTTP 400 (not 422) for Pydantic constraint failures.
 
 Purpose: This is the foundation of Phase 81A. Plans 02–05 cannot run until the new request shape compiles and validates. Locks the API contract that the v7.10 Claude skill (81B) will consume.
 
@@ -140,6 +142,14 @@ results = state.searcher.execute_search(
 mode=req.mode,
 ```
 
+From web/api_hardening.py:299-326 (verified at revision time — the envelope wrapper that determines status code for Pydantic errors):
+```python
+if isinstance(exc, (RequestValidationError, PydanticValidationError)):
+    # ...build body with code='invalid_request', message, fields...
+    return JSONResponse(status_code=400, content=body)
+```
+**This means: every `Field(le=100, ge=1)` violation, every `Literal[...]` enum violation, every `extra='forbid'` rejection returns HTTP 400 with `body['error']['code']=='invalid_request'`.** No 422. 81A does not modify this contract.
+
 From shared/api_errors.py (current state — verified at revision time):
 ```python
 # Line 24-44 — ERROR_CODES frozenset DOES NOT contain 'invalid_combination'.
@@ -198,9 +208,10 @@ self.responsa_bidirectional_check  # → responsa_options.bidirectional
   <name>Task 1: Add ResponsaOptions model + rewrite SearchRequest with search_mode + cross-field validators + lower MAX_LIMIT + add invalid_combination to ERROR_CODES + wire variants at API layer</name>
   <files>web/search_api.py, shared/api_errors.py</files>
   <read_first>
-    - .planning/phases/81A-api-contract-expansion/81A-CONTEXT.md (validation matrix table — copy verbatim)
+    - .planning/phases/81A-api-contract-expansion/81A-CONTEXT.md (validation matrix table — copy verbatim; note the limit-bound row asserts 400 invalid_request, NOT 422)
     - .planning/phases/81B-claude-skill-consumer/81-RESCOPE.md §3.1, §3.3, §3.6
     - web/search_api.py (read fully — current SearchRequest at line 112-120, MAX_LIMIT at line 126, validated_mode at line 391, Pydantic-except at 409-416, validated_mode assignment at 417, Responsa branch at 484-493, execute_search call at 502-511)
+    - web/api_hardening.py:280-330 (`_build_envelope_response` — confirms HTTP 400 for all PydanticValidationErrors)
     - shared/api_errors.py (ERROR_CODES at lines 24-44 — 'invalid_combination' is ABSENT and MUST be added)
     - genizah_core.py:7249-7473 (variants/metadata branching — confirms internal `mode` = variant tier for non-Responsa text)
   </read_first>
@@ -210,9 +221,9 @@ self.responsa_bidirectional_check  # → responsa_options.bidirectional
     - SearchRequest with `search_mode='exact'`, `responsa_options={variants:true,...}` → raises APIError(code='invalid_combination', http_status=400) with message containing both `responsa_options` AND `search_mode`.
     - SearchRequest with `search_mode='title'`, `gap=2` → raises APIError(code='invalid_combination', http_status=400) with message containing both `gap` AND `title`.
     - SearchRequest with `search_mode='shelfmark'`, `gap=5` → same as above (mentions `shelfmark`).
-    - SearchRequest with `search_mode='regex'` → raises Pydantic ValidationError (Literal enum constraint — regex is NOT in the 5 values).
+    - SearchRequest with `search_mode='regex'` → raises Pydantic ValidationError (Literal enum constraint — regex is NOT in the 5 values). The endpoint wrapper at `web/api_hardening.py:326` converts this to HTTP 400 with `code='invalid_request'`.
     - SearchRequest with `mode='text'` (old field) → raises Pydantic ValidationError (extra='forbid'); the search_endpoint catches it and emits 400 invalid_request with message containing `unknown field 'mode'` and `search_mode`.
-    - SearchRequest with `limit=101` → ValidationError (Field constraint le=100); `limit=0` → ValidationError (ge=1).
+    - SearchRequest with `limit=101` → ValidationError (Field constraint le=100); endpoint wrapper returns HTTP 400 with `code='invalid_request'`. `limit=0` → ValidationError (ge=1) → same HTTP 400 invalid_request.
     - SearchRequest defaults: `gap=0`, `limit=50`, `filters=None`, `responsa_options=None`.
     - ResponsaOptions defaults: all four flags = False; `extra='forbid'` rejects any unknown key (e.g. `variant_mode`, `variants_extended`).
     - **Variants wiring (Blocker 2 fix):** `search_mode='exact'` produces `mode='exact'` passed to `state.searcher.execute_search`; `search_mode='variants'` produces `mode='variants'`. These are the EXACT internal values the desktop UI passes (per `genizah_app.py:15796`).
@@ -254,7 +265,7 @@ self.responsa_bidirectional_check  # → responsa_options.bidirectional
         Validation matrix (81A-CONTEXT.md):
         - Any non-responsa search_mode + non-None responsa_options → 400 invalid_combination
         - search_mode in {'title', 'shelfmark'} + non-zero gap → 400 invalid_combination
-        - limit must be in [1, 100] (Pydantic Field constraint)
+        - limit must be in [1, 100] (Pydantic Field constraint → 400 invalid_request via Phase 78 envelope wrapper)
         - regex is intentionally NOT in the enum (D-09; deferred to v7.11)
         """
         model_config = ConfigDict(extra='forbid')
@@ -421,21 +432,21 @@ self.responsa_bidirectional_check  # → responsa_options.bidirectional
   </action>
   <verify>
     <automated>python -c "from web.search_api import SearchRequest, ResponsaOptions, MAX_LIMIT, _SEARCH_MODE_TO_INTERNAL; assert MAX_LIMIT == 100; assert _SEARCH_MODE_TO_INTERNAL['exact'] == 'exact' and _SEARCH_MODE_TO_INTERNAL['variants'] == 'variants'; r = SearchRequest(query='x', search_mode='exact'); assert r.search_mode == 'exact' and r.limit == 50; ro = ResponsaOptions(); assert ro.variants is False and ro.ja is False and ro.flex_spacing is False and ro.bidirectional is False; print('OK')"</automated>
-    <automated>grep -c "search_mode: Literal\\[\"exact\", \"variants\", \"responsa\", \"title\", \"shelfmark\"\\]" web/search_api.py</automated>
-    <automated>grep -c "class ResponsaOptions" web/search_api.py</automated>
-    <automated>grep -c "model_validator" web/search_api.py</automated>
-    <automated>grep -c "MAX_LIMIT = 100" web/search_api.py</automated>
-    <automated>grep -c "unknown field 'mode'" web/search_api.py</automated>
-    <automated>grep -c "_SEARCH_MODE_TO_INTERNAL" web/search_api.py</automated>
-    <automated>grep -c "'invalid_combination'" shared/api_errors.py</automated>
+    <automated>python -c "import typing; from web.search_api import SearchRequest; assert set(typing.get_args(SearchRequest.model_fields['search_mode'].annotation)) == {'exact','variants','responsa','title','shelfmark'}; print('OK')"</automated>
+    <automated>grep -q "class ResponsaOptions" web/search_api.py && echo found-ResponsaOptions || (echo missing-ResponsaOptions; exit 1)</automated>
+    <automated>grep -q "model_validator" web/search_api.py && echo found-model_validator || (echo missing-model_validator; exit 1)</automated>
+    <automated>grep -q "MAX_LIMIT = 100" web/search_api.py && echo found-MAX_LIMIT || (echo missing-MAX_LIMIT; exit 1)</automated>
+    <automated>grep -q "unknown field 'mode'" web/search_api.py && echo found-cutover-msg || (echo missing-cutover-msg; exit 1)</automated>
+    <automated>grep -q "_SEARCH_MODE_TO_INTERNAL" web/search_api.py && echo found-mapping || (echo missing-mapping; exit 1)</automated>
+    <automated>grep -q "'invalid_combination'" shared/api_errors.py && echo found-invalid_combination || (echo missing-invalid_combination; exit 1)</automated>
     <automated>python -c "from shared.api_errors import ERROR_CODES; assert 'invalid_combination' in ERROR_CODES; print('OK')"</automated>
   </verify>
   <acceptance_criteria>
     - `web/search_api.py` contains `class ResponsaOptions(BaseModel):` with exactly four fields (variants, ja, flex_spacing, bidirectional), each `bool = False`, and `model_config = ConfigDict(extra='forbid')`.
-    - `SearchRequest` declares `search_mode: Literal["exact", "variants", "responsa", "title", "shelfmark"]` (5 values, no regex).
+    - `SearchRequest` declares `search_mode` as a Literal with the exact 5-value set `{'exact','variants','responsa','title','shelfmark'}` (verified via `typing.get_args` rather than quote-style-dependent grep).
     - `SearchRequest` no longer declares a `mode:` field.
     - Two `@model_validator(mode='after')` decorators present in SearchRequest body.
-    - `MAX_LIMIT = 100` (line search yields exactly one match).
+    - `MAX_LIMIT = 100` (`grep -q` confirms presence).
     - `SearchRequest.limit` field uses `Field(default=50, ge=1, le=100)`.
     - `_SEARCH_MODE_TO_INTERNAL` mapping defined as a module-level constant containing all 5 keys, with `'exact' → 'exact'` and `'variants' → 'variants'` (NOT both → 'text'; this is the Blocker 2 fix that makes the two values behaviorally distinct via genizah_core.py:6467).
     - search_endpoint passes `mode=internal_mode` (not `mode=req.mode`) to `state.searcher.execute_search`.

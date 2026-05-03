@@ -31,9 +31,9 @@ tags:
 must_haves:
   truths:
     - "tests/test_search_api_v2.py is a NEW file owning the search_mode × responsa_options × invalid-combination matrix per D-12."
-    - "All 5 search_mode values (exact, variants, responsa, title, shelfmark) are exercised with at least one fixture query yielding a non-empty result OR a documented empty-but-200 result (AC2)."
-    - "All 4 responsa_options flags (variants, ja, flex_spacing, bidirectional) have at least one test asserting the flag's effect is observable in the response (AC3)."
-    - "The validation matrix from 81A-CONTEXT.md is verified case-by-case: invalid combinations return 400 invalid_combination; out-of-range limits return 422; old `mode` returns 400 invalid_request."
+    - "All 5 search_mode values (exact, variants, responsa, title, shelfmark) are exercised with TWO LAYERS per AC2: (Layer 1) deterministic stub-searcher tests asserting the engine receives the EXPECTED translated internal `mode` argument (`exact|variants|Responsa|Title|Shelfmark`); (Layer 2) real-index integration tests asserting `count >= 1` for known fixture queries, skipif no index."
+    - "All 4 responsa_options flags (variants, ja, flex_spacing, bidirectional) have at least one test asserting the flag's effect is observable per AC3: variants/ja MUST have stub-searcher tests asserting the cascade produces the expected `responsa_options['variant_mode']` change AND echo divergence (responsa_options vs responsa_options_effective); flex_spacing/bidirectional have engine-pass-through tests (cascade does not affect them in 81A)."
+    - "The validation matrix from 81A-CONTEXT.md is verified case-by-case: invalid combinations return 400 invalid_combination; out-of-range limits return HTTP 400 with `code='invalid_request'`; old `mode` returns 400 invalid_request."
     - "The `request` echo block is asserted on every successful test case (presence + correct key set)."
     - "PostHog properties `search_mode_value` and `responsa_options_count` are asserted via a mocked or capture-based check on at least one test per endpoint variant."
     - "Total ~40-50 test cases (per D-12)."
@@ -92,8 +92,8 @@ Validation matrix to translate into tests (from 81A-CONTEXT.md):
 | search_mode='title'/'shelfmark' + non-zero gap | ✗ 400 invalid_combination | test_gap_with_metadata_mode_rejected (2 sub-cases × multiple gap values) |
 | query empty after .strip() | ✗ 400 query_required | test_empty_query_rejected |
 | len(query) > 1000 | ✗ 400 query_too_long | test_query_too_long_rejected |
-| limit > 100 | ✗ 422 | test_limit_above_max_rejected |
-| limit < 1 | ✗ 422 | test_limit_below_min_rejected |
+| limit > 100 | ✗ 400 invalid_request | test_limit_above_max_rejected |
+| limit < 1 | ✗ 400 invalid_request | test_limit_below_min_rejected |
 | filters.* unknown key | ✗ 400 unknown_filter_key | test_unknown_filter_key_rejected (regression) |
 | filters.* unresolvable value | ✗ 400 unresolvable_filter_value | test_unresolvable_filter_value_rejected (regression — Phase 78 D-17 emits this code, NOT `invalid_filter_value` which is not in ERROR_CODES) |
 | Old `mode` field present | ✗ 400 invalid_request | test_old_mode_field_rejected (also in test_search_api.py; mirror here for matrix completeness) |
@@ -106,6 +106,8 @@ Fixture queries for AC2 (planner's discretion per CONTEXT — pick concrete stri
 - `search_mode='shelfmark'` → query="T-S 12.123" (a known shelfmark)
 
 These queries are best-effort fixtures; if any returns 0 results in the test environment (no index loaded), the test should mark as `skip` with a clear reason — but on the production-like CI environment, all 5 should return ≥1 result. If the test environment uses a stub searcher (Phase 78 pattern), use the stub's known fixture data instead.
+
+**Pydantic error status code (verified 2026-05-03):** `web/api_hardening.py:326` returns HTTP 400 with `code='invalid_request'` for ALL `PydanticValidationError`s (including `Field(le=100, ge=1)` and `Literal[...]` enum violations). NOT 422. All Section 4 tests assert HTTP 400.
 </interfaces>
 </context>
 
@@ -125,21 +127,38 @@ These queries are best-effort fixtures; if any returns 0 results in the test env
   <behavior>
     Test cases organized into the following pytest classes / sections:
 
-    **Section 1 — search_mode value coverage (AC2):**
-    - test_search_mode_exact_returns_envelope: POST with search_mode='exact', valid query → 200 envelope, request.search_mode=='exact', request.responsa_options is None.
-    - test_search_mode_variants_returns_envelope: same with 'variants'.
-    - test_search_mode_exact_vs_variants_behavioral_difference: post the SAME query string twice — once with search_mode='exact', once with 'variants'. Use a stub searcher that records the internal `mode` argument it receives. Assert: exact-call received `mode='exact'`, variants-call received `mode='variants'`. (Per Blocker 2 from revision 1: the API MUST produce a measurable behavioral distinction — wired via the internal mode mapping, consumed by `var_mgr.get_variants(term, mode)` at genizah_core.py:6467. NOT collapsed to a single internal `'text'` mode.)
-    - test_search_mode_responsa_default_options_returns_envelope: search_mode='responsa', no responsa_options → 200, request.responsa_options=={variants:F,ja:F,flex_spacing:F,bidirectional:F}, request.responsa_options_effective is the same (no cascade).
-    - test_search_mode_title_returns_envelope: search_mode='title' → 200, request.responsa_options is None.
-    - test_search_mode_shelfmark_returns_envelope: search_mode='shelfmark' → 200, request.responsa_options is None.
+    **Section 1 — search_mode value coverage (AC2, two-layer):**
+
+    LAYER 1 (deterministic, stub-searcher, ALWAYS runs):
+    - test_search_mode_exact_engine_receives_exact: stub-searcher records `mode` arg; POST search_mode='exact' → engine received internal `mode='exact'`.
+    - test_search_mode_variants_engine_receives_variants: → engine received `mode='variants'`.
+    - test_search_mode_responsa_engine_receives_responsa: → engine received `mode='Responsa'`.
+    - test_search_mode_title_engine_receives_title: → engine received `mode='Title'`.
+    - test_search_mode_shelfmark_engine_receives_shelfmark: → engine received `mode='Shelfmark'`.
+    - test_search_mode_exact_vs_variants_behavioral_difference: post the SAME query string twice — once with search_mode='exact', once with 'variants'. Stub records both calls. Assert: exact-call received `mode='exact'`, variants-call received `mode='variants'`. (Per Blocker 2 from revision 1: the API MUST produce a measurable behavioral distinction — wired via the internal mode mapping, consumed by `var_mgr.get_variants(term, mode)` at genizah_core.py:6467. NOT collapsed to a single internal `'text'` mode.)
+
+    LAYER 2 (real-index integration, skipif no index):
+    - test_search_mode_exact_returns_envelope: POST with search_mode='exact', valid query → 200 envelope, `count >= 1`, request.search_mode=='exact', request.responsa_options is None.
+    - test_search_mode_variants_returns_envelope: same with 'variants', `count >= 1`.
+    - test_search_mode_responsa_default_options_returns_envelope: search_mode='responsa', no responsa_options → 200, `count >= 1`, request.responsa_options=={variants:F,ja:F,flex_spacing:F,bidirectional:F}, request.responsa_options_effective is the same (no cascade).
+    - test_search_mode_title_returns_envelope: search_mode='title' → 200, `count >= 1`, request.responsa_options is None.
+    - test_search_mode_shelfmark_returns_envelope: search_mode='shelfmark' → 200, `count >= 1`, request.responsa_options is None.
+
+    Use `pytest.mark.skipif(not has_index(), reason='no Tantivy index in test env')` for LAYER 2. CI environments with the index see ≥1 result per mode; the LAYER 1 stub tests prove the API plumbing without requiring index data.
 
     **Section 2 — responsa_options flag effect (AC3):**
-    - For each of the 4 flags (variants, ja, flex_spacing, bidirectional), at least one test asserts that toggling the flag produces a different result count, different result-set shape, OR a different `responsa_options_effective` (when cascade fires for variants/ja). At minimum, assert the request echo carries the flag verbatim. Stub-based tests are acceptable: monkeypatch `state.searcher.execute_search` to record the `responsa_options` it received and assert it carried the user-supplied flag value.
+
+    For variants and ja: stub-searcher records BOTH the `responsa_options` dict received AND that toggling the flag changes the dict. Deterministic tests assert behavioral effect via the engine-arg observable.
+
+    For flex_spacing and bidirectional: engine-pass-through is sufficient (cascade does not touch these flags in 81A scope).
+
+    *NOTE: flex_spacing and bidirectional are pass-through-only in 81A; cascade does not affect them. AC3 for these flags is satisfied by engine-pass-through; behavioral effect testing is deferred to whichever phase wires the cascade tiers 4-6.*
+
     - test_responsa_options_variants_passed_to_engine: search_mode='responsa', responsa_options={variants:True,...} → engine receives responsa_options['variants']==True AND responsa_options['variant_mode']=='variants'.
-    - test_responsa_options_variants_false_engine_gets_exact_mode: variants:False → engine receives responsa_options['variant_mode']=='exact'.
-    - test_responsa_options_ja_passed_to_engine: ja:True → engine receives responsa_options['ja']==True.
-    - test_responsa_options_flex_spacing_passed_to_engine: flex_spacing:True → engine receives that.
-    - test_responsa_options_bidirectional_passed_to_engine: bidirectional:True → engine receives that.
+    - test_responsa_options_variants_false_engine_gets_exact_mode: variants:False → engine receives responsa_options['variant_mode']=='exact'. Specifically test the toggle: TWO requests with the SAME query, one variants:True, one variants:False; assert the recorded `responsa_options['variant_mode']` flips `'variants'` → `'exact'`.
+    - test_responsa_options_ja_passed_to_engine: ja:True → engine receives responsa_options['ja']==True. Test the toggle: TWO requests, one ja:True, one ja:False; assert the recorded `responsa_options['ja']` flips True → False.
+    - test_responsa_options_flex_spacing_passed_to_engine: flex_spacing:True → engine receives that (pass-through).
+    - test_responsa_options_bidirectional_passed_to_engine: bidirectional:True → engine receives that (pass-through).
 
     **Section 3 — Invalid combination matrix (AC4):**
     - test_responsa_options_with_exact_mode_rejected: search_mode='exact', responsa_options={variants:T} → 400, code='invalid_combination', message contains both 'responsa_options' and 'search_mode'.
@@ -154,11 +173,11 @@ These queries are best-effort fixtures; if any returns 0 results in the test env
     - test_query_empty_after_strip_rejected: query='   ' → 400 query_required.
     - test_query_too_long_rejected: query=('x'*1001) → 400 query_too_long.
     - test_query_at_cap_legal: query=('x'*1000), search_mode='exact' → 200 (boundary case).
-    - test_limit_above_max_rejected: limit=101 → 422.
-    - test_limit_below_min_rejected: limit=0 → 422.
+    - test_limit_above_max_rejected: limit=101 → HTTP 400 + `code='invalid_request'`.
+    - test_limit_below_min_rejected: limit=0 → HTTP 400 + `code='invalid_request'`.
     - test_limit_at_max_legal: limit=100 → 200.
     - test_limit_at_min_legal: limit=1 → 200.
-    - test_negative_limit_rejected: limit=-5 → 422.
+    - test_negative_limit_rejected: limit=-5 → HTTP 400 + `code='invalid_request'`.
 
     **Section 5 — Hard cutover (AC1, D-13):**
     - test_old_mode_field_rejected_with_helpful_message (mirror of Plan 04 test for matrix completeness): {'query':'x','mode':'text'} → 400 invalid_request, "unknown field 'mode'" in message.
@@ -179,6 +198,8 @@ These queries are best-effort fixtures; if any returns 0 results in the test env
     - test_posthog_event_carries_responsa_options_count_zero_for_non_responsa: assert event has `responsa_options_count == 0`.
     - test_posthog_event_carries_responsa_options_count_three_for_three_flags: search_mode='responsa', responsa_options={variants:T,ja:T,flex_spacing:T,bidirectional:F} → event.properties['responsa_options_count']==3.
     - test_posthog_event_search_mode_value_null_on_pydantic_rejection: send {'mode':'text'} (rejected) → event.properties['search_mode_value'] is None, responsa_options_count is 0.
+    - test_posthog_search_mode_value_present_on_invalid_combination: POST `{search_mode: 'exact', responsa_options: {variants: true}}` (rejected by @model_validator). Capture the emitted PostHog event. Assert `properties['search_mode_value'] == 'exact'` (NOT None — the provisional capture from raw body fired before Pydantic cross-field validation rejected). Asserts `properties['error_code'] == 'invalid_combination'` so the test is unambiguous.
+    - test_posthog_search_mode_value_null_on_invalid_request_unknown_field: POST `{mode: 'text'}` (extra='forbid' rejection). Capture event. Assert `properties['search_mode_value'] is None` AND `properties['error_code'] == 'invalid_request'` AND `properties['responsa_options_count'] == 0`.
 
     Total: ~30 test functions; with parametrize multiplications (limit values, search_mode values, responsa_options flag values) the assertion count lands in the 40-50 range per D-12.
   </behavior>
@@ -255,22 +276,22 @@ These queries are best-effort fixtures; if any returns 0 results in the test env
   <verify>
     <automated>pytest tests/test_search_api_v2.py -x --tb=short -q</automated>
     <automated>python -c "txt = open('tests/test_search_api_v2.py').read(); assert txt.count('def test_') >= 25, f'expected >=25 test functions, got {txt.count(chr(0x64)+chr(0x65)+chr(0x66)+chr(0x20)+chr(0x74)+chr(0x65)+chr(0x73)+chr(0x74)+chr(0x5f))}'; print('OK')"</automated>
-    <automated>grep -c "search_mode" tests/test_search_api_v2.py</automated>
-    <automated>grep -c "responsa_options_effective" tests/test_search_api_v2.py</automated>
-    <automated>grep -c "invalid_combination" tests/test_search_api_v2.py</automated>
-    <automated>grep -c "search_mode_value" tests/test_search_api_v2.py</automated>
-    <automated>grep -c "responsa_options_count" tests/test_search_api_v2.py</automated>
-    <automated>grep -c "regex" tests/test_search_api_v2.py</automated>
+    <automated>grep -q "search_mode" tests/test_search_api_v2.py && echo OK</automated>
+    <automated>grep -q "responsa_options_effective" tests/test_search_api_v2.py && echo OK</automated>
+    <automated>grep -q "invalid_combination" tests/test_search_api_v2.py && echo OK</automated>
+    <automated>grep -q "search_mode_value" tests/test_search_api_v2.py && echo OK</automated>
+    <automated>grep -q "responsa_options_count" tests/test_search_api_v2.py && echo OK</automated>
+    <automated>python -c "import re; txt = open('tests/test_search_api_v2.py').read(); assert not re.search(r'search_mode[\\\"\\']:\\s*[\\\"\\']regex', txt), 'regex used as a search_mode value'; print('OK')"</automated>
   </verify>
   <acceptance_criteria>
     - `tests/test_search_api_v2.py` exists, ≥350 lines.
     - `pytest tests/test_search_api_v2.py -x` exits 0.
     - File contains ≥25 `def test_` functions (parametrize multiplies this to 40-50 actual cases).
-    - All 5 search_mode values are exercised in successful-200 tests with assert_search_envelope_shape.
-    - Each of the 4 responsa_options flags has at least one test asserting it is passed to the search engine.
+    - All 5 search_mode values are exercised in BOTH layers per AC2: Layer 1 stub-searcher tests (always run, asserting engine receives the expected translated internal `mode`) AND Layer 2 real-index tests (skipif no index, asserting count≥1 + assert_search_envelope_shape).
+    - Each of the 4 responsa_options flags has at least one test asserting it is passed to the search engine. variants and ja additionally have toggle-tests proving flipping the flag changes the recorded engine-arg (variant_mode 'variants'↔'exact'; ja True↔False). flex_spacing and bidirectional are pass-through-only per the 81A scope note.
     - The 4 invalid-combination tests (responsa_options + non-responsa mode × 4) all assert HTTP 400 + code='invalid_combination'.
     - The 2 gap-with-metadata-mode tests assert HTTP 400 + code='invalid_combination'.
-    - The limit ceiling/floor tests assert HTTP 422.
+    - The limit ceiling/floor tests assert HTTP 400 + `code='invalid_request'` (per `web/api_hardening.py:326` envelope wrapper).
     - The query length tests assert HTTP 400 + correct error code.
     - The old-mode rejection test mirrors Plan 04's assertion (presence + helpful message).
     - The request-echo-cascade-divergence test asserts request.responsa_options.ja=True AND request.responsa_options_effective.ja=False AND warnings[] contains a JA-disabled string.
@@ -313,5 +334,7 @@ The matrix harness exits green. 81A is shippable. The v7.10 skill (81B) can be b
 </success_criteria>
 
 <output>
-Create `.planning/phases/81A-api-contract-expansion/81A-05-SUMMARY.md` listing: section breakdown of test_search_api_v2.py, total test-function count, fixture pattern reused (client + fake searcher + event-queue capture), the cascade-divergence simulation approach (monkeypatched thread-locals), and final pytest exit code from `pytest tests/test_search_api_v2.py` and `pytest tests/`.
+Create `.planning/phases/81A-api-contract-expansion/81A-05-SUMMARY.md` listing: section breakdown of test_search_api_v2.py, total test-function count, fixture pattern reused (client + fake searcher + event-queue capture), the cascade-divergence simulation approach (monkeypatched thread-locals), and final pytest exit code from `pytest tests/test_search_api_v2.py` and `pytest tests/`. The acceptance harness uses HTTP 400 + `code='invalid_request'` for all Pydantic constraint failures (per the Phase 78 envelope wrapper at `web/api_hardening.py:326`). The new Section 7 PostHog tests cover the Codex MEDIUM-3 provisional-capture path.
 </output>
+</content>
+</invoke>

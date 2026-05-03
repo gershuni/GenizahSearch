@@ -20,10 +20,11 @@ tags:
   - observability
 must_haves:
   truths:
-    - "Every PostHog `search_api_request` event for endpoint=search carries a `search_mode_value` property containing the literal string the client sent (one of: exact, variants, responsa, title, shelfmark)."
+    - "Every PostHog `search_api_request` event for endpoint=search carries a `search_mode_value` property containing the literal string the client sent (one of: exact, variants, responsa, title, shelfmark) when it parses, OR the raw body's `search_mode` value when cross-field validation rejects the request."
     - "Every PostHog `search_api_request` event for endpoint=search carries a `responsa_options_count` integer property (0 when `responsa_options` is None or `search_mode != 'responsa'`; otherwise the count of True flags in the four ResponsaOptions booleans)."
     - "Events for endpoint=browse and endpoint=parallels do NOT include `search_mode_value` (or it is null) and have `responsa_options_count = 0`."
-    - "On Pydantic-rejected requests (invalid_request) where `search_mode` cannot be validated, `search_mode_value` is null and `responsa_options_count` is 0."
+    - "On Pydantic-rejected requests where `search_mode` is structurally invalid (missing, wrong type, unknown enum value), `search_mode_value` is null and `responsa_options_count` is 0."
+    - "On `invalid_combination` errors raised by `@model_validator` (e.g. responsa_options-with-non-responsa-mode), the PostHog event's `search_mode_value` reflects the (provisionally-parsed) raw `search_mode` string from the request body — NOT None — so skill authors can see which mode triggered the cross-field rejection."
   artifacts:
     - path: "web/api_hardening.py"
       provides: "capture_api_event extended with search_mode_value + responsa_options_count props"
@@ -31,18 +32,20 @@ must_haves:
   key_links:
     - from: "web/search_api.py search_endpoint finally block"
       to: "web/api_hardening.py capture_api_event"
-      via: "two new keyword args (search_mode_value, responsa_options_count) computed once-per-request"
+      via: "two new keyword args (search_mode_value, responsa_options_count) computed from raw body provisionally then overwritten on Pydantic success"
       pattern: "search_mode_value"
 ---
 
 <objective>
-Extend the existing per-request PostHog `search_api_request` event with two new properties: `search_mode_value` (str — the literal `search_mode` enum string, one of `exact|variants|responsa|title|shelfmark`, or null when validation failed before assignment) and `responsa_options_count` (int — count of True flags in the validated ResponsaOptions, 0 otherwise).
+Extend the existing per-request PostHog `search_api_request` event with two new properties: `search_mode_value` (str — the literal `search_mode` enum string, one of `exact|variants|responsa|title|shelfmark`, or null when the field is structurally absent/invalid) and `responsa_options_count` (int — count of True flags in the validated ResponsaOptions, 0 otherwise).
+
+**Codex MEDIUM-3 fix:** Capture a PROVISIONAL `posthog_search_mode_value` from the raw request body BEFORE Pydantic construction. After successful Pydantic validation, OVERWRITE with the validated value (which is identical, but explicit). This way, `invalid_combination` errors (raised by `@model_validator(mode='after')` AFTER `search_mode` has been parsed but DURING cross-field validation) carry the parsed value, while `invalid_request` errors (e.g., bad type, missing field) carry None. We retain telemetry on the most interesting error class — cross-field rejections — which is exactly what skill authors will hit.
 
 **Wave 3 (per revision 1).** Plan 02 (Wave 2) modifies the same finally block (defensive meta-drain insertion). Plan 03 must run AFTER Plan 02 to avoid file-write conflicts on `web/search_api.py`'s finally block. Plan 03 modifies the `capture_api_event(...)` call region only; Plan 02 modifies the drain region only. Sequential execution prevents merge conflicts.
 
-Purpose: Per D-08, observability of the new contract. PostHog dashboards will be able to track adoption of each `search_mode`, frequency of Responsa with all-False options vs cascade-disabled, and rejection rate of the old `mode` field.
+Purpose: Per D-08, observability of the new contract. PostHog dashboards will be able to track adoption of each `search_mode`, frequency of Responsa with all-False options vs cascade-disabled, and rejection rate of the old `mode` field. With Codex MEDIUM-3, we additionally retain visibility on `invalid_combination` rejections (which are 81A's net-new error class).
 
-Output: `web/api_hardening.py` `capture_api_event` accepts two new keyword args. `web/search_api.py` search_endpoint computes them once per request and passes them through. `parallels_endpoint` and `browse_endpoint` pass `search_mode_value=None, responsa_options_count=0` (so the event shape is uniform across endpoints).
+Output: `web/api_hardening.py` `capture_api_event` accepts two new keyword args. `web/search_api.py` search_endpoint computes them once per request — provisionally from raw body, then overwrites on Pydantic success — and passes them through. `parallels_endpoint` and `browse_endpoint` pass `search_mode_value=None, responsa_options_count=0` (so the event shape is uniform across endpoints).
 </objective>
 
 <execution_context>
@@ -111,13 +114,15 @@ The decorator (in web/api_hardening.py — search for `def wrap_endpoint`) calls
 <tasks>
 
 <task type="auto" tdd="true">
-  <name>Task 1: Extend capture_api_event signature with search_mode_value + responsa_options_count, plumb through wrap_endpoint, wire from search_endpoint</name>
+  <name>Task 1: Extend capture_api_event signature with search_mode_value + responsa_options_count, plumb through wrap_endpoint, wire from search_endpoint with provisional-from-raw-body capture</name>
   <files>web/api_hardening.py, web/search_api.py</files>
   <read_first>
     - web/api_hardening.py — find `def capture_api_event` (~line 572) and `def wrap_endpoint` (search for it; it's the decorator used by browse/parallels)
     - web/search_api.py finally block in search_endpoint (~line 573-615 post-Plan-02; the meta-drain block from Plan 02 is present — do not touch it)
+    - web/search_api.py — find the location where the request body is first received (the `body: dict = await request.json()` or equivalent, BEFORE `SearchRequest(**body)` is called). The provisional capture site must be BEFORE Pydantic construction.
     - web/search_api.py parallels_endpoint and browse_endpoint (which use @wrap_endpoint)
     - .planning/phases/81A-api-contract-expansion/81A-CONTEXT.md (D-08)
+    - .planning/phases/81A-api-contract-expansion/81A-REVIEWS.md (Codex MEDIUM-3 — provisional capture)
   </read_first>
   <behavior>
     - capture_api_event(..., search_mode_value='exact', responsa_options_count=0) emits a PostHog event whose `properties` dict contains those two new keys with those values.
@@ -125,7 +130,8 @@ The decorator (in web/api_hardening.py — search for `def wrap_endpoint`) calls
     - capture_api_event called WITHOUT the two new args (existing call sites that haven't been updated) defaults them to None / 0 and still emits successfully.
     - For a successful /api/search call with search_mode='responsa' + responsa_options={variants:T,ja:T,flex_spacing:F,bidirectional:T} → event has search_mode_value='responsa', responsa_options_count=3.
     - For a successful /api/search call with search_mode='exact' → event has search_mode_value='exact', responsa_options_count=0.
-    - For a Pydantic-rejected /api/search request (e.g. unknown field 'mode'): the finally block fires with search_mode_value=None (because `req` was never bound), responsa_options_count=0.
+    - **Codex MEDIUM-3 — provisional capture:** For an `invalid_combination` rejection (e.g., search_mode='exact' + responsa_options={variants:T}): the model_validator raises BEFORE the success-path overwrite, but the provisional capture from the raw body fires FIRST, so `search_mode_value='exact'` ends up in the event. Verified by Plan 05 Section 7 test `test_posthog_search_mode_value_present_on_invalid_combination`.
+    - For a Pydantic-rejected /api/search request where the field is structurally invalid (e.g. unknown field 'mode', search_mode missing, search_mode wrong type): the finally block fires with search_mode_value=None (raw body had no parsable `search_mode`) and responsa_options_count=0.
     - For /api/browse and /api/parallels: events have search_mode_value=None, responsa_options_count=0.
   </behavior>
   <action>
@@ -164,7 +170,7 @@ The decorator (in web/api_hardening.py — search for `def wrap_endpoint`) calls
     props['responsa_options_count'] = int(responsa_options_count or 0)
     ```
 
-    **Step B — Compute the two values in search_endpoint.** In `web/search_api.py` `search_endpoint`, add two state variables alongside `validated_mode` (around line 391) and update them as the request is parsed:
+    **Step B — Compute the two values in search_endpoint with PROVISIONAL capture (Codex MEDIUM-3).** In `web/search_api.py` `search_endpoint`, add two state variables alongside `validated_mode` (around line 391) initialized to None / 0:
 
     Find:
     ```python
@@ -178,10 +184,31 @@ The decorator (in web/api_hardening.py — search for `def wrap_endpoint`) calls
     posthog_responsa_options_count: int = 0
     ```
 
-    After successful Pydantic validation (around line 417 where `validated_mode = req.search_mode` was set in Plan 01), also set:
+    **Provisional capture from raw body — BEFORE Pydantic construction.** Locate the line where the raw request body is parsed (e.g. `body = await request.json()` or `body: dict = ...`) but BEFORE the `SearchRequest(**body)` / `SearchRequest.model_validate(body)` call. Immediately AFTER the raw body is available but BEFORE Pydantic construction, insert:
+
+    ```python
+    # 81A D-08 + Codex MEDIUM-3 — provisional PostHog capture of search_mode
+    # from the raw body. If Pydantic construction succeeds, this is overwritten
+    # with the validated value (Step B continued below). If a @model_validator
+    # raises APIError('invalid_combination'), the value parsed here survives —
+    # so cross-field rejections retain telemetry on which mode triggered them.
+    # Structural rejections (missing field, wrong type, unknown enum value)
+    # leave it as None.
+    if isinstance(body, dict):
+        raw_search_mode = body.get('search_mode')
+        if isinstance(raw_search_mode, str):
+            posthog_search_mode_value = raw_search_mode
+        # responsa_options_count stays 0 provisionally — only counted after
+        # Pydantic confirms the responsa_options field is well-typed.
+    ```
+
+    After successful Pydantic validation (around line 417 where `validated_mode = req.search_mode` was set in Plan 01), OVERWRITE with the validated value. The values are identical for valid `search_mode` strings, but explicit overwrite documents the contract:
 
     ```python
     validated_mode = req.search_mode
+    # Overwrite the provisional capture with the validated value (identical
+    # for valid mode strings, but explicit — and now responsa_options_count
+    # can be computed from the parsed Pydantic model).
     posthog_search_mode_value = req.search_mode
     if req.search_mode == 'responsa' and req.responsa_options is not None:
         opts = req.responsa_options
@@ -239,26 +266,28 @@ The decorator (in web/api_hardening.py — search for `def wrap_endpoint`) calls
   <verify>
     <automated>python -m py_compile web/api_hardening.py web/search_api.py</automated>
     <automated>python -c "import inspect; from web.api_hardening import capture_api_event; sig = inspect.signature(capture_api_event); assert 'search_mode_value' in sig.parameters and 'responsa_options_count' in sig.parameters; print('OK')"</automated>
-    <automated>grep -c "search_mode_value" web/api_hardening.py</automated>
-    <automated>grep -c "responsa_options_count" web/api_hardening.py</automated>
-    <automated>grep -c "posthog_search_mode_value" web/search_api.py</automated>
-    <automated>grep -c "posthog_responsa_options_count" web/search_api.py</automated>
+    <automated>grep -q "search_mode_value" web/api_hardening.py && echo found || (echo missing; exit 1)</automated>
+    <automated>grep -q "responsa_options_count" web/api_hardening.py && echo found || (echo missing; exit 1)</automated>
+    <automated>grep -q "posthog_search_mode_value" web/search_api.py && echo found || (echo missing; exit 1)</automated>
+    <automated>grep -q "posthog_responsa_options_count" web/search_api.py && echo found || (echo missing; exit 1)</automated>
+    <automated>grep -q "raw_search_mode" web/search_api.py && echo found-provisional || (echo missing-provisional-capture; exit 1)</automated>
   </verify>
   <acceptance_criteria>
     - `capture_api_event` signature includes keyword-only `search_mode_value: Optional[str] = None` and `responsa_options_count: int = 0`.
     - The function builds a `props` dict that contains both new keys on every emitted event (not conditionally).
     - `wrap_endpoint`'s finally block reads `captured_state.get('search_mode_value')` and `captured_state.get('responsa_options_count', 0)`.
-    - `search_endpoint` computes `posthog_search_mode_value = req.search_mode` after Pydantic validation succeeds.
+    - **Codex MEDIUM-3 — provisional capture:** `search_endpoint` reads `body.get('search_mode')` (when body is a dict and value is a str) and assigns to `posthog_search_mode_value` BEFORE the `SearchRequest(...)` Pydantic construction. After successful construction, the value is overwritten with `req.search_mode` (identical content, explicit).
+    - On `invalid_combination` errors raised by `@model_validator(mode='after')`, the PostHog event's `search_mode_value` reflects the provisionally-captured raw `search_mode` string (not None). Plan 05 Section 7 test verifies this.
     - `search_endpoint` computes `posthog_responsa_options_count` correctly: `sum of True booleans in the four ResponsaOptions flags` when search_mode='responsa', else 0.
     - `browse_endpoint` sets `captured_state['search_mode_value'] = None` and `captured_state['responsa_options_count'] = 0` (explicit).
     - `parallels_endpoint` sets `captured_state['search_mode_value'] = None` and `captured_state['responsa_options_count'] = 0` (explicit).
     - Plan 03's edit to `web/search_api.py`'s finally block is LIMITED to the `capture_api_event(...)` call region — does NOT touch the Plan 02 string-drain or meta-drain blocks.
-    - All three endpoints' Pydantic-rejection paths produce events where `search_mode_value` is None and `responsa_options_count` is 0.
+    - Pydantic-rejection paths where `search_mode` is structurally invalid (missing, wrong type, unknown enum value) produce events where `search_mode_value` is None and `responsa_options_count` is 0.
     - `python -m py_compile` succeeds for both files.
-    - Existing PostHog soak/stress tests in `tests/test_search_api_soak.py` still pass (the additive signature is back-compat).
+    - Existing PostHog soak/stress tests in `tests/test_search_api_soak.py` still pass (the additive signature is back-compat; tests in that file are migrated to `search_mode` by Plan 04 Task 4).
   </acceptance_criteria>
   <done>
-    PostHog events from /api/search carry the two new properties with correct values. /api/browse and /api/parallels carry None/0 (explicit). Plan 05 adds tests asserting the property presence + correctness.
+    PostHog events from /api/search carry the two new properties with correct values. /api/browse and /api/parallels carry None/0 (explicit). Telemetry is preserved on `invalid_combination` cross-field rejections (Codex MEDIUM-3). Plan 05 adds tests asserting the property presence + correctness, including the cross-field-rejection case.
   </done>
 </task>
 
@@ -275,22 +304,22 @@ The decorator (in web/api_hardening.py — search for `def wrap_endpoint`) calls
 
 | Threat ID | Category | Component | Disposition | Mitigation Plan |
 |-----------|----------|-----------|-------------|-----------------|
-| T-81A03-01 | Information Disclosure | search_mode_value property | accept | The literal `search_mode` enum value is low-cardinality public information (one of 5 strings). Not user data. |
+| T-81A03-01 | Information Disclosure | search_mode_value property | accept | The literal `search_mode` enum value is low-cardinality public information (one of 5 strings; null when invalid). Not user data. The provisional capture from the raw body could include arbitrary string content if a hostile client sends `search_mode: "<arbitrary>"`, but this is bounded by the existing 1KB JSON size cap and the field is logged as-is to PostHog (no SQL/HTML interpretation downstream). |
 | T-81A03-02 | Information Disclosure | responsa_options_count property | accept | Single integer in [0, 4]. No content; no shape leak beyond "user enabled N flags." |
 | T-81A03-03 | DoS / latency | event capture path | mitigate | Existing best-effort queue (Concern #9) + sampling (`_should_sample`) preserved. New props add ~30 bytes per event; negligible. |
-| T-81A03-04 | Repudiation | failed-validation events | mitigate | search_mode_value is None on the Pydantic-rejection path (req unbound). The `error_code='invalid_request'` already labels the event correctly; the new fields are aux. |
+| T-81A03-04 | Repudiation | failed-validation events | mitigate | search_mode_value is non-None for `invalid_combination` errors (Codex MEDIUM-3 — provisional capture). search_mode_value remains None on the structural-rejection path (req unbound and raw body has no parsable search_mode). The `error_code='invalid_request'` vs `'invalid_combination'` already distinguishes the two cases; the provisional capture adds the offending mode value to the latter. |
 </threat_model>
 
 <verification>
 - `python -m py_compile web/api_hardening.py web/search_api.py` exits 0.
 - The signature inspection check (Task 1 verify) passes.
-- `pytest tests/test_search_api_soak.py -x` exits 0.
+- `pytest tests/test_search_api_soak.py -x` exits 0 (after Plan 04 Task 4 migrates the soak tests to `search_mode`).
 </verification>
 
 <success_criteria>
-PostHog events emitted from all three endpoints have a uniform shape including the two new properties. Search events carry the validated search_mode + the responsa_options_count; non-search events carry None/0. Plan 05 verifies via tests.
+PostHog events emitted from all three endpoints have a uniform shape including the two new properties. Search events carry the validated search_mode + the responsa_options_count; `invalid_combination` errors retain the provisionally-captured search_mode (Codex MEDIUM-3); structural rejections show null. Non-search events carry None/0. Plan 05 verifies via tests, including Section 7's `test_posthog_search_mode_value_present_on_invalid_combination`.
 </success_criteria>
 
 <output>
-Create `.planning/phases/81A-api-contract-expansion/81A-03-SUMMARY.md` listing the signature change, the two new local variables in `search_endpoint`, the explicit set in `browse_endpoint`/`parallels_endpoint`, the wrap_endpoint decorator update, and confirmation that the finally-block edit was limited to the capture_api_event call (Plan 02's drain regions untouched).
+Create `.planning/phases/81A-api-contract-expansion/81A-03-SUMMARY.md` listing the signature change, the two new local variables in `search_endpoint`, the provisional-capture-from-raw-body site (Codex MEDIUM-3), the explicit overwrite after successful Pydantic construction, the explicit set in `browse_endpoint`/`parallels_endpoint`, the wrap_endpoint decorator update, and confirmation that the finally-block edit was limited to the capture_api_event call (Plan 02's drain regions untouched).
 </output>

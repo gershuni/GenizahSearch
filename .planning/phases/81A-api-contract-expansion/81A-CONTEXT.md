@@ -72,9 +72,11 @@ Internal/undocumented API. **Breaking change** — old `mode` field is hard-reje
 | `search_mode='title'` or `'shelfmark'` + non-zero `gap` | ✗ 400 `invalid_combination` ("gap has no effect with metadata-only search modes") | `@model_validator(mode='after')` |
 | `query` empty after `.strip()` | ✗ 400 `query_required` | Existing |
 | `len(query) > 1000` | ✗ 400 `query_too_long` | Existing |
-| `limit > 100` or `limit < 1` | ✗ 422 | Pydantic Field constraint |
+| `limit > 100` or `limit < 1` | ✗ 400 `invalid_request` (Pydantic Field constraint, routed through Phase 78 envelope wrapper at `web/api_hardening.py:326` which returns HTTP 400 for ALL `PydanticValidationError`s — NOT 422) | Pydantic Field constraint |
 | `filters.*` value not in FJMS catalog | ✗ 400 `invalid_filter_value` | Inherited Phase 78 D-17 |
 | Old `mode` field present | ✗ 400 `invalid_request` ("unknown field 'mode' — use search_mode instead") | `extra='forbid'` (D-03/D-13) |
+
+**Note on Pydantic error status code (verified against live code 2026-05-03):** `web/api_hardening.py:299-326` `_build_envelope_response` returns `JSONResponse(status_code=400, ...)` with `code='invalid_request'` for ALL `PydanticValidationError` and `RequestValidationError` instances — including `Field(le=100, ge=1)` violations and `Literal[...]` enum violations. This is the Phase 78 hardening contract and is OUT OF SCOPE for 81A to modify. All 81A plans/tests assert HTTP 400 + `code='invalid_request'` for Pydantic constraint failures (NOT 422).
 
 ### Response envelope (final)
 
@@ -181,7 +183,7 @@ None.
 
 - **Echo block fidelity is the key contract.** Skills (81B) compare `responsa_options` vs `responsa_options_effective` (or read `warnings[]`) to detect silent server-side cascade. Both signals must agree on every Responsa cascade case — `tr()` string in `warnings[]` AND boolean diff in `responsa_options_effective`.
 - **Hard cutover wording matters.** When the old `mode` field is sent, the 400 message must explicitly name both the old field and the new (`"unknown field 'mode' — use search_mode instead"`). Skill authors who copy-paste old payloads need a one-line debugging hint.
-- **Regex absence is a surface contract.** Skill authors will inspect the enum at runtime; an attempt to send `search_mode='regex'` returns 422 (Pydantic enum constraint). Document the v7.11 candidacy in 82.
+- **Regex absence is a surface contract.** Skill authors will inspect the enum at runtime; an attempt to send `search_mode='regex'` returns 400 `invalid_request` (Pydantic enum constraint routed through the Phase 78 envelope wrapper at `web/api_hardening.py:326`). Document the v7.11 candidacy in 82.
 - **`/api/parallels` keeps `mode`, NOT `search_mode`.** Stylistic inconsistency is intentional (D-07 / OQ-2). Phase 82 documents it.
 
 </specifics>
@@ -205,3 +207,4 @@ None.
 
 *Phase: 81A-api-contract-expansion*
 *Context gathered: 2026-05-03*
+*Revised: 2026-05-03 (--reviews pass: limit-bound row + specifics regex note clarified to assert 400 invalid_request per Phase 78 envelope wrapper.)*

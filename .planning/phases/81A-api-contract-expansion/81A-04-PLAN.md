@@ -11,6 +11,8 @@ files_modified:
   - tests/test_search_api.py
   - tests/test_search_serializer.py
   - tests/test_parallels_api.py
+  - tests/test_browse_api.py
+  - tests/test_search_api_soak.py
 autonomous: true
 requirements:
   - API-EXPAND-07
@@ -29,6 +31,8 @@ must_haves:
     - "tests/test_search_serializer.py contains at least one test case asserting the `request` echo block is present in the parallels envelope with the parallels-specific shape (mode, NOT search_mode)."
     - "tests/test_parallels_api.py contains at least one test case asserting the `/api/parallels` envelope contains a `request` block, and that all Phase 80 test cases still pass with the additive change. [API-EXPAND-07 verification]"
     - "Git history of tests/test_search_api.py is preserved (rewritten in-place, NOT deleted+recreated) per D-12."
+    - "No `/api/search` POST in `tests/` uses the legacy `mode` field except the explicit `test_old_mode_field_rejected*` allowlist."
+    - "After Plan 04 lands, `pytest tests/test_browse_api.py tests/test_parallels_api.py tests/test_search_api_soak.py -x` exits 0."
   artifacts:
     - path: "tests/test_search_api.py"
       provides: "Phase 78-era hardening tests migrated to search_mode field"
@@ -39,6 +43,12 @@ must_haves:
     - path: "tests/test_parallels_api.py"
       provides: "request echo presence assertion + Phase 80 regression"
       contains: "request"
+    - path: "tests/test_browse_api.py"
+      provides: "/api/search callers migrated to search_mode"
+      contains: "search_mode"
+    - path: "tests/test_search_api_soak.py"
+      provides: "soak iterations migrated to search_mode"
+      contains: "search_mode"
   key_links:
     - from: "tests/test_search_api.py"
       to: "web/search_api.py SearchRequest"
@@ -92,7 +102,7 @@ Tests that previously asserted on the response envelope's `mode` field: this top
 
 Old `mode` field rejection test: a NEW test must verify that `{'query':'x','mode':'text'}` returns 400 with error code `invalid_request` and the error message contains the literal substring `unknown field 'mode'`.
 
-Tests that asserted limit > 200 returned 400: change to limit > 100 returns 422 (Pydantic Field constraint, NOT 400).
+Tests that asserted limit > 200 returned 400 `limit_too_high`: change to limit > 100 still returns HTTP 400 but with `body['error']['code']=='invalid_request'` (Pydantic Field constraint routed through `web/api_hardening.py:326` envelope wrapper, which converts ALL `PydanticValidationError`s to HTTP 400 invalid_request — NOT 422).
 
 Filter-validation tests (Warning 5): The actual error code emitted by Phase 78 D-17 is `unresolvable_filter_value` (or `unknown_filter_key` for unknown field names). NOT `invalid_filter_value` (that string is referenced in CONTEXT validation matrix but does NOT exist in `shared/api_errors.py` ERROR_CODES — verified at revision time). Tests must continue to assert against the actual emitted codes (`unresolvable_filter_value`, `unknown_filter_key`, `filter_vocabulary_unavailable`) — these are unchanged by Phase 81A.
 </interfaces>
@@ -113,7 +123,7 @@ Filter-validation tests (Warning 5): The actual error code emitted by Phase 78 D
     - Every test in tests/test_search_api.py that POSTs to /api/search uses the new `search_mode` field (not `mode`).
     - The old field name `'mode'` does NOT appear as a top-level key in any request payload (use grep to verify).
     - One new test asserts that POSTing `{'query':'x','mode':'text'}` returns HTTP 400 with `body['error']['code']=='invalid_request'` and `"unknown field 'mode'"` in `body['error']['message']`.
-    - Tests for the limit ceiling are updated: `limit=201` (or any > 100) returns HTTP 422 (Pydantic validation), not 400 'limit_too_high'.
+    - Tests for the limit ceiling are updated: `limit=201` (or any > 100) returns HTTP 400 with `body['error']['code']=='invalid_request'`, not 400 `limit_too_high`.
     - Existing rate-limit, mode-gate, statelessness, filter-vocab, PostHog-capture, and downgrade-warning tests pass with the renamed field.
     - Filter-validation tests continue to assert `unresolvable_filter_value` / `unknown_filter_key` (NOT a non-existent `invalid_filter_value`).
     - All other test bodies (assertions on count, total, results, warnings, error envelope shape) are unchanged.
@@ -137,8 +147,8 @@ Filter-validation tests (Warning 5): The actual error code emitted by Phase 78 D
     **Important consideration on Responsa tests:** Phase 78's hard-coded responsa_options dict was `{variants: True, ja: True, flex_spacing: False, bidirectional: False}`. After Plan 01, the API default is all-False. Tests that previously relied on implicit variants/ja being on must explicitly send `responsa_options: {variants: true, ja: true, ...}` to preserve their behavioral expectations.
 
     **Step C — Update limit-ceiling tests.** Find any test that POSTs with `limit > 200` and asserts a 400 `limit_too_high` envelope. Update to:
-    - For `limit > 100` (e.g., `limit=101`): expect HTTP 422 (Pydantic ValidationError) with `body['error']['code'] == 'invalid_request'`. If a Phase 78 test asserted code='limit_too_high', change it to 'invalid_request'.
-    - For `limit < 1` (e.g., `limit=0`): same — expect 422 / invalid_request via Pydantic.
+    - For `limit > 100` (e.g., `limit=101`): expect HTTP 400 with `body['error']['code'] == 'invalid_request'` (Phase 78 envelope wrapper converts Pydantic errors to 400). If a Phase 78 test asserted code='limit_too_high', change it to 'invalid_request'.
+    - For `limit < 1` (e.g., `limit=0`): same — expect HTTP 400 + `code='invalid_request'` via Pydantic + envelope wrapper.
 
     **Step D — Add new old-mode rejection test.** At a sensible location (end of file, or grouped with other Pydantic-validation tests), add:
 
@@ -159,15 +169,32 @@ Filter-validation tests (Warning 5): The actual error code emitted by Phase 78 D
 
     Use the existing `client` fixture pattern from the file (read the existing fixtures before writing this test).
 
-    **Step E — Sanity check.** After all edits, run:
-    - `grep -E "'mode':" tests/test_search_api.py` should return ZERO lines (all migrated).
-    - `grep -E "'search_mode':" tests/test_search_api.py` should return MANY lines (every old test).
-    - `grep "unknown field 'mode'" tests/test_search_api.py` should return at least 1 line (the new test).
+    **Step E — Sanity check (allowlist-aware).** After all edits, run these checks:
+
+    - The mechanical migration left no stale old-mode payloads OUTSIDE the rejection-test functions. Use this Python AST-based check:
+      ```bash
+      python -c "
+      import re, ast, pathlib
+      src = pathlib.Path('tests/test_search_api.py').read_text()
+      tree = ast.parse(src)
+      violations = []
+      for node in ast.walk(tree):
+          if isinstance(node, ast.FunctionDef) and node.name.startswith('test_old_mode_field_rejected'):
+              continue
+          seg = ast.get_source_segment(src, node) or ''
+          if isinstance(node, ast.FunctionDef) and re.search(r\"['\\\"]mode['\\\"]\\s*:\\s*['\\\"](text|Title|Shelfmark|Responsa)['\\\"]\", seg):
+              violations.append(node.name)
+      assert not violations, f'old mode field still in: {violations}'
+      print('OK')
+      "
+      ```
+    - `grep -q "search_mode" tests/test_search_api.py && echo OK` — many migrated tests reference the new field.
+    - `grep -q "unknown field 'mode'" tests/test_search_api.py && echo OK` — the rejection test exists.
 
     **Step F — Run tests and apply targeted repairs from the bounded fix list (Warning 7 fix).** Execute `pytest tests/test_search_api.py -x --tb=short`. Any remaining mismatches MUST belong to one of the following bounded categories — DO NOT make open-ended fixes:
 
     1. **Responsa default-flag drift.** Tests that asserted Phase 78's hard-coded `variants:True, ja:True` defaults now see all-False because the API default is `ResponsaOptions()` (all-False). Repair: add explicit `'responsa_options': {'variants': True, 'ja': True, 'flex_spacing': False, 'bidirectional': False}` to the payload to restore behavioral expectations.
-    2. **Limit-ceiling code change.** Tests that asserted `limit > 200` → 400 `limit_too_high`. Repair: assert `limit > 100` → 422 with `body['error']['code'] == 'invalid_request'` (Pydantic Field constraint, not the inner APIError path).
+    2. **Limit-ceiling code change.** Tests that asserted `limit > 200` → 400 `limit_too_high`. Repair: assert `limit > 100` → HTTP 400 with `body['error']['code'] == 'invalid_request'` (Pydantic Field constraint routed through `web/api_hardening.py:326`, which returns HTTP 400 — NOT 422).
     3. **Old-mode payload construction.** Stale `{'mode': 'text'/'Title'/'Shelfmark'/'Responsa'}` payloads not caught by the mechanical rewrite. Repair: re-grep and apply the translation table from Step B.
     4. **Top-level envelope `mode` field assertions.** Tests asserting `body['mode'] == 'text'`/`'Title'`/`'Shelfmark'`/`'Responsa'` see post-Plan-01 internal values like `'exact'`/`'variants'`/`'Title'`/`'Shelfmark'`/`'Responsa'`. Repair: either (a) update the expected value to the new internal mapping (`'exact'` for `search_mode='exact'`, `'variants'` for `search_mode='variants'`, capitalized for the others), OR (b) switch the assertion to `body['request']['search_mode']` which carries the API enum value verbatim.
     5. **Filter-validation code assertions.** If any test asserts a non-existent `invalid_filter_value` error code, repair to the actual emitted code (`unresolvable_filter_value` or `unknown_filter_key`). Phase 81A does not change Phase 78 D-17 filter-validation behavior.
@@ -176,16 +203,29 @@ Filter-validation tests (Warning 5): The actual error code emitted by Phase 78 D
   </action>
   <verify>
     <automated>pytest tests/test_search_api.py -x --tb=short</automated>
-    <automated>python -c "import re; txt = open('tests/test_search_api.py').read(); assert re.search(r\"['\\\"]mode['\\\"]\\s*:\\s*['\\\"](text|Title|Shelfmark|Responsa)['\\\"]\", txt) is None, 'old mode field still present in payloads'; print('OK')"</automated>
-    <automated>grep -c "search_mode" tests/test_search_api.py</automated>
-    <automated>grep -c "unknown field 'mode'" tests/test_search_api.py</automated>
-    <automated>grep -c "invalid_filter_value" tests/test_search_api.py</automated>
+    <automated>python -c "
+import re, ast, pathlib
+src = pathlib.Path('tests/test_search_api.py').read_text()
+tree = ast.parse(src)
+violations = []
+for node in ast.walk(tree):
+    if isinstance(node, ast.FunctionDef) and node.name.startswith('test_old_mode_field_rejected'):
+        continue
+    seg = ast.get_source_segment(src, node) or ''
+    if isinstance(node, ast.FunctionDef) and re.search(r\"['\\\"]mode['\\\"]\\s*:\\s*['\\\"](text|Title|Shelfmark|Responsa)['\\\"]\", seg):
+        violations.append(node.name)
+assert not violations, f'old mode field still in: {violations}'
+print('OK')
+"</automated>
+    <automated>grep -q "search_mode" tests/test_search_api.py && echo OK</automated>
+    <automated>grep -q "unknown field 'mode'" tests/test_search_api.py && echo OK</automated>
+    <automated>! grep -q "invalid_filter_value" tests/test_search_api.py && echo OK || (echo violation; exit 1)</automated>
   </verify>
   <acceptance_criteria>
     - `pytest tests/test_search_api.py -x` exits 0.
     - No payload literal in the file contains `'mode': 'text'` / `'mode': 'Title'` / etc. (grep verifies).
     - At least one test asserts the old-mode rejection with code='invalid_request' and message containing "unknown field 'mode'".
-    - Limit-ceiling tests assert HTTP 422 (not 400) for `limit > 100`.
+    - Limit-ceiling tests assert HTTP 400 with `code='invalid_request'` for `limit > 100` (Phase 78 envelope wrapper converts ALL PydanticValidationErrors to 400; NOT 422).
     - Responsa tests that previously relied on Phase 78's hard-coded `variants:True, ja:True` defaults now explicitly send those flags via `responsa_options`.
     - No test references a non-existent `invalid_filter_value` code (grep returns 0). Filter-validation assertions use `unresolvable_filter_value` / `unknown_filter_key` / `filter_vocabulary_unavailable` (the actual codes emitted by Phase 78 D-17).
     - Step F repairs are limited to the 5 bounded categories listed (Responsa defaults, limit ceiling, payload field name, envelope mode field, filter-validation codes). No open-ended changes.
@@ -386,6 +426,50 @@ Filter-validation tests (Warning 5): The actual error code emitted by Phase 78 D
   </done>
 </task>
 
+<task type="auto">
+  <name>Task 4: Migrate `/api/search` callers in tests/test_browse_api.py, tests/test_parallels_api.py, tests/test_search_api_soak.py (Codex HIGH-2 sprawl fix)</name>
+  <files>tests/test_browse_api.py, tests/test_parallels_api.py, tests/test_search_api_soak.py</files>
+  <read_first>
+    - tests/test_browse_api.py (lines 735, 832 — verified `/api/search` POSTs with `'mode': 'text'`)
+    - tests/test_parallels_api.py (line 568 — verified)
+    - tests/test_search_api_soak.py (lines 46, 94, 95, 98, 133, 134, 135, 141, 147 — verified, 9 calls)
+    - .planning/phases/81A-api-contract-expansion/81A-REVIEWS.md (Codex HIGH-2)
+  </read_first>
+  <behavior>
+    - Every `/api/search` POST in these 3 files uses `search_mode` (not `mode`) in the request payload.
+    - All other test bodies (assertions on count, total, results, rate-limit behavior, soak iteration counts) are unchanged.
+    - All three test files exit 0 under pytest after migration.
+  </behavior>
+  <action>
+    Apply the same translation table from Task 1 Step B to each file:
+    - `'mode': 'text'`      → `'search_mode': 'exact'`
+    - `'mode': 'Title'`     → `'search_mode': 'title'`
+    - `'mode': 'Shelfmark'` → `'search_mode': 'shelfmark'`
+    - `'mode': 'Responsa'`  → `'search_mode': 'responsa'`
+
+    Apply the same 5 bounded-repair categories from Task 1 Step F if any test fails after the rename.
+
+    **Per-file plan:**
+
+    - `tests/test_browse_api.py`: 2 known call sites (lines 735, 832). Both use `'mode': 'text'`. Edit each individually with enough surrounding context to disambiguate. Re-grep after edits: `grep -nE "/api/search.*['\\\"]mode['\\\"]\\s*:" tests/test_browse_api.py` should return zero lines.
+    - `tests/test_parallels_api.py`: 1 known call site (line 568). Same pattern. **Note:** This file already gains the new `test_parallels_envelope_contains_request_echo` test from Task 3; do NOT duplicate it. Just migrate line 568.
+    - `tests/test_search_api_soak.py`: 9 known call sites, all using `'mode': 'text'`. Read the file fully (it's a soak/stress test with iteration loops) before editing. Use `Edit` with enough surrounding context for each occurrence. Re-grep verifies zero residual lines.
+  </action>
+  <verify>
+    <automated>pytest tests/test_browse_api.py tests/test_parallels_api.py tests/test_search_api_soak.py -x --tb=short</automated>
+    <automated>! grep -qE "/api/search.*['\"]mode['\"]\s*:\s*['\"](text|Title|Shelfmark|Responsa)['\"]" tests/test_browse_api.py tests/test_parallels_api.py tests/test_search_api_soak.py && echo OK || (echo violation; exit 1)</automated>
+    <automated>grep -q "search_mode" tests/test_search_api_soak.py && echo OK</automated>
+  </verify>
+  <acceptance_criteria>
+    - `pytest tests/test_browse_api.py tests/test_parallels_api.py tests/test_search_api_soak.py -x` exits 0.
+    - No `/api/search` POST in these 3 files contains the legacy `mode` field.
+    - All Phase 78/79/80 regression coverage in these files (rate limits, soak iterations, browse-side regression) is preserved — only the field name in `/api/search` payloads changes.
+  </acceptance_criteria>
+  <done>
+    Codex HIGH-2 (test migration sprawl) is fully resolved. The phase gate "existing 1156-test baseline still passes" is achievable across the entire test directory after Plans 04 + 05 land.
+  </done>
+</task>
+
 </tasks>
 
 <threat_model>
@@ -414,5 +498,7 @@ Phase 78/80 hardening regression coverage is preserved at the new contract; the 
 </success_criteria>
 
 <output>
-Create `.planning/phases/81A-api-contract-expansion/81A-04-SUMMARY.md` listing: number of `mode→search_mode` payload replacements made, the new old-mode rejection test, the limit-ceiling assertion changes, the 5 new serializer round-trip tests, and the 1 new parallels-echo test. Confirm pytest exit 0 across all three files. Note that Step F repairs were limited to the 5 bounded categories.
+Create `.planning/phases/81A-api-contract-expansion/81A-04-SUMMARY.md` listing: number of `mode→search_mode` payload replacements made, the new old-mode rejection test, the limit-ceiling assertion changes, the 5 new serializer round-trip tests, and the 1 new parallels-echo test. Confirm pytest exit 0 across all three files. Note that Step F repairs were limited to the 5 bounded categories. Also note: Task 4 migrated `/api/search` callers in test_browse_api.py (2 sites), test_parallels_api.py (1 site), test_search_api_soak.py (9 sites). Confirm pytest exit 0 across all 5 modified test files. The 422→400 alignment is reflected in all limit-ceiling assertions.
 </output>
+</content>
+</invoke>
