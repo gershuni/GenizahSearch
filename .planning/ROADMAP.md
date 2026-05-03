@@ -310,8 +310,13 @@ back-nav bugfix.
   4. Response envelope echoes a `request` block: `search_mode` always identical to client request (never silently downgraded), `responsa_options` and `responsa_options_effective` (when applicable), `gap`, `limit`, `limit_effective`, `filters`. Responsa cascade case shows `responsa_options != responsa_options_effective` AND surfaces disabled options in `warnings[]`.
   5. Existing Phase 78/79/80 hardening behaviors hold (rate limit, mode gate, error envelope, PostHog capture, statelessness, per-bucket independence).
   6. `/api/parallels` envelope gains the `request` echo block; existing Phase 80 tests pass unchanged. The `mode` field name is preserved on `/api/parallels` (not renamed to `search_mode`) — the temporary inconsistency is documented in Phase 82.
-**Phase gate**: pytest green (~50–60 new test cases across the search-mode × responsa-options × invalid-combination matrix); CI green; existing 1156-test baseline still passes.
-**Plans**: TBD
+**Phase gate**: pytest green (~40–50 new test cases across the search-mode × responsa-options × invalid-combination matrix per D-09; regex deferred to v7.11); CI green; existing 1156-test baseline still passes.
+**Plans:** 5 plans
+- [ ] 81A-01-PLAN.md -- SearchRequest + ResponsaOptions Pydantic models with cross-field validators; lower MAX_LIMIT 200→100; hard cutover for old `mode` field
+- [ ] 81A-02-PLAN.md -- `request` echo block on /api/search and /api/parallels envelopes; structured cascade-meta thread-local for responsa_options_effective
+- [ ] 81A-03-PLAN.md -- PostHog event extension: search_mode_value + responsa_options_count properties (D-08)
+- [ ] 81A-04-PLAN.md -- In-place rewrite of tests/test_search_api.py (mode→search_mode); extend test_search_serializer.py + test_parallels_api.py with request echo round-trips (D-12)
+- [ ] 81A-05-PLAN.md -- New tests/test_search_api_v2.py (~40-50 case matrix: search_mode × responsa_options × invalid-combinations × bounds × echo × PostHog)
 
 ### Phase 81B: Claude Skill Consumer
 **Goal**: A runnable Anthropic Skill (SKILL.md + scripts) drives `/api/search` → `/api/browse` end-to-end via staged phrase discovery (multiple search calls, merge by uid, browse drill-down), producing ranked candidate witnesses with justifications grounded in browse text and honest reporting of `text_source='snippet'` and image-unavailability conditions. The v7.10 acceptance harness.
