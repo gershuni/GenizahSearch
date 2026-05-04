@@ -364,6 +364,9 @@ def serialize_search_payload(
     filters: Optional[dict] = None,
     warnings: Optional[list[str]] = None,
     total: Optional[int] = None,
+    # Phase 81A — when present, embedded verbatim under top-level `request`.
+    # Phase 77 download path leaves this None to preserve back-compat.
+    request_echo: Optional[dict] = None,
 ) -> dict:
     """Phase 77 EXPORT-01/03. Same shape Phase 78 /api/search will inherit.
 
@@ -400,7 +403,7 @@ def serialize_search_payload(
         for r in results
     ]
 
-    return {
+    envelope = {
         'schema_version': SCHEMA_VERSION,
         'source': 'search',
         'query': query or '',
@@ -413,6 +416,11 @@ def serialize_search_payload(
         'generated_at': _utc_iso_now(),
         'results': items,
     }
+    # Phase 81A — embed `request` echo block verbatim when supplied. None
+    # for the Phase 77 download path preserves the original envelope shape.
+    if request_echo is not None:
+        envelope['request'] = request_echo
+    return envelope
 
 
 # -----------------------------------------------------------------------------
@@ -799,6 +807,9 @@ def serialize_parallels_payload(
     max_freq: Optional[float] = None,
     boundary_options: Optional[dict] = None,
     warnings: Optional[list[str]] = None,
+    # Phase 81A — when present, embedded verbatim under top-level `request`.
+    # Phase 77 download path leaves this None to preserve back-compat.
+    request_echo: Optional[dict] = None,
 ) -> dict:
     """Phase 77 EXPORT-02/03. Same shape Phase 80 /api/parallels will inherit.
 
@@ -842,7 +853,7 @@ def serialize_parallels_payload(
         for g in filt_groups
     ]
 
-    return {
+    envelope = {
         'schema_version': SCHEMA_VERSION,
         'source': 'parallels',
         'source_text': source_text or '',
@@ -857,3 +868,8 @@ def serialize_parallels_payload(
         'results': main_envelope,
         'filtered': filt_envelope,
     }
+    # Phase 81A — embed `request` echo block verbatim when supplied. None
+    # for the Phase 77 download path preserves the original envelope shape.
+    if request_echo is not None:
+        envelope['request'] = request_echo
+    return envelope
