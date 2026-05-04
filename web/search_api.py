@@ -454,6 +454,14 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
         error_code: Optional[str] = None
         result_count: Optional[int] = None
         validated_mode: Optional[str] = None
+        # 81A D-08 + Codex MEDIUM-3 — provisional PostHog capture state.
+        # Populated from the raw body BEFORE Pydantic construction so
+        # `invalid_combination` rejections (raised by @model_validator AFTER
+        # search_mode parsed but DURING cross-field validation) retain the
+        # offending mode value in telemetry. Overwritten with the validated
+        # value after successful Pydantic construction.
+        posthog_search_mode_value: Optional[str] = None
+        posthog_responsa_options_count: int = 0
 
         try:
             # 0. Parse body and validate via Pydantic explicitly so we own
@@ -466,6 +474,16 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                     f'request body must be valid JSON: {exc}',
                     http_status=400,
                 )
+            # 81A D-08 + Codex MEDIUM-3 — provisional capture from raw body
+            # BEFORE Pydantic construction. Structural rejections (missing
+            # field, wrong type, unknown enum value) leave this as None;
+            # cross-field rejections preserve it.
+            if isinstance(body, dict):
+                _raw_search_mode = body.get('search_mode')
+                if isinstance(_raw_search_mode, str):
+                    posthog_search_mode_value = _raw_search_mode
+                # responsa_options_count stays 0 provisionally — only computed
+                # after Pydantic confirms the responsa_options field shape.
             try:
                 if isinstance(body, dict):
                     req = SearchRequest(**body)
@@ -490,6 +508,24 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                 raise
 
             validated_mode = req.search_mode
+            # 81A D-08 — overwrite the provisional PostHog values with the
+            # validated parse. Identical content for valid `search_mode`
+            # strings, but explicit overwrite documents the contract and
+            # gives us a single site to compute responsa_options_count from
+            # the parsed Pydantic model.
+            posthog_search_mode_value = req.search_mode
+            if req.search_mode == 'responsa' and req.responsa_options is not None:
+                _opts = req.responsa_options
+                posthog_responsa_options_count = sum([
+                    bool(_opts.variants),
+                    bool(_opts.ja),
+                    bool(_opts.flex_spacing),
+                    bool(_opts.bidirectional),
+                ])
+            else:
+                # responsa_options omitted → defaults all-False → count 0;
+                # non-responsa modes → count 0 by definition (D-08).
+                posthog_responsa_options_count = 0
 
             # 1. Mode gate (D-02, D-03, D-04).
             enforce_mode_gate(request)
@@ -699,6 +735,12 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                     status_code=status_code,
                     error_code=error_code,
                     client_ip=client_ip,
+                    # 81A D-08 — observability of new contract. Provisional
+                    # values (captured pre-Pydantic) survive the cross-field
+                    # `invalid_combination` rejection path (Codex MEDIUM-3);
+                    # structural rejections leave them as None / 0.
+                    search_mode_value=posthog_search_mode_value,
+                    responsa_options_count=posthog_responsa_options_count,
                 )
             except Exception:
                 logger.warning(
@@ -747,6 +789,11 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
         """
         # Browse has no mode; pin to None so PostHog event has the right shape.
         captured_state['mode'] = None
+        # 81A D-08 — browse has no search_mode and no responsa options;
+        # pin explicitly so PostHog events from /api/browse carry the
+        # uniform property shape (search_mode_value=None, count=0).
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
 
         # 0. Parse query params + Pydantic validation. The decorator catches
         #    PydanticValidationError; we just construct the model.
@@ -883,6 +930,11 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
 
         # PostHog mode property (D-09) — parallels-specific value space.
         captured_state['mode'] = req.mode
+        # 81A D-08 — parallels does NOT consume search_mode / responsa_options;
+        # pin explicitly so PostHog events from /api/parallels carry the
+        # uniform property shape (search_mode_value=None, count=0).
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
 
         # 1. Mode gate (same as search/browse).
         enforce_mode_gate(request)

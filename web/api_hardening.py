@@ -365,7 +365,16 @@ def wrap_endpoint(*, endpoint_name: str):
         async def _wrapped(request: Request):
             t0 = time.monotonic()
             client_ip = _resolve_rate_limit_key(request)
-            captured_state: dict = {'mode': None, 'result_count': None}
+            captured_state: dict = {
+                'mode': None,
+                'result_count': None,
+                # 81A D-08 — uniform PostHog event shape across endpoints.
+                # browse + parallels handlers may overwrite if they ever start
+                # accepting a search_mode field; today both leave them at
+                # None/0 (set explicitly in the handler bodies for clarity).
+                'search_mode_value': None,
+                'responsa_options_count': 0,
+            }
             status_code = 200
             error_code: Optional[str] = None
             try:
@@ -399,6 +408,11 @@ def wrap_endpoint(*, endpoint_name: str):
                         status_code=status_code,
                         error_code=error_code,
                         client_ip=client_ip,
+                        # 81A D-08 — plumb the two new properties from the
+                        # captured_state contract so wrap_endpoint-decorated
+                        # endpoints (browse, parallels) emit a uniform shape.
+                        search_mode_value=captured_state.get('search_mode_value'),
+                        responsa_options_count=captured_state.get('responsa_options_count', 0),
                     )
                 except Exception:
                     logger.warning(
@@ -578,6 +592,12 @@ def capture_api_event(
     status_code: int,
     error_code: Optional[str],
     client_ip: str,
+    # Phase 81A D-08 additions: literal `search_mode` enum value (one of
+    # exact|variants|responsa|title|shelfmark, or None when the field is
+    # structurally absent/invalid) and count of True flags in the validated
+    # ResponsaOptions (0 when search_mode != 'responsa' or options omitted).
+    search_mode_value: Optional[str] = None,
+    responsa_options_count: int = 0,
 ) -> None:
     """Enqueue a search_api_request PostHog event. Never blocks; never raises.
 
@@ -601,6 +621,10 @@ def capture_api_event(
         }
         if result_count is not None:
             props['result_count_bucket'] = result_count_bucket(result_count)
+        # Phase 81A D-08 additions — always present (None/0 when not applicable)
+        # so PostHog dashboards see a uniform event shape across endpoints.
+        props['search_mode_value'] = search_mode_value
+        props['responsa_options_count'] = int(responsa_options_count or 0)
         event = {
             'event': 'search_api_request',
             'distinct_id': hash_ip(client_ip),
