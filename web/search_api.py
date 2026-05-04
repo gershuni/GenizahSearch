@@ -477,10 +477,12 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
             # 81A D-08 + Codex MEDIUM-3 — provisional capture from raw body
             # BEFORE Pydantic construction. Structural rejections (missing
             # field, wrong type, unknown enum value) leave this as None;
-            # cross-field rejections preserve it.
+            # cross-field rejections preserve it. Gate on the allowed enum
+            # set so unknown values (e.g. 'regex', 'NOT_A_MODE') are treated
+            # as structurally invalid and stay None per D-08.
             if isinstance(body, dict):
                 _raw_search_mode = body.get('search_mode')
-                if isinstance(_raw_search_mode, str):
+                if isinstance(_raw_search_mode, str) and _raw_search_mode in _SEARCH_MODE_TO_INTERNAL:
                     posthog_search_mode_value = _raw_search_mode
                 # responsa_options_count stays 0 provisionally — only computed
                 # after Pydantic confirms the responsa_options field shape.

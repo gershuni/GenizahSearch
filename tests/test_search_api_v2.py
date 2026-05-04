@@ -698,6 +698,23 @@ def test_posthog_event_search_mode_value_null_on_pydantic_rejection(
     assert props.get('responsa_options_count') == 0
 
 
+@pytest.mark.parametrize('bad_mode', ['regex', 'NOT_A_MODE', 'fuzzy', 'EXACT', ''])
+def test_posthog_search_mode_value_null_on_unknown_enum_value(
+    client, captured_events, bad_mode,
+):
+    """81A D-08 contract: unknown enum values are STRUCTURAL rejections,
+    not cross-field rejections. PostHog must NOT receive the raw string —
+    search_mode_value stays None. Codex review finding."""
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': bad_mode})
+    assert r.status_code == 400, r.text
+    assert len(captured_events) >= 1
+    props = _props(captured_events[-1])
+    assert props.get('search_mode_value') is None, (
+        f"unknown enum value {bad_mode!r} must not leak into telemetry"
+    )
+    assert props.get('responsa_options_count') == 0
+
+
 # ---------------------------------------------------------------------------
 # Misc sanity — internal mapping + ERROR_CODES contract
 # ---------------------------------------------------------------------------
