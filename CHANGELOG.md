@@ -4,6 +4,20 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.9.4] - NLI Library Code Fix - 2026-05-04
+
+A tiny data-only patch correcting library attribution for 461 National Library of Israel manuscripts that were rendering as Oxford in browse.
+
+### Bug Fixes
+
+- **NLI manuscripts shown as Oxford**: 461 rows in `libraries.csv` had `library_code=Oxford` despite the call_numbers containing only NLI shelfmarks (`The National Library of Israel Ms. Heb. ...` or `JER NLI Heb`). Browse routing keys off `library_code`, so external links and source toggles rendered as Oxford. Bad data has been present since `libraries.csv` was first introduced (commit `68dc0e99`); just surfaced now via a user report on `sys_id=990025143260205171`. Fixed via `scripts/fix_nli_oxford_mislabel.py` flipping the 461 unambiguous rows to `library_code=NLI`. (both apps)
+
+### Internal
+
+- New script `scripts/fix_nli_oxford_mislabel.py` retained for future audits — preserves CRLF line endings and only flips rows where call_numbers contain an NLI signal but no Oxford signal (Allony/Harkavy/HAS cross-listings deliberately untouched).
+
+---
+
 ## [7.9.3] - Visual Similarity Dialog Fixes - 2026-04-24
 
 A small web-only patch fixing three usability bugs in the Visual Similarity dialog, all surfaced by the same user report.
