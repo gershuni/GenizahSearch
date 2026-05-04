@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "source": "parallels",
+  "generated_at": "2026-05-04T12:00:04.000Z",
+  "request": {
+    "text": "ויאמר משה אל בני ישראל ראו קרא ה' בשם בצלאל בן אורי",
+    "chunk_size": 5,
+    "mode": "exact"
+  },
+  "count": 2,
+  "total": 2,
+  "warnings": [],
+  "filtered": [],
+  "results": [
+    {
+      "uid": "990001234560205171_001r",
+      "locator": {"sys_id": "990001234560205171", "volume_ie": "IE12345", "p_num": 1, "fl_id": "T-S 12.123.1r"},
+      "shelfmark": "T-S 12.123",
+      "title": "Liturgical fragment",
+      "aggregate_score": 0.9241,
+      "metadata": {"library": "CUL", "library_name": "Cambridge University Library", "domains": ["Liturgy"], "dating": "11th century"},
+      "matches": [
+        {
+          "chunk_index": 0,
+          "score": 0.9241,
+          "source_chunk_text": "ויאמר משה אל בני ישראל ראו קרא",
+          "manuscript_snippet": "...ויאמר משה אל בני ישראל ראו קרא ה' בשם..."
+        }
+      ]
+    },
+    {
+      "uid": "990009876540205171_002v",
+      "locator": {"sys_id": "990009876540205171", "volume_ie": "IE99999", "p_num": 2, "fl_id": "ENA 1234.2v"},
+      "shelfmark": "ENA 1234",
+      "title": "Bible commentary",
+      "aggregate_score": 0.7103,
+      "metadata": {"library": "JTS", "library_name": "Jewish Theological Seminary", "domains": ["Bible"], "dating": "12th century"},
+      "matches": [
+        {
+          "chunk_index": 0,
+          "score": 0.7103,
+          "source_chunk_text": "ויאמר משה אל בני ישראל ראו קרא",
+          "manuscript_snippet": "...ויאמר משה אל כל העדה..."
+        }
+      ]
+    }
+  ]
+}

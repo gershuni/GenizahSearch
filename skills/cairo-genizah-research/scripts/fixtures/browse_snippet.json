@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source": "browse",
+  "generated_at": "2026-05-04T12:00:02.000Z",
+  "locator": {"uid": "990009876540205171_002v", "sys_id": "990009876540205171", "volume_ie": "IE99999", "p_num": 2, "fl_id": "ENA 1234.2v"},
+  "shelfmark": "ENA 1234",
+  "title": "Bible commentary",
+  "library_code": "JTS",
+  "library_name": "Jewish Theological Seminary",
+  "text": "...ויאמר משה אל בני ישראל ויקהל משה את כל עדת בני ישראל ויאמר אלהם...",
+  "text_source": "snippet",
+  "text_truncated": false,
+  "metadata": {
+    "pgp": null,
+    "fjms": null,
+    "nli": null
+  },
+  "image": {
+    "url": "/api/nli_image_by_sysid/990009876540205171?page=1",
+    "provider": "NLI",
+    "sources": [{"label": "NLI", "url": "/api/nli_image_by_sysid/990009876540205171?page=1"}]
+  },
+  "warnings": [
+    {"code": "enrichment_timeout", "source": "pgp", "message": "PGP enrichment timed out after 1.0s"}
+  ]
+}
