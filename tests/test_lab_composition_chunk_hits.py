@@ -14,7 +14,6 @@ refactor, BOTH the behavioral test AND the static checks fail loudly.
 """
 
 import inspect
-import pytest
 from unittest.mock import MagicMock, patch
 
 

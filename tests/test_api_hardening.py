@@ -16,7 +16,6 @@ Coverage:
 - R2-#2: RateLimiter.reset_for_tests() for test isolation
 """
 
-import os
 import time
 import pytest
 from unittest.mock import MagicMock
