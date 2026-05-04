@@ -328,7 +328,12 @@ back-nav bugfix.
   3. Triggering a 429, timeout, or partial `/api/browse` response (NLI image unavailable, `text_source='snippet'`) does not crash the conversation; the skill surfaces each failure in plain terms and continues processing. When `text_source != 'full'`, the candidate's justification appends `"(full text unavailable; based on snippet of N chars)"`.
   4. Skill self-paces using a token-bucket throttle, separate buckets per endpoint, default ≤24 req/min per bucket. A single skill run with 15 search + 10 browse calls completes without triggering its own rate limit.
 **Phase gate**: live end-to-end run against the production deployment with the user observing; user-signed-off ranking against at least one scholarly query, with browse-honesty annotations verified.
-**Plans**: TBD
+**Plans:** 5 plans
+- [ ] 81B-01-PLAN.md -- Wave 0 RED scaffold: skill source-tree skeleton + fixture corpus + 24 RED tests for SKILL-04/05/06 + smoke harness
+- [ ] 81B-02-PLAN.md -- Transport layer: _config + _lock + throttle.py (file-locked token bucket) + search.py/browse.py/parallels.py HTTP scripts (flips 7 throttle tests GREEN)
+- [ ] 81B-03-PLAN.md -- Business logic: normalize_shelfmark.py + format_output.py (honesty annotations + known-witness policy + render_markdown) + stage.py (merge-by-uid + tier A/B/C); flips 15 consumer tests GREEN
+- [ ] 81B-04-PLAN.md -- SKILL.md + README.md + references/api_contract.md + REQUIREMENTS.md SKILL-04 patch (closes R2 enum mismatch)
+- [ ] 81B-05-PLAN.md -- Bundled smoke_test.py + live user-observed acceptance run + ACCEPTANCE-RUN.md evidence (phase gate)
 
 ### Phase 82: Internal Documentation
 **Goal**: As-shipped contract is captured in one internal page and the new env-var surface is discoverable by future maintainers — without inviting external usage.
