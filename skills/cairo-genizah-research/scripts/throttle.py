@@ -15,12 +15,20 @@ Design notes:
 """
 from __future__ import annotations
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any, Union
 
-from . import _config
-from . import _lock
+# Support both package import and direct script invocation.
+try:
+    from . import _config
+    from . import _lock
+except ImportError:
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _config  # type: ignore
+    import _lock  # type: ignore
 
 STATE_FILENAME = "throttle.json"
 
