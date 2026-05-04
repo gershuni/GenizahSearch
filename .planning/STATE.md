@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
-status: Phase 80 closed. POST /api/parallels live with the same hardening shell as /api/search and /api/browse.
-stopped_at: phase 80 verification PASSED (2026-05-01)
-last_updated: "2026-05-01T12:00:00.000Z"
-last_activity: 2026-05-01 -- Phase 80 (4 plans) executed and VERIFIED PASSED (4/4 SCs). 1384 passed / 10 skipped (39 new tests). Code review clean (0 blockers/high/medium; 4 info).
+status: Phase 81A closed. /api/search now exposes the UI-aligned `search_mode` + `ResponsaOptions` request shape, request echo block, and PostHog observability props.
+stopped_at: phase 81A verification PASSED (2026-05-04)
+last_updated: "2026-05-04T12:00:00.000Z"
+last_activity: 2026-05-04 -- Phase 81A (5 plans across 4 waves) executed and VERIFIED PASSED (8/8 must-haves, API-EXPAND-01..08). 1465 passed / 15 skipped full suite.
 progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 22
-  completed_plans: 18
-  percent: 82
+  total_phases: 7
+  completed_phases: 5
+  total_plans: 27
+  completed_plans: 23
+  percent: 85
 ---
 
 # Project State
@@ -25,14 +25,14 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 
 ## Current Position
 
-Phase: 80 (api-parallels) — VERIFIED ✅ (2026-05-01)
-Plan: 4/4 plans landed; gsd-verifier reported PASSED (4/4 success criteria). VERIFICATION.md: `.planning/phases/80-api-parallels/80-VERIFICATION.md`. Code review clean: `.planning/phases/80-api-parallels/80-REVIEW.md` (0 blockers/high/medium; 4 info).
-Status: Phase 80 closed. POST /api/parallels live with the same hardening shell as /api/search and /api/browse.
-Last activity: 2026-05-01 -- Phase 80 (4 plans) executed and VERIFIED PASSED. 1384 passed / 10 skipped (39 new tests added by Plan 80-04).
+Phase: 81A (api-contract-expansion) — VERIFIED ✅ (2026-05-04)
+Plan: 5/5 plans landed across 4 waves; gsd-verifier reported PASSED (8/8 must-haves, API-EXPAND-01..08). VERIFICATION.md: `.planning/phases/81A-api-contract-expansion/81A-VERIFICATION.md`.
+Status: Phase 81A closed. /api/search now exposes the UI-aligned `search_mode` + `ResponsaOptions` request shape, request echo block, and PostHog observability props (`search_mode_value`, `responsa_options_count`).
+Last activity: 2026-05-04 -- Phase 81A (5 plans) executed and VERIFIED PASSED. 1465 passed / 15 skipped full suite.
 
-Progress: [##########] 82% (4/6 phases verified; 18/22 plans complete)
+Progress: [##########] 85% (5/7 phases verified; 23/27 plans complete)
 
-Next step: `/gsd-plan-phase 81` for Claude Skill Consumer (SKILL-01..03). All three search-helper endpoints (/api/search, /api/browse, /api/parallels) are now live with shared hardening; the skill phase can begin consuming them.
+Next step: `/gsd-plan-phase 81B` for Claude Skill Consumer (SKILL-01..03). All API contract expansion is in place; the skill phase can now consume the stabilized envelope.
 
 **Phase queue (v7.10):**
 
@@ -40,8 +40,9 @@ Next step: `/gsd-plan-phase 81` for Claude Skill Consumer (SKILL-01..03). All th
 2. ✅ **Phase 78** — /api/search + Hardening Shell (API-01,04,05,06,07 + HARDEN-01..05) — VERIFIED 2026-04-29 (78-VERIFICATION.md)
 3. ✅ **Phase 79** — /api/browse Drill-Down (API-03) — VERIFIED 2026-05-01 (79-VERIFICATION.md)
 4. ✅ **Phase 80** — /api/parallels (API-02) — VERIFIED 2026-05-01 (80-VERIFICATION.md, 4/4 SCs)
-5. **Phase 81** — Claude Skill Consumer (SKILL-01..03) ← next planning target
-6. Phase 82 — Internal Documentation (DOC-01, DOC-02)
+5. ✅ **Phase 81A** — API Contract Expansion (API-EXPAND-01..08) — VERIFIED 2026-05-04 (81A-VERIFICATION.md, 8/8 must-haves)
+6. **Phase 81B** — Claude Skill Consumer (SKILL-01..03) ← next planning target
+7. Phase 82 — Internal Documentation (DOC-01, DOC-02)
 
 Recommended next: `/gsd-plan-phase 81`.
 
