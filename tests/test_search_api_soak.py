@@ -43,7 +43,7 @@ def test_rate_limit_soak(monkeypatch):
         init_search_api(app_override=bare)
         with TestClient(bare) as client:
             responses = [
-                client.post('/api/search', json={'query': 'soak', 'mode': 'text'})
+                client.post('/api/search', json={'query': 'soak', 'search_mode': 'exact'})
                 for _ in range(50)
             ]
         rate_limited = [r for r in responses if r.status_code == 429]
@@ -91,11 +91,11 @@ def test_rate_limit_recovers_after_window(monkeypatch):
         init_search_api(app_override=bare)
         with TestClient(bare) as client:
             for _ in range(6):
-                client.post('/api/search', json={'query': 's', 'mode': 'text'})
-            r = client.post('/api/search', json={'query': 's', 'mode': 'text'})
+                client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
+            r = client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
             assert r.status_code == 429, r.json()
             fake_time[0] = 1061.0
-            r2 = client.post('/api/search', json={'query': 's', 'mode': 'text'})
+            r2 = client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
             assert r2.status_code == 200, r2.json()
     finally:
         state.searcher = saved_searcher
@@ -130,21 +130,21 @@ def test_retry_after_honest_in_sliding_window(monkeypatch):
         bare = FastAPI()
         init_search_api(app_override=bare)
         with TestClient(bare) as client:
-            client.post('/api/search', json={'query': 's', 'mode': 'text'})
-            client.post('/api/search', json={'query': 's', 'mode': 'text'})
-            r0 = client.post('/api/search', json={'query': 's', 'mode': 'text'})
+            client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
+            client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
+            r0 = client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
             assert r0.status_code == 429
             ra0 = int(r0.headers['Retry-After'])
             assert 58 <= ra0 <= 60, f"at t=0, Retry-After should be ~60, got {ra0}"
 
             fake_time[0] = 2030.0
-            r30 = client.post('/api/search', json={'query': 's', 'mode': 'text'})
+            r30 = client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
             assert r30.status_code == 429
             ra30 = int(r30.headers['Retry-After'])
             assert 28 <= ra30 <= 32
 
             fake_time[0] = 2059.0
-            r59 = client.post('/api/search', json={'query': 's', 'mode': 'text'})
+            r59 = client.post('/api/search', json={'query': 's', 'search_mode': 'exact'})
             assert r59.status_code == 429
             ra59 = int(r59.headers['Retry-After'])
             assert ra59 == 1
