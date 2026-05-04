@@ -710,3 +710,109 @@ class TestFilenameUniqueness:
         # ISO-ish timestamp present
         import re
         assert re.search(r'\d{4}-\d{2}-\d{2}T\d{6}', f), f"Got {f}"
+
+
+# ============================================================================
+# Phase 81A Plan 04 Task 2 — request_echo round-trip cases
+# ============================================================================
+
+class TestRequestEchoRoundTrip:
+    """81A Plan 02 wired `request_echo` keyword-only kwargs into both serializers.
+    These tests pin the contract: omit -> no `request` key (Phase 77 download
+    back-compat); supply -> embedded verbatim under `envelope['request']`.
+    Search and parallels echo dicts have intentionally different keysets per
+    D-07 (parallels keeps `mode` field name, no `responsa_options`).
+    """
+
+    def test_serialize_search_payload_omits_request_block_when_no_echo(self, mock_meta_mgr):
+        """81A back-compat: Phase 77 download path doesn't pass request_echo,
+        so the envelope must NOT contain a `request` key."""
+        from shared.search_serializer import serialize_search_payload
+        env = serialize_search_payload(
+            [], meta_mgr=mock_meta_mgr, query='foo', mode='text',
+        )
+        assert 'request' not in env
+
+    def test_serialize_search_payload_embeds_request_echo_verbatim(self, mock_meta_mgr):
+        """81A: when request_echo is supplied, it is embedded under `request`
+        with the exact key set: search_mode, responsa_options,
+        responsa_options_effective, gap, limit, limit_effective, filters."""
+        from shared.search_serializer import serialize_search_payload
+        echo = {
+            'search_mode': 'exact',
+            'responsa_options': None,
+            'responsa_options_effective': None,
+            'gap': 0,
+            'limit': 50,
+            'limit_effective': 50,
+            'filters': None,
+        }
+        env = serialize_search_payload(
+            [], meta_mgr=mock_meta_mgr, query='foo', mode='exact',
+            request_echo=echo,
+        )
+        assert env['request'] == echo
+        assert set(env['request'].keys()) == {
+            'search_mode', 'responsa_options', 'responsa_options_effective',
+            'gap', 'limit', 'limit_effective', 'filters',
+        }
+
+    def test_serialize_search_payload_responsa_cascade_divergence(self, mock_meta_mgr):
+        """81A AC6 — Responsa cascade case: requested ja=True, effective ja=False
+        is preserved verbatim by the serializer (cascade detection is upstream).
+        D-04: search_mode itself is never downgraded; only the responsa_options
+        flags diverge between input and effective."""
+        from shared.search_serializer import serialize_search_payload
+        echo = {
+            'search_mode': 'responsa',
+            'responsa_options':           {'variants': True, 'ja': True,  'flex_spacing': False, 'bidirectional': False},
+            'responsa_options_effective': {'variants': True, 'ja': False, 'flex_spacing': False, 'bidirectional': False},
+            'gap': 0,
+            'limit': 50,
+            'limit_effective': 50,
+            'filters': None,
+        }
+        env = serialize_search_payload(
+            [], meta_mgr=mock_meta_mgr, query='foo', mode='Responsa',
+            request_echo=echo,
+        )
+        assert env['request']['responsa_options']['ja'] is True
+        assert env['request']['responsa_options_effective']['ja'] is False
+        # D-04 — search_mode is identical to the input (never downgraded).
+        assert env['request']['search_mode'] == 'responsa'
+
+    def test_serialize_parallels_payload_omits_request_block_when_no_echo(self, mock_meta_mgr):
+        """81A back-compat: Phase 77 parallels download path leaves request_echo
+        as default None; no `request` key in the envelope."""
+        from shared.search_serializer import serialize_parallels_payload
+        env = serialize_parallels_payload(
+            [], [], meta_mgr=mock_meta_mgr, source_text='hello',
+        )
+        assert 'request' not in env
+
+    def test_serialize_parallels_payload_embeds_request_echo_verbatim(self, mock_meta_mgr):
+        """81A D-07: parallels echo retains `mode` field name (NOT `search_mode`)
+        and does NOT carry `responsa_options` (parallels never used Responsa).
+        Exactly 6 keys: mode, chunk_size, max_freq, boundary_options,
+        limit_effective, filters."""
+        from shared.search_serializer import serialize_parallels_payload
+        echo = {
+            'mode': 'variants',
+            'chunk_size': 5,
+            'max_freq': None,
+            'boundary_options': {'boundary_mode': 'full'},
+            'limit_effective': 0,
+            'filters': None,
+        }
+        env = serialize_parallels_payload(
+            [], [], meta_mgr=mock_meta_mgr, source_text='hello',
+            request_echo=echo,
+        )
+        assert env['request'] == echo
+        assert 'search_mode' not in env['request']
+        assert 'responsa_options' not in env['request']
+        assert env['request']['mode'] == 'variants'
+        assert set(env['request'].keys()) == {
+            'mode', 'chunk_size', 'max_freq', 'boundary_options',
+            'limit_effective', 'filters',
+        }
