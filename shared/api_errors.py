@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # branches on `code` strings, so renaming any of them is a breaking change.
 ERROR_CODES = frozenset({
     'invalid_request',
+    'invalid_combination',  # 81A D-03 — cross-field validation rejection (responsa_options/mode coupling, gap/metadata-mode coupling).
     'invalid_mode',
     'query_required',
     'query_too_long',
