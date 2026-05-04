@@ -524,6 +524,98 @@ def test_error_codes_taxonomy_includes_locked_codes():
 
 
 # ---------------------------------------------------------------------------
+# Phase 81A Plan 03 — capture_api_event extended with search_mode_value +
+# responsa_options_count properties (D-08).
+# ---------------------------------------------------------------------------
+
+def _capture_one_event(monkeypatch, **kwargs):
+    """Helper: invoke capture_api_event with sample-N=1 and a fake queue;
+    return the single captured event dict."""
+    monkeypatch.setenv('SEARCH_API_POSTHOG_SAMPLE_N', '1')
+    captured = []
+
+    class FakeQueue:
+        def put_nowait(self, item):
+            captured.append(item)
+
+    monkeypatch.setattr('web.api_hardening._event_queue', FakeQueue())
+    capture_api_event(**kwargs)
+    assert len(captured) == 1, f"expected exactly 1 event, got {len(captured)}"
+    return captured[0]
+
+
+def test_capture_api_event_signature_has_new_kwargs():
+    """81A-03: signature must accept keyword-only search_mode_value +
+    responsa_options_count with sensible defaults (None / 0)."""
+    import inspect
+    sig = inspect.signature(capture_api_event)
+    assert 'search_mode_value' in sig.parameters, sig
+    assert 'responsa_options_count' in sig.parameters, sig
+    # Defaults preserve back-compat with existing callers.
+    assert sig.parameters['search_mode_value'].default is None
+    assert sig.parameters['responsa_options_count'].default == 0
+
+
+def test_capture_api_event_back_compat_omits_new_kwargs(monkeypatch):
+    """81A-03: existing call sites that omit the new kwargs still emit, with
+    search_mode_value=None and responsa_options_count=0 in props."""
+    event = _capture_one_event(
+        monkeypatch,
+        endpoint='search', mode='text', latency_seconds=0.05,
+        result_count=0, status_code=200, error_code=None,
+        client_ip='127.0.0.1',
+    )
+    props = event['properties']
+    assert 'search_mode_value' in props
+    assert 'responsa_options_count' in props
+    assert props['search_mode_value'] is None
+    assert props['responsa_options_count'] == 0
+
+
+def test_capture_api_event_propagates_search_mode_value(monkeypatch):
+    """81A-03: when caller passes search_mode_value='exact', event carries it."""
+    event = _capture_one_event(
+        monkeypatch,
+        endpoint='search', mode='exact', latency_seconds=0.05,
+        result_count=10, status_code=200, error_code=None,
+        client_ip='127.0.0.1',
+        search_mode_value='exact', responsa_options_count=0,
+    )
+    props = event['properties']
+    assert props['search_mode_value'] == 'exact'
+    assert props['responsa_options_count'] == 0
+
+
+def test_capture_api_event_propagates_responsa_options_count(monkeypatch):
+    """81A-03: responsa search_mode with three True flags → count=3."""
+    event = _capture_one_event(
+        monkeypatch,
+        endpoint='search', mode='responsa', latency_seconds=0.05,
+        result_count=5, status_code=200, error_code=None,
+        client_ip='127.0.0.1',
+        search_mode_value='responsa', responsa_options_count=3,
+    )
+    props = event['properties']
+    assert props['search_mode_value'] == 'responsa'
+    assert props['responsa_options_count'] == 3
+
+
+def test_capture_api_event_responsa_options_count_coerces_to_int(monkeypatch):
+    """81A-03: defensive — falsy / None coerces to 0; truthy ints pass through."""
+    event = _capture_one_event(
+        monkeypatch,
+        endpoint='browse', mode=None, latency_seconds=0.01,
+        result_count=1, status_code=200, error_code=None,
+        client_ip='127.0.0.1',
+        search_mode_value=None, responsa_options_count=0,
+    )
+    props = event['properties']
+    assert props['search_mode_value'] is None
+    assert props['responsa_options_count'] == 0
+    assert isinstance(props['responsa_options_count'], int)
+
+
+# ---------------------------------------------------------------------------
 # Concern #3 — APIError dependency-inversion lock
 # ---------------------------------------------------------------------------
 
