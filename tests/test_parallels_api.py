@@ -565,7 +565,7 @@ def test_parallels_rate_limit_independence(bare_app, mock_searcher, monkeypatch)
         )
 
         # SEARCH bucket independent.
-        r = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+        r = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
     assert r.status_code != 429, (
         f'search bucket was incorrectly exhausted by parallels traffic '
         f'(D-05 regression); got status {r.status_code}'
@@ -759,3 +759,30 @@ def test_parallels_endpoint_uses_wrap_endpoint_decorator():
         'R-PR-03 precedent: capture_api_event must not appear in parallels_endpoint body'
     assert 't0 = time.monotonic()' not in body_no_doc, \
         'R-PR-03 precedent: t0 monotonic clock setup must not appear in handler body'
+
+
+# ---------------------------------------------------------------------------
+# Phase 81A Plan 04 Task 3 — request echo presence (AC8 / D-07)
+# ---------------------------------------------------------------------------
+
+def test_parallels_envelope_contains_request_echo(client, mock_searcher, clean_env):
+    """81A AC8 / D-07 — /api/parallels envelope gains a `request` echo block.
+    Field name is `mode` (NOT `search_mode`) per D-07; no `responsa_options`
+    (parallels never used Responsa); no `gap` (ParallelsRequest has no gap).
+    Exactly 6 keys: mode, chunk_size, max_freq, boundary_options,
+    limit_effective, filters."""
+    payload = {'text': 'hello world', 'mode': 'exact'}
+    resp = client.post('/api/parallels', json=payload)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert 'request' in body, body
+    echo = body['request']
+    assert set(echo.keys()) == {
+        'mode', 'chunk_size', 'max_freq', 'boundary_options',
+        'limit_effective', 'filters',
+    }, echo
+    # D-07: parallels keeps `mode`, not `search_mode`.
+    assert 'search_mode' not in echo
+    assert 'responsa_options' not in echo
+    # Echo's `mode` matches what the client sent.
+    assert echo['mode'] == 'exact'

@@ -732,7 +732,7 @@ def test_browse_rate_limit_independent_from_search(
                 f'{[r.status_code for r in statuses]!r}'
             )
             # SEARCH bucket is independent -- this MUST succeed (NOT 429).
-            r = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+            r = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
         assert r.status_code != 429, (
             f'search bucket was incorrectly exhausted by browse traffic '
             f'(D-18 regression); got status {r.status_code} body={r.text[:200]!r}'
@@ -829,7 +829,7 @@ def test_browse_locator_round_trip_real_http(
 
     try:
         # Step 1: real HTTP POST /api/search.
-        r = client.post('/api/search', json={'query': 'foo', 'mode': 'text'})
+        r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'exact'})
         assert r.status_code == 200, r.text
         body = r.json()
         items = body.get('results', [])
