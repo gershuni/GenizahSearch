@@ -153,30 +153,32 @@ def test_apierror_imported_from_shared_api_errors_module():
 # ---------------------------------------------------------------------------
 
 def test_happy_path_text_mode(client, populated_state, clean_env):
-    r = client.post('/api/search', json={'query': 'foo', 'mode': 'text'})
+    r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'exact'})
     assert r.status_code == 200, r.json()
     body = r.json()
     assert body['source'] == 'search'
-    assert body['mode'] == 'text'
+    # 81A: top-level `mode` echo now reflects internal mode value (search_mode='exact' -> 'exact').
+    assert body['mode'] == 'exact'
+    assert body['request']['search_mode'] == 'exact'
     assert body['schema_version'] == 1
     assert isinstance(body['results'], list)
     assert isinstance(body.get('warnings'), list)
 
 
 def test_happy_path_title_mode(client, populated_state, clean_env):
-    r = client.post('/api/search', json={'query': 'foo', 'mode': 'Title'})
+    r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'title'})
     assert r.status_code == 200, r.json()
     assert r.json()['mode'] == 'Title'
 
 
 def test_happy_path_shelfmark_mode(client, populated_state, clean_env):
-    r = client.post('/api/search', json={'query': 'T-S 12.345', 'mode': 'Shelfmark'})
+    r = client.post('/api/search', json={'query': 'T-S 12.345', 'search_mode': 'shelfmark'})
     assert r.status_code == 200, r.json()
     assert r.json()['mode'] == 'Shelfmark'
 
 
 def test_happy_path_responsa_mode(client, populated_state, clean_env):
-    r = client.post('/api/search', json={'query': 'דרבי', 'mode': 'Responsa'})
+    r = client.post('/api/search', json={'query': 'דרבי', 'search_mode': 'responsa'})
     assert r.status_code == 200, r.json()
     assert r.json()['mode'] == 'Responsa'
 
@@ -187,7 +189,7 @@ def test_happy_path_responsa_mode(client, populated_state, clean_env):
 
 def test_locator_present_on_every_item(client, populated_state, clean_env):
     """D-21 + Phase 77 D-04: every result item has uid AND locator."""
-    r = client.post('/api/search', json={'query': 'foo', 'mode': 'text'})
+    r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'exact'})
     assert r.status_code == 200
     for item in r.json().get('results', []):
         assert 'uid' in item
@@ -204,7 +206,7 @@ def test_locator_present_on_every_item(client, populated_state, clean_env):
 
 def test_query_required(client, populated_state, clean_env):
     """Empty query (after .strip()) → query_required."""
-    r = client.post('/api/search', json={'query': '   ', 'mode': 'text'})
+    r = client.post('/api/search', json={'query': '   ', 'search_mode': 'exact'})
     assert r.status_code == 400, r.json()
     assert r.json()['error']['code'] == 'query_required'
 
@@ -212,13 +214,13 @@ def test_query_required(client, populated_state, clean_env):
 def test_query_too_long(client, populated_state, clean_env):
     """Query > 1000 chars → query_too_long."""
     long_q = 'x' * 1001
-    r = client.post('/api/search', json={'query': long_q, 'mode': 'text'})
+    r = client.post('/api/search', json={'query': long_q, 'search_mode': 'exact'})
     assert r.status_code == 400, r.json()
     assert r.json()['error']['code'] == 'query_too_long'
 
 
 def test_unknown_mode_returns_invalid_request(client, populated_state, clean_env):
-    r = client.post('/api/search', json={'query': 'x', 'mode': 'NOT_A_MODE'})
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': 'NOT_A_MODE'})
     assert r.status_code == 400, r.json()
     assert r.json()['error']['code'] == 'invalid_request'
 
@@ -226,7 +228,7 @@ def test_unknown_mode_returns_invalid_request(client, populated_state, clean_env
 def test_unknown_filter_key_returns_invalid_request(client, populated_state, clean_env):
     """Pydantic extra='forbid' on FiltersModel → invalid_request."""
     r = client.post('/api/search', json={
-        'query': 'x', 'mode': 'text',
+        'query': 'x', 'search_mode': 'exact',
         'filters': {'__bogus_key__': ['anything']},
     })
     assert r.status_code == 400, r.json()
@@ -235,20 +237,22 @@ def test_unknown_filter_key_returns_invalid_request(client, populated_state, cle
 
 def test_extra_top_level_key_rejected(client, populated_state, clean_env):
     r = client.post('/api/search', json={
-        'query': 'x', 'mode': 'text', '__bogus_top_key__': 1,
+        'query': 'x', 'search_mode': 'exact', '__bogus_top_key__': 1,
     })
     assert r.status_code == 400, r.json()
     assert r.json()['error']['code'] == 'invalid_request'
 
 
 def test_limit_too_high(client, populated_state, clean_env):
-    r = client.post('/api/search', json={'query': 'x', 'mode': 'text', 'limit': 300})
+    """81A D-06: MAX_LIMIT lowered 200 -> 100; Pydantic Field(le=100) rejects via
+    envelope wrapper as HTTP 400 invalid_request (NOT 422, NOT limit_too_high)."""
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': 'exact', 'limit': 101})
     assert r.status_code == 400, r.json()
-    assert r.json()['error']['code'] == 'limit_too_high'
+    assert r.json()['error']['code'] == 'invalid_request'
 
 
 def test_limit_zero_returns_invalid_request(client, populated_state, clean_env):
-    r = client.post('/api/search', json={'query': 'x', 'mode': 'text', 'limit': 0})
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': 'exact', 'limit': 0})
     assert r.status_code == 400, r.json()
     assert r.json()['error']['code'] == 'invalid_request'
 
@@ -259,7 +263,7 @@ def test_limit_zero_returns_invalid_request(client, populated_state, clean_env):
 
 def test_error_envelope_shape(client, populated_state, clean_env):
     """Every non-2xx response is {error:{code,message,...}}, never raw 422 dump."""
-    r = client.post('/api/search', json={'mode': 'text'})  # missing 'query'
+    r = client.post('/api/search', json={'search_mode': 'exact'})  # missing 'query'
     assert r.status_code == 400, r.json()
     body = r.json()
     assert 'error' in body
@@ -281,7 +285,7 @@ def test_filter_resolution_known_good(client, populated_state, clean_env, monkey
         lambda v: v in ('Piyyut', 'Liturgy'), raising=False,
     )
     r = client.post('/api/search', json={
-        'query': 'x', 'mode': 'text',
+        'query': 'x', 'search_mode': 'exact',
         'filters': {'domains': ['Piyyut']},
     })
     assert r.status_code == 200, r.json()
@@ -293,7 +297,7 @@ def test_filter_resolution_bogus_value(client, populated_state, clean_env, monke
         lambda v: False, raising=False,
     )
     r = client.post('/api/search', json={
-        'query': 'x', 'mode': 'text',
+        'query': 'x', 'search_mode': 'exact',
         'filters': {'domains': ['__bogus_domain_xyz__']},
     })
     assert r.status_code == 400, r.json()
@@ -326,7 +330,7 @@ def test_filter_resolution_yields_empty_intersection_returns_empty_results_witho
         init_search_api(app_override=bare)
         with TestClient(bare) as c:
             r = c.post('/api/search', json={
-                'query': 'x', 'mode': 'text',
+                'query': 'x', 'search_mode': 'exact',
                 'filters': {'domains': ['Piyyut']},
             })
         assert r.status_code == 200, r.json()
@@ -349,7 +353,7 @@ def test_mode_gate_disabled(monkeypatch, populated_state):
     bare = FastAPI()
     init_search_api(app_override=bare)
     with TestClient(bare) as c:
-        r = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+        r = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
     assert r.status_code == 503, r.json()
     assert r.json()['error']['code'] == 'disabled'
 
@@ -361,7 +365,7 @@ def test_mode_gate_localhost_only_loopback_direct(monkeypatch, populated_state):
     init_search_api(app_override=bare)
     monkeypatch.setattr('web.api_hardening._is_loopback_request', lambda req: True)
     with TestClient(bare) as c:
-        r = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+        r = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
     assert r.status_code == 200, r.json()
 
 
@@ -372,7 +376,7 @@ def test_mode_gate_localhost_only_non_loopback(monkeypatch, populated_state):
     init_search_api(app_override=bare)
     monkeypatch.setattr('web.api_hardening._is_loopback_request', lambda req: False)
     with TestClient(bare) as c:
-        r = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+        r = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
     assert r.status_code == 403, r.json()
     assert r.json()['error']['code'] == 'localhost_only'
 
@@ -388,7 +392,7 @@ def test_mode_gate_localhost_only_xff_spoof_rejected(monkeypatch, populated_stat
     with TestClient(bare) as c:
         r = c.post(
             '/api/search',
-            json={'query': 'x', 'mode': 'text'},
+            json={'query': 'x', 'search_mode': 'exact'},
             headers={'X-Forwarded-For': '127.0.0.1, 203.0.113.5'},
         )
     # _is_loopback_request must reject because not EVERY XFF entry is loopback.
@@ -413,7 +417,7 @@ def test_mode_gate_localhost_only_clean_xff_chain(monkeypatch, populated_state):
     with TestClient(bare) as c:
         r = c.post(
             '/api/search',
-            json={'query': 'x', 'mode': 'text'},
+            json={'query': 'x', 'search_mode': 'exact'},
             headers={'X-Forwarded-For': '127.0.0.1, ::1'},
         )
     assert r.status_code == 200, r.json()
@@ -425,7 +429,7 @@ def test_mode_gate_localhost_only_clean_xff_chain(monkeypatch, populated_state):
 
 def test_identical_requests_byte_identical_modulo_timestamp(client, populated_state, clean_env):
     """Two identical requests produce identical bodies (modulo generated_at)."""
-    body = {'query': 'foo', 'mode': 'text'}
+    body = {'query': 'foo', 'search_mode': 'exact'}
     r1 = client.post('/api/search', json=body)
     r2 = client.post('/api/search', json=body)
     assert r1.status_code == 200 and r2.status_code == 200
@@ -443,7 +447,7 @@ def test_identical_requests_byte_identical_modulo_timestamp(client, populated_st
 
 def test_warnings_array_always_present(client, populated_state, clean_env):
     """Top-level 'warnings' key must always be present (even if empty)."""
-    r = client.post('/api/search', json={'query': 'x', 'mode': 'text'})
+    r = client.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
     assert r.status_code == 200
     assert 'warnings' in r.json()
     assert isinstance(r.json()['warnings'], list)
@@ -471,7 +475,7 @@ def test_warnings_surfaced_at_top_level(monkeypatch, mock_meta_mgr, clean_env):
         bare = FastAPI()
         init_search_api(app_override=bare)
         with TestClient(bare) as c:
-            r = c.post('/api/search', json={'query': 'x', 'mode': 'Responsa'})
+            r = c.post('/api/search', json={'query': 'x', 'search_mode': 'responsa'})
         assert r.status_code == 200
         body = r.json()
         warnings = body.get('warnings') or []
@@ -503,7 +507,7 @@ def test_zero_result_responsa_downgrade_warning_still_surfaced(monkeypatch, mock
         bare = FastAPI()
         init_search_api(app_override=bare)
         with TestClient(bare) as c:
-            r = c.post('/api/search', json={'query': 'דרבי', 'mode': 'Responsa'})
+            r = c.post('/api/search', json={'query': 'דרבי', 'search_mode': 'responsa'})
         assert r.status_code == 200, r.json()
         body = r.json()
         assert body['results'] == [], body
@@ -532,14 +536,14 @@ def test_rate_limited_envelope_code(monkeypatch, populated_state):
         # First few hits exhaust the limit.
         last = None
         for _ in range(5):
-            last = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+            last = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
         # At least one of those hits must have been throttled.
     assert last is not None
     # Find a 429 across the burst.
     statuses = []
     with TestClient(bare) as c:
         for _ in range(10):
-            r = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+            r = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
             statuses.append(r)
     rate_limited = [r for r in statuses if r.status_code == 429]
     assert len(rate_limited) >= 1, [r.status_code for r in statuses]
@@ -563,7 +567,7 @@ def test_capture_api_event_called_with_correct_status_and_error_code_on_apierror
     init_search_api(app_override=bare)
     with TestClient(bare) as c:
         # Empty query → APIError(query_required, 400)
-        r = c.post('/api/search', json={'query': '   ', 'mode': 'text'})
+        r = c.post('/api/search', json={'query': '   ', 'search_mode': 'exact'})
     assert r.status_code == 400
     matching = [e for e in captured_posthog_events
                 if e.get('error_code') == 'query_required']
@@ -583,7 +587,7 @@ def test_pydantic_structural_error_captures_posthog_invalid_request_event(
     bare = FastAPI()
     init_search_api(app_override=bare)
     with TestClient(bare) as c:
-        r = c.post('/api/search', json={'query': 'x', 'mode': 'NOT_A_MODE'})
+        r = c.post('/api/search', json={'query': 'x', 'search_mode': 'NOT_A_MODE'})
     assert r.status_code == 400, r.json()
     assert r.json()['error']['code'] == 'invalid_request', r.json()
     matching = [e for e in captured_posthog_events
@@ -726,7 +730,7 @@ def test_responsa_downgrade_threadlocal_cleared_on_exception(monkeypatch, mock_m
         bare = FastAPI()
         init_search_api(app_override=bare)
         with TestClient(bare) as c:
-            r = c.post('/api/search', json={'query': 'x', 'mode': 'text'})
+            r = c.post('/api/search', json={'query': 'x', 'search_mode': 'exact'})
         assert r.status_code == 200, r.json()
         warnings = r.json().get('warnings') or []
         leaked = [w for w in warnings if 'STALE_FROM_PRIOR_REQUEST' in str(w)]
@@ -761,3 +765,22 @@ def test_init_search_api_uses_app_state_not_module_global():
     for bare in (bare1, bare2):
         matches = [r for r in bare.routes if getattr(r, 'path', None) == '/api/search']
         assert len(matches) == 1, f'{bare}: /api/search registered {len(matches)} times'
+
+
+# ====================================================================
+# Phase 81A — old `mode` field rejection (D-13)
+# ====================================================================
+
+def test_old_mode_field_rejected_with_helpful_message(client, populated_state, clean_env):
+    """81A D-13 -- sending the old `mode` field returns 400 invalid_request
+    with a message that names both the old and new field names so skill authors
+    can find the migration path."""
+    resp = client.post('/api/search', json={'query': 'foo', 'mode': 'text'})
+    assert resp.status_code == 400, resp.json()
+    body = resp.json()
+    assert body['error']['code'] == 'invalid_request', body
+    msg = body['error']['message']
+    # Both `mode` and `search_mode` must appear so skill authors can find the migration path.
+    assert 'mode' in msg and 'search_mode' in msg, msg
+    # Specifically, the cutover string from the handler:
+    assert "unknown field 'mode'" in msg, msg
