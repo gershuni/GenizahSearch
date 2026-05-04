@@ -64,6 +64,11 @@ except ImportError:
 # engine may be invoked concurrently from FastAPI threads.
 _LAST_RESPONSA_DOWNGRADE = threading.local()
 
+# Phase 81A — structured per-flag cascade outcome carried alongside the
+# legacy string message. Skill consumer (81B) reads this to populate
+# responsa_options_effective in the /api/search envelope echo.
+_LAST_RESPONSA_DOWNGRADE_META = threading.local()
+
 
 def _set_last_responsa_downgrade(message: str) -> None:
     """Record a Responsa downgrade signal on the current thread.
@@ -89,6 +94,32 @@ def _consume_last_responsa_downgrade() -> Optional[str]:
         except AttributeError:
             pass
     return msg
+
+
+def _set_last_responsa_downgrade_meta(meta: dict) -> None:
+    """Phase 81A — record a structured per-flag cascade outcome.
+
+    `meta` is a dict with the four ResponsaOptions field names as keys and
+    booleans indicating whether each was applied (True) or cascade-disabled
+    (False). The skill consumer compares this to the request's
+    responsa_options to detect server-side downgrades.
+    """
+    _LAST_RESPONSA_DOWNGRADE_META.value = meta
+
+
+def _consume_last_responsa_downgrade_meta() -> Optional[dict]:
+    """Phase 81A — read-and-clear the structured cascade outcome.
+
+    Returns None when no downgrade occurred OR when already consumed
+    on the current thread.
+    """
+    meta = getattr(_LAST_RESPONSA_DOWNGRADE_META, 'value', None)
+    if meta is not None:
+        try:
+            del _LAST_RESPONSA_DOWNGRADE_META.value
+        except AttributeError:
+            pass
+    return meta
 
 
 # --- Shmidman Rare-Letter Helpers ---
@@ -7252,6 +7283,10 @@ class SearchEngine:
         # Keeps the signal one-shot per execute_search call, so it cannot
         # leak across requests on the same worker thread.
         _consume_last_responsa_downgrade()
+        # Phase 81A (Codex MEDIUM-2) — drain the structured-meta channel
+        # symmetrically so a direct-core caller cannot leave a stale meta
+        # dict that a later web request would read as "the cascade fired."
+        _consume_last_responsa_downgrade_meta()
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
@@ -7656,6 +7691,19 @@ class SearchEngine:
         # empty (the legacy results[0] attachment is preserved as a fallback).
         if responsa_warning:
             _set_last_responsa_downgrade(responsa_warning)
+            # Phase 81A — structured per-flag effective state alongside the
+            # legacy string channel. The local variables variants_on / ja_on /
+            # flex_spacing / bidirectional are bound at lines ~7295-7298 from
+            # the input responsa_options dict and are mutated by the cascade
+            # at lines ~7332-7334 (variants_on, ja_on; variant_mode is
+            # internal-only). flex_spacing and bidirectional are pass-through
+            # in 81A scope (cascade tiers 4-6 are deferred).
+            _set_last_responsa_downgrade_meta({
+                'variants':      bool(variants_on),
+                'ja':            bool(ja_on),
+                'flex_spacing':  bool(flex_spacing),
+                'bidirectional': bool(bidirectional),
+            })
         if responsa_warning and deduped:
             deduped[0]['responsa_warning'] = responsa_warning
 

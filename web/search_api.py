@@ -600,6 +600,11 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
             # handles the exception path. Reading on success first means we
             # still surface the downgrade warning correctly.
             downgrade_msg = _consume_last_responsa_downgrade()
+            # 81A — drain the structured-meta channel adjacent to the legacy
+            # string channel. Both feed the request-echo block below
+            # (cascade_meta populates responsa_options_effective when set).
+            from genizah_core import _consume_last_responsa_downgrade_meta as _consume_meta
+            cascade_meta = _consume_meta()
 
             # 9. Lift cascade-downgrade warning.
             #    R2-#1 + Concern #6: read the thread-local meta channel FIRST
@@ -620,6 +625,34 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                 results[0].pop('responsa_warning', None)
                 results[0].pop('responsa_expanded_count', None)
 
+            # 81A D-04/D-05/D-06 — build request echo for the response envelope.
+            # search_mode is ECHOED VERBATIM (never silently downgraded — D-04).
+            # responsa_options_effective reflects the cascade outcome (e.g.
+            # request.ja=true + cascade disable → effective.ja=false). For
+            # non-Responsa modes both responsa_options and
+            # responsa_options_effective are None (D-05).
+            if req.search_mode == 'responsa':
+                opts_dict = (req.responsa_options or ResponsaOptions()).model_dump()
+                if cascade_meta is not None:
+                    # cascade_meta is shaped {variants, ja, flex_spacing, bidirectional}
+                    effective_dict = cascade_meta
+                else:
+                    # No cascade fired — effective == requested.
+                    effective_dict = dict(opts_dict)
+            else:
+                opts_dict = None
+                effective_dict = None
+
+            request_echo = {
+                'search_mode': req.search_mode,
+                'responsa_options': opts_dict,
+                'responsa_options_effective': effective_dict,
+                'gap': req.gap,
+                'limit': req.limit,
+                'limit_effective': min(req.limit, MAX_LIMIT),
+                'filters': filters_dict,
+            }
+
             # 10. Serialize (D-24).
             from shared.search_serializer import serialize_search_payload
             envelope = serialize_search_payload(
@@ -631,6 +664,7 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                 filters=filters_dict,
                 warnings=warnings_list,
                 total=total,
+                request_echo=request_echo,
             )
             return envelope
 
@@ -680,6 +714,17 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
             except Exception:
                 logger.warning(
                     'thread-local downgrade drain failed in finally',
+                )
+            # 81A — symmetric defensive drain for the structured-meta channel
+            # so a setter without a matching consumer (e.g. exception between
+            # set-site and step 8a's consume) cannot leak meta into the next
+            # request on this worker thread.
+            try:
+                from genizah_core import _consume_last_responsa_downgrade_meta as _drain_meta
+                _drain_meta()
+            except Exception:
+                logger.warning(
+                    'thread-local downgrade-meta drain failed in finally',
                 )
 
     @target_app.get('/api/browse')
@@ -915,6 +960,22 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
         if bundle.truncated_to_200:
             warnings_list.append('truncated_to_200')
 
+        # 81A D-07 — request echo for /api/parallels. Field name `mode` is
+        # PRESERVED here (NOT renamed to search_mode); the rename is deferred
+        # to v7.11. ParallelsRequest at web/search_api.py has no `gap` field
+        # and no `responsa_options` (parallels never used Responsa), so the
+        # echo has 6 keys: mode, chunk_size, max_freq, boundary_options,
+        # limit_effective, filters. limit_effective mirrors the post-truncation
+        # group count (D-07: 200-group cap surfaced via warnings_list).
+        parallels_echo = {
+            'mode': req.mode,
+            'chunk_size': req.chunk_size,
+            'max_freq': req.max_freq,
+            'boundary_options': bundle.boundary_options,
+            'limit_effective': len(bundle.main_results),
+            'filters': filters_dict,
+        }
+
         # 8. Serialize — Phase 77 D-14 SOLE producer of envelope shape.
         envelope = serialize_parallels_payload(
             bundle.main_results,
@@ -926,6 +987,7 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
             max_freq=req.max_freq,
             boundary_options=bundle.boundary_options,
             warnings=warnings_list,
+            request_echo=parallels_echo,
         )
 
         # 9. Tell the decorator's finally block what to log to PostHog.
