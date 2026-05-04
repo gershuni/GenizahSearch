@@ -38,7 +38,7 @@ from typing import Literal, Optional, List
 from nicegui import app
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError, model_validator
 
 from web.state import state
 from web.api_hardening import (
@@ -109,21 +109,86 @@ class FiltersModel(BaseModel):
     date_to: Optional[int] = None
 
 
+class ResponsaOptions(BaseModel):
+    """Phase 81A D-02 — Responsa-only options. Field names mirror the desktop
+    UI checkboxes exactly (genizah_app.py:15788-15797).
+
+    D-03: extra='forbid' — extended/maximum variant tiers, variant_mode, and
+    any other field name are rejected. D-11: variants is a plain bool; the
+    internal variant_mode is derived server-side ('variants' if True else 'exact').
+    """
+    model_config = ConfigDict(extra='forbid')
+
+    variants: bool = False
+    ja: bool = False
+    flex_spacing: bool = False
+    bidirectional: bool = False
+
+
 class SearchRequest(BaseModel):
-    """API-01 / D-05."""
+    """Phase 81A — UI-aligned search_mode + Responsa-only options.
+
+    Replaces the Phase 78 `mode` field with `search_mode` (D-01, D-13). Old
+    `mode` field is hard-rejected by extra='forbid' — see search_endpoint for
+    the 400 invalid_request envelope with the explicit `unknown field 'mode'`
+    message.
+
+    Validation matrix (81A-CONTEXT.md):
+    - Any non-responsa search_mode + non-None responsa_options → 400 invalid_combination
+    - search_mode in {'title', 'shelfmark'} + non-zero gap → 400 invalid_combination
+    - limit must be in [1, 100] (Pydantic Field constraint → 400 invalid_request via Phase 78 envelope wrapper)
+    - regex is intentionally NOT in the enum (D-09; deferred to v7.11)
+    """
     model_config = ConfigDict(extra='forbid')
 
     query: str
-    mode: Literal['text', 'Title', 'Shelfmark', 'Responsa']
+    search_mode: Literal['exact', 'variants', 'responsa', 'title', 'shelfmark']
+    responsa_options: Optional[ResponsaOptions] = None
     gap: int = 0
-    limit: int = 50
+    limit: int = Field(default=50, ge=1, le=100)
     filters: Optional[FiltersModel] = None
+
+    @model_validator(mode='after')
+    def _check_responsa_options_coupling(self):
+        if self.search_mode != 'responsa' and self.responsa_options is not None:
+            raise APIError(
+                'invalid_combination',
+                f"responsa_options is only valid when search_mode='responsa' "
+                f"(got search_mode={self.search_mode!r})",
+                http_status=400,
+            )
+        return self
+
+    @model_validator(mode='after')
+    def _check_gap_metadata_coupling(self):
+        if self.search_mode in ('title', 'shelfmark') and self.gap and self.gap != 0:
+            raise APIError(
+                'invalid_combination',
+                f"gap has no effect with metadata-only search modes "
+                f"(search_mode={self.search_mode!r}, gap={self.gap})",
+                http_status=400,
+            )
+        return self
 
 
 # Constants (D-07, D-08, D-09).
 QUERY_LENGTH_CAP = 1000
 DEFAULT_LIMIT = 50
-MAX_LIMIT = 200
+MAX_LIMIT = 100  # 81A D-06 — lowered from 200 (also enforced via Pydantic Field(le=100))
+
+# 81A — translate API search_mode → internal mode value space consumed by
+# SearchEngine.execute_search (genizah_core.py:7249). For non-Responsa text
+# searches, the internal `mode` argument is THE variant-tier knob:
+# genizah_core.py:6467 calls var_mgr.get_variants(term, mode, limit=200),
+# so 'exact' → no variant expansion, 'variants' → 30-pair variant expansion.
+# Mirrors desktop UI semantics (genizah_app.py:15796 toggles 'variants' vs 'exact').
+_SEARCH_MODE_TO_INTERNAL = {
+    'exact':     'exact',
+    'variants':  'variants',
+    'responsa':  'Responsa',
+    'title':     'Title',
+    'shelfmark': 'Shelfmark',
+}
 
 # Phase 79 D-11 / R-08 -- transcription char cap.
 DEFAULT_BROWSE_TEXT_CAP = 4000
@@ -406,15 +471,25 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                     req = SearchRequest(**body)
                 else:
                     req = SearchRequest.model_validate(body)
-            except PydanticValidationError:
+            except PydanticValidationError as exc:
                 # Concern #12: pin status_code/error_code so the finally block
                 # fires the PostHog event with correct labels. Re-raise so
                 # the outer except branch builds the envelope.
                 status_code = 400
                 error_code = 'invalid_request'
+                # 81A D-13: when the rejected field is the old `mode`, surface the
+                # cutover hint explicitly so skill authors copy-pasting old payloads
+                # see the migration path.
+                for err in exc.errors():
+                    if err.get('type') == 'extra_forbidden' and err.get('loc') == ('mode',):
+                        raise APIError(
+                            'invalid_request',
+                            "unknown field 'mode' — use search_mode instead",
+                            http_status=400,
+                        )
                 raise
 
-            validated_mode = req.mode
+            validated_mode = req.search_mode
 
             # 1. Mode gate (D-02, D-03, D-04).
             enforce_mode_gate(request)
@@ -480,16 +555,20 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                 if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
                     short_circuit_empty = True
 
-            # 5. Build responsa_options if Responsa mode.
+            # 5. Build responsa_options if responsa search_mode (per req.responsa_options).
             responsa_options = None
-            if req.mode == 'Responsa':
+            if req.search_mode == 'responsa':
+                # Default: all-False ResponsaOptions when client omitted the field.
+                opts = req.responsa_options or ResponsaOptions()
+                # D-11: derive internal variant_mode from the boolean flag exactly as
+                # the desktop UI does (genizah_app.py:15796).
                 responsa_options = {
                     'responsa_mode': True,
-                    'variants': True,
-                    'ja': True,
-                    'flex_spacing': False,
-                    'bidirectional': False,
-                    'variant_mode': 'variants',
+                    'variants': opts.variants,
+                    'ja': opts.ja,
+                    'flex_spacing': opts.flex_spacing,
+                    'bidirectional': opts.bidirectional,
+                    'variant_mode': 'variants' if opts.variants else 'exact',
                 }
 
             # 6. Statelessness check (D-20). Forbidden reads — none below.
@@ -499,9 +578,10 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                 results = []
                 total = 0
             else:
+                internal_mode = _SEARCH_MODE_TO_INTERNAL[req.search_mode]
                 results = state.searcher.execute_search(
                     query_str=query,
-                    mode=req.mode,
+                    mode=internal_mode,
                     gap=req.gap,
                     progress_callback=None,
                     exclude_words=None,
@@ -546,7 +626,7 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                 results,
                 meta_mgr=state.meta_mgr,
                 query=query,
-                mode=req.mode,
+                mode=_SEARCH_MODE_TO_INTERNAL[req.search_mode],
                 gap=req.gap if req.gap else None,
                 filters=filters_dict,
                 warnings=warnings_list,
