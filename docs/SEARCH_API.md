@@ -95,6 +95,42 @@ Field names mirror the desktop UI checkboxes. Server-side derivation: `variant_m
 implicit (`'variants' if opts.variants else 'exact'`); do not send it. Other field names
 (extended/maximum tiers, `variant_mode`, etc.) are rejected by `extra='forbid'`.
 
+### Responsa query string syntax
+
+In addition to `responsa_options` flags, the **`query` string itself** supports a
+Responsa-Project-style mini-syntax (parsed by `genizah_core.parse_responsa_query`).
+This syntax is only honored when `search_mode="responsa"`; in other modes the same
+characters are matched literally. Tokens are whitespace-separated; modifiers stack.
+
+| Syntax | Example | Meaning |
+| ------ | ------- | ------- |
+| plain word | `שלום` | exact word match |
+| suffix wildcard | `שלום*` | word starts with the prefix |
+| prefix wildcard | `*נדר` | word ends with the suffix |
+| character pattern | `*פ*ט*ר*פ*` | letters appear in order, any chars between |
+| grammatical prefixes | `#שלום` | match plus all Hebrew grammatical prefix expansions (`ה`, `ב`, `ל`, `מ`, `ש`, `ו`, `כ`, plus 2-letter combos `וה`, `שב`, …) |
+| grammatical suffixes | `שלום#` | match plus Hebrew grammatical suffix expansions |
+| both prefixes + suffixes | `#שלום#` | combine the two above |
+| plene/defective | `%שלום` | tolerate plene/defective spelling variants |
+| stacked modifiers | `%#שלום#` | plene/defective + prefixes + suffixes (any order of `%` and leading `#`) |
+| OR group | `(עץ/אילן)` | match any of the alternatives at that position |
+| modifier + OR | `#(שלום/שלומות)` | grammatical prefixes applied to each alternative |
+| inline alternation | `אירו(ס/ש)ין` | one token, alternation inside a word |
+| negation | `-word` | exclude results containing this token (modifier prefix `-` may combine with `%`/`#`) |
+| per-pair gap | `word1 [3] word2` | allow up to 3 intervening tokens between the surrounding pair (overrides top-level `gap` for that pair) |
+| line constraint | `\|word` / `word\|` | token must be at the start / end of a manuscript line |
+| line gap | `word1 [\|2] word2` | allow up to 2 line breaks between the pair |
+
+Notes:
+- The leading `#`, `%`, `-` modifiers and the trailing `#` modifier may appear on plain
+  words, OR groups, and patterns; combinations are commutative for the leading set.
+- `[N]` and `[\|N]` tokens are gap markers, not search tokens — they do not count toward
+  the proximity slop and do not appear in `responsa_options_effective`.
+- Wildcard expansion can be expensive; the Responsa cascade may downgrade noisy patterns
+  and surface a `query_downgraded` warning in `warnings[]`.
+- The `query` length cap (`QUERY_LENGTH_CAP=1000`) applies to the raw string, not the
+  post-expansion form.
+
 ### Cross-field validation rejections
 
 | Input pattern | Error code | HTTP | Notes |
