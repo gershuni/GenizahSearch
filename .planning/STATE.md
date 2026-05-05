@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
-status: executing
-stopped_at: Phase 83 context gathered
-last_updated: "2026-05-05T10:08:07.030Z"
+status: milestone_complete
+stopped_at: v7.10 milestone deployed (2026-05-05)
+last_updated: "2026-05-05T10:46:00.000Z"
 progress:
   total_phases: 8
-  completed_phases: 7
-  total_plans: 37
-  completed_plans: 32
-  percent: 86
+  completed_phases: 8
+  total_plans: 42
+  completed_plans: 42
+  percent: 100
 ---
 
 # Project State
@@ -20,17 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 83 — public-release
+**Current focus:** v7.10 milestone COMPLETE — public Search API deployed 2026-05-05
 
 ## Current Position
 
-Phase: 83 (public-release) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 83
+Phase: 83 (public-release) — COMPLETE 2026-05-05
+Status: v7.10 milestone deployed to production
 
-Progress: [##############] 100% (7/7 phases; 32/32 plans complete)
+Progress: [##############] 100% (8/8 phases complete)
 
-Next step: scope a follow-up phase for public API release (deploy master-main; reframe doc; security review). Developer wants to ship API publicly per 2026-05-05 conversation.
+Next step: scope v7.11 milestone. Open follow-up items in memory: skill consumer follow-ups (clarification turn, broader-than-domain mode, API gaps), v7.10 acceptance notes from 81B, external data refresh routine cadence.
 
 **Phase queue (v7.10):**
 
@@ -41,8 +40,11 @@ Next step: scope a follow-up phase for public API release (deploy master-main; r
 5. ✅ **Phase 81A** — API Contract Expansion (API-EXPAND-01..08) — VERIFIED 2026-05-04 (81A-VERIFICATION.md, 8/8 must-haves)
 6. ✅ **Phase 81B** — Claude Skill Consumer (SKILL-01..06) — VERIFIED 2026-05-05 (VERIFICATION.md, 6/6 requirements; APPROVED WITH NOTES per ACCEPTANCE-RUN.md)
 7. ✅ **Phase 82** — Internal Documentation (DOC-01, DOC-02) — APPROVED 2026-05-05 (82-04-SUMMARY.md, cold-reader walkthrough; 2 gaps fixed inline: Responsa query-string syntax table added, inline-alternation row removed)
+8. ✅ **Phase 83** — Public Release of Search API (PUBLIC-01..PUBLIC-08) — DEPLOYED 2026-05-05 (5/5 plans). Wave 1 security audit APPROVED (12 mitigations verified, no remediation needed). Wave 2 parallel: docs/SEARCH_API.md public reframe + OpenAPI sub-mount with populated schemas (Codex HIGH fix landed) + README API section + SKILL public docs ref. Wave 3: v7.10.0 bump + bilingual web banner + deploy.sh on EC2 + 7-item Post-Deploy Verification green. No git tag, no GitHub Release (web-only convention).
 
-Recommended next: scope follow-up phase for public API release.
+**v7.10 Search API milestone COMPLETE.** Public endpoints live at https://genizahsearch.com/api/{search,browse,parallels} with OpenAPI spec at /api/openapi.json + Swagger UI at /api/docs.
+
+Recommended next: scope v7.11 milestone (skill consumer follow-ups + API gaps surfaced during 81B acceptance per memory: clarification turn, broader-than-domain mode, uid lookup, language filter, parallels-apostrophe handling, filter-vocab discovery).
 
 ## Performance Metrics
 

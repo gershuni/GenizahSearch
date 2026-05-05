@@ -355,12 +355,12 @@ back-nav bugfix.
 **Goal**: Promote the v7.10 search-helper endpoints (`/api/search`, `/api/browse`, `/api/parallels`) from internal-undocumented to a publicly documented and supported API surface — gated on a security audit, doc reframing, production deploy of `master-main`, and a discoverable link from `README.md`.
 **Depends on**: Phase 82 (internal docs as as-shipped baseline to reframe).
 **Requirements**: PUBLIC-01, PUBLIC-02, PUBLIC-03, PUBLIC-04, PUBLIC-05, PUBLIC-06, PUBLIC-07, PUBLIC-08
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans executed
 - [x] 83-01-PLAN.md -- Security audit (83-SECURITY.md covers D-05 a-f); Wave 0 RED test stubs (3 new test files)
 - [x] 83-02-PLAN.md -- docs/SEARCH_API.md reframe (banner removed, Stability/Quick Start/Attribution/Changelog added)
 - [x] 83-03-PLAN.md -- OpenAPI sub-mount: init_search_api path_prefix + web/main.py search_helper_app + Pydantic Field descriptions
 - [x] 83-04-PLAN.md -- README.md "API" section (English) + SKILL.md public docs reference
-- [ ] 83-05-PLAN.md -- Version 7.10.0 bump + CHANGELOG + CLAUDE.md entry + pre-deploy gate (manual) + deploy + close-out
+- [x] 83-05-PLAN.md -- Version 7.10.0 bump + CHANGELOG + CLAUDE.md entry + What's New banner + pre-deploy gate (passed) + deploy + close-out
 
 ## Progress
 
@@ -376,11 +376,13 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81A -> 81B -> 82 -> 83
 | 81A. Minimal API Contract Expansion | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
 | 81B. Claude Skill Consumer | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
 | 82. Internal Documentation | 0/0 | Not started | - |
-| 83. Public Release of Search API | 4/5 | In Progress|  |
+| 83. Public Release of Search API | 5/5 | Complete (2026-05-05) | 2026-05-05 |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-05 -- Phase 83 planned: 5 plans, Wave 1 (01/02/03 parallel) + Wave 2 (04) + Wave 3 (05). PUBLIC-01..PUBLIC-08 requirements defined. Execution order updated to include Phase 83.
+*Last updated: 2026-05-05 -- v7.10 Search API milestone COMPLETE. Phase 83 executed and deployed: Wave 1 (security audit APPROVED + 15 RED test stubs), Wave 2 parallel (docs/SEARCH_API.md public reframe + OpenAPI sub-mount with populated requestBody/parameters/responses [Codex HIGH fix] + README API section + SKILL public docs reference), Wave 3 (v7.10.0 version bump + CHANGELOG + CLAUDE.md Recently Changed + README What's New + bilingual web banner + production deploy via deploy.sh on EC2 + 7-item Post-Deploy Verification checklist green). 8 phase entries closed (77, 78, 79, 80, 81A, 81B, 82, 83). PUBLIC-01..PUBLIC-08 satisfied. Web-only release: no git tag, no GitHub Release object (desktop-poll prompt avoidance per project convention).
+
+*Previous update: 2026-05-05 -- Phase 83 planned: 5 plans, Wave 1 (01/02/03 parallel) + Wave 2 (04) + Wave 3 (05). PUBLIC-01..PUBLIC-08 requirements defined. Execution order updated to include Phase 83.
 
 *Previous update: 2026-05-02 -- Phase 81 rescoped into Phase 81A (Minimal API Contract Expansion) + Phase 81B (Claude Skill Consumer) after live testing showed the API was not expressive enough to power witness-discovery skills. Phase 81C (long-running parallels job API) deferred to v7.11. Milestone phase count 6 → 7. Full rationale, decisions, and acceptance criteria in `.planning/phases/81B-claude-skill-consumer/81-RESCOPE.md` (rev 3, APPROVED 2026-05-02).*
 
