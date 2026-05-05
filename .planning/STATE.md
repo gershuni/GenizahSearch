@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v7.10
 milestone_name: Search API
-status: executing
-stopped_at: context exhaustion at 91% (2026-05-01)
-last_updated: "2026-05-04T15:54:21.918Z"
-last_activity: 2026-05-04 -- Phase 81B planning complete
+status: phase-complete
+stopped_at: 2026-05-05 -- Phase 81B verified
+last_updated: "2026-05-05T00:00:00.000Z"
+last_activity: 2026-05-05 -- Phase 81B VERIFIED PASSED (6/6 requirements, APPROVED WITH NOTES)
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 28
-  completed_plans: 23
-  percent: 82
+  completed_plans: 28
+  percent: 86
 ---
 
 # Project State
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 81 — Claude Skill Consumer (next planning target)
+**Current focus:** Phase 81B — claude-skill-consumer
 
 ## Current Position
 
-Phase: 81A (api-contract-expansion) — VERIFIED ✅ (2026-05-04)
-Plan: 5/5 plans landed across 4 waves; gsd-verifier reported PASSED (8/8 must-haves, API-EXPAND-01..08). VERIFICATION.md: `.planning/phases/81A-api-contract-expansion/81A-VERIFICATION.md`.
-Status: Ready to execute
-Last activity: 2026-05-04 -- Phase 81B planning complete
+Phase: 81B (claude-skill-consumer) — VERIFIED PASSED 2026-05-05 (APPROVED WITH NOTES)
+Plan: 5 of 5 complete
+Status: Phase 81B complete; ready for Phase 82
+Last activity: 2026-05-05 -- Phase 81B VERIFIED PASSED (6/6 requirements satisfied; 22/22 skill tests GREEN; acceptance run signed off)
 
-Progress: [##########] 85% (5/7 phases verified; 23/27 plans complete)
+Progress: [############] 86% (6/7 phases verified; 28/28 plans complete)
 
-Next step: `/gsd-plan-phase 81B` for Claude Skill Consumer (SKILL-01..03). All API contract expansion is in place; the skill phase can now consume the stabilized envelope.
+Next step: `/gsd-plan-phase 82` for Internal Documentation (DOC-01, DOC-02) — last phase of v7.10 milestone.
 
 **Phase queue (v7.10):**
 
@@ -41,10 +41,10 @@ Next step: `/gsd-plan-phase 81B` for Claude Skill Consumer (SKILL-01..03). All A
 3. ✅ **Phase 79** — /api/browse Drill-Down (API-03) — VERIFIED 2026-05-01 (79-VERIFICATION.md)
 4. ✅ **Phase 80** — /api/parallels (API-02) — VERIFIED 2026-05-01 (80-VERIFICATION.md, 4/4 SCs)
 5. ✅ **Phase 81A** — API Contract Expansion (API-EXPAND-01..08) — VERIFIED 2026-05-04 (81A-VERIFICATION.md, 8/8 must-haves)
-6. **Phase 81B** — Claude Skill Consumer (SKILL-01..03) ← next planning target
-7. Phase 82 — Internal Documentation (DOC-01, DOC-02)
+6. ✅ **Phase 81B** — Claude Skill Consumer (SKILL-01..06) — VERIFIED 2026-05-05 (VERIFICATION.md, 6/6 requirements; APPROVED WITH NOTES per ACCEPTANCE-RUN.md)
+7. **Phase 82** — Internal Documentation (DOC-01, DOC-02) ← next planning target
 
-Recommended next: `/gsd-plan-phase 81`.
+Recommended next: `/gsd-plan-phase 82`.
 
 ## Performance Metrics
 
