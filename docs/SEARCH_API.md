@@ -2,29 +2,129 @@
 
 > Last updated: 2026-05-05
 
-## ⚠ Internal Helper — No Stability Promise
+## Stability
 
-This page documents an **internal** helper API used by first-party tooling (the
-`cairo-genizah-research` Claude skill, deployment soak tests, and ad-hoc maintainer
-scripts). It is **not** a public API.
+This is a public research-automation API. We aim to keep this contract stable. Breaking changes (request shape, response envelope shape, error codes) will only ship on major website-version releases and will be announced in `CHANGELOG.md` and the `Changelog` section below. Additive changes (new optional fields, new optional request keys, new endpoints) may ship at any time.
 
-- The contract may change without warning, including breaking changes within a patch release.
-- There are no API keys, no published SLAs, no semver guarantees.
-- It is not linked from `README.md` or the public site, and external usage is not invited.
-- For external research access to the Genizah corpus, use the website search interface at https://genizahsearch.com.
+**Interactive docs:** [`/api/docs`](https://genizahsearch.com/api/docs) (Swagger UI) · [`/api/openapi.json`](https://genizahsearch.com/api/openapi.json) (OpenAPI spec)
 
-If you are reading this because you are about to build a new internal consumer, prefer the
-skill at `skills/cairo-genizah-research/` over hand-rolling — it already handles the
-rate-limiter cooperation, retry semantics, and locator round-trip.
+---
+
+## Quick Start
+
+All three endpoints return JSON wrapped in a uniform envelope. Successful responses contain `schema_version`, `request` (echo of input), and a result payload (`results[]` for `/search` and `/parallels`, top-level fields for `/browse`). Failures return `{"error": {"code": "...", "message": "..."}}` with an HTTP 4xx/5xx status.
+
+### Search for manuscripts
+
+```bash
+curl -s -X POST https://genizahsearch.com/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "אחד מי יודע", "search_mode": "variants", "limit": 5}' \
+  | python -m json.tool
+```
+
+Response shape (truncated):
+
+```json
+{
+  "schema_version": "1.0",
+  "request": {"query": "אחד מי יודע", "search_mode": "variants", "limit": 5},
+  "results": [
+    {
+      "uid": "IE1_P1_FL1",
+      "rank": 1,
+      "score": 12.34,
+      "locator": {"sys_id": "990025143260205171", "p_num": 1},
+      "snippet": "..."
+    }
+  ],
+  "total": 42
+}
+```
+
+Take a result's `uid` and `locator.sys_id` to drill down via `/api/browse`.
+
+### Drill down to a manuscript page
+
+```bash
+curl -s "https://genizahsearch.com/api/browse?sys_id=990025143260205171&uid=IE1_P1_FL1" \
+  | python -m json.tool
+```
+
+Response shape (truncated):
+
+```json
+{
+  "schema_version": "1.0",
+  "request": {"sys_id": "990025143260205171", "uid": "IE1_P1_FL1"},
+  "manuscript": {"shelfmark": "...", "library_code": "..."},
+  "page": {"text": "...", "text_source": "pgp_transcription", "image_url": "..."}
+}
+```
+
+Returns transcription text (when available), PGP/FJMS/NLI metadata, and image URL.
+
+### Find composition parallels
+
+```bash
+curl -s -X POST https://genizahsearch.com/api/parallels \
+  -H "Content-Type: application/json" \
+  -d '{"text": "ואם בכי אבכה ומה ילד לי יגון", "chunk_size": 4, "mode": "variants"}' \
+  | python -m json.tool
+```
+
+Response shape (truncated):
+
+```json
+{
+  "schema_version": "1.0",
+  "request": {"text": "...", "chunk_size": 4, "mode": "variants"},
+  "results": [
+    {"sys_id": "...", "matched_chunks": [], "score": 0.87}
+  ]
+}
+```
+
+Returns a `results[]` of manuscript groups that share sequential phrase-chunks with the input text.
+
+### Error responses
+
+All endpoints return errors in a single envelope. Example:
+
+```json
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "Rate limit exceeded. Try again in 60 seconds."
+  }
+}
+```
+
+See [Error Codes](#error-codes) below for the full list.
+
+---
+
+## Attribution & Citation
+
+If you use GenizahSearch or its API in academic research, please cite the underlying data sources:
+
+- **MiDRASH Transcriptions (primary text corpus):** Stoekl Ben Ezra, D., et al. (2025). *MiDRASH Automatic Transcriptions of the Cairo Geniza Fragments* [Data set]. Zenodo. [doi.org/10.5281/zenodo.17734473](https://doi.org/10.5281/zenodo.17734473)
+- **Princeton Geniza Project (PGP):** Curated transcriptions, translations, and metadata — [geniza.princeton.edu](https://geniza.princeton.edu/)
+- **Friedberg Jewish Manuscript Studies (FJMS / FGP):** Domain classifications, scholarly joins, bibliography, and catalog records — [fjms.genizah.org](https://fjms.genizah.org/)
+- **National Library of Israel (NLI):** Manuscript images served via IIIF manifests
+
+For full credits including hosting and development attribution, see the [Credits & Data section in the main README](../README.md#credits--data).
+
+---
 
 ## Overview
 
 The v7.10 search-helper API exposes three endpoints — `POST /api/search`, `GET /api/browse`,
-and `POST /api/parallels` — that together let an internal consumer execute a Tantivy
+and `POST /api/parallels` — that together let a research consumer execute a Tantivy
 keyword/Responsa search, drill down into a single manuscript page (with PGP/FJMS/NLI
-enrichment), and run a composition-parallels job over an arbitrary input text. The three
-endpoints are consumed primarily by the `cairo-genizah-research` Claude skill, by the
-deployment soak/smoke harness, and by occasional maintainer scripts. They share a common
+enrichment), and run a composition-parallels job over an arbitrary input text. A reference
+consumer is the [`cairo-genizah-research` Claude skill](../skills/cairo-genizah-research/SKILL.md),
+which demonstrates the full search → browse → rank workflow. The three endpoints share a common
 hardening shell: per-IP rate limiting (independent token bucket per endpoint, all reading
 the same `SEARCH_API_RATE_LIMIT` env-var ceiling), a mode gate (`SEARCH_API_MODE`) that
 permits run-time disabling or loopback-only restriction without restart, a uniform error
@@ -648,11 +748,11 @@ docstrings in [web/search_api.py](../web/search_api.py).
 
 ## What This API Is NOT
 
-- Not a public API. No keys, no SLAs, no semver guarantees.
+- Not authenticated. There are no API keys today; access is anonymous and rate-limited per-IP. Future versions may add optional keys for higher quotas.
 - Not browse-page parity. Only the subset of fields the skill ranks against is exposed; UI-only fields (corrections, comments, lists, puzzles) are not.
-- Not a long-lived contract. Internal helper for v7.10 first-party tooling; the contract may change without warning.
-- Not linked from `README.md` and not linked from the public site. External usage is not invited.
-- For external research access to the Genizah corpus, use https://genizahsearch.com directly.
+- Not a write API. All three endpoints are read-only over the public corpus.
+- Not a bulk-export interface. For full-corpus access, use the [interactive search](https://genizahsearch.com) directly or contact the project for the underlying transcription dataset (see [Attribution & Citation](#attribution--citation)).
+- Not a long-running job runner. Composition-parallels requests run synchronously within the request timeout; a future async-job API may ship in v7.11+.
 
 ## See Also
 
@@ -661,3 +761,16 @@ docstrings in [web/search_api.py](../web/search_api.py).
 - [web/search_api.py](../web/search_api.py) — the route handlers and Pydantic models in source.
 - [shared/api_errors.py](../shared/api_errors.py) — `ERROR_CODES` and `WARNING_CODES` frozensets and the `APIError` exception type.
 - [shared/search_serializer.py](../shared/search_serializer.py) — the sole producer of envelope shapes (Phase 77 D-14).
+
+---
+
+## Changelog
+
+### v7.10 (2026-05-05) — Initial public release
+
+- Endpoints `/api/search`, `/api/browse`, `/api/parallels` promoted from internal-undocumented to public API per Phase 83.
+- OpenAPI spec at `/api/openapi.json`; interactive Swagger UI at `/api/docs`.
+- Stability commitment added (see "Stability" section above).
+- Attribution & Citation section added.
+
+Breaking changes announced in `CHANGELOG.md` for all future major-version releases.
