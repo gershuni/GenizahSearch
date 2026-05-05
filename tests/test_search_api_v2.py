@@ -24,9 +24,7 @@ web/api_hardening.py:326. NOT 422.
 """
 
 import os
-import json
-import inspect
-from typing import Any, Optional
+from typing import Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,12 +38,10 @@ from fastapi.testclient import TestClient
 
 from web.search_api import (  # noqa: E402
     init_search_api,
-    SearchRequest,
-    ResponsaOptions,
     MAX_LIMIT,
     _SEARCH_MODE_TO_INTERNAL,
 )
-from shared.api_errors import APIError, ERROR_CODES  # noqa: E402
+from shared.api_errors import ERROR_CODES  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

@@ -7,10 +7,8 @@ That is the intended RED state — Plan 02's acceptance criteria flips them GREE
 Tests use monkeypatch + fake clock (never time.sleep) to keep CI fast.
 Throttle state is filesystem-backed; tests use tmp_path for isolation.
 """
-import importlib
 import time
-import pytest
-from skills.cairo_genizah_research.scripts.throttle import acquire, _read_state, _write_state
+from skills.cairo_genizah_research.scripts.throttle import acquire, _read_state
 
 
 # ---------------------------------------------------------------------------

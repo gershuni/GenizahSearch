@@ -19,8 +19,7 @@ test_honesty_annotation_maps_pgp_transcription_as_full_per_R2.
 """
 from __future__ import annotations
 import json
-import sys
-from typing import Any, Iterable
+from typing import Iterable
 
 # Phase 79 D-10 enum value treated as "full text available".
 # REQUIREMENTS.md SKILL-04 prose says 'full'; this is the canonical R2 mapping.

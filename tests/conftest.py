@@ -1,7 +1,5 @@
 """Test configuration for ensuring project modules are importable."""
 
-import importlib
-import importlib.util
 import sys
 import types
 from pathlib import Path
