@@ -91,6 +91,45 @@
 
 ---
 
+## Milestone: v7.10 — Search API
+
+**Shipped:** 2026-05-05
+**Phases:** 8 (77, 78, 79, 80, 81A, 81B, 82, 83) | **Plans:** 37
+
+### What Was Built
+Public HTTP/JSON research-automation API: `/api/search`, `/api/browse`, `/api/parallels`. Single serializer module owns the response shape. Hardening shell (rate limit, mode gate, error envelope, PostHog) shared across all three endpoints. Reference Anthropic Skill `cairo-genizah-research` drives the API end-to-end with file-locked token-bucket throttling and browse-honesty annotations. OpenAPI sub-mounted at `/api/openapi.json` + Swagger at `/api/docs`, scoped to the 3 search-helper endpoints. `docs/SEARCH_API.md` reframed from internal-only to public-facing with Stability + Quick Start + Attribution + Changelog.
+
+### What Worked
+1. **Serializer-first sequencing (Phase 77 before any HTTP endpoint)** — the JSON contract was locked and exercised via toolbar exports before `/api/search` consumed it. Caught a `chunk_hits` field-name collision during smoke check before it reached the API surface.
+2. **Hardening shell built once in Phase 78, inherited by 79 + 80** — rate limiter, mode gate, error envelope, PostHog capture, and `wrap_endpoint` decorator wrote once and reused. Phases 79 and 80 added their endpoints in 4 plans each rather than reimplementing cross-cutting concerns.
+3. **Live acceptance run as the milestone gate (81B Plan 5)** — user-observed end-to-end skill run against production beat any static-analysis subagent for integration validation.
+4. **Phase 81 mid-milestone rescope into 81A + 81B + deferred 81C** — live testing after Phase 80 surfaced API expressivity gaps before the skill phase sunk cost into the wrong contract; 81-RESCOPE.md captured the decision atomically.
+5. **OpenAPI sub-mount over surgical handler refactor (Plan 83-03 Option B)** — `openapi_extra=` decorators preserved Phase 78/79/80 handler signatures byte-identical, no behavior change risk.
+
+### What Was Inefficient
+1. **Phase 82 + Phase 83 shipped without canonical VERIFICATION.md** — both were evidenced inline (82-04-SUMMARY cold-reader walkthrough; 83-SECURITY Post-Deploy checklist + STATE.md) but missing the artifact required by `/gsd-audit-milestone`. Surfaced at milestone-close audit, not blocking but admin tax.
+2. **PUBLIC-01..PUBLIC-08 lived in ROADMAP.md but never landed in REQUIREMENTS.md** — orphan-in-reverse: Phase 83 plans referenced them, were satisfied in flight, but never got traceability rows. Backfilled at close.
+3. **Pre-existing 120-item open artifact backlog** (38 debug sessions, 18 UAT gaps, 8 unresolved verifications, 50 quick tasks, 5 todos) is unrelated to v7.10 but blocked the close-audit from running clean. Needs a /gsd-cleanup pass between milestones.
+
+### Patterns Established
+1. **Wave 0 RED-test scaffold per phase** — Phases 78–83 all opened with a Wave 0 plan landing failing tests scoped to the phase's must-haves. Subsequent plans flip them GREEN. Already a convention, but this milestone made it universal.
+2. **Security-audit-as-document** (`83-SECURITY.md`): mitigation table at file:line + operator-runnable Post-Deploy Verification checklist + verdict. New format for retroactive security reviews.
+3. **Sub-mount for scoped FastAPI metadata** — when you need OpenAPI/Swagger on *some* routes but not others (image proxies, etc.), sub-app + `app.mount('/api', sub)` beats trying to filter the parent app's spec.
+4. **Web-only release pattern formalized**: NO git tag, NO GitHub Release object — desktop polls `/releases/latest` and would prompt every desktop user to update for a no-installer page. Documented in 83-05-SUMMARY decisions.
+
+### Key Lessons
+1. **Verification artifacts are administrative but load-bearing for audit.** When a phase's verification lives in SUMMARY narrative + sibling docs (SECURITY, VALIDATION, ACCEPTANCE-RUN), the canonical `{phase}-VERIFICATION.md` should still be authored, even if it just transcribes pointers.
+2. **Requirements traceability needs a forcing function before milestone close.** PUBLIC-01..08 satisfied themselves into the codebase but never satisfied themselves into REQUIREMENTS.md. Consider an `/gsd-add-requirement` step when ROADMAP introduces new REQ-IDs.
+3. **Mid-milestone rescopes work IF the rationale is captured atomically.** 81-RESCOPE.md (rev 3, APPROVED 2026-05-02) was the load-bearing artifact that let 81A + 81B + deferred 81C feel like a deliberate decomposition rather than scope creep.
+4. **A live user-observed acceptance run is stronger than any subagent integration check** for a deployed-and-running API. Use it.
+
+### Cost Observations
+- Model mix: opus (planner + executor) per project config; sonnet for review subagents
+- Sessions: ~6–8 focused sessions across 9 days wall clock (2026-04-27 → 2026-05-05)
+- Notable: highest plan count since v6.5.0 (37 plans for 8 phases — per-phase plans tightly scoped, ~4–5 plans each); reference Anthropic Skill is the first deliverable that lives outside genizahsearch.com proper
+
+---
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Days | Plans/Day | Key Theme |
@@ -106,6 +145,7 @@
 | v6.1.0 | 1 | 4 | 1 | 4.0 | Catalog browse |
 | v6.5.0 | 5 | 26 | 15 | 1.7 | Search UX + translations |
 | v7.8 | 4 | 9 | 1 | 9.0 | Structural foundation / CI |
+| v7.10 | 8 | 37 | 9 | 4.1 | Public Search API + reference Skill |
 
 **Observations:**
 - v6.5.0 had the lowest plans/day ratio — reflects the large batch translation work (multi-day server jobs) and bug-fix tail
