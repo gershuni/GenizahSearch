@@ -4,8 +4,8 @@ milestone: v7.10
 milestone_name: Search API
 status: executing
 stopped_at: context exhaustion at 91% (2026-05-01)
-last_updated: "2026-05-05T08:50:00.000Z"
-last_activity: 2026-05-05 -- Phase 82 APPROVED, v7.10 internal documentation complete
+last_updated: "2026-05-05T12:00:00.000Z"
+last_activity: 2026-05-05 -- Phase 83 added (Public Release of Search API)
 progress:
   total_phases: 7
   completed_phases: 7
@@ -173,6 +173,10 @@ See PROJECT.md Key Decisions table for full history.
 - **Result 1 in user's smoke-check sample (32 matches across 17 chunks for a single sys_id) is correct grouping, NOT a bug**: two distinct uids on the same sys_id had genuinely different manuscript content (different IEs / volumes / fragment slices). Group-level dedup collapses only entries sharing BOTH chunk_index AND manuscript_snippet — distinct snippets correctly stay separate matches.
 - **chunk_count rename is a Plan 05 deviation from Plan 02's plan text**: Plan 02 left the standard-mode int counter at `item['chunk_hits']`. Plan 05 renamed it to `item['chunk_count']` to free the field name. Verified that no other code in the repo reads `chunk_hits` as an int (the standard-mode rendering at the parallels page uses `len(rec.get('chunks', []))` instead).
 - **Cumulative Phase 77 commit count: 20** (14 plan-scope: 3+3+1+4+2 across plans 01-05 + 6 follow-on smoke-check fixes; 4 of those 6 are commit-scoped 77-04, 2 are 77-05 docs).
+
+### Roadmap Evolution
+
+- Phase 83 added 2026-05-05: Public Release of Search API — security audit of `/api/search`, `/api/browse`, `/api/parallels`; reframe `docs/SEARCH_API.md` from internal to public-facing; deploy `master-main` to production; link from `README.md`. Closes the "v7.10 public API release follow-up" memory item.
 
 ### Pending Todos
 

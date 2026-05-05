@@ -228,6 +228,7 @@ back-nav bugfix.
 - [x] **Phase 81A: Minimal API Contract Expansion** (complete 2026-05-04) — UI-aligned `search_mode` enum + Responsa option flags + request echo block. Replaces conflated `mode` field. Internal/undocumented; breaking change.
 - [x] **Phase 81B: Claude Skill Consumer** (complete 2026-05-05, APPROVED WITH NOTES) — Reference Anthropic Skill at `skills/cairo-genizah-research/` (SKILL.md + 11 scripts) with staged phrase discovery, browse drill-down, R2 honesty annotations, file-locked token-bucket throttle. v7.10 acceptance harness met.
 - [x] **Phase 82: Internal Documentation** (complete 2026-05-05, APPROVED) — `docs/SEARCH_API.md` (664 lines) and CLAUDE.md env-var deltas capturing the as-shipped v7.10 contract; cold-reader walkthrough surfaced + fixed 2 gaps (Responsa query-string syntax table; inline-alternation row removed as unsupported). Live-verified against localhost.
+- [ ] **Phase 83: Public Release of Search API** — Security audit of `/api/search`, `/api/browse`, `/api/parallels` (rate limits, IP exposure, abuse vectors); reframe `docs/SEARCH_API.md` from internal-only to public-facing API documentation (drop "internal helper, no stability promise" disclaimer, add usage guidance, stability commitments); deploy master-main to production; link from `README.md`.
 - ⏸ *Phase 81C — Long-Running Parallels Job API: deferred to v7.11 unless explicitly promoted. Sketched in `81-RESCOPE.md` §5.*
 
 ## Phase Details
@@ -350,6 +351,12 @@ back-nav bugfix.
 - [ ] 82-03-PLAN.md -- Patch CLAUDE.md env-var block with skill-side deltas GENIZAH_API_BASE + GENIZAH_SKILL_REQ_PER_MIN (DOC-02); README.md byte-unchanged
 - [ ] 82-04-PLAN.md -- Phase gate: scripts/check_docs.py green + cold-reader walkthrough by developer (SC3 falsification test)
 
+### Phase 83: Public Release of Search API
+**Goal**: Promote the v7.10 search-helper endpoints (`/api/search`, `/api/browse`, `/api/parallels`) from internal-undocumented to a publicly documented and supported API surface — gated on a security audit, doc reframing, production deploy of `master-main`, and a discoverable link from `README.md`.
+**Depends on**: Phase 82 (internal docs as as-shipped baseline to reframe).
+**Requirements**: TBD (defined during /gsd-plan-phase 83)
+**Plans**: TBD (defined during /gsd-plan-phase 83)
+
 ## Progress
 
 **Execution Order:**
@@ -364,6 +371,7 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81A -> 81B -> 82
 | 81A. Minimal API Contract Expansion | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
 | 81B. Claude Skill Consumer | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
 | 82. Internal Documentation | 0/0 | Not started | - |
+| 83. Public Release of Search API | 0/0 | Not planned yet (added 2026-05-05) | - |
 
 ---
 *Roadmap created: 2026-02-09*
