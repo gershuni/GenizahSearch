@@ -101,12 +101,30 @@ class FiltersModel(BaseModel):
     """D-15 hybrid: lists for categorical filters, scalars for date bounds."""
     model_config = ConfigDict(extra='forbid')
 
-    domains: Optional[List[str]] = None
-    authors: Optional[List[str]] = None
-    works: Optional[List[str]] = None
-    materials: Optional[List[str]] = None
-    date_from: Optional[int] = None
-    date_to: Optional[int] = None
+    domains: Optional[List[str]] = Field(
+        default=None,
+        description="FJMS domain labels (e.g. 'Halakha', 'Piyyut'). Unknown values -> 400 unresolvable_filter_value.",
+    )
+    authors: Optional[List[str]] = Field(
+        default=None,
+        description="FJMS genizah_persons author names. Unknown values -> 400 unresolvable_filter_value.",
+    )
+    works: Optional[List[str]] = Field(
+        default=None,
+        description="FJMS genizah_titles work names. Unknown values -> 400 unresolvable_filter_value.",
+    )
+    materials: Optional[List[str]] = Field(
+        default=None,
+        description="Material type (e.g. 'paper', 'parchment'). Unknown values -> 400 unresolvable_filter_value.",
+    )
+    date_from: Optional[int] = Field(
+        default=None,
+        description="Inclusive lower bound on manuscript estimated year (CE). Combine with date_to.",
+    )
+    date_to: Optional[int] = Field(
+        default=None,
+        description="Inclusive upper bound on manuscript estimated year (CE). Combine with date_from.",
+    )
 
 
 class ResponsaOptions(BaseModel):
@@ -119,10 +137,22 @@ class ResponsaOptions(BaseModel):
     """
     model_config = ConfigDict(extra='forbid')
 
-    variants: bool = False
-    ja: bool = False
-    flex_spacing: bool = False
-    bidirectional: bool = False
+    variants: bool = Field(
+        default=False,
+        description="Enable morphological variant expansion for Responsa mode.",
+    )
+    ja: bool = Field(
+        default=False,
+        description="Enable Judeo-Arabic expansion for Responsa mode.",
+    )
+    flex_spacing: bool = Field(
+        default=False,
+        description="Allow flexible spacing between terms in Responsa mode.",
+    )
+    bidirectional: bool = Field(
+        default=False,
+        description="Enable bidirectional (RTL+LTR) matching in Responsa mode.",
+    )
 
 
 class SearchRequest(BaseModel):
@@ -141,12 +171,32 @@ class SearchRequest(BaseModel):
     """
     model_config = ConfigDict(extra='forbid')
 
-    query: str
-    search_mode: Literal['exact', 'variants', 'responsa', 'title', 'shelfmark']
-    responsa_options: Optional[ResponsaOptions] = None
-    gap: int = 0
-    limit: int = Field(default=50, ge=1, le=100)
-    filters: Optional[FiltersModel] = None
+    query: str = Field(
+        ...,
+        description="Search query string. Max 1000 chars after stripping. Empty after strip -> 400 query_required.",
+    )
+    search_mode: Literal['exact', 'variants', 'responsa', 'title', 'shelfmark'] = Field(
+        ...,
+        description="Search mode: 'exact' (literal), 'variants' (morphological), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup).",
+    )
+    responsa_options: Optional[ResponsaOptions] = Field(
+        default=None,
+        description="Responsa expansion flags. Valid only when search_mode='responsa'; rejected otherwise with 400 invalid_combination.",
+    )
+    gap: int = Field(
+        default=0,
+        description="Gap between terms (words). Must be 0 when search_mode is 'title' or 'shelfmark'.",
+    )
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=100,
+        description="Max results to return. Bounded [1, 100]. Default 50.",
+    )
+    filters: Optional[FiltersModel] = Field(
+        default=None,
+        description="Optional domain/author/work/material/date filter. Unknown values fail-closed with 400.",
+    )
 
     @model_validator(mode='after')
     def _check_responsa_options_coupling(self):
@@ -217,12 +267,31 @@ class BrowseRequest(BaseModel):
     inside the body -- the wrap_endpoint decorator catches PydanticValidationError.
     """
     model_config = ConfigDict(extra='forbid')
-    sys_id: str
-    uid: Optional[str] = None
-    p_num: Optional[int] = None
-    volume_ie: Optional[str] = None
-    fl_id: Optional[str] = None
-    text_cap: Optional[int] = None
+    sys_id: str = Field(
+        ...,
+        description="Manuscript system_number (unique ID from /api/search result locator.sys_id).",
+    )
+    uid: Optional[str] = Field(
+        default=None,
+        description="Preferred locator: 'IE{N}_P{M}_FL{K}' format from /api/search result uid field. Uniquely resolves page.",
+    )
+    p_num: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="1-based page number (alternative to uid). Combine with optional volume_ie.",
+    )
+    volume_ie: Optional[str] = Field(
+        default=None,
+        description="IE identifier string (e.g. 'IE12345') for multi-IE manuscripts. Ignored for single-IE manuscripts.",
+    )
+    fl_id: Optional[str] = Field(
+        default=None,
+        description="Fragment/leaf identifier (e.g. 'T-S 12.123.1r'). Alternative to p_num.",
+    )
+    text_cap: Optional[int] = Field(
+        default=None,
+        description="Override transcription text cap in chars. Bounded [100, 10000]. Default: env SEARCH_API_BROWSE_TEXT_CAP (4000).",
+    )
 
 
 class ParallelsRequest(BaseModel):
@@ -245,12 +314,32 @@ class ParallelsRequest(BaseModel):
     """
     model_config = ConfigDict(extra='forbid')
 
-    text: str
-    chunk_size: int = Field(default=5, ge=2, le=20)
-    mode: Literal['exact', 'variants', 'fuzzy'] = 'exact'
-    max_freq: Optional[float] = None
-    boundary_mode: Literal['full', 'boundary', 'combined'] = 'full'
-    filters: Optional[FiltersModel] = None
+    text: str = Field(
+        ...,
+        description="Composition text to search for parallels. Max 20000 chars after stripping.",
+    )
+    chunk_size: int = Field(
+        default=5,
+        ge=2,
+        le=20,
+        description="Number of words per chunk for sliding-window matching. Default 5.",
+    )
+    mode: Literal['exact', 'variants', 'fuzzy'] = Field(
+        default='exact',
+        description="Matching mode for each chunk: 'exact' (literal), 'variants' (morphological), 'fuzzy' (approximate).",
+    )
+    max_freq: Optional[float] = Field(
+        default=None,
+        description="High-frequency cutoff ratio (0.0-1.0). Chunks appearing in more than max_freq fraction of corpus are moved to 'filtered'. None disables high-freq filtering.",
+    )
+    boundary_mode: Literal['full', 'boundary', 'combined'] = Field(
+        default='full',
+        description="Chunk boundary strategy: 'full' (any position), 'boundary' (text boundary-aligned), 'combined' (prefer boundaries).",
+    )
+    filters: Optional[FiltersModel] = Field(
+        default=None,
+        description="Optional domain/author/work/material/date filter (same as /api/search).",
+    )
 
 
 @dataclass(frozen=True)
@@ -404,7 +493,7 @@ def _resolve_text_cap(requested: Optional[int]) -> int:
 # Idempotent registrar (Concern #10 / R2-#2).
 # ---------------------------------------------------------------------------
 
-def init_search_api(app_override: Optional[FastAPI] = None) -> None:
+def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '/api') -> None:
     """Register Phase 78 search-helper routes onto target_app.
 
     Concern #10 / R2-#2: idempotent. Re-calling on the same app is a no-op.
@@ -418,6 +507,11 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
     Args:
         app_override: When None, registers onto the NiceGUI singleton. When a
                       bare FastAPI app is passed, registers onto that instead.
+        path_prefix: Route prefix prepended to '/search', '/browse',
+                     '/parallels'. Default '/api' preserves backward compatibility
+                     with tests that hit '/api/search' on a bare app. Pass ''
+                     when mounting the sub-app at '/api' in production -- the
+                     mount provides the prefix.
     """
     target_app = app_override if app_override is not None else app
 
@@ -435,7 +529,7 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
     # target_app. Envelope rewriting happens INSIDE the endpoint via
     # _build_envelope_response, called from per-endpoint try/except branches.
 
-    @target_app.post('/api/search')
+    @target_app.post(f'{path_prefix}/search')
     async def search_endpoint(request: Request):
         """POST /api/search — Phase 78 hardened search endpoint.
 
@@ -771,7 +865,7 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
                     'thread-local downgrade-meta drain failed in finally',
                 )
 
-    @target_app.get('/api/browse')
+    @target_app.get(f'{path_prefix}/browse')
     @wrap_endpoint(endpoint_name='browse')
     async def browse_endpoint(request: Request, *, captured_state: dict):
         """GET /api/browse -- Phase 79 drill-down endpoint.
@@ -895,7 +989,7 @@ def init_search_api(app_override: Optional[FastAPI] = None) -> None:
 
         return envelope
 
-    @target_app.post('/api/parallels')
+    @target_app.post(f'{path_prefix}/parallels')
     @wrap_endpoint(endpoint_name='parallels')
     async def parallels_endpoint(request: Request, *, captured_state: dict):
         """POST /api/parallels — Phase 80 composition/parallels endpoint.
