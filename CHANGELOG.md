@@ -4,6 +4,52 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.10.0] - Search API Public Release - 2026-05-05
+
+The v7.10 milestone (Phases 77–83 — 8 phase entries: 77, 78, 79, 80, 81A, 81B, 82, 83 — spanning serializer foundation, search/browse/parallels endpoints, hardening, contract expansion, reference Claude skill, internal docs, and public release) ships a public HTTP/JSON search-helper API over the existing Genizah corpus. Three endpoints — `POST /api/search`, `GET /api/browse`, `POST /api/parallels` — together let a research consumer execute keyword/Responsa search, drill down to a single manuscript page with PGP/FJMS/NLI enrichment, and run composition-parallels detection over arbitrary input text. The API is documented, OpenAPI-spec'd at `/api/openapi.json` with interactive Swagger UI at `/api/docs`, and publicly accessible. A reference Claude skill (`cairo-genizah-research`) demonstrates the full workflow.
+
+### New Features
+
+- **`POST /api/search`** — Keyword, variant, Responsa, Title, and Shelfmark search modes. Returns ranked manuscript results with locators for drill-down. Phase 78 / 81A.
+- **`GET /api/browse`** — Stateless manuscript drill-down from a search locator. Returns PGP transcription (when available), FJMS/NLI metadata, and image URLs. Phase 79.
+- **`POST /api/parallels`** — Composition-parallels detection using sliding-window chunk matching. Returns ranked parallel-witness groups with per-chunk match evidence. Phase 80.
+- **OpenAPI spec at `/api/openapi.json`** — Auto-generated from Pydantic models with explicit `openapi_extra` metadata; scoped to the 3 search-helper endpoints (legacy `/api/*` proxies excluded). Phase 83.
+- **Swagger UI at `/api/docs`** — Interactive endpoint explorer with try-it-now and full request/response schema documentation. Phase 83.
+- **JSON export toolbar buttons** — `/search` and `/parallels` pages have a download button for the current result set in the Claude-friendly JSON format. Phase 77.
+
+### Security & Hardening (web)
+
+- Per-IP rate limiting (30 req/min default, independent bucket per endpoint, configurable via `SEARCH_API_RATE_LIMIT`). Phase 78.
+- `SEARCH_API_MODE` env-var gate (`open` / `localhost-only` / `disabled`), flippable without restart. Phase 78.
+- Uniform error envelope `{"error": {"code": ..., "message": ...}}` across all three endpoints. Phase 78.
+- XFF spoofing protection via trusted-proxy allowlist and rightmost-non-trusted resolution. Phase 78.
+- Fail-closed filter validation — unknown filter values rejected at 400, not silently dropped. Phase 78.
+- Responsa expansion cap (`MAX_EXPANDED_TERMS=500`) guards against adversarial query expansion. Phase 78.
+- HMAC-hashed IP telemetry in PostHog with `POSTHOG_IP_SALT` persistence. Phase 78.
+- Phase 83 security audit (`83-SECURITY.md`): all Phase 78–81B mitigations re-verified load-bearing pre-deploy; Post-Deploy Verification checklist (7 items) re-run against production.
+
+### Documentation (web)
+
+- `docs/SEARCH_API.md` — Reframed from internal-only to a public API reference: request/response shapes, error codes, rate-limit architecture, env vars, curl examples with JSON response excerpts, Stability statement, Quick Start, Attribution, Changelog. Phase 82/83.
+- Stability statement: additive changes any time; breaking changes only on major-version releases announced in `CHANGELOG.md`. Phase 83.
+- `README.md` "## API" section added linking to the public docs. Phase 83.
+
+### Internal
+
+- `shared/search_serializer.py` — Single source of truth for JSON envelope shape (search, browse, parallels). Phase 77.
+- `skills/cairo-genizah-research/` — Reference Claude skill consuming all 3 endpoints with file-locked token-bucket throttling, tiered ranking, and browse-honesty annotations. Phase 81B.
+- Phase 81A: `search_mode` enum (`exact` / `variants` / `responsa` / `title` / `shelfmark`) + `responsa_options` flag bag + `request` echo block on all responses. Breaking change from Phase 78 `mode` field (announced at Phase 81A deploy).
+
+### Release Mechanics
+
+- Web-only release. NO desktop installer rebuilt or distributed (`bump_version.py` updates `CompileScriptGenizah.iss` as housekeeping only).
+- NO GitHub Release object created (desktop polls `releases/latest` for update prompts; a no-installer release would prompt every desktop user).
+- NO `v7.10.0` git tag (consistent with prior web-only release pattern in `CLAUDE.md` "Recently Changed" history).
+- Release identity lives in `version.py` + this CHANGELOG entry + the master-main commit SHA.
+- Rollback: `SEARCH_API_MODE=disabled` env-var flip on production kills the public surface in seconds (zero-downtime).
+
+---
+
 ## [7.9.4] - NLI Library Code Fix - 2026-05-04
 
 A tiny data-only patch correcting library attribution for 461 National Library of Israel manuscripts that were rendering as Oxford in browse.

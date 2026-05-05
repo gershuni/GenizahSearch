@@ -8,7 +8,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.9.3?
+## What's New in Version 7.10.0?
+
+### v7.10.0: Search API Public Release
+
+GenizahSearch now exposes a public HTTP/JSON research-automation API over the Genizah corpus. Three documented endpoints — `POST /api/search`, `GET /api/browse`, `POST /api/parallels` — let researchers and AI tools execute keyword/Responsa search, drill down to a single manuscript page with PGP/FJMS/NLI enrichment, and run composition-parallels detection over arbitrary input text.
+
+- **Three documented endpoints** — search (keyword, variants, Responsa, title, shelfmark), browse (stateless manuscript drill-down), parallels (sliding-window chunk-match composition detection)
+- **OpenAPI spec at `/api/openapi.json`** — auto-generated from Pydantic models with full request/response schemas
+- **Interactive Swagger UI at `/api/docs`** — try-it-now endpoint explorer
+- **Stability commitment** — additive changes any time; breaking changes only on major-version releases announced in `CHANGELOG.md`
+- **Reference Claude skill** — `skills/cairo-genizah-research/` demonstrates search → browse → rank with throttling and citation guidance
+- **Per-IP rate limiting** — 30 req/min per endpoint by default (configurable via `SEARCH_API_RATE_LIMIT`)
+
+See [docs/SEARCH_API.md](docs/SEARCH_API.md) for the full reference, curl examples, error codes, env vars, attribution policy, and citation guidance.
 
 ### v7.9.3: Visual Similarity Dialog Fixes
 
