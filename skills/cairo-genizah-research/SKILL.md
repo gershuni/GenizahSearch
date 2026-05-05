@@ -147,7 +147,6 @@ Error code → plain-text mapping:
 | `filter_vocabulary_unavailable` | `filter vocabulary not loaded — try without filters` |
 | `query_required` | `query field empty` |
 | `query_too_long` | `query exceeds 1000 chars` |
-| `regex_pattern_too_long` | `regex pattern exceeds 256 chars` |
 | `composition_required` | `composition text empty` |
 | `composition_too_long` | `composition exceeds 20000 chars` |
 | other / unknown | `request failed: <code> — <message>` |

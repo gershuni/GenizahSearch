@@ -27,7 +27,7 @@ Response shape (truncated):
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": 1,
   "request": {"query": "אחד מי יודע", "search_mode": "variants", "limit": 5},
   "results": [
     {
@@ -55,7 +55,7 @@ Response shape (truncated):
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": 1,
   "request": {"sys_id": "990025143260205171", "uid": "IE1_P1_FL1"},
   "manuscript": {"shelfmark": "...", "library_code": "..."},
   "page": {"text": "...", "text_source": "pgp_transcription", "image_url": "..."}
@@ -77,7 +77,7 @@ Response shape (truncated):
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": 1,
   "request": {"text": "...", "chunk_size": 4, "mode": "variants"},
   "results": [
     {"sys_id": "...", "matched_chunks": [], "score": 0.87}
@@ -243,7 +243,7 @@ Notes:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": 1,
   "source": "search",
   "generated_at": "2026-05-05T12:34:56Z",
   "count": 1,
@@ -371,7 +371,7 @@ overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": 1,
   "source": "browse",
   "generated_at": "2026-05-05T12:35:00Z",
   "locator": {
@@ -406,7 +406,7 @@ overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
 
 | Name | Type | Notes |
 | ---- | ---- | ----- |
-| `schema_version` | string | currently `"1.0"` |
+| `schema_version` | integer | currently `1` |
 | `source` | string | `"browse"` |
 | `generated_at` | string | ISO-8601 UTC |
 | `locator` | object | resolved locator (all five fields) |
@@ -481,7 +481,7 @@ The Lab Engine extended-parallels path is OUT OF SCOPE for v7.10 (Phase 80 D-02)
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": 1,
   "source": "parallels",
   "generated_at": "2026-05-05T12:36:00Z",
   "count": 1,

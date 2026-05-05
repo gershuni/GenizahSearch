@@ -8,7 +8,7 @@ Usage: python search.py --query "ויאמר" --search-mode exact --limit 10
 Per SKILL-01 / D-09: GENIZAH_API_BASE env var overrides --base-url.
 This INVERTS the typical CLI convention — env wins.
 
-Valid search_mode values: exact | variants | regex | responsa | title | shelfmark
+Valid search_mode values: exact | variants | responsa | title | shelfmark
 """
 from __future__ import annotations
 import argparse
@@ -26,7 +26,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import _config, throttle  # type: ignore
 
-SEARCH_MODES = {"exact", "variants", "regex", "responsa", "title", "shelfmark"}
+SEARCH_MODES = {"exact", "variants", "responsa", "title", "shelfmark"}
 
 
 def call_search(

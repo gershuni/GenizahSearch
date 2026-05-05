@@ -18,12 +18,10 @@ import sys
 from typing import Any
 
 try:
-    from . import _config
     from .search import call_search
 except ImportError:
     import os
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/..")
-    from scripts import _config  # type: ignore
     from scripts.search import call_search  # type: ignore
 
 
@@ -109,7 +107,7 @@ def _main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--search-mode", default="exact",
-        choices=["exact", "variants", "regex", "responsa", "title", "shelfmark"],
+        choices=["exact", "variants", "responsa", "title", "shelfmark"],
     )
     p.add_argument("--limit", type=int, default=50)
     p.add_argument("--gap", type=int, default=0)
