@@ -19,6 +19,7 @@
 - **v7.8 Structural Foundation** -- Phases 63-66 (shipped 2026-04-15)
 - **v7.9 Decomposition** -- Phases 67-76 (complete 2026-04-17)
 - **v7.10 Search API** -- Phases 77-83 (shipped 2026-05-05)
+- **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (active 2026-05-05)
 
 ## Phases
 
@@ -221,9 +222,54 @@ Public HTTP/JSON research-automation API over the Genizah corpus: `/api/search` 
 
 </details>
 
+### v7.11 CUDL Coverage & Synthetic Inventories (Phases 84-86) -- ACTIVE
+
+Goal: Close the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv so users searching for any CUDL-catalogued shelfmark land on a usable record. Bridge layer normalization (Mosseri/Or/CUL fixes) recovers thousands of already-existing rows; synthetic-row mechanism adds independent libraries.csv entries for the residue of FJMS-only inventories that have no NLI Alma record (e.g. T-S NS 329.96).
+
+#### Phase 84 -- CUDL Shelfmark Normalization
+
+**Goal:** Cross-system shelfmark normalization that bridges CUDL's classmark form (e.g. `mosseriiii27o`, `tsar48.211`, `tsf8.2`) to libraries.csv's variants (`Moss. III,27O`, `T-S Ar. 48.211`, `T-S F 8/002`).
+
+**Requirements:** NORM-01, NORM-02, NORM-03, NORM-04
+
+**Success criteria:**
+1. CUDL Mosseri classmarks resolve to existing `library_code=Mosseri` rows for ≥98% of the 3,883-classmark CUDL Mosseri set.
+2. Cambridge Or. classmarks resolve to existing libraries.csv rows for the `or<num>j<sub>` (letter-suffix) and `or<num>.<collapsed>` (numeric-collapse) patterns.
+3. Slash, comma, dot-after-letter, and leading-zero patterns in CUL shelfmarks normalize uniformly across all sub-collections.
+4. `scripts/scan_cudl_orphans.py` re-run reports a substantially reduced orphan count (target: ≤300 residue) with no regression on the 140K already-matching CUL rows.
+5. Existing browse external-link buttons (CUDL, Manchester, JTS) and shelfmark search produce identical results to v7.10 for non-Mosseri/non-Or shelfmarks.
+
+#### Phase 85 -- Synthetic FJMS Inventory Rows
+
+**Goal:** Independent libraries.csv rows for the ~93 T-S FJMS-only inventories (and any residue from Mosseri/Or post-Phase-84) using Option-2 18-digit synthetic sys_id format (`99` + InventoryId-padded-10 + `000000`).
+
+**Requirements:** SYNTH-01, SYNTH-02, SYNTH-03, SYNTH-04, SYNTH-05, SYNTH-06
+
+**Success criteria:**
+1. `is_synthetic_sys_id()` helper plus encode/decode utilities exist in shared code, with a test suite covering boundary cases (real Alma, synthetic, malformed).
+2. The Tantivy index includes synthetic rows so `T-S NS 329.96` and similar shelfmarks return search results in all modes (text/title/shelfmark/Responsa).
+3. Browse renders synthetic-row pages with FJMS catalogue + bibliography + measurements + CUDL manifest images, gracefully handling absent NLI fields (no empty placeholders, no console errors, no broken links).
+4. FJMS enrichment dialogs (catalogue, bibliography, measurements, free description) populate via InventoryId fallback when sys_id is synthetic.
+5. Lists, exclusions, parallels, comments, corrections round-trip synthetic sys_ids without crashes or silent data loss; web and desktop parity preserved.
+
+#### Phase 86 -- CUDL Coverage Audit
+
+**Goal:** Confirm the milestone closed the gap; produce a durable report and a regression-safe state.
+
+**Requirements:** AUDIT-01, AUDIT-02, AUDIT-03
+
+**Success criteria:**
+1. `scripts/scan_cudl_orphans.py` re-run after Phase 85 reports fewer than 200 truly-orphan CUDL classmarks with reasoned categorization for each.
+2. `reports/cudl_coverage.md` documents the post-milestone breakdown by collection (matched-by-normalization, synthetic-row, residual-unmatched) with methodology and re-run instructions.
+3. The 461 NLI Oxford-mislabel rows fixed in v7.9.4 still resolve correctly; no library_code attribution regressions detected.
+4. Both apps build and pass test suite green; check_docs green; no PostHog error spike post-deploy.
+
 ## Progress
-*No milestone currently in flight. Run `/gsd-new-milestone` to scope v7.11.*
+
+**Phase 84 — CUDL Shelfmark Normalization (next)**
+
+Run `/gsd-discuss-phase 84` (or `/gsd-plan-phase 84` to skip discussion).
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-05 -- v7.10 Search API milestone archived. See .planning/milestones/v7.10-ROADMAP.md for full phase detail and .planning/MILESTONES.md for accomplishments summary.*
+*Last updated: 2026-05-05 -- v7.11 CUDL Coverage milestone scoped. v7.10 Search API archived at .planning/milestones/v7.10-ROADMAP.md.*

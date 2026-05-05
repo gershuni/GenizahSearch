@@ -174,19 +174,25 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - .gitignore root debris cleanup (50→126 lines, untracked root 67→1) with exempted intentional assets -- v7.8
 - Documentation refresh: CODE_INDEX.md v7.8 sections, OPEN_ISSUES.md code review tracking, DEVELOPER_GUIDE.md CI/ruff/deps workflow -- v7.8
 
+- Public HTTP/JSON research-automation API: /api/search, /api/browse, /api/parallels with rate limiting + access mode gate -- v7.10
+- OpenAPI auto-generated at /api/openapi.json + Swagger UI at /api/docs scoped to public endpoints -- v7.10
+- Reference Anthropic Skill cairo-genizah-research with file-locked token-bucket throttle and browse-honesty annotations -- v7.10
+- Security hardening: XFF spoofing protection, fail-closed filter validation, MAX_EXPANDED_TERMS=500 cascade cap, HMAC-hashed PostHog telemetry with persistent IP salt -- v7.10
+- docs/SEARCH_API.md public-facing reference (Stability + Quick Start + Attribution + Changelog) -- v7.10
+
 ### Active
 
-**Milestone v7.10: Search API**
+**Milestone v7.11: CUDL Coverage & Synthetic Inventories**
 
-Goal: Add a thin internal HTTP/JSON surface over the existing search, parallels, and browse pipelines so external automation (first consumer: a Claude skill that sorts/ranks results) can drive GenizahSearch. Helper surface, not platform — narrow endpoints, no public docs, no long-term stability promise.
+Goal: Close the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv so users searching for any CUDL-catalogued shelfmark land on a usable record. Two complementary tracks: bridge-layer normalization that recovers thousands of already-existing rows masked by shelfmark-format mismatches, and synthetic libraries.csv rows for the residue of FJMS-only inventories that have no NLI Alma record (e.g. T-S NS 329.96).
 
 Target features:
-- JSON export from /search and /parallels (button downloads current results as Claude-friendly JSON, no new endpoint required)
-- POST /api/search — narrow internal endpoint over SearchEngine.execute_search with only the fields the consumer needs (query, mode, gap, limit, small filter subset) returning a one-shot Claude-friendly payload (sys_id, shelfmark, title, snippet, short text excerpt, key metadata)
-- POST /api/parallels — companion endpoint for composition/parallels search using the same payload conventions
-- GET /api/browse — drill-down by sys_id + page returning text + metadata + image URLs in one shot (no follow-up calls)
-- Claude skill consumer — first consumer skill that uses search → browse to sort/rank with full text, validating the payload shape end-to-end
-- Auth posture: open + rate-limit + capped result count + capped query length; revisit if abuse appears
+- Mosseri shelfmark normalizer (Moss. III,27O ↔ mosseriiii27o) recovering ~3,800 already-existing rows currently masked by format mismatch
+- Cambridge Or. shelfmark normalizer (Or. 1080 J 15 ↔ or1080j15, Or. 1080.1.1 ↔ or1080.11)
+- CUL shelfmark normalization fixes for slash / comma / dot-after-letter / leading-zero patterns (T-S F 8/002 ↔ tsf8.2, Add. 863, 2 ↔ add863.2, T-S Ar. 48.211 ↔ tsar48.211, T-S NS 329/0014 ↔ tsns329.14)
+- Synthetic libraries.csv rows for ~150-250 FJMS-only inventories using Option-2 18-digit numeric sys_id format (99 + InventoryId-padded-10 + 000000) preserving the existing "starts with 99 + all digits" sys_id contract
+- Browse + search + lists + exclusions + parallels + comments tolerate synthetic sys_ids; FJMS enrichment lookups fall back to InventoryId resolution when sys_id is synthetic
+- CUDL coverage audit report (reports/cudl_coverage.md) with per-collection breakdown of matched / synthetic / unmatched buckets, target residue under 200 truly-orphan classmarks
 
 ### Out of Scope
 
