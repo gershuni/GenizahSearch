@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.9.4
+# Genizah Search Pro 7.10.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -170,7 +170,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.9.4_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.10.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
