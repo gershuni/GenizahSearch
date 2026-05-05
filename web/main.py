@@ -174,8 +174,44 @@ APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
 init_api_routes()
-# Initialize Phase 78 search-helper API routes (POST /api/search; Phases 79/80 will add browse + parallels here)
-init_search_api()
+
+# Phase 83: OpenAPI sub-mount (D-07).
+# NiceGUI ships app.docs_url=None, app.openapi_url=None -- FastAPI auto-docs are
+# DISABLED on the NiceGUI singleton and cannot be enabled post-construction.
+# Solution: build a dedicated sub-app with docs enabled and mount it at /api.
+# Routes registered at path_prefix='' become /search, /browse, /parallels on
+# the sub-app; after mount at /api they are accessible at /api/search etc.
+# /api/docs and /api/openapi.json are built-in FastAPI routes on the sub-app --
+# they are NOT wrapped by @wrap_endpoint and are therefore excluded from the
+# rate limiter (D-07 requirement).
+#
+# servers=[{"url": "/api"}] (Codex MEDIUM): the sub-app's path keys in the
+# OpenAPI spec are /search, /browse, /parallels. The servers entry tells
+# OpenAPI consumers (Swagger UI, generated SDKs) that the operational base
+# URL is /api, so they invoke /api/search at runtime.
+#
+# version=APP_VERSION (Codex MEDIUM): pulled from version.py source-of-truth
+# rather than hard-coding "7.10.0" so future bumps don't go stale.
+from fastapi import FastAPI as _SearchHelperFastAPI
+from version import APP_VERSION as _APP_VERSION
+
+_search_helper_app = _SearchHelperFastAPI(
+    title="GenizahSearch Search-Helper API",
+    version=_APP_VERSION,
+    description=(
+        "Public research-automation API for the Cairo Genizah corpus. "
+        "Three endpoints: keyword/Responsa search, manuscript drill-down, "
+        "and composition-parallels detection. "
+        "Full reference: "
+        "https://github.com/gershuni/GenizahSearch/blob/master-main/docs/SEARCH_API.md"
+    ),
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    redoc_url="/redoc",
+    servers=[{"url": "/api", "description": "Public deployment"}],
+)
+init_search_api(app_override=_search_helper_app, path_prefix="")
+app.mount("/api", _search_helper_app)
 
 # Serve static files for SEO images
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
