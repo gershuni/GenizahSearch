@@ -51,6 +51,8 @@ on every script invocation. v7.10 acceptance run targets Claude Code.
 | `GENIZAH_SKILL_REQ_PER_MIN` | `24` | Throttle ceiling per endpoint bucket. |
 | `GENIZAH_SKILL_BURST` | `5` | Token-bucket burst capacity. |
 
+**API Documentation:** Full public API reference at [`docs/SEARCH_API.md`](../../docs/SEARCH_API.md) · Interactive: [genizahsearch.com/api/docs](https://genizahsearch.com/api/docs)
+
 **Precedence (D-09 — INVERSION of typical CLI convention):** if `GENIZAH_API_BASE`
 is set, it wins over any `--base-url` CLI flag. Rationale: a developer who set the
 env var once for local testing and forgot would otherwise be surprised when CLI

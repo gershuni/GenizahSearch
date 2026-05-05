@@ -154,6 +154,14 @@ Parallel detection based on **Shmidman, Koppel, and Porat (2016)**.
 
 ---
 
+## API
+
+GenizahSearch exposes a public HTTP/JSON API for research automation: keyword/Responsa search (`POST /api/search`), single-manuscript drill-down (`GET /api/browse`), and composition-parallels detection (`POST /api/parallels`). All endpoints are anonymous and rate-limited (30 req/min per endpoint per IP in the default public deployment) and return JSON in a uniform envelope.
+
+Full reference, curl examples, and interactive Swagger UI: [docs/SEARCH_API.md](docs/SEARCH_API.md) · [genizahsearch.com/api/docs](https://genizahsearch.com/api/docs).
+
+---
+
 ## Getting Started
 
 ### Web (Recommended)
