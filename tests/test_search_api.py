@@ -281,6 +281,9 @@ def test_error_envelope_shape(client, populated_state, clean_env):
 def test_filter_resolution_known_good(client, populated_state, clean_env, monkeypatch):
     """Known-good filter values resolve and search executes normally."""
     monkeypatch.setattr(
+        'shared.fjms_service._domain_vocabulary_is_loadable', lambda: True, raising=False,
+    )
+    monkeypatch.setattr(
         'shared.fjms_service.is_valid_domain_token',
         lambda v: v in ('Piyyut', 'Liturgy'), raising=False,
     )
@@ -292,6 +295,9 @@ def test_filter_resolution_known_good(client, populated_state, clean_env, monkey
 
 
 def test_filter_resolution_bogus_value(client, populated_state, clean_env, monkeypatch):
+    monkeypatch.setattr(
+        'shared.fjms_service._domain_vocabulary_is_loadable', lambda: True, raising=False,
+    )
     monkeypatch.setattr(
         'shared.fjms_service.is_valid_domain_token',
         lambda v: False, raising=False,
@@ -318,6 +324,9 @@ def test_filter_resolution_yields_empty_intersection_returns_empty_results_witho
     fake = MagicMock()
     state.searcher = fake
     try:
+        monkeypatch.setattr(
+            'shared.fjms_service._domain_vocabulary_is_loadable', lambda: True, raising=False,
+        )
         monkeypatch.setattr(
             'shared.fjms_service.is_valid_domain_token', lambda v: True, raising=False,
         )
@@ -610,6 +619,9 @@ def test_validate_filter_values_qualified_domain_accepted(monkeypatch):
     through the same logic, NOT a bare get_all_domains() membership check."""
     from shared.fjms_service import validate_filter_values
     monkeypatch.setattr(
+        'shared.fjms_service._domain_vocabulary_is_loadable', lambda: True, raising=False,
+    )
+    monkeypatch.setattr(
         'shared.fjms_service.is_valid_domain_token',
         lambda v: v == 'Other (Bible)' or v == 'Piyyut',
     )
@@ -623,6 +635,9 @@ def test_validate_filter_values_parent_domain_accepted(monkeypatch):
     UNION on ParentDomain (shared/fjms_service.py:976) MUST be accepted."""
     from shared.fjms_service import validate_filter_values
     monkeypatch.setattr(
+        'shared.fjms_service._domain_vocabulary_is_loadable', lambda: True, raising=False,
+    )
+    monkeypatch.setattr(
         'shared.fjms_service.is_valid_domain_token',
         lambda v: v == 'Liturgy',  # parent-domain token
     )
@@ -632,6 +647,9 @@ def test_validate_filter_values_parent_domain_accepted(monkeypatch):
 def test_validate_filter_values_unknown_domain_rejected(monkeypatch):
     """R2-#3: bogus tokens MUST raise APIError(http_status=400)."""
     from shared.fjms_service import validate_filter_values
+    monkeypatch.setattr(
+        'shared.fjms_service._domain_vocabulary_is_loadable', lambda: True, raising=False,
+    )
     monkeypatch.setattr('shared.fjms_service.is_valid_domain_token', lambda v: False)
     with pytest.raises(APIError) as exc_info:
         validate_filter_values({'domains': ['__bogus_domain_xyz__']})
