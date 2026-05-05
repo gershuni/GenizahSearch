@@ -1,5 +1,31 @@
 # Project Milestones: GenizahSearch
 
+## v7.10 Search API (Shipped: 2026-05-05)
+
+**Phases completed:** 8 phases, 37 plans, 52 tasks
+
+**Key accomplishments:**
+
+- Five new AppState fields populated at six execute-time sites + 22-test RED scaffold for shared.search_serializer; latent state.current_search_query bug fixed as a side effect at all three search-execute paths.
+- chunk_hits is now populated inside lab_composition_search and surfaced on the returned items, with 5 tests (3 static contract + 2 behavioral, monkeypatch-driven) locking the contract behaviorally per HIGH-04.
+- shared/search_serializer.py is now the single source of truth for the Claude-friendly JSON payload shape — one module, two top-level functions, one private _serialize_item, all 22 contract tests GREEN, and three review hardening fixes (HIGH-05 singleton-no-close, HIGH-06 millisecond+counter filename, HIGH-07 Oxford-null image_url) baked in.
+- Two new GET handlers (/api/export/json, /api/export/parallels/json) wired to toolbar buttons on /search and /parallels; init_api_routes refactored to accept an app_override parameter so the 5 handler tests register onto a bare FastAPI app instead of mutating the NiceGUI singleton; LOW-01 Hebrew translations added.
+- Phase 77 close-out plan: docs trail updated for the latent `state.current_search_query` bug fixed by Plan 01, the `shared/search_serializer.py` module shipped by Plan 03, and a `chunk_hits` field-name collision uncovered + fixed during the manual smoke check on /search and /parallels JSON downloads. Phase 77 ready for `/gsd-verify-work`.
+- Two pre-existing UAT major-severity gaps closed in one bundled plan: (1) `_reset_search` now clears the global `state` singleton's envelope-echo fields so post-'New Search' exports return 400 instead of emitting prior search results; (2) all 3 search-side export handlers (Excel/Word/JSON) now filter `state.last_results` by uid when checkbox selection is non-empty, with `-selected-N` filename suffix.
+- Files created (verified via `[ -f ... ] && echo FOUND`):
+- Found during:
+- `shared/api_errors.py`:
+- Found during:
+- Public surface:
+- Locked in 38 D-24 tests for GET /api/browse including a real-HTTP search→browse round-trip, plus a D-25 legacy spot check for /api/nli_image_by_sysid; uncovered and fixed a wrap_endpoint signature regression that was producing 422 on every browse request.
+- [Rule 3 — Blocking]
+- Anthropic Skill instruction file (SKILL.md, 204 lines) + human-facing README + Level-3 api_contract.md reference, with REQUIREMENTS.md SKILL-04 R2 enum mismatch closed
+- Status:
+- APPROVED
+- 1. [Rule 2 — missing critical functionality] Web banner copy refresh added as Task 2b
+
+---
+
 ## v7.8 Structural Foundation (Shipped: 2026-04-15)
 
 **Phases completed:** 4 phases (63-66), 9 plans

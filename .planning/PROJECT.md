@@ -8,7 +8,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current State (after v7.8 Structural Foundation shipped)
+## Current State (after v7.10 Search API shipped)
+
+**Shipped:** v7.10 Search API (2026-05-05)
+- Public HTTP/JSON research-automation API: `POST /api/search`, `GET /api/browse`, `POST /api/parallels`
+- Security hardening: per-IP rate limiter (default 30 req/min), `SEARCH_API_MODE` access gate (open/localhost-only/disabled), uniform error envelope, XFF spoofing protection, fail-closed filter validation, MAX_EXPANDED_TERMS=500 Responsa cascade cap, HMAC-hashed PostHog telemetry with persistent IP salt
+- OpenAPI auto-generated at `/api/openapi.json` + Swagger UI at `/api/docs` + ReDoc at `/api/redoc` — sub-mounted, scoped to the 3 search-helper endpoints, legacy `/api/*` excluded
+- Reference Anthropic Skill `cairo-genizah-research` (skills/cairo-genizah-research/) — staged phrase discovery, browse drill-down, R2 honesty annotations, file-locked token-bucket throttle (≤24 req/min/bucket; configurable via `GENIZAH_SKILL_REQ_PER_MIN`)
+- `docs/SEARCH_API.md` reframed public-facing: Stability + Quick Start + Attribution + Changelog
+- 8 phases, 37 plans, 36 in-traceability + 8 PUBLIC-* requirements satisfied
+- Web-only release: no git tag, no GitHub Release object (desktop-poll prompt avoidance per project convention)
+- Known follow-ups carried to v7.11: skill clarification turn, broader-than-domain mode, API gaps (uid/language/parallels-apostrophe/filter-vocab), rate-limiter sustained-load soak, SEARCH_API_MODE flip drill
 
 **Shipped:** v7.8 Structural Foundation (2026-04-15)
 - CI safety net: GitHub Actions (Ubuntu + Windows matrix) runs ruff + scripts/check_docs.py + pytest on every push/PR
