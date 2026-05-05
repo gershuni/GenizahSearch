@@ -4,7 +4,7 @@ milestone: v7.10
 milestone_name: Search API
 status: executing
 stopped_at: Phase 83 context gathered
-last_updated: "2026-05-05T10:03:31.427Z"
+last_updated: "2026-05-05T10:08:07.030Z"
 progress:
   total_phases: 8
   completed_phases: 7
@@ -20,13 +20,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.10 milestone complete; public-API release follow-up pending
+**Current focus:** Phase 83 — public-release
 
 ## Current Position
 
-Phase: 82 (internal-documentation) — APPROVED 2026-05-05 (cold-reader walkthrough)
-Plan: 4 of 4 complete
-Status: Ready to execute
+Phase: 83 (public-release) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 83
 
 Progress: [##############] 100% (7/7 phases; 32/32 plans complete)
 
