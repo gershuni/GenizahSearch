@@ -490,6 +490,103 @@ def _resolve_text_cap(requested: Optional[int]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Phase 83 -- OpenAPI metadata helpers (Codex HIGH concern #2).
+#
+# Background: the route handlers below use FastAPI's raw `Request` argument
+# and parse Pydantic models manually inside the body (search_api.py rationale
+# at the original lines 444-448). FastAPI therefore cannot infer the request
+# body / query params / response schemas from the handler signature -- without
+# explicit OpenAPI metadata the spec at /api/openapi.json renders empty
+# requestBody objects and Swagger UI displays buttonless endpoints.
+#
+# Solution per Codex's "typed wrapper" suggestion (Option B): keep handler
+# bodies/signatures byte-identical and declare OpenAPI metadata explicitly via
+# `openapi_extra=` on each route decorator. The metadata is built from each
+# Pydantic model's `model_json_schema()`. This changes the spec only -- not
+# the runtime parsing path -- so Phase 78/79/80/81A behavior is preserved.
+# ---------------------------------------------------------------------------
+
+def _openapi_request_body(model_cls) -> dict:
+    """Build an OpenAPI requestBody object from a Pydantic model.
+
+    Used for POST /search and POST /parallels.
+    """
+    schema = model_cls.model_json_schema(ref_template="#/components/schemas/{model}")
+    return {
+        "required": True,
+        "content": {
+            "application/json": {"schema": schema},
+        },
+    }
+
+
+def _openapi_query_parameters(model_cls) -> list:
+    """Build OpenAPI 'parameters' (in: query) list from a Pydantic model.
+
+    Used for GET /browse which takes query params, not a body.
+    """
+    schema = model_cls.model_json_schema(ref_template="#/components/schemas/{model}")
+    props = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    params = []
+    for name, prop_schema in props.items():
+        params.append({
+            "name": name,
+            "in": "query",
+            "required": name in required,
+            "description": prop_schema.get("description", ""),
+            "schema": {k: v for k, v in prop_schema.items() if k != "description"},
+        })
+    return params
+
+
+_ENVELOPE_SUCCESS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "string", "example": "1.0"},
+        "request": {"type": "object", "description": "Echo of validated request input."},
+    },
+    "required": ["schema_version", "request"],
+    "additionalProperties": True,
+}
+_ENVELOPE_ERROR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "error": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "ERROR_CODES key (see shared/api_errors.py)."},
+                "message": {"type": "string", "description": "Human-readable, sanitized."},
+            },
+            "required": ["code", "message"],
+        },
+    },
+    "required": ["error"],
+}
+
+
+def _openapi_responses_for(success_summary: str) -> dict:
+    return {
+        "200": {
+            "description": success_summary,
+            "content": {"application/json": {"schema": _ENVELOPE_SUCCESS_SCHEMA}},
+        },
+        "400": {
+            "description": "Validation error (e.g. invalid_request, query_required, invalid_combination, unresolvable_filter_value).",
+            "content": {"application/json": {"schema": _ENVELOPE_ERROR_SCHEMA}},
+        },
+        "429": {
+            "description": "Rate limit exceeded (rate_limited).",
+            "content": {"application/json": {"schema": _ENVELOPE_ERROR_SCHEMA}},
+        },
+        "503": {
+            "description": "Mode-gate disabled or upstream service unavailable.",
+            "content": {"application/json": {"schema": _ENVELOPE_ERROR_SCHEMA}},
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Idempotent registrar (Concern #10 / R2-#2).
 # ---------------------------------------------------------------------------
 
@@ -529,7 +626,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
     # target_app. Envelope rewriting happens INSIDE the endpoint via
     # _build_envelope_response, called from per-endpoint try/except branches.
 
-    @target_app.post(f'{path_prefix}/search')
+    @target_app.post(
+        f'{path_prefix}/search',
+        summary="Search Cairo Geniza manuscripts (keyword / Responsa / title / shelfmark).",
+        tags=["search"],
+        openapi_extra={
+            "requestBody": _openapi_request_body(SearchRequest),
+            "responses": _openapi_responses_for("Ranked search results envelope."),
+        },
+    )
     async def search_endpoint(request: Request):
         """POST /api/search — Phase 78 hardened search endpoint.
 
@@ -865,7 +970,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     'thread-local downgrade-meta drain failed in finally',
                 )
 
-    @target_app.get(f'{path_prefix}/browse')
+    @target_app.get(
+        f'{path_prefix}/browse',
+        summary="Drill down to a single manuscript page (text + metadata + image).",
+        tags=["browse"],
+        openapi_extra={
+            "parameters": _openapi_query_parameters(BrowseRequest),
+            "responses": _openapi_responses_for("Manuscript page envelope."),
+        },
+    )
     @wrap_endpoint(endpoint_name='browse')
     async def browse_endpoint(request: Request, *, captured_state: dict):
         """GET /api/browse -- Phase 79 drill-down endpoint.
@@ -989,7 +1102,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
         return envelope
 
-    @target_app.post(f'{path_prefix}/parallels')
+    @target_app.post(
+        f'{path_prefix}/parallels',
+        summary="Find composition parallels via sliding-window chunk matching.",
+        tags=["parallels"],
+        openapi_extra={
+            "requestBody": _openapi_request_body(ParallelsRequest),
+            "responses": _openapi_responses_for("Ranked parallel-witness groups envelope."),
+        },
+    )
     @wrap_endpoint(endpoint_name='parallels')
     async def parallels_endpoint(request: Request, *, captured_state: dict):
         """POST /api/parallels — Phase 80 composition/parallels endpoint.
