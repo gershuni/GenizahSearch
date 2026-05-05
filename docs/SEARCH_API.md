@@ -115,7 +115,6 @@ characters are matched literally. Tokens are whitespace-separated; modifiers sta
 | stacked modifiers | `%#שלום#` | plene/defective + prefixes + suffixes (any order of `%` and leading `#`) |
 | OR group | `(עץ/אילן)` | match any of the alternatives at that position |
 | modifier + OR | `#(שלום/שלומות)` | grammatical prefixes applied to each alternative |
-| inline alternation | `אירו(ס/ש)ין` | one token, alternation inside a word |
 | negation | `-word` | exclude results containing this token (modifier prefix `-` may combine with `%`/`#`) |
 | per-pair gap | `word1 [3] word2` | allow up to 3 intervening tokens between the surrounding pair (overrides top-level `gap` for that pair) |
 | line constraint | `\|word` / `word\|` | token must be at the start / end of a manuscript line |
