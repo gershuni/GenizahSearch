@@ -227,7 +227,7 @@ back-nav bugfix.
 - [x] **Phase 80: /api/parallels** (complete 2026-05-01) — Companion search-side endpoint reusing the locator and hardening shell, sequenced after browse so the locator round-trip is already validated before a second producer is added
 - [x] **Phase 81A: Minimal API Contract Expansion** (complete 2026-05-04) — UI-aligned `search_mode` enum + Responsa option flags + request echo block. Replaces conflated `mode` field. Internal/undocumented; breaking change.
 - [x] **Phase 81B: Claude Skill Consumer** (complete 2026-05-05, APPROVED WITH NOTES) — Reference Anthropic Skill at `skills/cairo-genizah-research/` (SKILL.md + 11 scripts) with staged phrase discovery, browse drill-down, R2 honesty annotations, file-locked token-bucket throttle. v7.10 acceptance harness met.
-- [ ] **Phase 82: Internal Documentation** — `docs/SEARCH_API.md` and `CLAUDE.md` env-var updates capturing the as-shipped contract (including 81A surface and the temporary `/api/parallels.mode` ↔ `/api/search.search_mode` inconsistency)
+- [x] **Phase 82: Internal Documentation** (complete 2026-05-05, APPROVED) — `docs/SEARCH_API.md` (664 lines) and CLAUDE.md env-var deltas capturing the as-shipped v7.10 contract; cold-reader walkthrough surfaced + fixed 2 gaps (Responsa query-string syntax table; inline-alternation row removed as unsupported). Live-verified against localhost.
 - ⏸ *Phase 81C — Long-Running Parallels Job API: deferred to v7.11 unless explicitly promoted. Sketched in `81-RESCOPE.md` §5.*
 
 ## Phase Details

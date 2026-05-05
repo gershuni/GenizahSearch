@@ -4,14 +4,14 @@ milestone: v7.10
 milestone_name: Search API
 status: executing
 stopped_at: context exhaustion at 91% (2026-05-01)
-last_updated: "2026-05-05T04:53:43.375Z"
-last_activity: 2026-05-05 -- Phase 82 planning complete
+last_updated: "2026-05-05T08:50:00.000Z"
+last_activity: 2026-05-05 -- Phase 82 APPROVED, v7.10 internal documentation complete
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 32
-  completed_plans: 28
-  percent: 88
+  completed_plans: 32
+  percent: 100
 ---
 
 # Project State
@@ -21,18 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 81B — claude-skill-consumer
+**Current focus:** v7.10 milestone complete; public-API release follow-up pending
 
 ## Current Position
 
-Phase: 81B (claude-skill-consumer) — VERIFIED PASSED 2026-05-05 (APPROVED WITH NOTES)
-Plan: 5 of 5 complete
-Status: Ready to execute
-Last activity: 2026-05-05 -- Phase 82 planning complete
+Phase: 82 (internal-documentation) — APPROVED 2026-05-05 (cold-reader walkthrough)
+Plan: 4 of 4 complete
+Status: v7.10 milestone functionally complete
 
-Progress: [############] 86% (6/7 phases verified; 28/28 plans complete)
+Progress: [##############] 100% (7/7 phases; 32/32 plans complete)
 
-Next step: `/gsd-plan-phase 82` for Internal Documentation (DOC-01, DOC-02) — last phase of v7.10 milestone.
+Next step: scope a follow-up phase for public API release (deploy master-main; reframe doc; security review). Developer wants to ship API publicly per 2026-05-05 conversation.
 
 **Phase queue (v7.10):**
 
@@ -42,9 +41,9 @@ Next step: `/gsd-plan-phase 82` for Internal Documentation (DOC-01, DOC-02) — 
 4. ✅ **Phase 80** — /api/parallels (API-02) — VERIFIED 2026-05-01 (80-VERIFICATION.md, 4/4 SCs)
 5. ✅ **Phase 81A** — API Contract Expansion (API-EXPAND-01..08) — VERIFIED 2026-05-04 (81A-VERIFICATION.md, 8/8 must-haves)
 6. ✅ **Phase 81B** — Claude Skill Consumer (SKILL-01..06) — VERIFIED 2026-05-05 (VERIFICATION.md, 6/6 requirements; APPROVED WITH NOTES per ACCEPTANCE-RUN.md)
-7. **Phase 82** — Internal Documentation (DOC-01, DOC-02) ← next planning target
+7. ✅ **Phase 82** — Internal Documentation (DOC-01, DOC-02) — APPROVED 2026-05-05 (82-04-SUMMARY.md, cold-reader walkthrough; 2 gaps fixed inline: Responsa query-string syntax table added, inline-alternation row removed)
 
-Recommended next: `/gsd-plan-phase 82`.
+Recommended next: scope follow-up phase for public API release.
 
 ## Performance Metrics
 
