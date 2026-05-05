@@ -18,7 +18,7 @@
 - **v7.7 Volume-Aware Browse** -- Phases 58-61 (shipped 2026-04-01)
 - **v7.8 Structural Foundation** -- Phases 63-66 (shipped 2026-04-15)
 - **v7.9 Decomposition** -- Phases 67-76 (complete 2026-04-17)
-- **v7.10 Search API** -- Phases 77-82 (active, started 2026-04-27)
+- **v7.10 Search API** -- Phases 77-83 (active, started 2026-04-27)
 
 ## Phases
 
@@ -354,13 +354,18 @@ back-nav bugfix.
 ### Phase 83: Public Release of Search API
 **Goal**: Promote the v7.10 search-helper endpoints (`/api/search`, `/api/browse`, `/api/parallels`) from internal-undocumented to a publicly documented and supported API surface — gated on a security audit, doc reframing, production deploy of `master-main`, and a discoverable link from `README.md`.
 **Depends on**: Phase 82 (internal docs as as-shipped baseline to reframe).
-**Requirements**: TBD (defined during /gsd-plan-phase 83)
-**Plans**: TBD (defined during /gsd-plan-phase 83)
+**Requirements**: PUBLIC-01, PUBLIC-02, PUBLIC-03, PUBLIC-04, PUBLIC-05, PUBLIC-06, PUBLIC-07, PUBLIC-08
+**Plans:** 5 plans
+- [ ] 83-01-PLAN.md -- Security audit (83-SECURITY.md covers D-05 a-f); Wave 0 RED test stubs (3 new test files)
+- [ ] 83-02-PLAN.md -- docs/SEARCH_API.md reframe (banner removed, Stability/Quick Start/Attribution/Changelog added)
+- [ ] 83-03-PLAN.md -- OpenAPI sub-mount: init_search_api path_prefix + web/main.py search_helper_app + Pydantic Field descriptions
+- [ ] 83-04-PLAN.md -- README.md "API" section (English) + SKILL.md public docs reference
+- [ ] 83-05-PLAN.md -- Version 7.10.0 bump + CHANGELOG + CLAUDE.md entry + pre-deploy gate (manual) + deploy + close-out
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81A -> 81B -> 82
+Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81A -> 81B -> 82 -> 83
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -371,10 +376,12 @@ Phases execute in numeric order: 77 -> 78 -> 79 -> 80 -> 81A -> 81B -> 82
 | 81A. Minimal API Contract Expansion | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
 | 81B. Claude Skill Consumer | 0/0 | Not started — rescoped 2026-05-02 from original Phase 81 | - |
 | 82. Internal Documentation | 0/0 | Not started | - |
-| 83. Public Release of Search API | 0/0 | Not planned yet (added 2026-05-05) | - |
+| 83. Public Release of Search API | 0/5 | Planned (2026-05-05) | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-02 -- Phase 81 rescoped into Phase 81A (Minimal API Contract Expansion) + Phase 81B (Claude Skill Consumer) after live testing showed the API was not expressive enough to power witness-discovery skills. Phase 81C (long-running parallels job API) deferred to v7.11. Milestone phase count 6 → 7. Full rationale, decisions, and acceptance criteria in `.planning/phases/81B-claude-skill-consumer/81-RESCOPE.md` (rev 3, APPROVED 2026-05-02).*
+*Last updated: 2026-05-05 -- Phase 83 planned: 5 plans, Wave 1 (01/02/03 parallel) + Wave 2 (04) + Wave 3 (05). PUBLIC-01..PUBLIC-08 requirements defined. Execution order updated to include Phase 83.
+
+*Previous update: 2026-05-02 -- Phase 81 rescoped into Phase 81A (Minimal API Contract Expansion) + Phase 81B (Claude Skill Consumer) after live testing showed the API was not expressive enough to power witness-discovery skills. Phase 81C (long-running parallels job API) deferred to v7.11. Milestone phase count 6 → 7. Full rationale, decisions, and acceptance criteria in `.planning/phases/81B-claude-skill-consumer/81-RESCOPE.md` (rev 3, APPROVED 2026-05-02).*
 
 *Previous update: 2026-04-28 -- Plan 77-05 complete; Phase 77 ready for /gsd-verify-work. Manual smoke-check on /search and /parallels JSON downloads PASSED after 4 follow-on commits resolved a chunk_hits field-name collision uncovered during smoke verification (Plan 02 had extended lab_composition_search to populate chunk_hits per uid as a list-of-tuples (D-13 Path A), but search_composition_logic had used chunk_hits since 2026-03-12 as an int counter — both producers wrote to the same per-uid item dict, so the serializer crashed with `'int' object is not iterable` on standard-mode parallels results). Fix chain: baf481fb (defensive isinstance guard + logger.exception), c24fcc48 (mirrored list-of-tuples shape into standard-mode + renamed int counter to chunk_count + fixed parallels rep-field mapping; +4 tests), 2e2d2b75 (surfaced Tantivy score on search results — was 0.0 in JSON because results.append at genizah_core.py:7542+:7559 never recorded score var; per-uid _chunk_hit_keys dedup), 327aea31 (group-level dedup keyed on (chunk_index, manuscript_snippet) for cross-uid duplicates from NLI multi-uid cataloging like Karaite prayer books; matches[] sorted by chunk_index ascending; +2 tests). Final test count: 1201 passed / 8 skipped (was 1162 at phase start → +39 new tests across the 5 plans). Cumulative phase commit count: 20 (14 plan-scope + 6 follow-on smoke-check fixes). Phase gate satisfied: pytest green, CI green (assumed pending push), manual download spot-check on /search and /parallels signed off.*
