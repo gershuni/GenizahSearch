@@ -149,6 +149,8 @@ SEARCH_API_POSTHOG_SAMPLE_N=1 (optional - capture every Nth API request to PostH
 SEARCH_API_BROWSE_TIMEOUT=1.0 (per-source enrichment timeout for /api/browse PGP/FJMS/NLI fetches in seconds; default: 1.0)
 SEARCH_API_BROWSE_CORE_TIMEOUT=2.0 (core BrowsePage fetch timeout for /api/browse in seconds; default: 2.0; previously no core timeout existed — added per Phase 79 R-01 to prevent executor pinning on a hung Tantivy reader)
 SEARCH_API_BROWSE_TEXT_CAP=4000 (default char cap for transcription text in /api/browse; per-request override via ?text_cap=N bounded by [100, 10000]; default: 4000)
+GENIZAH_API_BASE=https://genizahsearch.com (skill-side only; cairo-genizah-research skill consumer base URL; overrides --base-url CLI flag per skill D-09 env-wins; consumed by skills/cairo-genizah-research/scripts/_config.py)
+GENIZAH_SKILL_REQ_PER_MIN=24 (skill-side only; cairo-genizah-research skill self-throttle ceiling per endpoint bucket, default 24 req/min leaving 6 rpm headroom under server's 30 rpm SEARCH_API_RATE_LIMIT; SKILL-06)
 ```
 
 ## Testing
