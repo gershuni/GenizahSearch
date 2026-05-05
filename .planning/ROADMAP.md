@@ -344,7 +344,11 @@ back-nav bugfix.
   2. `CLAUDE.md` lists the new env vars (`SEARCH_API_MODE` and the rate-limit knobs) in its environment-variables section so future agents discover them through the standard project context; `README.md` is intentionally untouched.
   3. A reader unfamiliar with v7.10 can, using only `docs/SEARCH_API.md`, send a valid `/api/search` request with `search_mode` and (where applicable) `responsa_options`, follow the locator to `/api/browse`, and predict the error envelope returned by an invalid filter or invalid combination — without reading the source code.
 **Phase gate**: scripts/check_docs.py green; doc walkthrough by a reader who did not implement the milestone.
-**Plans**: TBD
+**Plans:** 4 plans
+- [ ] 82-01-PLAN.md -- Audit pass: produce 82-CONTRACT-AUDIT.md scratch doc capturing as-shipped surface (req/resp shapes, env vars, error codes, warnings, naming inconsistency)
+- [ ] 82-02-PLAN.md -- Author docs/SEARCH_API.md from the audit (DOC-01); 14 H2 sections, JSON examples, internal-helper disclaimer; not linked from README.md
+- [ ] 82-03-PLAN.md -- Patch CLAUDE.md env-var block with skill-side deltas GENIZAH_API_BASE + GENIZAH_SKILL_REQ_PER_MIN (DOC-02); README.md byte-unchanged
+- [ ] 82-04-PLAN.md -- Phase gate: scripts/check_docs.py green + cold-reader walkthrough by developer (SC3 falsification test)
 
 ## Progress
 
