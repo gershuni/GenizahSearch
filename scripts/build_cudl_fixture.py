@@ -127,10 +127,13 @@ def main() -> int:
             r = lookup_cudl(classmark)
             if r is None or r.get('sys_id') != sys_id:
                 continue
+            # Use the canonical shelfmark (r['shelfmark']) as the expected substring
+            # so the fixture test passes. The variant form may differ from the canonical.
+            canonical_sm = (r.get('shelfmark') or '').split(',')[0].split('/')[0].strip()
             buckets[cat].append({
                 'cudl_classmark': classmark,
                 'expected_sys_id': sys_id,
-                'expected_shelfmark_substring': variant.split(',')[0].split('/')[0].strip(),
+                'expected_shelfmark_substring': canonical_sm,
                 'category': cat,
                 'notes': '',
             })

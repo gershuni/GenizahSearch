@@ -1,0 +1,15 @@
+{
+  "cases": {
+    "AIU IX A 1": "aiuixa1",
+    "Antonin 906": "antonin906",
+    "ENA NS 1.4": "enans1.4",
+    "ENA-MS 2956": "ena2956",
+    "Gaster 86": "gaster86",
+    "Halper 331": "genizah331",
+    "Heb. e. 30/41": "hebe30.41",
+    "MS. Heb. a.1": "heba1",
+    "MS. Heb. b.10/26": "hebb10.26",
+    "Yevr. III B 1093": "evriiib1093"
+  },
+  "source_sha256": "a2aba91669fa8a115cb47298ce24ba2eca69dec00314416a0bea8c08ac057859"
+}
