@@ -31,31 +31,11 @@ LIBRARIES_CSV = ROOT / "libraries.csv"
 NLI_CROSSREF = ROOT / "nli_data" / "nli_crossref.db"
 REPORTS_DIR = ROOT / "reports"
 
-NUM_RE = re.compile(r"^(.+?)(\d+)$")
-
-
-def normalize(s: str) -> str:
-    """Normalize a shelfmark for CUDL-vs-libraries.csv matching.
-
-    CUDL collapses dots between letter and digit groups (e.g. ``T-S Ar. 48.211``
-    → ``tsar48.211``) but keeps dots between numeric groups. Mirror that:
-    drop the dot when it sits at a letter↔digit boundary, keep it between
-    digits.
-    """
-    s = (s or "").strip().lower()
-    s = re.sub(r"\s+", "", s)
-    s = s.replace("ms.", "").replace("-", "").replace('"', "").replace("'", "")
-    # Slashes and commas separate numeric groups in libraries.csv but CUDL
-    # uses dots (e.g. "T-S F 8/002" → "tsf8.2", "Add. 863, 2" → "add863.2").
-    s = s.replace("/", ".").replace(",", ".")
-    # Drop dots adjacent to a letter on either side (so "ar.48" -> "ar48",
-    # "i.3" -> "i3", but "48.211" stays "48.211").
-    s = re.sub(r"(?<=[a-z])\.|\.(?=[a-z])", "", s)
-    # Strip leading zeros from numeric segments ("329.0014" → "329.14",
-    # "8.002" → "8.2") so libraries.csv slash-zero forms match CUDL.
-    s = re.sub(r"(?<=\.)0+(\d)", r"\1", s)
-    s = re.sub(r"^0+(\d)", r"\1", s)
-    return s
+# Phase 84: import from shared.shelfmark_bridge — one source of truth (site #4, D-08).
+import sys as _sys
+if str(ROOT) not in _sys.path:
+    _sys.path.insert(0, str(ROOT))
+from shared.shelfmark_bridge import cudl_normalize as normalize, NUM_RE  # noqa: F401
 
 
 def main() -> int:
