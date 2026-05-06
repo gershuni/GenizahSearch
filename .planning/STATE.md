@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v7.11
 milestone_name: CUDL Coverage & Synthetic Inventories
 status: executing
-last_updated: "2026-05-06T10:56:02.204Z"
+last_updated: "2026-05-06T11:23:45.830Z"
 last_activity: 2026-05-06 -- Phase 84 planning complete
 progress:
   total_phases: 85
