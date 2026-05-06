@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v7.11
 milestone_name: CUDL Coverage & Synthetic Inventories
 status: executing
-last_updated: "2026-05-06T11:59:12.694Z"
-last_activity: 2026-05-06 -- Phase 84 execution started
+last_updated: "2026-05-06T12:30:00.000Z"
+last_activity: 2026-05-06 -- Phase 84 execution complete (5/5 plans, VERIFICATION human_needed 4/5)
 progress:
   total_phases: 85
-  completed_phases: 81
+  completed_phases: 82
   total_plans: 269
-  completed_plans: 263
-  percent: 98
+  completed_plans: 268
+  percent: 99
 ---
 
 # Project State
@@ -20,20 +20,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-05)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 84 — cudl-shelfmark-normalization
+**Current focus:** v7.11 Phase 85 — Synthetic FJMS Inventory Rows (next)
 
 ## Current Position
 
-Phase: 84 (cudl-shelfmark-normalization) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 84
-Last activity: 2026-05-06 -- Phase 84 execution started
+Phase: 84 (cudl-shelfmark-normalization) — COMPLETE (5/5 plans)
+Plan: —
+Status: Phase 84 complete; VERIFICATION 4/5 (1 deferred to Phase 86, 1 human_needed Mosseri 98% rate vs nli_crossref.db)
+Last activity: 2026-05-06 -- Phase 84 execution complete
 
-Progress: [..........] 0% (0/3 phases)
+Progress: [###.......] 33% (1/3 phases)
 
 **Phase queue (v7.11):**
 
-1. ⏭ **Phase 84** — CUDL Shelfmark Normalization (NORM-01..04). Bridge-layer normalizers for Mosseri / Or. / CUL slash-comma-zero patterns. No schema change.
+1. ✅ **Phase 84** — CUDL Shelfmark Normalization (NORM-01..04). Bridge-layer normalizers shipped: shared/shelfmark_bridge.py, alias index, leading-zero audit, NORM-04 regression guard.
 2. ⏭ **Phase 85** — Synthetic FJMS Inventory Rows (SYNTH-01..06). Option-2 18-digit numeric sys_id format. Touches search index, browse, lists, exclusions, parallels, FJMS enrichment fallback.
 3. ⏭ **Phase 86** — CUDL Coverage Audit (AUDIT-01..03). Final scan, report, regression check.
 
@@ -79,6 +79,6 @@ Progress: [..........] 0% (0/3 phases)
 
 ## Next Step
 
-`/gsd-discuss-phase 84` to gather context for CUDL normalization phase.
+`/gsd-discuss-phase 85` (Synthetic FJMS Inventory Rows) or `/gsd-plan-phase 85` to start the next phase.
 
-Or `/gsd-plan-phase 84` to skip discussion and plan directly (scope is well-defined from investigation).
+Optional: with `nli_crossref.db` available locally, run `pytest tests/test_shelfmark_bridge.py::TestScanDiffBaselineStillResolves -v` to confirm the human-verification item (Mosseri 98% end-to-end resolution rate).
