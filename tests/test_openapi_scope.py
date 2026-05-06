@@ -93,6 +93,54 @@ def test_openapi_request_schemas_populated():
 
 
 @pytest.mark.skipif(not _IMPORT_OK, reason="web.main not importable in this env")
+def test_openapi_request_schemas_have_no_unresolved_component_refs():
+    """Route-level request schemas must be self-contained for Swagger UI.
+
+    The API handlers parse raw Request objects, so their requestBody schemas are
+    injected through openapi_extra instead of FastAPI-owned Pydantic body
+    parameters. FastAPI therefore does not hoist nested Pydantic models into
+    top-level components. A request schema containing refs such as
+    #/components/schemas/FiltersModel will render in the raw JSON but break
+    Swagger UI expansion with a resolver error.
+    """
+    client = TestClient(nicegui_app)
+    resp = client.get("/api/openapi.json")
+    assert resp.status_code == 200
+    spec = resp.json()
+    paths = spec.get("paths", {})
+
+    def _path_entry(name):
+        return paths.get(f"/{name}") or paths.get(f"/api/{name}") or {}
+
+    def _walk(node):
+        if isinstance(node, dict):
+            yield node
+            for value in node.values():
+                yield from _walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from _walk(value)
+
+    for name in ("search", "parallels"):
+        schema = (
+            _path_entry(name)
+            .get("post", {})
+            .get("requestBody", {})
+            .get("content", {})
+            .get("application/json", {})
+            .get("schema", {})
+        )
+        refs = [
+            item["$ref"]
+            for item in _walk(schema)
+            if isinstance(item.get("$ref"), str)
+        ]
+        assert refs == [], (
+            f"POST /{name} request schema contains unresolved route-level refs: {refs}"
+        )
+
+
+@pytest.mark.skipif(not _IMPORT_OK, reason="web.main not importable in this env")
 def test_swagger_ui_renders():
     """GET /api/docs must return 200 with Swagger UI HTML."""
     client = TestClient(nicegui_app)

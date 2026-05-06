@@ -506,12 +506,52 @@ def _resolve_text_cap(requested: Optional[int]) -> int:
 # the runtime parsing path -- so Phase 78/79/80/81A behavior is preserved.
 # ---------------------------------------------------------------------------
 
+def _inline_schema_refs(schema: dict) -> dict:
+    """Inline local Pydantic ``$defs`` references for route-level OpenAPI extras.
+
+    FastAPI only hoists schemas into top-level ``components`` when it owns the
+    Pydantic body parameter. These endpoints parse raw ``Request`` objects and
+    attach request schemas via ``openapi_extra``, so any generated references to
+    ``#/components/schemas/...`` would point at a missing top-level section.
+    Keeping the requestBody schema self-contained avoids Swagger UI resolver
+    errors while preserving the runtime request contract.
+    """
+    defs = schema.get("$defs") or {}
+
+    def resolve(node):
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            marker = "#/$defs/"
+            if ref.startswith(marker):
+                name = ref[len(marker):]
+                target = defs.get(name)
+                if isinstance(target, dict):
+                    merged = {k: v for k, v in node.items() if k != "$ref"}
+                    resolved = resolve(target)
+                    if merged:
+                        resolved = {**resolved, **resolve(merged)}
+                    return resolved
+        return {
+            key: resolve(value)
+            for key, value in node.items()
+            if key != "$defs"
+        }
+
+    return resolve(schema)
+
+
 def _openapi_request_body(model_cls) -> dict:
     """Build an OpenAPI requestBody object from a Pydantic model.
 
     Used for POST /search and POST /parallels.
     """
-    schema = model_cls.model_json_schema(ref_template="#/components/schemas/{model}")
+    schema = _inline_schema_refs(
+        model_cls.model_json_schema(ref_template="#/$defs/{model}")
+    )
     return {
         "required": True,
         "content": {
