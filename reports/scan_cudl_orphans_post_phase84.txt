@@ -1,0 +1,5 @@
+CUL rows in libraries.csv: 140,170
+Distinct normalized variants: 271,464
+CUDL manifests: 141,368
+Wrote C:\GenizahSearch\.claude\worktrees\agent-a2740ebcdc0a73400\reports\cudl_orphans_all_post_phase84.csv: 6,052 rows
+Wrote C:\GenizahSearch\.claude\worktrees\agent-a2740ebcdc0a73400\reports\cudl_orphans_with_neighbor_post_phase84.csv: 104 rows

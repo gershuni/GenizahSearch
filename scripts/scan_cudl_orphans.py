@@ -39,6 +39,12 @@ from shared.shelfmark_bridge import cudl_normalize as normalize, NUM_RE  # noqa:
 
 
 def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="Scan for CUDL classmarks absent from libraries.csv.")
+    parser.add_argument('--out-suffix', default='', help="Suffix appended to output CSV filenames (e.g. _post_phase84)")
+    args = parser.parse_args()
+    suffix = args.out_suffix
+
     REPORTS_DIR.mkdir(exist_ok=True)
 
     norm_to_sys: dict[str, list[str]] = defaultdict(list)
@@ -107,14 +113,14 @@ def main() -> int:
                 }
             )
 
-    all_path = REPORTS_DIR / "cudl_orphans_all.csv"
+    all_path = REPORTS_DIR / f"cudl_orphans_all{suffix}.csv"
     with all_path.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["cudl_label", "manifest_url", "normalized_shelfmark"])
         w.writerows(all_orphans)
     print(f"Wrote {all_path}: {len(all_orphans):,} rows")
 
-    nb_path = REPORTS_DIR / "cudl_orphans_with_neighbor.csv"
+    nb_path = REPORTS_DIR / f"cudl_orphans_with_neighbor{suffix}.csv"
     with nb_path.open("w", encoding="utf-8", newline="") as f:
         if with_neighbor:
             w = csv.DictWriter(f, fieldnames=list(with_neighbor[0].keys()))
