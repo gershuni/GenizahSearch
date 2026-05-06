@@ -4143,7 +4143,7 @@ class MetadataManager:
                 shelfmark = current_meta.get('shelfmark', '')
                 norm_sm = normalize_shelfmark(shelfmark) if shelfmark else ''
                 current_meta['image_source_info'] = crossref_svc.get_image_sources(
-                    system_id, normalized_shelfmark=norm_sm
+                    system_id, normalized_shelfmark=norm_sm, shelfmark=shelfmark
                 )
                 current_meta['folio_images'] = crossref_svc.get_folio_images(system_id)
 

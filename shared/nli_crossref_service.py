@@ -891,18 +891,31 @@ class NliCrossrefService:
 
     # ── Image Availability Indicator (Phase 31: IMG-03) ─────────────
 
-    def get_image_sources(self, sys_id: str, normalized_shelfmark: str = None) -> dict:
+    def get_image_sources(
+        self,
+        sys_id: str,
+        normalized_shelfmark: str = None,
+        shelfmark: Optional[str] = None,
+    ) -> dict:
         """
         Quick check of which image sources exist for a manuscript.
 
         Args:
             sys_id: The Alma/system ID for the manuscript.
-            normalized_shelfmark: Optional normalized shelfmark for Cambridge lookup.
+            normalized_shelfmark: Optional canonical-normalized shelfmark for direct
+                Cambridge lookup (the historical path).
+            shelfmark: Optional RAW shelfmark. When provided, the Cambridge probe
+                falls through to `get_cambridge_manifest_with_bridge()` if the
+                direct query misses — closes the Phase 84 gap where CUDL-form
+                classmarks (slash/comma/leading-zero/Mosseri-label/Or.-numeric-collapse)
+                resolve via the bridge in get_cambridge_manifest_with_bridge but were
+                NOT reflected in image_source_info, leaving `_has_cambridge` False
+                in browse and suppressing the Cambridge button + images.
 
         Returns:
             Dict with keys:
                 - nli_fgp (bool): True if any FGPImageNumberId is non-empty
-                - cambridge (bool): True if normalized_shelfmark has a Cambridge manifest
+                - cambridge (bool): True if a Cambridge manifest is reachable
                 - image_count (int): Count of rows with non-empty FGPImageNumberId
         """
         result = {
@@ -926,7 +939,8 @@ class NliCrossrefService:
                 result["nli_fgp"] = True
                 result["image_count"] = row["cnt"]
 
-            # Check Cambridge manifests
+            # Check Cambridge manifests — direct canonical path first (preserves
+            # pre-Phase-84 behavior for already-matching rows).
             if normalized_shelfmark:
                 cam_cursor = self._conn.execute(
                     "SELECT COUNT(*) as cnt FROM cambridge_manifests "
@@ -935,6 +949,15 @@ class NliCrossrefService:
                 )
                 cam_row = cam_cursor.fetchone()
                 if cam_row and cam_row["cnt"] > 0:
+                    result["cambridge"] = True
+
+            # Phase 84 follow-up: bridge fallback. When the direct query missed but
+            # a raw shelfmark is available, ask the bridge wrapper. This mirrors the
+            # 4-tier cascade used by genizah_core.py 2a-supplement / 2a-mosseri so
+            # browse's `_has_cambridge` flag stays consistent with the resolved
+            # external_url.
+            if not result["cambridge"] and shelfmark:
+                if self.get_cambridge_manifest_with_bridge(shelfmark):
                     result["cambridge"] = True
 
         except Exception as e:

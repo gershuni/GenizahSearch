@@ -163,3 +163,85 @@ class TestScanDiffBaselineStillResolves:
             "shelfmark that was resolvable pre-phase. URL equality is required to "
             "defend against silent misrouting (Round 3 Codex HIGH #5)."
         )
+
+
+class TestImageSourceInfoBridgeFallback:
+    """Phase 84 follow-up: get_image_sources() must reflect Cambridge availability
+    for CUDL-form classmarks resolved via the bridge.
+
+    Pre-fix: get_image_sources did a single direct query against
+    cambridge_manifests.normalized_shelfmark using the CANONICAL normalize_shelfmark()
+    output. CUDL-form classmarks (slash, comma, leading-zero, Mosseri-label,
+    Or.-numeric-collapse) miss that query — even when get_cambridge_manifest_with_bridge
+    DOES resolve a manifest. Result: browse `_has_cambridge` flag stayed False and the
+    Cambridge button + IIIF images were suppressed despite a valid manifest URL.
+
+    Post-fix: when the direct query misses, the service falls through to
+    get_cambridge_manifest_with_bridge(shelfmark) and flips cambridge=True iff a
+    URL is reachable. UAT Test 2 (Mosseri) and Test 1 sub-issue 1c (T-S F 8/002)
+    are blocked on this behavior.
+    """
+
+    @pytest.fixture(scope="class")
+    def nli_svc(self):
+        from shared.nli_crossref_service import NliCrossrefService
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        candidates = [
+            root / "nli_data" / "nli_crossref.db",
+            root.parent.parent / "nli_data" / "nli_crossref.db",
+        ]
+        cur = root.parent
+        for _ in range(6):
+            candidates.append(cur / "nli_data" / "nli_crossref.db")
+            cur = cur.parent
+        db_path = next((str(p) for p in candidates if p.exists()), None)
+        if not db_path:
+            pytest.skip("nli_crossref.db not found")
+        return NliCrossrefService(db_path=db_path)
+
+    def test_mosseri_label_form_lifts_cambridge_flag_via_bridge(self, nli_svc):
+        """Mosseri row: canonical norm gives 'iii27a', no direct cambridge_manifests
+        match. Bridge resolves via Tier 3 (Mosseri label MS-MOSSERI-III-00027-A)."""
+        from genizah_core import normalize_shelfmark
+        sm = "Ms. III 27A"
+        sid = "990053834880205171"
+        norm = normalize_shelfmark(sm)
+        pre = nli_svc.get_image_sources(sid, normalized_shelfmark=norm)
+        post = nli_svc.get_image_sources(sid, normalized_shelfmark=norm, shelfmark=sm)
+        assert pre["cambridge"] is False, "regression test premise broken"
+        assert post["cambridge"] is True, (
+            "Phase 84 follow-up regressed: bridge fallback in get_image_sources "
+            "no longer detects Mosseri Cambridge availability. "
+            "Browse will hide the Cambridge button + images."
+        )
+
+    def test_ts_slash_leading_zero_form_lifts_cambridge_flag_via_bridge(self, nli_svc):
+        """T-S F 8/002 row: canonical norm gives 'tsf8.002', no direct match.
+        Bridge resolves via Tier 2 (cudl_normalize -> 'tsf8.2' which IS in the table)."""
+        from genizah_core import normalize_shelfmark
+        sm = "Ms. T-S F 8/002"
+        sid = "990026242400205171"
+        norm = normalize_shelfmark(sm)
+        pre = nli_svc.get_image_sources(sid, normalized_shelfmark=norm)
+        post = nli_svc.get_image_sources(sid, normalized_shelfmark=norm, shelfmark=sm)
+        assert pre["cambridge"] is False, "regression test premise broken"
+        assert post["cambridge"] is True, (
+            "Phase 84 follow-up regressed: bridge fallback in get_image_sources "
+            "no longer detects CUDL-form (slash + leading-zero) Cambridge availability."
+        )
+
+    def test_canonical_form_unchanged(self, nli_svc):
+        """Or. 1080 J 15 already matched the direct query pre-fix (canonical
+        and CUDL forms collide for this shape). Verify the bridge fallback is a
+        pure ADDITION that doesn't alter pre-fix behavior for canonical-matching
+        shelfmarks."""
+        from genizah_core import normalize_shelfmark
+        sm = "Or. 1080 J 15"
+        norm = normalize_shelfmark(sm)
+        pre = nli_svc.get_image_sources("synthetic", normalized_shelfmark=norm)
+        post = nli_svc.get_image_sources("synthetic", normalized_shelfmark=norm, shelfmark=sm)
+        # Both should detect Cambridge — the direct query already hits, the bridge
+        # short-circuits (inside the `if not result["cambridge"]` guard).
+        assert pre["cambridge"] is True
+        assert post["cambridge"] is True
