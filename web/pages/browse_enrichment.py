@@ -205,8 +205,14 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 if crossref_svc.is_available() and _sys_id:
                     from genizah_core import normalize_shelfmark
                     norm_shelf = normalize_shelfmark(_shelfmark) if _shelfmark else None
+                    # Phase 84 follow-up: pass raw shelfmark so the service can
+                    # fall through to the bridge cascade when the canonical-form
+                    # direct query misses (Mosseri label, T-S slash + leading-zero,
+                    # Or.-numeric-collapse). Without this, _has_cambridge stays
+                    # False in browse and the Cambridge button + IIIF images are
+                    # suppressed despite a valid manifest URL upstream.
                     result['image_source_info'] = crossref_svc.get_image_sources(
-                        _sys_id, normalized_shelfmark=norm_shelf
+                        _sys_id, normalized_shelfmark=norm_shelf, shelfmark=_shelfmark
                     )
                     if not result.get('is_cambridge') and result['image_source_info'].get('cambridge'):
                         result['is_cambridge'] = True
