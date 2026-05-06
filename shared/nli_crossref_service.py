@@ -25,6 +25,9 @@ from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
 
+# Phase 84: WARNING-once flag for shelfmark_bridge import failures (Gemini LOW).
+_BRIDGE_IMPORT_WARNED = False
+
 
 # ── Folio Label Parsing (Phase 31: IMG-04) ───────────────────────
 
@@ -343,6 +346,69 @@ class NliCrossrefService:
         except Exception as e:
             logger.error(f"NliCrossrefService.get_cambridge_manifest_by_label error for {label}: {e}")
             return None
+
+    def get_cambridge_manifest_with_bridge(self, shelfmark: str) -> Optional[str]:
+        """Phase 84: Try canonical normalized lookup, then CUDL-bridge fallbacks.
+
+        cambridge_manifests.normalized_shelfmark is stored in CUDL classmark form,
+        so the bridge's cudl_normalize() is the appropriate normalizer for queries
+        against this table — different from the rest of the codebase.
+
+        The wrapper takes a RAW shelfmark and performs canonical normalization
+        internally — callers should NOT pre-normalize. This is the contract
+        genizah_core.py relies on after the option-(b) migration (Plan 04).
+        """
+        if not shelfmark or self._conn is None:
+            return None
+        global _BRIDGE_IMPORT_WARNED
+        try:
+            from genizah_core import normalize_shelfmark
+            from shared.shelfmark_bridge import cudl_normalize, shelfmark_to_cudl_label
+        except ImportError as _e:
+            # Round 3 Codex MEDIUM — degraded path must STILL normalize before lookup.
+            # Pre-phase callers passed normalize_shelfmark(shelfmark) to
+            # get_cambridge_manifest; after option-(b) migration callers pass raw,
+            # so the wrapper must normalize internally even in the import-failure branch.
+            if not _BRIDGE_IMPORT_WARNED:
+                logger.warning("shelfmark_bridge unavailable in nli_crossref (degrading): %s", _e)
+                _BRIDGE_IMPORT_WARNED = True
+            try:
+                from genizah_core import normalize_shelfmark as _ns
+                return self.get_cambridge_manifest(_ns(shelfmark))
+            except Exception:
+                # Last-resort: hand the raw shelfmark in. Worse than canonical but
+                # preserves at least exact-match behavior on already-canonical inputs.
+                return self.get_cambridge_manifest(shelfmark)
+
+        # 1. Existing canonical path (preserves pre-phase-84 behavior).
+        url = self.get_cambridge_manifest(normalize_shelfmark(shelfmark))
+        if url:
+            return url
+        # 2. cudl_normalize fallback (cambridge_manifests stores CUDL form).
+        url = self.get_cambridge_manifest(cudl_normalize(shelfmark))
+        if url:
+            return url
+        # 3. Mosseri-specific forward-label fallback:
+        #    construct_mosseri_cudl_label() returns the actual CUDL `label` form,
+        #    e.g. 'MS-MOSSERI-III-00027-O', which is what `cambridge_manifests.label`
+        #    stores. Using slug.upper() would NOT match.
+        try:
+            from genizah_core import construct_mosseri_cudl_label
+            mosseri_label = construct_mosseri_cudl_label(shelfmark)
+            if mosseri_label:
+                url = self.get_cambridge_manifest_by_label(mosseri_label)
+                if url:
+                    return url
+        except ImportError:
+            pass  # already warned above
+
+        # 4. Generic forward-label fallback via shelfmark_to_cudl_label (T-S / Add. / Or.).
+        slug = shelfmark_to_cudl_label(shelfmark)
+        if slug:
+            url = self.get_cambridge_manifest(slug)
+            if url:
+                return url
+        return None
 
     # ── Metadata (Phase 32: META-01, META-02) ───────────────────────
 

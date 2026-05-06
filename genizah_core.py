@@ -2387,6 +2387,17 @@ def get_logger(name=None):
 
 LOGGER = get_logger(__name__)
 
+# Phase 84: WARNING-once flag for shelfmark_bridge import failures (Gemini LOW).
+_BRIDGE_IMPORT_WARNED = False
+
+
+def _warn_bridge_import_failed(exc):
+    """Log shelfmark_bridge import failure at WARNING once per process (Gemini LOW)."""
+    global _BRIDGE_IMPORT_WARNED
+    if not _BRIDGE_IMPORT_WARNED:
+        LOGGER.warning("shelfmark_bridge unavailable (degrading to v7.10 behavior): %s", exc)
+        _BRIDGE_IMPORT_WARNED = True
+
 
 def configure_lab_logger():
     """Configure a separate logger for Lab Mode operations."""
@@ -3399,6 +3410,15 @@ class MetadataManager:
             self._shelfmark_index = None
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
 
+            # Phase 84: build CUDL alias index for cross-system shelfmark lookups (D-03).
+            try:
+                from shared.shelfmark_bridge import build_alias_index as _build_cudl_alias_index
+                _build_cudl_alias_index(self.csv_bank)
+            except ImportError as e:
+                _warn_bridge_import_failed(e)
+            except Exception as e:
+                LOGGER.warning("CUDL alias index build failed (continuing without bridge): %s", e)
+
             # Stamp has_vs from vs_manifest.txt (lightweight, ~2.5MB, 129K sys_ids)
             vs_manifest_path = os.path.join(os.path.dirname(Config.LIBRARIES_CSV), 'fist_data', 'vs_manifest.txt')
             if not os.path.exists(vs_manifest_path):
@@ -3958,11 +3978,12 @@ class MetadataManager:
         crossref_svc = _get_crossref_service()
 
         # 2a-supplement: if MARC didn't provide a CUDL link, try crossref sidecar
+        # Phase 84: migrated from get_cambridge_manifest(norm_sm) to get_cambridge_manifest_with_bridge(shelfmark)
+        # The wrapper owns normalization internally; pass raw shelfmark (Codex MEDIUM #6).
         if not ext_link and crossref_svc and crossref_svc.is_available():
             shelfmark = current_meta.get('shelfmark', '')
             if shelfmark:
-                norm_sm = normalize_shelfmark(shelfmark)
-                cam_manifest_url = crossref_svc.get_cambridge_manifest(norm_sm)
+                cam_manifest_url = crossref_svc.get_cambridge_manifest_with_bridge(shelfmark)
                 if cam_manifest_url:
                     ext_link = cam_manifest_url
                     current_meta['external_url'] = ext_link
@@ -3970,21 +3991,22 @@ class MetadataManager:
                     LOGGER.info(f"Using local Cambridge manifest for {system_id} from crossref sidecar")
 
         # 2a-mosseri: if crossref didn't find Cambridge manifest and this is Mosseri, try CUDL label construction
+        # Phase 84: migrated from get_cambridge_manifest_by_label(label) to get_cambridge_manifest_with_bridge(variant)
+        # Round 3 Codex HIGH #4: variant loop PRESERVED — wrapper takes one shelfmark; only the loop
+        # knows which alternates to try for Mosseri rows whose primary shelfmark is not the resolving form.
         if not ext_link and crossref_svc and crossref_svc.is_available():
             lib_code = current_meta.get('lib_code') or self.csv_bank.get(system_id, {}).get('library_code', '')
             if lib_code == 'Mosseri':
                 # Try all call_number variants for best CUDL match
                 variants = self.csv_bank.get(system_id, {}).get('call_numbers_raw') or [current_meta.get('shelfmark', '')]
                 for variant in variants:
-                    label = construct_mosseri_cudl_label(variant)
-                    if label:
-                        cam_url = crossref_svc.get_cambridge_manifest_by_label(label)
-                        if cam_url:
-                            ext_link = cam_url
-                            current_meta['external_url'] = ext_link
-                            current_meta['external_provider'] = 'cambridge'
-                            LOGGER.info(f"Using Mosseri CUDL manifest for {system_id}: {label}")
-                            break
+                    cam_url = crossref_svc.get_cambridge_manifest_with_bridge(variant)
+                    if cam_url:
+                        ext_link = cam_url
+                        current_meta['external_url'] = ext_link
+                        current_meta['external_provider'] = 'cambridge'
+                        LOGGER.info(f"Using Mosseri CUDL manifest for {system_id} via variant {variant!r}")
+                        break
 
         # 2a-manchester: build canvas entries directly from ALL crossref images (each has its own luna_id)
         if not ext_link and crossref_svc and crossref_svc.is_available():
@@ -4585,6 +4607,19 @@ class MetadataManager:
             val = data.get(field, '')
             if val and matches(val, q_norm):
                 results.add(sys_id)
+
+        # Phase 84: CUDL classmark fallback (NORM-01/02). Zero-regression by construction:
+        # only runs when canonical matching returned no hits.
+        if field == 'shelfmark' and not results:
+            try:
+                from shared.shelfmark_bridge import lookup_cudl
+                hit = lookup_cudl(query)
+                if hit and hit.get('sys_id'):
+                    results.add(hit['sys_id'])
+            except ImportError as e:
+                _warn_bridge_import_failed(e)
+            except Exception as e:
+                LOGGER.debug("Bridge fallback failed for query %r: %s", query, e)
 
         return list(results)
 
