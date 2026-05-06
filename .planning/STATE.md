@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v7.11
 milestone_name: CUDL Coverage & Synthetic Inventories
-status: defining
-last_updated: "2026-05-05T00:00:00.000Z"
-last_activity: 2026-05-05 -- v7.11 milestone scoped (3 phases, 13 requirements)
+status: Defining (roadmap created, ready to discuss/plan Phase 84)
+last_updated: "2026-05-06T09:49:16.253Z"
+last_activity: 2026-05-05 -- v7.11 scoped from CUDL coverage investigation
 progress:
-  total_phases: 3
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_phases: 85
+  completed_phases: 81
+  total_plans: 264
+  completed_plans: 263
+  percent: 100
 ---
 
 # Project State
@@ -42,6 +42,7 @@ Progress: [..........] 0% (0/3 phases)
 **User-reported case:** `T-S NS 329.96` missing from app despite existing in CUDL. Investigation produced `scripts/scan_cudl_orphans.py` and surfaced 6,052 CUDL-vs-libraries.csv classmark gaps.
 
 **Key findings driving this milestone:**
+
 - 4 normalization bugs in the libraries.csv ↔ CUDL bridge accounted for ~13K false orphans (slash, comma, letter-adjacent dot, leading zeros).
 - Mosseri-aware normalization recovers 3,828 of 3,883 (98.6%) — rows already exist under `library_code=Mosseri` in `Moss. III,27O` form.
 - Cambridge Or. normalization recovers 584 of 1,421 so far; deeper letter-suffix pattern work in scope.
@@ -49,10 +50,12 @@ Progress: [..........] 0% (0/3 phases)
 - 0 cases of "missing alias on existing libraries.csv row" — the original "merge 329.96 into 329.97" hypothesis is wrong; NLI doesn't have a single Alma covering both.
 
 **Reports produced:**
+
 - `reports/cudl_orphans_all.csv` — 6,052 rows
 - `reports/cudl_orphans_with_neighbor.csv` — 104 rows (heuristic candidates, mostly disconfirmed by gap file)
 
 **External data references:**
+
 - `FIST_DB_BACKUP/gap_files/Inventory ID no exact match to Alma.xlsx` (NLI Chico/Tzippora, Feb 2026)
 - `FIST_DB_BACKUP/gap_files/Alma records - no Inventory ID.xlsx` (12,647 Alma rows lacking FIST link, mostly BL/RNL/JTS — out of scope)
 - `nli_data/nli_crossref.db` `cambridge_manifests` table (141,368 CUDL classmarks)
@@ -60,12 +63,14 @@ Progress: [..........] 0% (0/3 phases)
 ## Accumulated Context
 
 ### Architectural Constraints (carry-over from prior milestones)
+
 - **Dual app maintenance:** All shared logic lives in `genizah_core.py` and `shared/*`. UI is app-specific (web/, desktop/).
 - **sys_id contract:** Browse module identifies sys_id by "starts with 99, all digits" (web/pages/browse.py:584-585). Synthetic IDs MUST satisfy this.
 - **Tantivy index:** Local, includes a row per libraries.csv entry. Synthetic rows require index rebuild path.
 - **fjms_enrichment.db keys on AlmaId:** All catalogue/bib/measurement tables key by AlmaId, not InventoryId. Phase 85 needs an InventoryId-fallback resolver.
 
 ### Key References
+
 - `shared/nli_crossref_service.py` — current bridge layer for CUDL classmark resolution
 - `web/pages/browse.py` — sys_id detection logic (line 584-585)
 - `scripts/scan_cudl_orphans.py` — investigation script (will be re-run for AUDIT-01)
