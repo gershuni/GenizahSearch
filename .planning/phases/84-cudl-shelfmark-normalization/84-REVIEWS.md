@@ -1,8 +1,8 @@
 ---
 phase: 84
-round: 2
+round: 3
 reviewers: [gemini, codex]
-reviewed_at: 2026-05-06T11:06:41Z
+reviewed_at: 2026-05-06T11:28:08Z
 plans_reviewed:
   - 84-01-PLAN.md
   - 84-02-PLAN.md
@@ -13,36 +13,36 @@ self_skipped: claude (running inside Claude Code)
 unavailable: [coderabbit]
 ---
 
-# Cross-AI Plan Review — Phase 84: CUDL Shelfmark Normalization (Round 2, post-revision)
+# Cross-AI Plan Review — Phase 84: CUDL Shelfmark Normalization (Round 3, post-round-2-fixes)
 
-This is the second review round, evaluating plans **after** they were revised to incorporate Round 1 feedback (3 HIGH, 4 MEDIUM, 5 LOW items). The previous Round 1 REVIEWS.md content was overwritten by this revision pass — the consolidated record of Round 1 lives in git history (commit prior to `2a8dff2a`).
+This is the third review round, evaluating plans **after** the Round 2 revision pass that fixed all 6 verified Codex HIGH execution-level findings. The Round 2 REVIEWS.md content is preserved in git history (commit `979a5468`).
 
 ## Gemini Review
 
-# Cross-AI Plan Review — Phase 84: CUDL Shelfmark Normalization (Round 2)
+# Cross-AI Plan Review — Phase 84: CUDL Shelfmark Normalization (Round 3)
 
 ## Summary
-The revised implementation plans for Phase 84 are exceptional. They comprehensively address all 12 items (3 HIGH, 4 MEDIUM, 5 LOW) from the prior review round while maintaining the core "layered fallback" architecture. The transition from a strict orphan-set subset assertion to a "previously-resolved labels still resolve" invariant (Codex HIGH #1) is a significant improvement in test rigor. The inclusion of a strict ambiguity-exclusion policy with diagnostic reporting (Codex HIGH #2) and a conservative forward-allowlist (Codex HIGH #3) effectively mitigates the risk of silent mis-routing. The plans are technically mature, safe, and ready for execution.
+The Round 3 implementation plans for Phase 84 are exceptionally rigorous and represent a "gold standard" for safe, data-driven system migration. All 6 HIGH-severity execution findings from the prior round have been meticulously addressed. The architecture successfully balances the need for increased coverage (resolving Mosseri and Or. classmarks) with an absolute "zero-regression" mandate for the existing ~217,000 records. The inclusion of a multi-layered verification suite—combining source-hash integrity, literal-output snapshots, a validated golden fixture, and a full-baseline scan-diff—provides a bulletproof safety net. These plans are technically mature, defensively designed, and ready for immediate execution.
 
 ## Strengths
-*   **Rigorous Data Integrity:** The "Audit-first / Fail-loud" strategy for leading-zero collisions (Plan 01) combined with the new strict ambiguity-exclusion policy (Plan 02) ensures that no CUDL classmark is ever mapped to the wrong manuscript row.
-*   **Defensive Forward Mapping:** The conservative pattern-aware allowlist in `shelfmark_to_cudl_label` (Plan 03) prevents the application from generating speculative or broken CUDL URLs for uncertain manuscript forms.
-*   **High-Fidelity Validation:** Plan 05's four-layer guard (validated golden fixture, baseline-resolution invariant, canonical source-hash, and literal output checks) provides a world-class regression safety net for a project of this scale.
-*   **Decoupled Unit Testing:** The addition of deterministic unit tests that do not depend on `MetadataManager` or `libraries.csv` (Plan 02/05) ensures the normalization logic can be verified in isolation across different environments.
-*   **Unconditional Integration:** The requirement to migrate all runtime NLI manifest call paths (Plan 04) ensures the bridge is actually exercised where it provides value, fulfilling the design intent of D-08.
+- **Exhaustive Regression Guard:** Plan 05's combination of SHA256 source hashing for the canonical normalizer and a literal-output snapshot is an elite defensive pattern that makes accidental regressions impossible to miss.
+- **Data-Driven Fixtures:** The transition from hand-authored test cases to a reproducible, validated fixture-generation script (`scripts/build_cudl_fixture.py`) ensures that tests reflect the reality of the ~140K CUL records.
+- **Strict Ambiguity Handling:** The "collect-all / exclude-multi" policy for the alias index (Plan 02) and the "delta-introduced" collision isolation (Plan 01) are precisely tuned to allow normalization improvements while explicitly rejecting any change that would cause a mis-routing.
+- **Unconditional Runtime Migration:** Plan 04 correctly identifies and migrates the actual runtime call paths in `genizah_core.py` (enrichment logic) and `nli_crossref_service.py`, fulfilling the architectural intent of the bridge.
+- **Defensive Error Handling:** The "warning-once" module-level flags and graceful fallback logic ensure the application remains functional even if the bridge module or audit reports are missing.
 
 ## Concerns
-*   **Late-Import Warning Implementation (LOW):** Plan 04 Task 2 uses `getattr(shelfmark_to_cudl_label, '_warned', False)` to track warnings. While functionally correct, attaching state to a function object is less idiomatic than a module-level flag (as used in `genizah_core.py`).
-*   **Startup Latency (LOW):** Building the alias index (Plan 02) involves walking ~140K rows. Although O(1) lookups are efficient, the initial build time should be monitored. (Note: This was a Gemini LOW in the prior round and remains a minor observation).
-*   **Baseline Sample Size (LOW):** Plan 05 Task 3 samples only 500 rows for the baseline-resolution test. While reasonable for CI speed, a one-time full-baseline check during local execution would be even safer.
+- **None (HIGH/MEDIUM).** All prior execution-level risks have been mitigated.
+- **Redundant Pattern Logic (LOW):** Plan 03's `shelfmark_to_cudl_label` implements the Mosseri zfill-stripping logic internally, which is identical to the logic in Plan 02's `_index_key_for_label`. While safe, this is a minor DRY violation.
+- **Startup Latency Visibility (LOW):** Building the index involves walking ~140K rows. While efficient (O(1) lookups), adding a `DEBUG` level log with the elapsed time in milliseconds for `build_alias_index` would be beneficial for monitoring performance on lower-end desktop environments.
 
 ## Suggestions
-*   **Idiomatic Logging:** In `web/pages/browse.py`, prefer a module-level `_BRIDGE_IMPORT_WARNED` flag over function-attribute storage for consistency with `genizah_core.py`.
-*   **Pre-populate Safety Net:** In Plan 01, if any leading-zero collisions are already known from the Phase 84 investigation, hardcode them into `_BUILTIN_COLLISION_KEYS` immediately to provide immediate safety before the first audit run.
-*   **Full Baseline Run:** During the final verification of Plan 05, consider running the `TestScanDiffBaselineStillResolves` without the `[:500]` slice at least once locally to confirm 100% parity across the ~141K manifests.
+- **Consolidate Mosseri Logic:** In `shared/shelfmark_bridge.py`, consider having `shelfmark_to_cudl_label` call `_index_key_for_label(construct_mosseri_cudl_label(shelfmark))` to ensure there is exactly one implementation of the Mosseri-label-to-slug transform.
+- **Elapsed Time Logging:** Add a simple `start_time = time.time()` / `logger.info("... took %.2f seconds", ...)` block to `build_alias_index` to provide visibility into the ~140K-row walk cost during application startup.
+- **Fixture Variety Assert:** In `scripts/build_cudl_fixture.py`, consider adding a small print or assert ensuring at least one row with a `DOTMARKER` (e.g., `1080.1.1`) is actually included in the final CSV to exercise the Or. numeric-collapse logic.
 
 ## Risk Assessment: LOW
-The risk is low. The architecture is strictly additive (fallback-only), the most sensitive rules are protected by mandatory audits and exclusion lists, and the validation suite is exhaustive. The revisions have successfully closed the "silent mis-routing" and "test identity" gaps identified in Round 1.
+The risk is low. The architecture is strictly additive (fallback-only), the most sensitive rules are protected by mandatory audits and exclusion sets, and the verification rigor is significantly higher than a standard feature phase. The plans have successfully solved the "false confidence" problem identified in prior rounds.
 
 **Approval:** Approved for execution.
 
@@ -52,109 +52,111 @@ The risk is low. The architecture is strictly additive (fallback-only), the most
 
 ## Summary
 
-The revised plans close several prior concerns in intent, especially alias ambiguity handling and delta-only leading-zero auditing, but they still have execution-level gaps. The highest-risk residual issues are that Mosseri slug generation is wrong in the provided `_index_key_for_label()` sample, the NLI runtime migration misses the actual `genizah_core.py` call path, and the new scan-diff baseline test does not actually model "previously resolved still resolves." I would not execute these plans unchanged.
+The Round 2 fixes close several prior issues in intent, but not fully in execution. The plans are stronger than Round 2, especially around NLI call-site migration and orphan CSV column handling, but I would not execute unchanged. New regressions were introduced in Plan 03/05, and two prior HIGH Mosseri concerns are effectively reopened by later snippets.
 
 ## Strengths
 
-- The alias-index ambiguity policy is materially improved: collect all claims, exclude multi-`sys_id` keys, and report `reports/cudl_alias_collisions.csv`.
-- Leading-zero collision auditing is now properly scoped to the zero-collapse delta, with a separate full-normalization transparency report.
-- Numeric-collapse is now gated to Or.-like keys instead of all CUL variants.
-- The forward CUDL-link function is now conservative rather than applying `cudl_normalize()` to arbitrary shelfmarks.
-- Deterministic in-memory unit tests were added alongside the heavier `MetadataManager()` integration tests.
-- Canonical normalizer protection is stronger with source hash plus literal-output snapshot tests.
+- Plan 04 now explicitly includes the real `genizah_core.py` Cambridge manifest call sites at ~3965 and ~3981.
+- `reports/cudl_orphans_all.csv` column usage is now correct: `normalized_shelfmark` is the classmark, not `cudl_label`.
+- Or. numeric forward URL handling is correctly called out: `Or. 1080.1.1` must become `or1080.11`.
+- The ambiguity-exclusion design remains sound: collect claims first, exclude multi-`sys_id` keys, write a diagnostic report.
+- The scan-diff invariant is directionally better than strict orphan-set subset testing.
 
 ## Concerns
 
-- **HIGH: Mosseri slug generation sample is wrong.**
-  Plan 02 says `_index_key_for_label()` strips `MS-`, but the provided code does not. `MS-MOSSERI-III-00027-O` would normalize to `msmosseriiii27o`, not `mosseriiii27o`. This breaks NORM-01 and also Plan 03's `shelfmark_to_cudl_label('Moss. III,27O')`.
+- **HIGH: Plan 03 reintroduces the Mosseri `MS-` bug in `shelfmark_to_cudl_label()`.**
+  The Plan 02 `_index_key_for_label()` fix strips `MS`, but Plan 03's Mosseri forward path duplicates the logic and does not strip `MS`. `shelfmark_to_cudl_label("Moss. III,27O")` would produce `msmosseriiii27o`, not `mosseriiii27o`. This breaks browse CUDL URLs.
 
-- **HIGH: Or. numeric forward links are still wrong.**
-  `shelfmark_to_cudl_label('Or. 1080.1.1')` would return `or1080.1.1`, but the plan says CUDL uses `or1080.11`. Lookup handles collapse, but browse URL generation does not.
+- **HIGH: Plan 03's `lookup_cudl()` replacement drops the Plan 02 forward-label fallback.**
+  The Plan 02 lookup handles `MS-MOSSERI-III-00027-O` via `_index_key_for_label()`. The Plan 03 snippet replaces `lookup_cudl()` with only `cudl_normalize()` plus Or.-collapse. That breaks the explicit Round 2 critical case.
 
-- **HIGH: NLI runtime migration misses the actual call path.**
-  The existing manifest lookup happens in `genizah_core.py` around the external-IIIF logic via `crossref_svc.get_cambridge_manifest(...)` and `get_cambridge_manifest_by_label(...)`. Plan 04's grep/migration scope omits `genizah_core.py`, so the wrapper can be added but the real runtime path remains unchanged.
+- **HIGH: Plan 05 assumes `MetadataManager()` loads `libraries.csv`, but live code does not.**
+  In the current code, `MetadataManager.__init__()` only loads small caches. `_load_csv_bank()` runs later via background loading or explicit call. Therefore `scripts/build_cudl_fixture.py`, `scripts/build_cudl_baseline_resolved.py`, and the `alias_index_built` pytest fixture will see an empty `csv_bank` unless they call `mm._load_csv_bank()` directly.
 
-- **HIGH: The browse.py import-failure snippet can raise `NameError`.**
-  In the `except ImportError` block, it references `shelfmark_to_cudl_label` even though the import failed. It also never sets a warned flag. Use a module-level `_BRIDGE_IMPORT_WARNED` helper instead.
+- **HIGH: Plan 04 may regress Mosseri manifest lookup by deleting the all-variant loop.**
+  The old runtime path tries all `call_numbers_raw` variants. The new wrapper accepts only one `shelfmark`. If the primary shelfmark is not constructible but an alternate variant is, deleting the loop loses coverage. Keep the variant loop or make the wrapper accept variants/sys_id context.
 
-- **HIGH: Plan 05's scan-diff baseline does not prove the revised invariant.**
-  `build_cudl_baseline_resolved.py` dumps every `cambridge_manifests` row with a URL, not the labels that resolved pre-phase through the runtime or orphan scanner. The later test only samples 500 rows and passes `label` into a shelfmark-oriented wrapper. This does not close the prior HIGH scan-diff concern.
+- **HIGH: The baseline-still-resolves test does not catch wrong manifest routing.**
+  Plan 05 records `manifest_url` but the test only asserts `get_cambridge_manifest_with_bridge(original_shelfmark)` returns non-None. A wrong CUDL manifest URL would pass. This weakens the core "no silent misrouting" guarantee.
 
-- **HIGH: Fixture generation reads the wrong orphan-report column.**
-  Existing `reports/cudl_orphans_all.csv` columns are `cudl_label,manifest_url,normalized_shelfmark`. Plan 05 Source B uses `row[0]` as the classmark, but the classmark is `row[2]`.
+- **MEDIUM: Generated CUL fixture rows use `cudl_normalize()` instead of the forward URL function.**
+  Source A in `build_cudl_fixture.py` uses `cudl_normalize(variant)` for CUL rows, which can emit `or1080.1.1` rather than the viewer slug `or1080.11`. That under-tests the browse URL path.
 
-- **MEDIUM: `get_cambridge_manifest_with_bridge()` has a bad label fallback.**
-  It calls `get_cambridge_manifest_by_label(slug.upper())`; for Mosseri, the label is `MS-MOSSERI-III-00027-O`, not `MOSSERIIII27O`. The wrapper should try the original label if given, and for Mosseri should call `construct_mosseri_cudl_label()`.
+- **MEDIUM: Unit tests mutate the real `reports/cudl_alias_collisions.csv`.**
+  Synthetic `build_alias_index()` tests write fake collision keys into the real report path. This creates dirty working-tree noise and can overwrite the real diagnostic artifact.
 
-- **MEDIUM: Plan 01 contradicts itself on `_BUILTIN_COLLISION_KEYS`.**
-  `must_haves` says it is non-empty, while the interface says start with `set()` if none known. Either require known audited keys or drop "non-empty."
+- **MEDIUM: Import-failure fallback in `get_cambridge_manifest_with_bridge()` is not pre-phase equivalent.**
+  If `shelfmark_bridge` import fails, the snippet returns `self.get_cambridge_manifest(shelfmark)` instead of canonical `normalize_shelfmark(shelfmark)` lookup. That contradicts the "degrade to v7.10 behavior" claim.
 
-- **MEDIUM: Golden fixture may miss the critical Or numeric collapsed input.**
-  The generator mostly emits `cudl_normalize(variant)`, so it may test `or1080.1.1` but not `or1080.11`.
+- **MEDIUM: Verification for NLI migration should also forbid surviving `get_cambridge_manifest_by_label()` calls in `genizah_core.py`.**
+  The automated check shown only rejects `crossref_svc.get_cambridge_manifest(...)`, not the old label call.
 
-- **MEDIUM: Plan 05 uses `git checkout` to restore reports.**
-  That is destructive and can discard unrelated user edits. Add explicit `--output`/`--suffix` support to `scan_cudl_orphans.py` instead.
-
-- **LOW: Writing reports on every alias-index build may be noisy or fail in packaged/read-only runs.**
-  The failure is caught, but normal app startup should probably not emit report files unless in dev/audit mode.
+- **LOW: There is still no explicit end-to-end shelfmark-search test.**
+  Golden tests focus on `lookup_cudl()`. Add a test for `MetadataManager.search_by_meta("mosseriiii27o", "shelfmark")`.
 
 ## Suggestions
 
-1. Fix `_index_key_for_label()` to explicitly drop the leading `MS` segment before normalization.
-2. Apply `_collapse_numeric_runs()` inside `shelfmark_to_cudl_label()` for Or. shelfmarks.
-3. Replace the two existing `genizah_core.py` Cambridge lookup branches with one call to `get_cambridge_manifest_with_bridge(shelfmark)` or explicitly migrate both existing calls.
-4. Rewrite the browse.py logging as a module-level helper; do not reference a failed import symbol.
-5. Redesign the baseline test: capture pre-phase matched `normalized_shelfmark` values using the old scanner logic, then assert those same classmarks still match after bridge wiring.
-6. In fixture generation, use `csv.DictReader` and `row["normalized_shelfmark"]` for orphan classmarks.
-7. Add explicit fixture rows for `or1080.11`, `MS-MOSSERI-III-00027-O`, and `mosseriiii27o`.
-8. Add `--out-all` / `--out-neighbor` or `--suffix` to `scan_cudl_orphans.py`; do not use `git checkout` in the plan.
+- Reuse `_index_key_for_label()` inside `shelfmark_to_cudl_label()` for Mosseri labels. Do not duplicate MS/zfill stripping logic.
+- Merge Plan 03's `lookup_cudl()` changes into the Plan 02 implementation instead of replacing it. Preserve the `_index_key_for_label()` fallback, then add the Or.-collapse fallback.
+- In every Plan 05 script/test that uses `MetadataManager`, call `mm._load_csv_bank()` explicitly before reading `mm.csv_bank` or relying on the alias index.
+- Do not delete the Mosseri variant loop unless `get_cambridge_manifest_with_bridge()` accepts and iterates variants. The simpler safe change is to keep the loop and call the wrapper per variant.
+- In the baseline regression test, assert the returned URL equals `row["manifest_url"]`, not merely non-None.
+- Add `report_path=None` or `write_report=False` to `build_alias_index()` so unit tests can avoid writing real `reports/cudl_alias_collisions.csv`.
+- Generate CUL fixture classmarks via `shelfmark_to_cudl_label()` where supported, and separately include lookup-only normalized forms if desired.
+- Add a grep/test that `genizah_core.py` contains no surviving `get_cambridge_manifest_by_label(` after migration unless deliberately inside a preserved fallback block.
 
 ## Risk Assessment
 
-**MEDIUM-HIGH.** The architecture is still sound, and several prior review items are genuinely improved. But the revised plans contain concrete implementation snippets that would fail key acceptance paths or leave the real runtime path unchanged. The main risk is not broad regression in canonical normalization; it is false confidence from tests and wrappers that do not exercise the actual CUDL lookup and browse-image paths.
+**MEDIUM-HIGH.** The architecture is still good, and several prior HIGH items were addressed in the right direction. But later plan snippets reopen Mosseri slug handling, break forward-label lookup, and build a regression suite that may not load the data it thinks it is testing. The biggest residual risk is false confidence: tests could pass while browse URLs are wrong, baseline manifests are misrouted, or fixture generation silently exercises an empty `csv_bank`.
 
 ---
 
 ## Consensus Summary
 
-Reviewers diverge sharply: **Gemini approves for execution at LOW risk; Codex blocks at MEDIUM-HIGH** with 6 HIGH-severity execution-level findings. Both agree the architectural decisions in the revisions (ambiguity policy, delta-only audit, conservative forward allowlist, deterministic unit fixtures, source-hash guard) are correct in design. They disagree on whether the *concrete code snippets and fixture/baseline mechanics* in the revised plans will actually deliver those designs.
+**Verdict split persists for the third round.** Gemini sees Round 2 as having closed every meaningful risk and approves at LOW risk. Codex finds 5 NEW HIGH-severity issues — some of them reopen prior HIGH concerns through different code paths (Mosseri MS- handling, forward-label fallback) and others are genuinely new (MetadataManager not loading csv_bank in __init__, variant-loop deletion, baseline assertion strength).
+
+The pattern across three rounds is consistent: Codex applies adversarial code-level scrutiny and finds concrete falsifiable claims about specific snippets; Gemini reviews architecture and high-level coherence. Both are useful but they are not the same review.
 
 ### Agreed Strengths
-- Alias-index ambiguity policy (collect-all + exclude-multi + collision report).
-- Leading-zero audit isolated to the zero-collapse delta.
-- Conservative forward allowlist in `shelfmark_to_cudl_label`.
-- Or.-only numeric-collapse gating.
-- Deterministic unit tests alongside MetadataManager-integration tests.
-- Source-hash + literal-output guard for `normalize_shelfmark`.
+- NLI migration scope now includes the real `genizah_core.py` runtime call sites.
+- Orphan-CSV column handling is correct (`normalized_shelfmark` at index 2).
+- Or. numeric forward URL is correctly identified as needing collapse.
+- Ambiguity-exclusion policy and scan-diff invariant designs are sound.
 
-### Agreed Concerns
-- **Late-import logging hygiene** in `web/pages/browse.py` should use a module-level `_BRIDGE_IMPORT_WARNED` flag, matching the genizah_core.py pattern. Gemini flags as LOW; Codex calls out the same site under HIGH (#4) because the snippet can raise `NameError` after a failed import.
+### Codex-only HIGH items (worth verifying against the live codebase)
 
-### Codex-only HIGH-severity items (must address before execution)
-1. **`_index_key_for_label()` Mosseri stripping is wrong.** Sample code does not strip the leading `MS-`, so `MS-MOSSERI-III-00027-O` → `msmosseriiii27o` instead of `mosseriiii27o`. Fix Plan 02's helper to drop the leading `MS` segment explicitly.
-2. **Or. numeric forward URL is still wrong.** `shelfmark_to_cudl_label('Or. 1080.1.1')` would emit `or1080.1.1` not `or1080.11`. Apply `_collapse_numeric_runs()` inside the Or. branch of `shelfmark_to_cudl_label`. Lookup handles collapse already; browse URL generation does not.
-3. **NLI runtime migration omits `genizah_core.py`.** The actual `crossref_svc.get_cambridge_manifest(...)` and `get_cambridge_manifest_by_label(...)` call sites live in `genizah_core.py`. Plan 04's grep scope must explicitly include `genizah_core.py` and migrate those two branches; otherwise the wrapper exists but the runtime path is unchanged.
-4. **`browse.py` ImportError snippet references undefined symbol.** Inside `except ImportError`, the code refers to `shelfmark_to_cudl_label` (which failed to import). Replace with a module-level `_BRIDGE_IMPORT_WARNED` + `_warn_bridge_import_failed()` helper, mirroring genizah_core.py.
-5. **Scan-diff baseline does not prove the revised invariant.** `build_cudl_baseline_resolved.py` currently dumps every `cambridge_manifests` row with a URL, not the labels/classmarks that resolved pre-phase through the runtime/scanner. Capture pre-phase matched `normalized_shelfmark` values via the OLD scanner logic, then assert those same classmarks still match after bridge wiring. Drop the `[:500]` sample for at least one local full-baseline run.
-6. **Fixture generator reads wrong orphan-CSV column.** `reports/cudl_orphans_all.csv` columns are `cudl_label,manifest_url,normalized_shelfmark` — the classmark is `row[2]`, not `row[0]`. Switch to `csv.DictReader` and `row["normalized_shelfmark"]`.
+These are concrete, falsifiable claims that the orchestrator should verify before deciding whether to do a Round 3 replan, accept-as-is, or hand-edit:
 
-### Codex-only MEDIUM items (should address)
-- `get_cambridge_manifest_with_bridge()` falls back to `get_cambridge_manifest_by_label(slug.upper())`, which produces `MOSSERIIII27O` not the actual CUDL label `MS-MOSSERI-III-00027-O`. For Mosseri, route through `construct_mosseri_cudl_label()` instead.
-- Plan 01 internally inconsistent: `must_haves` requires `_BUILTIN_COLLISION_KEYS` non-empty, but interface says start with `set()` if none known. Either commit a known set or drop "non-empty."
-- Golden fixture may miss the critical `or1080.11` collapsed-input case. Add explicit rows for `or1080.11`, `MS-MOSSERI-III-00027-O`, `mosseriiii27o`.
-- Plan 05's `git checkout` to restore pre-phase reports is destructive. Add `--output`/`--suffix` to `scan_cudl_orphans.py` instead and emit post-phase reports to dedicated paths from the start.
+1. **Plan 03 duplicates Mosseri MS-stripping logic — and gets it wrong.** Plan 02 fixed `_index_key_for_label` to strip `MS`. Plan 03's `shelfmark_to_cudl_label` Mosseri branch reimplements the zfill-stripping inline (lines ~233-238 of 84-03-PLAN.md from Round 2) WITHOUT the MS-strip. Result: `shelfmark_to_cudl_label('Moss. III,27O')` → `msmosseriiii27o` instead of `mosseriiii27o`. **Suggested fix:** have Plan 03's Mosseri branch call `_index_key_for_label(mosseri_label)` instead of duplicating logic.
 
-### Codex-only LOW items
-- Alias-index report writes on every build may be noisy/fail in packaged/read-only runs. Gate report emission behind a dev/audit flag.
+2. **Plan 03's `lookup_cudl()` replacement drops the forward-label fallback added in Plan 02.** Plan 02 added a path so `lookup_cudl('MS-MOSSERI-III-00027-O')` resolves via `_index_key_for_label`. If Plan 03's snippet for `lookup_cudl` only retries with `_collapse_numeric_runs`, that Round 2 critical case regresses. **Suggested fix:** Plan 03 should ADD the Or.-collapse retry to the existing Plan 02 cascade, not replace it.
 
-### Gemini-only LOW items (re-emphasized)
-- Startup latency budget for the ~140K-row alias index walk should be measured/asserted.
-- One-time local full-baseline run (no slice) before merge.
+3. **Plan 05 scripts/tests assume `MetadataManager()` constructor loads `libraries.csv`.** Live code: `MetadataManager.__init__` only initializes small caches; `_load_csv_bank()` is invoked later via background loader or an explicit call. Therefore `build_cudl_fixture.py`, `build_cudl_baseline_resolved.py`, and the `alias_index_built` pytest fixture will see an empty `csv_bank` unless they call `mm._load_csv_bank()` explicitly. **Suggested fix:** every script/fixture that uses `MetadataManager` must call `mm._load_csv_bank()` after construction.
+
+4. **Plan 04 deletes the per-variant Cambridge manifest loop in `genizah_core.py:~3981`.** That loop iterates every `call_numbers_raw` variant. The new wrapper takes a single `shelfmark`. If a non-primary variant is the one that would have resolved, coverage regresses. **Suggested fix:** keep the variant loop and call `get_cambridge_manifest_with_bridge` per variant, OR extend the wrapper to accept a variants list / row context.
+
+5. **Plan 05 baseline test only asserts non-None URL, not URL equality.** A bridge regression that routes a baseline shelfmark to a *different* (wrong) CUDL manifest passes the current assertion. The "no silent misrouting" guarantee depends on equality. **Suggested fix:** assert `result_url == row['manifest_url']`, not `result_url is not None`.
+
+### Codex-only MEDIUM items
+- CUL fixture rows generated via `cudl_normalize(variant)` rather than `shelfmark_to_cudl_label`, under-testing the browse URL path (`or1080.1.1` enters the fixture instead of `or1080.11`).
+- Unit tests write to the real `reports/cudl_alias_collisions.csv` — should support an injected/temp report path.
+- Wrapper's import-failure fallback returns `get_cambridge_manifest(shelfmark)` (raw shelfmark) instead of `get_cambridge_manifest(normalize_shelfmark(shelfmark))` (canonical), which is what "degrade to v7.10" actually means.
+- NLI migration grep should also reject surviving `get_cambridge_manifest_by_label(` calls in `genizah_core.py`, not just `get_cambridge_manifest(`.
+
+### Codex-only LOW
+- Add an end-to-end `MetadataManager.search_by_meta('mosseriiii27o', 'shelfmark')` test to exercise the runtime search path, not just `lookup_cudl()`.
+
+### Gemini-only LOW
+- Plan 03 duplicates Plan 02's MS/zfill stripping (same observation Codex flags as HIGH #1, but Gemini frames it as DRY rather than correctness).
+- Add elapsed-time logging to `build_alias_index` for visibility during ~140K-row walk.
+- `build_cudl_fixture.py` should assert at least one Or. dotted-numeric row is included.
 
 ### Divergent Views
-- **Risk level:** Gemini → LOW (Approved). Codex → MEDIUM-HIGH (would not execute unchanged).
-- The disagreement turns on whether the Round 2 revisions' *snippets and fixture mechanics* actually implement the stated designs. Codex's six HIGH items, if confirmed, would close that gap and bring both reviewers into alignment.
+- **Risk level:** Gemini → LOW (Approved). Codex → MEDIUM-HIGH (would not execute unchanged). Identical pattern to Round 2.
+- The crux is again: Codex's claims name specific lines/snippets that, if true, mean the fixes are "correct in intent but wrong in execution." Items #1 and #2 are particularly worrying because they reopen prior HIGH findings through different code paths — a sign that the fixes were applied locally without cross-checking that the same logic appears elsewhere.
 
 ### Recommended Next Step
 
-The Codex HIGH items are concrete, falsifiable claims about specific code/CSV columns/call sites — not stylistic preferences. They should be verified against the live codebase (especially items 3, 5, 6 which name specific files and column orders) before either accepting or rejecting them. If verified true, run `/gsd-plan-phase 84 --reviews` again to fold them in. If any are stale (e.g., genizah_core.py call sites have already moved), correct the plans manually. Gemini's LOW items can ride along in the same revision.
+Verify Codex HIGH items #1, #2, #3, #5 against the actual revised plan text (and the `MetadataManager` source for #3). If 2+ are confirmed, run `/gsd-plan-phase 84 --reviews` for a Round 3 replan. If only #5 (URL equality) is confirmed, that single fix can be hand-edited in Plan 05 without a full replan cycle.
+
+If three review rounds is the budget and the user wants to ship, the safer move is: hand-fix the verified items in the plans, then proceed to `/gsd-execute-phase 84`. The execution phase has its own gates and the threat is a wrong CUDL URL for a small fragment of users — not data corruption.
