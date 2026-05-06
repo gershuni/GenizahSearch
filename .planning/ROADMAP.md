@@ -239,6 +239,15 @@ Goal: Close the gap between CUDL's ~141K classmark catalogue and GenizahSearch's
 4. `scripts/scan_cudl_orphans.py` re-run reports a substantially reduced orphan count (target: ≤300 residue) with no regression on the 140K already-matching CUL rows.
 5. Existing browse external-link buttons (CUDL, Manchester, JTS) and shelfmark search produce identical results to v7.10 for non-Mosseri/non-Or shelfmarks.
 
+**Plans:** 5 plans
+
+Plans:
+- [ ] 84-01-PLAN.md -- Bridge module foundation (cudl_normalize) + leading-zero collision audit (NORM-03)
+- [ ] 84-02-PLAN.md -- Mosseri reverse alias index reusing construct_mosseri_cudl_label (NORM-01)
+- [ ] 84-03-PLAN.md -- Or. patterns + numeric-collapse helper + collision exclusion + forward shelfmark_to_cudl_label (NORM-02, NORM-03)
+- [ ] 84-04-PLAN.md -- Wire bridge into 4 D-08 call sites + runtime alias-index hook (NORM-01, NORM-02, NORM-03)
+- [ ] 84-05-PLAN.md -- NORM-04 regression guard: golden fixture + scan diff + canonical-untouched assertion
+
 #### Phase 85 -- Synthetic FJMS Inventory Rows
 
 **Goal:** Independent libraries.csv rows for the ~93 T-S FJMS-only inventories (and any residue from Mosseri/Or post-Phase-84) using Option-2 18-digit synthetic sys_id format (`99` + InventoryId-padded-10 + `000000`).
