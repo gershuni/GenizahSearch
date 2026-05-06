@@ -14,17 +14,29 @@ Wiring is NOT done in this module — see Plan 04 of Phase 84.
 Functions:
   cudl_normalize(s)                  -- full normalization (runtime)
   _normalize_without_zero_collapse(s)-- audit-only sibling (no leading-zero strip)
-  lookup_cudl(classmark)             -- alias index lookup (stub until Plan 02/03)
-  build_alias_index(csv_bank)        -- populate alias index (stub until Plan 02)
-  load_collision_keys(report_path)   -- load D-06 gate file (stub until Plan 03)
+  _index_key_for_label(label)        -- module-level helper: forward CUDL label -> index key
+  lookup_cudl(classmark)             -- alias index lookup (implemented in Plan 02)
+  build_alias_index(csv_bank, ...)   -- populate alias index with strict ambiguity exclusion
+  load_collision_keys(report_path)   -- load D-06 gate file
   shelfmark_to_cudl_label(shelfmark) -- reverse lookup (stub until Plan 03)
   _is_collision_key(key)             -- check collision safety net
+  _write_alias_collision_report(...) -- write ambiguous-key audit CSV
+
+build_alias_index() uses a STRICT ambiguity-exclusion policy (Codex HIGH #2):
+any normalized key that maps to >1 distinct sys_id is EXCLUDED from the
+runtime index and written to reports/cudl_alias_collisions.csv (overridable
+via the report_path parameter — Round 3 Codex MEDIUM).
+
+_index_key_for_label is module-level (not nested) so Plan 03's lookup_cudl
+extension and shelfmark_to_cudl_label can reuse the SAME implementation
+(Round 3 Codex HIGH #1 — single source of truth).
 """
 from __future__ import annotations
 
 import csv
 import logging
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Set
 
@@ -124,40 +136,190 @@ def _is_collision_key(key: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Stub functions (implemented in Plans 02 / 03)
+# Module-level _index_key_for_label (Round 3 Codex HIGH #1 — single source of truth)
 # ---------------------------------------------------------------------------
 
 
-def lookup_cudl(classmark: str) -> Optional[Dict[str, str]]:
-    """Look up a CUDL classmark in the alias index.
+def _index_key_for_label(label: str) -> str:
+    """Normalize a forward CUDL label (e.g. 'MS-MOSSERI-III-00027-O') into the
+    index key form ('mosseriiii27o').
 
-    Returns ``{"sys_id": ..., "shelfmark": ...}`` if found, ``None`` otherwise.
-    Never raises — graceful-None per shared-service convention.
+    Strips the leading 'MS' segment that construct_mosseri_cudl_label() emits
+    (CUDL viewer slugs drop it), then collapses zfill zeros from numeric segments
+    before passing through cudl_normalize.
+
+    MUST be module-level (not nested) — Plan 03's lookup_cudl extension and
+    shelfmark_to_cudl_label both call this. ONE implementation, three callers.
+    """
+    if not label:
+        return ""
+    segs = label.split('-')
+    if segs and segs[0].upper() == 'MS':
+        segs = segs[1:]
+    parts = []
+    for seg in segs:
+        if seg.isdigit():
+            parts.append(seg.lstrip('0') or '0')
+        else:
+            parts.append(seg)
+    return cudl_normalize('-'.join(parts))
+
+
+# ---------------------------------------------------------------------------
+# Alias index — build + lookup
+# ---------------------------------------------------------------------------
+
+
+def _write_alias_collision_report(
+    ambiguous: Dict[str, set],
+    report_path: Optional[Path] = None,
+) -> None:
+    """Write ambiguity-audit CSV with columns key,sys_ids,shelfmarks.
+
+    Round 3 Codex MEDIUM: report_path is now a parameter so unit tests can pass
+    tmp_path / 'collisions.csv' and avoid mutating the real diagnostic artifact.
+    Default (None) resolves to <project_root>/reports/cudl_alias_collisions.csv.
+
+    Codex LOW (Round 2): swallow OSError quietly in packaged/read-only contexts —
+    app startup must not fail or emit WARNING noise on read-only filesystems.
+    """
+    if report_path is None:
+        reports_dir = Path(__file__).resolve().parent.parent / "reports"
+        try:
+            reports_dir.mkdir(exist_ok=True)
+        except OSError as e:
+            logger.debug("alias-collisions report skipped (cannot create reports dir): %s", e)
+            return
+        report_path = reports_dir / "cudl_alias_collisions.csv"
+    else:
+        # Caller-supplied path (tests). Ensure parent exists.
+        try:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug("alias-collisions report skipped (cannot create parent dir): %s", e)
+            return
+    try:
+        with report_path.open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["key", "sys_ids", "shelfmarks"])
+            for key in sorted(ambiguous.keys()):
+                claims = ambiguous[key]
+                sys_ids = sorted({sid for (sid, _s) in claims})
+                shelfmarks = sorted({s for (_sid, s) in claims if s})
+                w.writerow([key, "|".join(sys_ids), "|".join(shelfmarks)])
+    except OSError as e:
+        logger.debug("alias-collisions report skipped (write failed): %s: %s", report_path, e)
+
+
+def build_alias_index(csv_bank, report_path: Optional[Path] = None) -> None:
+    """Build the CUDL alias index with strict ambiguity-exclusion (Codex HIGH #2).
+
+    For each CUL/Mosseri row, walk its variants and produce normalized index keys
+    via the Mosseri forward path (construct_mosseri_cudl_label) and/or the generic
+    CUDL-form path (cudl_normalize). Collect all (sys_id, shelfmark) claims per key
+    into a builder set. After the walk, include ONLY keys with exactly one distinct
+    sys_id. Write excluded ambiguous keys to report_path (default
+    reports/cudl_alias_collisions.csv).
+
+    Args:
+        csv_bank: dict-of-dicts from MetadataManager.csv_bank.
+        report_path: optional path for the ambiguous-key audit file. Defaults to
+            <project_root>/reports/cudl_alias_collisions.csv. Tests should pass
+            tmp_path / 'collisions.csv' (Round 3 Codex MEDIUM — keep tests from
+            dirtying the real diagnostic artifact in the working tree).
+    """
+    from genizah_core import construct_mosseri_cudl_label  # late import — break cycle
+    global _CUDL_ALIAS_INDEX
+
+    try:
+        load_collision_keys()
+    except Exception as e:
+        logger.debug("load_collision_keys failed (continuing): %s", e)
+
+    index_builder: defaultdict = defaultdict(set)
+
+    for sys_id, data in csv_bank.items():
+        variants = data.get('call_numbers_raw') or []
+        primary = data.get('shelfmark')
+        if primary and primary not in variants:
+            variants = list(variants) + [primary]
+
+        canonical = data.get('shelfmark') or (variants[0] if variants else '')
+        library_code = data.get('library_code') or ''
+
+        for variant in variants:
+            # --- Mosseri forward path (D-03) ---
+            if library_code == 'Mosseri':
+                label = construct_mosseri_cudl_label(variant)
+                if label:
+                    key = _index_key_for_label(label)
+                    if key and not _is_collision_key(key):
+                        index_builder[key].add((sys_id, canonical))
+
+            # --- Generic CUDL-form path (CUL Or./T-S/Add. — applies in Plan 03 too) ---
+            if library_code in ('CUL', 'Mosseri'):
+                key = cudl_normalize(variant)
+                if key and not _is_collision_key(key):
+                    index_builder[key].add((sys_id, canonical))
+
+    # Materialize: keep only keys with exactly ONE distinct sys_id.
+    final_index: Dict[str, tuple] = {}
+    ambiguous: Dict[str, set] = {}
+    for key, claim_set in index_builder.items():
+        sys_ids = {sid for (sid, _shelf) in claim_set}
+        if len(sys_ids) == 1:
+            final_index[key] = next(iter(claim_set))
+        else:
+            ambiguous[key] = claim_set
+
+    _CUDL_ALIAS_INDEX = final_index
+
+    # Round 3 Codex MEDIUM: route the report path through the parameter so tests
+    # can inject tmp_path. None → canonical reports/cudl_alias_collisions.csv.
+    _write_alias_collision_report(ambiguous, report_path=report_path)
+
+    logger.warning(
+        "alias index built: %d keys, %d ambiguous keys excluded",
+        len(final_index), len(ambiguous),
+    )
+
+
+def lookup_cudl(classmark: str) -> Optional[Dict[str, str]]:
+    """Map a CUDL classmark to a libraries.csv row. Returns None if no match
+    OR if the key was excluded as ambiguous.
+
+    Tries the plain cudl_normalize form first (covers CUDL slug inputs like
+    'mosseriiii27o'); on miss, also tries _index_key_for_label (covers
+    forward-label inputs like 'MS-MOSSERI-III-00027-O').
 
     The alias index must first be populated by build_alias_index(). Returns None
     if the index has not been built yet or is empty.
 
-    Plan 02/03 implement the full build + lookup logic.
+    Plan 03 will EXTEND this with the Or.-collapse retry — Plan 03 must NOT
+    replace this body.
     """
-    if not _CUDL_ALIAS_INDEX:
+    if _CUDL_ALIAS_INDEX is None or not _CUDL_ALIAS_INDEX:
         return None
-    key = cudl_normalize(classmark)
-    if not key:
+    if not classmark:
         return None
-    entry = _CUDL_ALIAS_INDEX.get(key)
-    if entry is None:
+    k1 = cudl_normalize(classmark)
+    hit = _CUDL_ALIAS_INDEX.get(k1) if k1 else None
+    if hit is None:
+        # Forward-label form (e.g. "MS-MOSSERI-III-00027-O") — strip MS- and zfill
+        # via the module-level _index_key_for_label helper. Plan 03 extends this
+        # cascade with an Or.-only numeric-collapse third tier.
+        k2 = _index_key_for_label(classmark)
+        if k2 and k2 != k1:
+            hit = _CUDL_ALIAS_INDEX.get(k2)
+    if hit is None:
         return None
-    sys_id, shelfmark = entry
+    sys_id, shelfmark = hit
     return {"sys_id": sys_id, "shelfmark": shelfmark}
 
 
-def build_alias_index(csv_bank) -> None:
-    """Populate the CUDL alias index from the libraries.csv data bank.
-
-    Stub — Plan 02 implements the full walk-and-index logic for Mosseri,
-    CUL, and Or. rows. Does nothing for now.
-    """
-    pass  # Plan 02 implements this
+# ---------------------------------------------------------------------------
+# Collision key loader (Phase 84 D-06)
+# ---------------------------------------------------------------------------
 
 
 def load_collision_keys(report_path: Optional[Path] = None) -> int:
@@ -193,6 +355,11 @@ def load_collision_keys(report_path: Optional[Path] = None) -> int:
     _COLLISION_KEYS = keys
     logger.info("Loaded %d leading-zero collision keys from %s", len(keys), report_path)
     return len(keys)
+
+
+# ---------------------------------------------------------------------------
+# Stub: shelfmark_to_cudl_label (Plan 03)
+# ---------------------------------------------------------------------------
 
 
 def shelfmark_to_cudl_label(shelfmark: str) -> Optional[str]:
