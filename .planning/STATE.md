@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v7.11
 milestone_name: CUDL Coverage & Synthetic Inventories
 status: executing
-last_updated: "2026-05-06T11:49:12.202Z"
-last_activity: 2026-05-06 -- Phase 84 planning complete
+last_updated: "2026-05-06T11:59:12.694Z"
+last_activity: 2026-05-06 -- Phase 84 execution started
 progress:
   total_phases: 85
   completed_phases: 81
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-05)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.11 CUDL Coverage & Synthetic Inventories — Phase 84 next
+**Current focus:** Phase 84 — cudl-shelfmark-normalization
 
 ## Current Position
 
-Phase: 84 (CUDL Shelfmark Normalization) — NOT STARTED
-Plan: —
-Status: Ready to execute
-Last activity: 2026-05-06 -- Phase 84 planning complete
+Phase: 84 (cudl-shelfmark-normalization) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 84
+Last activity: 2026-05-06 -- Phase 84 execution started
 
 Progress: [..........] 0% (0/3 phases)
 
