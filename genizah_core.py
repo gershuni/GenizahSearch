@@ -2387,6 +2387,17 @@ def get_logger(name=None):
 
 LOGGER = get_logger(__name__)
 
+# Phase 84: WARNING-once flag for shelfmark_bridge import failures (Gemini LOW).
+_BRIDGE_IMPORT_WARNED = False
+
+
+def _warn_bridge_import_failed(exc):
+    """Log shelfmark_bridge import failure at WARNING once per process (Gemini LOW)."""
+    global _BRIDGE_IMPORT_WARNED
+    if not _BRIDGE_IMPORT_WARNED:
+        LOGGER.warning("shelfmark_bridge unavailable (degrading to v7.10 behavior): %s", exc)
+        _BRIDGE_IMPORT_WARNED = True
+
 
 def configure_lab_logger():
     """Configure a separate logger for Lab Mode operations."""
@@ -3398,6 +3409,15 @@ class MetadataManager:
             # to rebuild after background loading completes.
             self._shelfmark_index = None
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
+
+            # Phase 84: build CUDL alias index for cross-system shelfmark lookups (D-03).
+            try:
+                from shared.shelfmark_bridge import build_alias_index as _build_cudl_alias_index
+                _build_cudl_alias_index(self.csv_bank)
+            except ImportError as e:
+                _warn_bridge_import_failed(e)
+            except Exception as e:
+                LOGGER.warning("CUDL alias index build failed (continuing without bridge): %s", e)
 
             # Stamp has_vs from vs_manifest.txt (lightweight, ~2.5MB, 129K sys_ids)
             vs_manifest_path = os.path.join(os.path.dirname(Config.LIBRARIES_CSV), 'fist_data', 'vs_manifest.txt')
@@ -4585,6 +4605,19 @@ class MetadataManager:
             val = data.get(field, '')
             if val and matches(val, q_norm):
                 results.add(sys_id)
+
+        # Phase 84: CUDL classmark fallback (NORM-01/02). Zero-regression by construction:
+        # only runs when canonical matching returned no hits.
+        if field == 'shelfmark' and not results:
+            try:
+                from shared.shelfmark_bridge import lookup_cudl
+                hit = lookup_cudl(query)
+                if hit and hit.get('sys_id'):
+                    results.add(hit['sys_id'])
+            except ImportError as e:
+                _warn_bridge_import_failed(e)
+            except Exception as e:
+                LOGGER.debug("Bridge fallback failed for query %r: %s", query, e)
 
         return list(results)
 
