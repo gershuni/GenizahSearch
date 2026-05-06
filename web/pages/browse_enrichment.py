@@ -250,6 +250,17 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 result['cambridge_images'] = cached.get('images_ext', [])
                 result['external_provider'] = cached.get('external_provider', '')
                 result['cambridge_alignment'] = cached.get('cambridge_alignment')
+                # Phase 84 follow-up: propagate external_url back from nli_cache when
+                # the MARC branch (line 192-199 above) didn't set one. enrich_metadata
+                # may have resolved it via the bridge supplement (Cambridge for
+                # CUDL-only rows like Mosseri). Without this, pg.external_url stays
+                # empty for Mosseri/CUL-CUDL rows and the browse "View on CUDL" link
+                # falls through to a lossy shelfmark-slug fallback that 404s.
+                if not result.get('external_url') and cached.get('external_url'):
+                    cached_url = cached.get('external_url') or ''
+                    if 'cudl.lib.cam.ac.uk' in cached_url.lower():
+                        result['is_cambridge'] = True
+                    result['external_url'] = cached_url
 
             return result
 

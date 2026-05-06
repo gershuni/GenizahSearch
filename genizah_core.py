@@ -3966,9 +3966,17 @@ class MetadataManager:
         # Check for External Link from MARC (e.g. CUDL)
         ext_link = marc_data.get('external_iiif_link')
         if ext_link:
-            current_meta['external_url'] = ext_link
+            # Phase 84 follow-up: store the viewer URL form (cudl.lib.cam.ac.uk/view/...)
+            # rather than the raw IIIF manifest JSON URL (cudl.lib.cam.ac.uk/iiif/...).
+            # The "View on CUDL" external link in browse opens external_url in a new tab;
+            # /iiif/ returns JSON ("unavailable page" to a human), /view/ is the gallery
+            # page. Web-side browse_enrichment.py:199 already does this transform for
+            # MARC; centralizing it here so the bridge supplement (3a) and the Mosseri
+            # variant loop (3b) below get the same correct form.
             if 'cudl.lib.cam.ac.uk' in ext_link.lower():
+                ext_link = ext_link.replace("/iiif/", "/view/")
                 current_meta['external_provider'] = 'cambridge'
+            current_meta['external_url'] = ext_link
 
         # Lists for multiple sources
         images_nli = []
@@ -3986,7 +3994,10 @@ class MetadataManager:
                 cam_manifest_url = crossref_svc.get_cambridge_manifest_with_bridge(shelfmark)
                 if cam_manifest_url:
                     ext_link = cam_manifest_url
-                    current_meta['external_url'] = ext_link
+                    # Bridge returns the IIIF manifest URL form (/iiif/MS-...). Convert
+                    # to the CUDL viewer URL (/view/MS-...) for the user-facing
+                    # "View on CUDL" link. /iiif/ returns JSON; /view/ is the gallery.
+                    current_meta['external_url'] = ext_link.replace("/iiif/", "/view/")
                     current_meta['external_provider'] = 'cambridge'
                     LOGGER.info(f"Using local Cambridge manifest for {system_id} from crossref sidecar")
 
@@ -4003,7 +4014,8 @@ class MetadataManager:
                     cam_url = crossref_svc.get_cambridge_manifest_with_bridge(variant)
                     if cam_url:
                         ext_link = cam_url
-                        current_meta['external_url'] = ext_link
+                        # iiif manifest URL → viewer page URL (see 2a-supplement above).
+                        current_meta['external_url'] = ext_link.replace("/iiif/", "/view/")
                         current_meta['external_provider'] = 'cambridge'
                         LOGGER.info(f"Using Mosseri CUDL manifest for {system_id} via variant {variant!r}")
                         break
