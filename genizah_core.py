@@ -4734,6 +4734,40 @@ class MetadataManager:
                 # Dot-agnostic match only for dotless queries (e.g. "19234" == "19.234")
                 exact_matches.append(entry)
 
+        # Phase 84 follow-up: bridge resolution as exact match. The legacy
+        # normalize_shelfmark() does NOT collapse CUDL leading zeros or merge
+        # slash/comma/dot variants, so user queries in the canonical/NLI form
+        # (e.g. 'T-S F 8.2') never match libraries.csv rows stored only in CUDL
+        # classmark form (e.g. 'Ms. T-S F 8/002' → norm 'tsf8.002'). When the
+        # bridge resolves the query to a sys_id that's absent from exact_matches,
+        # promote it to exact-match status — that row is the user's intended
+        # target, and ranking it ahead of substring prefix-noise (8.20/8.21/8.22)
+        # gives a single-exact-match path back to the picker-free direct browse.
+        # UAT Test 1 sub-issue 1b: 'T-S F 8.2' resolves to row 990026242400205171.
+        try:
+            from shared.shelfmark_bridge import lookup_cudl
+            bridge_hit = lookup_cudl(query)
+        except ImportError as _e:
+            _warn_bridge_import_failed(_e)
+            bridge_hit = None
+        except Exception:
+            bridge_hit = None
+
+        if bridge_hit and bridge_hit.get('sys_id'):
+            _bsid = bridge_hit['sys_id']
+            if not any(e.get('sys_id') == _bsid for e in exact_matches):
+                _bdata = self.csv_bank.get(_bsid, {})
+                _bshelf = _bdata.get('shelfmark') or bridge_hit.get('shelfmark', '') or ''
+                _btitle = _bdata.get('title', '')
+                # Insert at front so the dedup-then-single-exact path returns
+                # this row as the resolved sys_id when no canonical exact match
+                # exists.
+                exact_matches.insert(0, {
+                    'sys_id': _bsid,
+                    'shelfmark': _bshelf,
+                    'title': _btitle,
+                })
+
         # Deduplicate exact matches by sys_id (e.g. "T-S AS 31.1" and "Ms. T-S AS 31.1"
         # are the same manuscript). Keep the shortest shelfmark as most user-friendly.
         if exact_matches:

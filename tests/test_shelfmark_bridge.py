@@ -245,3 +245,57 @@ class TestImageSourceInfoBridgeFallback:
         # short-circuits (inside the `if not result["cambridge"]` guard).
         assert pre["cambridge"] is True
         assert post["cambridge"] is True
+
+
+class TestResolveSystemBridgeExactMatch:
+    """Phase 84 follow-up: resolve_system_by_shelfmark must promote bridge-resolved
+    sys_ids to exact-match status so that user queries in canonical/NLI form
+    (e.g. 'T-S F 8.2') resolve directly to libraries.csv rows stored only in CUDL
+    classmark form (e.g. 'Ms. T-S F 8/002' — norm 'tsf8.002', no leading-zero
+    collapse in legacy normalize_shelfmark).
+
+    Pre-fix symptom (UAT Test 1 sub-issue 1b): typing 'T-S F 8.2' returned a
+    multi-suggestion picker with prefix substring matches (T-S F 8.20, 8.21,
+    8.22) but did NOT include the user's intended row 990026242400205171.
+
+    Post-fix: bridge hit is inserted as exact-match at position 0, dedup runs,
+    single-exact branch fires, and the picker is bypassed entirely.
+    """
+
+    @pytest.fixture(scope="class")
+    def mm(self):
+        from genizah_core import MetadataManager
+        try:
+            m = MetadataManager()
+            m._load_csv_bank()
+            if len(m.csv_bank) < 100000:
+                pytest.skip(f"csv_bank only loaded {len(m.csv_bank)} rows")
+        except Exception as e:
+            pytest.skip(f"MetadataManager unavailable: {e}")
+        return m
+
+    def test_canonical_form_resolves_to_cudl_classmark_row(self, mm):
+        """T-S F 8.2 → row 990026242400205171 stored as 'Ms. T-S F 8/002'."""
+        result = mm.resolve_system_by_shelfmark("T-S F 8.2")
+        assert result.get("sys_id") == "990026242400205171", (
+            f"Expected single-exact-match resolution to sys_id 990026242400205171, "
+            f"got: {result}"
+        )
+        assert not result.get("options"), "Picker should be bypassed (single exact match)"
+
+    def test_slash_form_one_zero_resolves(self, mm):
+        result = mm.resolve_system_by_shelfmark("T-S F 8/2")
+        assert result.get("sys_id") == "990026242400205171"
+
+    def test_slash_form_zero_padded_resolves(self, mm):
+        """T-S F 8/002: matches the stored shelfmark literally — must keep working."""
+        result = mm.resolve_system_by_shelfmark("T-S F 8/002")
+        assert result.get("sys_id") == "990026242400205171"
+
+    def test_canonical_shelfmark_unchanged_no_bridge_disturbance(self, mm):
+        """Regression: T-S 12.123 has a libraries.csv row that matches canonically.
+        The bridge insert must not displace the canonical exact match."""
+        result = mm.resolve_system_by_shelfmark("T-S 12.123")
+        assert result.get("sys_id"), "Canonical exact match must still resolve"
+        # Should not introduce a picker for a query that has a canonical exact match
+        assert not result.get("options")
