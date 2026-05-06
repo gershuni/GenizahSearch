@@ -15,10 +15,11 @@ Functions:
   cudl_normalize(s)                  -- full normalization (runtime)
   _normalize_without_zero_collapse(s)-- audit-only sibling (no leading-zero strip)
   _index_key_for_label(label)        -- module-level helper: forward CUDL label -> index key
-  lookup_cudl(classmark)             -- alias index lookup (implemented in Plan 02)
+  _collapse_numeric_runs(s)          -- Or.-only numeric-collapse helper (NORM-02)
+  lookup_cudl(classmark)             -- alias index lookup (3-tier cascade)
   build_alias_index(csv_bank, ...)   -- populate alias index with strict ambiguity exclusion
   load_collision_keys(report_path)   -- load D-06 gate file
-  shelfmark_to_cudl_label(shelfmark) -- reverse lookup (stub until Plan 03)
+  shelfmark_to_cudl_label(shelfmark) -- conservative forward lookup with documented allowlist
   _is_collision_key(key)             -- check collision safety net
   _write_alias_collision_report(...) -- write ambiguous-key audit CSV
 
@@ -30,6 +31,11 @@ via the report_path parameter — Round 3 Codex MEDIUM).
 _index_key_for_label is module-level (not nested) so Plan 03's lookup_cudl
 extension and shelfmark_to_cudl_label can reuse the SAME implementation
 (Round 3 Codex HIGH #1 — single source of truth).
+
+Plan 03 adds:
+  - _collapse_numeric_runs: Or.-ONLY numeric-collapse (NORM-02, Codex MEDIUM #5)
+  - 3-tier lookup_cudl cascade (tier 3 = Or.-collapse retry, Codex HIGH #2)
+  - shelfmark_to_cudl_label with _SUPPORTED_CUDL_PATTERNS allowlist (Codex HIGH #3)
 """
 from __future__ import annotations
 
@@ -48,6 +54,9 @@ logger = logging.getLogger(__name__)
 
 #: Exported for scripts/scan_cudl_orphans.py re-import (one source of truth).
 NUM_RE = re.compile(r"^(.+?)(\d+)$")
+
+#: Matches dot-separated numeric runs for NORM-02 Or.-only numeric-collapse.
+_NUMERIC_RUN_RE = re.compile(r"(\d+)(?:\.(\d+))+")
 
 # ---------------------------------------------------------------------------
 # Normalizer (NORM-03) — ported verbatim from scripts/scan_cudl_orphans.py:37-58
@@ -106,6 +115,32 @@ def _normalize_without_zero_collapse(s: str) -> str:
     s = re.sub(r"(?<=[a-z])\.|\.(?=[a-z])", "", s)
     # NOTE: the two leading-zero re.sub lines are intentionally omitted here.
     return s
+
+
+# ---------------------------------------------------------------------------
+# Or.-only numeric-collapse helper (NORM-02, Plan 03)
+# ---------------------------------------------------------------------------
+
+
+def _collapse_numeric_runs(s: str) -> str:
+    """Collapse dot-separated numeric runs into a single concatenated number.
+
+    'or1080.1.1' -> 'or1080.11' (NORM-02 numeric-collapse: Or. 1080.1.1 in CUDL)
+    'or1080.5.30' -> 'or1080.530'
+    'tsar48.211' -> 'tsar48.211' (single numeric segment after dot, unchanged)
+
+    Applies AFTER cudl_normalize. Only collapses when there are 3+ dot-separated
+    digit groups (so 2-group runs like '48.211' are kept as-is, matching CUDL).
+
+    Per Codex MEDIUM #5: callers MUST gate to Cambridge Or. variants only — do not
+    apply to arbitrary collections.
+    """
+    def _join(m: re.Match) -> str:
+        parts = m.group(0).split('.')
+        if len(parts) >= 3:
+            return parts[0] + '.' + ''.join(parts[1:])
+        return m.group(0)
+    return _NUMERIC_RUN_RE.sub(_join, s)
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +293,16 @@ def build_alias_index(csv_bank, report_path: Optional[Path] = None) -> None:
 
             # --- Generic CUDL-form path (CUL Or./T-S/Add. — applies in Plan 03 too) ---
             if library_code in ('CUL', 'Mosseri'):
-                key = cudl_normalize(variant)
-                if key and not _is_collision_key(key):
-                    index_builder[key].add((sys_id, canonical))
+                base_key = cudl_normalize(variant)
+                if base_key and not _is_collision_key(base_key):
+                    index_builder[base_key].add((sys_id, canonical))
+
+                # NORM-02 numeric-collapse path — GATED to Cambridge Or. variants ONLY
+                # (Codex MEDIUM #5). base_key already comes from cudl_normalize(variant).
+                if base_key and base_key.startswith('or') and len(base_key) > 2 and base_key[2].isdigit():
+                    collapsed_key = _collapse_numeric_runs(base_key)
+                    if collapsed_key and collapsed_key != base_key and not _is_collision_key(collapsed_key):
+                        index_builder[collapsed_key].add((sys_id, canonical))
 
     # Materialize: keep only keys with exactly ONE distinct sys_id.
     final_index: Dict[str, tuple] = {}
@@ -285,18 +327,20 @@ def build_alias_index(csv_bank, report_path: Optional[Path] = None) -> None:
 
 
 def lookup_cudl(classmark: str) -> Optional[Dict[str, str]]:
-    """Map a CUDL classmark to a libraries.csv row. Returns None if no match
-    OR if the key was excluded as ambiguous.
+    """Map a CUDL classmark to a libraries.csv row.
 
-    Tries the plain cudl_normalize form first (covers CUDL slug inputs like
-    'mosseriiii27o'); on miss, also tries _index_key_for_label (covers
-    forward-label inputs like 'MS-MOSSERI-III-00027-O').
+    Cascade (in order):
+      1. cudl_normalize(classmark) — handles plain CUDL slug inputs (e.g. 'mosseriiii27o').
+      2. _index_key_for_label(classmark) — handles forward-label inputs that arrive
+         with the literal 'MS-' prefix and zfilled segments (e.g. 'MS-MOSSERI-III-00027-O').
+         Added by Plan 02. MUST be preserved here (Round 3 Codex HIGH #2).
+      3. _collapse_numeric_runs(k1) — handles Or. numeric-collapse inputs that the user
+         typed in expanded form (e.g. 'or1080.1.1' when CUDL stores 'or1080.11').
+         Added by Plan 03. Or.-gated to mirror the index side.
 
+    Returns None if no match OR if the resolving key was excluded as ambiguous.
     The alias index must first be populated by build_alias_index(). Returns None
     if the index has not been built yet or is empty.
-
-    Plan 03 will EXTEND this with the Or.-collapse retry — Plan 03 must NOT
-    replace this body.
     """
     if _CUDL_ALIAS_INDEX is None or not _CUDL_ALIAS_INDEX:
         return None
@@ -304,13 +348,16 @@ def lookup_cudl(classmark: str) -> Optional[Dict[str, str]]:
         return None
     k1 = cudl_normalize(classmark)
     hit = _CUDL_ALIAS_INDEX.get(k1) if k1 else None
+    # Plan 02 cascade tier 2: forward-label form (MS-MOSSERI-III-00027-O style).
     if hit is None:
-        # Forward-label form (e.g. "MS-MOSSERI-III-00027-O") — strip MS- and zfill
-        # via the module-level _index_key_for_label helper. Plan 03 extends this
-        # cascade with an Or.-only numeric-collapse third tier.
         k2 = _index_key_for_label(classmark)
         if k2 and k2 != k1:
             hit = _CUDL_ALIAS_INDEX.get(k2)
+    # Plan 03 extension tier 3: Or.-only numeric-collapse retry.
+    if hit is None and k1 and k1.startswith('or') and len(k1) > 2 and k1[2].isdigit():
+        k3 = _collapse_numeric_runs(k1)
+        if k3 != k1:
+            hit = _CUDL_ALIAS_INDEX.get(k3)
     if hit is None:
         return None
     sys_id, shelfmark = hit
@@ -358,15 +405,60 @@ def load_collision_keys(report_path: Optional[Path] = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Stub: shelfmark_to_cudl_label (Plan 03)
+# Documented allowlist of supported forward shelfmark patterns (Plan 03)
 # ---------------------------------------------------------------------------
+
+# Codex HIGH #3 (Phase 84 review): the bridge MUST NOT generate CUDL viewer slugs
+# for arbitrary CUL subcollections — that risks routing browse.py to a 404 or
+# wrong manuscript page. Only patterns we have empirically confirmed map to live
+# CUDL viewer URLs are listed here.
+_SUPPORTED_CUDL_PATTERNS = (
+    re.compile(r"^\s*Or\.?\s", re.IGNORECASE),   # Or. 1080 J 15, Or 1080.1.1
+    re.compile(r"^\s*T-S\b", re.IGNORECASE),       # T-S Ar. 48.211, T-S F 8/002, T-S NS ...
+    re.compile(r"^\s*Add\.\s", re.IGNORECASE),     # Add. 863, 2
+)
 
 
 def shelfmark_to_cudl_label(shelfmark: str) -> Optional[str]:
-    """Convert a libraries.csv shelfmark to its CUDL viewer URL classmark form.
+    """Map a libraries.csv shelfmark to a CUDL URL slug — CONSERVATIVE.
 
-    Stub — Plan 03 implements the reverse-map logic (Mosseri, CUL) so the
-    browse page "Cambridge" button links to the correct CUDL viewer page.
-    Returns None for now.
+    Returns the slug for Mosseri shelfmarks (delegating to _index_key_for_label —
+    single source of truth, Round 3 Codex HIGH #1) and for shelfmarks matching the
+    documented _SUPPORTED_CUDL_PATTERNS allowlist (Or., T-S, Add.). Returns None for
+    uncertain forms so callers (browse.py) keep the v7.10 .replace(' ', '-') fallback.
+
+    Codex HIGH #3: do NOT use cudl_normalize as a generic fallback for non-Mosseri
+    CUL shelfmarks — that assumes every normalized key equals the CUDL viewer slug,
+    which is not true for all CUL subcollections.
     """
-    return None  # Plan 03 implements this
+    if not shelfmark:
+        return None
+    from genizah_core import construct_mosseri_cudl_label  # late import — break cycle
+
+    # --- Mosseri forward path ---
+    # Round 3 Codex HIGH #1: do NOT reimplement zfill+MS-strip inline. Delegate to the
+    # module-level _index_key_for_label, which is the single source of truth for the
+    # MS-MOSSERI-III-00027-O -> mosseriiii27o transform. The previous inline loop
+    # forgot to strip the leading 'MS' segment and produced 'msmosseriiii27o'.
+    mosseri_label = construct_mosseri_cudl_label(shelfmark)
+    if mosseri_label:
+        return _index_key_for_label(mosseri_label) or None
+
+    # --- Allowlist-gated path — only KNOWN supported CUL patterns ---
+    for pat in _SUPPORTED_CUDL_PATTERNS:
+        if pat.search(shelfmark):
+            key = cudl_normalize(shelfmark)
+            if not key:
+                return None
+            # Codex HIGH #2 (Round 2): for Or. numeric forms (`Or. 1080.1.1` →
+            # `or1080.1.1`) we MUST collapse to `or1080.11` to match the actual
+            # CUDL viewer slug. Mirror the same Or.-only gate used on the index side
+            # so non-Or. allowlist patterns (T-S, Add.) are unaffected.
+            if key.startswith('or') and len(key) > 2 and key[2].isdigit():
+                collapsed = _collapse_numeric_runs(key)
+                if collapsed:
+                    return collapsed
+            return key
+
+    # Uncertain pattern — return None so callers fall back to v7.10 behavior.
+    return None
