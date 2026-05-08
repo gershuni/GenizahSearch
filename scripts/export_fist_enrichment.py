@@ -29,6 +29,7 @@ This is the data foundation for FJMS Integration (v5.8.0),
 Metadata Enrichment (v5.9.0), and Catalog Descriptions (Phase 37).
 """
 
+import json
 import sqlite3
 import os
 from datetime import datetime, timezone
@@ -50,6 +51,67 @@ def clean_copy_date(value):
     return s
 
 
+# ---------------------------------------------------------------------------
+# Phase 85 SYNTH-05 — Synthetic AlmaId injection (REVIEWS-MODE 2026-05-08)
+#
+# Reads Plan 02's fist_data/synthetic_manifest.json into a temp table on the
+# source connection. Every UNION ALL block in the AlmaId-keyed export
+# functions restricts to InventoryIds in this temp table. NO independent
+# qualifying-set predicate is computed here — the manifest is the
+# AUTHORITATIVE cross-plan input (eliminates Plan 02 / Plan 03 divergence
+# per Codex/Gemini HIGH consensus).
+# ---------------------------------------------------------------------------
+
+
+def load_synthetic_manifest_into_temp_table(source, manifest_path) -> int:
+    """Populate temp.synthetic_qualifying_inventories from Plan 02's manifest.
+
+    REVIEWS-MODE: this is the ONLY InventoryId source for the UNION ALL
+    synthetic blocks in this script. The script does NOT compute its own
+    qualifying set — Plan 02's fist_data/synthetic_manifest.json is
+    authoritative.
+
+    Args:
+        source: sqlite3.Connection (or any object with .execute()) opened to
+            the FIST.db source. Temp tables in SQLite are connection-scoped,
+            so any cursor derived from this connection can query the
+            populated temp table.
+        manifest_path: Path-like pointing at fist_data/synthetic_manifest.json
+            as written by scripts/generate_synthetic_rows.py. May be None or
+            non-existent — in which case the temp table is created but empty
+            (zero synthetic rows are emitted in the resulting sidecar).
+
+    Returns:
+        int: count of InventoryIds loaded into the temp table.
+    """
+    # Drop-then-create is safe because temp tables are connection-scoped and
+    # we are at the start of a fresh export run.
+    try:
+        source.execute("DROP TABLE IF EXISTS temp.synthetic_qualifying_inventories")
+    except sqlite3.OperationalError:
+        # Some SQLite builds reject explicit "temp." schema in DROP; fall back.
+        source.execute("DROP TABLE IF EXISTS synthetic_qualifying_inventories")
+    source.execute("""
+        CREATE TEMP TABLE synthetic_qualifying_inventories (
+            InventoryId INTEGER PRIMARY KEY
+        )
+    """)
+
+    if manifest_path and Path(manifest_path).exists():
+        items = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        for item in items:
+            inv_id = int(item["inventory_id"])
+            source.execute(
+                "INSERT OR IGNORE INTO synthetic_qualifying_inventories(InventoryId) VALUES (?)",
+                (inv_id,),
+            )
+
+    count = source.execute(
+        "SELECT COUNT(*) FROM synthetic_qualifying_inventories"
+    ).fetchone()[0]
+    return count
+
+
 def export_domains(source, target):
     """Export domain classifications from FIST to sidecar."""
     print("Exporting domains...")
@@ -66,20 +128,44 @@ def export_domains(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            d.EngDesc as Domain,
-            d.HebDesc as DomainHeb,
-            pd.EngDesc as ParentDomain,
-            pd.HebDesc as ParentDomainHeb
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        JOIN dbo_CatalogMultiDomain cmd ON cat.UnitCatalogRecId = cmd.UnitCatalogRecId
-        JOIN CODE_Domain d ON cmd.DomainId = d.DomainId
-        LEFT JOIN CODE_Domain pd ON d.BelongToDomainId = pd.DomainId
+        SELECT AlmaId, Domain, DomainHeb, ParentDomain, ParentDomainHeb FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                d.EngDesc as Domain,
+                d.HebDesc as DomainHeb,
+                pd.EngDesc as ParentDomain,
+                pd.HebDesc as ParentDomainHeb
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiDomain cmd ON cat.UnitCatalogRecId = cmd.UnitCatalogRecId
+            JOIN CODE_Domain d ON cmd.DomainId = d.DomainId
+            LEFT JOIN CODE_Domain pd ON d.BelongToDomainId = pd.DomainId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows for inventories listed
+            -- in Plan 02's synthetic_manifest.json (loaded into temp table).
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                d.EngDesc as Domain,
+                d.HebDesc as DomainHeb,
+                pd.EngDesc as ParentDomain,
+                pd.HebDesc as ParentDomainHeb
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiDomain cmd ON cat.UnitCatalogRecId = cmd.UnitCatalogRecId
+            JOIN CODE_Domain d ON cmd.DomainId = d.DomainId
+            LEFT JOIN CODE_Domain pd ON d.BelongToDomainId = pd.DomainId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, Domain  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -130,18 +216,39 @@ def export_joins(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            uj.UnitJoinId as JoinGroupId,
-            uj.ScholarName,
-            uj.Comment,
-            fc.EngDesc as JoinType
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitJoin uj ON sig.SignatureId = uj.SignatureId
-        LEFT JOIN CODE_FullCode fc ON uj.JoinTypeCode = fc.ComputedCode
+        SELECT AlmaId, JoinGroupId, ScholarName, Comment, JoinType FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                uj.UnitJoinId as JoinGroupId,
+                uj.ScholarName,
+                uj.Comment,
+                fc.EngDesc as JoinType
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitJoin uj ON sig.SignatureId = uj.SignatureId
+            LEFT JOIN CODE_FullCode fc ON uj.JoinTypeCode = fc.ComputedCode
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                uj.UnitJoinId as JoinGroupId,
+                uj.ScholarName,
+                uj.Comment,
+                fc.EngDesc as JoinType
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitJoin uj ON sig.SignatureId = uj.SignatureId
+            LEFT JOIN CODE_FullCode fc ON uj.JoinTypeCode = fc.ComputedCode
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, JoinGroupId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -228,61 +335,133 @@ def export_catalog(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.UnitCatalogRecId,
-            cat.Title,
-            cat.GenizahTitleText as TitleHeb,
-            cat.AuthorText,
-            cat.CopyDate,
-            cat.CopyPlace,
-            cat.BI_TextualFrameHeb as TextualFrameHeb,
-            cat.BI_TextualFrameEng as TextualFrameEng,
-            CASE
-                WHEN sig.SourceId = 500
-                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
-                ELSE cs.EngDesc
-            END as SourceName,
-            CASE
-                WHEN sig.SourceId = 500
-                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
-                ELSE cs.HebDesc
-            END as SourceNameHeb,
-            cat.NumFolio,
-            cat.NumBifolio,
-            cat.NumColumn,
-            cat.NumRow,
-            gt.OrgTitle as GenizahTitleOrgTitle,
-            gt.EngTitle as GenizahTitleEngTitle,
-            cat.GenizahTitleId,
-            cat.Author,
-            cat.CopyToDate,
-            cat.CreationTypeCode,
-            cat.PartVocalCode,
-            cat.CantillationCode,
-            cat.SizeUnitCode,
-            cat.Autograph,
-            cat.Massorah,
-            cat.PalimpsestCode,
-            cat.IllustrationCode,
-            cat.Comment,
-            cat.Colophon,
-            cat.ColophonFolio,
-            cat.CopyName,
-            cat.ShelfmarkRange,
-            cat.OrgCreation,
-            cat.OrgAuthor,
-            cat.GenizahCode,
-            cat.NumEmpty
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
-        LEFT JOIN CODE_Catalog catname
-            ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
-        LEFT JOIN CODE_GenizahTitle gt ON cat.GenizahTitleId = gt.GenizahTitleID
+        SELECT
+            AlmaId, UnitCatalogRecId, Title, TitleHeb, AuthorText, CopyDate, CopyPlace,
+            TextualFrameHeb, TextualFrameEng, SourceName, SourceNameHeb,
+            NumFolio, NumBifolio, NumColumn, NumRow,
+            GenizahTitleOrgTitle, GenizahTitleEngTitle, GenizahTitleId, Author,
+            CopyToDate, CreationTypeCode, PartVocalCode, CantillationCode, SizeUnitCode,
+            Autograph, Massorah, PalimpsestCode, IllustrationCode, Comment, Colophon,
+            ColophonFolio, CopyName, ShelfmarkRange, OrgCreation, OrgAuthor, GenizahCode, NumEmpty
+        FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                cat.UnitCatalogRecId,
+                cat.Title,
+                cat.GenizahTitleText as TitleHeb,
+                cat.AuthorText,
+                cat.CopyDate,
+                cat.CopyPlace,
+                cat.BI_TextualFrameHeb as TextualFrameHeb,
+                cat.BI_TextualFrameEng as TextualFrameEng,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
+                    ELSE cs.EngDesc
+                END as SourceName,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
+                    ELSE cs.HebDesc
+                END as SourceNameHeb,
+                cat.NumFolio,
+                cat.NumBifolio,
+                cat.NumColumn,
+                cat.NumRow,
+                gt.OrgTitle as GenizahTitleOrgTitle,
+                gt.EngTitle as GenizahTitleEngTitle,
+                cat.GenizahTitleId,
+                cat.Author,
+                cat.CopyToDate,
+                cat.CreationTypeCode,
+                cat.PartVocalCode,
+                cat.CantillationCode,
+                cat.SizeUnitCode,
+                cat.Autograph,
+                cat.Massorah,
+                cat.PalimpsestCode,
+                cat.IllustrationCode,
+                cat.Comment,
+                cat.Colophon,
+                cat.ColophonFolio,
+                cat.CopyName,
+                cat.ShelfmarkRange,
+                cat.OrgCreation,
+                cat.OrgAuthor,
+                cat.GenizahCode,
+                cat.NumEmpty
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
+            LEFT JOIN CODE_Catalog catname
+                ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
+            LEFT JOIN CODE_GenizahTitle gt ON cat.GenizahTitleId = gt.GenizahTitleID
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                cat.UnitCatalogRecId,
+                cat.Title,
+                cat.GenizahTitleText as TitleHeb,
+                cat.AuthorText,
+                cat.CopyDate,
+                cat.CopyPlace,
+                cat.BI_TextualFrameHeb as TextualFrameHeb,
+                cat.BI_TextualFrameEng as TextualFrameEng,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
+                    ELSE cs.EngDesc
+                END as SourceName,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
+                    ELSE cs.HebDesc
+                END as SourceNameHeb,
+                cat.NumFolio,
+                cat.NumBifolio,
+                cat.NumColumn,
+                cat.NumRow,
+                gt.OrgTitle as GenizahTitleOrgTitle,
+                gt.EngTitle as GenizahTitleEngTitle,
+                cat.GenizahTitleId,
+                cat.Author,
+                cat.CopyToDate,
+                cat.CreationTypeCode,
+                cat.PartVocalCode,
+                cat.CantillationCode,
+                cat.SizeUnitCode,
+                cat.Autograph,
+                cat.Massorah,
+                cat.PalimpsestCode,
+                cat.IllustrationCode,
+                cat.Comment,
+                cat.Colophon,
+                cat.ColophonFolio,
+                cat.CopyName,
+                cat.ShelfmarkRange,
+                cat.OrgCreation,
+                cat.OrgAuthor,
+                cat.GenizahCode,
+                cat.NumEmpty
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
+            LEFT JOIN CODE_Catalog catname
+                ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
+            LEFT JOIN CODE_GenizahTitle gt ON cat.GenizahTitleId = gt.GenizahTitleID
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, UnitCatalogRecId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     _placeholders = ", ".join(["?"] * 37)
@@ -371,17 +550,37 @@ def export_catalog_running_titles(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.UnitCatalogRecId,
-            rt.RunningTitle,
-            rt.Comment
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        JOIN dbo_CatalogMultiRunningTitle rt ON cat.UnitCatalogRecId = rt.UnitCatalogRecId
+        SELECT AlmaId, UnitCatalogRecId, RunningTitle, Comment FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                cat.UnitCatalogRecId,
+                rt.RunningTitle,
+                rt.Comment
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiRunningTitle rt ON cat.UnitCatalogRecId = rt.UnitCatalogRecId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                cat.UnitCatalogRecId,
+                rt.RunningTitle,
+                rt.Comment
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiRunningTitle rt ON cat.UnitCatalogRecId = rt.UnitCatalogRecId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, UnitCatalogRecId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -433,19 +632,41 @@ def export_catalog_sizes(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.UnitCatalogRecId,
-            sz.SizeX,
-            sz.SizeY,
-            sz.InnerSizeX,
-            sz.InnerSizeY
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        JOIN dbo_CatalogMultiSize sz ON cat.UnitCatalogRecId = sz.UnitCatalogRecId
+        SELECT AlmaId, UnitCatalogRecId, SizeX, SizeY, InnerSizeX, InnerSizeY FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                cat.UnitCatalogRecId,
+                sz.SizeX,
+                sz.SizeY,
+                sz.InnerSizeX,
+                sz.InnerSizeY
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiSize sz ON cat.UnitCatalogRecId = sz.UnitCatalogRecId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                cat.UnitCatalogRecId,
+                sz.SizeX,
+                sz.SizeY,
+                sz.InnerSizeX,
+                sz.InnerSizeY
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiSize sz ON cat.UnitCatalogRecId = sz.UnitCatalogRecId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, UnitCatalogRecId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -491,20 +712,43 @@ def export_catalog_fields(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.UnitCatalogRecId,
-            fct.TableName as FieldCategory,
-            fc.EngDesc as FieldValue,
-            fc.HebDesc as FieldValueHeb
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        JOIN dbo_CatalogMultiField fld ON cat.UnitCatalogRecId = fld.UnitCatalogRecId
-        JOIN CODE_FullCode fc ON fld.ValueCode = fc.ComputedCode
-        JOIN CODE_FCDTable fct ON fc.FCDTableId = fct.FCDTableId
+        SELECT AlmaId, UnitCatalogRecId, FieldCategory, FieldValue, FieldValueHeb FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                cat.UnitCatalogRecId,
+                fct.TableName as FieldCategory,
+                fc.EngDesc as FieldValue,
+                fc.HebDesc as FieldValueHeb
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiField fld ON cat.UnitCatalogRecId = fld.UnitCatalogRecId
+            JOIN CODE_FullCode fc ON fld.ValueCode = fc.ComputedCode
+            JOIN CODE_FCDTable fct ON fc.FCDTableId = fct.FCDTableId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                cat.UnitCatalogRecId,
+                fct.TableName as FieldCategory,
+                fc.EngDesc as FieldValue,
+                fc.HebDesc as FieldValueHeb
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiField fld ON cat.UnitCatalogRecId = fld.UnitCatalogRecId
+            JOIN CODE_FullCode fc ON fld.ValueCode = fc.ComputedCode
+            JOIN CODE_FCDTable fct ON fc.FCDTableId = fct.FCDTableId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, UnitCatalogRecId, FieldCategory  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -555,28 +799,59 @@ def export_catalog_free_desc(source, target):
     # ENA 2943.21, the catalog rec is on V3 (SigId 38059814) but the free desc
     # is on V2 (SigId 37858814). Filtering to latest version would lose them.
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            sig.SignatureId,
-            fd.FreeDesc,
-            CASE
-                WHEN sig.SourceId = 500
-                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
-                ELSE cs.EngDesc
-            END as SourceName,
-            CASE
-                WHEN sig.SourceId = 500
-                    THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
-                ELSE cs.HebDesc
-            END as SourceNameHeb
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitFreeDescription fd ON sig.SignatureId = fd.SignatureId
-        LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
-        LEFT JOIN CODE_Catalog catname
-            ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
+        SELECT AlmaId, SignatureId, FreeDesc, SourceName, SourceNameHeb FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                sig.SignatureId,
+                fd.FreeDesc,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
+                    ELSE cs.EngDesc
+                END as SourceName,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
+                    ELSE cs.HebDesc
+                END as SourceNameHeb
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitFreeDescription fd ON sig.SignatureId = fd.SignatureId
+            LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
+            LEFT JOIN CODE_Catalog catname
+                ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                sig.SignatureId,
+                fd.FreeDesc,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.EngDesc)
+                    ELSE cs.EngDesc
+                END as SourceName,
+                CASE
+                    WHEN sig.SourceId = 500
+                        THEN COALESCE(catname.CatAcronym || ' Catalog', cs.HebDesc)
+                    ELSE cs.HebDesc
+                END as SourceNameHeb
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitFreeDescription fd ON sig.SignatureId = fd.SignatureId
+            LEFT JOIN dbo_CodeSource cs ON sig.SourceId = cs.TeamCode
+            LEFT JOIN CODE_Catalog catname
+                ON sig.SourceId = 500 AND sig.SubId = catname.CatalogId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, SignatureId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -625,16 +900,35 @@ def export_catalog_full_texts(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            sig.SignatureId,
-            ft.FullText
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitFullText ft ON sig.SignatureId = ft.SignatureId
-        WHERE ft.FullText IS NOT NULL AND TRIM(ft.FullText) != ''
+        SELECT AlmaId, SignatureId, FullText FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                sig.SignatureId,
+                ft.FullText
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitFullText ft ON sig.SignatureId = ft.SignatureId
+            WHERE ft.FullText IS NOT NULL AND TRIM(ft.FullText) != ''
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                sig.SignatureId,
+                ft.FullText
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitFullText ft ON sig.SignatureId = ft.SignatureId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE ft.FullText IS NOT NULL AND TRIM(ft.FullText) != ''
+              AND alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, SignatureId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -684,18 +978,39 @@ def export_catalog_textual_frames(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.UnitCatalogRecId,
-            tf.TextualFrameHeb,
-            tf.TextualFrameEng
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        JOIN dbo_CatalogMultiTextualFrame_Simple tf
-            ON cat.UnitCatalogRecId = tf.UnitCatalogRecId
+        SELECT AlmaId, UnitCatalogRecId, TextualFrameHeb, TextualFrameEng FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                cat.UnitCatalogRecId,
+                tf.TextualFrameHeb,
+                tf.TextualFrameEng
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiTextualFrame_Simple tf
+                ON cat.UnitCatalogRecId = tf.UnitCatalogRecId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                cat.UnitCatalogRecId,
+                tf.TextualFrameHeb,
+                tf.TextualFrameEng
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiTextualFrame_Simple tf
+                ON cat.UnitCatalogRecId = tf.UnitCatalogRecId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, UnitCatalogRecId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -747,19 +1062,41 @@ def export_catalog_mentions(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.UnitCatalogRecId,
-            fc.EngDesc as MentionType,
-            m.Mention,
-            m.MentionDesc
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        JOIN dbo_CatalogMultiMention m ON cat.UnitCatalogRecId = m.UnitCatalogRecId
-        LEFT JOIN CODE_FullCode fc ON m.MentionTypeCode = fc.ComputedCode
+        SELECT AlmaId, UnitCatalogRecId, MentionType, Mention, MentionDesc FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                cat.UnitCatalogRecId,
+                fc.EngDesc as MentionType,
+                m.Mention,
+                m.MentionDesc
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiMention m ON cat.UnitCatalogRecId = m.UnitCatalogRecId
+            LEFT JOIN CODE_FullCode fc ON m.MentionTypeCode = fc.ComputedCode
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                cat.UnitCatalogRecId,
+                fc.EngDesc as MentionType,
+                m.Mention,
+                m.MentionDesc
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
+            JOIN dbo_CatalogMultiMention m ON cat.UnitCatalogRecId = m.UnitCatalogRecId
+            LEFT JOIN CODE_FullCode fc ON m.MentionTypeCode = fc.ComputedCode
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, UnitCatalogRecId  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -864,6 +1201,40 @@ def export_bibliography(source, target):
                 AND baa.AuthorOrder = 1
             LEFT JOIN CODE_Author a ON baa.ArticleAuthorId = a.AuthorId
             LEFT JOIN CODE_Catalog cat ON bib.CatalogId = cat.CatalogId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                t.RunningTitleEng, t.RunningTitleHeb,
+                t.TitleYearEng, t.AcronymEng, t.AcronymHeb,
+                bib.MentionPage, bib.FromPage, bib.ToPage,
+                COALESCE(NULLIF(bib.JournalVolumeTxt, ''), bib.Volume) as Vol,
+                bib.EVolume, bib.JournalDate,
+                fc.EngDesc as MentionType,
+                ft.EngDesc as TranscriptionType,
+                fl.EngDesc as TranslationType,
+                bib.ArticleName,
+                a.EngDesc as ArticleAuthorEng, a.HebDesc as ArticleAuthorHeb,
+                cat.CatAcronym,
+                bib.Comment, bib.NoteForDisplay, bib.CatalogEntry
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitBibliographyReference bib ON sig.SignatureId = bib.SignatureId
+            LEFT JOIN CODE_Title t ON bib.TitleId = t.TitleId
+            LEFT JOIN CODE_FullCode fc ON ABS(bib.MentionTypeCode) = fc.ComputedCode
+            LEFT JOIN CODE_FullCode ft ON bib.IsHasTranscriptionCode = ft.ComputedCode
+            LEFT JOIN CODE_FullCode fl ON bib.IsHasTranslationCode = fl.ComputedCode
+            LEFT JOIN dbo_BibMultiArticleAuthor baa
+                ON bib.UnitBibliographyReferenceId = baa.UnitBibliographyReferenceId
+                AND baa.AuthorOrder = 1
+            LEFT JOIN CODE_Author a ON baa.ArticleAuthorId = a.AuthorId
+            LEFT JOIN CODE_Catalog cat ON bib.CatalogId = cat.CatalogId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
         )
         GROUP BY AlmaId, RunningTitleEng, RunningTitleHeb,
                  TitleYearEng, AcronymEng, AcronymHeb,
@@ -872,6 +1243,8 @@ def export_bibliography(source, target):
                  TranscriptionType, TranslationType,
                  ArticleName, ArticleAuthorEng, ArticleAuthorHeb,
                  CatAcronym, NoteForDisplay, CatalogEntry
+        ORDER BY AlmaId, RunningTitleEng, MentionPage  -- REVIEWS-MODE Codex HIGH determinism
+        -- Note: bibliography UNION ALL kept above; ORDER BY is at the outer GROUP BY level.
     """)
 
     n_cols = 22
@@ -918,17 +1291,37 @@ def export_catalog_refs(source, target):
     """)
 
     cursor = source.execute("""
-        SELECT DISTINCT
-            TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
-            cat.CatAcronym, cat.Author, cat.Title,
-            ccr.CatalogEntry, ccr.IsSource
-        FROM dbo_InventoryAlma alma
-        JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        JOIN dbo_UnitCatalogRec ucr ON sig.SignatureId = ucr.SignatureId
-        JOIN dbo_CatalogMultiCatalogRef ccr ON ucr.UnitCatalogRecId = ccr.UnitCatalogRecId
-        JOIN CODE_Catalog cat ON ccr.CatalogCode = cat.CatalogId
+        SELECT AlmaId, CatAcronym, CatalogAuthor, CatalogTitle, CatalogEntry, IsSource FROM (
+            SELECT DISTINCT
+                TRIM(CAST(alma.AlmaId AS TEXT)) as AlmaId,
+                cat.CatAcronym, cat.Author as CatalogAuthor, cat.Title as CatalogTitle,
+                ccr.CatalogEntry, ccr.IsSource
+            FROM dbo_InventoryAlma alma
+            JOIN dbo_Inventory inv ON alma.InventoryId = inv.InventoryId
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec ucr ON sig.SignatureId = ucr.SignatureId
+            JOIN dbo_CatalogMultiCatalogRef ccr ON ucr.UnitCatalogRecId = ccr.UnitCatalogRecId
+            JOIN CODE_Catalog cat ON ccr.CatalogCode = cat.CatalogId
+
+            UNION ALL
+
+            -- Phase 85 SYNTH-05: synthetic AlmaId rows from Plan 02 manifest.
+            SELECT DISTINCT
+                ('99' || printf('%010d', inv.InventoryId) || '000000') as AlmaId,
+                cat.CatAcronym, cat.Author as CatalogAuthor, cat.Title as CatalogTitle,
+                ccr.CatalogEntry, ccr.IsSource
+            FROM dbo_Inventory inv
+            JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
+            JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
+            JOIN dbo_UnitCatalogRec ucr ON sig.SignatureId = ucr.SignatureId
+            JOIN dbo_CatalogMultiCatalogRef ccr ON ucr.UnitCatalogRecId = ccr.UnitCatalogRecId
+            JOIN CODE_Catalog cat ON ccr.CatalogCode = cat.CatalogId
+            LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
+            WHERE alma.AlmaId IS NULL
+              AND inv.InventoryId IN (SELECT InventoryId FROM synthetic_qualifying_inventories)
+        )
+        ORDER BY AlmaId, CatAcronym, CatalogEntry  -- REVIEWS-MODE Codex HIGH determinism
     """)
 
     batch = []
@@ -1263,6 +1656,88 @@ def _table_exists(cursor, table_name: str) -> bool:
     return result[0] > 0
 
 
+def _validate_synthetic_export(target) -> None:
+    """REVIEWS-MODE Codex HIGH: post-export table-specific invariants.
+
+    Per Plan 03 reviews-mode revisions, the prior `COUNT(*) = COUNT(DISTINCT
+    AlmaId)` global check is invalid for 1:N tables (bibliography, domains,
+    etc.). Replaced with per-table invariants:
+
+      (a) catalog: 1:1 by (AlmaId, UnitCatalogRecId) — no duplicate pairs in
+          synthetic block. (The plan's draft listed (AlmaId, UnitCatalogRecId,
+          SignatureId) but the catalog table doesn't carry SignatureId; the
+          schema's effective uniqueness key is (AlmaId, UnitCatalogRecId).)
+      (b) For all 12 AlmaId-keyed tables: assert no synthetic AlmaId collides
+          with any real AlmaId (D-01a).
+      (c) Cross-table: every synthetic AlmaId must appear in `catalog` at
+          minimum (warn — don't fail — on absence; surfaces Phase 86 audit
+          pickup candidates).
+
+    `target` may be a sqlite3.Cursor (production main()) or a sqlite3.Connection
+    (tests). Both have .execute() with consistent semantics.
+    """
+    from shared.synthetic_sys_id import is_synthetic_sys_id
+
+    # (a) catalog (AlmaId, UnitCatalogRecId) uniqueness in synthetic block
+    duplicates = target.execute("""
+        SELECT AlmaId, UnitCatalogRecId, COUNT(*) as c
+        FROM catalog
+        WHERE AlmaId LIKE '99%000000'
+        GROUP BY AlmaId, UnitCatalogRecId
+        HAVING c > 1
+    """).fetchall()
+    if duplicates:
+        raise SystemExit(
+            f"REVIEWS-MODE INVARIANT VIOLATION: catalog has duplicate (AlmaId, "
+            f"UnitCatalogRecId) pairs in synthetic block: {duplicates[:5]}"
+        )
+
+    # (b) per-table real/synthetic disjointness (D-01a collision invariant)
+    alma_keyed = ["catalog", "domains", "joins", "catalog_running_titles",
+                  "catalog_sizes", "catalog_fields", "catalog_free_desc",
+                  "catalog_full_texts", "catalog_textual_frames",
+                  "catalog_mentions", "bibliography", "catalog_refs"]
+    for table in alma_keyed:
+        try:
+            rows = target.execute(f"SELECT DISTINCT AlmaId FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            # Table absent — skip (legitimate when running per-table tests).
+            continue
+        ids = {r[0] for r in rows if r[0] is not None}
+        synthetic = {a for a in ids if is_synthetic_sys_id(a)}
+        real = ids - synthetic
+        intersect = synthetic & real
+        if intersect:
+            raise SystemExit(
+                f"D-01a COLLISION in {table}: synthetic and real AlmaIds overlap: "
+                f"{sorted(intersect)[:5]}"
+            )
+        print(f"  {table}: {len(real):,} real, {len(synthetic):,} synthetic AlmaIds")
+
+    # (c) Cross-table: synthetic AlmaIds in 1:N tables but NOT in catalog -> warn
+    try:
+        catalog_synth = {r[0] for r in target.execute(
+            "SELECT DISTINCT AlmaId FROM catalog WHERE AlmaId LIKE '99%000000'"
+        )}
+    except sqlite3.OperationalError:
+        catalog_synth = set()
+    import sys as _sys
+    for table in [t for t in alma_keyed if t != "catalog"]:
+        try:
+            table_synth = {r[0] for r in target.execute(
+                f"SELECT DISTINCT AlmaId FROM {table} WHERE AlmaId LIKE '99%000000'"
+            )}
+        except sqlite3.OperationalError:
+            continue
+        orphans = table_synth - catalog_synth
+        if orphans:
+            print(
+                f"  WARNING: {len(orphans)} synthetic AlmaIds in {table} are absent "
+                f"from catalog (e.g. {sorted(orphans)[:3]}) — Phase 86 audit pickup",
+                file=_sys.stderr,
+            )
+
+
 def create_meta(target):
     """Create meta table with version and build info."""
     target.execute("DROP TABLE IF EXISTS meta")
@@ -1331,6 +1806,16 @@ def main():
     target.execute("PRAGMA synchronous=NORMAL")
 
     try:
+        # Phase 85 SYNTH-05 REVIEWS-MODE: load Plan 02's manifest into temp table
+        # BEFORE per-table exports run. The manifest is the AUTHORITATIVE
+        # InventoryId source for synthetic-AlmaId UNION blocks; the script does
+        # NOT compute its own qualifying set (eliminates Plan 02 / Plan 03
+        # divergence per Codex/Gemini HIGH consensus).
+        manifest_path = project_dir / "fist_data" / "synthetic_manifest.json"
+        synth_count = load_synthetic_manifest_into_temp_table(source_conn, manifest_path)
+        print(f"Phase 85: loaded {synth_count:,} synthetic InventoryIds from manifest")
+        print()
+
         domain_count = export_domains(source, target)
         join_count = export_joins(source, target)
         catalog_count = export_catalog(source, target)
@@ -1351,6 +1836,10 @@ def main():
         cv_count = export_code_values(source, target)
         create_fts5(target)
         create_meta(target)
+
+        # Phase 85 SYNTH-05 REVIEWS-MODE: post-export table-specific invariants.
+        print("\nValidating synthetic-row export (Phase 85)...")
+        _validate_synthetic_export(target)
 
         # Compact the database
         print("\nCompacting database...")

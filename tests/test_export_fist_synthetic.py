@@ -478,10 +478,21 @@ class TestDeterministicOrdering:
     def test_explicit_order_by_in_each_union(self):
         path = Path(__file__).resolve().parent.parent / "scripts" / "export_fist_enrichment.py"
         src = path.read_text(encoding="utf-8")
-        # Find every UNION ALL block; assert ORDER BY appears within ~3000 chars after.
-        union_positions = [m.start() for m in re.finditer(r"\bUNION ALL\b", src)]
-        assert union_positions, "No UNION ALL blocks found — Task 2 implementation missing"
-        for pos in union_positions:
+        # Compute SQL-only UNION ALL positions: scan only the inside of triple-
+        # double-quoted strings (the SQL blocks), skipping module-level
+        # docstrings and comments. Each export function's SQL is wrapped in
+        # `source.execute("""...""")` so triple-quoted blocks are SQL-region
+        # candidates. Filter to only those whose body contains a SELECT.
+        sql_union_positions: list[int] = []
+        for sql_match in re.finditer(r'"""(.*?)"""', src, re.DOTALL):
+            body = sql_match.group(1)
+            if "SELECT" not in body.upper():
+                continue
+            block_start = sql_match.start(1)
+            for m in re.finditer(r"\bUNION ALL\b", body):
+                sql_union_positions.append(block_start + m.start())
+        assert sql_union_positions, "No SQL UNION ALL blocks found — Task 2 implementation missing"
+        for pos in sql_union_positions:
             window = src[pos:pos + 3000]
             assert "ORDER BY" in window, (
                 f"UNION ALL at offset {pos} lacks ORDER BY within 3000 chars — "
