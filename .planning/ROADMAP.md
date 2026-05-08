@@ -261,14 +261,14 @@ Plans:
 4. FJMS enrichment dialogs (catalogue, bibliography, measurements, free description) populate via InventoryId fallback when sys_id is synthetic.
 5. Lists, exclusions, parallels, comments, corrections round-trip synthetic sys_ids without crashes or silent data loss; web and desktop parity preserved.
 
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 - [x] 85-01-PLAN.md -- shared/synthetic_sys_id.py helper module (is_synthetic / encode / decode) + golden fixtures (SYNTH-01)
 - [x] 85-02-PLAN.md -- scripts/generate_synthetic_rows.py + libraries.csv marker block + csv_bank loader marker tolerance + audit artifacts (SYNTH-02, SYNTH-03)
 - [x] 85-03-PLAN.md -- scripts/export_fist_enrichment.py UNION ALL synthetic AlmaId rows in 11+ enrichment tables (SYNTH-05)
 - [x] 85-04-PLAN.md -- Browse hide-NLI + CUDL-default + D-14 network-call guards (web + desktop parity, ~22-26 sites) (SYNTH-04)
-- [ ] 85-05-PLAN.md -- Public API is_synthetic field + PostHog property + community round-trip + corrections-write deferral (SYNTH-06)
+- [x] 85-05-PLAN.md -- Public API is_synthetic field + PostHog property + community round-trip + corrections-write deferral (SYNTH-06)
 
 #### Phase 86 -- CUDL Coverage Audit
 
