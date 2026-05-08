@@ -3723,6 +3723,13 @@ class MetadataManager:
             suffix: IE suffix for multi-volume manuscripts (1=primary, 2=second IE, etc.)
         """
         import time
+        # Phase 85 D-14: synthetic sys_ids have no NLI Alma record — skip the
+        # network call BEFORE issuing it. Saves ~93-2K external requests per
+        # cold cache cycle and prevents NLI 404 access-log pollution.
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        if is_synthetic_sys_id(system_id):
+            return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
+
         # Check manifest-only cache first
         cache_key = (system_id, suffix)
         if cache_key in self._iiif_manifest_cache:
@@ -3788,9 +3795,9 @@ class MetadataManager:
     def fetch_marc_data(self, system_id):
         """Fetch and parse MARC XML for bibliography, notes, and extended metadata."""
         import time
-        # Use the specific IIIF/MARC endpoint which is more reliable
-        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
-        headers = Config.HTTP_HEADERS
+        # Phase 85 D-14: synthetic sys_ids have no NLI MARC record — skip the
+        # network call BEFORE issuing it (parallel to fetch_iiif_manifest guard).
+        from shared.synthetic_sys_id import is_synthetic_sys_id
 
         result = {
             'bibliography': [],
@@ -3807,6 +3814,12 @@ class MetadataManager:
             'online_link': None,
             'external_iiif_link': None
         }
+        if is_synthetic_sys_id(system_id):
+            return result
+
+        # Use the specific IIIF/MARC endpoint which is more reliable
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
+        headers = Config.HTTP_HEADERS
 
         # 260421 follow-up (L81 lag): circuit breaker + per-sys_id negative
         # cache so failed MARC fetches don't re-burn timeout on every
@@ -10380,13 +10393,15 @@ class ListsManager:
             return '\n'.join(lines)
 
         elif format_type == 'with_link':
+            from shared.synthetic_sys_id import is_synthetic_sys_id
             lines = [f"{tr('Shelfmark:')} {shelfmark}"]
             if title:
                 lines.append(f"{tr('Title:')} {title}")
             lines.append(f"{tr('System ID:')} {sys_id}")
-            # Add Ktiv link
-            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
-            lines.append(f"{tr('Link:')} {ktiv_url}")
+            # Add Ktiv link — Phase 85 D-06: skip for synthetic sys_ids
+            if not is_synthetic_sys_id(sys_id):
+                ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+                lines.append(f"{tr('Link:')} {ktiv_url}")
             return '\n'.join(lines)
 
         return shelfmark

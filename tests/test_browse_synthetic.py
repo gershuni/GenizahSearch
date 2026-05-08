@@ -85,25 +85,33 @@ class TestFetchIiifManifestGuard:
         """Regression: real Alma sys_id still attempts the network call (will
         either succeed or fail through circuit breaker / negative cache, but
         should NOT short-circuit via the synthetic early-return)."""
+        import time as _t
+
         from genizah_core import MetadataManager
 
         mm = MetadataManager.__new__(MetadataManager)
         mm._iiif_manifest_cache = {}
         mm._iiif_manifest_fail_cache = {}
-        # Force circuit breaker open so we don't actually network-call in the test;
-        # this exercises the next-layer guard rather than the synthetic guard.
-        mm._nli_consecutive_failures = 99
-        import time as _t
-        mm._nli_circuit_open_until = _t.time() + 60.0
 
-        # Per the test goal: just verify the synthetic-guard early-return DOES
-        # NOT fire for a real Alma id. The circuit breaker handles the rest.
-        with patch.object(MetadataManager, "_make_session") as mock_session:
-            result = mm.fetch_iiif_manifest(REAL_ALMA_ID)
-        # We're past the synthetic guard; result is the circuit-breaker fallback.
-        # Either way, we should NOT have triggered a real network call.
-        mock_session.assert_not_called()
-        assert isinstance(result, dict)
+        # Force the class-level circuit breaker open so we don't actually
+        # network-call in the test; this exercises the next-layer guard rather
+        # than the synthetic guard. _nli_circuit_open_until is a CLASS
+        # attribute (modified via classmethod cls.) — must be set on the class.
+        original_open_until = MetadataManager._nli_circuit_open_until
+        original_failures = MetadataManager._nli_consecutive_failures
+        try:
+            MetadataManager._nli_circuit_open_until = _t.time() + 60.0
+            MetadataManager._nli_consecutive_failures = 99
+
+            with patch.object(MetadataManager, "_make_session") as mock_session:
+                result = mm.fetch_iiif_manifest(REAL_ALMA_ID)
+            # We're past the synthetic guard; result is the circuit-breaker
+            # fallback. We should NOT have triggered a real network call.
+            mock_session.assert_not_called()
+            assert isinstance(result, dict)
+        finally:
+            MetadataManager._nli_circuit_open_until = original_open_until
+            MetadataManager._nli_consecutive_failures = original_failures
 
 
 class TestFetchMarcDataGuard:
@@ -178,11 +186,12 @@ class TestApiEndpointGuards:
         ]
         assert handler_starts, "Could not locate API handlers"
         for start in handler_starts:
-            # Check next ~10 lines for is_synthetic guard
-            window = "\n".join(lines[start:start + 10])
+            # Check next ~25 lines for is_synthetic guard (handler may have
+            # a multi-line docstring before the guard)
+            window = "\n".join(lines[start:start + 25])
             assert "is_synthetic_sys_id" in window, (
                 f"Handler at line {start+1} missing is_synthetic_sys_id guard "
-                f"in first 10 lines"
+                f"in first 25 lines"
             )
 
 

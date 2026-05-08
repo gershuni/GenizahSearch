@@ -25,6 +25,7 @@ from nicegui import ui, run
 from web.translations import tr
 from web.document_service import get_document_for_fragment, get_section_for_page, get_all_sources_for_fragment
 from web.pages.browse_state import BrowseState, _crossref_cache
+from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = logging.getLogger(__name__)
 
@@ -496,13 +497,17 @@ def populate_bib_catalog_buttons(container, state: BrowseState, page):
 
     # NLI/Ktiv bibliography from crossref cache
     marc_bib = []
-    try:
-        from web.state import state as app_state
-        if app_state.meta_mgr and hasattr(app_state.meta_mgr, 'nli_cache'):
-            cached = app_state.meta_mgr.nli_cache.get(page.sys_id, {})
-            marc_bib = cached.get('marc', {}).get('bibliography', [])
-    except Exception:
-        pass  # Cache operation failed; continue without cached data
+    # Phase 85 D-06: synthetic sys_ids have no NLI MARC record — skip the cache
+    # read entirely so the bibliography panel doesn't render a "Bibliography Ktiv"
+    # chip with empty contents.
+    if not is_synthetic_sys_id(page.sys_id):
+        try:
+            from web.state import state as app_state
+            if app_state.meta_mgr and hasattr(app_state.meta_mgr, 'nli_cache'):
+                cached = app_state.meta_mgr.nli_cache.get(page.sys_id, {})
+                marc_bib = cached.get('marc', {}).get('bibliography', [])
+        except Exception:
+            pass  # Cache operation failed; continue without cached data
 
     catalog_source_count = len(fjms_data.get('source_names', []))
 
