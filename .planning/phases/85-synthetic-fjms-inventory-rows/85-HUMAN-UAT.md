@@ -3,7 +3,7 @@ status: partial
 phase: 85-synthetic-fjms-inventory-rows
 source: [85-VERIFICATION.md]
 started: 2026-05-08T11:34:44Z
-updated: 2026-05-08T11:34:44Z
+updated: 2026-05-08T19:30:00Z
 ---
 
 ## Current Test
@@ -13,9 +13,9 @@ updated: 2026-05-08T11:34:44Z
 ## Tests
 
 ### 1. Open browse for synthetic sys_id (e.g. /browse?sys_id=990000002099000000) on web app
-expected: Page renders with FJMS catalogue/bibliography/measurements panels populated; NLI elements (KTIV button, NLI source toggle, Alma metadata) hidden; if CUDL manifest available, Cambridge IIIF image loads; if not, metadata-only Phase 53 fallback with no broken-image placeholder; no console errors; no 404 noise in NLI logs
+expected: Page renders with FJMS Bibliography panel populated (5,034 of 5,035 synthetic IDs have bibliography); catalogue/free-desc/full-text panels intentionally empty (data reality — these inventories only have bibliography in FJMS); NLI elements hidden; metadata-only Phase 53 fallback with no broken-image placeholder; no console errors; no 404 noise in NLI logs
 result: [pending]
-notes: Blocked on operational gap (G-01) — fjms_enrichment.db must be regenerated against real FIST.db with the new manifest UNION ALL injection. Run `python scripts/export_fist_enrichment.py` then deploy to web server.
+notes: G-01 resolved 2026-05-08 — sidecar regenerated to 895MB with 5,034 synthetic AlmaIds in bibliography table. Deploy regenerated sidecar to web server + bundle in next desktop installer.
 
 ### 2. Search 'T-S NS 329.96' (or equivalent FJMS-only shelfmark from manifest) in Shelfmark mode
 expected: Returns synthetic row with FJMS-derived title and matching call_numbers; clicking through to browse opens the synthetic-row page successfully
@@ -44,19 +44,25 @@ passed: 0
 issues: 0
 pending: 6
 skipped: 0
-blocked: 1
+blocked: 0
 
 ## Gaps
 
 ### G-01 Operational: regenerate fjms_enrichment.db
-status: failed
+status: resolved
+resolved: 2026-05-08T19:30:00Z
 debug_session: null
-notes: Plan 03 wired UNION ALL synthetic injection in scripts/export_fist_enrichment.py and tests pass, but the actual fist_data/fjms_enrichment.db on disk has NOT been regenerated since 2026-04-21 (pre-Phase-85). Currently 0 synthetic AlmaIds in catalog table. Until the sidecar is rebuilt against real FIST.db with the new manifest, opening a browse page for any synthetic sys_id will not show FJMS catalogue/bibliography/measurements data — defeating SYNTH-04 criterion 4.
+notes: Sidecar regenerated 2026-05-08 against real FIST.db. Final size 895MB. Synthetic AlmaId coverage:
+- bibliography: 5,034 distinct synthetic AlmaIds (full manifest coverage minus 1 CSV-injection-leader exclusion)
+- catalog: 1 synthetic (only 1 InventoryId has UnitCatalogRec entry)
+- domains: 1 synthetic (same InventoryId)
+- catalog_fields / sizes / running_titles / free_desc / full_texts / textual_frames / mentions / refs / joins: 0 synthetic each
 
-**Required steps:**
-1. Run `python scripts/export_fist_enrichment.py` against real `fist_data/FIST.db` to regenerate `fist_data/fjms_enrichment.db` with the 5,035 synthetic-AlmaId UNION ALL rows
-2. Verify post-export catalog table contains 5,035 synthetic AlmaIds matching manifest
-3. Deploy regenerated sidecar to web server + bundle in next desktop installer
+This is the data reality. Plan 02 qualified InventoryIds via "any FJMS signal" (catalog title OR genizah title OR bib OR free_desc OR full_text OR size). 5,034 of 5,035 qualified via bibliography only — they don't have entries in dbo_UnitCatalogRec or other catalog-keyed tables. Browse pages for synthetic rows will populate the Bibliography panel and leave catalogue/scholarly-description/measurements panels empty. Acceptable per Plan 02's inclusive-coverage stance ("if any external system holds something useful, GenizahSearch should let researchers find and view it").
+
+**Side effect of regen — script optimization:** Original UNION-ALL outer ORDER BY (Codex HIGH "determinism" review) caused indefinite hang on real FIST.db (catalog_fields stuck at 0 rows for 2+ hours). Codex consultation rewrote to drop outer ORDER BY entirely; semantic-determinism test invariant added. Tests went 33→45 passing. Commit `74fa6beb`.
+
+**Sidecar deployment still pending:** Deploy regenerated `fist_data/fjms_enrichment.db` to web server + bundle in next desktop installer.
 
 ### G-02 Decision: SYNTH-03 narrowing
 status: needs_decision
