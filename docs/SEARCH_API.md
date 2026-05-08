@@ -290,6 +290,7 @@ Notes:
 | ---- | ---- | ----- |
 | `uid` | string \| null | `IE{N}_P{M}_FL{K}` when resolvable; safe to feed verbatim into `/api/browse?uid=...` |
 | `locator` | object | always present; `{sys_id, volume_ie, p_num, fl_id}`; any individual field may be null |
+| `is_synthetic` | bool | Phase 85 SYNTH-06 (v7.11): `true` iff the row is a Phase-85 synthetic libraries.csv entry generated for an FJMS-only or CUDL-orphaned inventory; `false` for real NLI Alma records. Top-level (NOT nested under `locator`); additive — schema_version stays 1. Skill consumers should consider showing a "no NLI metadata" annotation when `true`. |
 | `score` | float | Tantivy raw score |
 | `shelfmark` | string | canonical shelfmark for display |
 | `title` | string | manuscript title (often Hebrew) |
@@ -410,6 +411,7 @@ overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
 | `source` | string | `"browse"` |
 | `generated_at` | string | ISO-8601 UTC |
 | `locator` | object | resolved locator (all five fields) |
+| `is_synthetic` | bool | Phase 85 SYNTH-06 (v7.11): `true` iff the resolved row is a Phase-85 synthetic libraries.csv entry. Top-level (NOT nested under `locator`); additive — schema_version stays 1. When `true`, `metadata.nli` will typically be `null` and the image will fall back to CUDL when available. |
 | `shelfmark` | string | canonical shelfmark |
 | `title` | string | manuscript title |
 | `library_code` | string | e.g. `CUL`, `JTS`, `Oxford` |
@@ -765,6 +767,46 @@ docstrings in [web/search_api.py](../web/search_api.py).
 ---
 
 ## Changelog
+
+### v7.11 (Phase 85 — SYNTH-06) — Synthetic-row API field (additive)
+
+As of v7.11, all `/api/search`, `/api/browse`, and `/api/parallels` response items
+include a top-level `is_synthetic: boolean` field (NOT nested under `locator`):
+
+- `false` (default): the result row corresponds to a real NLI Alma record.
+- `true`: the result row is a synthetic libraries.csv entry generated for an
+  FJMS-only or CUDL-orphaned inventory (Phase 85). Synthetic rows have FJMS
+  catalogue / bibliography / measurements but no NLI Alma data; CUDL images are
+  served when a Cambridge IIIF manifest is available.
+
+This field is **additive and backward-compatible**: existing consumers can ignore it.
+Schema version remains `1` per the Phase 83 stability commitment ("additive changes
+any time"). Skill consumers should consider showing a "no NLI metadata" annotation
+when `is_synthetic: true`.
+
+**PostHog event tagging (analytics):** `/api/search` and `/api/browse` events carry
+an `is_synthetic` property. `/api/parallels` events INTENTIONALLY omit this property
+— parallels seeds with composition `text`, not `sys_id`, so there is no canonical
+"seed sys_id" to tag. Future analytics needing this signal can derive it from the
+response payload's per-item `is_synthetic` field.
+
+**Corrections write deferral (D-10):** Corrections-write is gated CLIENT-SIDE at the
+two real write entry points — there is NO `POST /api/corrections` HTTP route in
+this codebase:
+
+- `corrections_client.py` `CorrectionsClient.create_correction` returns
+  `(None, "synthetic_corrections_disabled: ...")` for synthetic `document_id`.
+- `supabase_corrections_client.py` `SupabaseCorrectionsClient.create_correction`
+  returns the same shape BEFORE the `client.table('corrections').insert(data).execute()`
+  call.
+
+This is a Phase 85 D-10 deferral; a future plan will define proper `page_number`
+semantics for image-backed synthetic rows. The web and desktop UIs hide the
+"Add correction" / "Edit" button as defense-in-depth.
+
+**Audit deferral note:** AUDIT-01 / AUDIT-02 / AUDIT-03 (re-running
+`scan_cudl_orphans.py`, producing `reports/cudl_coverage.md`, regression-checking
+the Phase-85 hide-NLI gates) are tracked in **Phase 86** — see `ROADMAP.md §Phase 86`.
 
 ### v7.10 (2026-05-05) — Initial public release
 

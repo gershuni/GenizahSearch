@@ -65,6 +65,14 @@ logger = logging.getLogger(__name__)
 # points do not need their own .env parser.
 from shared.supabase_provider import SUPABASE_URL, SUPABASE_ANON_KEY
 
+# Phase 85 SYNTH-06 / D-10 — corrections-write deferral. Synthetic-row
+# corrections are gated at this REAL write entry point (REVIEWS-MODE
+# iteration 1 B1: supabase_corrections_client.py:768
+# SupabaseCorrectionsClient.create_correction) BEFORE the
+# client.table('corrections').insert call. UI hide on web + desktop is
+# defense-in-depth; this is the load-bearing gate.
+from shared.synthetic_sys_id import is_synthetic_sys_id
+
 
 def _sanitize_ilike_pattern(value) -> str:
     """Sanitize a user string for interpolation into a PostgREST `.ilike` pattern.
@@ -787,6 +795,17 @@ class SupabaseCorrectionsClient:
         ie_id: str = None
     ) -> Tuple[Optional[Correction], str]:
         """Create a new correction."""
+        # Phase 85 SYNTH-06 / D-10 — REVIEWS-MODE iteration 1 B1 gate.
+        # Reject synthetic sys_ids BEFORE the client.table('corrections').insert
+        # call below. Page_number semantics are undefined for image-less
+        # synthetic rows; Phase 87 will define them. Match the existing
+        # Tuple[Optional[Correction], str] return shape.
+        if is_synthetic_sys_id(document_id):
+            return (
+                None,
+                "synthetic_corrections_disabled: corrections cannot be added to synthetic sys_ids",
+            )
+
         client = self._get_client()
         if not client:
             return None, "Supabase client not available"

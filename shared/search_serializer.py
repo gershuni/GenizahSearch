@@ -45,6 +45,12 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+# Phase 85 D-14 (SYNTH-06): is_synthetic field is the single source of truth
+# for synthetic-vs-real classification on /api/search, /api/browse, and
+# /api/parallels response items. Skill consumers branch on this field for
+# browse-honesty annotations (see docs/SEARCH_API.md).
+from shared.synthetic_sys_id import is_synthetic_sys_id
+
 logger = logging.getLogger(__name__)
 
 # Schema version -- bump if envelope/item shape changes incompatibly.
@@ -296,6 +302,12 @@ def _serialize_item(
             'volume_ie': parsed.get('ie_id'),
             'p_num': parsed.get('p_num'),
         },
+        # Phase 85 SYNTH-06 / D-14 — top-level (NOT nested under locator per A3)
+        # additive boolean flag: True iff sys_id is a Phase-85 synthetic 18-digit
+        # "99 + InventoryId.zfill(10) + 000000" identifier. Skill consumers branch
+        # on this for browse-honesty annotations (no NLI metadata for synthetic).
+        # Schema version stays 1 (additive change per Phase 83 stability commitment).
+        'is_synthetic': is_synthetic_sys_id(final_sys_id),
         'score': score,
         'shelfmark': display.get('shelfmark', '') or '',
         'title': display.get('title', '') or '',
@@ -628,6 +640,10 @@ def serialize_browse_payload(
         'generated_at':    _utc_iso_now(),
         'locator':         locator,
         'page_indexing':   '1-based',
+        # Phase 85 SYNTH-06 / D-14 — top-level (NOT nested under locator per A3)
+        # additive boolean flag matching the per-item flag on /api/search results.
+        # Schema version stays 1 (additive change per Phase 83 stability commitment).
+        'is_synthetic':    is_synthetic_sys_id(getattr(page, 'sys_id', None)),
         'shelfmark':       getattr(page, 'shelfmark', None) or '',
         'title':           getattr(page, 'title', None) or '',
         'library': {

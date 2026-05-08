@@ -374,6 +374,12 @@ def wrap_endpoint(*, endpoint_name: str):
                 # None/0 (set explicitly in the handler bodies for clarity).
                 'search_mode_value': None,
                 'responsa_options_count': 0,
+                # Phase 85 SYNTH-06 / D-14 — populated by /api/search and
+                # /api/browse handlers from is_synthetic_sys_id(sys_id) on the
+                # response. /api/parallels INTENTIONALLY leaves None: parallels
+                # takes `text`, not `sys_id`, so there is no canonical seed
+                # sys_id to tag (REVIEWS-MODE Codex HIGH).
+                'is_synthetic': None,
             }
             status_code = 200
             error_code: Optional[str] = None
@@ -413,6 +419,9 @@ def wrap_endpoint(*, endpoint_name: str):
                         # endpoints (browse, parallels) emit a uniform shape.
                         search_mode_value=captured_state.get('search_mode_value'),
                         responsa_options_count=captured_state.get('responsa_options_count', 0),
+                        # Phase 85 SYNTH-06 / D-14 — populated by /api/browse
+                        # handler; /api/parallels intentionally leaves None.
+                        is_synthetic=captured_state.get('is_synthetic'),
                     )
                 except Exception:
                     logger.warning(
@@ -598,6 +607,11 @@ def capture_api_event(
     # ResponsaOptions (0 when search_mode != 'responsa' or options omitted).
     search_mode_value: Optional[str] = None,
     responsa_options_count: int = 0,
+    # Phase 85 SYNTH-06 / D-14: True if the request landed on a Phase-85
+    # synthetic sys_id (per is_synthetic_sys_id helper); False if real Alma;
+    # None when the property is structurally inapplicable (/api/parallels
+    # takes text not sys_id, or pre-resolution error paths).
+    is_synthetic: Optional[bool] = None,
 ) -> None:
     """Enqueue a search_api_request PostHog event. Never blocks; never raises.
 
@@ -625,6 +639,11 @@ def capture_api_event(
         # so PostHog dashboards see a uniform event shape across endpoints.
         props['search_mode_value'] = search_mode_value
         props['responsa_options_count'] = int(responsa_options_count or 0)
+        # Phase 85 SYNTH-06 / D-14 — uniform shape: present on /api/search and
+        # /api/browse events; None on /api/parallels (parallels takes text,
+        # not sys_id, so there is no canonical seed to tag — REVIEWS-MODE
+        # Codex HIGH).
+        props['is_synthetic'] = is_synthetic
         event = {
             'event': 'search_api_request',
             'distinct_id': hash_ip(client_ip),

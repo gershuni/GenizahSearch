@@ -4,6 +4,60 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] — v7.11 CUDL Coverage & Synthetic Inventories
+
+Phase 85 (synthetic FJMS inventory rows) — closes the residue gap left after Phase 84
+shelfmark normalization. ~5,035 synthetic libraries.csv rows generated for FJMS-only
+inventories that have no NLI Alma record. Synthetic sys_ids use the Phase-85 18-digit
+"99 + InventoryId.zfill(10) + 000000" format, satisfying the existing "starts with
+99 + all digits" sys_id contract.
+
+### Added
+
+- Synthetic libraries.csv rows for FJMS-only inventories (Phase 85 SYNTH-02).
+  Users can now search for and browse classmarks like `T-S NS 329.96` that have CUDL
+  images and FJMS scholarly metadata but no NLI Alma record. Discoverable via Title
+  and Shelfmark search modes.
+- `is_synthetic: bool` field on `/api/search`, `/api/browse`, and `/api/parallels`
+  response items (top-level, NOT nested under `locator`). Additive change —
+  `schema_version` stays `1` per the Phase 83 stability commitment.
+- `is_synthetic` PostHog event property on `/api/search` and `/api/browse` events
+  (intentionally OMITTED from `/api/parallels` events — parallels takes `text`,
+  not `sys_id`, so there is no canonical seed sys_id to tag).
+- `shared/synthetic_sys_id.py` helper module (Phase 85 SYNTH-01): pure functions
+  `is_synthetic_sys_id`, `encode_inventory_sys_id`, `decode_inventory_id`. Single
+  source of truth — repo-grep lint enforces no hand-rolled string slicing.
+
+### Changed
+
+- Browse page hides KTIV link, NLI source toggle, NLI bibliography chips, and NLI
+  image source for synthetic rows (Phase 85 SYNTH-04). CUDL becomes the default
+  image source when a Cambridge IIIF manifest is available.
+- Corrections-write rejects synthetic sys_ids at the client-side write entry points
+  (`CorrectionsClient.create_correction` and
+  `SupabaseCorrectionsClient.create_correction`) with the message
+  `synthetic_corrections_disabled: ...`. Web and desktop "Edit" buttons are also
+  hidden as defense-in-depth. (REVIEWS-MODE iteration 1 B1+B2: there is no
+  `POST /api/corrections` HTTP route in this codebase — gating happens at the
+  client-class level.)
+- FJMS sidecar (`fjms_enrichment.db`) UNION-ALL pattern lets FJMS lookups for
+  synthetic sys_ids resolve via InventoryId fallback (Phase 85 SYNTH-05).
+
+### Deferred
+
+- Corrections-write on synthetic rows — `page_number` semantics undefined for
+  image-less synthetic inventories. Client-side write entries reject with
+  explicit error code; UI buttons hidden. A future plan will define proper
+  `page_number` semantics.
+- AUDIT-01, AUDIT-02, AUDIT-03 — see `ROADMAP.md §Phase 86` (next phase).
+  Phase 86 re-runs `scripts/scan_cudl_orphans.py` and produces
+  `reports/cudl_coverage.md` confirming closure of the CUDL coverage gap.
+  Phase 85 produces the synthetic-row mechanism + audit residue
+  (`reports/synthetic_ambiguity_residue.csv`, `fist_data/synthetic_manifest.json`)
+  that Phase 86 consumes.
+
+---
+
 ## [7.10.0] - Search API Public Release - 2026-05-05
 
 The v7.10 milestone (Phases 77–83 — 8 phase entries: 77, 78, 79, 80, 81A, 81B, 82, 83 — spanning serializer foundation, search/browse/parallels endpoints, hardening, contract expansion, reference Claude skill, internal docs, and public release) ships a public HTTP/JSON search-helper API over the existing Genizah corpus. Three endpoints — `POST /api/search`, `GET /api/browse`, `POST /api/parallels` — together let a research consumer execute keyword/Responsa search, drill down to a single manuscript page with PGP/FJMS/NLI enrichment, and run composition-parallels detection over arbitrary input text. The API is documented, OpenAPI-spec'd at `/api/openapi.json` with interactive Swagger UI at `/api/docs`, and publicly accessible. A reference Claude skill (`cairo-genizah-research`) demonstrates the full workflow.

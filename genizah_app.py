@@ -3394,6 +3394,17 @@ class GenizahGUI(QMainWindow):
         if not self.browse_edit_mode:
             return
 
+        # Phase 85 SYNTH-06 / D-10 — defense-in-depth UI gate.
+        # corrections_client.create_correction also rejects synthetic at the
+        # write entry, but a clear user-facing message belongs at the UI layer.
+        if is_synthetic_sys_id(self.current_browse_sid):
+            QMessageBox.information(
+                self,
+                tr("Corrections not available"),
+                tr("Corrections cannot be added to synthetic-row manuscripts (FJMS-only inventories without NLI Alma records). This restriction is tracked for a future release."),
+            )
+            return
+
         new_text = self.browse_text.toPlainText()
         original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
         draft_correction_id = getattr(self, '_browse_draft_correction_id', None)
@@ -7365,7 +7376,13 @@ class GenizahGUI(QMainWindow):
         self.btn_browse_add_to_list.setEnabled(True)
         self.btn_b_toggle_img.setEnabled(True)
         # Enable community buttons
-        self.btn_b_edit.setEnabled(True)
+        # Phase 85 SYNTH-06 / D-10 — corrections-write deferred for synthetic
+        # rows (page_number semantics undefined for image-less FJMS-only
+        # inventories). Hide AND disable the Edit button on synthetic;
+        # backend reject in corrections_client.py is the load-bearing gate.
+        _is_synth_row = is_synthetic_sys_id(sid)
+        self.btn_b_edit.setEnabled(not _is_synth_row)
+        self.btn_b_edit.setVisible(not _is_synth_row)
         self.btn_b_comment.setEnabled(True)
         self.btn_b_view_corrections.setEnabled(True)
         self.btn_b_joins.setEnabled(True)
