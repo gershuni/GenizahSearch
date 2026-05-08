@@ -13,6 +13,35 @@ if ROOT_PATH not in sys.path:
 
 
 # ---------------------------------------------------------------------------
+# Phase 85 (Plan 85-03 + 85-02): pin `scripts` to the root namespace package.
+#
+# Both `C:/Genizahsearch/scripts/` (root, namespace package) and
+# `C:/Genizahsearch/skills/cairo-genizah-research/scripts/__init__.py`
+# (skill, regular package) coexist. When pytest collects tests across both
+# trees in one process, sys.modules['scripts'] can end up bound to whichever
+# was imported first — leading to ImportError ("cannot import name 'X' from
+# 'scripts' ...skills/.../scripts/__init__.py") for callers expecting the
+# root one. Bind the root namespace package up-front so subsequent
+# `from scripts import X` resolves to root scripts/.
+# ---------------------------------------------------------------------------
+def _pin_root_scripts_namespace() -> None:
+    root_scripts = ROOT_DIR / "scripts"
+    if not root_scripts.is_dir():
+        return
+    existing = sys.modules.get("scripts")
+    existing_path = getattr(existing, "__path__", None)
+    # If already bound to a path that does not include root scripts/, replace.
+    if existing is None or str(root_scripts) not in (list(existing_path) if existing_path else []):
+        pkg = types.ModuleType("scripts")
+        pkg.__path__ = [str(root_scripts)]  # type: ignore[attr-defined]
+        pkg.__package__ = "scripts"
+        sys.modules["scripts"] = pkg
+
+
+_pin_root_scripts_namespace()
+
+
+# ---------------------------------------------------------------------------
 # Skill import bridge: skills/cairo-genizah-research/ (hyphens in dir name)
 # is not directly importable as `skills.cairo_genizah_research`. Register it
 # as a package under the underscore name so test imports work without renaming

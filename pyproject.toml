@@ -13,3 +13,13 @@ markers = [
     "slow: marks tests as slow; run with `pytest -m slow`",
     "e2e: marks tests requiring Selenium/ChromeDriver (paired with slow)",
 ]
+
+# Phase 85 (Plan 85-03 cross-plan integration fix): restrict collection to
+# `test_*.py` only. The default also matches `*_test.py`, which collected
+# `skills/cairo-genizah-research/scripts/smoke_test.py` (a manual smoke
+# harness, not a pytest test). That collection bound `sys.modules['scripts']`
+# to the skill's `scripts/__init__.py`, breaking `from scripts import
+# export_fist_enrichment` in tests/test_export_fist_synthetic.py. Restricting
+# to `test_*.py` excludes the smoke harness and keeps the project namespace
+# clean. No other `*_test.py` files exist in first-party code.
+python_files = ["test_*.py"]
