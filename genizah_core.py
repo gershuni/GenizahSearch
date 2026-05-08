@@ -3371,6 +3371,11 @@ class MetadataManager:
                         continue
                     # Format: system_number, oxford_part_id, call_numbers, library_code, ..., titles_non_placeholder
                     raw_sys_id = row[0]
+                    # Phase 85 D-04a: tolerate marker-block lines from scripts/generate_synthetic_rows.py
+                    # (e.g. '# BEGIN SYNTHETIC', '# END SYNTHETIC'). Without this guard, the loader's
+                    # digit-normalization would produce sys_id='' and overwrite previous '' entries.
+                    if raw_sys_id.startswith('#'):
+                        continue
                     sys_id = "".join(ch for ch in str(raw_sys_id) if ch.isdigit())
 
                     # Oxford Part ID (column 1) - for Neubauer catalog
