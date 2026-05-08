@@ -816,3 +816,230 @@ class TestRequestEchoRoundTrip:
             'mode', 'chunk_size', 'max_freq', 'boundary_options',
             'limit_effective', 'filters',
         }
+
+
+# ============================================================================
+# Phase 85 — REVIEWS-MODE 2026-05-08 (SYNTH-06)
+# Append-only addition: do NOT modify or remove any pre-existing test.
+# Preserves the 818-line baseline at mtime 2026-05-04.
+# ============================================================================
+
+
+class TestPhase85IsSynthetic:
+    """Phase 85 SYNTH-06 public-API serializer tests.
+
+    Verifies the additive is_synthetic field on /api/search and /api/browse
+    envelopes (parallels response items inherit it via shared serializer).
+    Top-level placement (NOT nested under locator) per A3.
+    """
+
+    SYNTHETIC_ID = "990001234560000000"
+    REAL_ALMA_ID = "990025143260205171"
+
+    def _make_result(self, sys_id):
+        """Minimal _serialize_item input dict (matches contract used elsewhere)."""
+        return {
+            'uid': 'abc' if sys_id else '',
+            'display': {
+                'id': sys_id or '',
+                'shelfmark': 'T-S 1.1',
+                'title': 'Test',
+                'library_code': 'CUL',
+            },
+            'snippet': '',
+            'full_text': '',
+            'sort_score': 0.9,
+            'raw_header': '',
+        }
+
+    def test_field_top_level_for_synthetic(self, mock_meta_mgr):
+        from shared.search_serializer import _serialize_item
+        env = _serialize_item(
+            self._make_result(self.SYNTHETIC_ID),
+            meta_mgr=mock_meta_mgr,
+            domain_batch={},
+            catalog_batch={},
+        )
+        assert 'is_synthetic' in env, "Field missing from envelope"
+        assert env['is_synthetic'] is True
+        assert 'is_synthetic' not in env.get('locator', {}), \
+            "Field incorrectly nested under locator"
+
+    def test_field_top_level_for_real_alma(self, mock_meta_mgr):
+        from shared.search_serializer import _serialize_item
+        env = _serialize_item(
+            self._make_result(self.REAL_ALMA_ID),
+            meta_mgr=mock_meta_mgr,
+            domain_batch={},
+            catalog_batch={},
+        )
+        assert env['is_synthetic'] is False
+
+    def test_field_false_when_no_sys_id(self, mock_meta_mgr):
+        from shared.search_serializer import _serialize_item
+        env = _serialize_item(
+            self._make_result(None),
+            meta_mgr=mock_meta_mgr,
+            domain_batch={},
+            catalog_batch={},
+        )
+        assert env['is_synthetic'] is False
+
+    def test_browse_envelope_carries_field_synthetic(self):
+        """serialize_browse_payload top-level envelope has is_synthetic."""
+        from shared.search_serializer import serialize_browse_payload
+        page = MagicMock()
+        page.uid = 'uid-1'
+        page.sys_id = self.SYNTHETIC_ID
+        page.volume_ie = None
+        page.p_num = 1
+        page.fl_id = None
+        page.shelfmark = 'T-S NS 329.96'
+        page.title = ''
+        page.library_code = 'CUL'
+        page.text = ''
+        page.volumes = []
+        env = serialize_browse_payload(
+            page=page, pgp=None, fjms=None, nli=None,
+        )
+        assert 'is_synthetic' in env, "Field missing from browse envelope"
+        assert env['is_synthetic'] is True
+        # Codex HIGH (A3): top-level, NOT nested under locator
+        assert 'is_synthetic' not in env.get('locator', {})
+
+    def test_browse_envelope_carries_field_real_alma(self):
+        from shared.search_serializer import serialize_browse_payload
+        page = MagicMock()
+        page.uid = 'uid-2'
+        page.sys_id = self.REAL_ALMA_ID
+        page.volume_ie = None
+        page.p_num = 1
+        page.fl_id = None
+        page.shelfmark = 'T-S 1.1'
+        page.title = ''
+        page.library_code = 'CUL'
+        page.text = ''
+        page.volumes = []
+        env = serialize_browse_payload(
+            page=page, pgp=None, fjms=None, nli=None,
+        )
+        assert env['is_synthetic'] is False
+
+    def test_schema_version_unchanged(self):
+        """Phase 83 stability commitment: additive field → SCHEMA_VERSION stays 1."""
+        from shared.search_serializer import SCHEMA_VERSION
+        assert SCHEMA_VERSION == 1
+
+    def test_capture_api_event_accepts_is_synthetic_kwarg(self):
+        """capture_api_event signature must include is_synthetic kwarg (default None)."""
+        from web.api_hardening import capture_api_event
+        import inspect
+        sig = inspect.signature(capture_api_event)
+        assert 'is_synthetic' in sig.parameters, \
+            "capture_api_event missing is_synthetic kwarg"
+        assert sig.parameters['is_synthetic'].default is None
+
+    def test_parallels_handler_does_not_set_is_synthetic(self):
+        """REVIEWS-MODE Codex HIGH: /api/parallels takes `text` not `sys_id`,
+        so captured_state['is_synthetic'] is intentionally NOT set.
+
+        Verify by source-scan that parallels_endpoint does NOT contain a line
+        like `captured_state['is_synthetic'] = is_synthetic_sys_id(...)`.
+        """
+        import re
+        with open('web/search_api.py', 'r', encoding='utf-8') as f:
+            src = f.read()
+        # Find the parallels_endpoint function body (until next outer def or EOF).
+        m = re.search(
+            r"async def parallels_endpoint.*?(?=\n    @target_app\.|\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m, "parallels_endpoint not found in web/search_api.py"
+        body = m.group(0)
+        # The broken `captured_state['is_synthetic'] = is_synthetic_sys_id(seed_sys_id)`
+        # pattern must not exist (no such field).
+        bad = re.search(
+            r"captured_state\[['\"]is_synthetic['\"]\]\s*=\s*is_synthetic_sys_id\(",
+            body,
+        )
+        assert not bad, (
+            "REVIEWS-MODE violation: parallels_endpoint contains broken "
+            "is_synthetic plumbing. Per Codex HIGH, /api/parallels takes `text` "
+            "not `sys_id`; captured_state['is_synthetic'] should be left None."
+        )
+        # Verify the explanatory comment is present.
+        assert (
+            'parallels takes' in body.lower()
+            or 'is_synthetic' in body and 'intentional' in body.lower()
+            or 'is_synthetic' in body and 'omit' in body.lower()
+        ), (
+            "parallels_endpoint should have an inline comment explaining "
+            "why is_synthetic is intentionally omitted"
+        )
+
+    def test_search_handler_sets_is_synthetic(self):
+        """REVIEWS-MODE: _search_body / search_endpoint computes captured_state['is_synthetic']
+        from response items (any synthetic present)."""
+        with open('web/search_api.py', 'r', encoding='utf-8') as f:
+            src = f.read()
+        # The search endpoint is `search_endpoint` (not _search_body); the assignment
+        # must exist somewhere in that function body.
+        import re
+        m = re.search(
+            r"async def search_endpoint.*?(?=\n    @target_app\.|\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m, "search_endpoint not found in web/search_api.py"
+        body = m.group(0)
+        assert "captured_state['is_synthetic']" in body or \
+               'captured_state["is_synthetic"]' in body or \
+               'posthog_is_synthetic' in body, (
+            "search_endpoint must populate captured_state['is_synthetic'] for PostHog"
+        )
+
+    def test_browse_handler_sets_is_synthetic(self):
+        """REVIEWS-MODE: browse_endpoint computes captured_state['is_synthetic'] from sys_id."""
+        with open('web/search_api.py', 'r', encoding='utf-8') as f:
+            src = f.read()
+        import re
+        m = re.search(
+            r"async def browse_endpoint.*?(?=\n    @target_app\.|\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m, "browse_endpoint not found in web/search_api.py"
+        body = m.group(0)
+        assert "captured_state['is_synthetic']" in body or \
+               'captured_state["is_synthetic"]' in body, (
+            "browse_endpoint must populate captured_state['is_synthetic'] for PostHog"
+        )
+        # And reference the helper.
+        assert 'is_synthetic_sys_id' in body, (
+            "browse_endpoint must call is_synthetic_sys_id(sys_id)"
+        )
+
+
+class TestPhase85ExistingFilePreserved:
+    """REVIEWS-MODE Codex HIGH guard: pre-existing 818-line baseline preserved."""
+
+    def test_minimum_line_count(self):
+        """File should have GROWN from 818 (baseline mtime 2026-05-04), not shrunk."""
+        with open('tests/test_search_serializer.py', 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        assert len(lines) > 818, (
+            f"REVIEWS-MODE Codex HIGH violation: tests/test_search_serializer.py "
+            f"has {len(lines)} lines; pre-existing baseline was 818. "
+            f"Phase 85 should APPEND, not recreate."
+        )
+
+    def test_pre_existing_classes_present(self):
+        """The 7 pre-existing test classes (verified 2026-05-08) must still be importable."""
+        from tests import test_search_serializer as mod
+        for cls_name in (
+            'TestSchemaConstant', 'TestSearchEnvelope', 'TestPerItemShape',
+            'TestParallelsEnvelope', 'TestSingleSourceOfTruth',
+            'TestFilenameUniqueness', 'TestRequestEchoRoundTrip',
+        ):
+            assert hasattr(mod, cls_name), (
+                f"REVIEWS-MODE Codex HIGH violation: pre-existing class "
+                f"{cls_name} missing — Phase 85 must APPEND only."
+            )
