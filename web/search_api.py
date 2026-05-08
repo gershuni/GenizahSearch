@@ -701,6 +701,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # value after successful Pydantic construction.
         posthog_search_mode_value: Optional[str] = None
         posthog_responsa_options_count: int = 0
+        # Phase 85 SYNTH-06 / D-14 — populated AFTER serialization with
+        # `any(item['is_synthetic'] for item in envelope['results'])`. None on
+        # error paths (pre-serialization rejection) so PostHog event reflects
+        # structural unavailability, not a False signal.
+        posthog_is_synthetic: Optional[bool] = None
 
         try:
             # 0. Parse body and validate via Pydantic explicitly so we own
@@ -943,6 +948,21 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 total=total,
                 request_echo=request_echo,
             )
+            # Phase 85 SYNTH-06 / D-14 — derive captured_state['is_synthetic']
+            # from response items. True iff at least one result row is a
+            # synthetic libraries.csv entry (helper module decides). The
+            # property is uniformly shaped per Plan 05 (None for parallels;
+            # resolved bool for search/browse).
+            try:
+                _items = envelope.get('results', []) or []
+                if _items:
+                    posthog_is_synthetic = any(
+                        bool(it.get('is_synthetic')) for it in _items
+                    )
+                else:
+                    posthog_is_synthetic = False
+            except Exception:
+                posthog_is_synthetic = None
             return envelope
 
         except APIError as exc:
@@ -982,6 +1002,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     # structural rejections leave them as None / 0.
                     search_mode_value=posthog_search_mode_value,
                     responsa_options_count=posthog_responsa_options_count,
+                    # Phase 85 SYNTH-06 / D-14 — derived from response items
+                    # after serialization. None on error paths (no envelope).
+                    is_synthetic=posthog_is_synthetic,
                 )
             except Exception:
                 logger.warning(
@@ -1139,6 +1162,13 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
         # 11. Tell the decorator's finally block what to log to PostHog.
         captured_state['result_count'] = 1
+        # Phase 85 SYNTH-06 / D-14 — populate is_synthetic from the resolved
+        # sys_id (NOT the requested locator: a uid-keyed lookup may resolve to
+        # a different sys_id; the resolved page is the authoritative answer).
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        captured_state['is_synthetic'] = is_synthetic_sys_id(
+            getattr(bundle.page, 'sys_id', None)
+        )
 
         return envelope
 
@@ -1192,6 +1222,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # uniform property shape (search_mode_value=None, count=0).
         captured_state['search_mode_value'] = None
         captured_state['responsa_options_count'] = 0
+        # Phase 85 SYNTH-06 / D-14 (REVIEWS-MODE Codex HIGH) —
+        # /api/parallels takes `text`, NOT `sys_id`, so there is no canonical
+        # seed sys_id to tag with is_synthetic. Synthetic rows have no Tantivy
+        # chunks, so they are naturally absent from main_results regardless of
+        # the seed text. We INTENTIONALLY leave captured_state['is_synthetic']
+        # at its wrap_endpoint default of None for /api/parallels events.
+        # Future analytics needing this signal can derive it from the response
+        # payload's per-item is_synthetic field (set by shared serializer).
 
         # 1. Mode gate (same as search/browse).
         enforce_mode_gate(request)
