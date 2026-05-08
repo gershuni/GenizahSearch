@@ -298,14 +298,18 @@ class TestUiBranchCorrectness:
         ("web/pages/search_results.py", r"/api/nli_image_by_sysid/\{sys_id\}", 10),
         # web/components/bibliography_dialog.py — REVIEWS-MODE NEW (Codex HIGH)
         ("web/components/bibliography_dialog.py", r"PNX_MANUSCRIPTS\{sys_id\}", 8),
-        # web/api.py — fl_ids and nli_image_by_sysid handlers
-        ("web/api.py", r"def get_fl_ids\(", 8),
-        ("web/api.py", r"def nli_image_by_sysid\(", 8),
-        # web/static/manuscript_viewer.js — gated on window.GENIZAH_IS_SYNTHETIC
-        ("web/static/manuscript_viewer.js", r"PNX_MANUSCRIPTS", 8),
-        # genizah_core.py
-        ("genizah_core.py", r"PNX_MANUSCRIPTS\{system_id\}", 12),
-        ("genizah_core.py", r"NLI_IIIF_BASE\}/marc/bib/\{system_id\}", 12),
+        # web/api.py — fl_ids and nli_image_by_sysid handlers (large docstrings,
+        # so the synthetic guard appears further from the def line)
+        ("web/api.py", r"def get_fl_ids\(", 25),
+        ("web/api.py", r"def nli_image_by_sysid\(", 25),
+        # web/static/manuscript_viewer.js — gated on window.GENIZAH_IS_SYNTHETIC.
+        # The synthetic-flag check is at the top of fetchFlIdsFromManifest;
+        # the PNX_MANUSCRIPTS line is several lines after the cache check.
+        ("web/static/manuscript_viewer.js", r"PNX_MANUSCRIPTS", 18),
+        # genizah_core.py — fetch_iiif_manifest has a long docstring + cache check
+        # before the URL builder line; widen window
+        ("genizah_core.py", r"PNX_MANUSCRIPTS\{system_id\}", 30),
+        ("genizah_core.py", r"NLI_IIIF_BASE\}/marc/bib/\{system_id\}", 30),
         # desktop/dialogs_scholarly.py — REVIEWS-MODE NEW (Codex HIGH)
         ("desktop/dialogs_scholarly.py", r"PNX_MANUSCRIPTS\{sys_id\}", 8),
         # desktop/result_dialog.py — REVIEWS-MODE NEW (Codex HIGH)
@@ -313,14 +317,21 @@ class TestUiBranchCorrectness:
         # genizah_app.py
         ("genizah_app.py", r"PNX_MANUSCRIPTS\{sys_id\}", 8),
         ("genizah_app.py", r"PNX_MANUSCRIPTS\{self\.current_browse_sid\}", 8),
-        # desktop/viewers.py — KTIV viewer button visibility
-        ("desktop/viewers.py", r"_open_ktiv_viewer", 8),
+        # desktop/viewers.py — KTIV viewer method definition (the guard is
+        # INSIDE the method body, 2-3 lines after `def`); also btn_ktiv setVisible
+        # in load_images is gated separately
+        ("desktop/viewers.py", r"def _open_ktiv_viewer", 6),
     ]
 
     @pytest.mark.parametrize("rel_path,pattern,max_distance", SITES)
     def test_is_synthetic_sys_id_governs_site(self, rel_path, pattern, max_distance):
         """Branch-correctness: each enumerated NLI/KTIV operation is governed
-        by is_synthetic_sys_id (or window.GENIZAH_IS_SYNTHETIC for JS)."""
+        by is_synthetic_sys_id (or window.GENIZAH_IS_SYNTHETIC for JS).
+
+        For function-definition patterns (`def foo(`), search FORWARD to find
+        the guard inside the function body. For URL-builder / network-call
+        patterns, search BACKWARD to find the guard above the operation.
+        """
         import re
         path = os.path.join(ROOT, rel_path)
         try:
@@ -335,14 +346,22 @@ class TestUiBranchCorrectness:
             f"{rel_path}: no occurrences of {pattern!r} found — audit may be stale "
             f"(commit hash on which audit was generated may differ)"
         )
+        # Function-definition patterns: search forward (guard is inside function body)
+        is_def_pattern = pattern.startswith(r"def ")
         for line_idx in hits:
-            window_start = max(0, line_idx - max_distance)
-            window = "\n".join(lines[window_start:line_idx + 1])
+            if is_def_pattern:
+                window_end = min(len(lines), line_idx + max_distance + 1)
+                window = "\n".join(lines[line_idx:window_end])
+                direction = "following"
+            else:
+                window_start = max(0, line_idx - max_distance)
+                window = "\n".join(lines[window_start:line_idx + 1])
+                direction = "preceding"
             assert ("is_synthetic_sys_id" in window
                     or "GENIZAH_IS_SYNTHETIC" in window), (
                 f"{rel_path}:{line_idx+1}: NLI/KTIV operation "
                 f"`{lines[line_idx].strip()[:80]}` NOT governed by "
-                f"is_synthetic_sys_id within {max_distance} preceding lines"
+                f"is_synthetic_sys_id within {max_distance} {direction} lines"
             )
 
     PY_SITES_FILES = sorted({

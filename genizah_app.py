@@ -32,6 +32,7 @@ from functools import partial
 _CORE_IMPORT_ERROR = None
 try:
     from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax  # noqa: F401 (VariantManager used at lines 880, 12908 -- ruff can't see through try/except)
+    from shared.synthetic_sys_id import is_synthetic_sys_id
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
 
@@ -12789,8 +12790,10 @@ class GenizahGUI(QMainWindow):
                 if title:
                     lines.append(f"כותרת: {title}")
                 lines.append(f"מספר מערכת: {sys_id}")
-                ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
-                lines.append(f"קישור: {ktiv_url}")
+                # Phase 85 D-06: synthetic sys_ids skip the KTIV link in clipboard text
+                if not is_synthetic_sys_id(sys_id):
+                    ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+                    lines.append(f"קישור: {ktiv_url}")
                 text = '\n'.join(lines)
 
         clipboard = QApplication.clipboard()
@@ -21713,7 +21716,8 @@ class GenizahGUI(QMainWindow):
             threading.Thread(target=worker, daemon=True).start()
         
     def browse_open_catalog(self):
-        if self.current_browse_sid:
+        # Phase 85 D-06: synthetic sys_ids skip the NLI catalog page (no Alma record)
+        if self.current_browse_sid and not is_synthetic_sys_id(self.current_browse_sid):
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
 
     def _browse_open_external_link(self):

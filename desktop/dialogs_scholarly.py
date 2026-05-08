@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QPalette
 
 from genizah_core import CURRENT_LANG, load_app_config, tr
+from shared.synthetic_sys_id import is_synthetic_sys_id
 
 class FjmsBibliographyDialog(QDialog):
     """FJMS bibliography dialog with structured table."""
@@ -111,7 +112,8 @@ class FjmsBibliographyDialog(QDialog):
 
         # Bottom row
         bottom_row = QHBoxLayout()
-        if sys_id:
+        # Phase 85 D-06: synthetic sys_ids hide the KTIV button (no NLI Alma record)
+        if sys_id and not is_synthetic_sys_id(sys_id):
             ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
             btn_ktiv = QPushButton(tr('Open in KTIV'))
             btn_ktiv.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ktiv_url)))
@@ -1286,7 +1288,8 @@ class NliBibliographyDialog(QDialog):
 
         # Bottom row
         bottom_row = QHBoxLayout()
-        if sys_id:
+        # Phase 85 D-06: synthetic sys_ids hide the KTIV button (no NLI Alma record)
+        if sys_id and not is_synthetic_sys_id(sys_id):
             ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
             btn_ktiv = QPushButton(tr('Open in KTIV'))
             btn_ktiv.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ktiv_url)))

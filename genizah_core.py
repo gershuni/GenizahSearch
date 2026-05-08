@@ -4324,9 +4324,13 @@ class MetadataManager:
             return result
 
     def _fetch_single_worker(self, system_id):
-        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
-        # Initialize default meta structure
+        # Phase 85 D-14: synthetic sys_ids skip the NLI MARC network call
+        # (no Alma record exists). Returns the default empty meta structure.
+        from shared.synthetic_sys_id import is_synthetic_sys_id
         meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': [], 'thumb_url': None, 'thumb_checked': False}
+        if is_synthetic_sys_id(system_id):
+            return meta
+        url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
         
         headers = Config.HTTP_HEADERS
         
@@ -4450,6 +4454,10 @@ class MetadataManager:
         return f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=stream&dps_pid=FL{digits}"
 
     def _fetch_fl_ids(self, system_id):
+        # Phase 85 D-14: synthetic sys_ids have no NLI manifest — skip the network call.
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        if is_synthetic_sys_id(system_id):
+            return []
         url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
         headers = Config.HTTP_HEADERS
         try:

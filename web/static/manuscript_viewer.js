@@ -27,8 +27,18 @@ const _flIdCache = {};
  * Server-side /api/nli_image_by_sysid resolves FL IDs locally from crossref
  * sidecar (815K pre-resolved records). This client-side manifest fetch is a
  * last-resort fallback for uncovered manuscripts.
+ *
+ * Phase 85 D-06/D-14: synthetic sys_ids skip the NLI manifest fetch entirely.
+ * The window.GENIZAH_IS_SYNTHETIC flag is set by web/pages/browse.py at
+ * page render time. Saves cold-cache external requests + prevents
+ * polluting NLI access logs with PNX_MANUSCRIPTS99...000000 404s.
  */
 async function fetchFlIdsFromManifest(sysId) {
+    if (typeof window !== 'undefined' && window.GENIZAH_IS_SYNTHETIC) {
+        console.log(`[Manifest] Skipping NLI manifest fetch for synthetic ${sysId}`);
+        return [];
+    }
+
     if (_flIdCache[sysId]) {
         console.log(`[Manifest] Cache hit for ${sysId}`);
         return _flIdCache[sysId];
@@ -129,7 +139,12 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     }
 
     // Try 3: Use server-side NLI proxy (handles collections that block browser requests)
-    if (sysId && !img.dataset.triedServerProxy) {
+    // Phase 85 D-06/D-14: synthetic sys_ids skip the proxy entirely — the
+    // /api/nli_image_by_sysid endpoint returns 204 for synthetic, but the
+    // <img> would still issue an unnecessary request. Skip cleanly to the
+    // "All fallbacks exhausted" branch.
+    const isSynth = (typeof window !== 'undefined' && window.GENIZAH_IS_SYNTHETIC);
+    if (sysId && !img.dataset.triedServerProxy && !isSynth) {
         img.dataset.triedServerProxy = 'true';
         const proxyUrl = `/api/nli_image_by_sysid/${sysId}?page=${pageIdx || 0}`;
         console.log(`Trying server-side NLI proxy: ${proxyUrl}`);

@@ -17,6 +17,7 @@ from PyQt6 import sip
 
 from genizah_core import Config, get_logger, tr
 from desktop.image_loader import ImageLoaderThread
+from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
 
@@ -992,6 +993,8 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_external.setVisible(bool(self.external_url))
 
         # KTIV button: show when NLI FGP images available (Phase 31)
+        # Phase 85 D-06: synthetic sys_ids never show the KTIV button
+        # (no NLI Alma record exists for them).
         image_source_info = meta.get('image_source_info', {})
         if image_source_info.get('nli_fgp'):
             # Use sys_id from meta or try fl_id-based detection
@@ -1002,7 +1005,7 @@ class ManuscriptViewerWidget(QWidget):
                 if isinstance(fl_ids, str):
                     fl_ids = [fl_ids]
             self._ktiv_sys_id = sys_id
-            self.btn_ktiv.setVisible(bool(sys_id))
+            self.btn_ktiv.setVisible(bool(sys_id) and not is_synthetic_sys_id(sys_id))
         else:
             self._ktiv_sys_id = None
             self.btn_ktiv.setVisible(False)
@@ -1226,7 +1229,9 @@ class ManuscriptViewerWidget(QWidget):
 
     def _open_ktiv_viewer(self):
         """Open the NLI KTIV manuscript viewer at the current page."""
-        if self._ktiv_sys_id:
+        # Phase 85 D-06: defense-in-depth — synthetic sys_ids never reach
+        # KTIV (button is hidden in load_images), but guard the URL builder too.
+        if self._ktiv_sys_id and not is_synthetic_sys_id(self._ktiv_sys_id):
             # Use docid query param (not hash fragment) -- hash-based URLs fail on direct navigation
             docid = f"PNX_MANUSCRIPTS{self._ktiv_sys_id}-1"
             # Append FL ID to navigate to the current page
