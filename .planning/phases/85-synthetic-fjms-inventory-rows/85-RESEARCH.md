@@ -793,9 +793,9 @@ This phase doesn't depend on external library versions — it's project-internal
 
 **If this table is empty:** It's not. 10 explicit assumptions, mostly LOW-risk planner-discretion choices. None compromise the locked decisions.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-These are gaps that the planner needs to resolve during the planning phase OR by a small experiment:
+These are gaps that the planner needs to resolve during the planning phase OR by a small experiment. Each entry below carries an explicit `RESOLVED:` line; recommendations have been incorporated into the corresponding plans.
 
 ### 1. Exact qualifying-set membership predicate for D-02
 - **What we know:** D-02 says EITHER (a) CUDL manifest exists OR (b) substantive FJMS metadata (catalog title, scholarly description, measurement, OR bibliography). Two different scopes.
