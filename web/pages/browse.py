@@ -3895,11 +3895,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     await search_shelfmark()
 
                                 # Custom Edit Button
-                                ui.button(
-                                    tr('Edit'),
-                                    icon='edit',
-                                    on_click=toggle_edit_mode
-                                ).props('flat dense size=sm').classes('text-xs').tooltip(tr('Edit Transcription'))
+                                # Phase 85 SYNTH-06 / D-10 — corrections-write deferred for
+                                # synthetic rows (page_number semantics undefined for
+                                # image-less FJMS-only inventories). UI hide is
+                                # defense-in-depth; backend reject at corrections_client.py
+                                # + supabase_corrections_client.py is the load-bearing gate.
+                                if not is_synthetic_sys_id(page.sys_id):
+                                    ui.button(
+                                        tr('Edit'),
+                                        icon='edit',
+                                        on_click=toggle_edit_mode
+                                    ).props('flat dense size=sm').classes('text-xs').tooltip(tr('Edit Transcription'))
                                 create_comment_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,

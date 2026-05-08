@@ -12,6 +12,13 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# Phase 85 SYNTH-06 / D-10 — corrections-write deferral. Synthetic-row
+# corrections are gated at this REAL write entry point (REVIEWS-MODE
+# iteration 1 B1: corrections_client.py:582 CorrectionsClient.create_correction)
+# because page_number semantics are undefined for image-less synthetic rows.
+# UI hide on web + desktop is defense-in-depth; this is the load-bearing gate.
+from shared.synthetic_sys_id import is_synthetic_sys_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -605,6 +612,15 @@ class CorrectionsClient:
         Returns:
             Tuple of (Correction or None, message)
         """
+        # Phase 85 SYNTH-06 / D-10 — REVIEWS-MODE iteration 1 B1 gate.
+        # Reject synthetic sys_ids at the WRITE entry point. Page_number
+        # semantics are undefined for image-less synthetic rows; Phase 87
+        # will define them. Match the existing return tuple shape.
+        if is_synthetic_sys_id(document_id):
+            return (
+                None,
+                "synthetic_corrections_disabled: corrections cannot be added to synthetic sys_ids",
+            )
         try:
             payload = {
                 'document_id': document_id,
