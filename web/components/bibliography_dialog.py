@@ -15,6 +15,7 @@ import html as html_mod
 from nicegui import ui
 from web.translations import tr, get_language
 from shared.fjms_service import format_page_ref, _parse_marc_annotations, strip_marc_annotation_suffix, _ts_symbol
+from shared.synthetic_sys_id import is_synthetic_sys_id
 from typing import List, Dict
 
 
@@ -48,10 +49,12 @@ def create_fjms_bibliography_dialog(
                     ui.label(f'\u2014 {shelfmark}').classes('text-sm opacity-80')
 
             with ui.row().classes('items-center gap-2'):
-                ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
-                ui.link(tr('Open in KTIV'), ktiv_url, new_tab=True).classes(
-                    'text-white text-sm px-2 py-1 rounded'
-                ).style('background: rgba(255,255,255,0.2); text-decoration: none;')
+                # Phase 85 D-06: synthetic sys_ids hide the KTIV link
+                if sys_id and not is_synthetic_sys_id(sys_id):
+                    ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+                    ui.link(tr('Open in KTIV'), ktiv_url, new_tab=True).classes(
+                        'text-white text-sm px-2 py-1 rounded'
+                    ).style('background: rgba(255,255,255,0.2); text-decoration: none;')
                 ui.button(icon='close', on_click=dialog.close).props('flat dense round').classes('text-white')
 
         # Filter row
@@ -280,10 +283,15 @@ def create_nli_bibliography_dialog(
                     ui.label(f'\u2014 {shelfmark}').classes('text-sm opacity-80')
 
             with ui.row().classes('items-center gap-2'):
-                ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
-                ui.link(tr('Open in KTIV'), ktiv_url, new_tab=True).classes(
-                    'text-white text-sm px-2 py-1 rounded'
-                ).style('background: rgba(255,255,255,0.2); text-decoration: none;')
+                # Phase 85 D-06: synthetic sys_ids hide the KTIV link.
+                # (This dialog should never even open for synthetic since
+                # marc_bib is empty per browse_enrichment.py:503 guard;
+                # kept as defense-in-depth.)
+                if sys_id and not is_synthetic_sys_id(sys_id):
+                    ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
+                    ui.link(tr('Open in KTIV'), ktiv_url, new_tab=True).classes(
+                        'text-white text-sm px-2 py-1 rounded'
+                    ).style('background: rgba(255,255,255,0.2); text-decoration: none;')
                 ui.button(icon='close', on_click=dialog.close).props('flat dense round').classes('text-white')
 
         # Filter row

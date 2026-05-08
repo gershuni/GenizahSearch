@@ -43,6 +43,7 @@ from web.services import (
     get_oxford_direct_image_url,
     is_oxford_manuscript,
 )
+from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.translations import tr, is_rtl, get_language
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
@@ -791,6 +792,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Save position to storage for persistence (Phase 74: via helper)
                 persist_browse_snapshot(state, page)
 
+                # Phase 85 D-06: expose synthetic-row flag to client-side JS
+                # (web/static/manuscript_viewer.js gates NLI manifest fetch +
+                # NLI image proxy fallback on this flag).
+                _is_synth_js = 'true' if is_synthetic_sys_id(page.sys_id) else 'false'
+                ui.run_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
+
                 # PostHog: track manuscript views
                 from web.analytics import posthog_capture
                 posthog_capture('browse_manuscript', {
@@ -824,6 +831,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.page_input_value = 0
                     state.error = None
                     _update_browser_url()
+                    # Phase 85 D-06: expose synthetic-row flag to client-side JS
+                    _is_synth_js = 'true' if is_synthetic_sys_id(meta_page.sys_id) else 'false'
+                    ui.run_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
                 else:
                     if fl_id:
                         state.error = tr('No text available') + f" (fl_id: {fl_id})"
@@ -1704,17 +1714,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     'color: #ffffff !important; opacity: 0.95;'
                                 ).tooltip(_overlay_title if len(words) > 5 else '')
 
-                        # Ktiv link
-                        ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
-                        with ui.link(target=ktiv_url, new_tab=True).classes(
-                            'flex items-center gap-1 px-2 py-1 rounded'
-                        ).style(
-                            'text-decoration: none; '
-                            'color: #ffffff !important; '
-                            'background: rgba(255, 255, 255, 0.2);'
-                        ):
-                            ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
-                            ui.label(tr('Ktiv')).classes('text-sm font-semibold').style('color: #ffffff !important;')
+                        # Ktiv link — Phase 85 D-06: hidden for synthetic sys_ids (no NLI Alma record)
+                        if not is_synthetic_sys_id(page.sys_id):
+                            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
+                            with ui.link(target=ktiv_url, new_tab=True).classes(
+                                'flex items-center gap-1 px-2 py-1 rounded'
+                            ).style(
+                                'text-decoration: none; '
+                                'color: #ffffff !important; '
+                                'background: rgba(255, 255, 255, 0.2);'
+                            ):
+                                ui.icon('open_in_new', size='sm').style('color: #ffffff !important;')
+                                ui.label(tr('Ktiv')).classes('text-sm font-semibold').style('color: #ffffff !important;')
 
                         # PGP link button placeholder (populated by enrichment Phase B)
                         pgp_link_el = ui.element('span')
@@ -1968,10 +1979,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Changed to H3 (or small title)
                     h3(tr('External link'), classes='text-xs font-bold mb-2', style='color: var(--text-secondary);')
                     with ui.row().classes('gap-2 flex-wrap'):
-                        # NLI Ktiv
-                        # NLI Ktiv
-                        ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
-                        ui.link('NLI Ktiv', ktiv_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+                        # NLI Ktiv — Phase 85 D-06: hidden for synthetic sys_ids
+                        if not is_synthetic_sys_id(page.sys_id):
+                            ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
+                            ui.link('NLI Ktiv', ktiv_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
 
                         # Oxford Bodleian
                         if page.is_oxford and page.external_url:
@@ -2426,6 +2437,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                         img_src = get_oxford_direct_image_url(frag_sm, pg_idx)
                                                         if not img_src:
                                                             img_src = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                                    elif is_synthetic_sys_id(frag_sid):
+                                                        # Phase 85 D-06: synthetic sys_ids have no NLI image source
+                                                        # — image_url stays empty so the <img> shows blank/error placeholder
+                                                        img_src = ''
                                                     else:
                                                         img_src = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
 
@@ -2894,6 +2909,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         frag_img_url = get_oxford_direct_image_url(frag_sm, pg_idx)
                                         if not frag_img_url:
                                             frag_img_url = f'/api/oxford_image/{frag_sid}?page={pg_idx}'
+                                    elif is_synthetic_sys_id(frag_sid):
+                                        # Phase 85 D-06: synthetic sys_ids have no NLI image source
+                                        frag_img_url = ''
                                     else:
                                         frag_img_url = f'/api/nli_image_by_sysid/{frag_sid}?page={pg_idx}'
 
@@ -3439,7 +3457,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # Direct browser requests to NLI are blocked for some collections
                     has_image = True
                     _suffix_param = f'&suffix={page.volume_suffix}' if page.volume_suffix > 1 else ''
-                    img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{_suffix_param}{cache_bust_api}"
+                    # Phase 85 D-06/D-08: synthetic sys_ids skip the NLI image proxy.
+                    # If a CUDL manifest is available the cambridge auto-default
+                    # below switches active_source='cambridge' which routes to
+                    # /api/cambridge_image/. If no CUDL, has_image is forced
+                    # False so the <img> doesn't render with a 204-only URL.
+                    if is_synthetic_sys_id(page.sys_id):
+                        if not page.cambridge_images:
+                            has_image = False
+                            img_url = ''
+                        else:
+                            img_url = ''  # will be reset by cambridge branch below
+                    else:
+                        img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{_suffix_param}{cache_bust_api}"
                     fallback_url = None
 
                 # External source override: if user switched to Cambridge/Manchester/JTS/Oxford and images are available
@@ -3454,6 +3484,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 # Auto-default to external sources when available (before image URL construction)
                 # When NLI IIIF is down, these ensure images load from alternate providers
+                # Phase 85 D-08: synthetic sys_ids with a CUDL manifest default
+                # to Cambridge as the image source (no NLI attempted at all).
+                _is_synth = is_synthetic_sys_id(page.sys_id)
+                if _is_synth and _has_cambridge_images and state.active_source == 'nli' and not state.source_user_override:
+                    state.active_source = 'cambridge'
                 if _has_jts_images and state.active_source == 'nli' and not state.source_user_override:
                     state.active_source = 'jts'
                 if _has_manchester_images and state.active_source == 'nli' and not state.source_user_override:
@@ -3518,7 +3553,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _folio_images = page.folio_images or []
                 _effective_count = _src_info.get('image_count', 0) or page.total_pages
                 _is_single_page = _effective_count <= 1 and page.total_pages <= 1
-                _has_nli = _src_info.get('nli_fgp', False)
+                # Phase 85 D-06: synthetic sys_ids have no NLI Alma record —
+                # _has_nli forced False so the NLI source chip + viewer deep-link
+                # button never render. Cambridge / Manchester / JTS chips still
+                # appear when their respective images are available.
+                _has_nli = (not is_synthetic_sys_id(page.sys_id)) and _src_info.get('nli_fgp', False)
                 _has_cambridge = _src_info.get('cambridge', False) or page.is_cambridge
                 _has_manchester = _src_info.get('manchester', False)
                 _has_jts = _src_info.get('jts', False)
@@ -4026,7 +4065,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     # not just the manuscript's native source. If the user
                                     # switched to NLI on an Oxford manuscript, the credit
                                     # should link to NLI/Ktiv, not to Bodleian.
-                                    _nli_credit_url = f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}'
+                                    # Phase 85 D-06: synthetic sys_ids skip NLI URL construction
+                                    # entirely; credit_link falls through to the cambridge/oxford/etc.
+                                    # branches if applicable, or stays empty for the no-image case.
+                                    if is_synthetic_sys_id(page.sys_id):
+                                        _nli_credit_url = ''
+                                    else:
+                                        _nli_credit_url = f'https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}'
                                     if _is_nli_active:
                                         credit_link = _nli_credit_url
                                     elif _is_oxford_active or (page.is_oxford and state.active_source != 'nli'):

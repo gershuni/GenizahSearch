@@ -26,6 +26,7 @@ from web.services import (
     get_oxford_direct_image_url,
     is_oxford_manuscript,
 )
+from shared.synthetic_sys_id import is_synthetic_sys_id
 from shared.refinement import compute_all_terms_filter, enrich_snippet_with_chain_terms
 from genizah_core import SearchEngine, get_library_display
 from web.document_service import (
@@ -643,7 +644,12 @@ def create_result_card(search_state, refs, index, result):
                             if _tv['suffix'] > 1:
                                 _thumb_suffix = f'&suffix={_tv["suffix"]}'
                             break
-            _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300{_thumb_suffix}"
+            # Phase 85 D-06: synthetic sys_ids skip the NLI image proxy URL
+            # so the search-result thumbnail doesn't try to load a 204 endpoint.
+            if is_synthetic_sys_id(sys_id):
+                _img_url = None
+            else:
+                _img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300{_thumb_suffix}"
             is_oxford = False
             try:
                 from web.pages.browse import is_oxford_manuscript
@@ -1188,6 +1194,11 @@ def open_advanced_dialog(search_state, refs, index, result):
             img_url = get_oxford_direct_image_url(shelfmark, page_idx)
             if not img_url:
                 img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"
+        elif sys_id and is_synthetic_sys_id(sys_id):
+            # Phase 85 D-06: synthetic sys_ids have no NLI image source —
+            # advanced search dialog renders without an image (Phase 53 metadata-only)
+            img_url = None
+            has_image = False
         elif sys_id:
             _suffix_param = f'&suffix={_vol_suffix}' if _vol_suffix > 1 else ''
             img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}{_suffix_param}"

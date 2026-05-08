@@ -13,6 +13,7 @@ import re
 import os
 import threading
 from genizah_core import Config
+from shared.synthetic_sys_id import is_synthetic_sys_id
 from urllib.parse import urlparse
 from web.crawler_visibility import ARCHIVE_DISALLOWED_PATHS, ARCHIVE_USER_AGENT_TOKENS
 
@@ -466,7 +467,14 @@ def init_api_routes(app_override=None):
 
     @target_app.get('/api/fl_ids/{sys_id}')
     def get_fl_ids(sys_id: str):
-        """Return manifest FL IDs for a sys_id (cached). Used by NLI viewer deep links."""
+        """Return manifest FL IDs for a sys_id (cached). Used by NLI viewer deep links.
+
+        Phase 85 D-14: synthetic sys_ids skip NLI resolution. Returns 200 + JSON
+        empty list dict (NOT 204) — JSON-expecting clients call .json() and would
+        break on 204 No Content per REVIEWS-MODE Codex MEDIUM closure.
+        """
+        if is_synthetic_sys_id(sys_id):
+            return {"fl_ids": []}
         fl_ids = fetch_fl_ids_from_nli(sys_id)
         return fl_ids
 
@@ -593,7 +601,12 @@ def init_api_routes(app_override=None):
             suffix: IIIF manifest suffix (1=primary IE, 2=second IE, etc.).
                     For multi-IE manuscripts, each IE has its own manifest with
                     different images. Default 1 for single-IE manuscripts.
+
+        Phase 85 D-14: synthetic sys_ids return 204 No Content. Image endpoint;
+        <img> consumers handle 204 as "image not available" without breaking.
         """
+        if is_synthetic_sys_id(sys_id):
+            return Response(content="", status_code=204)
         got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=suffix)
         if got is None:
             return Response(content="Image not found", status_code=404)

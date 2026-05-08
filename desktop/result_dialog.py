@@ -30,6 +30,7 @@ from desktop.title_helpers import (
     _resolve_display_title, _set_label_with_tooltip,
 )
 from desktop.image_loader import ImageLoaderThread
+from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
 
@@ -2806,10 +2807,13 @@ class ResultDialog(QDialog):
             super().closeEvent(event)
 
     def open_catalog(self):
-        if self.current_sys_id: QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
+        # Phase 85 D-06: synthetic sys_ids skip the NLI catalog page (no Alma record)
+        if self.current_sys_id and not is_synthetic_sys_id(self.current_sys_id):
+            QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_sys_id}"))
 
     def open_viewer(self):
-        if self.current_sys_id:
+        # Phase 85 D-06: synthetic sys_ids skip the NLI viewer (no Alma record)
+        if self.current_sys_id and not is_synthetic_sys_id(self.current_sys_id):
             # Use docid query param (not hash fragment) — hash-based URLs fail on direct navigation
             docid = f"PNX_MANUSCRIPTS{self.current_sys_id}-1"
             if self.current_fl_id:
