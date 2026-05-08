@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v7.11
 milestone_name: CUDL Coverage & Synthetic Inventories
-status: planning
-last_updated: "2026-05-08T00:00:00.000Z"
-last_activity: 2026-05-08 -- Phase 85 context gathered (FJMS lookup arch, scope, persistence, browse UX); Codex-reviewed twice
+status: executing
+last_updated: "2026-05-08T09:01:53.514Z"
+last_activity: 2026-05-08 -- Phase 85 planning complete
 progress:
   total_phases: 86
   completed_phases: 82
-  total_plans: 269
+  total_plans: 274
   completed_plans: 268
-  percent: 100
+  percent: 98
 ---
 
 # Project State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-05-05)
 
 Phase: 85 (synthetic-fjms-inventory-rows) — CONTEXT gathered
 Plan: —
-Status: Phase 85 discuss-phase complete; CONTEXT.md captures D-01..D-15 across FJMS lookup architecture (Option 4: synthetic-in-AlmaId + helpers), scope (max-inclusion CUDL OR FJMS), persistence (libraries.csv append + idempotent regen), browse UX (quiet degradation), title precedence, community-write rules. Codex-reviewed twice. Ready for /gsd-plan-phase 85.
-Last activity: 2026-05-08 -- Phase 85 context gathered
+Status: Ready to execute
+Last activity: 2026-05-08 -- Phase 85 planning complete
 
 Progress: [###.......] 33% (1/3 phases, 85 in plan-stage)
 
