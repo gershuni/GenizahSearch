@@ -471,33 +471,64 @@ class TestManifestAuthority:
             )
 
 
-@needs_task2
-class TestDeterministicOrdering:
-    """REVIEWS-MODE Codex HIGH: every UNION block has explicit ORDER BY."""
+def _quoted_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
 
-    def test_explicit_order_by_in_each_union(self):
+
+def _canonical_table_rows(conn: sqlite3.Connection, table: str) -> list[tuple]:
+    columns = [
+        row[1]
+        for row in conn.execute(f"PRAGMA table_info({_quoted_identifier(table)})")
+    ]
+    assert columns, f"{table}: exported table missing"
+    order_cols = ", ".join(_quoted_identifier(col) for col in columns)
+    return conn.execute(
+        f"SELECT * FROM {_quoted_identifier(table)} ORDER BY {order_cols}"
+    ).fetchall()
+
+
+@needs_task2
+class TestStreamingUnionExports:
+    """REVIEWS-MODE: unioned source exports must stream; determinism is semantic."""
+
+    def test_union_source_queries_do_not_force_sort(self):
         path = Path(__file__).resolve().parent.parent / "scripts" / "export_fist_enrichment.py"
         src = path.read_text(encoding="utf-8")
-        # Compute SQL-only UNION ALL positions: scan only the inside of triple-
-        # double-quoted strings (the SQL blocks), skipping module-level
-        # docstrings and comments. Each export function's SQL is wrapped in
-        # `source.execute("""...""")` so triple-quoted blocks are SQL-region
-        # candidates. Filter to only those whose body contains a SELECT.
-        sql_union_positions: list[int] = []
-        for sql_match in re.finditer(r'"""(.*?)"""', src, re.DOTALL):
-            body = sql_match.group(1)
-            if "SELECT" not in body.upper():
-                continue
-            block_start = sql_match.start(1)
-            for m in re.finditer(r"\bUNION ALL\b", body):
-                sql_union_positions.append(block_start + m.start())
-        assert sql_union_positions, "No SQL UNION ALL blocks found — Task 2 implementation missing"
-        for pos in sql_union_positions:
-            window = src[pos:pos + 3000]
-            assert "ORDER BY" in window, (
-                f"UNION ALL at offset {pos} lacks ORDER BY within 3000 chars — "
-                f"REVIEWS-MODE byte-stability violation"
+        sql_blocks = [
+            m.group(1)
+            for m in re.finditer(r'source\.execute\(\s*"""(.*?)"""', src, re.DOTALL)
+            if "UNION ALL" in m.group(1).upper()
+        ]
+        assert sql_blocks, "No SQL UNION ALL blocks found"
+        for body in sql_blocks:
+            assert not re.search(r"\bORDER\s+BY\b", body, re.IGNORECASE), (
+                "Unioned source export SQL must stream rows from SQLite; "
+                "canonical test reads should sort target content instead."
             )
+
+    @pytest.mark.parametrize("table", ALMA_KEYED_TABLES)
+    def test_repeated_exports_have_same_canonical_content(
+        self, fist_seed, manifest_fixture, tmp_path, table
+    ):
+        from scripts import export_fist_enrichment as ef
+
+        snapshots = []
+        for run in range(2):
+            target_path = tmp_path / f"fjms_{table}_{run}.db"
+            target_conn = sqlite3.connect(target_path)
+            try:
+                target = target_conn.cursor()
+                ef.load_synthetic_manifest_into_temp_table(fist_seed, manifest_fixture)
+                export_fn = getattr(ef, f"export_{table}")
+                export_fn(fist_seed.cursor(), target)
+                target_conn.commit()
+                snapshots.append(_canonical_table_rows(target_conn, table))
+            finally:
+                target_conn.close()
+
+        assert snapshots[0] == snapshots[1], (
+            f"{table}: repeated exports changed canonical table content"
+        )
 
 
 @needs_task2
