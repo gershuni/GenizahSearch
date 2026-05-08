@@ -16,7 +16,14 @@ Results/
 Genizah_Tantivy_Index/
 *.pkl
 config.pkl
-fist_data/
+fist_data/*
+# Phase 85 SYNTH-02: synthetic_manifest.json is AUTHORITATIVE for Plan 03 —
+# must be tracked so the FJMS sidecar exporter (Plan 03) can read the
+# committed qualifying-set as its only InventoryId source. Pattern uses
+# `fist_data/*` (not `fist_data/`) so the !-exception works correctly:
+# git cannot re-include files inside an excluded *directory*, but can
+# re-include files inside an excluded *glob* pattern.
+!fist_data/synthetic_manifest.json
 nli_data/
 pgp_data/pgp.db
 FIST_DB_BACKUP/
@@ -25,7 +32,11 @@ FIST_DB_BACKUP/
 dist/
 build/
 *.spec
-/Reports
+/Reports/*
+/reports/*
+# Phase 85 SYNTH-02: synthetic-coverage artifacts (Phase 86 audit consumes residue)
+!/reports/synthetic_ambiguity_residue.csv
+!/reports/synthetic_coverage.md
 Genizah_Index/genizah.log
 genizah.log
 backend.log
