@@ -72,3 +72,15 @@ debug_session: null
 notes: ROADMAP success criterion #2 says "all standard search modes (text/title/shelfmark/Responsa)" but implementation supports Title+Shelfmark only. Text/Responsa use Tantivy chunks; synthetic rows have no transcription text. Both Codex and Gemini reviewers (MEDIUM) flagged this; `reports/synthetic_coverage.md` §"SYNTH-03 Search Mode Coverage" recommends REQUIREMENTS amendment.
 
 **User decision needed:** accept narrowing (REQUIREMENTS amendment) OR schedule Tantivy-stub-rows infrastructure follow-up phase.
+
+### G-03 Phase-86 deferral: parent-shelfmark false synthetics
+status: deferred (Phase 86)
+debug_session: null
+notes: Discovered 2026-05-09 during UAT item 2 retry. 175 synthetic rows are FIST.db series/container InventoryIds whose leaf fragments already exist as real Alma rows in libraries.csv (e.g. `T-S NS: T-S NS 161` shadows 1,009 real-Alma `T-S NS 161.x` rows; `T-S NS 139` shadows 603, etc.). Plan 02's qualifying logic checked `WHERE alma.AlmaId IS NULL` for the inventory itself but not for descendant shelfmarks. Total 10,949 real-Alma child shelfmarks shadowed.
+
+User decided 2026-05-09 to **defer to Phase 86 audit cleanup** rather than re-run Plan 85 generation. ROADMAP §Phase 86 success criterion 5(b) updated to scope this. CHANGELOG documents the gap loudly. Audit input: `reports/synthetic_parent_shelfmarks.csv`.
+
+### G-04 Phase-86 deferral: T-S NS 329.96 (originating user case)
+status: deferred (Phase 86)
+debug_session: null
+notes: Discovered 2026-05-09 during UAT item 2. T-S NS 329.96 is in `reports/synthetic_ambiguity_residue.csv` with 12 multi_signature entries (recto/verso/multi-version imports). Plan 02 D-05a STRICT excluded it by design. Originating user case for the v7.11 milestone is NOT closed by Phase 85. ROADMAP §Phase 86 success criterion 5(a) updated to triage multi_signature residue.

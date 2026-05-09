@@ -56,6 +56,21 @@ inventories that have no NLI Alma record. Synthetic sys_ids use the Phase-85 18-
   Tier 3 (FJMS-only no-CUDL) accounts for all 5,035 synthetic rows. **Phase 86
   audit will triage the multi_signature residue** and decide whether to relax
   D-05a for known-safe cases or schedule a deeper signature-deduplication phase.
+- **Parent-shelfmark false synthetics (175 entries, ~10,949 real-Alma children
+  shadowed) NOT closed by Phase 85.** Discovered during 2026-05-09 UAT: 175 of
+  the 5,035 synthetic rows are FIST.db series/container InventoryIds whose leaf
+  fragments already exist as real Alma rows in libraries.csv (e.g. synthetic
+  `T-S NS: T-S NS 161` shadows 1,009 real-Alma rows for `T-S NS 161.x`
+  fragments; `T-S NS 139` shadows 603, `T-S NS 110` shadows 546, etc.). Plan 02's
+  qualifying logic checked `WHERE alma.AlmaId IS NULL` for the inventory itself
+  but not for descendant shelfmarks. Logged to
+  `reports/synthetic_parent_shelfmarks.csv` for **Phase 86 audit cleanup** — the
+  follow-up will add a "no real-Alma children" filter to
+  `scripts/generate_synthetic_rows.py::_build_qualifying_inventories`,
+  regenerate libraries.csv (175 fewer synthetic rows), and regenerate
+  `fjms_enrichment.db` (175 fewer synthetic AlmaIds). Until Phase 86 ships, the
+  shelfmark-search picker may show synthetic series rows alongside real leaf
+  rows for these 175 prefixes.
 - Corrections-write on synthetic rows — `page_number` semantics undefined for
   image-less synthetic inventories. Client-side write entries reject with
   explicit error code; UI buttons hidden. A future plan will define proper

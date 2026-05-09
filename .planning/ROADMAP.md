@@ -272,7 +272,7 @@ Plans:
 
 #### Phase 86 -- CUDL Coverage Audit
 
-**Goal:** Confirm the milestone closed the gap; produce a durable report and a regression-safe state.
+**Goal:** Confirm the milestone closed the gap; produce a durable report and a regression-safe state. Triage the residue artifacts Phase 85 left for later cleanup.
 
 **Requirements:** AUDIT-01, AUDIT-02, AUDIT-03
 
@@ -281,6 +281,9 @@ Plans:
 2. `reports/cudl_coverage.md` documents the post-milestone breakdown by collection (matched-by-normalization, synthetic-row, residual-unmatched) with methodology and re-run instructions.
 3. The 461 NLI Oxford-mislabel rows fixed in v7.9.4 still resolve correctly; no library_code attribution regressions detected.
 4. Both apps build and pass test suite green; check_docs green; no PostHog error spike post-deploy.
+5. **Phase 85 residue triage** — process two artifacts Phase 85 deferred:
+   (a) `reports/synthetic_ambiguity_residue.csv` (10,689 entries; multi_signature + multi_inventory + csv_injection_leader) — decide whether to relax D-05a STRICT for known-safe multi_signature cases (e.g. when all SignatureIds resolve to the same canonical_shelfmark + library_code, pick lowest SignatureId per the existing tie-break logic). The originating user case T-S NS 329.96 (12 SignatureIds for one shelfmark) is the prototype.
+   (b) `reports/synthetic_parent_shelfmarks.csv` (175 entries; 10,949 real-Alma children covered) — REMOVE these false-positive synthetic rows where the FIST.db series-container shelfmark already has real-Alma children in libraries.csv. T-S NS 161 (1,009 real children), T-S NS 139 (603), T-S NS 110 (546) are the worst offenders. Discovered during Phase 85 UAT 2026-05-09. Add a "no real-Alma children" filter to `scripts/generate_synthetic_rows.py::_build_qualifying_inventories`. Regenerate libraries.csv synthetic block (175 fewer rows) and `fist_data/fjms_enrichment.db` (175 fewer synthetic AlmaIds in bibliography).
 
 ## Progress
 
