@@ -31,12 +31,12 @@ CUDL classmark form ↔ libraries.csv shelfmark form mapping fixes. Lands in the
 
 New libraries.csv rows representing FJMS-only inventories that have no NLI Alma record. Keyed by Option-2 synthetic sys_id (18-digit, `99` + InventoryId-padded-10 + `000000`).
 
-- [ ] **SYNTH-01** — A `is_synthetic_sys_id(s)` helper plus encode/decode functions for the 18-digit format exist in shared code; all sites that branch on Alma vs FJMS metadata consult the helper rather than parsing the string ad-hoc.
-- [ ] **SYNTH-02** — User can search by an FJMS-only shelfmark (e.g. `T-S NS 329.96`) and get a result row backed by a synthetic libraries.csv entry with FJMS-derived title and matching `call_numbers`.
-- [ ] **SYNTH-03** — The Tantivy index includes synthetic rows so all standard search modes (text/title/shelfmark/Responsa) return them; transcription text is empty when FJMS has no full text, but the row is still discoverable.
-- [ ] **SYNTH-04** — User can open the browse page for a synthetic sys_id and see CUDL image panel (when a manifest exists), FJMS catalogue/bibliography/measurements, and clear UI signalling that no NLI metadata is available, without errors or empty fallbacks elsewhere on the page.
-- [ ] **SYNTH-05** — FJMS enrichment lookups (`fjms_service.py`) resolve synthetic sys_ids via their underlying InventoryId, so catalogue/bib/measurement/free-desc dialogs populate correctly. The fallback path is shared by both web and desktop apps.
-- [ ] **SYNTH-06** — Lists, exclusions, parallels, comments, corrections, and external-link buttons all tolerate synthetic sys_ids: round-trip add/remove/serialize works, and no path silently drops or crashes on the new ID format.
+- [x] **SYNTH-01** — A `is_synthetic_sys_id(s)` helper plus encode/decode functions for the 18-digit format exist in shared code; all sites that branch on Alma vs FJMS metadata consult the helper rather than parsing the string ad-hoc.
+- [x] **SYNTH-02** — User can search by an FJMS-only shelfmark (e.g. `T-S NS 329.96`) and get a result row backed by a synthetic libraries.csv entry with FJMS-derived title and matching `call_numbers`.
+- [x] **SYNTH-03** — The Tantivy index includes synthetic rows so all standard search modes (text/title/shelfmark/Responsa) return them; transcription text is empty when FJMS has no full text, but the row is still discoverable.
+- [x] **SYNTH-04** — User can open the browse page for a synthetic sys_id and see CUDL image panel (when a manifest exists), FJMS catalogue/bibliography/measurements, and clear UI signalling that no NLI metadata is available, without errors or empty fallbacks elsewhere on the page.
+- [x] **SYNTH-05** — FJMS enrichment lookups (`fjms_service.py`) resolve synthetic sys_ids via their underlying InventoryId, so catalogue/bib/measurement/free-desc dialogs populate correctly. The fallback path is shared by both web and desktop apps.
+- [x] **SYNTH-06** — Lists, exclusions, parallels, comments, corrections, and external-link buttons all tolerate synthetic sys_ids: round-trip add/remove/serialize works, and no path silently drops or crashes on the new ID format.
 
 ### Coverage Audit
 

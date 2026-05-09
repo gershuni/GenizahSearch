@@ -261,7 +261,7 @@ Plans:
 4. FJMS enrichment dialogs (catalogue, bibliography, measurements, free description) populate via InventoryId fallback when sys_id is synthetic.
 5. Lists, exclusions, parallels, comments, corrections round-trip synthetic sys_ids without crashes or silent data loss; web and desktop parity preserved.
 
-**Plans:** 5/5 plans complete (infrastructure landed; libraries.csv synthetic data REVERTED 2026-05-09 — see "Outcome" below)
+**Plans:** 5/5 plans complete
 
 Plans:
 - [x] 85-01-PLAN.md -- shared/synthetic_sys_id.py helper module (is_synthetic / encode / decode) + golden fixtures (SYNTH-01)
