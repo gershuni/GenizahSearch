@@ -261,7 +261,7 @@ Plans:
 4. FJMS enrichment dialogs (catalogue, bibliography, measurements, free description) populate via InventoryId fallback when sys_id is synthetic.
 5. Lists, exclusions, parallels, comments, corrections round-trip synthetic sys_ids without crashes or silent data loss; web and desktop parity preserved.
 
-**Plans:** 5/5 plans complete
+**Plans:** 5/5 plans complete (infrastructure landed; libraries.csv synthetic data REVERTED 2026-05-09 — see "Outcome" below)
 
 Plans:
 - [x] 85-01-PLAN.md -- shared/synthetic_sys_id.py helper module (is_synthetic / encode / decode) + golden fixtures (SYNTH-01)
@@ -270,20 +270,24 @@ Plans:
 - [x] 85-04-PLAN.md -- Browse hide-NLI + CUDL-default + D-14 network-call guards (web + desktop parity, ~22-26 sites) (SYNTH-04)
 - [x] 85-05-PLAN.md -- Public API is_synthetic field + PostHog property + community round-trip + corrections-write deferral (SYNTH-06)
 
-#### Phase 86 -- CUDL Coverage Audit
+**Outcome (2026-05-09):** All five plans shipped (infrastructure intact); the actual synthetic-row population was reverted during UAT. Plan 02's "inclusive coverage stance" qualified InventoryIds with ANY FJMS signal, but the resulting 5,035 synthetic rows had only bibliography pointers (no text, image, or catalog description) — useless for actual research without the underlying manuscript. Additionally, 175 of those rows shadowed real-Alma series-children (e.g. synthetic `T-S NS 161` shadowed 1,009 real `T-S NS 161.x` rows). User-decision-revert: `libraries.csv` synthetic block emptied (markers preserved), `fist_data/synthetic_manifest.json` set to `[]`, `fjms_enrichment.db` restored from gz backup. Infrastructure (helper module, browse gates, /api `is_synthetic`, corrections-write reject) stays dormant; no synthetic sys_ids in production. **Phase 86 will re-attempt with stricter qualification criteria (CUDL-image-only, possibly relaxing D-05a for unambiguous overlaps).**
 
-**Goal:** Confirm the milestone closed the gap; produce a durable report and a regression-safe state. Triage the residue artifacts Phase 85 left for later cleanup.
+#### Phase 86 -- CUDL Coverage Audit + Synthetic Re-attempt
+
+**Goal:** Confirm Phase 84 closed the normalization gap; re-attempt synthetic rows with image-bearing-only criteria; produce a durable report.
 
 **Requirements:** AUDIT-01, AUDIT-02, AUDIT-03
 
 **Success criteria:**
-1. `scripts/scan_cudl_orphans.py` re-run after Phase 85 reports fewer than 200 truly-orphan CUDL classmarks with reasoned categorization for each.
-2. `reports/cudl_coverage.md` documents the post-milestone breakdown by collection (matched-by-normalization, synthetic-row, residual-unmatched) with methodology and re-run instructions.
+1. `scripts/scan_cudl_orphans.py` re-run after Phase 84 reports fewer than 200 truly-orphan CUDL classmarks with reasoned categorization for each.
+2. `reports/cudl_coverage.md` documents the post-Phase-84 breakdown by collection (matched-by-normalization, residual-unmatched) with methodology and re-run instructions.
 3. The 461 NLI Oxford-mislabel rows fixed in v7.9.4 still resolve correctly; no library_code attribution regressions detected.
 4. Both apps build and pass test suite green; check_docs green; no PostHog error spike post-deploy.
-5. **Phase 85 residue triage** — process two artifacts Phase 85 deferred:
-   (a) `reports/synthetic_ambiguity_residue.csv` (10,689 entries; multi_signature + multi_inventory + csv_injection_leader) — decide whether to relax D-05a STRICT for known-safe multi_signature cases (e.g. when all SignatureIds resolve to the same canonical_shelfmark + library_code, pick lowest SignatureId per the existing tie-break logic). The originating user case T-S NS 329.96 (12 SignatureIds for one shelfmark) is the prototype.
-   (b) `reports/synthetic_parent_shelfmarks.csv` (175 entries; 10,949 real-Alma children covered) — REMOVE these false-positive synthetic rows where the FIST.db series-container shelfmark already has real-Alma children in libraries.csv. T-S NS 161 (1,009 real children), T-S NS 139 (603), T-S NS 110 (546) are the worst offenders. Discovered during Phase 85 UAT 2026-05-09. Add a "no real-Alma children" filter to `scripts/generate_synthetic_rows.py::_build_qualifying_inventories`. Regenerate libraries.csv synthetic block (175 fewer rows) and `fist_data/fjms_enrichment.db` (175 fewer synthetic AlmaIds in bibliography).
+5. **Synthetic re-attempt with image-bearing criteria.** Modify `scripts/generate_synthetic_rows.py::_build_qualifying_inventories` to ONLY emit synthetic rows where:
+   (a) The InventoryId has a CUDL manifest in `nli_crossref.db.cambridge_manifests` (Tier 1 or Tier 2), AND
+   (b) No real-Alma row in libraries.csv has a child shelfmark of this synthetic's leaf (filter from `reports/synthetic_parent_shelfmarks.csv`), AND
+   (c) Optionally relax D-05a STRICT for known-safe multi_signature cases — when all FIST SignatureIds resolve to the same canonical_shelfmark + library_code, pick lowest SignatureId per the existing tie-break logic (so T-S NS 329.96 with 12 multi_signature entries CAN be synthesized). Baseline: ~100-500 image-bearing synthetics expected (instead of 5,035 bib-only). The originating user case (T-S NS 329.96) closes here.
+6. **Carry-forward residue artifacts:** keep `reports/synthetic_ambiguity_residue.csv` and `reports/synthetic_parent_shelfmarks.csv` as documentation of the Plan 02 attempt. Document the Phase 85 outcome in CHANGELOG so users + future maintainers understand why infrastructure exists with no production data.
 
 ## Progress
 

@@ -6,81 +6,77 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [Unreleased] — v7.11 CUDL Coverage & Synthetic Inventories
 
-Phase 85 (synthetic FJMS inventory rows) — closes the residue gap left after Phase 84
-shelfmark normalization. ~5,035 synthetic libraries.csv rows generated for FJMS-only
-inventories that have no NLI Alma record. Synthetic sys_ids use the Phase-85 18-digit
-"99 + InventoryId.zfill(10) + 000000" format, satisfying the existing "starts with
-99 + all digits" sys_id contract.
+**Phase 85 outcome:** Synthetic-row INFRASTRUCTURE landed (helper module, generation
+script, browse hide-NLI gates, /api `is_synthetic` field, corrections-write reject,
+FJMS sidecar UNION-ALL pattern) but the synthetic-row POPULATION was reverted
+during 2026-05-09 UAT. Plan 02's "inclusive coverage stance" qualified InventoryIds
+on ANY FJMS signal, but the resulting 5,035 rows had only bibliography pointers
+(no text, no image, no catalog description) — not actionable for research without
+the underlying manuscript. Additionally, 175 of those rows shadowed real-Alma
+series-children (e.g. synthetic `T-S NS 161` shadowed 1,009 real `T-S NS 161.x`
+rows). User decision: revert the data, keep the infrastructure dormant, re-attempt
+in Phase 86 with image-bearing-only criteria.
 
-### Added
+### Infrastructure landed (active in code, no production data)
 
-- Synthetic libraries.csv rows for **5,035 FJMS-only inventories** that have FJMS
-  bibliography metadata but no NLI Alma record. Users can search for and browse them
-  via Title and Shelfmark search modes. Browse pages populate the Bibliography panel;
-  catalogue/scholarly-description/measurements panels stay empty (data reality —
-  these inventories only have bibliography in FJMS).
-- `is_synthetic: bool` field on `/api/search`, `/api/browse`, and `/api/parallels`
-  response items (top-level, NOT nested under `locator`). Additive change —
-  `schema_version` stays `1` per the Phase 83 stability commitment.
-- `is_synthetic` PostHog event property on `/api/search` and `/api/browse` events
-  (intentionally OMITTED from `/api/parallels` events — parallels takes `text`,
-  not `sys_id`, so there is no canonical seed sys_id to tag).
 - `shared/synthetic_sys_id.py` helper module (Phase 85 SYNTH-01): pure functions
   `is_synthetic_sys_id`, `encode_inventory_sys_id`, `decode_inventory_id`. Single
   source of truth — repo-grep lint enforces no hand-rolled string slicing.
-
-### Changed
-
+- `scripts/generate_synthetic_rows.py` (Phase 85 SYNTH-02): regeneration script
+  with marker-fenced libraries.csv block, authoritative manifest, idempotent
+  `--dry-run` / `--apply` modes. Currently produces an empty manifest because
+  `libraries.csv` synthetic block was emptied. Phase 86 will tighten qualification.
+- `scripts/export_fist_enrichment.py` UNION-ALL pattern (Phase 85 SYNTH-05):
+  synthetic-AlmaId rows merged with real-Alma rows in 12 enrichment tables at
+  export time. Currently a no-op because manifest is empty.
 - Browse page hides KTIV link, NLI source toggle, NLI bibliography chips, and NLI
-  image source for synthetic rows (Phase 85 SYNTH-04). CUDL becomes the default
-  image source when a Cambridge IIIF manifest is available.
+  image source when `is_synthetic_sys_id(sys_id)` is true (Phase 85 SYNTH-04).
+  CUDL becomes the default image source when a Cambridge IIIF manifest is
+  available. Web + desktop parity. No-op in production until Phase 86 re-attempts.
+- `is_synthetic: bool` field on `/api/search`, `/api/browse`, and `/api/parallels`
+  response items (top-level, NOT nested under `locator`). Additive change —
+  `schema_version` stays `1` per the Phase 83 stability commitment. Always `false`
+  in production until Phase 86 re-attempts.
+- `is_synthetic` PostHog event property on `/api/search` and `/api/browse` events
+  (intentionally OMITTED from `/api/parallels` events — parallels takes `text`,
+  not `sys_id`, so there is no canonical seed sys_id to tag).
 - Corrections-write rejects synthetic sys_ids at the client-side write entry points
   (`CorrectionsClient.create_correction` and
   `SupabaseCorrectionsClient.create_correction`) with the message
   `synthetic_corrections_disabled: ...`. Web and desktop "Edit" buttons are also
   hidden as defense-in-depth. (REVIEWS-MODE iteration 1 B1+B2: there is no
   `POST /api/corrections` HTTP route in this codebase — gating happens at the
-  client-class level.)
-- FJMS sidecar (`fjms_enrichment.db`) UNION-ALL pattern lets FJMS lookups for
-  synthetic sys_ids resolve via InventoryId fallback (Phase 85 SYNTH-05).
+  client-class level.) No-op in production until Phase 86 re-attempts.
 
-### Deferred
+### Deferred to Phase 86 (CUDL Coverage Audit + Synthetic Re-attempt)
 
-- **Originating user case (T-S NS 329.96 and ~10,689 multi_signature peers)
-  NOT closed by Phase 85.** Plan 02's D-05a STRICT ambiguity policy excluded
-  every CUDL classmark that maps to multiple FIST SignatureIds (e.g. recto/verso
-  scans + multi-version imports). For T-S NS 329.96, FIST.db holds 12 distinct
-  SignatureIds for that single shelfmark — they were logged to
-  `reports/synthetic_ambiguity_residue.csv` rather than synthesized. Tier 1
-  (CUDL+FJMS overlap) and Tier 2 (CUDL-only) coverage are 0 in this milestone;
-  Tier 3 (FJMS-only no-CUDL) accounts for all 5,035 synthetic rows. **Phase 86
-  audit will triage the multi_signature residue** and decide whether to relax
-  D-05a for known-safe cases or schedule a deeper signature-deduplication phase.
-- **Parent-shelfmark false synthetics (175 entries, ~10,949 real-Alma children
-  shadowed) NOT closed by Phase 85.** Discovered during 2026-05-09 UAT: 175 of
-  the 5,035 synthetic rows are FIST.db series/container InventoryIds whose leaf
-  fragments already exist as real Alma rows in libraries.csv (e.g. synthetic
-  `T-S NS: T-S NS 161` shadows 1,009 real-Alma rows for `T-S NS 161.x`
-  fragments; `T-S NS 139` shadows 603, `T-S NS 110` shadows 546, etc.). Plan 02's
-  qualifying logic checked `WHERE alma.AlmaId IS NULL` for the inventory itself
-  but not for descendant shelfmarks. Logged to
-  `reports/synthetic_parent_shelfmarks.csv` for **Phase 86 audit cleanup** — the
-  follow-up will add a "no real-Alma children" filter to
-  `scripts/generate_synthetic_rows.py::_build_qualifying_inventories`,
-  regenerate libraries.csv (175 fewer synthetic rows), and regenerate
-  `fjms_enrichment.db` (175 fewer synthetic AlmaIds). Until Phase 86 ships, the
-  shelfmark-search picker may show synthetic series rows alongside real leaf
-  rows for these 175 prefixes.
-- Corrections-write on synthetic rows — `page_number` semantics undefined for
+- **Synthetic re-attempt with image-bearing-only criteria.** Plan 02's "any FJMS
+  signal" qualification produced 5,035 bibliography-pointer-only rows that didn't
+  help researchers. Phase 86 will tighten `_build_qualifying_inventories` to
+  require: (a) a CUDL manifest in `nli_crossref.db.cambridge_manifests`, (b) no
+  real-Alma children of the synthetic's leaf shelfmark in libraries.csv (filter
+  from `reports/synthetic_parent_shelfmarks.csv`), and optionally (c) relax D-05a
+  STRICT for unambiguous multi_signature cases (so the originating user case
+  T-S NS 329.96 — 12 SignatureIds for one shelfmark — can be synthesized when
+  all 12 resolve to the same canonical_shelfmark + library_code). Expected
+  output: ~100-500 image-bearing synthetic rows (instead of 5,035 bib-only).
+- **Originating user case (T-S NS 329.96) and ~10,689 multi_signature peers.**
+  Logged to `reports/synthetic_ambiguity_residue.csv`. Phase 86 will triage and
+  decide which to admit under the relaxed D-05a.
+- **175 parent-shelfmark false synthetics shadowing 10,949 real-Alma children.**
+  Logged to `reports/synthetic_parent_shelfmarks.csv` (e.g. `T-S NS 161` had
+  1,009 real-Alma `161.x` children but was synthesized as a series-container).
+  Phase 86's "no real-Alma children" filter handles this.
+- **Corrections-write on synthetic rows.** `page_number` semantics undefined for
   image-less synthetic inventories. Client-side write entries reject with
   explicit error code; UI buttons hidden. A future plan will define proper
-  `page_number` semantics.
-- AUDIT-01, AUDIT-02, AUDIT-03 — see `ROADMAP.md §Phase 86` (next phase).
-  Phase 86 re-runs `scripts/scan_cudl_orphans.py` and produces
-  `reports/cudl_coverage.md` confirming closure of the CUDL coverage gap.
-  Phase 85 produces the synthetic-row mechanism + audit residue
-  (`reports/synthetic_ambiguity_residue.csv`, `fist_data/synthetic_manifest.json`)
-  that Phase 86 consumes.
+  `page_number` semantics if image-bearing synthetics admit corrections.
+- **AUDIT-01, AUDIT-02, AUDIT-03** — Phase 86 re-runs `scripts/scan_cudl_orphans.py`
+  and produces `reports/cudl_coverage.md` confirming closure of the CUDL coverage
+  gap from Phase 84 normalization. Phase 85 carries forward the residue artifacts
+  (`reports/synthetic_ambiguity_residue.csv`,
+  `reports/synthetic_parent_shelfmarks.csv`, `fist_data/synthetic_manifest.json`)
+  for Phase 86 to consume.
 
 ---
 
