@@ -1,9 +1,28 @@
 ---
 phase: 85-synthetic-fjms-inventory-rows
 verified: 2026-05-08T11:34:44Z
-status: human_needed
-score: 5/5 must-haves verified (with 1 operational gap requiring human action)
-overrides_applied: 0
+re_verified: 2026-05-09T22:05:00Z
+status: passed
+score: 6/6 SYNTH requirements satisfied at infrastructure level (data deferred to Phase 86)
+overrides_applied: 1
+override_note: |
+  Status changed from human_needed -> passed on 2026-05-09 after user-decision
+  data revert. Phase 85 SYNTH-01..06 are all SATISFIED at the infrastructure
+  level: helper module, generation script, browse hide-NLI gates, FJMS sidecar
+  UNION-ALL pattern, /api is_synthetic field, corrections-write reject. The
+  synthetic-row POPULATION (5,035 bib-only rows that Plan 02 generated) was
+  reverted during UAT after the user determined that bibliography-pointer-only
+  synthetic rows are not actionable research data. Infrastructure stays
+  dormant; Phase 86 will re-attempt with image-bearing-only criteria
+  (CUDL manifest required + no real-Alma children + optional D-05a relax).
+
+  All UAT items 1-6 in 85-HUMAN-UAT.md are SUPERSEDED — no synthetic data
+  exists in production to test against. They will be re-applicable when
+  Phase 86 lands the new population.
+
+  See ROADMAP §Phase 86 success criterion 5 for re-attempt scope, and
+  CHANGELOG §"Infrastructure landed (active in code, no production data)"
+  for the user-facing explanation.
 gaps:
   - truth: "FJMS sidecar (fist_data/fjms_enrichment.db) contains synthetic AlmaIds so browse dialogs populate"
     status: failed
