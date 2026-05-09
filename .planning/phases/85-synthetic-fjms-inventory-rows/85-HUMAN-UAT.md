@@ -1,14 +1,21 @@
 ---
-status: partial
+status: superseded
 phase: 85-synthetic-fjms-inventory-rows
 source: [85-VERIFICATION.md]
 started: 2026-05-08T11:34:44Z
-updated: 2026-05-08T19:30:00Z
+updated: 2026-05-09T22:00:00Z
+superseded_reason: |
+  All 5,035 synthetic rows reverted 2026-05-09 after UAT items 1-2 surfaced a
+  fundamental design issue: bibliography-pointer-only synthetic rows are not
+  actionable research data. The data was reverted; the infrastructure remains
+  dormant. Items 3-6 below are NO LONGER NEEDED for Phase 85 (no synthetic
+  data exists to test against). They will be re-applicable when Phase 86
+  re-attempts synthetic generation with image-bearing-only criteria.
 ---
 
 ## Current Test
 
-[awaiting human testing]
+[superseded — Phase 85 data reverted; infrastructure landed dormant]
 
 ## Tests
 
