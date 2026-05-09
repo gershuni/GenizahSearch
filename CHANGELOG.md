@@ -14,10 +14,11 @@ inventories that have no NLI Alma record. Synthetic sys_ids use the Phase-85 18-
 
 ### Added
 
-- Synthetic libraries.csv rows for FJMS-only inventories (Phase 85 SYNTH-02).
-  Users can now search for and browse classmarks like `T-S NS 329.96` that have CUDL
-  images and FJMS scholarly metadata but no NLI Alma record. Discoverable via Title
-  and Shelfmark search modes.
+- Synthetic libraries.csv rows for **5,035 FJMS-only inventories** that have FJMS
+  bibliography metadata but no NLI Alma record. Users can search for and browse them
+  via Title and Shelfmark search modes. Browse pages populate the Bibliography panel;
+  catalogue/scholarly-description/measurements panels stay empty (data reality —
+  these inventories only have bibliography in FJMS).
 - `is_synthetic: bool` field on `/api/search`, `/api/browse`, and `/api/parallels`
   response items (top-level, NOT nested under `locator`). Additive change —
   `schema_version` stays `1` per the Phase 83 stability commitment.
@@ -45,6 +46,16 @@ inventories that have no NLI Alma record. Synthetic sys_ids use the Phase-85 18-
 
 ### Deferred
 
+- **Originating user case (T-S NS 329.96 and ~10,689 multi_signature peers)
+  NOT closed by Phase 85.** Plan 02's D-05a STRICT ambiguity policy excluded
+  every CUDL classmark that maps to multiple FIST SignatureIds (e.g. recto/verso
+  scans + multi-version imports). For T-S NS 329.96, FIST.db holds 12 distinct
+  SignatureIds for that single shelfmark — they were logged to
+  `reports/synthetic_ambiguity_residue.csv` rather than synthesized. Tier 1
+  (CUDL+FJMS overlap) and Tier 2 (CUDL-only) coverage are 0 in this milestone;
+  Tier 3 (FJMS-only no-CUDL) accounts for all 5,035 synthetic rows. **Phase 86
+  audit will triage the multi_signature residue** and decide whether to relax
+  D-05a for known-safe cases or schedule a deeper signature-deduplication phase.
 - Corrections-write on synthetic rows — `page_number` semantics undefined for
   image-less synthetic inventories. Client-side write entries reject with
   explicit error code; UI buttons hidden. A future plan will define proper

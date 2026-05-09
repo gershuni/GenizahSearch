@@ -14,12 +14,13 @@ updated: 2026-05-08T19:30:00Z
 
 ### 1. Open browse for synthetic sys_id (e.g. /browse?sys_id=990000002099000000) on web app
 expected: Page renders with FJMS Bibliography panel populated (5,034 of 5,035 synthetic IDs have bibliography); catalogue/free-desc/full-text panels intentionally empty (data reality — these inventories only have bibliography in FJMS); NLI elements hidden; metadata-only Phase 53 fallback with no broken-image placeholder; no console errors; no 404 noise in NLI logs
-result: [pending]
-notes: G-01 resolved 2026-05-08 — sidecar regenerated to 895MB with 5,034 synthetic AlmaIds in bibliography table. Deploy regenerated sidecar to web server + bundle in next desktop installer.
+result: passed (2026-05-09)
+notes: User confirmed: synthetic sys_id 990000002099000000 resolves to RNL: Firkovitch II A 195/2, no images, 1 bib item. Matches expected behavior per the data reality. G-01 resolved 2026-05-08 — sidecar regenerated to 895MB with 5,034 synthetic AlmaIds in bibliography table. Deploy regenerated sidecar to web server + bundle in next desktop installer.
 
 ### 2. Search 'T-S NS 329.96' (or equivalent FJMS-only shelfmark from manifest) in Shelfmark mode
 expected: Returns synthetic row with FJMS-derived title and matching call_numbers; clicking through to browse opens the synthetic-row page successfully
-result: [pending]
+result: confirmed-known-gap (2026-05-09)
+notes: T-S NS 329.96 is in the ambiguity residue (multi_signature: 12 distinct FIST SignatureIds for one shelfmark), NOT in the synthetic block. Plan 02 D-05a STRICT excluded it by design. Originating user case NOT closed by Phase 85 — explicitly deferred to Phase 86 audit per CHANGELOG. The picker shows neighboring real shelfmarks (329.964, 329.968, 329.969). Pick a different FJMS-only shelfmark from the manifest (5,035 InventoryIds) to test the synthetic search path itself; e.g. the manifest has Mosseri shelfmarks and CUL shelfmarks WITHOUT multi_signature ambiguity.
 
 ### 3. Add synthetic sys_id to a saved list, then reload the list
 expected: Round-trip preserves synthetic sys_id without crash; list item displays shelfmark; remove operation succeeds
@@ -40,11 +41,12 @@ result: [pending]
 ## Summary
 
 total: 6
-passed: 0
+passed: 1
 issues: 0
-pending: 6
-skipped: 0
+pending: 4
+skipped: 1
 blocked: 0
+notes: Item 1 passed; Item 2 confirms a known design gap (T-S NS 329.96 deferred to Phase 86 — counted as skipped because the test now needs a different shelfmark to exercise the synthetic search path); Items 3-6 still pending.
 
 ## Gaps
 
