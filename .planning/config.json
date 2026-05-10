@@ -2,7 +2,7 @@
   "mode": "interactive",
   "parallelization": true,
   "commit_docs": true,
-  "model_profile": "balanced",
+  "model_profile": "budget",
   "granularity": "fine",
   "workflow": {
     "research": true,
