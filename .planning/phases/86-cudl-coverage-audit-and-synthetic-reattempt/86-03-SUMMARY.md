@@ -2,14 +2,14 @@
 phase: 86-cudl-coverage-audit-and-synthetic-reattempt
 plan: 03
 subsystem: residue-pattern-adjudication
-status: pre-checkpoint
+status: complete
 tags:
   - residue-patterns
   - human-adjudication
   - phase-86
   - checkpoint
   - bridge-aware-ranker
-  - interim-summary
+  - reject-all-outcome
 
 # Dependency graph
 requires:
@@ -51,13 +51,13 @@ key-decisions:
   - "FIST.db path override: added --fist-db CLI arg so the script can run from a worktree against the main checkout's data file (fist_data/FIST.db is gitignored)."
   - "First-occurrence-only filing in _prefetch_fist_candidate_buckets: the 3-table production join can multiply rows for an inventory with several signatures/UCR matches; the prefetch helper bucketises by InventoryId first occurrence so each FIST shelfmark appears once per bucket."
 
-requirements-completed: []
-requirements-in-progress:
-  - AUDIT-01 (partial; full completion requires Task 2 adjudication + optional Task 3)
+requirements-completed:
+  - AUDIT-01 (adjudication complete; 0 rules accepted; bridge unchanged from Plan 01 baseline)
+requirements-in-progress: []
 
 # Metrics
-duration: ~25min (pre-checkpoint phase only)
-completed: pre-checkpoint
+duration: ~30min (pre-checkpoint ~25min + post-checkpoint ~5min)
+completed: 2026-05-11
 started: 2026-05-11
 ---
 
@@ -282,7 +282,60 @@ Ephemeral / regenerable artifacts:
 Plan completion status: PRE-CHECKPOINT (Task 1 of 3 done; Task 2 awaits user; Task 3 conditional).
 
 ---
+
+## Post-Checkpoint Summary (2026-05-11)
+
+**Outcome:** All 6 pattern families REJECTED by user. **0 rules accepted.** Bridge code (`shared/fist_cudl_bridge.py`) remains UNCHANGED from Plan 01 baseline. Task 3 (conditional rule integration) is correctly SKIPPED because N=0 rules were accepted.
+
+### User adjudication rationale (per family)
+
+1. **T-S F flattened-series — REJECT.** Proposed CUDL keys (`tsf1.1100`, `tsf2.250`, etc.) don't appear in residue; score-102 matches in artifact's sample table come from EXISTING D-02a Pattern 3 (N)-strip rule, not from the proposed flattened-series rule. Residue `tsf1.11` rows are `multi_inventory_ambiguous` because the existing (N)-strip rule maps both `T-S F1(1).11` and `T-S F1(2).11` to `tsf1.11`.
+2. **T-S Ar flattened-series — REJECT.** Same shape as Family 1: proposed keys (`tsar18.234`) don't appear in residue; score-102 matches are from existing (N)-strip rule.
+3. **T-S NS minute-fragments — REJECT.** `cudl_normalize('T-S NS X.minute fragments')` already produces `tsnsXminutefragments` — rule is redundant with existing behavior. Residue suggests a separate alias-index investigation worth carry-forward, not a new normalizer rule.
+4. **Or. single-segment ambiguity — REJECT.** HIGH RISK confirmed via FIST.db probing: `Or.1080 11.45`, `Or.1080 5.17`, `Or.1080 6.11`, `Or.1080 B14.1` show sub-fragment digits are REAL physical divisions. Collapsing `Or.1080 11.1` → CUDL `or1080.11` would conflate distinct manuscripts.
+5. **Mosseri exotic letter — REJECT.** FIST has ZERO `Moss.{ROMAN},{N}{lowercase letter}` shelfmarks. All Mosseri letter-suffixes use UPPERCASE A: `Moss. I,53A`, `Moss. III,133A`, `Moss. I,118.1A`. Proposed regex would never match real FIST data.
+6. **T-S Misc multi-segment — REJECT.** FIST uses `T-S Misc.X.Y(Z)` (parens for sub-fragment) for residue cases, not `T-S Misc X.Y.Z`. Proposed regex matches existing canonical 3-segment forms that already normalize correctly — so the rule is either redundant or wrong-direction.
+
+### Key carry-forward finding (3 categories of existing-rule issues)
+
+The 1,847 residue is dominated by EXISTING-rule over-aggressiveness, **not** missing normalizer rules. The three patterns documented for a future "Phase 87 — Bridge rule disambiguation" plan are:
+
+1. **D-02a Pattern 3 ((N)-strip) conflations** — `T-S F1(1).N` and `T-S F1(2).N` both produce `tsf1.N`, causing `multi_inventory_ambiguous` for CUDL `tsf1.N`. Disambiguation idea: preserve (N) suffix for T-S F / T-S Ar families.
+2. **Mosseri concat-form spurious collisions** — `Moss. I,5.1` produces concat-form alias `mosserii51` which collides with canonical `Moss. I,51`. Disambiguation idea: gate concat-form alias to fragments without internal sub-segments.
+3. **AIU-preliminary-handlist duplicates** — `AIU: Mosseri: Moss. I,26.1` and canonical `Moss. I,26.1` produce identical aliases → `multi_inventory_ambiguous`. Disambiguation idea: prefer AlmaId-bearing inventory or strip AIU-prefix preliminary-handlist entries.
+
+### Milestone-defining win
+
+**`T-S NS 329.96` (the originating user case) CLOSES** via Plan 02's CUDL-walked generator:
+
+- `explain_fist_by_cudl('tsns329.96')` returns `status='single' entries=[(65549106, 'T-S NS 329.96')]`
+- Plan 02's `--apply` run will emit a synthetic libraries.csv row for it
+- This was the case that motivated the entire Phase 86 reframe
+
+### Post-checkpoint verification results
+
+- **Task 1 — Adjudication edits to `86-RESIDUE-PATTERNS.md`:** 6/6 family decisions filled in with `[x] Reject` checkbox + verbatim rationale block; Adjudication Summary section appended above `## After Adjudication`. Committed as `85eba7f5`.
+- **Task 2 — Bridge unchanged verification:** `git log --oneline -- shared/fist_cudl_bridge.py` shows ONE commit (Plan 01's `91eb38a6 feat(86-01): add shared/fist_cudl_bridge.py with D-02a normalizers + 3-table join`); `git diff 91eb38a6 -- shared/fist_cudl_bridge.py` is empty (exit code 0). Bridge code identical to Plan 01 baseline. No commit needed for this task.
+- **Task 3 — Full pytest run:** GREEN. `1824 passed, 21 skipped, 2 warnings in 163.59s`. The 2 warnings are pre-existing and unrelated (httpx deprecation in parallels API tests; posthog-api-drain teardown AttributeError on FakeQueue). No new tests added in this plan (correctly, since 0 rules accepted).
+
+### Plan 04 inputs
+
+Plan 04 should:
+- Reference the Adjudication Summary section in `reports/cudl_coverage.md` under a new `## Residue Pattern Adjudication` section.
+- Quote the 3-category existing-rule findings as recommended scope for a future "Phase 87 — Bridge rule disambiguation" plan revision.
+- Confirm T-S NS 329.96 appears in the Plan 02 `--apply` output as a closed (synthetic-row-emitted) case.
+
+### Post-checkpoint task commits
+
+1. **Task 1 (post-checkpoint): adjudicate 6 residue families as REJECTED** — `85eba7f5` (docs)
+2. **Task 4 (post-checkpoint): finalize SUMMARY.md** — committed alongside this finalize edit (docs)
+
+### TDD Gate Compliance (post-checkpoint)
+
+Task 3 was marked `tdd="true"` in the plan, but its preconditions (N>=1 accepted rules) are not met — N=0 accepted means no `test_accepted_rule_*` tests to add. No RED/GREEN gate enforcement applies because there is no rule to test. The plan-level conditional structure correctly handles this branch.
+
+---
 *Phase: 86-cudl-coverage-audit-and-synthetic-reattempt*
 *Plan: 03*
-*Status: INTERIM — awaiting user adjudication at Task 2 checkpoint*
-*Pre-checkpoint completion: 2026-05-11*
+*Status: COMPLETE — 0 rules accepted, bridge unchanged, T-S NS 329.96 closes via Plan 02*
+*Completion: 2026-05-11*
