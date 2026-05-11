@@ -818,9 +818,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     except Exception as track_err:
                         logger.error(f"Failed to track recent item: {track_err}")
             else:
-                # No Tantivy page — try metadata-only fallback from csv_bank
+                # No Tantivy page — try metadata-only fallback from csv_bank.
+                # Phase 86: derive requested p_num from explicit p_num OR from
+                # current_page + direction (Next/Prev buttons send direction=±1).
                 _fallback_sys = state.sys_id
-                _requested_p = p_num  # Phase 86: thread user's clicked page through
+                if p_num is not None:
+                    _requested_p = p_num
+                elif direction != 0 and state.current_page and state.current_page.p_num:
+                    _requested_p = state.current_page.p_num + direction
+                else:
+                    _requested_p = state.current_page.p_num if state.current_page else None
                 def _fetch_metadata_only():
                     return service.get_metadata_only_browse_page(_fallback_sys, p_num=_requested_p)
                 meta_page = await run.io_bound(_fetch_metadata_only)
