@@ -5378,6 +5378,17 @@ class GenizahGUI(QMainWindow):
         self.text_position_combo.addItems([tr("Anywhere"), tr("Start of text"), tr("End of text"), tr("Line starts"), tr("Line ends")])
         self.text_position_combo.setToolTip(tr("Constrain matches to text boundaries (for join detection)"))
         self.text_position_combo.setFixedWidth(120)
+        # Highlight when set to a non-default position so the user always sees
+        # the sticky state in the crowded toolbar row.
+        def _highlight_text_position(idx):
+            if idx == 0:
+                self.text_position_combo.setStyleSheet("")
+            else:
+                self.text_position_combo.setStyleSheet(
+                    "QComboBox { border: 2px solid #f39c12; background: #fff8e1; }"
+                )
+        self.text_position_combo.currentIndexChanged.connect(_highlight_text_position)
+        _highlight_text_position(self.text_position_combo.currentIndex())
 
         # Gear button for search settings
         self.btn_search_settings = QPushButton("⚙")

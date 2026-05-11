@@ -651,6 +651,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                                 def save_text_position():
                                     app.storage.user['search_text_position'] = text_position_select.value
+                                    try:
+                                        _update_chip_bar()
+                                    except NameError:
+                                        # Chip bar not yet constructed during initial render.
+                                        pass
                                 text_position_select.on('update:model-value', save_text_position)
 
 
@@ -711,7 +716,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             mode_select.on('update:model-value', on_mode_change)
 
         # === Search only in... Filter Panel (BEFORE Advanced Options & progress bar) ===
-        _adv_filters_expanded = _has_active_filters() or _filters_from_browse
+        _pos_pref = app.storage.user.get('search_text_position', 'anywhere') or 'anywhere'
+        _adv_filters_expanded = _has_active_filters() or _filters_from_browse or _pos_pref != 'anywhere'
         adv_filters_panel = ui.expansion(
             text=tr('Search only in...'),
             icon='filter_alt',
@@ -1049,7 +1055,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def _update_chip_bar():
             """Rebuild chip bar from current filter state."""
             chip_bar_container.clear()
-            has_any = _has_active_filters()
+            _pos = (text_position_select.value or 'anywhere')
+            _pos_active = _pos != 'anywhere'
+            has_any = _has_active_filters() or _pos_active
             chip_bar_container.set_visibility(has_any)
             if not has_any:
                 return
@@ -1060,6 +1068,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             opts_w = work_select.options if hasattr(work_select, 'options') else {}
 
             with chip_bar_container:
+                # Text-position chip (shown when dropdown != Anywhere). Placed first
+                # because it changes search semantics, not just display filtering.
+                if _pos_active:
+                    _pos_label_map = {
+                        'start': tr('Start of text'),
+                        'end': tr('End of text'),
+                        'line_start': tr('Line starts'),
+                        'line_end': tr('Line ends'),
+                    }
+                    def _clear_text_position():
+                        text_position_select.value = 'anywhere'
+                        app.storage.user['search_text_position'] = 'anywhere'
+                        _update_chip_bar()
+                    ui.chip(
+                        f"{tr('Text Position')}: {_pos_label_map.get(_pos, _pos)}",
+                        icon='vertical_align_top', removable=True,
+                        on_click=lambda: None, color='amber-3',
+                    ).on('remove', _clear_text_position)
+
                 # Mode indicator
                 if not search_state.filter_include_mode and (
                     search_state.filter_domains or search_state.filter_authors or search_state.filter_works
@@ -2035,6 +2062,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         clear_search_snapshot()
         app.storage.user['search_query'] = ''
         app.storage.user['search_mode'] = 'exact'
+        # Bootstrap-input precedent (Phase 74): text_position is NOT a
+        # SearchUIState field and is excluded from _SEARCH_SNAPSHOT_KEYS,
+        # so reset it directly here — same shape as search_query/search_mode.
+        text_position_select.value = 'anywhere'
+        app.storage.user['search_text_position'] = 'anywhere'
         # Phase 77 gap-closure (Plan 06, Gap #1): mirror the page-scoped
         # search_state clear into the global state singleton that the FastAPI
         # export handlers (web/api.py:1816-1955) read from. Plan 01 populated
