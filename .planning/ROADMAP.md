@@ -289,6 +289,15 @@ Plans:
    (c) Optionally relax D-05a STRICT for known-safe multi_signature cases — when all FIST SignatureIds resolve to the same canonical_shelfmark + library_code, pick lowest SignatureId per the existing tie-break logic (so T-S NS 329.96 with 12 multi_signature entries CAN be synthesized). Baseline: ~100-500 image-bearing synthetics expected (instead of 5,035 bib-only). The originating user case (T-S NS 329.96) closes here.
 6. **Carry-forward residue artifacts:** keep `reports/synthetic_ambiguity_residue.csv` and `reports/synthetic_parent_shelfmarks.csv` as documentation of the Plan 02 attempt. Document the Phase 85 outcome in CHANGELOG so users + future maintainers understand why infrastructure exists with no production data.
 
+**Plans:** 5 plans
+
+Plans:
+- [ ] 86-01-PLAN.md -- shared/fist_cudl_bridge.py sibling module + 4 D-02a normalizers (Mosseri Roman, prefix-strip, (N) series-strip, Or. dot-fix) + alias-index builder + unit tests (AUDIT-01)
+- [ ] 86-02-PLAN.md -- _build_qualifying_inventories CUDL-walked rewrite + D-04 multi_signature relax + D-06 parent-shadow filter + pattern_guess residue column + T-S NS 329.96 closure fixture (AUDIT-01)
+- [ ] 86-03-PLAN.md -- 86-RESIDUE-PATTERNS.md D-02c human-in-the-loop adjudication artifact + scripts/build_residue_patterns_artifact.py + CHECKPOINT + accepted-rule integration into bridge (AUDIT-01)
+- [ ] 86-04-PLAN.md -- Operational sequence (generate --apply / export / scan) + reports/cudl_coverage.md (AUDIT-02) + scripts/audit_nli_attribution.py + tests/test_nli_oxford_attribution.py (AUDIT-03) + HUMAN-UAT + OPEN_ISSUES.md update (AUDIT-01, AUDIT-02, AUDIT-03)
+- [ ] 86-05-PLAN.md (optional) -- Release coordination: bump_version.py 7.11.0 + CHANGELOG + CLAUDE.md Recently Changed + README What's New; web-only deploy per feedback_no_github_release_for_web_only.md
+
 ## Progress
 
 **Phase 84 — CUDL Shelfmark Normalization (next)**
