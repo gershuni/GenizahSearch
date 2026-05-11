@@ -1436,22 +1436,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).classes('text-sm').props('outline dense no-caps')
                     search_within_btn.set_visibility(False)
 
-                    # Phase 56: Exclude manuscripts button (D-01 entry point 1: results area)
-                    exclude_btn = ui.button(
-                        tr('Exclude manuscripts'), icon='person_remove',
-                        on_click=lambda: _show_exclusion_dialog()
-                    ).classes('text-sm').props('outline dense no-caps')
-                    _set_btn_visible(exclude_btn, False)
-
-                    # Restore visibility if stored exclusion sources exist
-                    if search_state.exclusion_sources:
-                        _set_btn_visible(exclude_btn, True)
-                        n_src = len(search_state.exclusion_sources)
-                        n_total = sum(len(s.sys_ids) for s in search_state.exclusion_sources)
-                        exclude_btn.text = f"{tr('Exclude manuscripts')} ({n_total})"
-                        exclude_btn.props('outline dense no-caps color=red')
-
-                    # Phase 56: Per-source exclusion chips (rendered inline)
+                    # Phase 56 entry-point 1 (top-toolbar "Exclude manuscripts"
+                    # button) was removed — the filter-panel "Exclude known
+                    # manuscripts" button at line ~1617 is the sole entry point.
+                    # Per-source exclusion chips remain here so users still see
+                    # active exclusions at a glance from the results bar.
                     exclusion_chips_row = ui.row().classes('gap-1 items-center')
                     exclusion_chips_row.set_visibility(bool(search_state.exclusion_sources))
 
@@ -2055,7 +2044,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Phase 56: Clear exclusion sources
         search_state.exclusion_sources = []
         _update_exclude_btn()
-        _set_btn_visible(exclude_btn, False)
         # Reset persistent storage to clean defaults (Phase 74: via helper).
         # search_query/search_mode are bootstrap-input keys NOT owned by the helper;
         # keep their UX-driven writes here to wipe the query bar on New Search.
@@ -3241,33 +3229,26 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _update_exclude_btn()
 
     def _update_exclude_btn():
-        """Update exclude button text/color and chips based on active exclusion sources."""
-        if search_state.exclusion_sources:
-            n_total = sum(len(s.sys_ids) for s in search_state.exclusion_sources)
-            exclude_btn.text = f"{tr('Exclude manuscripts')} ({n_total})"
-            exclude_btn.props('outline dense no-caps color=red')
-            _set_btn_visible(exclude_btn, True)
-            # Only show per-source chips when multiple sources (single source count is on button)
-            if len(search_state.exclusion_sources) > 1:
-                exclusion_chips_row.set_visibility(True)
-                exclusion_chips_row.clear()
-                with exclusion_chips_row:
-                    for src in search_state.exclusion_sources:
-                        def _make_remove(s=src):
-                            return lambda: _remove_exclusion_source(s)
-                        ui.chip(
-                            f"{src.label} ({len(src.sys_ids)})", icon='close',
-                            on_click=_make_remove()
-                        ).props('outline dense removable color=red')
-            else:
-                exclusion_chips_row.set_visibility(False)
-                exclusion_chips_row.clear()
-        else:
-            exclude_btn.text = tr('Exclude manuscripts')
-            exclude_btn.props(remove='color')
-            exclude_btn.props('outline dense no-caps')
+        """Render per-source exclusion chips next to the top results bar.
+
+        The top-toolbar "Exclude manuscripts" button was removed (duplicate of
+        the filter-panel "Exclude known manuscripts" entry point). Chips remain
+        as the sole indicator that exclusions are active, carrying the count
+        per source. Single-source case now shows its count on the chip text.
+        """
+        exclusion_chips_row.clear()
+        if not search_state.exclusion_sources:
             exclusion_chips_row.set_visibility(False)
-            exclusion_chips_row.clear()
+            return
+        exclusion_chips_row.set_visibility(True)
+        with exclusion_chips_row:
+            for src in search_state.exclusion_sources:
+                def _make_remove(s=src):
+                    return lambda: _remove_exclusion_source(s)
+                ui.chip(
+                    f"{src.label} ({len(src.sys_ids)})", icon='close',
+                    on_click=_make_remove()
+                ).props('outline dense removable color=red')
 
     def _remove_exclusion_source(source):
         """Remove a single exclusion source (D-06 per-source clear)."""
@@ -4442,8 +4423,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
             _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
             _update_domain_filter_btn()
-            # Phase 56: Show exclude button when results exist
-            _set_btn_visible(exclude_btn, True)
+            # Phase 56: refresh exclusion chips when results render
             _update_exclude_btn()
 
         def _render_with_filters(reset_expansion=True):
