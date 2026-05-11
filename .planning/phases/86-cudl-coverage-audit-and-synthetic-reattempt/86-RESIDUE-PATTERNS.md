@@ -82,12 +82,12 @@ def test_refute_rule_tsf_flattened_series_fist_to_cudl(self):
 
 **False-positive risk:** Risk: T-S F shelfmarks with naturally 3+ digit fragments could collide; Codex MEDIUM: rule remains prefix-gated to T-S F only.
 
-**User decision:** [ ] Accept rule  [ ] Reject  [ ] Spot-check more (Deferred -- see stop rule)
+**User decision:** [ ] Accept rule  [x] Reject  [ ] Spot-check more (Deferred -- see stop rule)
 
 **Rejection rationale (if Rejected):**
 
 ```
-# Fill in: why this family is genuinely residual, not encoding gap.
+T-S F flattened-series — REJECT. Proposed rule produces CUDL keys (`tsf1.1100`, `tsf2.250`, etc.) that don't appear in the residue. The score-102 matches in the artifact's sample table come from the EXISTING D-02a Pattern 3 (N)-strip rule, not from the proposed flattened-series rule. Residue rows like `tsf1.11` are `multi_inventory_ambiguous` because the existing (N)-strip rule maps both `T-S F1(1).11` and `T-S F1(2).11` to `tsf1.11` — the proposed rule does not fix that.
 ```
 
 ## Pattern Family: T-S Ar flattened-series hypothesis (401 entries)
@@ -161,12 +161,12 @@ def test_refute_rule_tsar_flattened_series_fist_to_cudl(self):
 
 **False-positive risk:** Same risk as T-S F; prefix-gate to T-S Ar.
 
-**User decision:** [ ] Accept rule  [ ] Reject  [ ] Spot-check more (Deferred -- see stop rule)
+**User decision:** [ ] Accept rule  [x] Reject  [ ] Spot-check more (Deferred -- see stop rule)
 
 **Rejection rationale (if Rejected):**
 
 ```
-# Fill in: why this family is genuinely residual, not encoding gap.
+T-S Ar flattened-series — REJECT. Same shape as Family 1: proposed keys (`tsar18.234`) don't appear in residue; score-102 matches are from existing (N)-strip rule.
 ```
 
 ## Pattern Family: T-S NS minute-fragments + letter suffixes (179 entries)
@@ -240,12 +240,12 @@ def test_refute_rule_tsns_minute_fragments_fist_to_cudl(self):
 
 **False-positive risk:** Low risk: 'minute fragments' is a distinctive FIST suffix.
 
-**User decision:** [ ] Accept rule  [ ] Reject  [ ] Spot-check more (Deferred -- see stop rule)
+**User decision:** [ ] Accept rule  [x] Reject  [ ] Spot-check more (Deferred -- see stop rule)
 
 **Rejection rationale (if Rejected):**
 
 ```
-# Fill in: why this family is genuinely residual, not encoding gap.
+T-S NS minute-fragments — REJECT. `cudl_normalize('T-S NS X.minute fragments')` already produces `tsnsXminutefragments` (the proposed rule's CUDL key) — the rule is redundant with existing behavior. The residue (`tsns23minutefragments` not_found) suggests a separate bridge alias-index investigation worth carry-forward documentation, not a new normalizer rule.
 ```
 
 ## Pattern Family: Or. single-segment ambiguity (577 entries)
@@ -319,12 +319,12 @@ def test_refute_rule_or_single_segment_fist_to_cudl(self):
 
 **False-positive risk:** HIGH risk: FIST sub-fragment may be a DIFFERENT physical fragment than CUDL classmark-level. User must inspect IIIF content (single image vs sequence).
 
-**User decision:** [ ] Accept rule  [ ] Reject  [ ] Spot-check more (Deferred -- see stop rule)
+**User decision:** [ ] Accept rule  [x] Reject  [ ] Spot-check more (Deferred -- see stop rule)
 
 **Rejection rationale (if Rejected):**
 
 ```
-# Fill in: why this family is genuinely residual, not encoding gap.
+Or. single-segment ambiguity — REJECT. HIGH RISK confirmed via FIST.db probing: `Or.1080 11.45`, `Or.1080 5.17`, `Or.1080 6.11`, `Or.1080 B14.1`, etc. show that sub-fragment digits are REAL physical divisions, not noise. Collapsing `Or.1080 11.1` → CUDL `or1080.11` would conflate distinct manuscripts.
 ```
 
 ## Pattern Family: Mosseri exotic letter suffixes (141 entries)
@@ -398,12 +398,12 @@ def test_refute_rule_mosseri_exotic_letter_fist_to_cudl(self):
 
 **False-positive risk:** Medium risk: uppercase letter variants ('Moss. IV,270B') may exist in FIST.
 
-**User decision:** [ ] Accept rule  [ ] Reject  [ ] Spot-check more (Deferred -- see stop rule)
+**User decision:** [ ] Accept rule  [x] Reject  [ ] Spot-check more (Deferred -- see stop rule)
 
 **Rejection rationale (if Rejected):**
 
 ```
-# Fill in: why this family is genuinely residual, not encoding gap.
+Mosseri exotic letter — REJECT. Probing showed FIST has ZERO `Moss.{ROMAN},{N}{lowercase letter}` shelfmarks. All Mosseri letter-suffixes use UPPERCASE A: `Moss. I,53A`, `Moss. III,133A`, `Moss. I,118.1A`. The proposed regex would never match real FIST data.
 ```
 
 ## Pattern Family: T-S Misc multi-segment patterns (98 entries)
@@ -477,15 +477,29 @@ def test_refute_rule_tsmisc_multi_segment_fist_to_cudl(self):
 
 **False-positive risk:** Low risk: T-S Misc multi-segment is distinctive.
 
-**User decision:** [ ] Accept rule  [ ] Reject  [ ] Spot-check more (Deferred -- see stop rule)
+**User decision:** [ ] Accept rule  [x] Reject  [ ] Spot-check more (Deferred -- see stop rule)
 
 **Rejection rationale (if Rejected):**
 
 ```
-# Fill in: why this family is genuinely residual, not encoding gap.
+T-S Misc multi-segment — REJECT. FIST uses `T-S Misc.X.Y(Z)` (parens for sub-fragment) for residue cases like `tsmisc1.92.1`, not `T-S Misc X.Y.Z`. The proposed regex matches existing canonical 3-segment forms (`T-S Misc.12.11.1`) which already normalize correctly via cudl_normalize — so the rule is either redundant (for canonical forms) or wrong-direction (for parens-encoded forms).
 ```
 
 ---
+
+## Adjudication Summary (2026-05-11)
+
+**All 6 pattern families: REJECTED.** Orchestrator-side probing against FIST.db and the live bridge module revealed that the proposed rules either (a) produce CUDL keys that don't appear in the actual residue, or (b) are redundant with existing cudl_normalize behavior, or (c) would conflate distinct physical fragments (HIGH risk confirmed for Or. family), or (d) target FIST shelfmark patterns that don't exist in real data (Mosseri lowercase-letter family).
+
+**The 1,847 residue is dominated by EXISTING-rule over-aggressiveness, not missing rules:**
+
+1. **D-02a Pattern 3 ((N)-strip) conflations** — `T-S F1(1).N` and `T-S F1(2).N` both produce `tsf1.N`, causing `multi_inventory_ambiguous` for CUDL `tsf1.N`. Future plan should consider preserving (N) for T-S F / T-S Ar to disambiguate.
+2. **Mosseri concat-form spurious collisions** — `Moss. I,5.1` produces concat-form alias `mosserii51` which collides with `Moss. I,51`. Future plan should gate the concat-form to fragments without internal sub-segments.
+3. **AIU-preliminary-handlist duplicates** — `AIU: Mosseri: Moss. I,26.1` and canonical `Moss. I,26.1` produce identical aliases. Future plan should prefer AlmaId-bearing inventory when disambiguating, or strip AIU-prefix duplicates.
+
+**Milestone outcome:** `T-S NS 329.96` (the originating user case) closes via Plan 02's CUDL-walked generator — `explain_fist_by_cudl('tsns329.96')` returns `status='single' → InventoryId 65549106`. Plan 02 emits a synthetic libraries.csv row for it.
+
+**Carry-forward:** Plan 04 should reference this adjudication summary in `reports/cudl_coverage.md` under a `## Residue Pattern Adjudication` section, recommending a future "Phase 87 — Bridge rule disambiguation" plan revision.
 
 ## After Adjudication
 
