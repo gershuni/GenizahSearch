@@ -380,6 +380,16 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                     pg.folio_label = browse_enrich['folio_images'][0].get('folio_label', '')
                     pg.total_pages = len(browse_enrich['folio_images'])
                     pg.current_idx = 1
+            # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
+            # folio_images but cambridge_images populated via the bridge.
+            # Derive total_pages from cambridge_images so pagination works.
+            if not pg.total_pages and pg.cambridge_images:
+                pg.total_pages = len(pg.cambridge_images)
+                if not pg.p_num:
+                    pg.p_num = 1
+                    state.page_input_value = 1
+                if not pg.current_idx:
+                    pg.current_idx = 1
 
         # Physical metadata from crossref_data (independent of browse_enrich success)
         if crossref_data and crossref_data.get('physical_metadata'):
