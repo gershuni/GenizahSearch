@@ -65,7 +65,17 @@ from shared.synthetic_sys_id import (  # noqa: E402
     encode_inventory_sys_id,
     is_synthetic_sys_id,
 )
-from shared.shelfmark_bridge import cudl_normalize  # noqa: E402
+from shared.shelfmark_bridge import (  # noqa: E402
+    build_alias_index,
+    cudl_normalize,
+    lookup_cudl,
+)
+from shared.fist_cudl_bridge import (  # noqa: E402  Phase 86 NEW (Plan 01)
+    InventoryRecord,
+    build_fist_alias_index,
+    explain_fist_by_cudl,
+    lookup_fist_by_cudl,
+)
 
 CSV_PATH = ROOT / "libraries.csv"
 # FIST.db actually lives at fist_data/FIST.db in this repo (NOT FIST_DB_BACKUP/
@@ -97,8 +107,122 @@ def _has_csv_injection_leader(value: object) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# FIST.db harvest — REVIEWS-MODE REVISED (D-02 expanded, D-05a multi-signature,
-# explicit ORDER BY, connection-injectable)
+# Phase 86 helpers (Plan 02) — CUDL-walked rewrite scaffolding
+# ---------------------------------------------------------------------------
+
+
+def _build_real_only_csv_bank(csv_bank: dict) -> dict:
+    """Return a synthetic-stripped view of csv_bank for Phase 84's build_alias_index.
+
+    Pass 2 HIGH-1 (idempotency): when Phase 86 has already run --apply once,
+    libraries.csv contains the synthetic block AND csv_bank reflects it. If we
+    feed that bank straight into build_alias_index, lookup_cudl(classmark) will
+    resolve to a synthetic sys_id and the CUDL-walk's step-1 skip predicate will
+    treat the classmark as 'already covered' — silently dropping it from the
+    new qualifying set. Re-applying then wipes the synthetic block entirely.
+
+    Solution (option A — zero Phase 84 mutation, preserves NORM-04): rebuild a
+    synthetic-stripped dict here. The bridge's alias index only sees REAL
+    libraries.csv rows, so step-1 short-circuits only when a REAL row covers
+    the classmark.
+
+    We do NOT touch csv_bank itself — runtime behaviour relying on synthetic
+    sys_ids (browse, FJMS lookups, etc.) continues to work because those
+    consumers query csv_bank directly, not the bridge alias index.
+    """
+    return {
+        sys_id: data
+        for sys_id, data in csv_bank.items()
+        if not is_synthetic_sys_id(sys_id)
+    }
+
+
+def _guess_pattern(cudl_classmark: str) -> str:
+    """Categorize residue classmark into one of the known D-02b families.
+
+    Output is a hint for human adjudicators looking at 86-RESIDUE-PATTERNS.md
+    (Phase 86 Plan 03); not a load-bearing decision. Returns 'other' for
+    classmarks that don't match any of the known prefixes.
+    """
+    if not cudl_classmark:
+        return "other"
+    if cudl_classmark.startswith("tsf"):
+        return "tsf_flattened_series"
+    if cudl_classmark.startswith("tsar"):
+        return "tsar_flattened_series"
+    if cudl_classmark.startswith("tsns"):
+        if "minute" in cudl_classmark or cudl_classmark[-1:].isalpha():
+            return "tsns_minute_or_letter"
+        return "tsns_other"
+    if cudl_classmark.startswith("or"):
+        return "or_single_segment"
+    if cudl_classmark.startswith("mosseri"):
+        return "mosseri_exotic_letter"
+    if cudl_classmark.startswith("tsmisc"):
+        return "tsmisc_multi_segment"
+    return "other"
+
+
+def _load_parent_shelfmark_set(path: Optional[Path] = None) -> set[str]:
+    """Load D-06 parent-shadow filter from reports/synthetic_parent_shelfmarks.csv.
+
+    File schema: parent_shelfmark,synthetic_sys_id,inventory_id,real_child_count,sample_real_children
+    Returns empty set if file missing (graceful — Phase 86 first run may not have it).
+    """
+    if path is None:
+        path = ROOT / "reports" / "synthetic_parent_shelfmarks.csv"
+    if not path.exists():
+        return set()
+    out: set[str] = set()
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            ps = (row.get("parent_shelfmark") or "").strip()
+            if ps:
+                out.add(ps)
+    return out
+
+
+def _build_csv_bank_from_rows(rows: list[list[str]]) -> dict:
+    """Reconstruct a csv_bank dict-of-dicts from raw libraries.csv rows.
+
+    Phase 84 build_alias_index expects the MetadataManager.csv_bank shape:
+    keys are digit-normalized sys_ids; each value carries 'shelfmark',
+    'library_code', and 'call_numbers_raw' (list of pipe-split variants).
+
+    Marker-block rows ('# BEGIN SYNTHETIC', '# END SYNTHETIC') and the header
+    row are skipped via the same heuristics genizah_core._load_csv_bank uses
+    (sys_id starts with '#' -> skip; digit-normalized empty -> skip).
+    """
+    out: dict = {}
+    for row in rows:
+        if not row or len(row) < 3:
+            continue
+        raw_sys_id = row[0]
+        if not raw_sys_id or raw_sys_id.startswith("#"):
+            continue
+        sys_id = "".join(ch for ch in str(raw_sys_id) if ch.isdigit())
+        if not sys_id:
+            continue
+        raw_shelves = row[2].split("|") if len(row) > 2 else []
+        shelf = raw_shelves[0].strip() if raw_shelves else ""
+        for s in raw_shelves:
+            s = s.strip()
+            if s and len(s) < len(shelf):
+                shelf = s
+        library_code = row[3].strip() if len(row) > 3 else ""
+        call_numbers_raw = [s.strip() for s in raw_shelves if s.strip()] or None
+        out[sys_id] = {
+            "shelfmark": shelf,
+            "library_code": library_code,
+            "call_numbers_raw": call_numbers_raw,
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Phase 86 Plan 02 — CUDL-walked _build_qualifying_inventories rewrite
+# (replaces Phase 85's FIST-walked + multi_signature STRICT predicate)
 # ---------------------------------------------------------------------------
 
 
@@ -106,284 +230,225 @@ def _build_qualifying_inventories(
     fist_conn: sqlite3.Connection,
     nli_conn: Optional[sqlite3.Connection] = None,
 ) -> tuple[dict[int, dict], list[dict]]:
-    """Walk FIST.db × cambridge_manifests; return (qualifying, ambiguity_residue).
+    """CUDL-WALKED rewrite (Phase 86 Plan 02 — D-01).
 
-    REVIEWS-MODE REVISIONS (2026-05-08):
-    - D-02 EXPANDED: predicate includes bibliography, free-description, full-text,
-      and measurement (CatalogMultiSize) signals — not just catalog title.
-    - D-05a STRICT: exclude both multi-inventory AND multi-signature ambiguities;
-      residue dict includes 'ambiguity_kind' field.
-    - DETERMINISTIC ORDERING: every SELECT has explicit ORDER BY.
-    - claims tie-break: lowest SignatureId (deterministic), not arbitrary [0].
-    - Connections injectable for testability (Gemini LOW accepted).
+    Replaces Phase 85's FIST-walked + multi_signature STRICT predicate (which
+    produced the reverted 5,035 bib-only rows) with a CUDL-walked, image-bearing-
+    only resolver:
+      - Walks nli_crossref.db.cambridge_manifests (~141K CUDL classmarks).
+      - Skips classmarks Phase 84 already resolves to a REAL libraries.csv row
+        via lookup_cudl. The outer caller MUST have built the alias index from
+        a synthetic-stripped csv_bank (see _build_real_only_csv_bank) so prior-
+        run synthetic rows cannot mask a still-qualifying classmark (Pass 2
+        HIGH-1 idempotency invariant).
+      - Resolves each remaining classmark through explain_fist_by_cudl (Plan 01
+        — status-aware):
+          * 'not_found' -> residue ambiguity_kind='no_fist_match' + pattern_guess
+          * 'multi_inventory_ambiguous' -> residue ambiguity_kind='multi_inventory'
+            (DISTINCT category per Codex HIGH #6) + comma-joined inventory IDs
+          * 'single':
+              - rec.has_alma=True -> SKIP silently (alias-only existing
+                libraries.csv row — audit-only coverage; no synthetic emitted)
+              - rec.fist_shelfmark in parent_shadow set (D-06) -> residue
+                ambiguity_kind='parent_shadow'
+              - CSV-injection leader in shelfmark/label/title_heb/genizah_title
+                -> residue ambiguity_kind='csv_injection_leader'
+              - else -> emit qualifying row with title_heb / genizah_title
+                propagated from the InventoryRecord (Gemini HIGH #8) and
+                has_cudl_manifest=True by construction (D-01a image-bearing-
+                only invariant).
 
-    SCHEMA MAPPING (deviation from plan's draft column names; see
-    85-02-SUMMARY.md):
-      - Plan said dbo_BibliographyRef → actual: dbo_UnitBibliographyReference
-      - Plan said dbo_FreeDescription → actual: dbo_UnitFreeDescription
-      - Plan said dbo_FullText        → actual: dbo_UnitFullText
-      - Plan said dbo_UnitSize        → actual: dbo_CatalogMultiSize
-      - Plan said sig.Signature (shelfmark column) → actual: shelfmark on
-        dbo_Inventory.Shelfmark (Signature does NOT carry the shelfmark text)
-      - Plan said cat.TitleHeb / cat.GenizahTitle → actual: cat.Title (already
-        Hebrew in this corpus) and cat.GenizahTitleText. No separate TitleHeb
-        column exists.
+    Args:
+        fist_conn: open sqlite3.Connection to FIST.db (read-only is fine).
+        nli_conn:  open sqlite3.Connection to nli_crossref.db. REQUIRED in
+            Phase 86 — Phase 85's FIST-walk fallback path is removed. Raises
+            ValueError if None.
 
     Returns: (
         qualifying: dict mapping InventoryId -> {
-            'canonical_shelfmark': str,
-            'title_heb': Optional[str],     # cat.Title (Hebrew per FIST.db corpus)
-            'title_eng': Optional[str],     # always None (no English column)
-            'genizah_title': Optional[str], # cat.GenizahTitleText
-            'library_code': 'CUL' | 'Mosseri',
-            'has_cudl_manifest': bool,
-            'has_fjms_metadata': bool,
-            'cudl_label': str,
+            'canonical_shelfmark': str,        # rec.fist_shelfmark
+            'title_heb':       Optional[str],  # rec.title_heb (HIGH #8)
+            'title_eng':       Optional[str],  # always None
+            'genizah_title':   Optional[str],  # rec.genizah_title (HIGH #8)
+            'library_code':    'CUL' | 'Mosseri',
+            'has_cudl_manifest': True,         # D-01a by construction
+            'has_fjms_metadata': bool,         # any title present
+            'cudl_label':      str,            # CUDL label from cambridge_manifests
         },
-        ambiguity_residue: list[dict] with ambiguity_kind ∈
-          {'multi_inventory', 'multi_signature', 'csv_injection_leader'}
+        ambiguity_residue: list[dict] with ambiguity_kind in
+          {'no_fist_match', 'multi_inventory', 'parent_shadow',
+           'csv_injection_leader'} and pattern_guess populated
     )
     """
-    # Step 1: Read CUDL classmarks from nli_crossref.db (the "manifest" set).
-    cudl_classmarks: set[str] = set()
-    if nli_conn is not None:
-        cur = nli_conn.execute(
-            """
-            SELECT normalized_shelfmark
-            FROM cambridge_manifests
-            ORDER BY normalized_shelfmark
-            """
-        )
-        cudl_classmarks = {row[0] for row in cur if row[0]}
-
-    # Step 2a: Pre-aggregate D-02 EXPANDED signal sets in O(N) time.
-    # The "natural" approach (EXISTS subqueries in the main SELECT) is O(N*M)
-    # against unindexed FIST tables and runs > 5 minutes on real data
-    # (worktree sanity check 2026-05-08). Pre-aggregating each signal table
-    # into a Python set takes < 1 second per table.
-    bib_sigs = {
-        r[0]
-        for r in fist_conn.execute(
-            "SELECT DISTINCT SignatureId FROM dbo_UnitBibliographyReference "
-            "WHERE SignatureId IS NOT NULL ORDER BY SignatureId"
-        )
-    }
-    freedesc_sigs = {
-        r[0]
-        for r in fist_conn.execute(
-            "SELECT DISTINCT SignatureId FROM dbo_UnitFreeDescription "
-            "WHERE SignatureId IS NOT NULL ORDER BY SignatureId"
-        )
-    }
-    fulltext_sigs = {
-        r[0]
-        for r in fist_conn.execute(
-            "SELECT DISTINCT SignatureId FROM dbo_UnitFullText "
-            "WHERE SignatureId IS NOT NULL ORDER BY SignatureId"
-        )
-    }
-    size_cats = {
-        r[0]
-        for r in fist_conn.execute(
-            "SELECT DISTINCT UnitCatalogRecId FROM dbo_CatalogMultiSize "
-            "WHERE UnitCatalogRecId IS NOT NULL ORDER BY UnitCatalogRecId"
-        )
-    }
-
-    # Step 2b: Walk FIST.db for inventories WITHOUT Alma link.
-    # D-02 EXPANDED predicate signals (bib/freedesc/fulltext/size) attached
-    # in Python via the pre-aggregated sets above.
-    raw_rows = fist_conn.execute(
-        """
-        SELECT
-            inv.InventoryId,
-            sig.SignatureId,
-            inv.Shelfmark as canonical_shelfmark,
-            cat.UnitCatalogRecId,
-            cat.Title as title_heb,
-            cat.GenizahTitleText as genizah_title
-        FROM dbo_Inventory inv
-        JOIN dbo_InventorySignature isig ON inv.InventoryId = isig.InventoryId
-        JOIN dbo_Signature sig ON isig.SetSignatureId = sig.SetSignatureId
-        LEFT JOIN dbo_UnitCatalogRec cat ON sig.SignatureId = cat.SignatureId
-        LEFT JOIN dbo_InventoryAlma alma ON alma.InventoryId = inv.InventoryId
-        WHERE alma.AlmaId IS NULL
-          AND inv.Shelfmark IS NOT NULL
-          AND inv.Shelfmark != ''
-        ORDER BY inv.InventoryId, sig.SignatureId, cat.UnitCatalogRecId
-        """
-    ).fetchall()
-
-    rows = []
-    for inv_id, sig_id, shelfmark, cat_id, title_heb, gen_title in raw_rows:
-        rows.append(
-            (
-                inv_id,
-                sig_id,
-                shelfmark,
-                cat_id,
-                title_heb,
-                gen_title,
-                int(sig_id in bib_sigs),
-                int(sig_id in freedesc_sigs),
-                int(sig_id in fulltext_sigs),
-                int(cat_id is not None and cat_id in size_cats),
-            )
+    if nli_conn is None:
+        raise ValueError(
+            "Phase 86 D-01 CUDL-walk requires nli_conn (nli_crossref.db). "
+            "Phase 85's FIST-walk fallback is removed in Phase 86."
         )
 
-    # Step 3: D-05a STRICT — group by normalized CUDL key.
-    # Exclude when key matches:
-    #   (a) multiple distinct InventoryIds → ambiguity_kind='multi_inventory'
-    #   (b) single InventoryId BUT multiple distinct SignatureIds → ambiguity_kind='multi_signature'
-    by_key: dict[str, list[tuple]] = defaultdict(list)
-    for row_tuple in rows:
-        (
-            inv_id,
-            sig_id,
-            shelfmark,
-            cat_id,
-            title_heb,
-            gen_title,
-            has_bib,
-            has_freedesc,
-            has_fulltext,
-            has_size,
-        ) = row_tuple
-        if not shelfmark:
-            continue
-        key = cudl_normalize(shelfmark)
-        if not key:
-            continue
-        by_key[key].append(
-            (
-                inv_id,
-                sig_id,
-                shelfmark,
-                cat_id,
-                title_heb,
-                gen_title,
-                bool(has_bib),
-                bool(has_freedesc),
-                bool(has_fulltext),
-                bool(has_size),
-            )
+    # Step 1: Walk CUDL classmarks deterministically.
+    cudl_rows = list(
+        nli_conn.execute(
+            "SELECT label, manifest_url, normalized_shelfmark "
+            "FROM cambridge_manifests "
+            "WHERE normalized_shelfmark IS NOT NULL AND normalized_shelfmark != '' "
+            "ORDER BY normalized_shelfmark"
         )
+    )
+
+    # Step 2: Build Phase 86 FIST<->CUDL alias index (in-memory, one-shot).
+    # Populates title_heb/genizah_title on each InventoryRecord (Gemini HIGH #8)
+    # via the 3-table production-correct join (Pass 2 HIGH-2).
+    build_fist_alias_index(fist_conn)
+
+    # Step 3: Load D-06 parent-shadow filter.
+    parent_shelfmarks = _load_parent_shelfmark_set()
 
     qualifying: dict[int, dict] = {}
     ambiguity_residue: list[dict] = []
 
-    # Process keys in DETERMINISTIC sorted order.
-    for key in sorted(by_key.keys()):
-        claims = by_key[key]
-        distinct_inv = sorted({c[0] for c in claims})
-        distinct_sig = sorted({c[1] for c in claims})
+    for label, manifest_url, classmark in cudl_rows:
+        # Phase 84 check — classmark already in REAL libraries.csv?
+        # Pass 2 HIGH-1: the outer caller built the alias index from a
+        # synthetic-stripped csv_bank, so synthetic prior-run rows cannot
+        # mask this classmark.
+        if lookup_cudl(classmark) is not None:
+            continue
 
-        # D-05a (a) — multiple inventories → ambiguous.
-        if len(distinct_inv) > 1:
+        # Phase 86 FIST resolution via status-aware explain_fist_by_cudl.
+        status, entries = explain_fist_by_cudl(classmark)
+
+        if status == "not_found":
             ambiguity_residue.append(
                 {
-                    "cudl_label": key,
+                    "inventory_id": "",
+                    "signature_id": "",
+                    "ambiguity_kind": "no_fist_match",
+                    "classmark": classmark,
+                    "cudl_label": label or "",
+                    "fist_signature_ids": "",
+                    "fist_inventory_ids": "",
+                    "leading_char": "",
+                    "pattern_guess": _guess_pattern(classmark),
+                }
+            )
+            continue
+
+        if status == "multi_inventory_ambiguous":
+            # Codex HIGH #6: distinct category from no_fist_match.
+            inv_ids = ",".join(str(e.inventory_id) for e in entries)
+            ambiguity_residue.append(
+                {
+                    "inventory_id": "",
+                    "signature_id": "",
                     "ambiguity_kind": "multi_inventory",
-                    "fist_signature_ids": "|".join(str(s) for s in distinct_sig),
-                    "fist_inventory_ids": "|".join(str(i) for i in distinct_inv),
+                    "classmark": classmark,
+                    "cudl_label": label or "",
+                    "fist_signature_ids": "",
+                    "fist_inventory_ids": inv_ids,
                     "leading_char": "",
-                    "inventory_id": distinct_inv[0],
-                    "signature_id": distinct_sig[0],
-                    "classmark": key,
+                    "pattern_guess": _guess_pattern(classmark),
                 }
             )
             continue
 
-        # D-05a (b) REVIEWS-MODE — multiple signatures (recto/verso/copies) → ambiguous.
-        if len(distinct_sig) > 1:
+        # status == 'single'
+        rec: InventoryRecord = entries[0]
+
+        # D-01a / Codex HIGH #7: rec.has_alma=True means libraries.csv row
+        # exists (alias-only coverage). No new synthetic emitted; Plan 04's
+        # coverage report counts these as the distinct
+        # `phase86_existing_alma_candidate` tier with explicit framing that
+        # app shelfmark search depends on Phase 84 alias coverage.
+        if rec.has_alma:
+            continue
+
+        # D-06 parent-shadow filter.
+        if rec.fist_shelfmark in parent_shelfmarks:
             ambiguity_residue.append(
                 {
-                    "cudl_label": key,
-                    "ambiguity_kind": "multi_signature",
-                    "fist_signature_ids": "|".join(str(s) for s in distinct_sig),
-                    "fist_inventory_ids": "|".join(str(i) for i in distinct_inv),
+                    "inventory_id": str(rec.inventory_id),
+                    "signature_id": "",
+                    "ambiguity_kind": "parent_shadow",
+                    "classmark": classmark,
+                    "cudl_label": label or "",
+                    "fist_signature_ids": "",
+                    "fist_inventory_ids": str(rec.inventory_id),
                     "leading_char": "",
-                    "inventory_id": distinct_inv[0],
-                    "signature_id": distinct_sig[0],
-                    "classmark": key,
+                    "pattern_guess": _guess_pattern(classmark),
                 }
             )
             continue
 
-        # Unambiguous: exactly 1 inventory, 1 signature.
-        # DETERMINISTIC tie-break: pick the claim with lowest (inv, sig, cat).
-        # SQL already returns sorted, but re-sort defensively for clarity.
-        claim = sorted(claims, key=lambda c: (c[0], c[1], c[3] or 0))[0]
-        (
-            inv_id,
-            sig_id,
-            shelfmark,
-            cat_id,
-            title_heb,
-            gen_title,
-            has_bib,
-            has_freedesc,
-            has_fulltext,
-            has_size,
-        ) = claim
-
-        # CSV-injection FAIL-LOUD (Codex MEDIUM): exclude rows with leading
-        # =/+/-/@ in title or shelfmark; log to residue.
-        injection_leader = ""
-        if _has_csv_injection_leader(shelfmark):
-            injection_leader = str(shelfmark)[:1]
-        elif _has_csv_injection_leader(title_heb):
-            injection_leader = str(title_heb)[:1]
-        elif _has_csv_injection_leader(gen_title):
-            injection_leader = str(gen_title)[:1]
-        if injection_leader:
-            ambiguity_residue.append(
-                {
-                    "cudl_label": key,
-                    "ambiguity_kind": "csv_injection_leader",
-                    "fist_signature_ids": str(sig_id),
-                    "fist_inventory_ids": str(inv_id),
-                    "leading_char": injection_leader,
-                    "inventory_id": inv_id,
-                    "signature_id": sig_id,
-                    "classmark": key,
-                }
-            )
-            continue
-
-        has_cudl = key in cudl_classmarks
-        # D-02 EXPANDED (REVIEWS-MODE): qualifying = title OR genizah_title
-        # OR bib OR freedesc OR fulltext OR size.
-        has_fjms = bool(
-            title_heb
-            or gen_title
-            or has_bib
-            or has_freedesc
-            or has_fulltext
-            or has_size
+        # CSV-injection fail-loud — guard ALL caller-controlled strings
+        # (Gemini suggestion fold-in: extend to title_heb/genizah_title).
+        inj_source = next(
+            (
+                s
+                for s in (
+                    rec.fist_shelfmark,
+                    label,
+                    rec.title_heb,
+                    rec.genizah_title,
+                )
+                if s and _has_csv_injection_leader(s)
+            ),
+            None,
         )
-        if not (has_cudl or has_fjms):
+        if inj_source is not None:
+            ambiguity_residue.append(
+                {
+                    "inventory_id": str(rec.inventory_id),
+                    "signature_id": "",
+                    "ambiguity_kind": "csv_injection_leader",
+                    "classmark": classmark,
+                    "cudl_label": label or "",
+                    "fist_signature_ids": "",
+                    "fist_inventory_ids": str(rec.inventory_id),
+                    "leading_char": str(inj_source)[:1],
+                    "pattern_guess": _guess_pattern(classmark),
+                }
+            )
             continue
 
-        qualifying[inv_id] = {
-            "canonical_shelfmark": shelfmark,
-            "title_heb": title_heb,
-            "title_eng": None,  # No English title column in dbo_UnitCatalogRec
-            "genizah_title": gen_title,
-            "library_code": _classify_library_code(shelfmark),
-            "has_cudl_manifest": has_cudl,
-            "has_fjms_metadata": has_fjms,
-            "cudl_label": key,
+        # Emit qualifying row. Title metadata propagates from
+        # InventoryRecord (Gemini HIGH #8).
+        qualifying[rec.inventory_id] = {
+            "canonical_shelfmark": rec.fist_shelfmark,
+            "title_heb": rec.title_heb,
+            "title_eng": None,  # No English column in dbo_UnitCatalogRec.
+            "genizah_title": rec.genizah_title,
+            "library_code": _classify_library_code(rec.fist_shelfmark),
+            "has_cudl_manifest": True,  # D-01a invariant by construction.
+            "has_fjms_metadata": bool(rec.title_heb or rec.genizah_title),
+            "cudl_label": label or "",
         }
 
     return qualifying, ambiguity_residue
 
 
-def _classify_library_code(shelfmark: str) -> str:
-    """D-15: synthetic rows reuse 'CUL' or 'Mosseri'; no new codes."""
-    s = (shelfmark or "").lower()
-    if "moss" in s:
+def _classify_library_code(fist_shelfmark: str) -> str:
+    """Map FIST.Shelfmark to libraries.csv library_code (D-15 Phase 85: CUL or Mosseri only).
+
+    Recognizes Mosseri in three forms (Codex MEDIUM widening):
+      - 'Moss. <Roman>,...' (canonical FIST form)
+      - 'Mosseri: Moss. <Roman>,...' (FIST data-noise prefix)
+      - Any shelfmark whose post-last-':' substring begins with 'Moss.'
+        (e.g., 'AIU: Moss. III,27.1' — defensive widening).
+    Default: 'CUL'.
+    """
+    if not fist_shelfmark:
+        return "CUL"
+    sm_raw = fist_shelfmark.strip()
+    sm = sm_raw.lower()
+    if sm.startswith("moss."):
         return "Mosseri"
+    if sm.startswith("mosseri:"):
+        return "Mosseri"
+    if ":" in sm_raw:
+        tail = sm_raw.rsplit(":", 1)[1].strip().lower()
+        if tail.startswith("moss."):
+            return "Mosseri"
     return "CUL"
 
 
@@ -578,6 +643,9 @@ def _write_residue(path: Path, residue: list[dict]) -> None:
     fist_inventory_ids, leading_char) AND the four required names from the
     plan's sub-feature 3 acceptance criterion (inventory_id, signature_id,
     ambiguity_kind, classmark).
+
+    Phase 86 Plan 02: appended `pattern_guess` as the 9th column for Plan 03
+    residue-pattern adjudication (Pass 2 MEDIUM-3: signature stays path-first).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
@@ -592,23 +660,33 @@ def _write_residue(path: Path, residue: list[dict]) -> None:
                 "fist_signature_ids",
                 "fist_inventory_ids",
                 "leading_char",
+                "pattern_guess",  # Phase 86 Plan 02 — D-02c residue category hint.
             ]
         )
-        # DETERMINISTIC ORDERING: sort by (cudl_label, ambiguity_kind, signature_id).
-        for r in sorted(
-            residue,
-            key=lambda x: (x["cudl_label"], x["ambiguity_kind"], x.get("signature_id", 0)),
-        ):
+
+        # DETERMINISTIC ORDERING: sort by (cudl_label, ambiguity_kind, classmark).
+        # Use string-coerced keys so blank inventory_id/signature_id don't break
+        # the comparison against int rows from Phase 85 legacy residue dicts.
+        def _sort_key(x: dict) -> tuple:
+            return (
+                str(x.get("cudl_label", "") or ""),
+                str(x.get("ambiguity_kind", "") or ""),
+                str(x.get("classmark", "") or ""),
+                str(x.get("signature_id", "") or ""),
+            )
+
+        for r in sorted(residue, key=_sort_key):
             w.writerow(
                 [
                     r.get("inventory_id", ""),
                     r.get("signature_id", ""),
                     r["ambiguity_kind"],
-                    r.get("classmark", r["cudl_label"]),
-                    r["cudl_label"],
-                    r["fist_signature_ids"],
-                    r["fist_inventory_ids"],
+                    r.get("classmark", r.get("cudl_label", "")),
+                    r.get("cudl_label", ""),
+                    r.get("fist_signature_ids", ""),
+                    r.get("fist_inventory_ids", ""),
                     r.get("leading_char", ""),
+                    r.get("pattern_guess", ""),  # Phase 86 Plan 02
                 ]
             )
 
@@ -726,6 +804,19 @@ def main() -> int:
     real_alma_ids = _collect_real_alma_ids(rows)
     print(f"Real-Alma rows in libraries.csv: {len(real_alma_ids)}")
 
+    # Phase 86 Plan 02 / Pass 2 HIGH-1: build Phase 84 alias index from a
+    # synthetic-stripped csv_bank. Without this, a prior --apply run's
+    # synthetic block would resolve via lookup_cudl and silently mask a
+    # qualifying classmark on the next --apply -> block-wipe risk.
+    csv_bank_full = _build_csv_bank_from_rows(rows)
+    real_only = _build_real_only_csv_bank(csv_bank_full)
+    print(
+        f"csv_bank loaded: total={len(csv_bank_full)} "
+        f"real_only={len(real_only)} "
+        f"stripped_synthetics={len(csv_bank_full) - len(real_only)}"
+    )
+    build_alias_index(real_only)
+
     qualifying, ambiguity_residue = _build_qualifying_inventories(fist_conn, nli_conn)
     print(f"Qualifying synthetic inventories: {len(qualifying)}")
     print(f"Ambiguity residue (excluded): {len(ambiguity_residue)}")
@@ -738,6 +829,19 @@ def main() -> int:
     print(f"Synthetic rows to emit: {len(synthetic_rows)}")
 
     if args.dry_run:
+        # Phase 86 Plan 02 / Codex HIGH #5: dry-run writes residue to the
+        # explicit _dryrun-suffixed path so Plan 03 has a fresh artifact to
+        # consume without touching the canonical --apply residue file.
+        # When residue_path is at its canonical default, the dry-run path is
+        # reports/synthetic_ambiguity_residue_dryrun.csv (explicit suffix —
+        # matches the plan's must_have string acceptance criterion).
+        # Path-first signature preserved (Pass 2 MEDIUM-3).
+        if residue_path == RESIDUE_PATH:
+            dryrun_path = ROOT / "reports" / "synthetic_ambiguity_residue_dryrun.csv"
+        else:
+            dryrun_path = residue_path.with_name(residue_path.stem + "_dryrun.csv")
+        _write_residue(dryrun_path, ambiguity_residue)
+        print(f"[dry-run] residue: {dryrun_path}")
         for row in synthetic_rows[:5]:
             print(f"  {row[0]}  {row[2]}  {row[3]}  {row[7][:60]}")
         return 0

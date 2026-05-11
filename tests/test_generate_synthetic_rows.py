@@ -177,13 +177,24 @@ def _make_fist_seed(extra_setup: str = "") -> sqlite3.Connection:
 
 
 def _make_nli_seed(classmarks: list[str] | None = None) -> sqlite3.Connection:
+    """Seed an in-memory nli_crossref.db with the production cambridge_manifests
+    schema (label, manifest_url, normalized_shelfmark).
+
+    Phase 86 Plan 02 (Rule 1 fix): the CUDL-walked _build_qualifying_inventories
+    SELECTs all three columns; the prior single-column schema produces a
+    `no such column: label` OperationalError. Helper now mirrors the Phase 86
+    test helper in tests/test_synthetic_generation_phase86.py.
+    """
     conn = sqlite3.connect(":memory:")
-    conn.execute("CREATE TABLE cambridge_manifests (normalized_shelfmark TEXT)")
+    conn.execute(
+        "CREATE TABLE cambridge_manifests (label TEXT, manifest_url TEXT, normalized_shelfmark TEXT)"
+    )
     if classmarks:
         for c in classmarks:
             conn.execute(
-                "INSERT INTO cambridge_manifests (normalized_shelfmark) VALUES (?)",
-                (c,),
+                "INSERT INTO cambridge_manifests (label, manifest_url, normalized_shelfmark) "
+                "VALUES (?, ?, ?)",
+                (c, f"https://example/{c}.json", c),
             )
     conn.commit()
     return conn
@@ -197,59 +208,28 @@ def _make_nli_seed(classmarks: list[str] | None = None) -> sqlite3.Connection:
 class TestQualifyingInventories:
     """Unit tests for _build_qualifying_inventories (D-02 EXPANDED, D-05a STRICT)."""
 
-    def test_d02_expanded_predicate_includes_bibliography(self):
-        """REVIEWS-MODE Codex HIGH: D-02 expanded — bibliography signal qualifies."""
-        from scripts.generate_synthetic_rows import _build_qualifying_inventories
-
-        # inv 3 has NO catalog title but has a bibliography row.
-        fist = _make_fist_seed(
-            """
-            INSERT INTO dbo_Inventory VALUES
-                (1, 'T-S 1.1'),
-                (2, 'T-S NS 329.96'),
-                (3, 'T-S NS 330.10');
-            INSERT INTO dbo_InventorySignature VALUES (1, 100), (2, 200), (3, 300);
-            INSERT INTO dbo_Signature VALUES (100, 1000), (200, 2000), (300, 3000);
-            INSERT INTO dbo_UnitCatalogRec VALUES
-                (10, 1000, 'Real Title', NULL),
-                (20, 2000, 'מילון', NULL);
-            -- inv 1 has Alma; inv 3 has bibliography only.
-            INSERT INTO dbo_InventoryAlma VALUES (1, 1, 990025143260205171);
-            INSERT INTO dbo_UnitBibliographyReference VALUES (5001, 3000);
-            """
-        )
-        nli = _make_nli_seed(["tsns329.96"])
-        qualifying, _residue = _build_qualifying_inventories(fist, nli)
-        # inv 3 has NO title fields but has a bibliography row → qualifies.
-        assert 3 in qualifying, "D-02 EXPANDED: bibliography-only inventory missing"
-        assert qualifying[3]["has_fjms_metadata"] is True
-        # inv 2 qualifies via title.
-        assert 2 in qualifying
-        # inv 1 has Alma so it's excluded.
-        assert 1 not in qualifying
-
-    def test_d02_expanded_predicate_includes_free_desc(self):
-        """REVIEWS-MODE Codex HIGH: D-02 expanded — free description qualifies."""
-        from scripts.generate_synthetic_rows import _build_qualifying_inventories
-
-        fist = _make_fist_seed(
-            """
-            INSERT INTO dbo_Inventory VALUES (4, 'T-S NS 400.1');
-            INSERT INTO dbo_InventorySignature VALUES (4, 400);
-            INSERT INTO dbo_Signature VALUES (400, 4000);
-            -- No UnitCatalogRec → no title fields.
-            -- BUT a free-description record exists.
-            INSERT INTO dbo_UnitFreeDescription VALUES (5002, 4000, 'A scholarly note.');
-            """
-        )
-        nli = _make_nli_seed([])
-        qualifying, _residue = _build_qualifying_inventories(fist, nli)
-        assert 4 in qualifying
-        assert qualifying[4]["has_fjms_metadata"] is True
-        assert qualifying[4]["has_cudl_manifest"] is False
+    # NOTE (Phase 86 Plan 02 Rule 1 deviation): the two Phase 85 D-02 EXPANDED
+    # predicate tests (test_d02_expanded_predicate_includes_bibliography and
+    # test_d02_expanded_predicate_includes_free_desc) were removed because
+    # Phase 86 D-01a image-bearing-only inverted the predicate: bibliography /
+    # free-description / full-text / measurement signals on their own NO LONGER
+    # qualify a synthetic row. Only inventories whose shelfmark resolves to a
+    # cambridge_manifests classmark are emitted. The dropped behaviour was the
+    # over-inclusive predicate Phase 85 was reverted for; see plan must_have
+    # truth "Phase 85's FJMS-only inclusion is DROPPED" and 85-VERIFICATION.md
+    # (5,035 bib-only rows). The csv-injection guard is now exercised inside
+    # the CUDL-walk path (see test_csv_injection_fail_loud_phase86 below) and
+    # by tests/test_synthetic_generation_phase86.py.
 
     def test_ambiguity_residue_multi_inventory_logged(self):
-        """REVIEWS-MODE Codex HIGH: D-05a — multi-inventory ambiguity logged."""
+        """Phase 86 D-04a / Codex HIGH #6: multi-inventory ambiguity is logged
+        when the CUDL classmark resolves to >1 distinct FIST InventoryId.
+
+        Updated from Phase 85 (Rule 1 fix): the test now seeds a CUDL manifest
+        so the CUDL-walked _build_qualifying_inventories actually visits the
+        classmark; the prior empty _make_nli_seed([]) caused the walker to skip
+        the inventories entirely under Phase 86 semantics.
+        """
         from scripts.generate_synthetic_rows import _build_qualifying_inventories
 
         # Two distinct InventoryIds, same shelfmark → ambiguous.
@@ -265,36 +245,27 @@ class TestQualifyingInventories:
                 (111, 10110, 'B', NULL);
             """
         )
-        nli = _make_nli_seed([])
+        # Phase 86 Rule 1: seed CUDL manifest so the walker visits 'ts12.345'.
+        nli = _make_nli_seed(["ts12.345"])
         qualifying, residue = _build_qualifying_inventories(fist, nli)
         assert 10 not in qualifying
         assert 11 not in qualifying
         kinds = {r["ambiguity_kind"] for r in residue}
         assert "multi_inventory" in kinds
 
-    def test_ambiguity_residue_multi_signature_logged(self):
-        """REVIEWS-MODE Codex HIGH: D-05a — multi-signature ambiguity logged."""
-        from scripts.generate_synthetic_rows import _build_qualifying_inventories
-
-        # ONE InventoryId but TWO distinct SignatureIds (recto/verso) → ambiguous.
-        fist = _make_fist_seed(
-            """
-            INSERT INTO dbo_Inventory VALUES (20, 'T-S NS 500.1');
-            INSERT INTO dbo_InventorySignature VALUES (20, 2010), (20, 2020);
-            INSERT INTO dbo_Signature VALUES (2010, 20100), (2020, 20200);
-            INSERT INTO dbo_UnitCatalogRec VALUES
-                (210, 20100, 'recto', NULL),
-                (220, 20200, 'verso', NULL);
-            """
-        )
-        nli = _make_nli_seed([])
-        qualifying, residue = _build_qualifying_inventories(fist, nli)
-        assert 20 not in qualifying
-        kinds = {r["ambiguity_kind"] for r in residue}
-        assert "multi_signature" in kinds
+    # NOTE (Phase 86 Plan 02 Rule 1 deviation): test_ambiguity_residue_multi_signature_logged
+    # was removed. Phase 86 D-04 relaxes the multi_signature exclusion (the
+    # originating user case T-S NS 329.96 has 13 SignatureIds on one InventoryId
+    # and MUST resolve via 'single' status). Multi-signature within one Inventory
+    # is no longer a residue category; only multi-INVENTORY ambiguity is.
 
     def test_csv_injection_fail_loud(self):
-        """REVIEWS-MODE Codex MEDIUM: leading =/+/-/@ in title excludes the row."""
+        """REVIEWS-MODE Codex MEDIUM: leading =/+/-/@ in title excludes the row.
+
+        Updated for Phase 86 Plan 02 (Rule 1 fix): seed CUDL manifest so the
+        CUDL-walked path reaches the injection guard. Under Phase 86 the guard
+        also covers title_heb / genizah_title (Gemini suggestion fold-in).
+        """
         from scripts.generate_synthetic_rows import _build_qualifying_inventories
 
         fist = _make_fist_seed(
@@ -306,14 +277,18 @@ class TestQualifyingInventories:
                 (310, 30100, '=HYPERLINK("evil")', NULL);
             """
         )
-        nli = _make_nli_seed([])
+        # Phase 86 Rule 1: seed CUDL manifest so the walker visits the classmark.
+        nli = _make_nli_seed(["tsns600.1"])
         qualifying, residue = _build_qualifying_inventories(fist, nli)
         assert 30 not in qualifying
         kinds = {r["ambiguity_kind"] for r in residue}
         assert "csv_injection_leader" in kinds
 
     def test_csv_injection_excludes_row(self, tmp_path):
-        """Sub-feature 6 acceptance: row with leading =/+/-/@ in title NOT emitted to libraries.csv."""
+        """Sub-feature 6 acceptance: row with leading =/+/-/@ in title NOT emitted to libraries.csv.
+
+        Updated for Phase 86 Plan 02 (Rule 1 fix): seed CUDL manifest.
+        """
         from scripts import generate_synthetic_rows as gen
 
         fist = _make_fist_seed(
@@ -325,7 +300,8 @@ class TestQualifyingInventories:
                 (311, 31100, '+CMD evil', NULL);
             """
         )
-        nli = _make_nli_seed([])
+        # Phase 86 Rule 1: seed CUDL manifest so the walker visits the classmark.
+        nli = _make_nli_seed(["tsns600.2"])
         qualifying, residue = gen._build_qualifying_inventories(fist, nli)
         assert 31 not in qualifying
 
@@ -368,7 +344,14 @@ class TestRegenerateScript:
         }
 
     def _seed_fist_nli(self):
-        """Seed: inv 1 has Alma; inv 2 + 3 are synthetic-eligible."""
+        """Seed: inv 1 has Alma; inv 2 + 3 are synthetic-eligible.
+
+        Phase 86 Plan 02 (Rule 1 fix): both inv 2 ('T-S NS 329.96') and inv 3
+        ('T-S NS 330.10') need a cambridge_manifests entry for the CUDL-walked
+        _build_qualifying_inventories to visit and emit them. Phase 85 only
+        seeded one because the FIST-walked predicate could qualify via FJMS
+        metadata alone; Phase 86 D-01a requires a CUDL manifest by construction.
+        """
         fist = _make_fist_seed(
             """
             INSERT INTO dbo_Inventory VALUES
@@ -384,7 +367,7 @@ class TestRegenerateScript:
             INSERT INTO dbo_InventoryAlma VALUES (1, 1, 990025143260205171);
             """
         )
-        nli = _make_nli_seed(["tsns329.96"])
+        nli = _make_nli_seed(["tsns329.96", "tsns330.10"])
         return fist, nli
 
     def _run_apply(self, gen, monkeypatch, tmp_path):
@@ -541,7 +524,10 @@ class TestRegenerateScript:
             INSERT INTO dbo_UnitCatalogRec VALUES (20, 2000, 'מילון', NULL);
             """
         )
-        nli = _make_nli_seed([])
+        # Phase 86 Rule 1 fix: seed CUDL manifest so the CUDL-walked path
+        # visits inv 2's classmark; otherwise no synthetic row is emitted and
+        # the collision check never fires.
+        nli = _make_nli_seed(["tsns329.96"])
 
         # Stub files at tmp paths so .exists() returns True without monkeypatching
         # the read-only Path attribute.
