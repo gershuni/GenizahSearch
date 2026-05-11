@@ -54,7 +54,7 @@ import re
 import shutil
 import sqlite3
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Optional
 
@@ -67,14 +67,12 @@ from shared.synthetic_sys_id import (  # noqa: E402
 )
 from shared.shelfmark_bridge import (  # noqa: E402
     build_alias_index,
-    cudl_normalize,
     lookup_cudl,
 )
 from shared.fist_cudl_bridge import (  # noqa: E402  Phase 86 NEW (Plan 01)
     InventoryRecord,
     build_fist_alias_index,
     explain_fist_by_cudl,
-    lookup_fist_by_cudl,
 )
 
 CSV_PATH = ROOT / "libraries.csv"

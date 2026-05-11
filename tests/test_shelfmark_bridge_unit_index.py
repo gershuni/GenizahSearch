@@ -3,7 +3,6 @@
 Codex MEDIUM #7: avoid integration-only coverage. These tests build small synthetic
 csv_banks in memory and exercise the bridge logic directly. Run in any environment.
 """
-import pytest
 from shared.shelfmark_bridge import (
     cudl_normalize, _collapse_numeric_runs, shelfmark_to_cudl_label,
     build_alias_index, lookup_cudl,

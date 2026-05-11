@@ -45,7 +45,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from shared.synthetic_sys_id import is_synthetic_sys_id  # noqa: E402
 
 
 SYNTHETIC_ID = "990001234560000000"

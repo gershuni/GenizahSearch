@@ -10,7 +10,6 @@ keeps the working tree clean and preserves the real diagnostic artifact.
 import csv
 from pathlib import Path
 
-import pytest
 
 from shared.shelfmark_bridge import build_alias_index, lookup_cudl
 

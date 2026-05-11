@@ -20,7 +20,6 @@ import sqlite3
 import pytest
 
 from shared.fist_cudl_bridge import (
-    InventoryRecord,
     build_fist_alias_index,
     explain_fist_by_cudl,
     fist_to_cudl_keys,
