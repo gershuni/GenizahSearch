@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v7.11
 milestone_name: CUDL Coverage & Synthetic Inventories
 status: executing
-last_updated: "2026-05-11T14:00:44.046Z"
-last_activity: 2026-05-11 -- Phase 86 planning complete
+last_updated: "2026-05-11T14:12:49.171Z"
+last_activity: 2026-05-11 -- Phase 86 execution started
 progress:
   total_phases: 87
   completed_phases: 83
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-05)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 85 — synthetic-fjms-inventory-rows
+**Current focus:** Phase 86 — cudl-coverage-audit-and-synthetic-reattempt
 
 ## Current Position
 
-Phase: 85
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-11 -- Phase 86 planning complete
+Phase: 86 (cudl-coverage-audit-and-synthetic-reattempt) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 86
+Last activity: 2026-05-11 -- Phase 86 execution started
 
 Progress: [###.......] 33% (1/3 phases, 85 in plan-stage)
 
