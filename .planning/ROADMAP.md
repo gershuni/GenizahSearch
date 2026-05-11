@@ -289,7 +289,7 @@ Plans:
    (c) Optionally relax D-05a STRICT for known-safe multi_signature cases — when all FIST SignatureIds resolve to the same canonical_shelfmark + library_code, pick lowest SignatureId per the existing tie-break logic (so T-S NS 329.96 with 12 multi_signature entries CAN be synthesized). Baseline: ~100-500 image-bearing synthetics expected (instead of 5,035 bib-only). The originating user case (T-S NS 329.96) closes here.
 6. **Carry-forward residue artifacts:** keep `reports/synthetic_ambiguity_residue.csv` and `reports/synthetic_parent_shelfmarks.csv` as documentation of the Plan 02 attempt. Document the Phase 85 outcome in CHANGELOG so users + future maintainers understand why infrastructure exists with no production data.
 
-**Plans:** 5 plans
+**Plans:** 0/5 plans executed
 
 Plans:
 - [ ] 86-01-PLAN.md -- shared/fist_cudl_bridge.py sibling module + 4 D-02a normalizers (Mosseri Roman, prefix-strip, (N) series-strip, Or. dot-fix) + alias-index builder + unit tests (AUDIT-01)
