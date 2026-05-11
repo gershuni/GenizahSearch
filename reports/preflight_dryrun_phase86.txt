@@ -1,0 +1,14 @@
+Real-Alma rows in libraries.csv: 255615
+csv_bank loaded: total=255723 real_only=255615 stripped_synthetics=108
+Qualifying synthetic inventories: 108
+Ambiguity residue (excluded): 1847
+  - multi_inventory: 248
+  - no_fist_match: 1599
+Synthetic rows to emit: 108
+[dry-run] residue: C:\GenizahSearch\.claude\worktrees\agent-ab0ad3493be564d3d\reports\synthetic_ambiguity_residue_dryrun.csv
+  990000038099000000  Or. 1080–1081: Or.1080 127  CUL  Or. 1080–1081: Or.1080 127
+  990000819850000000  Moss. II,281.2  Mosseri  Moss. II,281.2
+  990001172850000000  Moss. III,167  Mosseri  Moss. III,167
+  990001759099000000  T-S Boxes: T-S K25.240  CUL  T-S Boxes: T-S K25.240
+  990001799099000000  T-S Misc.: T-S Misc.27.19  CUL  T-S Misc.: T-S Misc.27.19
+alias index built: 291350 keys, 2486 ambiguous keys excluded

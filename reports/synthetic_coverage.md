@@ -1,7 +1,7 @@
 # Phase 85 Synthetic Coverage Report
 
-Total synthetic rows: 5035
-Total ambiguity-excluded keys (D-05a + csv-injection): 10689
+Total synthetic rows: 108
+Total ambiguity-excluded keys (D-05a + csv-injection): 1847
 
 ## Tier 1 (CUDL + FJMS)
 
@@ -13,14 +13,14 @@ bibliography, free-description, full-text, or measurement).
 
 ## Tier 2 (CUDL only, no FJMS)
 
-Count: 0
+Count: 108
 
 Inventories that have a CUDL manifest but NO substantive FJMS metadata.
 Browse renders the CUDL images; no scholarly metadata to display.
 
 ## Tier 3 (FJMS only, no CUDL)
 
-Count: 5035
+Count: 0
 
 Inventories with substantive FJMS metadata but NO CUDL manifest.
 Browse renders metadata only (Phase 53 metadata-only path).
