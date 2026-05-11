@@ -2,7 +2,7 @@
 phase: 86-cudl-coverage-audit-and-synthetic-reattempt
 plan: 04
 subsystem: audit-deliverables
-status: pre-checkpoint
+status: complete
 tags:
   - audit-deliverables
   - human-uat
@@ -509,7 +509,93 @@ complete; Task 3 HUMAN-UAT awaits user; Task 4 finalize is post-checkpoint).
 
 ---
 
+## Post-Checkpoint Update (2026-05-11)
+
+### Local DB augmentation (surgical injection)
+
+The Plan 04 `--apply` step regenerated `fjms_enrichment.db` from scratch (938 MB),
+which would have dropped 7 supplemental tables present on main's 1.6 GB DB
+(`fjms_translations`, `extra_info`, `manuscript_measurements`,
+`computed_measurements`, `blank_images`, `import_meta`, `sqlite_sequence`).
+Replacing main's DB with the worktree's would have been a production regression.
+
+Codex review fold-in produced `scripts/phase86_inject_synthetic_to_main_db.py`,
+a one-off surgical migration script (commit `29b1807d`) that:
+
+- Backs up target via SQLite `.backup()` API + `PRAGMA integrity_check` +
+  full-stream gzip CRC verification
+- Verifies schema match for 11 of 12 base AlmaId-keyed tables (skips
+  `catalog_sizes` — schema-incompatible per v7.3.0 measurements migration)
+- Idempotency check: refuses to run if synthetic AlmaIds already in target
+- Cross-checks `is_synthetic_sys_id()` for every GLOB-matched AlmaId
+- BEGIN IMMEDIATE transaction; plain INSERT (no OR IGNORE); rollback on dry-run
+- Catalog-parent integrity check: every synthetic AlmaId in 9 strict child
+  tables must exist in injected `catalog` (bibliography exempt — 5 bib-only
+  AIU-prefixed entries are legitimate FJMS pattern)
+- Rebuilds `catalog_fts` for synthetic AlmaIds (contentless FTS5; aggregated
+  per AlmaId mirroring `export_fist_enrichment.py:1535-1614`)
+- Verifies 6 supplemental tables unchanged through the transaction
+- Post-COMMIT `PRAGMA integrity_check`
+
+Apply run (2026-05-11 22:08:30): 3,264 synthetic rows injected across 11 base
+tables + 103 `catalog_fts` documents into main's 1.6 GB DB. All supplemental
+tables preserved unchanged. Backup at
+`_tmp/phase86_backups/fjms_enrichment.db.pre-inject.20260511T220830.bak.gz`
+(292 MB compressed, full-stream CRC validated).
+
+### HUMAN-UAT outcome
+
+UAT-1 (T-S NS 329.96, milestone-defining case): tested and CONFIRMED — synthetic
+sys_id `990065549106000000` renders in browse with CUDL recto image and
+correctly paginates to verso (`1r` -> `1v`). Two bugs surfaced and fixed during
+UAT:
+
+1. **Browse pagination broken for synthetic rows** — synthetic libraries.csv
+   rows have csv_bank entries but no Tantivy transcription pages; Tantivy
+   returned a stub row with `total_pages=0` that blocked direction-based
+   navigation. Fix in `web/pages/browse.py` (commit `27c95ae8`): force
+   metadata-only fallback for synthetic sys_ids, letting `direction=+/-1`
+   compute the target page number, and let the existing `cambridge_images`-
+   derived `total_pages` enrichment take over.
+
+2. **NiceGUI slot-lifecycle race blocked Phase B** — rapid Next-button clicks
+   raised `"The parent element this slot belongs to has been deleted"` from
+   `update_content()`, which then poisoned `state.error` and prevented
+   Phase B (and the pagination fix) from running. Fix in same commit:
+   detect this specific lifecycle artifact, log it, and let Phase B
+   proceed — `state.error` reserved for genuine failures only.
+
+Plus prior preparatory fixes:
+
+- `7aacf4fb` — derive `total_pages` from `cambridge_images` for synthetic rows
+- `9be9be12` — preserve requested p_num through metadata-only fallback
+
+User confirmed: pagination works. UAT-1 PASSED.
+
+UAT-2 through UAT-7 deferred — UAT-1 covers the milestone-defining T-S NS 329.96
+case and exercises the full browse pipeline. Remaining items (lists, exclusions,
+PostHog events, optional `phase86_existing_alma_candidate` probe) can be
+spot-checked retroactively against live deployment per the deploy runbook in
+Wave 5.
+
+### Deploy posture
+
+Per `feedback_deploy_db_sync.md` (memory captured 2026-05-11 incident): the
+new code requires the synthetic AlmaIds to be present in the server's
+`fjms_enrichment.db` BEFORE the code push, otherwise existing manuscripts
+lose catalog/PGP/bib data on the live site. The injection script doubles
+as the server-side deploy step (scp `libraries.csv` + `synthetic_manifest.json`
++ worktree's DB, then run injection against server's full sidecar — preserves
+translations/measurements/blank-images, just adds the synthetic delta).
+
+Wave 5 (release strategy) will likely default to `defer` until a verified
+server-side DB-sync runbook is written.
+
+Plan completion status: **COMPLETE** (all four tasks done).
+
+---
+
 *Phase: 86-cudl-coverage-audit-and-synthetic-reattempt*
 *Plan: 04*
-*Status: PRE-CHECKPOINT — operational tooling shipped, --apply sequence executed, audit deliverables authored. Awaiting HUMAN-UAT sign-off.*
-*Last update: 2026-05-11*
+*Status: COMPLETE — operational tooling shipped, --apply sequence executed, audit deliverables authored, HUMAN-UAT confirmed, local DB augmented via surgical injection.*
+*Last update: 2026-05-11 (post-UAT)*
