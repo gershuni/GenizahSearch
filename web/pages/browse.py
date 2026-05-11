@@ -820,15 +820,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             else:
                 # No Tantivy page — try metadata-only fallback from csv_bank
                 _fallback_sys = state.sys_id
+                _requested_p = p_num  # Phase 86: thread user's clicked page through
                 def _fetch_metadata_only():
-                    return service.get_metadata_only_browse_page(_fallback_sys)
+                    return service.get_metadata_only_browse_page(_fallback_sys, p_num=_requested_p)
                 meta_page = await run.io_bound(_fetch_metadata_only)
                 if my_gen != _load_generation['value']:
                     return
                 if meta_page:
                     state.sys_id = meta_page.sys_id
                     state.current_page = meta_page
-                    state.page_input_value = 0
+                    state.page_input_value = meta_page.p_num
                     state.error = None
                     _update_browser_url()
                     # Phase 85 D-06: expose synthetic-row flag to client-side JS

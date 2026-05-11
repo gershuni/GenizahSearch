@@ -364,11 +364,18 @@ class GenizahService:
             logger.error("Browse page error: %s", e)
             return None
 
-    def get_metadata_only_browse_page(self, sys_id: str) -> Optional[BrowsePage]:
+    def get_metadata_only_browse_page(
+        self, sys_id: str, p_num: Optional[int] = None
+    ) -> Optional[BrowsePage]:
         """Phase A (hot path): csv_bank only for metadata-only records. No SQLite/crossref.
 
         Returns None if sys_id is not in csv_bank.
         fl_id, images, and enrichment data are populated by Phase B.
+
+        Phase 86: when caller passes a p_num (e.g. user clicked Next on a
+        synthetic row), preserve it on the returned BrowsePage. Phase B
+        enrichment derives total_pages from cambridge_images and clamps
+        p_num to that range.
         """
         if not self.is_ready or not sys_id:
             return None
@@ -386,13 +393,15 @@ class GenizahService:
             # Default NLI attribution (Phase B will refine if needed)
             attribution = _NLI_HE if get_language() == 'he' else _NLI_EN
 
+            requested_p = max(1, p_num) if p_num else 0
+
             return BrowsePage(
                 uid='',
-                p_num=0,
+                p_num=requested_p,
                 text='',
                 full_header='',
                 total_pages=0,
-                current_idx=0,
+                current_idx=requested_p,
                 sys_id=sys_id,
                 shelfmark=shelfmark or '',
                 title=title or '',
