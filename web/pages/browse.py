@@ -761,6 +761,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             _volume_ie = state.volume_ie
 
             def _fetch_page():
+                # Phase 86: synthetic sys_ids have no transcription pages in
+                # Tantivy — Tantivy returns a single stub row with total_pages=0
+                # which blocks Next/Prev navigation (direction=+1 can't advance
+                # past page 1). Force the metadata-only fallback so the
+                # direction-based _requested_p computation runs and the CUDL
+                # canvas-derived total_pages takes effect.
+                if _sys_id and is_synthetic_sys_id(_sys_id):
+                    return None
                 if fl_id:
                     return service.get_browse_page_by_fl(fl_id, sys_id=_sys_id)
                 elif p_num is not None:
@@ -851,7 +859,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         except Exception as e:
             if my_gen != _load_generation['value']:
                 return
-            state.error = f"{tr('Error')}: {str(e)}"
+            err_str = str(e)
+            # NiceGUI lifecycle race: a previous render's slot was torn down
+            # mid-flight (common on rapid navigation / Phase A re-render).
+            # The page data has loaded; log the artifact but do NOT poison
+            # state.error — that would block Phase B and any pagination
+            # fix we apply there (#86).
+            if 'parent element this slot belongs to has been deleted' in err_str.lower():
+                logger.warning(
+                    "NiceGUI slot lifecycle race during Phase A (continuing to Phase B): %s",
+                    err_str,
+                )
+            else:
+                state.error = f"{tr('Error')}: {err_str}"
 
         # Title translations: fast SQLite query (~1ms), safe for Phase A
         # Note: Oxford translations moved to Phase B (oxford_part_metadata is deferred)
