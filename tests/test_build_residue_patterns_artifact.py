@@ -22,7 +22,6 @@ import sqlite3
 import sys
 from pathlib import Path
 
-import pytest
 
 # Make sibling `scripts/` package importable when this test runs from the
 # repo root (mirrors the bootstrap in build_residue_patterns_artifact.py).
