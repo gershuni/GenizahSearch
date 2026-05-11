@@ -1,1 +1,758 @@
-[]
+[
+  {
+    "canonical_shelfmark": "Or. 1080–1081: Or.1080 127",
+    "inventory_id": 38099,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990000038099000000"
+  },
+  {
+    "canonical_shelfmark": "Moss. II,281.2",
+    "inventory_id": 819850,
+    "library_code": "Mosseri",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990000819850000000"
+  },
+  {
+    "canonical_shelfmark": "Moss. III,167",
+    "inventory_id": 1172850,
+    "library_code": "Mosseri",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990001172850000000"
+  },
+  {
+    "canonical_shelfmark": "T-S Boxes: T-S K25.240",
+    "inventory_id": 1759099,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990001759099000000"
+  },
+  {
+    "canonical_shelfmark": "T-S Misc.: T-S Misc.27.19",
+    "inventory_id": 1799099,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990001799099000000"
+  },
+  {
+    "canonical_shelfmark": "Oriental: Or.1080.46",
+    "inventory_id": 2449099,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990002449099000000"
+  },
+  {
+    "canonical_shelfmark": "T-S Ar.: T-S Ar.18(2). 1141",
+    "inventory_id": 2642099,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990002642099000000"
+  },
+  {
+    "canonical_shelfmark": "Moss. IV,366.1",
+    "inventory_id": 3340850,
+    "library_code": "Mosseri",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990003340850000000"
+  },
+  {
+    "canonical_shelfmark": "Moss. IV,366.2",
+    "inventory_id": 3341850,
+    "library_code": "Mosseri",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990003341850000000"
+  },
+  {
+    "canonical_shelfmark": "Moss. IV,366.3",
+    "inventory_id": 3342850,
+    "library_code": "Mosseri",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990003342850000000"
+  },
+  {
+    "canonical_shelfmark": "Moss. IV,369",
+    "inventory_id": 3346850,
+    "library_code": "Mosseri",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990003346850000000"
+  },
+  {
+    "canonical_shelfmark": "Moss. VII,110",
+    "inventory_id": 3593850,
+    "library_code": "Mosseri",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990003593850000000"
+  },
+  {
+    "canonical_shelfmark": "T-S F12.4",
+    "inventory_id": 6593101,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990006593101000000"
+  },
+  {
+    "canonical_shelfmark": "T-S F17.40",
+    "inventory_id": 6799101,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990006799101000000"
+  },
+  {
+    "canonical_shelfmark": "T-S H3.104a-t",
+    "inventory_id": 7336101,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990007336101000000"
+  },
+  {
+    "canonical_shelfmark": "T-S 12.749",
+    "inventory_id": 23178104,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990023178104000000"
+  },
+  {
+    "canonical_shelfmark": "T-S 12.750",
+    "inventory_id": 23179104,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990023179104000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.10",
+    "inventory_id": 65463106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065463106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.11",
+    "inventory_id": 65464106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065464106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.96",
+    "inventory_id": 65549106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065549106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.145",
+    "inventory_id": 65599106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065599106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.148",
+    "inventory_id": 65602106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065602106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.245",
+    "inventory_id": 65700106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065700106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.465",
+    "inventory_id": 65921106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065921106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.491",
+    "inventory_id": 65947106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990065947106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.644",
+    "inventory_id": 66101106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066101106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.645",
+    "inventory_id": 66102106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066102106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.646",
+    "inventory_id": 66103106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066103106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.647",
+    "inventory_id": 66104106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066104106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.700",
+    "inventory_id": 66158106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066158106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.701",
+    "inventory_id": 66159106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066159106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.785",
+    "inventory_id": 66243106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066243106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.794",
+    "inventory_id": 66253106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066253106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.798",
+    "inventory_id": 66257106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066257106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.847",
+    "inventory_id": 66306106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066306106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.848",
+    "inventory_id": 66307106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066307106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.860",
+    "inventory_id": 66319106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066319106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.911",
+    "inventory_id": 66370106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066370106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.912",
+    "inventory_id": 66371106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066371106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.939",
+    "inventory_id": 66399106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066399106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.940",
+    "inventory_id": 66400106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066400106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.942",
+    "inventory_id": 66402106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066402106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.943",
+    "inventory_id": 66403106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066403106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S NS 329.1008",
+    "inventory_id": 66468106,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990066468106000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 74.41",
+    "inventory_id": 85750107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990085750107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 74.102",
+    "inventory_id": 85811107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990085811107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 82.129",
+    "inventory_id": 87741107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087741107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 82.137",
+    "inventory_id": 87749107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087749107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 82.138",
+    "inventory_id": 87750107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087750107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 82.169",
+    "inventory_id": 87781107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087781107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 82.227",
+    "inventory_id": 87839107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087839107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.80",
+    "inventory_id": 87940107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087940107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.81",
+    "inventory_id": 87941107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087941107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.97",
+    "inventory_id": 87957107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087957107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.121",
+    "inventory_id": 87981107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087981107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.124",
+    "inventory_id": 87984107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990087984107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.265",
+    "inventory_id": 88125107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088125107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.267",
+    "inventory_id": 88127107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088127107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.268",
+    "inventory_id": 88128107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088128107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.286",
+    "inventory_id": 88146107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088146107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.287",
+    "inventory_id": 88147107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088147107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.288",
+    "inventory_id": 88148107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088148107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 83.289",
+    "inventory_id": 88149107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088149107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.1",
+    "inventory_id": 88182107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088182107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.27",
+    "inventory_id": 88208107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088208107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.35",
+    "inventory_id": 88216107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088216107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.37",
+    "inventory_id": 88218107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088218107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.38",
+    "inventory_id": 88219107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088219107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.72",
+    "inventory_id": 88253107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088253107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.73",
+    "inventory_id": 88254107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088254107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.74",
+    "inventory_id": 88255107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088255107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.75",
+    "inventory_id": 88256107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088256107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.87",
+    "inventory_id": 88268107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088268107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.90",
+    "inventory_id": 88271107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088271107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.96",
+    "inventory_id": 88277107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088277107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.97",
+    "inventory_id": 88278107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088278107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.123",
+    "inventory_id": 88304107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088304107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.154",
+    "inventory_id": 88335107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088335107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.155",
+    "inventory_id": 88336107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088336107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.156",
+    "inventory_id": 88337107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088337107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.157",
+    "inventory_id": 88338107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088338107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.159",
+    "inventory_id": 88340107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088340107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.160",
+    "inventory_id": 88341107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088341107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.161",
+    "inventory_id": 88342107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088342107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.162",
+    "inventory_id": 88343107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088343107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.163",
+    "inventory_id": 88344107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088344107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.164",
+    "inventory_id": 88345107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088345107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.186",
+    "inventory_id": 88367107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088367107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.200",
+    "inventory_id": 88381107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088381107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.202",
+    "inventory_id": 88383107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088383107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.223",
+    "inventory_id": 88404107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088404107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.224",
+    "inventory_id": 88405107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088405107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.225",
+    "inventory_id": 88406107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088406107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.238",
+    "inventory_id": 88419107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088419107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.240",
+    "inventory_id": 88421107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088421107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.241",
+    "inventory_id": 88422107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088422107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.308",
+    "inventory_id": 88489107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088489107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.309",
+    "inventory_id": 88490107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088490107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.317",
+    "inventory_id": 88498107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088498107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 84.318",
+    "inventory_id": 88499107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990088499107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 90.163",
+    "inventory_id": 90438107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990090438107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 90.418",
+    "inventory_id": 90693107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990090693107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 94.126",
+    "inventory_id": 92429107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990092429107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 94.179",
+    "inventory_id": 92482107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990092482107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 94.311",
+    "inventory_id": 92614107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990092614107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 95.48",
+    "inventory_id": 92727107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990092727107000000"
+  },
+  {
+    "canonical_shelfmark": "T-S AS 213.34",
+    "inventory_id": 133520107,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990133520107000000"
+  },
+  {
+    "canonical_shelfmark": "Or.1080 14.49",
+    "inventory_id": 137477111,
+    "library_code": "CUL",
+    "source": "cudl_match",
+    "synthetic_sys_id": "990137477111000000"
+  }
+]

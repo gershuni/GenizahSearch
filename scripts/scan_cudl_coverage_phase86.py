@@ -240,14 +240,26 @@ def classify_classmark(classmark: str):
 
 def main() -> int:
     # Build BOTH bridge indexes. Phase 84 needs libraries.csv via csv_bank;
-    # Phase 86 needs FIST.db. The csv_bank loader must mirror what
-    # scripts/scan_cudl_orphans.py uses (genizah_core import path).
-    from genizah_core import csv_bank
+    # Phase 86 needs FIST.db.
+    #
     # Pass 2 HIGH-1 cross-reference: Plan 02's _build_real_only_csv_bank is the
     # generation-time filter. AT SCAN TIME we WANT lookup_cudl to resolve to
     # synthetic sys_ids (so the scanner can classify them as phase86_synthetic
     # via is_synthetic_sys_id). Therefore the scanner uses the FULL csv_bank,
     # NOT the synthetic-stripped one.
+    #
+    # NOTE (executor 2026-05-11 deviation Rule 1): the plan example imported
+    # `from genizah_core import csv_bank` directly, but csv_bank is a
+    # MetadataManager instance attribute, not a module-level export. Rebuild
+    # the csv_bank from raw libraries.csv rows using Plan 02's helper —
+    # this mirrors the production code path exactly.
+    from scripts.generate_synthetic_rows import (
+        _build_csv_bank_from_rows,
+        _read_libraries_csv,
+    )
+    libraries_csv = ROOT / "libraries.csv"
+    csv_rows, _ = _read_libraries_csv(libraries_csv)
+    csv_bank = _build_csv_bank_from_rows(csv_rows)
     build_alias_index(csv_bank)
 
     fist_conn = sqlite3.connect(f"file:{FIST_DB}?mode=ro", uri=True)

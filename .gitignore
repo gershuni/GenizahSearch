@@ -37,6 +37,14 @@ build/
 # Phase 85 SYNTH-02: synthetic-coverage artifacts (Phase 86 audit consumes residue)
 !/reports/synthetic_ambiguity_residue.csv
 !/reports/synthetic_coverage.md
+# Phase 86 Plan 04 audit deliverables (AUDIT-01, AUDIT-02): durable artifacts
+# documenting CUDL coverage state after the CUDL-walked synthetic re-attempt.
+!/reports/cudl_coverage.md
+!/reports/cudl_coverage_post_phase86.csv
+!/reports/scan_cudl_orphans_post_phase86.txt
+!/reports/cudl_orphans_all_post_phase86.csv
+!/reports/cudl_orphans_with_neighbor_post_phase86.csv
+!/reports/preflight_dryrun_phase86.txt
 Genizah_Index/genizah.log
 genizah.log
 backend.log
