@@ -568,6 +568,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         safe_title = _json.dumps(f'{shelfmark} | Dicta Genizah Search')
         js = f'try {{ history.replaceState(null, "", {safe_url}); document.title = {safe_title}; }} catch(e) {{}}'
         _page_client.run_javascript(js)
+
+    def _run_page_javascript(js: str) -> None:
+        """Run JavaScript through the captured client from detached load tasks."""
+        try:
+            _page_client.run_javascript(js)
+        except Exception as exc:
+            logger.warning("Browse page JavaScript dispatch failed: %s", exc)
     # If a shelfmark was passed via URL (not already resolved to sys_id), set it for auto-search on load
     _pending_shelfmark = initial_shelfmark
 
@@ -750,7 +757,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             for key in ('brightness', 'contrast'):
                 if slider_refs.get(key): slider_refs[key].value = 0
             if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
-            ui.run_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
+            _run_page_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
         update_content()  # Show loading spinner
 
         # === Phase A: Fast page fetch ===
@@ -804,7 +811,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # (web/static/manuscript_viewer.js gates NLI manifest fetch +
                 # NLI image proxy fallback on this flag).
                 _is_synth_js = 'true' if is_synthetic_sys_id(page.sys_id) else 'false'
-                ui.run_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
+                _run_page_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
 
                 # PostHog: track manuscript views
                 from web.analytics import posthog_capture
@@ -849,7 +856,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     _update_browser_url()
                     # Phase 85 D-06: expose synthetic-row flag to client-side JS
                     _is_synth_js = 'true' if is_synthetic_sys_id(meta_page.sys_id) else 'false'
-                    ui.run_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
+                    _run_page_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
                 else:
                     if fl_id:
                         state.error = tr('No text available') + f" (fl_id: {fl_id})"
@@ -865,7 +872,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # The page data has loaded; log the artifact but do NOT poison
             # state.error — that would block Phase B and any pagination
             # fix we apply there (#86).
-            if 'parent element this slot belongs to has been deleted' in err_str.lower():
+            _err_lower = err_str.lower()
+            if (
+                'parent element this slot belongs to has been deleted' in _err_lower
+                or 'current slot cannot be determined' in _err_lower
+            ):
                 logger.warning(
                     "NiceGUI slot lifecycle race during Phase A (continuing to Phase B): %s",
                     err_str,
