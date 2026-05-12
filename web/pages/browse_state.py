@@ -119,7 +119,15 @@ def restore_browse_snapshot(state: 'BrowseState') -> tuple:
     cross-VERSION corruption, not same-version Tab-B-overwrites-Tab-A.
     True per-tab isolation is deferred (Codex W3 - future phase).
     """
-    stored_version = app.storage.user.get('browse_snapshot_schema_version', 0)
+    # NiceGUI raises AssertionError "user storage for {uuid} should be created
+    # before accessing it" when the session was pruned mid-flight (10s
+    # prune_user_storage scheduler races with a fresh page handler). Wrap the
+    # version-stamp read so the page renders with defaults instead of a 500.
+    try:
+        stored_version = app.storage.user.get('browse_snapshot_schema_version', 0)
+    except (AssertionError, Exception) as e:
+        logger.debug(f"[BrowseSnapshot] user storage unavailable on restore: {e}")
+        return (None, None)
     if stored_version == 0:
         # Pre-Phase-74 snapshots have no version stamp. Adopt the legacy payload
         # once by stamping to the current version; otherwise returning users
@@ -162,7 +170,11 @@ def persist_browse_snapshot(state: 'BrowseState', page=None) -> None:
         page:  BrowsePage object (for shelfmark / p_num extraction). Optional:
                if None, only reading-desk half is persisted.
     """
-    if not app.storage.user.get('session_persistence_enabled', True):
+    try:
+        if not app.storage.user.get('session_persistence_enabled', True):
+            return
+    except (AssertionError, Exception) as e:
+        logger.debug(f"[BrowseSnapshot] user storage unavailable on persist: {e}")
         return
     try:
         app.storage.user['browse_snapshot_schema_version'] = _BROWSE_SNAPSHOT_VERSION

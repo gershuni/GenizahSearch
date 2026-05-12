@@ -1,5 +1,5 @@
 """Tests for browse snapshot helpers (Phase 74 + 74-CODEX-REVIEW2 fixes)."""
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 def test_missing_stamp_adopts_legacy_payload():
@@ -115,3 +115,51 @@ def test_persist_round_trip():
         assert pos is not None and pos['sys_id'] == '456' and pos['p_num'] == 3
         assert desk is not None and desk['pgpid'] == 99
         assert desk['entries'] == [{'sys_id': '456', 'shelfmark': 'T-S 13.1'}]
+
+
+def test_restore_tolerates_user_storage_assertion():
+    """Snapshot restore must not 500 when NiceGUI session storage was pruned.
+
+    Production crash 2026-05-12: prune_user_storage (10s scheduler) races with
+    a fresh /browse handler. NiceGUI raises
+    `AssertionError: user storage for {uuid} should be created before
+    accessing it` from storage.py:121. restore_browse_snapshot must catch and
+    return defaults so the page renders with no snapshot instead of a 500.
+    """
+    storage = MagicMock()
+    storage.get.side_effect = AssertionError(
+        'user storage for 6432b6d0-538a-4129-90a3-3ba9a6085e93 should be created before accessing it'
+    )
+    with patch('web.pages.browse_state.app') as mock_app:
+        mock_app.storage.user = storage
+        from web.pages.browse_state import BrowseState, restore_browse_snapshot
+
+        pos, desk = restore_browse_snapshot(BrowseState())
+
+        assert pos is None
+        assert desk is None
+
+
+def test_persist_tolerates_user_storage_assertion():
+    """Snapshot persist must not raise when NiceGUI session storage was pruned.
+
+    Same root cause as test_restore_tolerates_user_storage_assertion. persist
+    callers (snapshot triggers after navigation/state mutation) should swallow
+    the AssertionError and return silently.
+    """
+    storage = MagicMock()
+    storage.get.side_effect = AssertionError(
+        'user storage for 6432b6d0-538a-4129-90a3-3ba9a6085e93 should be created before accessing it'
+    )
+    with patch('web.pages.browse_state.app') as mock_app:
+        mock_app.storage.user = storage
+        from web.pages.browse_state import BrowseState, persist_browse_snapshot
+
+        class _Page:
+            p_num = 1
+            shelfmark = 'T-S 1.1'
+
+        state = BrowseState()
+        state.sys_id = '789'
+        # Should not raise
+        persist_browse_snapshot(state, page=_Page())
