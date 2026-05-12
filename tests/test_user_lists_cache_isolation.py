@@ -93,20 +93,49 @@ def test_cache_keyed_by_user_id_blocks_cross_user_read():
         assert patched_lists.call_count == 3
 
 
-def test_invalidate_cache_clears_user_id_too():
-    """invalidate_cache() must clear the user_id stamp; otherwise a subsequent
-    fetch as the same user could short-circuit using stale ``_cache=None`` plus
-    matching user_id.
+def test_invalidate_cache_clears_atomic_entry():
+    """invalidate_cache() resets the atomic ``_cache_entry`` to None.
+
+    Updated 2026-05-12 (Codex review CRITICAL fix): the cache now lives in a
+    single tuple field assigned in one statement (instead of three separate
+    fields that were non-atomic across the GIL).
     """
     from web.user_lists import UserListsManager
 
     mgr = UserListsManager()
-    mgr._cache = {'lists': {}}
-    mgr._cache_time = 9_999_999.0
-    mgr._cache_user_id = 'user-A'
+    mgr._cache_entry = ('user-A', 9_999_999.0, {'lists': {}})
 
     mgr.invalidate_cache()
 
-    assert mgr._cache is None
-    assert mgr._cache_time == 0
-    assert mgr._cache_user_id is None
+    assert mgr._cache_entry is None
+
+
+def test_cache_entry_written_atomically():
+    """The cache write must be a single tuple-assignment statement so concurrent
+    readers cannot observe a half-mutated state (e.g. new data with old user_id
+    stamp). Sanity-check the structural invariant.
+    """
+    from unittest.mock import patch
+    from web.user_lists import UserListsManager
+
+    mgr = UserListsManager()
+
+    def fake_is_logged_in():
+        return True
+
+    with patch('web.user_lists.GlobalAuthState.is_logged_in', fake_is_logged_in), \
+         patch('web.user_lists.GlobalAuthState.get_user_id', return_value='user-A'), \
+         patch('web.user_lists.get_user_lists', return_value=_build_lists('user-A')), \
+         patch('web.user_lists.get_projects', return_value=[]):
+        mgr._get_cached_data()
+
+    # After the call, _cache_entry must be a fully-populated tuple — never None
+    # mid-write, never with mismatched user_id/data.
+    assert mgr._cache_entry is not None
+    user_id, ts, data = mgr._cache_entry
+    assert user_id == 'user-A'
+    assert ts > 0
+    assert 'lists' in data
+    # The names in the cached data are user-A's, not some other user.
+    a_list_names = {v['name'] for v in data['lists'].values()}
+    assert a_list_names == {'user-A-list-0', 'user-A-list-1'}

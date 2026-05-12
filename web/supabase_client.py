@@ -21,11 +21,17 @@ from shared.supabase_provider import get_url, get_anon_key
 
 logger = logging.getLogger(__name__)
 
-# Per-user session lock to prevent concurrent token refresh (race condition fix)
-_session_locks: Dict[int, threading.Lock] = {}
+# Per-user session lock to prevent concurrent token refresh (race condition fix).
+# 2026-05-12 Codex review CRITICAL fix: keys changed from ``id(storage)`` to the
+# session's access_token. CPython can reuse object ids after a pruned session
+# storage dict is GC'd, which let a NEW session inherit a CACHED authenticated
+# client belonging to the previous user. Keying by a stable per-session token
+# eliminates that cross-user leak: a fresh session has a fresh access_token and
+# cannot collide with another user's entry.
+_session_locks: Dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
-# Cached authenticated clients: storage_id -> (client, expiry_timestamp)
-_client_cache: Dict[int, Tuple[Client, float]] = {}
+# Cached authenticated clients: access_token -> (client, expiry_timestamp).
+_client_cache: Dict[str, Tuple[Client, float]] = {}
 _CLIENT_CACHE_TTL = 50  # seconds (Supabase access tokens last 60s)
 
 # ============================================================================
@@ -92,58 +98,75 @@ def get_user_client() -> Client:
     The first request refreshes and caches; subsequent requests reuse the cached client.
 
     Falls back to the singleton client if no user session tokens are available.
+
+    2026-05-12 Codex review CRITICAL fix: the cache + lock dicts are keyed by
+    ``access_token`` (a stable per-session identifier) instead of the previous
+    ``id(app.storage.user)``. CPython can reuse object ids after a session
+    storage dict is GC'd by ``prune_user_storage``, which let a fresh session
+    that happened to land on the same memory address inherit a cached
+    authenticated client belonging to a different user.
     """
     try:
         from nicegui import app as _app
         storage = _app.storage.user
-        storage_id = id(storage)
 
-        # Fast path: return cached client if still valid
+        # Read tokens FIRST so the cache key is bound to the actual session,
+        # not to a memory-address proxy. No tokens → anonymous singleton client.
+        auth_session = storage.get('auth_session') or {}
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+
+        if not access_token or not refresh_token:
+            logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
+            return get_client()
+
+        cache_key = access_token  # Unique per-session, rotates on refresh.
+
+        # Fast path: return cached client if still valid.
         now = time.time()
-        cached = _client_cache.get(storage_id)
+        cached = _client_cache.get(cache_key)
         if cached and cached[1] > now:
             return cached[0]
 
-        # Get or create a lock for this user session
+        # Get or create a lock for this session.
         with _locks_guard:
-            if storage_id not in _session_locks:
-                _session_locks[storage_id] = threading.Lock()
-            lock = _session_locks[storage_id]
+            if cache_key not in _session_locks:
+                _session_locks[cache_key] = threading.Lock()
+            lock = _session_locks[cache_key]
 
         with lock:
-            # Re-check cache after acquiring lock (another thread may have refreshed)
-            cached = _client_cache.get(storage_id)
+            # Re-check cache after acquiring lock (another thread may have refreshed).
+            cached = _client_cache.get(cache_key)
             if cached and cached[1] > now:
                 return cached[0]
 
-            # Read tokens (may have been updated by a prior request that held the lock)
-            auth_session = storage.get('auth_session', {})
-            access_token = auth_session.get('access_token')
-            refresh_token = auth_session.get('refresh_token')
+            # Re-read tokens — another request that held the lock may have refreshed.
+            auth_session = storage.get('auth_session') or {}
+            access_token_inner = auth_session.get('access_token') or access_token
+            refresh_token_inner = auth_session.get('refresh_token') or refresh_token
 
-            if access_token and refresh_token:
-                try:
-                    user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-                    resp = user_client.auth.set_session(access_token, refresh_token)
-                    # Update stored tokens — set_session may have refreshed them
-                    if resp and resp.session:
-                        storage['auth_session'] = {
-                            'access_token': resp.session.access_token,
-                            'refresh_token': resp.session.refresh_token,
-                        }
-                    _client_cache[storage_id] = (user_client, now + _CLIENT_CACHE_TTL)
-                    return user_client
-                except Exception as e:
-                    logger.error(f"[get_user_client] set_session failed: {e}")
-                    _client_cache.pop(storage_id, None)
-                    # Clear auth only for terminal token errors (consumed/expired/invalid);
-                    # transient network or Supabase outages should NOT log the user out.
-                    err_msg = str(e).lower()
-                    if 'refresh token' in err_msg or 'invalid' in err_msg or 'expired' in err_msg:
-                        _clear_stale_auth(storage)
-                    return get_client()
-            else:
-                logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
+            try:
+                user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+                resp = user_client.auth.set_session(access_token_inner, refresh_token_inner)
+                # Update stored tokens — set_session may have refreshed them.
+                if resp and resp.session:
+                    storage['auth_session'] = {
+                        'access_token': resp.session.access_token,
+                        'refresh_token': resp.session.refresh_token,
+                    }
+                    new_key = resp.session.access_token
+                else:
+                    new_key = access_token_inner
+                _client_cache[new_key] = (user_client, now + _CLIENT_CACHE_TTL)
+                return user_client
+            except Exception as e:
+                logger.error(f"[get_user_client] set_session failed: {e}")
+                _client_cache.pop(cache_key, None)
+                # Clear auth only for terminal token errors (consumed/expired/invalid);
+                # transient network or Supabase outages should NOT log the user out.
+                err_msg = str(e).lower()
+                if 'refresh token' in err_msg or 'invalid' in err_msg or 'expired' in err_msg:
+                    _clear_stale_auth(storage)
                 return get_client()
     except Exception as e:
         logger.error(f"[get_user_client] Error creating per-user client: {e}")

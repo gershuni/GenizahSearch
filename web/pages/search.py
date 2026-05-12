@@ -117,7 +117,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     _saved_results = (
         _saved_active_snapshot.get('results', [])
         if _saved_active_snapshot else
-        (app.storage.user.get('search_results', []) or [])
+        (_safe_get('search_results', []) or [])
     )
     try:
         _saved_results_count = len(_saved_results)
@@ -143,9 +143,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # Restore domain exclusions / printed filter from storage only for session restores
     if restore_saved_exclusions:
-        _de = app.storage.user.get('domain_exclusions')
+        _de = _safe_get('domain_exclusions')
         search_state.domain_exclusions = set(_de) if _de is not None else set()
-        search_state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
+        search_state.printed_filter = _safe_get('search_printed_filter', 'all')
 
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:
@@ -163,12 +163,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # Restore word search excluded ids from session
     if restore_saved_exclusions:
-        _wse = app.storage.user.get('word_search_excluded_ids')
+        _wse = _safe_get('word_search_excluded_ids')
         search_state.word_search_excluded_ids = set(_wse) if _wse is not None else set()
 
     # Phase 56: Restore manuscript exclusion sources from session
     if restore_saved_exclusions:
-        _saved_excl = app.storage.user.get('search_exclusion_sources', [])
+        _saved_excl = _safe_get('search_exclusion_sources', [])
         if _saved_excl:
             try:
                 search_state.exclusion_sources = deserialize_sources(_saved_excl)
@@ -176,7 +176,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.exclusion_sources = []  # Lookup failed; use empty list
 
     # Phase 55: Restore refinement chain from session (D-14)
-    _saved_refinement_chain = app.storage.user.get('search_refinement_chain', [])
+    _saved_refinement_chain = _safe_get('search_refinement_chain', [])
     if _saved_refinement_chain and restore_saved_results:
         try:
             search_state.refinement_chain = [RefinementStep.from_dict(d) for d in _saved_refinement_chain]

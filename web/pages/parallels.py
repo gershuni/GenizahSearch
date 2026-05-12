@@ -288,20 +288,23 @@ def create_parallels_page(initial_text: str = None):
             )
         except Exception:
             pass  # Snapshot restore failed; page falls back to empty
-    elif 'parallels_results' in app.storage.user:
-        try:
-            p_state.results = app.storage.user.get('parallels_results', [])
-            # Legacy fallback for pre-fix sessions only
-            state.parallels_results = p_state.results
-            state.parallels_filtered = app.storage.user.get('parallels_filtered', [])
-            from web.export_state import set_parallels_export
-            set_parallels_export(
-                results=p_state.results,
-                filtered=app.storage.user.get('parallels_filtered', []) or [],
-                meta=None,
-            )
-        except Exception:
-            pass  # Browser storage operation failed; preference not persisted
+    else:
+        # 2026-05-12 Codex HIGH: safe_user_get guards bootstrap reads.
+        _legacy_results = _safe_get('parallels_results')
+        if _legacy_results is not None:
+            try:
+                p_state.results = _legacy_results or []
+                _legacy_filtered = _safe_get('parallels_filtered', []) or []
+                state.parallels_results = p_state.results
+                state.parallels_filtered = _legacy_filtered
+                from web.export_state import set_parallels_export
+                set_parallels_export(
+                    results=p_state.results,
+                    filtered=_legacy_filtered,
+                    meta=None,
+                )
+            except Exception:
+                pass  # Browser storage operation failed; preference not persisted
 
     # Decode initial text from URL or restore from storage
     decoded_text = ""
@@ -316,7 +319,7 @@ def create_parallels_page(initial_text: str = None):
             decoded_text = initial_text  # Operation failed; use fallback value
     else:
         # Try to restore from storage
-        decoded_text = _active_snapshot.get('source_text') or app.storage.user.get('parallels_source_text', '')
+        decoded_text = (_active_snapshot or {}).get('source_text') or _safe_get('parallels_source_text', '')
 
     # Auto-exclude source manuscript when launched from another module
     if initial_text and state.meta_mgr:

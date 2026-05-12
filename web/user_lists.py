@@ -15,7 +15,7 @@ Usage:
 """
 
 import time
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple, Any
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -67,9 +67,13 @@ class UserListsManager:
         """
         self.local_mgr = local_mgr
         self.meta_mgr = meta_mgr
-        self._cache = None
-        self._cache_time = 0
-        self._cache_user_id: Optional[str] = None  # 2026-05-12 cross-user fix
+        # 2026-05-12 cross-user fix (Codex review CRITICAL):
+        # Cache state is held in a single tuple ``(user_id, timestamp, data)``
+        # assigned atomically in one statement. The earlier multi-field
+        # version was racy: a thread writing User B's data could partially
+        # mutate (_cache=B, _cache_user_id still 'A') before completing,
+        # letting a concurrent User-A reader return User B's data.
+        self._cache_entry: Optional[Tuple[Optional[str], float, Dict[str, Any]]] = None
         self._cache_ttl = 10  # Cache for 10 seconds
 
     @property
@@ -118,19 +122,22 @@ class UserListsManager:
         """Get data from cache or fetch from Supabase.
 
         2026-05-12 cross-user fix: `UserListsManager` is a singleton on
-        `AppState` (web/state.py), so multi-tenant requests share the same
-        instance. The TTL cache must therefore be keyed by `user_id`
-        too — otherwise User B's request within the 10s window returns
-        User A's lists.
+        `AppState` (web/state.py), so multi-tenant requests share the
+        same instance. The cache entry is held in a single immutable
+        tuple ``(user_id, timestamp, data)`` so a concurrent reader
+        cannot observe a half-mutated state (Codex review CRITICAL — the
+        first fix used three separate fields, which is non-atomic
+        across the GIL for multi-statement writes).
         """
         now = time.time()
         current_user_id = self.user_id
+        entry = self._cache_entry  # Snapshot the reference atomically.
         if (
-            self._cache
-            and self._cache_user_id == current_user_id
-            and (now - self._cache_time) < self._cache_ttl
+            entry is not None
+            and entry[0] == current_user_id
+            and (now - entry[1]) < self._cache_ttl
         ):
-            return self._cache
+            return entry[2]
 
         # Fetch fresh data
         if self.is_authenticated:
@@ -165,18 +172,16 @@ class UserListsManager:
             data['lists_order'] = list(data['lists'].keys())
             data['projects_order'] = list(data['projects'].keys())
 
-            self._cache = data
-            self._cache_time = now
-            self._cache_user_id = current_user_id  # 2026-05-12 cross-user fix
+            # ATOMIC write: assign the whole (user_id, time, data) tuple in
+            # one statement so concurrent readers never see a partial state.
+            self._cache_entry = (current_user_id, now, data)
             return data
 
         return self._get_default_data()
 
     def invalidate_cache(self):
         """Invalidate the cache to force refresh."""
-        self._cache = None
-        self._cache_time = 0
-        self._cache_user_id = None  # 2026-05-12 cross-user fix
+        self._cache_entry = None  # 2026-05-12 atomic snapshot reset
 
     # === List Operations ===
 

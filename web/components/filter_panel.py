@@ -230,44 +230,49 @@ def persist_value(key, value):
 def load_filter_state(state, storage_prefix: str):
     """Restore filter state from session storage.
 
+    2026-05-12: routed through ``safe_user_get`` because this is called
+    from search/parallels page bootstrap. A prune_user_storage race here
+    would otherwise return 500 instead of falling back to defaults.
+
     Args:
         state: State object to populate with filter values.
         storage_prefix: Storage key prefix (e.g., 'search' or 'parallels').
     """
+    from web.safe_storage import safe_user_get as _sg
     pfx = storage_prefix
     # Migrate from legacy single-value keys to multi-select lists
-    _legacy_domain = app.storage.user.get(f'{pfx}_filter_domain', None)
-    _legacy_author = app.storage.user.get(f'{pfx}_filter_author', None)
-    _legacy_work = app.storage.user.get(f'{pfx}_filter_work', None)
-    _fd = app.storage.user.get(f'{pfx}_filter_domains')
+    _legacy_domain = _sg(f'{pfx}_filter_domain', None)
+    _legacy_author = _sg(f'{pfx}_filter_author', None)
+    _legacy_work = _sg(f'{pfx}_filter_work', None)
+    _fd = _sg(f'{pfx}_filter_domains')
     state.filter_domains = _fd if _fd is not None else ([_legacy_domain] if _legacy_domain else [])
-    _fa = app.storage.user.get(f'{pfx}_filter_authors')
+    _fa = _sg(f'{pfx}_filter_authors')
     state.filter_authors = _fa if _fa is not None else ([_legacy_author] if _legacy_author else [])
-    _fw = app.storage.user.get(f'{pfx}_filter_works')
+    _fw = _sg(f'{pfx}_filter_works')
     state.filter_works = _fw if _fw is not None else ([_legacy_work] if _legacy_work else [])
-    state.filter_include_mode = app.storage.user.get(f'{pfx}_filter_include_mode', True)
-    state.filter_date_from = app.storage.user.get(f'{pfx}_filter_date_from', None)
-    state.filter_date_to = app.storage.user.get(f'{pfx}_filter_date_to', None)
-    _fme = app.storage.user.get(f'{pfx}_filter_material_exclude')
+    state.filter_include_mode = _sg(f'{pfx}_filter_include_mode', True)
+    state.filter_date_from = _sg(f'{pfx}_filter_date_from', None)
+    state.filter_date_to = _sg(f'{pfx}_filter_date_to', None)
+    _fme = _sg(f'{pfx}_filter_material_exclude')
     state.filter_material_exclude = _fme if _fme is not None else []
-    _fta = app.storage.user.get(f'{pfx}_filter_text_all')
+    _fta = _sg(f'{pfx}_filter_text_all')
     state.filter_text_all = _fta if _fta is not None else []
-    _ftany = app.storage.user.get(f'{pfx}_filter_text_any')
+    _ftany = _sg(f'{pfx}_filter_text_any')
     state.filter_text_any = _ftany if _ftany is not None else []
-    _ftn = app.storage.user.get(f'{pfx}_filter_text_not')
+    _ftn = _sg(f'{pfx}_filter_text_not')
     state.filter_text_not = _ftn if _ftn is not None else []
     # Measurement filters (Phase 54)
-    state.filter_width_min = app.storage.user.get(f'{pfx}_filter_width_min', None)
-    state.filter_width_max = app.storage.user.get(f'{pfx}_filter_width_max', None)
-    state.filter_height_min = app.storage.user.get(f'{pfx}_filter_height_min', None)
-    state.filter_height_max = app.storage.user.get(f'{pfx}_filter_height_max', None)
-    state.filter_line_count_min = app.storage.user.get(f'{pfx}_filter_line_count_min', None)
-    state.filter_line_count_max = app.storage.user.get(f'{pfx}_filter_line_count_max', None)
-    state.filter_line_height_min = app.storage.user.get(f'{pfx}_filter_line_height_min', None)
-    state.filter_line_height_max = app.storage.user.get(f'{pfx}_filter_line_height_max', None)
-    state.filter_text_density_min = app.storage.user.get(f'{pfx}_filter_text_density_min', None)
-    state.filter_text_density_max = app.storage.user.get(f'{pfx}_filter_text_density_max', None)
-    _fmm = app.storage.user.get(f'{pfx}_filter_measurement_material')
+    state.filter_width_min = _sg(f'{pfx}_filter_width_min', None)
+    state.filter_width_max = _sg(f'{pfx}_filter_width_max', None)
+    state.filter_height_min = _sg(f'{pfx}_filter_height_min', None)
+    state.filter_height_max = _sg(f'{pfx}_filter_height_max', None)
+    state.filter_line_count_min = _sg(f'{pfx}_filter_line_count_min', None)
+    state.filter_line_count_max = _sg(f'{pfx}_filter_line_count_max', None)
+    state.filter_line_height_min = _sg(f'{pfx}_filter_line_height_min', None)
+    state.filter_line_height_max = _sg(f'{pfx}_filter_line_height_max', None)
+    state.filter_text_density_min = _sg(f'{pfx}_filter_text_density_min', None)
+    state.filter_text_density_max = _sg(f'{pfx}_filter_text_density_max', None)
+    _fmm = _sg(f'{pfx}_filter_measurement_material')
     state.filter_measurement_material = _fmm if _fmm is not None else []
 
 
@@ -284,17 +289,18 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     Returns:
         True if filters were consumed, False otherwise.
     """
+    from web.safe_storage import safe_user_get as _sg
     if require_from_browse:
         # Search page: only consume if from_browse flag is set (passed via URL param)
         # The caller must check this condition before calling
-        incoming = app.storage.user.get('incoming_filters', {})
+        incoming = _sg('incoming_filters', {})
         if not incoming:
             return False
     else:
         # Parallels page: consume whenever incoming_filters exist
-        if not app.storage.user.get('incoming_filters'):
+        if not _sg('incoming_filters'):
             return False
-        incoming = app.storage.user.get('incoming_filters', {})
+        incoming = _sg('incoming_filters', {})
         if not incoming:
             return False
 
