@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.10.0
+# Genizah Search Pro 7.11.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.10.0?
+## What's New in Version 7.11.0?
+
+### v7.11.0: CUDL Coverage & Synthetic Inventories
+
+A 3-phase milestone (Phases 84, 85, 86) closing the gap between Cambridge CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv. Triggered by a user-reported case (`T-S NS 329.96` — present in CUDL with 2 image canvases, missing entirely from the app) that turned out to be representative of thousands of orphan classmarks.
+
+- **CUDL shelfmark normalization** — Mosseri label form (`Moss. III,27O` ↔ `mosseriiii27o`), Cambridge Or. numeric collapse, leading-zero collision audit, slash/comma/dot bug fixes. Recovers thousands of CUDL classmarks already represented in libraries.csv under different forms (96.23% of CUDL coverage now resolves via direct Phase 84 normalization)
+- **108 image-bearing synthetic manuscripts** — including T-S NS 329.96. These are FJMS-only inventories that have CUDL canvas images but no NLI Alma record at all. They now appear in search results, browse, the API, and image viewers exactly like real manuscripts, with proper image source attribution
+- **New "View on CUDL" link** — works correctly for previously-orphan Mosseri and CUL CUDL shelfmarks that previously fell through to a slug-fallback that 404'd
+- **Browse pagination fix** — synthetic manuscripts with CUDL canvases but no transcription text can now navigate Next/Prev through their image pages (both web and desktop). Page combo populates with correct image count
+- **Search Text Position dropdown reset** — selecting New Search now properly resets the Anywhere/Start/End/Line-starts/Line-ends dropdown; an active-state chip appears when the dropdown is set to anything other than the default
+- **Duplicate "Exclude manuscripts" button removed** — the filter panel's button is now the single source
+
+Synthetic manuscripts are currently read-only (no transcription/joins/comments support) — that's tracked as a Phase 87 follow-up.
 
 ### v7.10.0: Search API Public Release
 
@@ -183,7 +196,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.10.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.11.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

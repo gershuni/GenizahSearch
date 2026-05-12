@@ -4,18 +4,54 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased] — v7.11 CUDL Coverage & Synthetic Inventories
+## [7.11.0] - CUDL Coverage & Synthetic Inventories - 2026-05-12
 
-**Phase 85 outcome:** Synthetic-row INFRASTRUCTURE landed (helper module, generation
-script, browse hide-NLI gates, /api `is_synthetic` field, corrections-write reject,
-FJMS sidecar UNION-ALL pattern) but the synthetic-row POPULATION was reverted
-during 2026-05-09 UAT. Plan 02's "inclusive coverage stance" qualified InventoryIds
-on ANY FJMS signal, but the resulting 5,035 rows had only bibliography pointers
-(no text, no image, no catalog description) — not actionable for research without
-the underlying manuscript. Additionally, 175 of those rows shadowed real-Alma
-series-children (e.g. synthetic `T-S NS 161` shadowed 1,009 real `T-S NS 161.x`
-rows). User decision: revert the data, keep the infrastructure dormant, re-attempt
-in Phase 86 with image-bearing-only criteria.
+A 3-phase milestone (Phases 84, 85, 86) closing the gap between CUDL's ~141K
+classmark catalogue and GenizahSearch's libraries.csv. The originating
+user-reported case was `T-S NS 329.96` — present in CUDL with 2 image canvases,
+missing from libraries.csv because its FJMS inventory has no NLI Alma record at
+all. The milestone splits into normalization (recovering thousands of CUDL
+classmarks already represented in libraries.csv under different forms) and
+synthetic rows (a new 18-digit `99…000000` sys_id format for the small residue
+of truly-orphan FJMS inventories with no NLI counterpart).
+
+**Milestone outcome:**
+
+- **Phase 84** (CUDL Shelfmark Normalization) — `shared/fist_cudl_bridge.py`
+  bridge module with normalizers for Mosseri label form (`Moss. III,27O` ↔
+  `mosseriiii27o`), Cambridge Or. numeric collapse, leading-zero collision
+  audit, slash/comma/dot bug fixes. Wires into `get_image_sources`, browse
+  enrichment, shelfmark search fallback, and CUDL link builder.
+
+- **Phase 85** (Synthetic Infrastructure) — helper module
+  `shared/synthetic_sys_id.py`, generation script, FJMS sidecar UNION-ALL
+  pattern in export, browse hide-NLI gates, `is_synthetic` field on /api
+  responses + PostHog events, corrections-write reject. The initial Phase 85
+  POPULATION (5,035 bibliography-only rows) was reverted by `3c75a9bc` during
+  UAT — the infrastructure stays active but produces zero rows until Phase 86
+  re-attempts with image-bearing criteria.
+
+- **Phase 86** (CUDL Coverage Audit + Synthetic Re-attempt) — **108 image-bearing
+  synthetic manuscripts** including the originating case `T-S NS 329.96`. The
+  CUDL-walked qualifier requires (a) a CUDL manifest in `cambridge_manifests`,
+  (b) no real-Alma children, (c) unambiguous bridge resolution. AUDIT-02 5-tier
+  coverage report shows 96.23% phase84_hit + 2.39% phase86_existing_alma_candidate
+  + 0.08% phase86_synthetic + 1.13% phase86_residue. The 1,599-row residue
+  (29.99% of original 5,325 truly-orphan CUDL classmarks) is documented in
+  `.planning/phases/86-cudl-coverage-audit-and-synthetic-reattempt/86-RESIDUE-PATTERNS.md`
+  with 6 pattern families analyzed and REJECTED — they need human-in-loop
+  adjudication, not new auto-rules.
+
+**Phase 85 background (kept for context):** The original Phase 85 attempt
+shipped INFRASTRUCTURE but reverted POPULATION during 2026-05-09 UAT. Plan
+02's "inclusive coverage stance" qualified InventoryIds on ANY FJMS signal,
+but the resulting 5,035 rows had only bibliography pointers (no text, no
+image, no catalog description) — not actionable for research without the
+underlying manuscript. Additionally, 175 of those rows shadowed real-Alma
+series-children (e.g. synthetic `T-S NS 161` shadowed 1,009 real
+`T-S NS 161.x` rows). User decision: revert the data, keep the
+infrastructure dormant, re-attempt in Phase 86 with image-bearing-only
+criteria. **Phase 86 delivered on that decision.**
 
 ### Infrastructure landed (active in code, no production data)
 
@@ -77,6 +113,99 @@ in Phase 86 with image-bearing-only criteria.
   (`reports/synthetic_ambiguity_residue.csv`,
   `reports/synthetic_parent_shelfmarks.csv`, `fist_data/synthetic_manifest.json`)
   for Phase 86 to consume.
+
+### Phase 84 — CUDL Shelfmark Normalization (active)
+
+- **`shared/fist_cudl_bridge.py`** — bridge module with FIST↔CUDL normalizers.
+  `lookup_fist_by_cudl`, `explain_fist_by_cudl`, `build_fist_alias_index`,
+  Mosseri label normalizer (`Moss. III,27O` ↔ `mosseriiii27o`), Cambridge Or.
+  numeric collapse, ambiguity-policy guard against leading-zero collisions.
+- **`shared/shelfmark_bridge.py`** — `build_alias_index()` + `lookup_cudl()`
+  wired into `genizah_core.resolve_system_by_shelfmark` as fallback for shelfmark
+  search misses, and into `get_image_sources()` so CUDL manifest URLs surface in
+  browse for previously-orphan shelfmarks.
+- **6 bridge wiring call sites** across `genizah_core.py`, `web/services.py`,
+  `web/pages/browse_enrichment.py:208`, image-source resolution, CUDL link
+  builder, and orphan-scanner unification. Web browse `View on CUDL` button
+  resolves correctly for Mosseri + CUL-CUDL shelfmarks that previously fell
+  through to lossy slug-fallback 404s.
+- **3-layer regression guard:** `cudl_must_resolve` fixture (positive tests),
+  `cudl_baseline_resolved` snapshot (regression detection), unit tests on
+  ambiguity policy. `scripts/build_cudl_fixture.py` regenerates from real data.
+
+### Phase 86 — CUDL Coverage Audit + Synthetic Re-attempt (active)
+
+- **108 image-bearing synthetic manuscripts** in `libraries.csv`, including
+  the originating user case `T-S NS 329.96` (sys_id `990065549106000000`). All
+  108 have CUDL canvas images accessible via the FIST↔CUDL bridge. Distribution:
+  101 CUL + 7 Mosseri. The synthetic block is marker-fenced in libraries.csv
+  for idempotent regeneration.
+- **Surgical DB injection** (`scripts/phase86_inject_synthetic_to_main_db.py`):
+  3,264 catalog rows + 103 FTS5 docs across 11 base tables in
+  `fjms_enrichment.db`, leaving the 7 supplemental tables (translations,
+  measurements, blank_images, extra_info, computed_measurements, import_meta,
+  fjms_translations) untouched. `catalog_sizes` skipped per Codex review
+  (schema drift — main has v7.3.0 measurements columns, worktree had v6.5 form).
+  Backup via `.backup()` API + full gzip CRC kept at
+  `_tmp/phase86_backups/fjms_enrichment.db.pre-inject.*.bak.gz`.
+- **Browse pagination for synthetic sys_ids** — synthetic rows have CUDL
+  canvases but no Tantivy transcription pages, so `total_pages=0` from the core
+  search engine. Fix derives `total_pages` from `cambridge_images` (web) and
+  enriched image lists (desktop) so Next/Prev work and the page combo populates.
+  Bypasses Tantivy for synthetic via `is_synthetic_sys_id` short-circuit,
+  preserves requested `p_num` through metadata-only fallback, tolerates NiceGUI
+  slot-lifecycle race during Phase A re-render.
+- **AUDIT-02 5-tier coverage report** (`reports/cudl_coverage.md`):
+  phase84_hit 96.23%, phase86_existing_alma_candidate 2.39%,
+  phase86_synthetic 0.08%, phase86_residue 1.13%, multi_inventory_ambiguous 0.18%.
+- **Residue patterns adjudication** — 6 pattern families analyzed in
+  `.planning/phases/86-cudl-coverage-audit-and-synthetic-reattempt/86-RESIDUE-PATTERNS.md`.
+  All marked REJECTED with carry-forward note: the residue (1,599 rows) reflects
+  EXISTING-rule over-aggressiveness, not missing rules. Human-in-loop
+  adjudication required, not new auto-rules.
+- **NLI attribution regression guard** — `scripts/audit_nli_attribution.py` +
+  `tests/fixtures/v7_9_4_nli_flipped_sys_ids.txt` (461-row golden fixture from
+  `git show 29fd3044`) confirm Phase 86 work did not regress the v7.9.4
+  Oxford→NLI library_code flip.
+
+### Browse Bug Fixes (Web + Desktop)
+
+- **Synthetic-row pagination** — `_get_metadata_only_browse_page` accepts
+  `p_num` / `absolute_index` / `next_prev` and produces a moving target page
+  clamped to ≥ 1. `browse_render_page` derives `total` from the largest of
+  `_browse_folio_images`, `images_ext`, or `images_nli` when `metadata_only`
+  and `total_pages==0`. Combo, page-count label, and viewer.set_page all sync
+  to the image-driven page count.
+
+### Other Fixes
+
+- **fix(search):** remove duplicate top-toolbar "Exclude manuscripts" button
+  (the filter panel already has one — the results bar entry was a stray
+  carry-over from an earlier UX iteration). Reduces visual noise.
+- **fix(search):** reset Text Position dropdown (Anywhere / Start / End /
+  Line starts / Line ends) on New Search + show active-state chip when not
+  set to default. Previously persisted across sessions and caused stealth
+  "why aren't my results showing up" confusion.
+- **fix(ci):** remove unused `pytest` imports flagged by ruff F401 across
+  Phase 86 test files.
+
+### Database Refresh
+
+- **`fjms_enrichment.db`** rebuilt with 3,264 synthetic rows + 103 FTS5 docs
+  added via surgical INSERT-only migration. All 7 supplemental tables
+  preserved. Backup retained on server as
+  `fjms_enrichment.db.pre-phase86-20260512`.
+
+### Migration Notes
+
+- **Deploy posture established:** scp DBs FIRST, then push code. The
+  2026-05-11 incident (deployed code without DB sync → catalog/PGP/bib data
+  loss → reverted to `6ce42522`) is now codified as the standard runbook.
+- **Web auto-deployed** 2026-05-12 via `deploy.sh` after scp of
+  `fjms_enrichment.db` + atomic systemd swap. Old DB preserved on server.
+- **Desktop installer** rebuilt and bundled with updated `libraries.csv`
+  (108 synthetic rows) + `fjms_enrichment.db` (3,264 synthetic rows). No
+  user-data migration required.
 
 ---
 
