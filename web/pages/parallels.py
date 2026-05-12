@@ -276,6 +276,13 @@ def create_parallels_page(initial_text: str = None):
             p_state.excluded_manuscript_ids = set(_active_snapshot.get('excluded_manuscript_ids', []))
             state.parallels_results = p_state.results
             state.parallels_filtered = p_state.filtered_results
+            # 2026-05-12 cross-user fix: mirror to per-session export payload.
+            from web.export_state import set_parallels_export
+            set_parallels_export(
+                results=p_state.results,
+                filtered=p_state.filtered_results,
+                meta=None,
+            )
         except Exception:
             pass  # Snapshot restore failed; page falls back to empty
     elif 'parallels_results' in app.storage.user:
@@ -284,6 +291,12 @@ def create_parallels_page(initial_text: str = None):
             # Legacy fallback for pre-fix sessions only
             state.parallels_results = p_state.results
             state.parallels_filtered = app.storage.user.get('parallels_filtered', [])
+            from web.export_state import set_parallels_export
+            set_parallels_export(
+                results=p_state.results,
+                filtered=app.storage.user.get('parallels_filtered', []) or [],
+                meta=None,
+            )
         except Exception:
             pass  # Browser storage operation failed; preference not persisted
 
@@ -1977,6 +1990,13 @@ def create_parallels_page(initial_text: str = None):
                 'boundary_options': None,
                 'warnings': ['restored-from-history'],
             }
+            # 2026-05-12 cross-user fix: mirror to per-session export payload.
+            from web.export_state import set_parallels_export
+            set_parallels_export(
+                results=p_state.results,
+                filtered=p_state.filtered_results,
+                meta=state.parallels_search_meta,
+            )
 
             # Update header and render
             results_header.text = f"{len(p_state.results)} {tr('parallels found')}"
@@ -2032,6 +2052,9 @@ def create_parallels_page(initial_text: str = None):
         state.parallels_results = []
         state.parallels_filtered = []
         state.parallels_search_meta = None  # Phase 77: clear envelope-echo metadata on reset
+        # 2026-05-12 cross-user fix: clear per-session export payload.
+        from web.export_state import clear_parallels_export
+        clear_parallels_export()
         ui.notify(tr('Composition reset'), type='info', timeout=2000)
 
     async def execute_parallels():
@@ -2302,6 +2325,14 @@ def create_parallels_page(initial_text: str = None):
                         'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
                         'warnings': [],  # Phase 78 will populate
                     }
+                    # 2026-05-12 cross-user fix: mirror to per-session export payload
+                    # so /api/export/parallels/* honor only this session's data.
+                    from web.export_state import set_parallels_export
+                    set_parallels_export(
+                        results=main_results,
+                        filtered=filtered_results,
+                        meta=state.parallels_search_meta,
+                    )
                     # Also store in user storage (for UI persistence across page reloads)
                     app.storage.user['parallels_results'] = _compact_result_rows(
                         main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]

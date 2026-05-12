@@ -52,9 +52,15 @@ def mock_meta_mgr():
 
 
 @pytest.fixture
-def populated_search_state(mock_meta_mgr):
-    """Populate web.api.state.last_results + envelope-echo fields, restore on teardown."""
+def populated_search_state(mock_meta_mgr, monkeypatch):
+    """Populate web.api.state.last_results + the per-session export payload.
+
+    Updated 2026-05-12: handlers now read from web.export_state per-session
+    payload (formerly state.* singleton). Tests inject a stub backend dict
+    via the ``_TEST_BACKEND`` hook.
+    """
     from web.api import state
+    import web.export_state as export_state
     saved = {
         'last_results': state.last_results,
         'current_search_query': getattr(state, 'current_search_query', ''),
@@ -66,7 +72,7 @@ def populated_search_state(mock_meta_mgr):
         'meta_mgr': state.meta_mgr,
     }
     state.meta_mgr = mock_meta_mgr
-    state.last_results = [{
+    results = [{
         'uid': 'uid_001',
         'display': {
             'shelfmark': 'T-S 12.345',
@@ -79,12 +85,25 @@ def populated_search_state(mock_meta_mgr):
         'full_text': 'lorem ipsum',
         'sort_score': 0.5,
     }]
+    state.last_results = results
     state.last_selected_uids = None
     state.current_search_query = 'foo'
     state.current_search_mode = 'text'
     state.current_search_gap = None
     state.last_filters_applied = None
     state.last_search_warnings = []
+    fake_backend = {
+        'export_search_payload': {
+            'results': results,
+            'query': 'foo',
+            'mode': 'text',
+            'gap': None,
+            'filters': None,
+            'warnings': [],
+            'selected_uids': None,
+        }
+    }
+    monkeypatch.setattr(export_state, '_TEST_BACKEND', fake_backend)
     yield state
     for k, v in saved.items():
         setattr(state, k, v)
@@ -100,8 +119,10 @@ def empty_search_state():
 
 
 @pytest.fixture
-def populated_parallels_state(mock_meta_mgr):
+def populated_parallels_state(mock_meta_mgr, monkeypatch):
+    """Populate state.* AND the per-session parallels export payload."""
     from web.api import state
+    import web.export_state as export_state
     saved = {
         'parallels_results': state.parallels_results,
         'parallels_filtered': state.parallels_filtered,
@@ -109,7 +130,7 @@ def populated_parallels_state(mock_meta_mgr):
         'meta_mgr': state.meta_mgr,
     }
     state.meta_mgr = mock_meta_mgr
-    state.parallels_results = [{
+    parallels_results = [{
         'uid': 'uid_a',
         'raw_header': 'header_9911111111111111_IE1_P3',
         'score': 50,
@@ -117,6 +138,7 @@ def populated_parallels_state(mock_meta_mgr):
         'text': 'manuscript text',
         'chunk_hits': [(0, 'first chunk', 30, 'manuscript snippet')],
     }]
+    state.parallels_results = parallels_results
     state.parallels_filtered = []
     state.parallels_search_meta = {
         'source_text': 'hello world',
@@ -127,6 +149,14 @@ def populated_parallels_state(mock_meta_mgr):
         'boundary_options': None,
         'warnings': [],
     }
+    fake_backend = {
+        'export_parallels_payload': {
+            'results': parallels_results,
+            'filtered': [],
+            'meta': state.parallels_search_meta,
+        }
+    }
+    monkeypatch.setattr(export_state, '_TEST_BACKEND', fake_backend)
     yield state
     for k, v in saved.items():
         setattr(state, k, v)

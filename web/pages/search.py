@@ -2070,6 +2070,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # carried over from the prior search so a new export defaults to
         # "full result set" (which is now empty — handlers return 400).
         state.last_selected_uids = None
+        # 2026-05-12 cross-user fix: clear per-session export payload.
+        from web.export_state import clear_search_export
+        clear_search_export()
         ui.notify(tr('Search reset'), type='info', timeout=2000)
 
     # === Bulk Operations ===
@@ -2092,6 +2095,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # selection to the global state singleton so /api/export/* handlers
         # see the change.
         state.last_selected_uids = compute_selected_uids(search_state)
+        # 2026-05-12 cross-user fix: mirror selection to per-session export
+        # payload so the FastAPI handlers (which now read per-session) honor
+        # the bulk-toggle.
+        from web.export_state import update_search_export_selection
+        update_search_export_selection(state.last_selected_uids)
 
     def update_selection_ui():
         """Update selection counter and bulk actions visibility."""
@@ -3797,6 +3805,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # search.py:4232-4242. Pass it through verbatim (None when no active filters).
             state.last_filters_applied = params.get('filters')
             state.last_search_warnings = ['restored-from-history']
+            # 2026-05-12 cross-user fix: mirror to per-session export payload.
+            from web.export_state import set_search_export
+            set_search_export(
+                results=state_snapshot['results'],
+                query=entry.get('query', '') or '',
+                mode=state.current_search_mode,
+                gap=state.current_search_gap,
+                filters=state.last_filters_applied,
+                warnings=state.last_search_warnings,
+                selected_uids=None,
+            )
             # Update count display
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
             # Re-render with restored exclusions (manuscript exclusions first if active)
@@ -4107,6 +4126,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             state.last_search_warnings = ['partial-results']  # signal partial-result fidelity to consumers
             # Still save results for display
             state.last_results = results
+            # 2026-05-12 cross-user fix: mirror to per-session export payload.
+            from web.export_state import set_search_export
+            set_search_export(
+                results=results,
+                query=clean_query,
+                mode=mode,
+                gap=state.current_search_gap,
+                filters=state.last_filters_applied,
+                warnings=['partial-results'],
+                selected_uids=None,
+            )
 
             # Compute elapsed
             total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
@@ -4186,6 +4216,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         state.last_search_warnings = []  # Phase 78 will populate; Phase 77 always [] per D-07
         # Finalize search state for immediate display
         state.last_results = results
+        # 2026-05-12 cross-user fix: mirror to per-session export payload so
+        # /api/export/* (Excel/Word/JSON) honor this session's data exclusively.
+        from web.export_state import set_search_export
+        set_search_export(
+            results=results,
+            query=clean_query,
+            mode=mode,
+            gap=state.current_search_gap,
+            filters=state.last_filters_applied,
+            warnings=[],
+            selected_uids=None,
+        )
         search_state.is_running = False
         search_state.is_cancelled = False
         search_state.progress = 1.0

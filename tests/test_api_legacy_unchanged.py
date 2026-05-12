@@ -33,13 +33,18 @@ def client_with_both_inits():
     return TestClient(bare)
 
 
-def test_legacy_export_route_shape_unchanged(client_with_both_inits):
+def test_legacy_export_route_shape_unchanged(client_with_both_inits, monkeypatch):
     """Happy path: GET /api/export/json (legacy Phase 77 route) returns the
     Phase 77 envelope with no `error` key — proving init_search_api did not
     accidentally short-circuit the legacy route.
 
+    Updated 2026-05-12: payload now read from per-session web.export_state
+    (formerly state.* singleton). Tests inject a stub backend dict via the
+    ``_TEST_BACKEND`` hook.
+
     Reference: tests/test_api_export_json.py:54-150 for the seed pattern."""
     from web.state import state
+    import web.export_state as export_state
     saved_results = state.last_results
     saved_meta = state.meta_mgr
     from unittest.mock import MagicMock
@@ -51,7 +56,7 @@ def test_legacy_export_route_shape_unchanged(client_with_both_inits):
         'ie_id': 'IE99', 'p_num': '7', 'fl_id': None,
     }
     state.meta_mgr = fake_meta
-    state.last_results = [{
+    results = [{
         'uid': 'uid_001',
         'display': {
             'shelfmark': 'T-S 12.345', 'title': 'test',
@@ -61,6 +66,19 @@ def test_legacy_export_route_shape_unchanged(client_with_both_inits):
         'snippet': 'a *match* here', 'full_text': 'lorem ipsum',
         'sort_score': 0.5,
     }]
+    state.last_results = results
+    fake_backend = {
+        'export_search_payload': {
+            'results': results,
+            'query': 'foo',
+            'mode': 'text',
+            'gap': None,
+            'filters': None,
+            'warnings': [],
+            'selected_uids': None,
+        }
+    }
+    monkeypatch.setattr(export_state, '_TEST_BACKEND', fake_backend)
     try:
         r = client_with_both_inits.get('/api/export/json')
         assert r.status_code == 200, r.text

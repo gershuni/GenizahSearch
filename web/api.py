@@ -1843,31 +1843,29 @@ def init_api_routes(app_override=None):
     @target_app.get('/api/export/excel')
     def export_excel():
         """Export search results to Excel format using unified export service."""
-        if not state.last_results:
+        # Per-session read (web.export_state). The previous singleton path
+        # (state.last_results / state.current_search_query) leaked User A's
+        # query name into User B's xlsx filename across separate devices.
+        from web.export_state import get_search_export
+        payload = get_search_export()
+        if not payload or not payload.get('results'):
             return Response("No results to export", status_code=400)
 
-        # Phase 77 gap-closure (Plan 06, Gap #2): honor row-checkbox selection.
-        # The selection-uid field is None when no selection (export all);
-        # non-empty list when user has checked specific rows. Empty list `[]`
-        # is treated as None defensively (helper never produces it, but a
-        # future regression that sets it shouldn't silently emit zero rows).
-        _sel = state.last_selected_uids
+        all_results = payload['results']
+        query = payload.get('query') or ''
+        _sel = payload.get('selected_uids')
         if _sel:
             _sel_set = set(_sel)
-            _results = [r for r in state.last_results if r.get('uid', '') in _sel_set]
+            _results = [r for r in all_results if r.get('uid', '') in _sel_set]
         else:
-            _results = state.last_results
+            _results = all_results
 
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_search_results_excel(
-                _results,
-                state.current_search_query or ""
+                _results, query
             )
-            # Phase 77 gap-closure (Plan 06, Gap #2): suffix filename when filtered
-            # by selection so full vs. partial exports disambiguate at the OS level.
-            if _sel and len(_results) < len(state.last_results):
-                # filename ends in '.xlsx' — splice the suffix before the dot.
+            if _sel and len(_results) < len(all_results):
                 root, _, ext = filename.rpartition('.')
                 filename = f"{root}-selected-{len(_results)}.{ext}" if root else filename
             return Response(
@@ -1884,25 +1882,26 @@ def init_api_routes(app_override=None):
     @target_app.get('/api/export/word')
     def export_word():
         """Export search results to Word format using unified export service."""
-        if not state.last_results:
+        from web.export_state import get_search_export
+        payload = get_search_export()
+        if not payload or not payload.get('results'):
             return Response("No results to export", status_code=400)
 
-        # Phase 77 gap-closure (Plan 06, Gap #2): honor row-checkbox selection.
-        _sel = state.last_selected_uids
+        all_results = payload['results']
+        query = payload.get('query') or ''
+        _sel = payload.get('selected_uids')
         if _sel:
             _sel_set = set(_sel)
-            _results = [r for r in state.last_results if r.get('uid', '') in _sel_set]
+            _results = [r for r in all_results if r.get('uid', '') in _sel_set]
         else:
-            _results = state.last_results
+            _results = all_results
 
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_search_results_word(
-                _results,
-                state.current_search_query or ""
+                _results, query
             )
-            # Phase 77 gap-closure (Plan 06, Gap #2): suffix filename when filtered.
-            if _sel and len(_results) < len(state.last_results):
+            if _sel and len(_results) < len(all_results):
                 root, _, ext = filename.rpartition('.')
                 filename = f"{root}-selected-{len(_results)}.{ext}" if root else filename
             return Response(
@@ -1920,11 +1919,19 @@ def init_api_routes(app_override=None):
     def export_parallels_excel():
         """Export parallels results to Excel using unified export service."""
         from nicegui import app as nicegui_app
+        from web.export_state import get_parallels_export
 
-        parallels_results = state.parallels_results or []
-        filtered_results = state.parallels_filtered or []
-        # Get source text from storage for filename
-        source_text = nicegui_app.storage.user.get('parallels_source_text', '')
+        session_payload = get_parallels_export() or {}
+        parallels_results = session_payload.get('results') or []
+        filtered_results = session_payload.get('filtered') or []
+        meta = session_payload.get('meta') or {}
+        # source_text: prefer meta, fall back to legacy app.storage.user key.
+        source_text = meta.get('source_text') or ''
+        if not source_text:
+            try:
+                source_text = nicegui_app.storage.user.get('parallels_source_text', '') or ''
+            except Exception:
+                source_text = ''
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -1949,11 +1956,18 @@ def init_api_routes(app_override=None):
     def export_parallels_word():
         """Export parallels results to Word using unified export service."""
         from nicegui import app as nicegui_app
+        from web.export_state import get_parallels_export
 
-        parallels_results = state.parallels_results or []
-        filtered_results = state.parallels_filtered or []
-        # Get source text from storage for filename
-        source_text = nicegui_app.storage.user.get('parallels_source_text', '')
+        session_payload = get_parallels_export() or {}
+        parallels_results = session_payload.get('results') or []
+        filtered_results = session_payload.get('filtered') or []
+        meta = session_payload.get('meta') or {}
+        source_text = meta.get('source_text') or ''
+        if not source_text:
+            try:
+                source_text = nicegui_app.storage.user.get('parallels_source_text', '') or ''
+            except Exception:
+                source_text = ''
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -1979,38 +1993,40 @@ def init_api_routes(app_override=None):
         """Phase 77 EXPORT-01/03/04: search results as Claude-friendly JSON.
 
         Stateful download (mirrors existing /api/export/excel pattern). Reads
-        state.last_results + envelope-echo fields populated at web/pages/search.py
-        execute-time. Phase 78 /api/search is the stateless POST counterpart.
+        per-session payload from web.export_state (formerly state.* singleton,
+        which leaked across users — 2026-05-12). Phase 78 /api/search is the
+        stateless POST counterpart.
         """
         from starlette.responses import JSONResponse
         from shared.search_serializer import (
             serialize_search_payload, build_search_filename,
         )
+        from web.export_state import get_search_export
 
-        if not state.last_results:
+        session_payload = get_search_export()
+        if not session_payload or not session_payload.get('results'):
             return Response("No results to export", status_code=400)
 
-        # Phase 77 gap-closure (Plan 06, Gap #2): honor row-checkbox selection.
-        _sel = state.last_selected_uids
+        all_results = session_payload['results']
+        _sel = session_payload.get('selected_uids')
         if _sel:
             _sel_set = set(_sel)
-            _results = [r for r in state.last_results if r.get('uid', '') in _sel_set]
+            _results = [r for r in all_results if r.get('uid', '') in _sel_set]
         else:
-            _results = state.last_results
+            _results = all_results
 
         try:
             payload = serialize_search_payload(
                 _results,
                 meta_mgr=state.meta_mgr,
-                query=getattr(state, 'current_search_query', '') or '',
-                mode=getattr(state, 'current_search_mode', 'text') or 'text',
-                gap=getattr(state, 'current_search_gap', None),
-                filters=getattr(state, 'last_filters_applied', None),
-                warnings=getattr(state, 'last_search_warnings', None) or [],
+                query=session_payload.get('query') or '',
+                mode=session_payload.get('mode') or 'text',
+                gap=session_payload.get('gap'),
+                filters=session_payload.get('filters'),
+                warnings=session_payload.get('warnings') or [],
             )
             filename = build_search_filename()
-            # Phase 77 gap-closure (Plan 06, Gap #2): suffix filename when filtered.
-            if _sel and len(_results) < len(state.last_results):
+            if _sel and len(_results) < len(all_results):
                 root, _, ext = filename.rpartition('.')
                 filename = f"{root}-selected-{len(_results)}.{ext}" if root else filename
             return JSONResponse(
@@ -2028,17 +2044,20 @@ def init_api_routes(app_override=None):
         """Phase 77 EXPORT-02/03/04: parallels results as Claude-friendly JSON.
 
         Stateful download (mirrors existing /api/export/parallels/excel pattern).
-        Reads state.parallels_results + state.parallels_filtered + state.parallels_search_meta.
-        Phase 80 /api/parallels is the stateless POST counterpart.
+        Reads per-session payload from web.export_state (formerly state.* singleton,
+        which leaked across users — 2026-05-12). Phase 80 /api/parallels is the
+        stateless POST counterpart.
         """
         from starlette.responses import JSONResponse
         from nicegui import app as nicegui_app
         from shared.search_serializer import (
             serialize_parallels_payload, build_parallels_filename,
         )
+        from web.export_state import get_parallels_export
 
-        parallels_results = state.parallels_results or []
-        filtered_results = state.parallels_filtered or []
+        session_payload = get_parallels_export() or {}
+        parallels_results = session_payload.get('results') or []
+        filtered_results = session_payload.get('filtered') or []
 
         # Empty-state check first - avoids touching app.storage.user when there's
         # nothing to export (storage requires a NiceGUI request context which is
@@ -2046,10 +2065,9 @@ def init_api_routes(app_override=None):
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
 
-        meta = getattr(state, 'parallels_search_meta', None) or {}
-        # Fallback: source_text from app.storage.user (matches existing Excel/Word path).
-        # Storage access can raise outside a NiceGUI request context (tests); fall
-        # back to the meta-supplied value when storage is unavailable.
+        meta = session_payload.get('meta') or {}
+        # Fallback: source_text from app.storage.user (legacy parallels write).
+        # Storage access can raise outside a NiceGUI request context (tests).
         storage_source_text = ''
         try:
             storage_source_text = nicegui_app.storage.user.get('parallels_source_text', '') or ''

@@ -2,13 +2,20 @@
 Phase 77 Plan 06 -- gap-closure regression tests.
 
 Covers:
-  Gap #1 (UAT test 8): _reset_search clears global state envelope fields
-                       so post-reset exports return 400.
-  Gap #2 (UAT test 9): exports honor state.last_selected_uids:
+  Gap #1 (UAT test 8): _reset_search clears the export payload so
+                       post-reset exports return 400.
+  Gap #2 (UAT test 9): exports honor session_payload['selected_uids']:
                        - None  -> full set
                        - list  -> uid-filtered subset
                        - []    -> defensive -- treated as None
                        Filename gets '-selected-N' suffix when filtered.
+
+Updated 2026-05-12: exports read from the per-session export_state payload
+(web.export_state.get_search_export) instead of the cross-user-leaky
+state.* singleton fields. Tests inject a stub backend dict via the
+``_TEST_BACKEND`` hook on web.export_state. The singleton state.* fields
+are still cleared by ``_reset_search`` for legacy callers, but the
+export handlers themselves only consult the per-session payload.
 
 Builds a bare FastAPI app per fixture (mirrors test_api_export_json.py
 HIGH-08 pattern) so handler logic can be exercised without NiceGUI.
@@ -51,10 +58,41 @@ def mock_meta_mgr():
     return mgr
 
 
+class _StateProxy:
+    """Backwards-compat wrapper exposing ``last_selected_uids`` writes that
+    propagate into the per-session export payload.
+
+    Pre-2026-05-12 tests set ``state.last_selected_uids = ...`` directly to
+    drive the singleton export path. The handlers now read from
+    ``web.export_state`` instead. This proxy mirrors the assignment into
+    the stub backend's selected_uids field so the same test ergonomics
+    keep working.
+    """
+    def __init__(self, state, backend):
+        self._state = state
+        self._backend = backend
+
+    def __setattr__(self, name, value):
+        if name in ('_state', '_backend'):
+            super().__setattr__(name, value)
+            return
+        if name == 'last_selected_uids':
+            payload = self._backend.get('export_search_payload')
+            if payload is not None:
+                payload['selected_uids'] = value
+                self._backend['export_search_payload'] = payload
+        setattr(self._state, name, value)
+
+    def __getattr__(self, name):
+        return getattr(self._state, name)
+
+
 @pytest.fixture
-def state_with_5_results(mock_meta_mgr):
-    """Populate state with 5 results (uids u0..u4) and snapshot for restore."""
+def state_with_5_results(mock_meta_mgr, monkeypatch):
+    """Populate per-session export payload (and legacy state.*) with 5 results."""
     from web.api import state
+    import web.export_state as export_state
+
     saved = {
         'last_results': state.last_results,
         'current_search_query': state.current_search_query,
@@ -66,7 +104,7 @@ def state_with_5_results(mock_meta_mgr):
         'meta_mgr': state.meta_mgr,
     }
     state.meta_mgr = mock_meta_mgr
-    state.last_results = [{
+    results = [{
         'uid': f'u{i}',
         'display': {
             'shelfmark': f'T-S 12.34{i}',
@@ -79,13 +117,30 @@ def state_with_5_results(mock_meta_mgr):
         'full_text': 'lorem ipsum',
         'sort_score': 0.5 + i * 0.1,
     } for i in range(5)]
+    state.last_results = results
     state.current_search_query = 'foo'
     state.current_search_mode = 'text'
     state.current_search_gap = None
     state.last_filters_applied = None
     state.last_search_warnings = []
     state.last_selected_uids = None
-    yield state
+
+    # Inject stub backend so export_state functions route through a local
+    # dict instead of NiceGUI's app.storage.user (unavailable in TestClient).
+    fake_backend = {
+        'export_search_payload': {
+            'results': results,
+            'query': 'foo',
+            'mode': 'text',
+            'gap': None,
+            'filters': None,
+            'warnings': [],
+            'selected_uids': None,
+        }
+    }
+    monkeypatch.setattr(export_state, '_TEST_BACKEND', fake_backend)
+
+    yield _StateProxy(state, fake_backend)
     for k, v in saved.items():
         setattr(state, k, v)
 
@@ -152,9 +207,12 @@ def test_export_json_filename_no_suffix_when_full_set_selected(client, state_wit
 # --- Gap #1 test: reset clears global state -----------------------------
 
 def test_reset_clears_global_state_then_export_returns_400(client, state_with_5_results):
-    """Manually performs the exact 7 assignments _reset_search does at
-    web/pages/search.py:_reset_search end-block (Plan 06 Gap #1 fix).
-    Asserts each field cleared AND that a follow-up export returns 400.
+    """Manually performs the exact assignments _reset_search does at
+    web/pages/search.py:_reset_search end-block (Plan 06 Gap #1 fix +
+    2026-05-12 cross-user fix).
+
+    Asserts the legacy state.* fields are cleared, the per-session
+    export payload is cleared, and a follow-up export returns 400.
     """
     # Pre-condition: state populated.
     assert len(state_with_5_results.last_results) == 5
@@ -168,6 +226,9 @@ def test_reset_clears_global_state_then_export_returns_400(client, state_with_5_
     state_with_5_results.last_filters_applied = None
     state_with_5_results.last_search_warnings = []
     state_with_5_results.last_selected_uids = None
+    # 2026-05-12: per-session clear is what gates the export handler now.
+    from web.export_state import clear_search_export
+    clear_search_export()
 
     # Each field at its documented default:
     assert state_with_5_results.last_results == []
