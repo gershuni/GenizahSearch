@@ -421,7 +421,9 @@ The Reading Desk is useful for any researcher who wants to view multiple shelfma
         ''').style('color: var(--text-secondary);')
 
     # === Fragment Puzzle ===
-    with ui.card().classes('w-full p-6').set_visibility(WEB_PUZZLE_ENABLED):
+    _puzzle_card = ui.card().classes('w-full p-6')
+    _puzzle_card.set_visibility(WEB_PUZZLE_ENABLED)
+    with _puzzle_card:
         ui.element('a').props(f'name="help-puzzle"')
         with ui.row().classes('items-center gap-3 mb-4'):
             ui.icon('extension').classes('text-2xl text-primary')
@@ -466,7 +468,9 @@ A visual canvas for arranging manuscript fragment images side by side to reconst
         ''').style('color: var(--text-secondary);')
 
     # === Community Publishing ===
-    with ui.card().classes('w-full p-6').set_visibility(WEB_PUZZLE_ENABLED):
+    _community_card = ui.card().classes('w-full p-6')
+    _community_card.set_visibility(WEB_PUZZLE_ENABLED)
+    with _community_card:
         ui.element('a').props(f'name="help-community-publish"')
         with ui.row().classes('items-center gap-3 mb-4'):
             ui.icon('publish').classes('text-2xl text-primary')
