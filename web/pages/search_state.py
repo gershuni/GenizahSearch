@@ -340,7 +340,8 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
     corruption but does NOT prevent Tab B overwriting Tab A's snapshot.
     True per-tab isolation is deferred (Codex W3).
     """
-    stored_version = app.storage.user.get('search_snapshot_schema_version', 0)
+    from web.safe_storage import safe_user_get
+    stored_version = safe_user_get('search_snapshot_schema_version', 0)
     if stored_version == 0:
         # Pre-Phase-74 snapshots have no version stamp. Adopt the legacy payload
         # once by stamping to current; otherwise returning users would have
@@ -386,7 +387,8 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
     runtime_only and cross_page_preference fields are NOT written.
     Gated by session_persistence_enabled, mirroring filter_panel.persist_value.
     """
-    if not app.storage.user.get('session_persistence_enabled', True):
+    from web.safe_storage import safe_user_get
+    if not safe_user_get('session_persistence_enabled', True):
         return
     try:
         app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION

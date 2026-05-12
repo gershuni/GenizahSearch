@@ -254,8 +254,11 @@ def create_parallels_page(initial_text: str = None):
     if not _filters_from_browse:
         load_filter_state(p_state, 'parallels')
 
-    # Restore per-manuscript exclusions from session
-    _emi = app.storage.user.get('parallels_excluded_manuscript_ids')
+    # Restore per-manuscript exclusions from session.
+    # 2026-05-12: pruned-session AssertionError fix — safe_user_get returns
+    # default on session-prune races so the page renders empty instead of 500.
+    from web.safe_storage import safe_user_get as _safe_get
+    _emi = _safe_get('parallels_excluded_manuscript_ids')
     p_state.excluded_manuscript_ids = set(_emi) if _emi is not None else set()
 
     def _has_active_filters() -> bool:
@@ -263,7 +266,7 @@ def create_parallels_page(initial_text: str = None):
         return has_active_filters(p_state)
 
     # Restore domain exclusions for parallels
-    _pde = app.storage.user.get('parallels_domain_exclusions')
+    _pde = _safe_get('parallels_domain_exclusions')
     p_state.domain_exclusions = set(_pde) if _pde is not None else set()
 
     # Restore previous results

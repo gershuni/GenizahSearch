@@ -145,15 +145,22 @@ def test_clear_search_filters_preserves_live_search_state():
 
 
 def test_stale_version_discards_snapshot():
-    """Snapshot with wrong version stamp is silently discarded."""
+    """Snapshot with wrong version stamp is silently discarded.
+
+    2026-05-12: restore_search_snapshot now reads the version stamp via
+    web.safe_storage.safe_user_get (Codex HIGH finding fix), so the mock
+    must intercept that module's ``app`` import as well.
+    """
     storage = {
         'search_results': [{'display': {'id': 'old'}}],
         'domain_exclusions': ['stale'],
         'search_snapshot_schema_version': 999,
     }
-    with patch('web.pages.search_state.app') as mock_app:
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = {}
+        mock_safe_app.storage.user = storage
         from web.pages.search_state import SearchUIState, restore_search_snapshot
 
         state = SearchUIState()

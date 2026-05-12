@@ -2101,9 +2101,10 @@ def init_api_routes(app_override=None):
     @target_app.get('/api/export/browse/word')
     def export_browse_word():
         """Export current browse page to Word using unified export service."""
-        from nicegui import app as nicegui_app
-
-        browse_data = nicegui_app.storage.user.get('browse_export_data')
+        # 2026-05-12: routed through safe_user_get so prune_user_storage races
+        # don't surface as 500 (Codex review HIGH finding on the v7.11.0 fixes).
+        from web.safe_storage import safe_user_get
+        browse_data = safe_user_get('browse_export_data')
         if not browse_data:
             return Response("No browse data to export", status_code=400)
 

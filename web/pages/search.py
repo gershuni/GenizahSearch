@@ -95,11 +95,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     }
 
     # Resolve which persisted search state, if any, should be reused for this request.
-    raw_saved_mode = app.storage.user.get('search_mode', 'exact')
-    raw_saved_query = app.storage.user.get('search_query', '')
-    saved_preset = app.storage.user.get('search_preset', 30)
-    saved_max_changes = app.storage.user.get('search_max_changes', 2)
-    saved_gap = app.storage.user.get('search_gap', 0)
+    # 2026-05-12: pruned-session AssertionError fix — route through safe_user_get
+    # so a fresh page handler racing with prune_user_storage degrades to defaults
+    # instead of returning 500. Codex flagged these 5 raw reads as still-vulnerable.
+    from web.safe_storage import safe_user_get as _safe_get
+    raw_saved_mode = _safe_get('search_mode', 'exact')
+    raw_saved_query = _safe_get('search_query', '')
+    saved_preset = _safe_get('search_preset', 30)
+    saved_max_changes = _safe_get('search_max_changes', 2)
+    saved_gap = _safe_get('search_gap', 0)
 
     use_slider = False
     if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
