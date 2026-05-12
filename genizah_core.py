@@ -8379,21 +8379,49 @@ class SearchEngine:
                 })
         return full_content
         
-    def _get_metadata_only_browse_page(self, sys_id):
-        """Build a minimal browse result from csv_bank for records with no Tantivy text."""
+    def _get_metadata_only_browse_page(self, sys_id, p_num=None, absolute_index=None, next_prev=0):
+        """Build a minimal browse result from csv_bank for records with no Tantivy text.
+
+        Phase 86: synthetic (and other metadata-only) records have no Tantivy
+        pages, but enriched images can drive pagination at the UI layer. Thread
+        the caller's p_num / absolute_index / direction through so Next/Prev
+        and combo selection produce a moving target page that the renderer can
+        clamp against the image count.
+        """
         if not hasattr(self, 'meta_mgr') or not self.meta_mgr:
             return None
         shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
         if shelfmark == 'Unknown':
             return None
+
+        if p_num is not None:
+            try:
+                base_p = max(1, int(p_num))
+            except (ValueError, TypeError):
+                base_p = 1
+        elif absolute_index is not None:
+            try:
+                base_p = max(1, int(absolute_index) + 1)
+            except (ValueError, TypeError):
+                base_p = 1
+        else:
+            base_p = 1
+
+        try:
+            bump = int(next_prev or 0)
+        except (ValueError, TypeError):
+            bump = 0
+
+        target_p = max(1, base_p + bump)
+
         return {
             'uid': '',
-            'p_num': 0,
+            'p_num': target_p,
             'full_header': '',
             'text': '',
             'total_pages': 0,
-            'current_idx': 0,
-            'internal_index': 0,
+            'current_idx': target_p,
+            'internal_index': target_p - 1,
             'sys_id': sys_id,
             'metadata_only': True,
         }
@@ -8401,17 +8429,17 @@ class SearchEngine:
     def get_browse_page(self, sys_id, p_num=None, next_prev=0, absolute_index=None, allow_cross=False, volume_ie=None):
         browse_map = self._load_browse_map()
         if not browse_map:
-            return self._get_metadata_only_browse_page(sys_id)
+            return self._get_metadata_only_browse_page(sys_id, p_num=p_num, absolute_index=absolute_index, next_prev=next_prev)
 
         # Prepare ordered list for cross-manuscript navigation
         if allow_cross and (not hasattr(self, '_ordered_sys_ids') or not self._ordered_sys_ids):
             self._ordered_sys_ids = list(browse_map.keys())
 
         if sys_id not in browse_map:
-            return self._get_metadata_only_browse_page(sys_id)
+            return self._get_metadata_only_browse_page(sys_id, p_num=p_num, absolute_index=absolute_index, next_prev=next_prev)
         all_pages = browse_map[sys_id]
         if not all_pages:
-            return self._get_metadata_only_browse_page(sys_id)
+            return self._get_metadata_only_browse_page(sys_id, p_num=p_num, absolute_index=absolute_index, next_prev=next_prev)
 
         # Filter to specific IE for multi-IE manuscripts
         active_ie = volume_ie

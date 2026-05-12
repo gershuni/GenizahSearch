@@ -21548,6 +21548,27 @@ class GenizahGUI(QMainWindow):
         total = pd['total_pages']
         curr_idx = pd['current_idx'] # 1-based index
 
+        # Phase 86: synthetic / metadata-only records have no Tantivy pages
+        # (total_pages=0), but enriched images can still drive pagination.
+        # Derive total from the largest enriched image list and clamp curr_idx
+        # so combo population, page-count label, and viewer.set_page below
+        # all see a consistent image-driven page count.
+        if pd.get('metadata_only') and total == 0 and self.current_browse_sid:
+            _meta = self.meta_mgr.nli_cache.get(self.current_browse_sid, {}) if self.meta_mgr else {}
+            _derived = max(
+                len(self._browse_folio_images or []),
+                len(_meta.get('images_ext') or []),
+                len(_meta.get('images_nli') or []),
+            )
+            if _derived > 0:
+                total = _derived
+                if curr_idx <= 0:
+                    curr_idx = 1
+                elif curr_idx > total:
+                    curr_idx = total
+                self.current_browse_p = curr_idx
+                self.current_browse_internal_idx = curr_idx - 1
+
         # Get folio images from enriched metadata (if available)
         # Only use crossref folio labels when the image count matches the
         # page count from the search index.  When they differ the labels
