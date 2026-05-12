@@ -69,6 +69,7 @@ class UserListsManager:
         self.meta_mgr = meta_mgr
         self._cache = None
         self._cache_time = 0
+        self._cache_user_id: Optional[str] = None  # 2026-05-12 cross-user fix
         self._cache_ttl = 10  # Cache for 10 seconds
 
     @property
@@ -114,14 +115,26 @@ class UserListsManager:
         }
 
     def _get_cached_data(self) -> Dict:
-        """Get data from cache or fetch from Supabase."""
+        """Get data from cache or fetch from Supabase.
+
+        2026-05-12 cross-user fix: `UserListsManager` is a singleton on
+        `AppState` (web/state.py), so multi-tenant requests share the same
+        instance. The TTL cache must therefore be keyed by `user_id`
+        too — otherwise User B's request within the 10s window returns
+        User A's lists.
+        """
         now = time.time()
-        if self._cache and (now - self._cache_time) < self._cache_ttl:
+        current_user_id = self.user_id
+        if (
+            self._cache
+            and self._cache_user_id == current_user_id
+            and (now - self._cache_time) < self._cache_ttl
+        ):
             return self._cache
 
         # Fetch fresh data
         if self.is_authenticated:
-            user_id = self.user_id
+            user_id = current_user_id
             lists = get_user_lists(user_id)
             projects = get_projects(user_id)
 
@@ -154,6 +167,7 @@ class UserListsManager:
 
             self._cache = data
             self._cache_time = now
+            self._cache_user_id = current_user_id  # 2026-05-12 cross-user fix
             return data
 
         return self._get_default_data()
@@ -162,6 +176,7 @@ class UserListsManager:
         """Invalidate the cache to force refresh."""
         self._cache = None
         self._cache_time = 0
+        self._cache_user_id = None  # 2026-05-12 cross-user fix
 
     # === List Operations ===
 
