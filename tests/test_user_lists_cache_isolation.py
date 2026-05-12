@@ -14,7 +14,7 @@ only return the cached value when the user_id matches the current
 ``GlobalAuthState.get_user_id()`` (which IS per-session, backed by
 ``app.storage.user``).
 """
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 def _build_lists(user_id, count=2):
