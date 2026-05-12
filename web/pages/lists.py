@@ -651,9 +651,9 @@ def create_lists_page():
     async def show_migration_dialog():
         """Show dialog to migrate local lists to user account."""
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
-            h3(tr('Sync Your Lists'), classes='text-xl font-bold mb-4')
-            ui.label(tr('You have local lists that can be synced to your account.')).classes('mb-2')
-            ui.label(tr('This will make them available on all your devices.')).classes('mb-4').style('color: var(--text-secondary);')
+            h3(tr('Move browser lists to your account'), classes='text-xl font-bold mb-4')
+            ui.label(tr("Your browser has saved lists that haven't been moved to your account yet.")).classes('mb-2')
+            ui.label(tr('Moving them will make them available on all your devices and apps.')).classes('mb-4').style('color: var(--text-secondary);')
 
             async def do_migration():
                 if hasattr(state.lists_mgr, 'migrate_local_to_user'):
@@ -673,7 +673,7 @@ def create_lists_page():
 
             with ui.row().classes('w-full justify-end gap-2'):
                 ui.button(tr('Later'), on_click=dialog.close).props('flat')
-                ui.button(tr('Sync Now'), on_click=do_migration).classes('bg-primary text-white')
+                ui.button(tr('Move to account'), on_click=do_migration).classes('bg-primary text-white')
 
         dialog.open()
 
@@ -686,7 +686,11 @@ def create_lists_page():
             with ui.row().classes('items-center gap-2'):
                 # Show sync status
                 if GlobalAuthState.is_logged_in():
-                    ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Synced to your account'))
+                    ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
+                    ui.button(
+                        icon='refresh',
+                        on_click=async_refresh_ui,
+                    ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
                 else:
                     ui.icon('cloud_off', size='sm').classes('text-gray-400').tooltip(tr('Local storage only - log in to sync'))
                 ui.button(
@@ -717,9 +721,9 @@ def create_lists_page():
                         with ui.row().classes('items-center gap-3'):
                             ui.icon('sync', size='md').classes('text-blue-600')
                             with ui.column().classes('flex-grow'):
-                                ui.label(tr('Local Lists Available')).classes('font-semibold text-blue-800')
-                                ui.label(tr('You have lists stored on this device. Sync them to your account?')).classes('text-sm text-blue-600')
-                            ui.button(tr('Sync Now'), on_click=show_migration_dialog).classes('bg-blue-500 text-white')
+                                ui.label(tr('Browser lists found')).classes('font-semibold text-blue-800')
+                                ui.label(tr("This browser has lists that haven't been moved to your account. Move them now?")).classes('text-sm text-blue-600')
+                            ui.button(tr('Move to account'), on_click=show_migration_dialog).classes('bg-blue-500 text-white')
 
         # Main Content: Sidebar + Content
         with ui.splitter(value=25).classes('w-full flex-grow') as splitter:
