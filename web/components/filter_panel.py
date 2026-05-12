@@ -6,7 +6,7 @@ Extracts duplicated filter functions that were identical in search.py and parall
 UI layout construction remains in each page -- only data/logic functions are shared.
 """
 
-from nicegui import app, run
+from nicegui import run
 import logging
 
 logger = logging.getLogger(__name__)
@@ -218,9 +218,17 @@ def has_active_filters(state) -> bool:
 
 
 def persist_value(key, value):
-    """Save to storage if session persistence is enabled."""
-    if app.storage.user.get('session_persistence_enabled', True):
-        app.storage.user[key] = value
+    """Save to storage if session persistence is enabled.
+
+    2026-05-12 Codex 3rd-pass CRITICAL fix: routed through safe_user_get /
+    safe_user_set because this is also called during bootstrap from
+    consume_incoming_filters (browse → search/parallels handoff), so a
+    pruned-session race could 500 the page on the WRITE path too —
+    fixing only reads at this site was insufficient.
+    """
+    from web.safe_storage import safe_user_get, safe_user_set
+    if safe_user_get('session_persistence_enabled', True):
+        safe_user_set(key, value)
 
 
 # ============================================================================
@@ -323,8 +331,10 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     if incoming.get('material_exclude'):
         state.filter_material_exclude = incoming['material_exclude']
         persist_value(f'{pfx}_filter_material_exclude', incoming['material_exclude'])
-    # Clear incoming_filters from storage after consuming
-    app.storage.user.pop('incoming_filters', None)
+    # Clear incoming_filters from storage after consuming.
+    # 2026-05-12 Codex 3rd-pass CRITICAL: safe_user_pop so prune races don't 500.
+    from web.safe_storage import safe_user_pop
+    safe_user_pop('incoming_filters', None)
     return True
 
 

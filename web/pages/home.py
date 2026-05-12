@@ -24,7 +24,10 @@ def create_page():
     with ui.column().classes('w-full max-w-7xl mx-auto gap-3 fade-in'):
 
         # === OCR Disclaimer Banner (dismissible, compact single-line) ===
-        if not app.storage.user.get('ocr_disclaimer_dismissed', False):
+        # 2026-05-12 Codex 3rd-pass HIGH: safe_user_get so prune races on
+        # / don't 500 the homepage.
+        from web.safe_storage import safe_user_get as _safe_get
+        if not _safe_get('ocr_disclaimer_dismissed', False):
             banner_dir = 'rtl' if is_rtl() else 'ltr'
             with ui.element('div').classes('w-full px-4 py-2 flex items-center gap-3').style(
                 f'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); direction: {banner_dir};'

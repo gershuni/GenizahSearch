@@ -640,7 +640,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             # Text Position Filter (for join detection)
                             with ui.column().classes('gap-1'):
                                 ui.label(tr('Text Position')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                                saved_text_position = app.storage.user.get('search_text_position', 'anywhere')
+                                saved_text_position = _safe_get('search_text_position', 'anywhere')
                                 text_position_select = ui.select(
                                     {
                                         'anywhere': tr('Anywhere'),
@@ -720,7 +720,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             mode_select.on('update:model-value', on_mode_change)
 
         # === Search only in... Filter Panel (BEFORE Advanced Options & progress bar) ===
-        _pos_pref = app.storage.user.get('search_text_position', 'anywhere') or 'anywhere'
+        _pos_pref = _safe_get('search_text_position', 'anywhere') or 'anywhere'
         _adv_filters_expanded = _has_active_filters() or _filters_from_browse or _pos_pref != 'anywhere'
         adv_filters_panel = ui.expansion(
             text=tr('Search only in...'),

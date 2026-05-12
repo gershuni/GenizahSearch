@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 def create_settings_page():
     """Create the Settings page."""
 
+    # 2026-05-12 Codex 3rd-pass HIGH: route page-render storage reads through
+    # safe_user_get so a prune_user_storage race doesn't 500 /settings.
+    from web.safe_storage import safe_user_get as _safe_get
+
     with ui.column().classes('w-full max-w-4xl mx-auto gap-2 fade-in p-4'):
 
         # === Page Header ===
@@ -42,7 +46,7 @@ def create_settings_page():
                         # Theme
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Theme')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            current_theme = app.storage.user.get('theme', 'light')
+                            current_theme = _safe_get('theme', 'light')
                             theme_select = ui.select(
                                 {
                                     'light': tr('Light'),
@@ -62,7 +66,7 @@ def create_settings_page():
                         # Results per page
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Results per page')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            results_per_page = app.storage.user.get('results_per_page', 50)
+                            results_per_page = _safe_get('results_per_page', 50)
                             rpp_select = ui.select(
                                 {25: '25', 50: '50', 100: '100', 200: '200'},
                                 value=results_per_page
@@ -76,7 +80,7 @@ def create_settings_page():
                         # Default search mode
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Default search mode')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            default_mode = app.storage.user.get('default_search_mode', 'exact')
+                            default_mode = _safe_get('default_search_mode', 'exact')
                             mode_select = ui.select(
                                 {
                                     'exact': tr('Exact'),
@@ -94,7 +98,7 @@ def create_settings_page():
                         # Default gap
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Default word gap')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            default_gap = app.storage.user.get('default_gap', 0)
+                            default_gap = _safe_get('default_gap', 0)
                             gap_input = ui.number(
                                 value=default_gap,
                                 min=0,
@@ -108,7 +112,7 @@ def create_settings_page():
 
                     # Lab Mode default toggle
                     ui.separator().classes('my-2')
-                    lab_default = app.storage.user.get('lab_mode_default', False)
+                    lab_default = _safe_get('lab_mode_default', False)
                     lab_switch = ui.switch(tr('Enable Lab Mode by default'), value=lab_default)
 
                     def toggle_lab():
@@ -122,7 +126,7 @@ def create_settings_page():
                     ui.label(tr('Control how search state is saved between sessions')).classes('text-xs').style('color: var(--text-muted);')
 
                     # Enable/disable toggle
-                    persist_enabled = app.storage.user.get('session_persistence_enabled', True)
+                    persist_enabled = _safe_get('session_persistence_enabled', True)
                     persist_switch = ui.switch(tr('Save search state between sessions'), value=persist_enabled)
                     ui.label(tr('When enabled, your search results, exclusions, and filters are preserved when you return')).classes('text-xs mr-10').style('color: var(--text-muted);')
 
@@ -134,7 +138,7 @@ def create_settings_page():
                     # History limit
                     with ui.row().classes('items-center gap-2 mt-2'):
                         ui.label(tr('Search history entries')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                        history_limit = app.storage.user.get('search_history_limit', 20)
+                        history_limit = _safe_get('search_history_limit', 20)
                         history_limit_input = ui.number(
                             value=history_limit,
                             min=5,

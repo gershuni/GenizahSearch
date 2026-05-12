@@ -140,10 +140,17 @@ def get_user_client() -> Client:
             if cached and cached[1] > now:
                 return cached[0]
 
-            # Re-read tokens — another request that held the lock may have refreshed.
+            # Re-read tokens after lock acquisition. If a concurrent logout /
+            # _clear_stale_auth fired while we waited for the lock,
+            # auth_session is now gone — do NOT resurrect cleared auth by
+            # falling back to pre-lock tokens (Codex 3rd-pass CRITICAL).
             auth_session = storage.get('auth_session') or {}
-            access_token_inner = auth_session.get('access_token') or access_token
-            refresh_token_inner = auth_session.get('refresh_token') or refresh_token
+            access_token_inner = auth_session.get('access_token')
+            refresh_token_inner = auth_session.get('refresh_token')
+            if not access_token_inner or not refresh_token_inner:
+                logger.info("[get_user_client] auth_session cleared while waiting for lock — returning anonymous")
+                _client_cache.pop(cache_key, None)
+                return get_client()
 
             try:
                 user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -248,12 +255,16 @@ def sign_in(email: str, password: str) -> Dict:
 def sign_out() -> Dict:
     """Sign out the current user."""
     try:
-        # Clear cached authenticated client for this session
+        # 2026-05-12 Codex 3rd-pass LOW fix: _client_cache and _session_locks
+        # are now keyed by access_token (str), not id(storage) (int). Evict by
+        # the current session's access_token so the cleanup actually fires.
         try:
             from nicegui import app as _app
-            storage_id = id(_app.storage.user)
-            _client_cache.pop(storage_id, None)
-            _session_locks.pop(storage_id, None)
+            auth_session = (_app.storage.user.get('auth_session') or {})
+            access_token = auth_session.get('access_token')
+            if access_token:
+                _client_cache.pop(access_token, None)
+                _session_locks.pop(access_token, None)
         except Exception:
             pass  # Cache operation failed; continue without cached data
         client = get_client()
