@@ -48,14 +48,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 1 | 7 | 8 |
 | P2 Medium Bugs | 15 | 69 | 84 |
-| P3 Low Priority | 2 | 5 | 7 |
+| P3 Low Priority | 3 | 5 | 8 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 6 | 7 | 13 |
 | Untested Areas | 4 | 3 | 7 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **28** | **112** | **140** |
+| **Total** | **29** | **112** | **141** |
 
 ---
 
@@ -195,6 +195,7 @@ Move to "Completed Issues" section at bottom with date
 | **Reading Desk from joined view: "Could not resolve fragment identifiers"** | `genizah_app.py:15956` | ✅ Fixed (2026-03-17) | Added `meta_mgr.resolve_system_by_shelfmark()` as third fallback in `_browse_open_joins_in_reading_desk`. |
 | **Deleting local puzzle join leaves orphaned Supabase published join** | `web/pages/puzzle.py`, `genizah_app.py` | ✅ Fixed (2026-03-17) | Auto-calls `unpublish_join` before deleting local document. |
 | **Phase 87 follow-up: enable transcriptions / joins / comments on the 108 image-bearing synthetic manuscripts** | `corrections_client.py`, `supabase_corrections_client.py`, `genizah_app.py:7394-7396`, `web/pages/browse.py` (`is_synthetic_sys_id` gates at multiple sites) | ❌ Open (logged 2026-05-12) | Phase 85 deferred corrections-write for synthetic rows with the rationale *"page_number semantics undefined for image-less FJMS-only inventories"* (SYNTH-06/D-10). Phase 86 flipped that premise for the **108 image-bearing CUDL-walked rows** (T-S NS 329.96 et al.): they now have well-defined `page_number` = CUDL canvas index 1..N. Enabling corrections/joins/comments for these means: (1) lift the `is_synthetic_sys_id`-based corrections-write reject in `corrections_client.create_correction` + `SupabaseCorrectionsClient.create_correction`; (2) lift the Edit-button hide in desktop (`genizah_app.py:7394-7396`) and web (`web/pages/browse.py` several sites); (3) lift the join/comment create rejects; (4) decide whether the policy applies only to CUDL-walked synthetic rows (with images) or all future synthetic — Phase 85 also produced/will-produce FJMS-only synthetic rows (no images) for which the original deferral is still correct; (5) migrate the `is_synthetic_sys_id` check from "skip" → "has-no-images" check (probably via a `has_image_canvases(sys_id)` predicate against `nli_crossref.db`/bridge); (6) verify `page_number` round-trips correctly across web ↔ desktop ↔ Supabase. Scope as a dedicated Phase 87. **Reason logged:** user prompted enablement during the v7.11.0 release sequence on 2026-05-12. |
+| **Phase 87 follow-up: persist desktop comment `category` properly** | `supabase_corrections_client.py:1083-1091`, `corrections_client.py:790+`, `corrections_ui.py:2489-2502`, `comments` table (Supabase) | ❌ Open (logged 2026-05-12) | The desktop `CommentDialog` "Type" dropdown (General / Question / Scholarly Note / Suggestion / Issue) was being passed straight through as the `comments.scope` column, which is CHECK-constrained to `IN ('page', 'manuscript', 'general')`. 4 of 5 dropdown choices raised `23514 comments_scope_check`. The v7.11.0 hotfix mirrors the web client: scope is now derived from `page_number` presence (`'page'` if set, else `'manuscript'`), and the dropdown's category value is **silently discarded** (it was never round-tripping on read anyway — `_parse_comment` reads the DB's `scope` back into the misleadingly-named `comment_type` dataclass field). Phase 87 work: (1) add a `category TEXT CHECK (category IN ('general','question','scholarly_note','suggestion','issue')) DEFAULT 'general'` column to the `comments` table (Codex review preferred this over a join table or `tags TEXT[]` — overbuilt without multi-tagging or moderation needs); (2) audit Supabase RLS policies for the new column; (3) update web + desktop `create_comment` to send `category`; (4) update `_parse_comment` to read it back into a properly-named field; (5) split the misnamed `Comment.comment_type` dataclass field into `Comment.scope` + `Comment.category` so the two concepts don't share one name long-term; (6) add a matching category UI to the web comment dialog for parity. **Codex review note (2026-05-12):** "Bottom line: fix the constraint violation with A, log C as Phase 87, do not migrate Supabase during the hotfix." |
 
 ---
 

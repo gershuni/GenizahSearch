@@ -1080,11 +1080,22 @@ class SupabaseCorrectionsClient:
             return None, "Must be logged in to comment"
 
         try:
+            # The `comments.scope` column is constrained to ('page', 'manuscript',
+            # 'general') — it expresses WHERE the comment applies, not WHAT KIND
+            # of comment it is. The `comment_type` parameter (UI dropdown:
+            # general/question/scholarly_note/suggestion/issue) was historically
+            # passed straight through here, which made 4 of 5 dropdown choices
+            # raise a 23514 check-constraint violation. The dropdown value also
+            # never round-tripped on read (`_parse_comment` reads `scope` back
+            # into `comment_type`), so it had no working persistence.
+            # Mirror web's behavior: derive `scope` from page_number presence.
+            # Persisting the category proper is a Phase 87 follow-up (add a
+            # `category` TEXT CHECK column to the comments table).
             data = {
                 'author_id': self.current_user._uuid,
                 'sys_id': document_id,
                 'content': content,
-                'scope': comment_type,
+                'scope': 'page' if page_number else 'manuscript',
                 'page_number': page_number,
                 'is_public': is_public,
                 'parent_id': parent_id
