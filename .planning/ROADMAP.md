@@ -251,7 +251,15 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   3. The allowlist file contains a per-entry justification comment for every remaining raw access (e.g., bootstrap code that runs before session existence is guaranteed).
   4. The CI lint check (grep-based or ruff custom rule) added in FOUND-04 rejects a synthetic test file containing a raw `app.storage.user.get(` call outside the allowlist, and passes the production code unchanged.
   5. All 6 existing `tests/test_safe_storage.py` tests pass without modification.
-**Plans**: TBD
+**Plans**: 8 plans
+- [ ] 87-01-VALIDATION-FOUNDATION-PLAN.md — Failing test stubs + allowlist scaffold (Wave 0)
+- [ ] 87-02-SESSION-UUID-HELPERS-PLAN.md — get_session_uuid + ensure_session_uuid in web/safe_storage.py (Wave 1)
+- [ ] 87-03-LEAF-FILE-MIGRATIONS-PLAN.md — text_editor, translation_report, home, settings, search_results (Wave 1)
+- [ ] 87-04-MAIN-AND-ALIAS-MIGRATIONS-PLAN.md — main.py + api.py (nicegui_app alias) + supabase_client.py (_app alias) (Wave 2)
+- [ ] 87-05-BROWSE-CLUSTER-MIGRATIONS-PLAN.md — browse.py + browse_state.py + catalog_browse.py (Wave 2)
+- [ ] 87-06-SEARCH-CLUSTER-MIGRATIONS-PLAN.md — parallels.py + search.py + search_state.py (Wave 2)
+- [ ] 87-07-LINT-FINALIZATION-PLAN.md — Lint scanner + allowlist finalization (Wave 3)
+- [ ] 87-08-ACCEPTANCE-AND-DOCS-PLAN.md — Docs + STATE.md + human smoke-check (Wave 4)
 
 ### Phase 88: State Separation by Deletion
 **Goal**: Delete singleton mirrors on `AppState` so `web/export_state.py` is the only path for per-user export state, with the `_TEST_BACKEND` shim replaced by proper test fixtures.
