@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Completed 87-01-VALIDATION-FOUNDATION-PLAN.md
-last_updated: "2026-05-13T05:03:54.627Z"
+stopped_at: Completed 87-02-SESSION-UUID-HELPERS-PLAN.md
+last_updated: "2026-05-13T05:13:14.810Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 1
-  percent: 13
+  completed_plans: 2
+  percent: 25
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-13)
 ## Current Position
 
 Phase: 87 (Foundations -- Session UUID and Safe Storage Chokepoint) — EXECUTING
-Plan: 2 of 8 (next: 87-02-SESSION-UUID-HELPERS)
+Plan: 3 of 8 (next: 87-03-LEAF-FILE-MIGRATIONS)
 Status: Executing Phase 87
-Last activity: 2026-05-13 -- Plan 87-01 complete (Wave 0 failing-test gate)
+Last activity: 2026-05-13 -- Plan 87-02 complete (session UUID helpers + B1 bootstrap wiring + Fix 1 route coverage)
 
-Progress: [█░░░░░░░░░] 13%
+Progress: [███░░░░░░░] 25%
 
 ## Phase Queue (v7.12)
 
@@ -68,6 +68,7 @@ Progress: [█░░░░░░░░░] 13%
 - Refresh-only locking keyed by `_session_uuid`: UUID-keyed locks are stable across token rotation; no cached authenticated client objects
 - `_TEST_BACKEND` shim removed: tests use real session storage with proper fixtures or adapter injection
 - Phase 87-01 Wave 0 gate established: 10 failing test stubs + 6-test AST lint scanner + 4-entry allowlist YAML. PyYAML 6.0.3 confirmed. test_safe_storage.py byte-unchanged (FOUND-05 invariant SHA256 = e165bf0e...)
+- Phase 87-02 complete: get_session_uuid/ensure_session_uuid added to web/safe_storage.py with M5 strict regex validation (^[0-9a-f]{32}$); ensure_session_uuid wired at create_layout (L349), reset_hints_route (L1288), auth_callback_route (L1450); /privacy-extension intentionally skipped (zero storage access — AST-confirmed). 17/17 phase 87 tests pass (6 safe_storage + 11 session_uuid). FOUND-05 SHA-256 invariant preserved. T-87-01 mitigation verified (100 sessions, 0 collisions); T-87-02 mitigation verified (4 dedicated regex-validation tests).
 
 ### Carryover from hold commits (master-main at cca23db3)
 
@@ -84,7 +85,7 @@ Progress: [█░░░░░░░░░] 13%
 
 ## Session Continuity
 
-Last session: 2026-05-13T05:03:54.621Z
-Stopped at: Completed 87-01-VALIDATION-FOUNDATION-PLAN.md
+Last session: 2026-05-13T05:13:10.358Z
+Stopped at: Completed 87-02-SESSION-UUID-HELPERS-PLAN.md
 Resume file: None
 Next step: `/gsd-discuss-phase 87` (Foundations: session UUID + safe_storage chokepoint)
