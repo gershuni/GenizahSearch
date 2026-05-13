@@ -1,12 +1,13 @@
 ---
 plan: 87-08-ACCEPTANCE-AND-DOCS
 phase: 87
-status: partial
+status: complete
 task_1: complete
-task_2: pending_user_smoke_check
+task_2: approved_by_user
 completed_date: 2026-05-13
 commits:
   - 812b7b04
+  - 10a1f370
 ---
 
 # Plan 87-08: Acceptance and Docs — SUMMARY
@@ -36,13 +37,20 @@ commits:
 - [x] All 23 Phase 87 invariant tests still pass (test_safe_storage 6 + test_session_uuid 11 + test_no_raw_storage_access 6)
 - [x] Full pytest suite still green (verified at Plan 07 close: 1879/1879)
 
-## Task 2: Human Smoke-Check (PENDING USER APPROVAL)
+## Task 2: Human Smoke-Check (APPROVED 2026-05-13)
 
-Per B1 clarification in 87-REVIEWS.md: this smoke check **CONFIRMS** (does not DISCOVER) the B1 wiring under real (non-mocked) NiceGUI runtime. Plan 02's `test_create_layout_mints_session_uuid` already proved the wiring at the unit-test level.
+Per B1 clarification in 87-REVIEWS.md: this smoke check **CONFIRMED** (did not DISCOVER) the B1 wiring under real (non-mocked) NiceGUI runtime. Plan 02's `test_create_layout_mints_session_uuid` already proved the wiring at the unit-test level.
 
-The orchestrator has surfaced the 7-step smoke check (start `python -m web.main`, open browser, verify `_session_uuid` minted in `.nicegui/storage-user-*.json` with `^[0-9a-f]{32}$` regex, verify UUID stability across navigation, verify isolation across browser sessions, verify `/browse?sys_id=...` no longer 500s, verify CI scanner collects 6 tests) to the user.
+**User ran all 7 steps and reported: "Approved — all 7 steps passed"** on 2026-05-13.
 
-**Awaiting user response.** Plan 87-08 is `gate: blocking` on Task 2 — Phase 87 is not formally complete until the user approves.
+The 7 verified outcomes:
+1. `python -m web.main` started cleanly with no startup errors
+2. Browser navigation through `/`, `/search` produced no `AssertionError` traces
+3. `.nicegui/storage-user-*.json` contained `_session_uuid` matching `^[0-9a-f]{32}$`
+4. UUID stable across `/search` → `/browse` navigation in same tab
+5. Incognito session minted a distinct UUID (isolation confirmed)
+6. `/browse?sys_id=...` rendered without 500 (original v7.11.0 bug fix re-confirmed)
+7. `pytest --collect-only` reported the expected 6 lint scanner tests
 
 ## Files Modified
 
