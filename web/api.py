@@ -1918,8 +1918,8 @@ def init_api_routes(app_override=None):
     @target_app.get('/api/export/parallels/excel')
     def export_parallels_excel():
         """Export parallels results to Excel using unified export service."""
-        from nicegui import app as nicegui_app
         from web.export_state import get_parallels_export
+        from web.safe_storage import safe_user_get
 
         session_payload = get_parallels_export() or {}
         parallels_results = session_payload.get('results') or []
@@ -1928,10 +1928,7 @@ def init_api_routes(app_override=None):
         # source_text: prefer meta, fall back to legacy app.storage.user key.
         source_text = meta.get('source_text') or ''
         if not source_text:
-            try:
-                source_text = nicegui_app.storage.user.get('parallels_source_text', '') or ''
-            except Exception:
-                source_text = ''
+            source_text = safe_user_get('parallels_source_text', '') or ''
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -1955,8 +1952,8 @@ def init_api_routes(app_override=None):
     @target_app.get('/api/export/parallels/word')
     def export_parallels_word():
         """Export parallels results to Word using unified export service."""
-        from nicegui import app as nicegui_app
         from web.export_state import get_parallels_export
+        from web.safe_storage import safe_user_get
 
         session_payload = get_parallels_export() or {}
         parallels_results = session_payload.get('results') or []
@@ -1964,10 +1961,7 @@ def init_api_routes(app_override=None):
         meta = session_payload.get('meta') or {}
         source_text = meta.get('source_text') or ''
         if not source_text:
-            try:
-                source_text = nicegui_app.storage.user.get('parallels_source_text', '') or ''
-            except Exception:
-                source_text = ''
+            source_text = safe_user_get('parallels_source_text', '') or ''
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -2049,11 +2043,11 @@ def init_api_routes(app_override=None):
         stateless POST counterpart.
         """
         from starlette.responses import JSONResponse
-        from nicegui import app as nicegui_app
         from shared.search_serializer import (
             serialize_parallels_payload, build_parallels_filename,
         )
         from web.export_state import get_parallels_export
+        from web.safe_storage import safe_user_get
 
         session_payload = get_parallels_export() or {}
         parallels_results = session_payload.get('results') or []
@@ -2067,12 +2061,8 @@ def init_api_routes(app_override=None):
 
         meta = session_payload.get('meta') or {}
         # Fallback: source_text from app.storage.user (legacy parallels write).
-        # Storage access can raise outside a NiceGUI request context (tests).
-        storage_source_text = ''
-        try:
-            storage_source_text = nicegui_app.storage.user.get('parallels_source_text', '') or ''
-        except Exception:
-            storage_source_text = ''
+        # safe_user_get absorbs the prune-race AssertionError internally.
+        storage_source_text = safe_user_get('parallels_source_text', '') or ''
         source_text = (meta.get('source_text') or storage_source_text or '')
 
         try:
