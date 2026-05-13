@@ -12,7 +12,7 @@ Features:
 
 import logging
 
-from nicegui import ui, app, run
+from nicegui import ui, run
 from typing import Optional
 import asyncio
 import re
@@ -38,6 +38,7 @@ def _warn_bridge_import_failed(exc: Exception) -> None:
     )
 
 
+from web.safe_storage import safe_user_get, safe_user_set
 from web.services import (
     get_service,
     get_oxford_direct_image_url,
@@ -1117,9 +1118,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         persist_browse_snapshot(state, state.current_page)
 
     def _restore_reading_desk_state():
-        """Restore reading desk state from app.storage.user after language switch."""
+        """Restore reading desk state from session storage after language switch."""
+        # M3 audit: Class B wrapper — the try/except covers multi-step logic
+        # (dict access on saved.get('entries'), enter_joined_view() call,
+        # source preference restoration). The storage call moves to
+        # safe_user_get (which absorbs prune-race AssertionError internally),
+        # but the outer wrapper is PRESERVED because it catches AttributeError,
+        # KeyError, TypeError from downstream logic.
         try:
-            saved = app.storage.user.get('reading_desk_state')
+            saved = safe_user_get('reading_desk_state')
             logger.info(f"[ReadingDesk] Attempting restore, saved state: {bool(saved)}")
             if saved and saved.get('entries'):
                 frag_info = saved['entries']
@@ -1210,8 +1217,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             export_data['p_num'] = state.current_page.p_num
             export_data['text'] = state.current_page.text
 
-        # Store in session storage
-        app.storage.user['browse_export_data'] = export_data
+        # Store in session storage (safe_user_set absorbs prune-race AssertionError)
+        safe_user_set('browse_export_data', export_data)
 
         # Trigger download
         ui.download('/api/export/browse/word')
@@ -2075,11 +2082,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 _browse_type_he = None
                                 _browse_type_lang = get_language()
                                 _browse_pgpid = state.pgp_metadata.get('pgpid')
-                                _browse_show_trans = False
-                                try:
-                                    _browse_show_trans = app.storage.user.get('show_translations', False)
-                                except Exception:
-                                    pass  # Translation lookup failed; continue without translation
+                                # Class A wrapper collapsed — safe_user_get absorbs prune-race AssertionError.
+                                _browse_show_trans = safe_user_get('show_translations', False)
                                 if _browse_show_trans and _browse_type_lang == 'he' and _browse_pgpid:
                                     try:
                                         from shared.translation_service import TranslationService
@@ -2110,11 +2114,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             with ui.column().classes('gap-1 mb-2'):
                                 ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                                 # Phase 46: Show translated description when toggle is on
-                                _show_trans_browse = False
-                                try:
-                                    _show_trans_browse = app.storage.user.get('show_translations', False)
-                                except Exception:
-                                    pass  # Translation lookup failed; continue without translation
+                                # Class A wrapper collapsed — safe_user_get absorbs prune-race AssertionError.
+                                _show_trans_browse = safe_user_get('show_translations', False)
                                 _pgpid_browse = state.pgp_metadata.get('pgpid')
                                 _trans_desc_he = None
                                 _browse_lang = get_language()
