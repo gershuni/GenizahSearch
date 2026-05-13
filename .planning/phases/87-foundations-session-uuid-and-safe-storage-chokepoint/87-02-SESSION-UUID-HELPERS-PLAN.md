@@ -26,9 +26,10 @@ must_haves:
     - "Two consecutive calls with the same storage dict return the same UUID"
     - "Mutating auth_session keys does not affect _session_uuid (token-refresh stability)"
     - "Uppercase, non-string, malformed, and AssertionError-during-write cases all handled per M5"
-    - "ensure_session_uuid() is wired into web/main.py:create_layout() so every @ui.page handler that calls create_layout() mints the UUID on first call (16 of 19 routes; the 3 remaining — /privacy-extension, /reset-hints, /auth/callback — rely on lazy-mint via get_session_uuid() on first storage read, which is the documented design per R-01 in 87-RESEARCH.md) (B1 fix)"
+    - "ensure_session_uuid() is wired into web/main.py:create_layout() (covers 16 of 19 @ui.page handlers); PLUS directly wired into /reset-hints (storage pop access) and /auth/callback (OAuth atomic writes) per Fix 1 in 87-REVIEWS.md iteration 3 (Codex B1-residual); /privacy-extension is intentionally skipped (pure static info page, zero storage access) and the route-coverage test in Plan 01 documents this exemption"
     - "An automated test exercises the bootstrap path (test_create_layout_mints_session_uuid in tests/test_session_uuid.py)"
-    - "All 10 tests in tests/test_session_uuid.py pass (9 original + 1 bootstrap)"
+    - "A route-coverage test in tests/test_session_uuid.py (test_every_ui_page_handler_mints_uuid, created by Plan 01) enforces that every @ui.page handler in web/main.py either calls create_layout() or ensure_session_uuid() — exempts only /privacy-extension"
+    - "All 11 tests in tests/test_session_uuid.py pass (9 original + 1 bootstrap + 1 route-coverage from Plan 01)"
     - "All 6 existing tests in tests/test_safe_storage.py pass without modification (FOUND-05)"
   artifacts:
     - path: "web/safe_storage.py"
@@ -36,10 +37,10 @@ must_haves:
       contains: "def get_session_uuid"
       min_lines: 130
     - path: "web/main.py"
-      provides: "create_layout() bootstrap call to ensure_session_uuid() (B1) — single line at the top of the function. Covers 16 of 19 @ui.page handlers (every handler that uses the standard layout). The 3 non-layout routes (/privacy-extension, /reset-hints, /auth/callback) rely on lazy-mint inside get_session_uuid() — any later code path that reads the UUID will mint it on first access. SC1 is still satisfied because the design is lazy-mint, not eager-mint; the bootstrap call is an optimization for the common path, not a hard guarantee for every route."
+      provides: "create_layout() bootstrap call to ensure_session_uuid() (B1) — covers 16 of 19 @ui.page handlers; PLUS direct ensure_session_uuid() calls at the top of reset_hints_route and auth_callback_route (Fix 1 in 87-REVIEWS.md iteration 3 — Codex B1-residual). Total coverage: 18 of 19 routes; the remaining 1 route (/privacy-extension) is intentionally skipped (zero storage access). Import line `from web.safe_storage import ensure_session_uuid` is added to the module."
       contains: "ensure_session_uuid"
     - path: "tests/test_session_uuid.py"
-      provides: "New bootstrap test test_create_layout_mints_session_uuid added by this plan (B1 automated coverage)"
+      provides: "New bootstrap test test_create_layout_mints_session_uuid added by this plan (B1 automated coverage). Plan 01 separately adds test_every_ui_page_handler_mints_uuid for the route-coverage regression guard (Fix 1)."
       contains: "test_create_layout_mints_session_uuid"
   key_links:
     - from: "web/main.py:create_layout"
@@ -473,6 +474,120 @@ Expected: zero new errors (the file may already have pre-existing ruff warnings 
 </task>
 
 <task type="auto">
+  <name>Task 2b: Wire ensure_session_uuid() into /reset-hints and /auth/callback (Fix 1 in 87-REVIEWS.md iteration 3 — Codex B1-residual)</name>
+  <read_first>
+    - web/main.py lines 1279-1284 (the /reset-hints route — pops 3 hint keys directly from app.storage.user; needs ensure_session_uuid wiring)
+    - web/main.py lines 1436-1470 (the /auth/callback route — writes USER_KEY/PROFILE_KEY/auth_session in complete_login closure; needs ensure_session_uuid wiring BEFORE the closures are defined so the UUID is minted before any auth telemetry fires)
+    - web/main.py lines 1245-1278 (the /privacy-extension route — verify it has zero storage access; this route is INTENTIONALLY SKIPPED and the route-coverage test exempts it)
+    - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-REVIEWS.md (Codex round 2 HIGH residual B1 finding)
+    - tests/test_session_uuid.py (verify test_every_ui_page_handler_mints_uuid exists from Plan 01; this task's edits make that test pass)
+  </read_first>
+  <files>web/main.py</files>
+  <action>
+**Fix 1 (Codex B1-residual):** Wire `ensure_session_uuid()` into the 2 non-`create_layout()` routes that touch storage. `/privacy-extension` is INTENTIONALLY SKIPPED — no UUID needed because nothing reads or writes storage there.
+
+**Step 1: Verify the import added by Task 2 is already in place.**
+
+```
+python -c "import re; src = open('web/main.py').read(); m = re.search(r'from web\.safe_storage import.*ensure_session_uuid', src); print('import present:', bool(m))"
+```
+
+Expected: `True` (Task 2 added it). No additional import needed for this task.
+
+**Step 2: Wire `/reset-hints` (line ~1279-1284).**
+
+Read 10 lines around line 1279 to confirm the current shape. The route currently looks like:
+
+```python
+@ui.page('/reset-hints')
+def reset_hints_route():
+    """Hidden utility route to reset all feature discovery hints."""
+    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen'):
+        app.storage.user.pop(key, None)
+    ui.navigate.to('/')
+```
+
+Add `ensure_session_uuid()` as the FIRST statement inside the function (after the docstring). After the edit:
+
+```python
+@ui.page('/reset-hints')
+def reset_hints_route():
+    """Hidden utility route to reset all feature discovery hints."""
+    ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before storage pops
+    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen'):
+        app.storage.user.pop(key, None)
+    ui.navigate.to('/')
+```
+
+**Note:** The 3 `app.storage.user.pop` calls on line 1282 REMAIN AS-IS — they are migrated to `safe_user_pop` by Plan 04 (leaf-file migrations). This task only adds the bootstrap wiring; the migration is unchanged.
+
+**Step 3: Wire `/auth/callback` (line ~1436).**
+
+Read 10 lines around line 1436 to confirm the current shape. The route currently looks like:
+
+```python
+@ui.page('/auth/callback')
+async def auth_callback_route(code: str = None, error: str = None, error_description: str = None):
+    """
+    OAuth callback handler.
+    Supabase redirects here after Google login with ?code= parameter (PKCE flow).
+    Also handles ?error= / ?error_description= from cancelled or failed OAuth attempts.
+    """
+    from web.supabase_client import get_profile, exchange_code_for_session
+    from web.auth_state import GlobalAuthState
+    ...
+```
+
+Add `ensure_session_uuid()` as the FIRST statement inside the function (after the docstring, BEFORE the `from web.supabase_client import ...` line). After the edit:
+
+```python
+@ui.page('/auth/callback')
+async def auth_callback_route(code: str = None, error: str = None, error_description: str = None):
+    """
+    OAuth callback handler.
+    Supabase redirects here after Google login with ?code= parameter (PKCE flow).
+    Also handles ?error= / ?error_description= from cancelled or failed OAuth attempts.
+    """
+    ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before OAuth atomic writes / telemetry
+    from web.supabase_client import get_profile, exchange_code_for_session
+    from web.auth_state import GlobalAuthState
+    ...
+```
+
+**Why BEFORE the imports:** the OAuth flow fires `posthog_capture('login_success', ...)` and writes to `app.storage.user` (USER_KEY, PROFILE_KEY, auth_session) — both of which may depend on `_session_uuid` being present in storage for downstream Phase 88+ telemetry consumers. Minting first guarantees the UUID is available before any of those side effects fire.
+
+**Note:** The 3 `app.storage.user[...]` writes in `complete_login` (lines 1458, 1460, 1463) REMAIN AS-IS — they are allowlisted by Plan 01 (the OAuth atomic writes are deferred to Phase 91 AUTHW-01). This task only adds the bootstrap wiring; the writes are unchanged.
+
+**Step 4: Confirm /privacy-extension is intentionally skipped.**
+
+Read web/main.py:1245-1278. Verify the entire body uses only `ui.add_head_html`, `ui.column`, `ui.label` — zero `app.storage.user` access of any kind. This route is a pure static info page (browser-extension privacy policy). The route-coverage test (`test_every_ui_page_handler_mints_uuid` in Plan 01) hard-codes `/privacy-extension` into its `EXEMPT_ROUTES` set.
+
+If reading reveals ANY `app.storage.user` access on /privacy-extension (this would be a surprise — current state has none), STOP and consult the user. The exempt-list assumption would be invalid and require a third wiring site here.
+
+**Step 5: Verify (Windows-safe).**
+
+```
+python -c "import ast; ast.parse(open('web/main.py').read()); print('parses OK')"
+ruff check web/main.py
+```
+  </action>
+  <verify>
+    <automated>python -c "import ast; tree = ast.parse(open('web/main.py').read()); ok = {n.name: any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id == 'ensure_session_uuid' for c in ast.walk(n)) for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in {'reset_hints_route', 'auth_callback_route'}}; assert ok.get('reset_hints_route'), 'reset_hints_route missing'; assert ok.get('auth_callback_route'), 'auth_callback_route missing'; print('OK')"</automated>
+  </verify>
+  <acceptance_criteria>
+    - `web/main.py` parses as valid Python after the edits
+    - `reset_hints_route` body contains a call to `ensure_session_uuid()` (verified via the `<verify>` Python AST scan)
+    - `auth_callback_route` body contains a call to `ensure_session_uuid()` (verified via the `<verify>` Python AST scan)
+    - The call in `auth_callback_route` appears BEFORE the `from web.supabase_client import ...` line (verify by reading lines 1436-1450: `ensure_session_uuid()` should appear before any other statement that isn't a docstring)
+    - `/privacy-extension` route body has zero `app.storage.user` accesses
+    - `ruff check web/main.py` exits 0 (no NEW lint errors introduced)
+    - `python -m pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` exits 0 (helpers + bootstrap tests still green)
+    - `python -m pytest tests/test_session_uuid.py::test_every_ui_page_handler_mints_uuid -x` exits 0 (the route-coverage regression guard now PASSES after this task lands — Plan 01 created the test, this task makes it green)
+  </acceptance_criteria>
+  <done>reset_hints_route and auth_callback_route both call ensure_session_uuid() as their first statement; /privacy-extension intentionally skipped; route-coverage test passes; B1-residual closed.</done>
+</task>
+
+<task type="auto">
   <name>Task 3: Add automated test for the bootstrap wiring (B1 — test_create_layout_mints_session_uuid)</name>
   <read_first>
     - tests/test_session_uuid.py (CURRENT STATE after Plan 01 — read fully; the new test gets APPENDED, not inserted)
@@ -497,7 +612,7 @@ Run:
 python -c "import re; src = open('tests/test_session_uuid.py').read(); print('current test count:', len(re.findall(r'^def test_', src, re.MULTILINE)))"
 ```
 
-Expected: 9 (the Plan 01 + M5 tests).
+Expected: 10 (the 5 base + 4 M5 tests + 1 route-coverage test from Plan 01).
 
 **Step 2: Append the new test at the END of the file.**
 
@@ -560,13 +675,13 @@ def test_create_layout_mints_session_uuid():
         )
 ```
 
-**Step 3: Verify the test file now has 10 tests.**
+**Step 3: Verify the test file now has 11 tests.**
 
 ```
 python -c "import re; src = open('tests/test_session_uuid.py').read(); print('test count:', len(re.findall(r'^def test_', src, re.MULTILINE)))"
 ```
 
-Expected: `test count: 10`.
+Expected: `test count: 11` (5 base + 4 M5 + 1 route-coverage from Plan 01 + 1 bootstrap from this task).
 
 **Step 4: Run the full file.**
 
@@ -574,7 +689,7 @@ Expected: `test count: 10`.
 python -m pytest tests/test_session_uuid.py -x -v
 ```
 
-Expected: 10 passed (9 from Plan 01 + 1 new bootstrap test). If `test_create_layout_mints_session_uuid` fails:
+Expected: 11 passed (10 from Plan 01 — 5 base + 4 M5 + 1 route-coverage — + 1 new bootstrap test). If `test_create_layout_mints_session_uuid` fails:
 - If it fails at Part A (textual): Task 2's edit to web/main.py was wrong or incomplete. Re-check that the import and call are present.
 - If it fails at Part B (functional): Task 1's `ensure_session_uuid()` implementation has a bug. Re-check the function body.
   </action>
@@ -582,11 +697,11 @@ Expected: 10 passed (9 from Plan 01 + 1 new bootstrap test). If `test_create_lay
     <automated>python -m pytest tests/test_session_uuid.py::test_create_layout_mints_session_uuid -x -v</automated>
   </verify>
   <acceptance_criteria>
-    - `tests/test_session_uuid.py` contains exactly 10 `def test_*` functions (verified via `python -c "import re; print(len(re.findall(r'^def test_', open('tests/test_session_uuid.py').read(), re.MULTILINE)))"` prints `10`)
+    - `tests/test_session_uuid.py` contains exactly 11 `def test_*` functions (verified via `python -c "import re; print(len(re.findall(r'^def test_', open('tests/test_session_uuid.py').read(), re.MULTILINE)))"` prints `11`)
     - The new test name `test_create_layout_mints_session_uuid` is present: `python -c "assert 'def test_create_layout_mints_session_uuid' in open('tests/test_session_uuid.py').read(); print('OK')"` prints `OK`
-    - `python -m pytest tests/test_session_uuid.py -x` exits 0 with all 10 tests passing
+    - `python -m pytest tests/test_session_uuid.py -x` exits 0 with all 11 tests passing
     - `python -m pytest tests/test_session_uuid.py::test_create_layout_mints_session_uuid -x` exits 0 (the new bootstrap test specifically passes)
-    - `python -m pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` exits 0 (full Phase 87 helper test suite green: 6 + 10 = 16 tests)
+    - `python -m pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` exits 0 (full Phase 87 helper test suite green: 6 + 11 = 17 tests)
   </acceptance_criteria>
   <done>Bootstrap-wiring test added and passing; FOUND-01 SC1 is now verified by automated test, not by Plan 08's manual smoke check.</done>
 </task>
@@ -622,7 +737,7 @@ After all 3 tasks (Windows-safe commands throughout):
 ```
 # Verify Wave 0 -> Wave 1 transition
 python -m pytest tests/test_safe_storage.py tests/test_session_uuid.py -x -v
-# Expected: 16 passed in <2 seconds (6 + 10)
+# Expected: 17 passed in <2 seconds (6 + 11)
 
 # Verify FOUND-05 file invariant
 python -c "import subprocess; r = subprocess.run(['git', 'diff', '--stat', 'tests/test_safe_storage.py'], capture_output=True, text=True); assert not r.stdout.strip(), r.stdout; print('FOUND-05 invariant preserved')"
@@ -662,9 +777,9 @@ print('OK: B1 bootstrap wiring present')
 1. `web/safe_storage.py` has 6 functions: `safe_user_get`, `safe_user_set`, `safe_user_pop`, `_is_valid_uuid`, `get_session_uuid`, `ensure_session_uuid`
 2. Module constants `_SESSION_UUID_KEY = '_session_uuid'` and `_SESSION_UUID_RE = re.compile(r"^[0-9a-f]{32}$")` defined
 3. `web/main.py:create_layout()` calls `ensure_session_uuid()` as its first statement (B1 wiring); import is present
-4. `tests/test_session_uuid.py` has 10 tests including `test_create_layout_mints_session_uuid` (B1 automated coverage)
+4. `tests/test_session_uuid.py` has 11 tests including `test_create_layout_mints_session_uuid` (B1 automated coverage) and `test_every_ui_page_handler_mints_uuid` (Fix 1 — Codex B1-residual route-coverage guard, created by Plan 01, made green by Task 2b)
 5. `python -m pytest tests/test_safe_storage.py -x` -> 6 passed (FOUND-05)
-6. `python -m pytest tests/test_session_uuid.py -x` -> 10 passed (FOUND-01 + M5 + B1)
+6. `python -m pytest tests/test_session_uuid.py -x` -> 11 passed (FOUND-01 + M5 + B1 + Fix 1 route-coverage)
 7. `tests/test_safe_storage.py` byte-identical to baseline
 8. Existing 3 helper signatures and bodies UNCHANGED (verified by AST function-set comparison)
 9. Threat T-87-01 mitigated: UUID generated via `uuid.uuid4().hex` (CSPRNG); zero collisions across 100 simulated sessions
@@ -675,7 +790,8 @@ print('OK: B1 bootstrap wiring present')
 After completion, create `.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-02-SUMMARY.md` summarizing:
 - Functions added to web/safe_storage.py (with signatures): _is_valid_uuid, get_session_uuid, ensure_session_uuid
 - B1 wiring: location in web/main.py (line number where ensure_session_uuid() is called inside create_layout)
-- Test results: 6/6 existing tests pass + 10/10 new tests pass = 16/16 total
+- Fix 1 wiring (Codex B1-residual): line numbers in reset_hints_route and auth_callback_route where ensure_session_uuid() is called; confirmation that /privacy-extension is the single intentionally-skipped route
+- Test results: 6/6 existing tests pass + 11/11 new tests pass = 17/17 total
 - T-87-01 verification: 100-session uniqueness confirmed
 - T-87-02 verification: strict regex validation; 4 dedicated tests for uppercase/non-string/malformed/AssertionError-on-write
 - B1 verification: test_create_layout_mints_session_uuid exercises the bootstrap path

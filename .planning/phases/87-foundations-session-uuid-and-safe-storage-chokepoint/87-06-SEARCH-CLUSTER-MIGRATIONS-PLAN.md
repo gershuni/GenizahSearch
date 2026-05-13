@@ -416,29 +416,56 @@ For each read site (lines 362-374 approximately), apply:
 
 **Step 4: Migrate `persist_search_snapshot` writes.**
 
-Per PATTERNS.md, the persist function does a bulk write of 6 keys:
+Per PATTERNS.md, the persist function does a bulk write of 6 keys.
 
-BEFORE:
+**Specific Class B preservation site (Fix 4 in 87-REVIEWS.md iteration 3 — Codex MEDIUM M3 residual):** `persist_search_snapshot()` at lines 384-410 (post-iter2 line numbers). The try-except at lines 393-410 wraps `app.storage.user['search_snapshot_schema_version'] = ...`, `persist_search_active_snapshot(state)`, `_compact_result_rows(...)` call, `state.refinement_chain` `to_dict()` iteration, AND 4 more `app.storage.user[...]` assignments. This is **Class B** because the block covers non-storage transformations (list slicing, `_compact_result_rows`, `to_dict()` over the refinement chain, list-construction expressions `list(state.domain_exclusions or [])`, etc.). **Do NOT collapse the outer try-except**; only replace raw `app.storage.user[...]` calls inside it with `safe_user_set`. Note: there is also a NESTED try-except at lines 402-407 around the refinement_chain `to_dict()` loop — that one is also Class B (catches transformation failures) and stays.
+
+BEFORE (showing the wrapping try-except — lines 393-410):
 ```python
-app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
-app.storage.user['search_results'] = _compact_result_rows(...)
-app.storage.user['search_printed_filter'] = state.printed_filter
-app.storage.user['domain_exclusions'] = list(state.domain_exclusions or [])
-app.storage.user['search_refinement_chain'] = [...]
-app.storage.user['search_exclusion_sources'] = list(state.exclusion_sources or [])
+    try:
+        app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
+        persist_search_active_snapshot(state)
+        app.storage.user['search_results'] = _compact_result_rows(
+            (state.results or [])[:_SEARCH_ACTIVE_USER_FALLBACK_LIMIT]
+        )
+        app.storage.user['search_printed_filter'] = state.printed_filter
+        app.storage.user['domain_exclusions'] = list(state.domain_exclusions or [])
+        # refinement_chain (list[RefinementStep] -> list[dict])
+        try:
+            app.storage.user['search_refinement_chain'] = [
+                s.to_dict() for s in (state.refinement_chain or [])
+            ]
+        except Exception:
+            app.storage.user['search_refinement_chain'] = []
+        app.storage.user['search_exclusion_sources'] = list(state.exclusion_sources or [])
+    except Exception:
+        pass  # Browser storage operation failed; snapshot not persisted (D-08)
 ```
 
-AFTER:
+AFTER (BOTH try-except wrappers PRESERVED per Fix 4 — only raw storage calls swapped):
 ```python
-safe_user_set('search_snapshot_schema_version', _SEARCH_SNAPSHOT_VERSION)
-safe_user_set('search_results', _compact_result_rows(...))
-safe_user_set('search_printed_filter', state.printed_filter)
-safe_user_set('domain_exclusions', list(state.domain_exclusions or []))
-safe_user_set('search_refinement_chain', [...])
-safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
+    # Class B OUTER try-except PRESERVED — covers transformations.
+    try:
+        safe_user_set('search_snapshot_schema_version', _SEARCH_SNAPSHOT_VERSION)
+        persist_search_active_snapshot(state)
+        safe_user_set('search_results', _compact_result_rows(
+            (state.results or [])[:_SEARCH_ACTIVE_USER_FALLBACK_LIMIT]
+        ))
+        safe_user_set('search_printed_filter', state.printed_filter)
+        safe_user_set('domain_exclusions', list(state.domain_exclusions or []))
+        # Class B INNER try-except also PRESERVED — wraps to_dict() iteration:
+        try:
+            safe_user_set('search_refinement_chain', [
+                s.to_dict() for s in (state.refinement_chain or [])
+            ])
+        except Exception:
+            safe_user_set('search_refinement_chain', [])
+        safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
+    except Exception:
+        pass  # Browser storage operation failed; snapshot not persisted (D-08)
 ```
 
-If wrapped in a Class A try/except, drop the wrapper. If wrapped in Class B (e.g., catches errors from `_compact_result_rows` or list-construction), preserve.
+This task does NOT drop either wrapper. The Class A vs Class B rule says: if the except clause covers ONLY storage prune (AssertionError), collapse. If it covers transformations (list/dict construction, to_dict, _compact_result_rows), preserve. Both wrappers in persist_search_snapshot fall into the preserve bucket.
 
 **Step 5: Migrate `_reset_filter_storage_keys` function (pops + writes).**
 

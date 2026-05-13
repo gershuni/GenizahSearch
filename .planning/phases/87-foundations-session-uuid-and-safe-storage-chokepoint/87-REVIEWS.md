@@ -132,3 +132,48 @@ Per Codex's HIGH and MEDIUM concerns, the BLOCKING question for the orchestrator
 ### Verdict
 
 User decision required. Gemini approves; Codex blocks on B1-residual. Both are reasonable readings. Round-1 explicitly raised B1 and asked for a fix — that history weighs toward Option A (close the gap to honor the round-1 ask literally). The 3 fixes are small (one wiring task per route + 1 new route-coverage test + 4 small refinements) and fit within the existing plan structure.
+
+
+---
+
+## Iteration 3 Revision Response
+
+User walked through the round-2 findings with the orchestrator and elected to fix 4 of the 6 items in the breakdown table. Findings 1, 3, 4, and 6 below were addressed by surgical plan edits; finding 5 was deferred to backlog; finding 2 was rejected (already documented honestly).
+
+| Finding | Severity | Disposition | Closed by |
+|---------|----------|-------------|-----------|
+| 1. B1-residual (3 routes not wired to ensure_session_uuid) | HIGH | **Fixed** | Plan 02 new Task 2b wires `/reset-hints` and `/auth/callback`; `/privacy-extension` intentionally skipped (zero storage access). Plan 01 Task 1 adds `test_every_ui_page_handler_mints_uuid` route-coverage regression guard with `EXEMPT_ROUTES = {'/privacy-extension'}`. |
+| 2. Allowlist `enclosing` documentation-only | MEDIUM | **Rejected** | Plan 01 lines 185-188 already honestly document the limitation as advisory; `expected_count` provides the fail-loud signal. No edit needed. |
+| 3. `test_allowlist_counts_exact` silent-skip when no aliases | MEDIUM | **Fixed** | Plan 01 Task 3 pseudocode (around line 960) replaced — now explicitly counts 0 when no aliases and appends a mismatch if `expected_count > 0` for any pattern in the file. Plan 01 Task 3 acceptance criteria extended with regression-path note. |
+| 4. M3 residual: persist_*_snapshot Class B wrappers ambiguity | MEDIUM | **Fixed** | Plan 05 Task 2 migration of `persist_browse_snapshot()` (browse_state.py:162-205) now has explicit Class B callout for the inner try-except wrapping dict construction + conditional logic; AFTER example PRESERVES the wrapper. Plan 06 Task 3 migration of `persist_search_snapshot()` (search_state.py:384-410) now has explicit Class B callout for both the outer try-except AND the nested refinement_chain try-except; AFTER example PRESERVES both wrappers. |
+| 5. Scanner edge case: bare chained attribute double-report | LOW | **Deferred to backlog** | New P2 entry in `docs/OPEN_ISSUES.md` ("Phase 87 scanner edge case: bare chained attribute double-report"). Production code doesn't hit this pattern; fix instructions and regression-test name (`test_scanner_handles_bare_chained_attribute`) recorded for future revisit. P2 open count 16 → 17; total open 30 → 31. |
+| 6. Plan 01 doc inconsistency (5 vs 6 test functions) | LOW | **Fixed** | Plan 01 line 34 (must_haves artifacts) changed `5 test functions` → `6 test functions` and added `test_lint_does_not_double_report_nested_nodes` to the listed names. Plan 01 Task 3 acceptance criterion (around line 1034) changed `exactly 5 test functions` → `exactly 6 test functions` and removed the trailing "(note: 6 expected test names…)" clarifying parenthetical. Plan 01 also updated throughout for new 10-test count in `tests/test_session_uuid.py` (5 base + 4 M5 + 1 route-coverage). Plan 02 success_criteria + verification block updated to 11 total tests (Plan 01's 10 + Plan 02's bootstrap test). |
+
+### Edits Summary (files touched)
+
+- `.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-01-VALIDATION-FOUNDATION-PLAN.md`
+  - line 34 must_haves: 5 test functions → 6 test functions; added double-report test name
+  - line ~1034 Task 3 acceptance: exactly 5 → exactly 6
+  - Task 1 action: 9 tests → 10 tests; appended `test_every_ui_page_handler_mints_uuid` verbatim
+  - Task 3 silent-skip pseudocode → explicit count-0 with expected_count > 0 fail
+  - truths section: added 2 bullets (route-coverage guard + count-test fail-loud)
+- `.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-02-SESSION-UUID-HELPERS-PLAN.md`
+  - truths: "16 of 19 + lazy-mint" → "16 of 19 via create_layout + 2 direct + 1 intentionally skipped"
+  - new Task 2b: wires `ensure_session_uuid()` into `reset_hints_route` and `auth_callback_route` with concrete BEFORE/AFTER code + `/privacy-extension` skip rationale
+  - Task 3 step counts updated 9 → 10 (input from Plan 01) and final 10 → 11 (after Plan 02 bootstrap test); success_criteria + verification + output sections all updated
+- `.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-05-BROWSE-CLUSTER-MIGRATIONS-PLAN.md`
+  - Task 2 (browse_state.py): added Class B preservation callout for `persist_browse_snapshot()` at lines 162-205; AFTER example rewritten to PRESERVE the inner try-except wrapping dict construction
+- `.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-06-SEARCH-CLUSTER-MIGRATIONS-PLAN.md`
+  - Task 3 Step 4: added Class B preservation callout for `persist_search_snapshot()` at lines 384-410; AFTER example PRESERVES both the outer try-except AND the nested refinement_chain try-except
+- `docs/OPEN_ISSUES.md`
+  - new P2 entry: "Phase 87 scanner edge case: bare chained attribute double-report" (deferred LOW); Quick Summary counts P2 16→17, Total 30→31
+
+### Wave Structure (unchanged)
+
+- Wave 0: Plan 01 (test scaffolding + allowlist)
+- Wave 1: Plan 02 (helpers + create_layout wiring + Task 2b reset_hints/auth_callback wiring + bootstrap test)
+- Wave 2: Plans 03-06 (migrations)
+- Wave 3: Plan 07 (lint finalization)
+- Wave 4: Plan 08 (acceptance + docs)
+
+No plan files moved waves; no `files_modified` overlaps introduced.

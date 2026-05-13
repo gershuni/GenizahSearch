@@ -329,6 +329,8 @@ For `browse_state.py` specifically, the predominant pattern per research is Clas
 
 Approach: edit the file ONE FUNCTION AT A TIME, applying the M2/M3 rules.
 
+**Specific Class B preservation site (Fix 4 in 87-REVIEWS.md iteration 3 — Codex MEDIUM M3 residual):** `persist_browse_snapshot()` at lines 162-205 (post-iter2 line numbers). The OUTER try-except at lines 173-178 wraps `app.storage.user.get('session_persistence_enabled', True)` — this is **Class A** (storage gate; will be replaced by `safe_user_get` and the wrapper collapses cleanly). The INNER try-except at lines 179-205 wraps the schema-version write, position write, reading-desk write, AND the pop fallback — these are **Class B** because the block also covers dict construction (the `{'sys_id': state.sys_id, ...}` and `[{'sys_id': e.get('sys_id', ''), ...} for e in state.reading_desk_entries]` expressions) and the conditional logic (`if page is not None and state.sys_id:` / `if state.view_joined and state.reading_desk_entries:`). **Do NOT collapse the inner try-except**; only replace the raw `app.storage.user[...]` calls inside it with `safe_user_set` / `safe_user_pop`. The `except Exception as e: logger.error(...)` remains as a safety net for dict-construction failures unrelated to storage prune.
+
 CONCRETE EXAMPLE for `persist_browse_snapshot`:
 
 BEFORE (per research, lines 174-203):
@@ -347,19 +349,39 @@ BEFORE (per research, lines 174-203):
             logger.error(f"[BrowseSnapshot] Error persisting state: {e}")
 ```
 
-Analyze: the outer try/except is Class A (absorbs prune-race during multi-key write). Collapse:
+Analyze (revised per Fix 4): the OUTER try-except (lines 173-178, wrapping `session_persistence_enabled` get) is Class A — collapses to `safe_user_get(...)`. The INNER try-except (lines 179-205) is Class B — it wraps multi-key writes PLUS dict construction PLUS conditional logic. Preserve the inner wrapper:
 
-AFTER:
+AFTER (Class B inner try-except PRESERVED per Fix 4):
 ```python
+        # Class A outer storage gate (collapses):
         if not safe_user_get('session_persistence_enabled', True):
             return
-        safe_user_set('browse_snapshot_schema_version', _BROWSE_SNAPSHOT_VERSION)
-        if page is not None and state.sys_id:
-            safe_user_set('browse_position', {...})
-        if state.reading_desk_data:
-            safe_user_set('reading_desk_state', {...})
-        else:
-            safe_user_pop('reading_desk_state', None)
+        # Class B inner try-except PRESERVED — it covers dict construction
+        # and conditional logic, not just storage prune. Per Fix 4 in
+        # 87-REVIEWS.md iteration 3 (Codex MEDIUM M3 residual).
+        try:
+            safe_user_set('browse_snapshot_schema_version', _BROWSE_SNAPSHOT_VERSION)
+            if page is not None and state.sys_id:
+                safe_user_set('browse_position', {
+                    'sys_id': state.sys_id,
+                    'p_num': getattr(page, 'p_num', 1),
+                    'shelfmark': getattr(page, 'shelfmark', ''),
+                    'volume_ie': state.volume_ie,
+                })
+            if state.view_joined and state.reading_desk_entries:
+                rd_data = [
+                    {'sys_id': e.get('sys_id', ''), 'shelfmark': e.get('shelfmark', '')}
+                    for e in state.reading_desk_entries
+                ]
+                safe_user_set('reading_desk_state', {
+                    'entries': rd_data,
+                    'pgpid': state.joined_pgpid,
+                    'selected_sources': state.reading_desk_selected_sources or {},
+                })
+            else:
+                safe_user_pop('reading_desk_state', None)
+        except Exception as e:
+            logger.error(f"[BrowseSnapshot] Error persisting state: {e}")
 ```
 
 **Step 6: Run the test file BEFORE updating it (intentional — Task 3 updates the monkeypatches).**

@@ -23,15 +23,17 @@ must_haves:
   truths:
     - "Failing test stubs exist for FOUND-01 (session UUID minting/stability) including poisoning, uppercase, non-string, AssertionError test cases per M5"
     - "Failing test stubs exist for FOUND-04 (lint scanner) using a corrected AST chain check that matches actual ast.walk output (see B2 fix)"
+    - "Route-coverage regression guard exists (test_every_ui_page_handler_mints_uuid) — enforces that every @ui.page handler in web/main.py either calls create_layout() or ensure_session_uuid() (Fix 1 in 87-REVIEWS.md iteration 3 — Codex B1-residual)"
     - "Allowlist YAML file exists with at least web/auth_state.py + web/supabase_client.py:111 + web/main.py:1458-1463 + web/export_state.py:48 entries, each with expected_count (per H1)"
     - "PyYAML 6.0.3 verified available (yaml.__version__ matches)"
     - "AST scanner uses parent-tracking to avoid double-reporting (B2)"
+    - "test_allowlist_counts_exact fails loudly (not silent-skip) when an allowlisted file's nicegui app import is removed but expected_count > 0 (Fix 3 in 87-REVIEWS.md iteration 3 — Codex MEDIUM)"
   artifacts:
     - path: "tests/test_session_uuid.py"
-      provides: "9 failing unit tests for get_session_uuid / ensure_session_uuid (skeleton; 5 base + 4 from M5 — uppercase, non-string, malformed, AssertionError-on-write)"
+      provides: "10 failing unit tests for get_session_uuid / ensure_session_uuid + route-coverage wiring guard (skeleton; 5 base + 4 from M5 — uppercase, non-string, malformed, AssertionError-on-write — + 1 from B1-residual: test_every_ui_page_handler_mints_uuid)"
       contains: "test_session_uuid_unique_across_100_sessions"
     - path: "tests/test_no_raw_storage_access.py"
-      provides: "5 test functions: test_no_raw_storage_access_outside_allowlist, test_lint_rejects_synthetic_violation, test_lint_handles_aliased_imports, test_allowlist_well_formed, test_allowlist_counts_exact (the H1 expected_count enforcement test)"
+      provides: "6 test functions: test_no_raw_storage_access_outside_allowlist, test_lint_rejects_synthetic_violation, test_lint_handles_aliased_imports, test_lint_does_not_double_report_nested_nodes (B2 regression guard), test_allowlist_well_formed, test_allowlist_counts_exact (the H1 expected_count enforcement test)"
       contains: "_find_app_aliases"
     - path: ".planning/phase87_storage_allowlist.yaml"
       provides: "Allowlist for 4 known bootstrap sites with expected_count per entry pattern (H1)"
@@ -199,7 +201,7 @@ allowed_raw_access:
 <tasks>
 
 <task type="auto">
-  <name>Task 1: Verify PyYAML available (L2) and create tests/test_session_uuid.py with 9 failing unit-test stubs (FOUND-01 + M5)</name>
+  <name>Task 1: Verify PyYAML available (L2) and create tests/test_session_uuid.py with 10 unit-test stubs (FOUND-01 + M5 + B1-residual route-coverage)</name>
   <read_first>
     - tests/test_safe_storage.py (FULL FILE — this is the mock pattern reference; copy the `with patch('web.safe_storage.app') as mock_app` style exactly)
     - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-RESEARCH.md (read the "Concurrency Test for FOUND-01" code block at lines 519-601)
@@ -217,11 +219,11 @@ python -c "import yaml; print(yaml.__version__)"
 
 Expected: `6.0.3` (matches the version installed transitively via NiceGUI). If this command fails with ImportError, STOP and add `PyYAML>=6.0` to `requirements.txt` as an explicit direct dependency before proceeding. Do not silently rely on transitive installation.
 
-**Step 1: Create `tests/test_session_uuid.py` (NEW file) with 9 unit tests.**
+**Step 1: Create `tests/test_session_uuid.py` (NEW file) with 10 unit tests.**
 
 Tests import `get_session_uuid` and `ensure_session_uuid` from `web.safe_storage` — those helpers do NOT exist yet, so all tests using them will FAIL with ImportError. That failure is the expected Wave 0 state; Plan 02 makes them green.
 
-Test composition (5 original + 4 new per M5):
+Test composition (5 original + 4 from M5 + 1 from B1-residual):
 1. `test_session_uuid_unique_across_100_sessions` (FOUND-01 SC1)
 2. `test_session_uuid_stable_within_session`
 3. `test_session_uuid_survives_token_refresh`
@@ -231,6 +233,7 @@ Test composition (5 original + 4 new per M5):
 7. **NEW (M5)** `test_session_uuid_rejects_non_string` — int / None / dict stored values trigger regeneration
 8. **NEW (M5)** `test_session_uuid_rejects_malformed_length` — too-short / too-long hex triggers regeneration
 9. **NEW (M5)** `test_ensure_session_uuid_returns_false_on_assertion` — AssertionError-during-write returns False without raising
+10. **NEW (Fix 1 — B1-residual)** `test_every_ui_page_handler_mints_uuid` — route-coverage regression guard: every @ui.page handler in web/main.py must either call create_layout() or call ensure_session_uuid() directly. Exempt: `/privacy-extension` (zero storage access).
 
 Exact file content to write:
 
@@ -249,6 +252,13 @@ Revision tests (M5 from 87-REVIEWS.md): the original 5 tests did not exercise
 the validation regex on read. New tests 6-9 cover uppercase hex (reject),
 non-string stored values (reject), malformed length (reject), and
 AssertionError-during-write (ensure_session_uuid returns False).
+
+Iteration 3 revision (Fix 1 in 87-REVIEWS.md — Codex B1-residual): test 10
+(test_every_ui_page_handler_mints_uuid) is a route-coverage regression guard
+that parses web/main.py and enforces that every @ui.page handler either calls
+create_layout() (which calls ensure_session_uuid()) or calls
+ensure_session_uuid() directly. The exempt route /privacy-extension is a pure
+static info page with zero storage access.
 """
 from unittest.mock import patch, MagicMock
 
@@ -386,23 +396,80 @@ def test_ensure_session_uuid_returns_false_on_assertion():
         from web.safe_storage import ensure_session_uuid
         result = ensure_session_uuid()
         assert result is False, "ensure_session_uuid should return False on prune-race write"
+
+
+# ---------------------------------------------------------------------------
+# B1-residual fix (Codex round 2): route-coverage regression guard.
+# Asserts that every @ui.page handler in web/main.py either calls create_layout()
+# (which calls ensure_session_uuid()) OR calls ensure_session_uuid() directly.
+# This test prevents future regressions where a new @ui.page that touches
+# storage is added without one of these wiring patterns.
+# ---------------------------------------------------------------------------
+
+def test_every_ui_page_handler_mints_uuid():
+    """Every @ui.page handler in web/main.py either calls create_layout()
+    (which calls ensure_session_uuid()) OR calls ensure_session_uuid() directly.
+
+    The one documented exception is /privacy-extension (pure static info page,
+    zero storage access). Adding a new @ui.page that touches storage without
+    one of these wiring patterns will fail this test.
+    """
+    import ast
+    import pathlib as _pathlib
+    repo_root = _pathlib.Path(__file__).resolve().parent.parent
+    source = (repo_root / 'web' / 'main.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    EXEMPT_ROUTES = {'/privacy-extension'}
+    failures = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        # Check decorators for @ui.page('/path')
+        page_path = None
+        for dec in node.decorator_list:
+            if (isinstance(dec, ast.Call) and
+                isinstance(dec.func, ast.Attribute) and
+                dec.func.attr == 'page' and
+                isinstance(dec.func.value, ast.Name) and
+                dec.func.value.id == 'ui' and
+                dec.args and
+                isinstance(dec.args[0], ast.Constant) and
+                isinstance(dec.args[0].value, str)):
+                page_path = dec.args[0].value
+                break
+        if page_path is None:
+            continue
+        if page_path in EXEMPT_ROUTES:
+            continue
+        # Walk the function body for create_layout() or ensure_session_uuid() call
+        body_source = ast.unparse(node)
+        has_layout = 'create_layout(' in body_source
+        has_ensure = 'ensure_session_uuid(' in body_source
+        if not (has_layout or has_ensure):
+            failures.append(f"{page_path} (line {node.lineno}): no create_layout() or ensure_session_uuid() call")
+    assert not failures, (
+        "The following @ui.page handlers in web/main.py do NOT wire ensure_session_uuid():" + chr(10)
+        + "  " + (chr(10) + "  ").join(failures)
+        + chr(10) + chr(10)
+        + "Fix: add `ensure_session_uuid()` to the function OR call create_layout()."
+    )
 ```
 
-After writing: `pytest tests/test_session_uuid.py --collect-only` MUST list exactly 9 tests. Full pytest run will fail with ImportError on `get_session_uuid` until Plan 02 lands.
+After writing: `pytest tests/test_session_uuid.py --collect-only` MUST list exactly 10 tests. Full pytest run will fail with ImportError on `get_session_uuid` until Plan 02 lands.
   </action>
   <verify>
-    <automated>python -c "import subprocess, sys; r = subprocess.run([sys.executable, '-m', 'pytest', 'tests/test_session_uuid.py', '--collect-only', '-q'], capture_output=True, text=True); print(r.stdout); print(r.stderr); sys.exit(0 if 'test_session_uuid_unique_across_100_sessions' in r.stdout and r.stdout.count('::test_') == 9 else 1)"</automated>
+    <automated>python -c "import subprocess, sys; r = subprocess.run([sys.executable, '-m', 'pytest', 'tests/test_session_uuid.py', '--collect-only', '-q'], capture_output=True, text=True); print(r.stdout); print(r.stderr); sys.exit(0 if 'test_session_uuid_unique_across_100_sessions' in r.stdout and r.stdout.count('::test_') == 10 else 1)"</automated>
   </verify>
   <acceptance_criteria>
     - PyYAML is importable: `python -c "import yaml; print(yaml.__version__)"` exits 0 and prints `6.0.3` (or later)
     - File `tests/test_session_uuid.py` exists
-    - Python AST count of `def test_*` functions in the file equals 9: `python -c "import ast; print(sum(1 for n in ast.walk(ast.parse(open('tests/test_session_uuid.py').read())) if isinstance(n, ast.FunctionDef) and n.name.startswith('test_')))"` prints `9`
-    - File contains all 9 test names: `python -c "src = open('tests/test_session_uuid.py').read(); names = ['test_session_uuid_unique_across_100_sessions', 'test_session_uuid_stable_within_session', 'test_session_uuid_survives_token_refresh', 'test_session_uuid_returns_ephemeral_on_prune', 'test_ensure_session_uuid_idempotent', 'test_session_uuid_rejects_uppercase_hex', 'test_session_uuid_rejects_non_string', 'test_session_uuid_rejects_malformed_length', 'test_ensure_session_uuid_returns_false_on_assertion']; missing = [n for n in names if 'def ' + n not in src]; assert not missing, missing; print('OK')"` prints `OK`
-    - `pytest tests/test_session_uuid.py --collect-only -q` exits 0 AND its output contains exactly 9 `::test_` items
+    - Python AST count of `def test_*` functions in the file equals 10: `python -c "import ast; print(sum(1 for n in ast.walk(ast.parse(open('tests/test_session_uuid.py').read())) if isinstance(n, ast.FunctionDef) and n.name.startswith('test_')))"` prints `10`
+    - File contains all 10 test names: `python -c "src = open('tests/test_session_uuid.py').read(); names = ['test_session_uuid_unique_across_100_sessions', 'test_session_uuid_stable_within_session', 'test_session_uuid_survives_token_refresh', 'test_session_uuid_returns_ephemeral_on_prune', 'test_ensure_session_uuid_idempotent', 'test_session_uuid_rejects_uppercase_hex', 'test_session_uuid_rejects_non_string', 'test_session_uuid_rejects_malformed_length', 'test_ensure_session_uuid_returns_false_on_assertion', 'test_every_ui_page_handler_mints_uuid']; missing = [n for n in names if 'def ' + n not in src]; assert not missing, missing; print('OK')"` prints `OK`
+    - `pytest tests/test_session_uuid.py --collect-only -q` exits 0 AND its output contains exactly 10 `::test_` items
     - Running `pytest tests/test_session_uuid.py` exits non-zero (ImportError on `get_session_uuid` — expected pre-Plan-02 state)
     - tests/test_safe_storage.py byte-unchanged from baseline (FOUND-05 invariant): `python -c "import hashlib; print(hashlib.sha256(open('tests/test_safe_storage.py', 'rb').read()).hexdigest())"` produces a stable hash recorded in the SUMMARY
   </acceptance_criteria>
-  <done>Test file exists with 9 stubs that fail import; collect-only succeeds with exactly 9 tests; PyYAML availability confirmed.</done>
+  <done>Test file exists with 10 stubs that fail import; collect-only succeeds with exactly 10 tests; PyYAML availability confirmed.</done>
 </task>
 
 <task type="auto">
@@ -959,9 +1026,17 @@ def test_allowlist_counts_exact():
             continue
         aliases = _find_app_aliases(tree)
         if not aliases:
-            # No nicegui app import — every pattern's expected_count must be 0
-            # (or the file's just a stub; in practice allowlist entries always
-            # have at least one import). Skip silently if no aliases.
+            # No nicegui app import — actual count is 0 by definition. If the
+            # allowlist still lists patterns with expected_count > 0 for this file,
+            # the test must fail loudly so stale allowlist entries are caught.
+            # (Fix 3 in 87-REVIEWS.md iteration 3 — Codex MEDIUM finding.)
+            for pat in entry['patterns']:
+                if pat['expected_count'] > 0:
+                    mismatches.append(
+                        f"{rel}: pattern {pat['source']!r} expected_count={pat['expected_count']} "
+                        f"but file has no nicegui app import (actual count = 0). "
+                        f"Either remove this allowlist entry or restore the import."
+                    )
             continue
         visitor = _StorageAccessVisitor(aliases, source)
         visitor.visit(tree)
@@ -1031,7 +1106,7 @@ Expected: 4 passed. The 2 production-scanning tests (`test_no_raw_storage_access
   </verify>
   <acceptance_criteria>
     - File `tests/test_no_raw_storage_access.py` exists
-    - File contains exactly 5 test functions: `python -c "import ast; names = [n.name for n in ast.walk(ast.parse(open('tests/test_no_raw_storage_access.py').read())) if isinstance(n, ast.FunctionDef) and n.name.startswith('test_')]; assert sorted(names) == sorted(['test_allowlist_well_formed', 'test_lint_rejects_synthetic_violation', 'test_lint_handles_aliased_imports', 'test_lint_does_not_double_report_nested_nodes', 'test_allowlist_counts_exact', 'test_no_raw_storage_access_outside_allowlist']), names; print('OK')"` prints `OK` (note: 6 expected test names — the `<action>` writes 6; clarify if running on 5)
+    - File contains exactly 6 test functions: `python -c "import ast; names = [n.name for n in ast.walk(ast.parse(open('tests/test_no_raw_storage_access.py').read())) if isinstance(n, ast.FunctionDef) and n.name.startswith('test_')]; assert sorted(names) == sorted(['test_allowlist_well_formed', 'test_lint_rejects_synthetic_violation', 'test_lint_handles_aliased_imports', 'test_lint_does_not_double_report_nested_nodes', 'test_allowlist_counts_exact', 'test_no_raw_storage_access_outside_allowlist']), names; print('OK')"` prints `OK`
     - File contains `class _StorageAccessVisitor(ast.NodeVisitor)`: verified via Python AST scan
     - File uses `chain[-2:] == ['user', 'storage']` (the B2 corrected check) AND does NOT contain `chain[-2:] == ['storage', 'user']` (the original buggy check)
     - File imports yaml: verified via `python -c "import ast; tree = ast.parse(open('tests/test_no_raw_storage_access.py').read()); assert any(isinstance(n, ast.Import) and any(a.name == 'yaml' for a in n.names) for n in ast.walk(tree)); print('OK')"` prints `OK`
@@ -1041,6 +1116,7 @@ Expected: 4 passed. The 2 production-scanning tests (`test_no_raw_storage_access
     - Running `pytest tests/test_no_raw_storage_access.py::test_lint_does_not_double_report_nested_nodes -x` exits 0 (PASSES — parent tracking works)
     - Running `pytest tests/test_no_raw_storage_access.py::test_no_raw_storage_access_outside_allowlist -x` exits non-zero (FAILS — production code still has raw access; this is expected at Wave 0 and gates Plans 03-06 to complete)
     - Running `pytest tests/test_no_raw_storage_access.py::test_allowlist_counts_exact -x` exits non-zero (FAILS — counts won't match until Plan 07 because main.py/supabase_client.py still have non-allowlisted raw accesses pre-Plan-04)
+    - **Fix 3 regression path:** `test_allowlist_counts_exact` correctly fails when an allowlisted file's nicegui app import is removed but expected_count > 0 (the silent-skip replacement explicitly counts 0 and reports a mismatch — verify by reading the test body: it must contain `if not aliases:` followed by a loop over `entry['patterns']` that appends to mismatches when `expected_count > 0`)
     - tests/test_safe_storage.py file byte-unchanged from baseline (FOUND-05 invariant): SHA-256 stable across the Wave 0 commit
   </acceptance_criteria>
   <done>Lint scanner file exists with corrected AST chain logic + parent tracking + H1 count test; 4 of 6 tests pass; the 2 production-scanning tests fail as expected.</done>
@@ -1100,7 +1176,7 @@ python -c "import hashlib, pathlib; h = hashlib.sha256(pathlib.Path('tests/test_
 
 <success_criteria>
 1. PyYAML 6.0.3+ confirmed importable (L2 gate)
-2. `tests/test_session_uuid.py` exists with 9 tests (5 original + 4 M5 additions); collect-only succeeds; runtime fails with ImportError (expected pre-Plan-02)
+2. `tests/test_session_uuid.py` exists with 10 tests (5 original + 4 M5 additions + 1 B1-residual route-coverage guard); collect-only succeeds; runtime fails with ImportError on the first 9 tests (expected pre-Plan-02); the 10th test (test_every_ui_page_handler_mints_uuid) may already pass at Wave 0 because it only reads web/main.py source — it gates Plan 02 from regressing the bootstrap wiring
 3. `.planning/phase87_storage_allowlist.yaml` exists with 4 well-formed entries; each pattern has `source` + `expected_count` (H1 schema)
 4. `tests/test_no_raw_storage_access.py` exists with 6 tests using the B2-corrected AST chain order (`chain[-2:] == ['user', 'storage']`); 4 standalone tests pass (well_formed, synthetic, aliased, no_double_report); 2 production-scanning tests fail as expected at Wave 0
 5. `tests/test_safe_storage.py` is byte-identical to baseline (FOUND-05 invariant)
