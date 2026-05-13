@@ -12,7 +12,8 @@ search_state and refs parameters instead of capturing them via closure.
 """
 from __future__ import annotations
 
-from nicegui import ui, run, app
+from nicegui import ui, run
+from web.safe_storage import safe_user_get as _safe_get
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language
@@ -478,11 +479,7 @@ def create_result_card(search_state, refs, index, result):
                     _vs_container_ref[0] = _vs_partner_container
 
                 # Title and optional translated description (Phase 46)
-                _show_trans = False
-                try:
-                    _show_trans = app.storage.user.get('show_translations', False)
-                except Exception:
-                    pass  # Translation lookup failed; continue without translation
+                _show_trans = _safe_get('show_translations', False)
                 _title_info = search_state.title_translations.get(sys_id) if sys_id else None
                 if _title_info:
                     _lang = get_language()
@@ -1572,11 +1569,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 # Phase 46-06: Show pre-computed document_type_he when UI is Hebrew
                                 _adv_type_he = None
                                 _pgpid_for_type = pgp_metadata.get('pgpid')
-                                _show_type_trans = False
-                                try:
-                                    _show_type_trans = app.storage.user.get('show_translations', False)
-                                except Exception:
-                                    pass  # Translation lookup failed; continue without translation
+                                _show_type_trans = _safe_get('show_translations', False)
                                 _type_lang = get_language()
                                 if _show_type_trans and _type_lang == 'he' and _pgpid_for_type and search_state.translation_data:
                                     _type_trans = search_state.translation_data.get(sys_id)
@@ -1630,11 +1623,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                         with ui.column().classes('gap-1 mt-2'):
                             ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
                             # Phase 46: Show translated description when toggle is on and UI is Hebrew
-                            _show_trans_adv = False
-                            try:
-                                _show_trans_adv = app.storage.user.get('show_translations', False)
-                            except Exception:
-                                pass  # Translation lookup failed; continue without translation
+                            _show_trans_adv = _safe_get('show_translations', False)
                             _adv_pgpid = pgp_metadata.get('pgpid')
                             _adv_trans_he = None
                             _adv_lang = get_language()

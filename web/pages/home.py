@@ -11,7 +11,7 @@ A professional research dashboard providing:
 
 import asyncio
 
-from nicegui import ui, app
+from nicegui import ui
 from web.state import state
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
@@ -26,7 +26,7 @@ def create_page():
         # === OCR Disclaimer Banner (dismissible, compact single-line) ===
         # 2026-05-12 Codex 3rd-pass HIGH: safe_user_get so prune races on
         # / don't 500 the homepage.
-        from web.safe_storage import safe_user_get as _safe_get
+        from web.safe_storage import safe_user_get as _safe_get, safe_user_set as _safe_set
         if not _safe_get('ocr_disclaimer_dismissed', False):
             banner_dir = 'rtl' if is_rtl() else 'ltr'
             with ui.element('div').classes('w-full px-4 py-2 flex items-center gap-3').style(
@@ -37,7 +37,7 @@ def create_page():
                 ui.link(tr('Learn more →'), '/about').classes('text-xs').style('color: var(--primary-600); text-decoration: none;')
                 def dismiss_banner():
                     # Explicit user dismiss (X button): persist unconditionally.
-                    app.storage.user['ocr_disclaimer_dismissed'] = True
+                    _safe_set('ocr_disclaimer_dismissed', True)
                     try:
                         ocr_banner.delete()
                     except Exception:
@@ -55,10 +55,7 @@ def create_page():
                         ocr_banner.delete()
                     except Exception:
                         return
-                    try:
-                        app.storage.user['ocr_disclaimer_dismissed'] = True
-                    except Exception:
-                        pass
+                    _safe_set('ocr_disclaimer_dismissed', True)
                 try:
                     asyncio.get_event_loop().call_later(10.0, _auto_dismiss_ocr)
                 except RuntimeError:
