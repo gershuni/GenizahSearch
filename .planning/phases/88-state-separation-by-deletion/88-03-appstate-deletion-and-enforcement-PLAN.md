@@ -19,7 +19,8 @@ must_haves:
     - "The 10 per-user fields are physically deleted from web/state.py:AppState.init() — direct attribute access on an AppState instance raises AttributeError."
     - "A runtime attr-absence test (tests/test_no_appstate_export_fields.py) parametrized over the 10 field names asserts AttributeError on every direct access — defensive against fixture-time regressions."
     - "A static AST/grep test (tests/test_no_deleted_state_references.py) scans web/ AND tests/ for any state.<deleted_field> attribute access OR setattr(state, '<deleted_field>', ...) call — fails CI if a regression slips through."
-    - "The AST scanner has a seed-trap unit test proving it ignores comments/docstrings but catches actual code references."
+    - "Static AST scanner catches aliased imports: `from web.state import state as s` / `from web.api import state as api_state` / `import web.state as web_state` (`web_state.state.X` chained access) — extends D-07 alias coverage per cross-AI review Refinement 5 (Codex MEDIUM)."
+    - "The AST scanner has a seed-trap unit test proving it ignores comments/docstrings but catches actual code references, AND a seed-trap test proving it catches aliased imports."
     - "Stale docstring/comment mentions at web/api.py:1846-1848 (2026-05-12 cross-user fix) and web/search_api.py:1198-1199 (MUST NOT touch state.last_results) are refreshed to reflect the post-Phase-88 reality."
     - "web/export_state.py module docstring (Phase 88 D-16) is refreshed to remove the 'singleton state.* writes are intentionally left in place' paragraph — the writes are now gone."
     - "Plan-boundary green: pytest + ruff check + python scripts/check_docs.py all exit 0; full Phase 88 success criteria from ROADMAP.md verified."
@@ -30,9 +31,9 @@ must_haves:
       min_lines: 60
     - path: "tests/test_no_appstate_export_fields.py"
       provides: "Runtime attr-absence test parametrized over 10 field names"
-      contains: "pytest.raises(AttributeError)"
+      contains: "assert not hasattr(instance, field)"
     - path: "tests/test_no_deleted_state_references.py"
-      provides: "Static AST scanner for state.<deleted_field> references in web/ + tests/"
+      provides: "Static AST scanner for state.<deleted_field> references in web/ + tests/ with alias-import coverage per Refinement 5"
       contains: "ast.Attribute"
   key_links:
     - from: "AppState.init()"
@@ -41,14 +42,14 @@ must_haves:
       pattern: "self\\.(last_results|current_search_query|parallels_results)"
     - from: "tests/test_no_deleted_state_references.py"
       to: "AST node walker"
-      via: "ast.Attribute(value=Name('state'), attr=<deleted_field>) detection + ast.Call setattr detection"
-      pattern: "ast\\.(Attribute|Call)"
+      via: "ast.Attribute(value=Name('state'), attr=<deleted_field>) detection + ast.Call setattr detection + ImportFrom alias tracking"
+      pattern: "ast\\.(Attribute|Call|ImportFrom|Import)"
 ---
 
 <objective>
-Delete the 10 per-user mirror fields from web/state.py:AppState; install two complementary regression guards (runtime attr-absence test D-06 + static AST scanner D-07); refresh the stale docstring/comment mentions per D-16; verify full Phase 88 success criteria from ROADMAP.md.
+Delete the 10 per-user mirror fields from web/state.py:AppState; install two complementary regression guards (runtime attr-absence test D-06 + static AST scanner D-07 with alias-import coverage per Refinement 5); refresh the stale docstring/comment mentions per D-16; verify full Phase 88 success criteria from ROADMAP.md.
 
-Purpose: Close the cross-user state-leak attack surface permanently. The Plan 88-01 + 88-02 migration left the AppState fields write-orphaned and reader-free — they are now dead code. Deletion eliminates the singleton mirrors entirely. The two enforcement tests (runtime + static) ensure no future PR can dynamically re-create one of these attributes (AppState has no `__setattr__` guard, so a `state.last_results = ...` line in new code would silently re-create the attr without the static scanner).
+Purpose: Close the cross-user state-leak attack surface permanently. The Plan 88-01 + 88-02 migration left the AppState fields write-orphaned and reader-free — they are now dead code. Deletion eliminates the singleton mirrors entirely. The two enforcement tests (runtime + static) ensure no future PR can dynamically re-create one of these attributes (AppState has no `__setattr__` guard, so a `state.last_results = ...` line in new code would silently re-create the attr without the static scanner). Per Refinement 5 (Codex review), the static scanner is hardened to catch aliased imports — the scanner is intended as a PERMANENT CI guard and must survive aliased imports.
 
 Output: 7 modified files (3 source, 2 new tests, 2 docs). AppState class shrinks by 10 fields. Two new tests are added to the permanent CI surface. Stale comments updated. Full Phase 88 success criteria from ROADMAP.md proven via verification commands in Task 6.
 </objective>
@@ -103,6 +104,18 @@ AppState class is a singleton via __new__ pattern — but the `state` module-lev
     - .planning/phases/88-state-separation-by-deletion/88-CONTEXT.md (D-04 plan ordering rationale; this task assumes Plans 88-01 + 88-02 have landed)
   </read_first>
   <action>
+**Tooling note (per Codex review, Refinement 7):** Acceptance-criterion shell
+commands below assume Bash + GNU grep are available via the `Bash` tool in
+the execute-phase runtime. If running on a pure-PowerShell shell, the
+equivalent commands are:
+  - `grep -nE "pat" file` → `rg -nN "pat" file`
+  - `grep -c "pat" file`  → `(rg -c "pat" file)` (rg returns count)
+  - `grep -rn "pat" dir`  → `rg -n "pat" dir`
+  - `test -f path && echo OK` → `python -c "import os; assert os.path.isfile('path'); print('OK')"`
+The executor agent SHOULD run the Bash-style commands first via the Bash
+tool; fallback to PowerShell equivalents only if the Bash invocation fails
+or is unavailable.
+
 Delete lines 26-50 (the 10 per-user mirror fields) from web/state.py:AppState.init().
 
 Before edit, web/state.py:AppState.init() contains 18 lines of assignments (lines 15-50): the 7 service-related fields (meta_mgr, var_mgr, searcher, lab_engine, indexer, _local_lists_mgr, _user_lists_mgr) plus the 10 per-user fields plus a few comment blocks.
@@ -273,7 +286,7 @@ def test_appstate_still_has_non_deleted_fields():
     <automated>python -m pytest tests/test_no_appstate_export_fields.py -v --tb=short</automated>
   </verify>
   <acceptance_criteria>
-    - `test -f tests/test_no_appstate_export_fields.py && echo OK` returns OK.
+    - `python -c "import os; assert os.path.isfile('tests/test_no_appstate_export_fields.py'); print('OK')"` exits 0 (file exists).
     - `python -m pytest tests/test_no_appstate_export_fields.py -v` exits 0 with 11 tests passing.
     - `grep -c "DELETED_FIELDS = " tests/test_no_appstate_export_fields.py` returns 1 (single list of 10 names).
     - `grep -c "@pytest.mark.parametrize" tests/test_no_appstate_export_fields.py` returns 1.
@@ -283,7 +296,7 @@ def test_appstate_still_has_non_deleted_fields():
 </task>
 
 <task type="auto">
-  <name>Task 3: Create tests/test_no_deleted_state_references.py (D-07 static AST scanner)</name>
+  <name>Task 3: Create tests/test_no_deleted_state_references.py (D-07 static AST scanner with alias-import coverage per Refinement 5)</name>
   <files>tests/test_no_deleted_state_references.py</files>
   <read_first>
     - tests/test_no_raw_storage_access.py (full file — canonical AST scanner pattern, especially _walk_attribute_chain and _StorageAccessVisitor patterns)
@@ -292,10 +305,18 @@ def test_appstate_still_has_non_deleted_fields():
   </read_first>
   <action>
 Create the static AST scanner that walks all .py files under web/ AND tests/ and flags any reference matching:
-1. `<X>.last_results` (or any of the other 9 deleted fields) where `<X>` is an identifier matching the names typically bound to `AppState()` instances (`state`, `app_state`).
+1. `<X>.last_results` (or any of the other 9 deleted fields) where `<X>` is an identifier matching the names typically bound to `AppState()` instances (`state`, `app_state`, OR any alias from `from web.state import state as X` / `from web.api import state as X`).
 2. `setattr(<X>, 'last_results', ...)` or any of the 9 other field names as the second arg.
+3. **Per Refinement 5 (Codex MEDIUM):** Chained-attribute access like `web_state.state.last_results` from `import web.state as web_state`.
 
 Per CONTEXT.md "Claude's Discretion": AST is preferred over pure regex (mirrors test_no_raw_storage_access.py Phase 87 pattern). Per D-07: scan both web/ AND tests/ (Plan 88-01 + 88-02 already cleaned these directories; the scanner is a forward-going guard).
+
+**Per Refinement 5 (cross-AI review — Codex MEDIUM):** The scanner is intended as a PERMANENT CI guard and must survive aliased imports. The default `STATE_BINDING_NAMES = {'state', 'app_state'}` catches the canonical idiom but misses:
+- `from web.state import state as s` → `s.last_results = []`
+- `import web.state as web_state` → `web_state.state.last_results`
+- `from web.api import state as api_state` → `api_state.last_results`
+
+The scanner walks `Import` and `ImportFrom` nodes first to populate a per-file `aliases` set, then uses that augmented set when checking Attribute and Call nodes.
 
 Concrete file content (write verbatim, modeled on test_no_raw_storage_access.py shape):
 
@@ -307,6 +328,10 @@ fields deleted from web/state.py:AppState in Phase 88. Catches:
 
   1. Attribute access:  state.last_results, state.parallels_results, etc.
                         Also app_state.last_results (alternate binding name).
+                        Also aliased imports per Refinement 5:
+                          from web.state import state as s  → s.last_results
+                          from web.api import state as api_state → api_state.last_results
+                          import web.state as web_state → web_state.state.last_results
   2. setattr calls:     setattr(state, 'last_results', ...).
   3. getattr calls:     getattr(state, 'last_results', ...).
 
@@ -318,6 +343,11 @@ dynamic re-introductions that runtime tests might miss when order-dependent.
 Per Phase 88 D-07: scan both web/ and tests/ — Plan 88-01 + 88-02 cleaned
 both directories; this scanner is the forward-going regression guard.
 Per D-08: this test lives in Phase 88, NOT deferred to Phase 92 SWEEP-01.
+Per Phase 88 Refinement 5 (Codex MEDIUM): the scanner tracks per-file
+import aliases so it survives `from web.state import state as s` and
+chained `web_state.state.X` access patterns — important because this
+scanner is a PERMANENT CI guard and must survive long enough to catch
+regressions where contributors don't use the canonical binding names.
 """
 import ast
 from pathlib import Path
@@ -347,6 +377,9 @@ DELETED_FIELDS = frozenset({
 # which would mass-false-positive (every class with a `last_results` attr
 # in any other module would trip). The AppState class itself defines none
 # of these post-Phase-88, so self.X inside AppState is safe to skip.
+#
+# Per Refinement 5: this set is the DEFAULT — the visitor extends it
+# per-file via ImportFrom alias tracking.
 STATE_BINDING_NAMES = frozenset({'state', 'app_state'})
 
 # Files exempt from this scan (the test itself, the AppState class definition,
@@ -358,44 +391,84 @@ EXEMPT_FILES = frozenset({
 
 
 class _DeletedStateAccessVisitor(ast.NodeVisitor):
-    """Visit Attribute / Call nodes; flag references to deleted AppState fields."""
+    """Visit Import/ImportFrom to collect AppState bindings (including aliases),
+    then Attribute/Call nodes to flag references to deleted AppState fields.
+
+    Per Phase 88 D-07 extension (Codex review, Refinement 5): the scanner
+    tracks aliased imports so that `from web.state import state as s;
+    s.last_results = []` is caught alongside the canonical
+    `state.last_results = []`.
+    """
+
+    # Default binding names always recognized (canonical idiom).
+    _DEFAULT_BINDINGS = frozenset({'state', 'app_state'})
+    # Modules whose `state` symbol binds to the AppState singleton.
+    _STATE_SOURCE_MODULES = frozenset({'web.state', 'web.api'})
 
     def __init__(self, source: str):
         self.source = source
         self.violations: list[tuple[int, str]] = []
+        self.aliases: set[str] = set(self._DEFAULT_BINDINGS)
 
-    def _record(self, node):
-        seg = ast.get_source_segment(self.source, node) or ''
-        self.violations.append((node.lineno, seg))
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        # Catches: from web.state import state [as s], from web.api import state [as s]
+        if node.module in self._STATE_SOURCE_MODULES:
+            for alias in node.names:
+                if alias.name == 'state':
+                    self.aliases.add(alias.asname or alias.name)
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import):
+        # Catches: import web.state as web_state (then web_state.state.X is access via attribute chain)
+        # For simplicity we don't fully chase web_state.state.X here — we add web_state to a
+        # secondary set tracked via attribute-chain inspection in visit_Attribute. The
+        # primary alias set still catches the common case.
+        # No-op for the alias set; chain-resolution handled in visit_Attribute below.
+        self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute):
-        # Catches `<name>.last_results` where <name> is a binding to an AppState
-        # instance. We do NOT recurse into the value child for the matching
-        # detection because we want the OUTERMOST attribute on `state` —
-        # `state.last_results.append(...)` is one violation (the .last_results
-        # attribute access), not two.
+        # Direct case: <name>.last_results where <name> is in self.aliases.
         if (
             isinstance(node.value, ast.Name)
-            and node.value.id in STATE_BINDING_NAMES
+            and node.value.id in self.aliases
             and node.attr in DELETED_FIELDS
         ):
+            self._record(node)
+        # Chained case: <module_alias>.state.last_results
+        # Only fires when the inner attribute chain ends in `.state.<field>`.
+        elif (
+            isinstance(node.value, ast.Attribute)
+            and node.value.attr == 'state'
+            and node.attr in DELETED_FIELDS
+        ):
+            # We accept this as a possible AppState ref — conservative but bounded.
+            # (False-positive risk: any object with a `.state.<field>` chain matching.
+            # Acceptable in this codebase — `.state` is overwhelmingly AppState.)
             self._record(node)
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call):
-        # Catches setattr(state, 'last_results', ...) and getattr(state, 'last_results', ...).
+        # setattr / getattr against any aliased binding.
         if isinstance(node.func, ast.Name) and node.func.id in ('setattr', 'getattr'):
             if len(node.args) >= 2:
                 arg0, arg1 = node.args[0], node.args[1]
+                # arg0 is a Name in self.aliases, OR an Attribute ending in .state
+                arg0_is_state = (
+                    (isinstance(arg0, ast.Name) and arg0.id in self.aliases)
+                    or (isinstance(arg0, ast.Attribute) and arg0.attr == 'state')
+                )
                 if (
-                    isinstance(arg0, ast.Name)
-                    and arg0.id in STATE_BINDING_NAMES
+                    arg0_is_state
                     and isinstance(arg1, ast.Constant)
                     and isinstance(arg1.value, str)
                     and arg1.value in DELETED_FIELDS
                 ):
                     self._record(node)
         self.generic_visit(node)
+
+    def _record(self, node):
+        seg = ast.get_source_segment(self.source, node) or ''
+        self.violations.append((node.lineno, seg))
 
 
 def _scan_file(path: Path, source: str) -> list[tuple[int, str]]:
@@ -447,9 +520,39 @@ def test_scanner_ignores_strings_and_comments():
     )
 
 
+def test_scanner_catches_aliased_imports():
+    """Phase 88 D-07 extension (Codex review, Refinement 5): scanner must catch
+    aliased state bindings, not just the canonical `state` and `app_state` names.
+
+    Aliased forms exercised:
+      - from web.state import state as s   →  s.last_results
+      - from web.api import state as api_state  →  api_state.parallels_results
+      - import web.state as web_state      →  web_state.state.current_search_query
+      - setattr(s, 'last_filters_applied', None)
+    """
+    aliased = (
+        "from web.state import state as s\n"
+        "from web.api import state as api_state\n"
+        "import web.state as web_state\n"
+        "def bad_aliased():\n"
+        "    s.last_results = []\n"
+        "    api_state.parallels_results = []\n"
+        "    web_state.state.current_search_query = ''\n"
+        "    setattr(s, 'last_filters_applied', None)\n"
+    )
+    tree = ast.parse(aliased)
+    visitor = _DeletedStateAccessVisitor(aliased)
+    visitor.visit(tree)
+    assert len(visitor.violations) >= 4, (
+        f"Expected at least 4 aliased violations (s.X, api_state.X, "
+        f"web_state.state.X, setattr(s,...)), got {len(visitor.violations)}: "
+        f"{visitor.violations}"
+    )
+
+
 def test_no_deleted_state_references_in_web_and_tests():
     """Production guard: no Python file under web/ or tests/ references any of
-    the 10 Phase-88-deleted AppState fields via state.X / app_state.X /
+    the 10 Phase-88-deleted AppState fields via state.X / app_state.X / aliased /
     setattr(state, ...) / getattr(state, ...).
     """
     violations = []
@@ -487,19 +590,23 @@ Edge cases the executor MUST verify after writing:
 4. If Task 1 left a one-line comment placeholder mentioning the deleted fields (e.g., "Per-user export state migrated to web.export_state (Phase 88, 2026-05-13)"), the scanner should ignore it because comments aren't AST nodes — confirmed by the seed-trap.
 
 5. If a file IS exempt (e.g., test_no_appstate_export_fields.py), it must contain the strings `last_results`, `parallels_results`, etc. — that's the whole point of D-06. EXEMPT_FILES handles this.
+
+6. **Aliased-import edge cases (Refinement 5):** The new seed-trap `test_scanner_catches_aliased_imports` verifies that the visitor picks up `s.last_results` and `web_state.state.current_search_query`. Verify the production scan still passes — Plan 88-01 + 88-02 should have ensured no source file uses these patterns either. If a false positive is hit (e.g., a third-party module's `.state.X` attribute chain matches a deleted field name), add the file to `EXEMPT_FILES` AND document why in an inline comment.
   </action>
   <verify>
     <automated>python -m pytest tests/test_no_deleted_state_references.py -v --tb=short</automated>
   </verify>
   <acceptance_criteria>
-    - `test -f tests/test_no_deleted_state_references.py && echo OK` returns OK.
-    - `python -m pytest tests/test_no_deleted_state_references.py -v` exits 0 with all 3 tests passing (synthetic-attribute-access seed-trap, ignores-strings-and-comments seed-trap, production scan).
+    - `python -c "import os; assert os.path.isfile('tests/test_no_deleted_state_references.py'); print('OK')"` exits 0 (file exists).
+    - `python -m pytest tests/test_no_deleted_state_references.py -v` exits 0 with all 4 tests passing (synthetic-attribute-access seed-trap, ignores-strings-and-comments seed-trap, aliased-imports seed-trap per Refinement 5, production scan).
     - `grep -c "DELETED_FIELDS = frozenset" tests/test_no_deleted_state_references.py` returns 1.
     - `grep -c "STATE_BINDING_NAMES" tests/test_no_deleted_state_references.py` returns at least 2 (1 declaration + 1+ use).
     - `grep -c "EXEMPT_FILES" tests/test_no_deleted_state_references.py` returns at least 2.
+    - `grep -n "test_scanner_catches_aliased_imports" tests/test_no_deleted_state_references.py` returns 1 match (Refinement 5 seed-trap present).
+    - `grep -n "visit_ImportFrom" tests/test_no_deleted_state_references.py` returns 1 match (alias tracking implemented).
     - `python -m ruff check tests/test_no_deleted_state_references.py` exits 0.
   </acceptance_criteria>
-  <done>tests/test_no_deleted_state_references.py created; 3 tests pass (seed-trap attribute, seed-trap strings/comments, production scan); D-07 static guard installed; scanner is now permanent CI guard.</done>
+  <done>tests/test_no_deleted_state_references.py created; 4 tests pass (synthetic seed-trap attribute, seed-trap strings/comments, aliased-imports seed-trap per Refinement 5, production scan); D-07 static guard installed with alias-import coverage; scanner is now permanent CI guard.</done>
 </task>
 
 <task type="auto">
@@ -573,6 +680,7 @@ Expected post-task state of web/export_state.py module docstring (verbatim from 
 - References Phase 87 chokepoint helpers
 - References Phase 88 removed `_TEST_BACKEND` and `_backend()`
 - References D-11 isinstance guard and D-12 copy-on-update
+- References Refinement 4 getter hardening
 - Does NOT contain "singleton state.* writes are intentionally left in place"
 
 If verification finds the stale paragraph, delete it.
@@ -635,7 +743,7 @@ Part B — CLAUDE.md "Recently Changed" section.
 Add a new entry at the top of the "Recently Changed" section. Format (match the existing v7.12 Phase 87 entry style — terse, factual, version-tagged):
 
 ```
-- May 2026: v7.12 Path B Phase 88 (State Separation by Deletion) — internal milestone, not a release. Second phase of v7.12 Multitenant Architecture (Path B) refactor. Deletes the 10 per-user export-state singleton mirror fields from `web/state.py:AppState` (`last_results`, `current_search_query`, `current_search_mode`, `current_search_gap`, `last_filters_applied`, `last_search_warnings`, `last_selected_uids`, `parallels_results`, `parallels_filtered`, `parallels_search_meta`). Plan 88-01 migrated 13 writer sites across `web/pages/search.py`, `web/pages/search_results.py`, `web/pages/parallels.py` from `state.X = value` to local-variable threading through the existing `web.export_state.set_*` / `update_*` / `clear_*` calls (Codex round-5 catch: reorder of original plan ordering required because `set_search_export(...)` calls passed `state.current_search_gap` etc. as kwargs two lines below their assignments). Plan 88-02 rewrote `web/export_state.py` to route through Phase 87 `web.safe_storage` chokepoint helpers, deleted the `_TEST_BACKEND` production-shim + `_backend()` helper (per D-09 + Phase 87 chokepoint discipline), hardened `update_*` functions with `isinstance(payload, dict)` guard (D-11) + copy-on-update (D-12), folded `parallels_source_text` into the `set_parallels_export(meta={'source_text': ...})` payload (D-13), deleted the reader-side fallback at `web/api.py:1928-1931, 1962-1964, 2063-2066` (D-14), rewrote 4 affected test files (`test_export_cross_user_isolation`, `test_export_state_selection`, `test_api_export_json`, `test_api_legacy_unchanged`) to `monkeypatch.setattr('web.safe_storage.app', ...)` pattern (D-01, D-02) — deleting `_StateProxy` wrapper, dropping all `state.X =` fixture setup, adding a source_text cross-user leak regression test (D-15), and deleted the `web/export_state.py` entry from `.planning/phase87_storage_allowlist.yaml` (allowlist count: 4 → 3 entries). Plan 88-03 deleted the 10 fields from `AppState.init()`, installed two permanent CI regression guards: runtime attr-absence test `tests/test_no_appstate_export_fields.py` (11 tests = 10 parametrized + 1 survivor sanity per D-06) and static AST scanner `tests/test_no_deleted_state_references.py` (D-07 — walks `web/` + `tests/` for `state.<deleted_field>` / `setattr(state, ...)` / `getattr(state, ...)`, 3 tests = 2 seed-traps + 1 production scan), refreshed stale docstring/comment mentions per D-16 at `web/api.py:1846-1848` and `web/search_api.py:1198-1201`. Codex round-5 review reshaped plan ordering (locals-first instead of fields-first per D-04 + D-05) to eliminate the data-loss window where deletion-first ordering would feed stale defaults into `set_search_export(...)` kwargs. Full pytest suite green at each plan boundary (D-05). All 6 STATE-XX requirements satisfied. Zero user-visible behavior change. Web-only milestone — desktop unaffected. Hand-off chain: Phase 89 deletes `UserListsManager._cache_entry` singleton (LISTS-01..04); Phase 90 deletes `_client_cache` / `_session_locks` / `_CLIENT_CACHE_TTL` and the auth `_app.storage.user` allowlist entry (AUTHC-01..05); Phase 91 deletes the `web/auth_state.py` + `web/main.py` OAuth allowlist entries (AUTHW-01..06); Phase 92 final sweep + acceptance (SWEEP-01..06). (web)
+- May 2026: v7.12 Path B Phase 88 (State Separation by Deletion) — internal milestone, not a release. Second phase of v7.12 Multitenant Architecture (Path B) refactor. Deletes the 10 per-user export-state singleton mirror fields from `web/state.py:AppState` (`last_results`, `current_search_query`, `current_search_mode`, `current_search_gap`, `last_filters_applied`, `last_search_warnings`, `last_selected_uids`, `parallels_results`, `parallels_filtered`, `parallels_search_meta`). Plan 88-01 migrated 13 writer sites across `web/pages/search.py`, `web/pages/search_results.py`, `web/pages/parallels.py` from `state.X = value` to local-variable threading through the existing `web.export_state.set_*` / `update_*` / `clear_*` calls (Codex round-5 catch: reorder of original plan ordering required because `set_search_export(...)` calls passed `state.current_search_gap` etc. as kwargs two lines below their assignments). Plan 88-02 rewrote `web/export_state.py` to route through Phase 87 `web.safe_storage` chokepoint helpers, deleted the `_TEST_BACKEND` production-shim + `_backend()` helper (per D-09 + Phase 87 chokepoint discipline), hardened `update_*` functions with `isinstance(payload, dict)` guard (D-11) + copy-on-update (D-12), hardened getters `get_search_export()` / `get_parallels_export()` with isinstance guard (Refinement 4 — cross-AI review), folded `parallels_source_text` into the `set_parallels_export(meta={'source_text': ...})` payload (D-13), deleted the reader-side fallback at `web/api.py:1928-1931, 1962-1964, 2063-2066` (D-14), rewrote 4 affected test files (`test_export_cross_user_isolation`, `test_export_state_selection`, `test_api_export_json`, `test_api_legacy_unchanged`) to `monkeypatch.setattr('web.safe_storage.app', ...)` pattern with `SimpleNamespace`-based instance-isolated stubs (D-01, D-02, Refinement 6) — deleting `_StateProxy` wrapper, dropping all `state.X =` fixture setup, adding a strengthened source_text cross-user leak regression test exercising a POSITIVE export path (D-15, Refinement 2), and deleted the `web/export_state.py` entry from `.planning/phase87_storage_allowlist.yaml` (allowlist count: 4 → 3 entries). Plan 88-03 deleted the 10 fields from `AppState.init()`, installed two permanent CI regression guards: runtime attr-absence test `tests/test_no_appstate_export_fields.py` (11 tests = 10 parametrized + 1 survivor sanity per D-06) and static AST scanner `tests/test_no_deleted_state_references.py` (D-07 — walks `web/` + `tests/` for `state.<deleted_field>` / `setattr(state, ...)` / `getattr(state, ...)` AND aliased imports per Refinement 5 (`from web.state import state as s`, `import web.state as web_state`), 4 tests = 3 seed-traps + 1 production scan), refreshed stale docstring/comment mentions per D-16 at `web/api.py:1846-1848` and `web/search_api.py:1198-1201`. Codex round-5 review reshaped plan ordering (locals-first instead of fields-first per D-04 + D-05) to eliminate the data-loss window where deletion-first ordering would feed stale defaults into `set_search_export(...)` kwargs. Cross-AI plan review (Gemini + Codex, 2026-05-13) refined plans pre-execution with 7 targeted improvements (scoped greps to `web/`+`tests/`, strengthened D-15 positive-path test, audit of `set_parallels_export(..., meta=None)` paths, getter isinstance guards, alias-import scanner coverage, SimpleNamespace stubs, Windows-tooling fallback notes). Full pytest suite green at each plan boundary (D-05). All 6 STATE-XX requirements satisfied. Zero user-visible behavior change. Web-only milestone — desktop unaffected. Hand-off chain: Phase 89 deletes `UserListsManager._cache_entry` singleton (LISTS-01..04); Phase 90 deletes `_client_cache` / `_session_locks` / `_CLIENT_CACHE_TTL` and the auth `_app.storage.user` allowlist entry (AUTHC-01..05); Phase 91 deletes the `web/auth_state.py` + `web/main.py` OAuth allowlist entries (AUTHW-01..06); Phase 92 final sweep + acceptance (SWEEP-01..06). (web)
 ```
 
 This entry mirrors the Phase 87 entry shape and length. The full justification is intentional — these CLAUDE.md entries are the milestone history for future maintainers and are the canonical source of "what changed and why" outside the PR descriptions.
@@ -657,7 +765,7 @@ Read .planning/STATE.md and search for any "Phase 88" placeholder. If found, upd
 </task>
 
 <task type="auto">
-  <name>Task 6: Plan-boundary green + full Phase 88 success-criteria verification</name>
+  <name>Task 6: Plan-boundary green + full Phase 88 success-criteria verification (greps scoped per Refinement 1)</name>
   <files></files>
   <read_first>
     - .planning/ROADMAP.md (Phase 88 5 success criteria)
@@ -669,13 +777,15 @@ Run the full verification matrix proving Phase 88 success criteria from ROADMAP.
 
 Commands (each must exit 0):
 
-1. `python -m pytest -q` (full suite — target: 1879 baseline + ~14 new tests from this phase (11 from test_no_appstate_export_fields + 3 from test_no_deleted_state_references + 1+ from D-15) = ~1894+ passed / ~20 skipped).
+1. `python -m pytest -q` (full suite — target: 1879 baseline + ~15 new tests from this phase (11 from test_no_appstate_export_fields + 4 from test_no_deleted_state_references with the Refinement 5 alias-imports seed-trap + 1+ from D-15) = ~1895+ passed / ~20 skipped).
 
 2. `python -m ruff check .` (full repo lint clean).
 
 3. `python scripts/check_docs.py` (docs health check clean post-Task-5 updates).
 
-ROADMAP.md Phase 88 success criteria verification (run these commands and confirm each returns the expected output):
+ROADMAP.md Phase 88 success criteria verification (run these commands and confirm each returns the expected output).
+
+**All grep gates scoped to web/ + tests/ per Refinement 1 (cross-AI review, Codex HIGH):** planning artifacts and historical CLAUDE.md entries mention these names intentionally — a repo-wide `grep -rn "_TEST_BACKEND" .` would produce false-positive contradictions.
 
 SC#1 — "Static grep of web/state.py:AppState returns zero matches for the 10 deleted per-user fields":
 - `grep -nE "^\\s+self\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\\s*[:=]" web/state.py`
@@ -688,7 +798,7 @@ SC#2 — "A user opens two concurrent browser sessions, searches in session A, t
 SC#3 — "Static grep of web/export_state.py returns zero matches for _TEST_BACKEND":
 - `grep -n "_TEST_BACKEND" web/export_state.py`
 - Expected: 0 matches.
-- Additionally: `grep -rn "_TEST_BACKEND" .` (entire repo) returns 0 matches.
+- **Additionally (scoped to web/ + tests/ per Refinement 1):** `rg "_TEST_BACKEND" web tests` returns 0 matches. Bash-form equivalent: `grep -rn "_TEST_BACKEND" web/ tests/`. Scoped to web/ + tests/ per cross-AI review (Codex HIGH): planning artifacts and historical CLAUDE.md entries mention these names intentionally.
 
 SC#4 — "tests/test_export_cross_user_isolation.py passes and asserts cross-user isolation directly against per-session storage, with no reference to _TEST_BACKEND":
 - `python -m pytest tests/test_export_cross_user_isolation.py -v` exits 0.
@@ -700,7 +810,7 @@ SC#5 — "tests/test_export_state_selection.py, tests/test_api_export_json.py, a
 
 STATE-XX requirement satisfaction matrix:
 - STATE-01 (10 fields deleted): SC#1 verifies.
-- STATE-02 (writers route through export_state): `grep -nE "state\\.(last_results|current_search_query|<...10 fields...>)\\s*=" web/` returns 0 matches.
+- STATE-02 (writers route through export_state): `rg "state\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\\s*=" web` returns 0 matches (scoped per Refinement 1; Bash-form: `grep -rnE "state\\.(...10 fields...)\\s*=" web/`).
 - STATE-03 (readers route through export_state): `grep -n "parallels_source_text" web/api.py` returns 0 matches (Plan 88-02 deleted the only remaining reader-side reference).
 - STATE-04 (_TEST_BACKEND removed): SC#3 verifies.
 - STATE-05 (test_export_cross_user_isolation rewritten): SC#4 verifies.
@@ -708,35 +818,36 @@ STATE-XX requirement satisfaction matrix:
 
 Static AST scanner final check:
 - `python -m pytest tests/test_no_deleted_state_references.py::test_no_deleted_state_references_in_web_and_tests -v` exits 0.
-- This is the FINAL gate: if any file under web/ or tests/ still has a runtime reference to one of the 10 deleted fields, this test fails. By extension, the test passing proves SC#1 PLUS extends to dynamic references that SC#1 alone would miss.
+- This is the FINAL gate: if any file under web/ or tests/ still has a runtime reference to one of the 10 deleted fields (including aliased-import forms per Refinement 5), this test fails. By extension, the test passing proves SC#1 PLUS extends to dynamic references that SC#1 alone would miss.
 
 Phase 87 lint scanner final check (should still be green):
 - `python -m pytest tests/test_no_raw_storage_access.py -v` exits 0 with all 6 tests passing.
 - `grep -c "^  - file:" .planning/phase87_storage_allowlist.yaml` returns 3 (auth_state, main, supabase_client — web/export_state.py entry deleted by Plan 88-02 Task 6).
 
-Sanity grep — no stranded references:
-- `grep -rn "_TEST_BACKEND\|export_state\\._backend\|_StateProxy" .` returns 0 matches across the entire repo.
+Sanity grep — no stranded references (scoped to web/ + tests/ per Refinement 1):
+- `rg "_TEST_BACKEND|export_state\\._backend|_StateProxy" web tests` returns 0 matches across web/ + tests/. Bash-form equivalent: `grep -rn "_TEST_BACKEND\|export_state\._backend\|_StateProxy" web/ tests/`. Scoped to web/ + tests/ per cross-AI review (Codex HIGH): planning artifacts and historical CLAUDE.md entries mention these names intentionally — a repo-wide scan would produce false positives.
 
 If ANY of the above commands fails or returns unexpected output, the task is NOT done. Diagnose and fix; do not declare the plan complete with a red gate.
 
-Final commit hint (the executor performs the commit after all acceptance criteria pass): single commit message body referencing all 5 ROADMAP success criteria + 6 STATE-XX requirements + Codex round-5 plan-ordering refinement.
+Final commit hint (the executor performs the commit after all acceptance criteria pass): single commit message body referencing all 5 ROADMAP success criteria + 6 STATE-XX requirements + Codex round-5 plan-ordering refinement + cross-AI review refinements (R1, R2, R4, R5, R6).
   </action>
   <verify>
     <automated>python -m pytest -q</automated>
   </verify>
   <acceptance_criteria>
-    - `python -m pytest -q` exits 0 with at least 1893 tests passing (Phase 87 baseline 1879 + 11 from test_no_appstate_export_fields + 3 from test_no_deleted_state_references = 1893 minimum; Plan 88-02 D-15 adds 1+ more).
+    - `python -m pytest -q` exits 0 with at least 1894 tests passing (Phase 87 baseline 1879 + 11 from test_no_appstate_export_fields + 4 from test_no_deleted_state_references (with Refinement 5 alias-imports seed-trap) = 1894 minimum; Plan 88-02 D-15 adds 1+ more).
     - `python -m ruff check .` exits 0.
     - `python scripts/check_docs.py` exits 0.
     - `grep -nE "^\\s+self\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\\s*[:=]" web/state.py` returns 0 matches (SC#1).
-    - `grep -rn "_TEST_BACKEND" .` returns 0 matches across the entire repo (SC#3 strict form).
-    - `grep -rn "_StateProxy" tests/` returns 0 matches.
+    - `rg "_TEST_BACKEND" web tests` returns 0 matches (SC#3 scoped form per Refinement 1; Bash-form: `grep -rn "_TEST_BACKEND" web/ tests/`).
+    - `rg "_StateProxy" tests` returns 0 matches (already scoped to tests/).
     - `python -m pytest tests/test_no_deleted_state_references.py::test_no_deleted_state_references_in_web_and_tests -v` exits 0 (Phase 88 final gate).
     - `python -m pytest tests/test_no_appstate_export_fields.py -v` exits 0 with 11 tests passing.
+    - `python -m pytest tests/test_no_deleted_state_references.py -v` exits 0 with 4 tests passing (3 seed-traps + 1 production scan).
     - `python -m pytest tests/test_no_raw_storage_access.py -v` exits 0 with all Phase 87 tests still passing.
     - `grep -c "^  - file:" .planning/phase87_storage_allowlist.yaml` returns 3.
   </acceptance_criteria>
-  <done>Phase 88 complete: all 5 ROADMAP success criteria verified, all 6 STATE-XX requirements satisfied, plan-boundary green at full pytest + ruff + check_docs, two permanent CI guards (runtime + static) installed.</done>
+  <done>Phase 88 complete: all 5 ROADMAP success criteria verified, all 6 STATE-XX requirements satisfied, plan-boundary green at full pytest + ruff + check_docs, two permanent CI guards (runtime + static, with alias-import coverage per Refinement 5) installed.</done>
 </task>
 
 </tasks>
@@ -749,30 +860,31 @@ Final commit hint (the executor performs the commit after all acceptance criteri
 | AppState.init() field deletion | Internal class refactor; risk is a test or fixture somewhere in the codebase that still does `state.last_results = [...]` after Plan 88-01 + 88-02 cleaned the 4 known files — would silently re-create the attribute dynamically (AppState has no `__setattr__` guard per CONTEXT.md Deferred Ideas). Mitigation: D-07 static AST scanner catches this at CI time. |
 | Runtime D-06 test order dependency | If another test runs BEFORE D-06 and sets `state.last_results = [...]` dynamically, the AppState singleton carries the attribute and the D-06 hasattr assertion fails — but for the WRONG reason (not the deletion regression we want to guard). Mitigation: D-07 catches the order-dependent re-introduction at the AST scan layer; D-06 is the secondary runtime confirmation. |
 | Static D-07 scanner false-positive | If the scanner flags a comment/docstring/string literal containing the field name, the build fails for a non-issue. Mitigation: seed-trap test `test_scanner_ignores_strings_and_comments` proves the AST-based approach is structurally safe (no Comment nodes in ast.walk; string literals are Constant nodes not Attribute nodes). |
+| Static D-07 scanner alias coverage | Pre-Refinement-5: scanner only caught `state.X` and `app_state.X`, missing `from web.state import state as s` aliases. Risk: a contributor 6 months from now uses an alias and the scanner silently misses the regression. Mitigation per Refinement 5: scanner now walks ImportFrom/Import nodes and extends its alias set per-file; seed-trap `test_scanner_catches_aliased_imports` proves the alias machinery works. |
 
 ## STRIDE Threat Register
 
 | Threat ID | Category | Component | Disposition | Mitigation Plan |
 |-----------|----------|-----------|-------------|-----------------|
-| T-88-03-01 | Tampering | Dynamic re-introduction of deleted field | mitigate | A future PR adds `state.last_results = [...]` (or any of the 9 others) somewhere in `web/` or `tests/`. AppState has no `__setattr__` guard, so this silently re-creates the attribute and re-opens the cross-user leak. D-07 static AST scanner (Task 3) catches this at CI time before merge. D-06 runtime hasattr test (Task 2) provides defense-in-depth — if the dynamic write happens during test setup BEFORE D-06 runs, D-06 catches it then (although D-07 catches it at lint time, earlier). Both layers needed because runtime order matters for D-06 but doesn't for D-07. |
-| T-88-03-02 | Information Disclosure | Scanner false-negative on alternate binding | accept | The scanner catches `state.X` and `app_state.X` but NOT `self.X` (intentional — would mass-false-positive across unrelated classes). If a future contributor adds `self.last_results = [...]` to AppState init OR aliases `import_alias = state` then does `import_alias.last_results = [...]`, the scanner misses it. Acceptable because (a) the AppState class definition is small and well-known; (b) the runtime D-06 test catches the init-body case by checking hasattr on a fresh instance; (c) the alias case is exotic and the production reader path (web.api.py) was already migrated in v7.11.1 to web.export_state, so even a re-introduced AppState attribute would have no consumer. The attack surface re-opening requires BOTH writer reintroduction AND reader reintroduction. |
-| T-88-03-03 | Denial of Service | Plan-boundary test failure | mitigate | Task 6 enumerates 8 separate verification commands. If ANY fails, the plan cannot be declared complete. Each command targets a specific success criterion. The 1893+ test target gives a precise pass threshold. |
+| T-88-03-01 | Tampering | Dynamic re-introduction of deleted field | mitigate | A future PR adds `state.last_results = [...]` (or any of the 9 others) somewhere in `web/` or `tests/`. AppState has no `__setattr__` guard, so this silently re-creates the attribute and re-opens the cross-user leak. D-07 static AST scanner (Task 3) with alias-import coverage per Refinement 5 catches this at CI time before merge — including aliased forms like `from web.state import state as s; s.last_results = []`. D-06 runtime hasattr test (Task 2) provides defense-in-depth — if the dynamic write happens during test setup BEFORE D-06 runs, D-06 catches it then (although D-07 catches it at lint time, earlier). Both layers needed because runtime order matters for D-06 but doesn't for D-07. |
+| T-88-03-02 | Information Disclosure | Scanner false-negative on alternate binding | mitigate | Pre-Refinement-5, the scanner caught `state.X` and `app_state.X` only — missing aliases like `from web.state import state as s` or `import web.state as web_state`. Per Refinement 5 (Codex MEDIUM), the scanner now walks ImportFrom/Import nodes and extends its alias set per-file. It still does NOT catch `self.X` (intentional — would mass-false-positive across unrelated classes). Acceptable because (a) the AppState class definition is small and well-known; (b) the runtime D-06 test catches the init-body case by checking hasattr on a fresh instance; (c) the production reader path (web.api.py) was already migrated in v7.11.1 to web.export_state, so even a re-introduced AppState attribute would have no consumer. The attack surface re-opening requires BOTH writer reintroduction AND reader reintroduction. |
+| T-88-03-03 | Denial of Service | Plan-boundary test failure | mitigate | Task 6 enumerates 8 separate verification commands. If ANY fails, the plan cannot be declared complete. Each command targets a specific success criterion. The 1894+ test target gives a precise pass threshold (was 1893, +1 for the new aliased-imports seed-trap per Refinement 5). |
 | T-88-03-04 | Repudiation | Stale documentation misleads future contributors | mitigate | D-16 in Task 4 refreshes the 3 stale comment/docstring sites. Task 5 adds the Phase 88 entry to CLAUDE.md "Recently Changed" and OPEN_ISSUES.md — the canonical milestone history for future maintainers. Without these updates, a future contributor reading `web/search_api.py:1198` would see a rule that names fields no longer existing — confusing but not security-impacting. The mitigation is editorial clarity. |
 
 **No HIGH-severity threats.** Plan 88-03 closes the cross-user export-state attack surface PERMANENTLY by:
 (a) Physically deleting the 10 singleton mirror fields (Task 1).
-(b) Installing a permanent CI guard against dynamic re-introduction (Tasks 2 + 3 — runtime + static).
+(b) Installing a permanent CI guard against dynamic re-introduction (Tasks 2 + 3 — runtime + static, with alias coverage per Refinement 5).
 (c) Refreshing stale documentation so future contributors don't accidentally reintroduce the pattern based on stale rules (Task 4 + Task 5).
 
-The mitigation chain is layered: D-07 catches at CI lint time (earliest), D-06 catches at test runtime (defense-in-depth), and the documentation refresh provides forward guidance that prevents the regression from being attempted in the first place.
+The mitigation chain is layered: D-07 catches at CI lint time (earliest, with alias-import coverage), D-06 catches at test runtime (defense-in-depth), and the documentation refresh provides forward guidance that prevents the regression from being attempted in the first place.
 
 **Defense-in-depth note:** Phase 87 chokepoint (`web/safe_storage.py`) provides the per-session storage isolation that ALL export-state reads/writes now route through. Phase 88 closes the AppState singleton bypass that was the leak vector. Phase 89-92 close the other singleton/cache patterns identified across 4 rounds of Codex review.
 </threat_model>
 
 <verification>
 1. All 6 tasks pass acceptance criteria.
-2. Plan-boundary green (Task 6): full pytest at Phase 87 baseline + 14+ new Phase 88 tests, ruff clean, check_docs clean.
-3. ROADMAP.md Phase 88 5 success criteria all verified via Task 6's enumerated commands.
+2. Plan-boundary green (Task 6): full pytest at Phase 87 baseline + 15+ new Phase 88 tests, ruff clean, check_docs clean.
+3. ROADMAP.md Phase 88 5 success criteria all verified via Task 6's enumerated commands (with greps scoped per Refinement 1).
 4. STATE-01..06 all satisfied:
    - STATE-01: 10 fields deleted from AppState (SC#1).
    - STATE-02: Writers migrated (Plan 88-01) — grep confirms 0 writer references.
@@ -780,7 +892,7 @@ The mitigation chain is layered: D-07 catches at CI lint time (earliest), D-06 c
    - STATE-04: _TEST_BACKEND removed (SC#3).
    - STATE-05: test_export_cross_user_isolation rewritten (SC#4).
    - STATE-06: 3 other tests rewritten (SC#5).
-5. Two new permanent CI guards installed: tests/test_no_appstate_export_fields.py (D-06) + tests/test_no_deleted_state_references.py (D-07).
+5. Two new permanent CI guards installed: tests/test_no_appstate_export_fields.py (D-06) + tests/test_no_deleted_state_references.py (D-07 with alias-import coverage per Refinement 5).
 6. Phase 87 lint scanner remains green; allowlist trimmed from 4 to 3 entries.
 7. Documentation refreshed: docs/OPEN_ISSUES.md + CLAUDE.md "Recently Changed" + 3 stale docstring/comment sites in source.
 8. Zero user-visible behavior change.
@@ -790,12 +902,13 @@ The mitigation chain is layered: D-07 catches at CI lint time (earliest), D-06 c
 - All 5 ROADMAP.md Phase 88 success criteria verified.
 - All 6 STATE-XX requirements satisfied (collectively across Plans 88-01, 88-02, 88-03).
 - Phase 87 invariants intact (lint scanner green, 3 allowlist entries remaining all scoped to Phase 90/91 deletion).
-- Two new permanent CI regression guards installed (D-06 runtime + D-07 static).
+- Two new permanent CI regression guards installed (D-06 runtime + D-07 static with alias-import coverage per Refinement 5).
 - Documentation maintenance contract honored (CLAUDE.md + OPEN_ISSUES updated per CLAUDE.md doc-maintenance rules).
-- Plan-boundary green: 1893+ pytest passed, ruff clean, check_docs clean.
+- Plan-boundary green: 1894+ pytest passed, ruff clean, check_docs clean.
 - Phase 88 ready to mark complete in ROADMAP.md (3/3 plans complete).
 </success_criteria>
 
 <output>
 After completion, create `.planning/phases/88-state-separation-by-deletion/88-03-appstate-deletion-and-enforcement-SUMMARY.md` per @$HOME/.claude/get-shit-done/templates/summary.md.
 </output>
+</content>

@@ -16,6 +16,7 @@ must_haves:
     - "Every existing `set_search_export(...) / set_parallels_export(...) / update_*(...) / clear_*(...)` call continues to receive identical values (sourced from locals instead of state.X)."
     - "AppState fields still exist on the class after this plan — they are now write-orphaned (no writer references them) but readers (none remain; api.py already migrated to per-session payload in v7.11.1) do not break."
     - "All existing tests pass byte-unchanged. Test fixtures that do `state.last_results = [...]` etc. continue to work because the AppState class still owns those attributes."
+    - "Every `set_parallels_export(` call in `web/pages/parallels.py` after this plan is either (a) a clear-export path with empty results, (b) a positive export path with `source_text` in meta per D-13, or (c) carries an inline comment justifying intentional empty source_text — no unannotated `meta=None` with non-empty results ships (Refinement 3 per cross-AI review)."
     - "Plan-boundary green: `pytest` and `ruff check` and `python scripts/check_docs.py` all exit 0."
   artifacts:
     - path: "web/pages/search.py"
@@ -25,7 +26,7 @@ must_haves:
       provides: "Writer sites at 126, 377-380 migrated to locals"
       contains: "update_search_export_results("
     - path: "web/pages/parallels.py"
-      provides: "Writer sites at 281-302, 1981-2002, 2300-2338 migrated to locals"
+      provides: "Writer sites at 281-302, 1981-2002, 2300-2338 migrated to locals; source_text fold-in audited per Refinement 3"
       contains: "set_parallels_export("
   key_links:
     - from: "web/pages/search.py writer sites"
@@ -111,13 +112,25 @@ parallels_results, parallels_filtered, parallels_search_meta
     - .planning/phases/88-state-separation-by-deletion/88-CONTEXT.md (D-04, D-05 ordering rationale)
   </read_first>
   <action>
+**Tooling note (per Codex review, Refinement 7):** Acceptance-criterion shell
+commands below assume Bash + GNU grep are available via the `Bash` tool in
+the execute-phase runtime. If running on a pure-PowerShell shell, the
+equivalent commands are:
+  - `grep -nE "pat" file` → `rg -nN "pat" file`
+  - `grep -c "pat" file`  → `(rg -c "pat" file)` (rg returns count)
+  - `grep -rn "pat" dir`  → `rg -n "pat" dir`
+  - `test -f path && echo OK` → `python -c "import os; assert os.path.isfile('path'); print('OK')"`
+The executor agent SHOULD run the Bash-style commands first via the Bash
+tool; fallback to PowerShell equivalents only if the Bash invocation fails
+or is unavailable.
+
 Migrate 5 writer site clusters in `web/pages/search.py`. At each site, replace `state.X = value` lines with local-variable assignments and thread those locals as keyword arguments into the existing `set_search_export(...)` / `update_search_export_selection(...)` / `clear_search_export()` calls.
 
 **Naming convention (per CONTEXT.md "Claude's Discretion"):** Match the kwarg name on the export_state call site. Use `_results`, `_query`, `_mode`, `_gap`, `_filters_applied`, `_warnings`, `_selected_uids` as the literal local names — leading underscore signals "scratch variable for export payload, no consumer beyond this scope." Per D-13/D-14 these locals do NOT need to outlive the immediate `set_search_export(...)` call.
 
 **Site 1: `_reset_search` block at lines 2067-2079** (search reset path).
 - BEFORE: 7 lines `state.last_results = []` / `state.current_search_query = ''` / `state.current_search_mode = 'exact'` / `state.current_search_gap = None` / `state.last_filters_applied = None` / `state.last_search_warnings = []` / `state.last_selected_uids = None`, followed by `clear_search_export()` call.
-- AFTER: Delete the 7 `state.X = ...` lines entirely. The `clear_search_export()` call at line 2079 takes no arguments and already does the right thing for per-session storage. Keep the `from web.export_state import clear_search_export` and the call. Keep the comment block but trim it to reflect that the per-session export is now the only state being cleared (remove the Phase 77 gap-closure preamble; replace with a one-line comment: `# Clear per-session export payload (singleton mirror deletion: Phase 88).`).
+- AFTER: Delete the 7 `state.X = ...` lines entirely. The `clear_search_export()` call at line 2079 takes no arguments and already does the right thing for per-session storage. Keep the `from web.export_state import clear_search_export` and the call. Keep the comment block but trim it to reflect that the per-session export is now the only state being cleared (remove the Phase 77 gap-closure preamble; replace with a one-line comment: `# Clear per-session export payload — Phase 88 deleted the singleton mirror.`).
 
 **Site 2: `toggle_select_all` block at lines 2098-2106** (bulk select-all).
 - BEFORE: `state.last_selected_uids = compute_selected_uids(search_state)` followed by `update_search_export_selection(state.last_selected_uids)`.
@@ -198,7 +211,7 @@ Migrate 2 writer sites in `web/pages/search_results.py`.
 </task>
 
 <task type="auto">
-  <name>Task 3: Migrate writer sites in web/pages/parallels.py (3 sites + source_text fold-in)</name>
+  <name>Task 3: Migrate writer sites in web/pages/parallels.py (3 sites + source_text fold-in + audit per Refinement 3)</name>
   <files>web/pages/parallels.py</files>
   <read_first>
     - web/pages/parallels.py (lines 275-310 for site 1, lines 450-470 for source_text writer at line 457, lines 1970-2010 for site 2, lines 2017-2065 for site 3 + source_text resets at 2049-2061, lines 2295-2350 for site 4 + source_text persistence at 2341-2344)
@@ -206,7 +219,7 @@ Migrate 2 writer sites in `web/pages/search_results.py`.
     - .planning/phases/88-state-separation-by-deletion/88-CONTEXT.md (D-13: source_text fold-in)
   </read_first>
   <action>
-Migrate 3 writer-site clusters in `web/pages/parallels.py` AND fold `parallels_source_text` into the `meta` dict per D-13.
+Migrate 3 writer-site clusters in `web/pages/parallels.py` AND fold `parallels_source_text` into the `meta` dict per D-13. Audit every remaining `set_parallels_export(` call per Refinement 3 (cross-AI review).
 
 **Naming convention:** Use locals `_results`, `_filtered`, `_meta`, `_parallels_search_meta`, `_parallels_results`, `_parallels_filtered` (match the kwarg names on `set_parallels_export(results=, filtered=, meta=)`).
 
@@ -214,6 +227,10 @@ Migrate 3 writer-site clusters in `web/pages/parallels.py` AND fold `parallels_s
 - BEFORE: `state.parallels_results = p_state.results` and `state.parallels_filtered = p_state.filtered_results`, then `set_parallels_export(results=p_state.results, filtered=p_state.filtered_results, meta=None)`.
 - AFTER: Delete both `state.X =` assignment lines. The `set_parallels_export(...)` call already uses `p_state.results` and `p_state.filtered_results` directly — no new locals needed; just remove the singleton mirror.
 - Trim comments: change "2026-05-12 cross-user fix: mirror to per-session export payload" to "Phase 88: per-session export payload is the sole writer path (singleton mirror removed)".
+- **Per Refinement 3 (cross-AI review):** This site passes `meta=None` even when `p_state.results` may be non-empty. Determine if the snapshot object (`p_state` — actual class `ParallelsState`) carries a `source_text` attribute (read `web/pages/parallels.py` for the `ParallelsState` class definition; check the snapshot-restore mechanism for a `source_text` field). 
+  - **If `p_state.source_text` exists:** thread it through by changing `meta=None` to `meta={'source_text': getattr(p_state, 'source_text', None) or ''}` — this is the cleanest path, populating meta with the snapshot's source_text.
+  - **If `p_state.source_text` does NOT exist:** keep `meta=None` AND add an inline comment above the call: `# Phase 88 D-13: snapshot-restore path — source_text intentionally empty (ParallelsState carries no source_text field; legacy bootstrap path Site 1b handles fallback for non-snapshot reloads).`
+  - This explicit classification is mandatory per Refinement 3; do not leave the call unannotated.
 
 **Site 1b: bootstrap legacy-storage fallback at lines 293-308** (`else:` branch — reads `_safe_get('parallels_results')`).
 - BEFORE: `state.parallels_results = p_state.results` and `state.parallels_filtered = _legacy_filtered`, then `set_parallels_export(results=p_state.results, filtered=_legacy_filtered, meta=None)`.
@@ -237,6 +254,7 @@ Migrate 3 writer-site clusters in `web/pages/parallels.py` AND fold `parallels_s
 - AFTER: Delete the 3 `state.X = ...` assignments at lines 2056-2058. **Per D-14:** the `safe_user_set('parallels_source_text', '')` line at 2051 — keep it for now (writer side). The READER-side fallback in `web/api.py` reading `safe_user_get('parallels_source_text', '')` is deleted in Plan 88-02 (D-14). For consistency with the fold-in, the writer here at 2051 will become dead code after Plan 88-02 lands, but we leave the cleanup of writer-side `safe_user_set('parallels_source_text', ...)` to Plan 88-02 (it goes together with the reader-side fallback removal).
 - Note: lines 2049 (`safe_user_set('parallels_results', [])`) and 2050 (`safe_user_set('parallels_filtered', [])`) are SEPARATE from the export_state path — they write to the legacy storage keys for UI persistence across page reloads (see lines 2341-2344 for the writes that load these). Do NOT touch them in this plan; they are not export_state writes.
 - Keep the `clear_parallels_export()` call at 2061. Trim comment to `# Clear per-session export payload (Phase 88: singleton mirror removed).`
+- **Per Refinement 3:** `clear_parallels_export()` is bucket (a) (clear-export path with empty results) — no annotation needed since it does not call `set_parallels_export(..., meta=None)`. However if the audit reveals that the cluster ALSO calls `set_parallels_export(results=[], filtered=[], meta=None)` somewhere (it shouldn't — `clear_parallels_export()` does the dict pop), classify as (a) explicitly.
 
 **Site 4: search-completion at lines 2300-2339** (`execute_parallels` completion block).
 - BEFORE: 2 lines `state.parallels_results = main_results` and `state.parallels_filtered = filtered_results` at 2300-2301, then `state.parallels_search_meta = { ... 7-key dict ... }` at lines 2323-2331, then `set_parallels_export(results=main_results, filtered=filtered_results, meta=state.parallels_search_meta)` at lines 2335-2338.
@@ -251,6 +269,10 @@ Migrate 3 writer-site clusters in `web/pages/parallels.py` AND fold `parallels_s
 - BEFORE: After the export_state set, there are `safe_user_set('parallels_results', _compact_result_rows(...))` and `safe_user_set('parallels_filtered', _compact_result_rows(...))` calls for legacy page-reload persistence.
 - AFTER: NOT TOUCHED in Plan 88-01. These are not export_state writes; they are UI persistence. They are handled in Plan 88-02 only if they collide with source_text fold-in — they don't, so leave alone.
 
+**Post-edit audit (per Codex review, Refinement 3):** Walk every `set_parallels_export(` call in the edited file. For each, classify into (a) clear path with empty results, (b) positive export with source_text in meta, or (c) positive export with intentionally empty source_text. Every call must fall into one of these three buckets. The Site 1 snapshot-restore path (`if _active_snapshot:` branch) is a known (c) candidate — it passes `meta=None` even when `p_state.results` may be non-empty. If `p_state.results` can be non-empty at that path, fold in the snapshot's source_text if available from `p_state` (e.g., via a `_snapshot_meta = {'source_text': getattr(p_state, 'source_text', None) or ''}` local) OR add an inline comment `# Phase 88 D-13: snapshot path — source_text intentionally empty (no snapshot.source_text field)` justifying the omission.
+
+After applying the audit, the Sites 1, 1b, 2, 4 calls produce non-empty meta or carry the bucket-(c) annotation; Site 3 calls only `clear_parallels_export()` which is bucket (a) — does not call `set_parallels_export(...)`.
+
 **Verification grep targets:**
 - `grep -nE '^\s*state\.(parallels_results|parallels_filtered|parallels_search_meta)\s*=' web/pages/parallels.py` MUST return 0 matches.
 - `grep -nE 'set_parallels_export\(' web/pages/parallels.py` MUST return at least 4 matches (4 writer-site clusters wired).
@@ -264,8 +286,14 @@ Migrate 3 writer-site clusters in `web/pages/parallels.py` AND fold `parallels_s
     - `python -c "import ast; ast.parse(open('web/pages/parallels.py', encoding='utf-8').read())"` exits 0.
     - `python -m pytest tests/test_export_cross_user_isolation.py tests/test_export_state_selection.py tests/test_api_export_json.py tests/test_api_legacy_unchanged.py -x` exits 0.
     - `python -m ruff check web/pages/parallels.py` exits 0.
+    - Every `set_parallels_export(` call in `web/pages/parallels.py` after this task is one of:
+        (a) `meta=None` AND `results=[]` AND `filtered=[]` (the legitimate clear-export path; OR called from `_reset_parallels` cluster); OR
+        (b) `meta=<dict>` that contains a `'source_text'` key (positive export path with source_text fold-in per D-13); OR
+        (c) `meta=None` with non-empty results AND has an inline comment `# Phase 88 D-13: source_text empty/unknown for this path because <reason>` justifying the omission.
+      No `set_parallels_export(...)` call with non-empty results ships an unannotated `meta=None`.
+    - `python -c "import re; src=open('web/pages/parallels.py', encoding='utf-8').read(); calls=re.findall(r'set_parallels_export\s*\([^)]+\)', src, re.DOTALL); print(len(calls), 'set_parallels_export calls'); [print(repr(c[:200])) for c in calls]"` — manual visual audit; every call printed must match (a), (b), or (c) above.
   </acceptance_criteria>
-  <done>3 writer-site clusters in parallels.py migrated to locals; AppState parallels_* fields write-orphaned across all writer sites; set_parallels_export still receives all values via locals; D-13 source_text bootstrap fold-in landed for the legacy bootstrap path.</done>
+  <done>3 writer-site clusters in parallels.py migrated to locals; AppState parallels_* fields write-orphaned across all writer sites; set_parallels_export still receives all values via locals; D-13 source_text bootstrap fold-in landed for the legacy bootstrap path; every set_parallels_export call audited per Refinement 3 and classified as (a), (b), or (c).</done>
 </task>
 
 <task type="auto">
@@ -284,8 +312,8 @@ Concrete commands (each must exit 0):
 
 If pytest fails on a test outside the 4 export-specific tests, investigate — the migration MAY have broken a test that touches `state.X` reads (although there should be none since api.py was already migrated in v7.11.1). If any failure is surfaced, the most likely cause is a missed `state.X =` line that should have been migrated, OR a kwarg name mismatch on the export_state call. Use the verification greps in Tasks 1-3 to locate.
 
-**Specifically MUST verify:**
-- `grep -rnE "^\s*state\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\s*=" web/` returns 0 matches across ALL `web/` (not just the 3 modified files — sanity check there are no other writer sites we missed).
+**Specifically MUST verify (scoped to web/ per Refinement 1 — cross-AI review):**
+- `rg -n "^\s*state\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\s*=" web` returns 0 matches across ALL `web/` (not just the 3 modified files — sanity check there are no other writer sites we missed). Equivalent Bash form: `grep -rnE "^\s*state\.(<10 fields>)\s*=" web/`. Both are scoped to `web/` to avoid false-positives in `.planning/`, `_tmp/`, or CLAUDE.md historical context.
   </action>
   <verify>
     <automated>cd C:/Genizahsearch && python -m pytest -q 2>&1 | tail -5 && python -m ruff check . 2>&1 | tail -3 && python scripts/check_docs.py 2>&1 | tail -3</automated>
@@ -294,7 +322,7 @@ If pytest fails on a test outside the 4 export-specific tests, investigate — t
     - `python -m pytest -q` exits 0 with at least 1879 tests passing (Phase 87 close baseline).
     - `python -m ruff check .` exits 0.
     - `python scripts/check_docs.py` exits 0.
-    - `grep -rnE "^\s*state\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\s*=" web/` returns 0 matches (no writer site missed).
+    - `rg -n "^\s*state\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\s*=" web` returns 0 matches (no writer site missed; scoped to web/ per Refinement 1).
   </acceptance_criteria>
   <done>Plan 88-01 leaves the tree green: pytest at Phase 87 baseline, ruff clean, check_docs clean. AppState fields physically still exist on the class but have zero writers in the web/ tree.</done>
 </task>
@@ -313,7 +341,7 @@ If pytest fails on a test outside the 4 export-specific tests, investigate — t
 
 | Threat ID | Category | Component | Disposition | Mitigation Plan |
 |-----------|----------|-----------|-------------|-----------------|
-| T-88-01-01 | Information Disclosure | Writer migration (search.py site 4 or 5) | mitigate | If a `state.current_search_gap = ...` line is missed at lines 4117-4117 or 4202-4202 (inside try/except), the assignment continues to write to the singleton. Plan 88-03's static AST guard (D-07) catches the residual access. Plan 88-01 mitigates with grep verification in Task 4: `grep -rnE "^\s*state\.(<10 fields>)\s*=" web/` must return 0 matches. |
+| T-88-01-01 | Information Disclosure | Writer migration (search.py site 4 or 5) | mitigate | If a `state.current_search_gap = ...` line is missed at lines 4117-4117 or 4202-4202 (inside try/except), the assignment continues to write to the singleton. Plan 88-03's static AST guard (D-07) catches the residual access. Plan 88-01 mitigates with grep verification in Task 4: `rg -n "^\s*state\.(<10 fields>)\s*=" web` must return 0 matches. |
 | T-88-01-02 | Tampering | export_state.set_search_export kwarg ordering | mitigate | If a local variable rename (e.g., `_gap` vs `_current_search_gap`) is inconsistent between the assignment site and the `set_search_export(...)` call, Python raises `NameError` immediately. Mitigation: per-site verification via `python -c "import ast; ast.parse(...)"` in each Task's acceptance criteria + pytest test run. No silent failure mode — Python's lexical scoping is the safety net. |
 | T-88-01-03 | Denial of Service | Plan-boundary regression | accept | If a pytest test fails because Plan 88-01 missed a writer site, the migration regression is bisectable (3 files, ~13 sites). Acceptance criterion: full pytest in Task 4. Rollback strategy: `git revert HEAD` on the offending commit. Mitigation already adequate via test gate. |
 
@@ -325,7 +353,7 @@ If pytest fails on a test outside the 4 export-specific tests, investigate — t
 <verification>
 1. **All 4 tasks pass acceptance criteria** (greps + pytest + ruff per-task).
 2. **Plan-boundary green** (Task 4): full pytest at Phase 87 baseline (~1879 passed), ruff clean, check_docs clean.
-3. **No new writer site outside the 3 modified files:** `grep -rnE "^\s*state\.(<10 fields>)\s*=" web/` returns 0 matches across all of `web/`.
+3. **No new writer site outside the 3 modified files:** `rg -n "^\s*state\.(<10 fields>)\s*=" web` returns 0 matches across all of `web/` (scoped per Refinement 1).
 4. **export_state ABI unchanged:** `grep -cE "def (set|update|clear)_(search|parallels)_export\b" web/export_state.py` returns 7 (7 public functions still defined with identical signatures).
 5. **AppState class shape unchanged:** `grep -cE "^\s+self\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\s*[:=]" web/state.py` returns 10 (all 10 fields still declared in `init()`).
 </verification>
@@ -339,3 +367,5 @@ If pytest fails on a test outside the 4 export-specific tests, investigate — t
 <output>
 After completion, create `.planning/phases/88-state-separation-by-deletion/88-01-writer-migration-SUMMARY.md` per @$HOME/.claude/get-shit-done/templates/summary.md.
 </output>
+</content>
+</invoke>

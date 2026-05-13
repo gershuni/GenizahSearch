@@ -19,21 +19,23 @@ must_haves:
     - "web/export_state.py no longer defines _TEST_BACKEND or _backend() — all functions call web.safe_storage.safe_user_get/safe_user_set/safe_user_pop directly."
     - "All setter/updater/clearer functions return None (not bool); the boolean from safe_user_set is absorbed internally to preserve the silent-failure contract."
     - "update_* functions guard against poisoned-shape payloads with isinstance(payload, dict) and adopt copy-on-update before mutation."
+    - "get_search_export() and get_parallels_export() return None when storage holds a non-dict at the key (isinstance guard, Phase 88 D-11 extension per Refinement 4 — Codex review)."
     - "The 4 test files (test_export_cross_user_isolation, test_export_state_selection, test_api_export_json, test_api_legacy_unchanged) monkeypatch web.safe_storage.app directly — no _TEST_BACKEND, no _StateProxy, no state.X = ... fixture setup for the 10 fields."
+    - "Test stubs use SimpleNamespace(storage=SimpleNamespace(user=...)) for instance-isolated state (Refinement 6 — Codex review); no class-level `_StubApp.storage.user` shared across tests."
     - "parallels_source_text reader-side fallback at api.py lines 1928-1931, 1962-1964, 2063-2066 is deleted; source_text reads exclusively from meta['source_text']."
     - "The web/export_state.py entry is removed from .planning/phase87_storage_allowlist.yaml."
     - "tests/test_no_raw_storage_access.py still passes — Phase 87 lint scanner sees zero new raw accesses and one fewer allowlist entry."
-    - "New test in test_export_cross_user_isolation.py proves the legacy source_text fallback is genuinely dead by asserting User A's source_text cannot leak into User B's parallels-export response."
+    - "D-15 source_text leak regression test exercises a POSITIVE export path (User B has valid parallels results), not just the empty-payload 400 path — proves the legacy fallback is dead even when the export reaches the code branch that USED to read it (Refinement 2 — Codex review)."
     - "Plan-boundary green: pytest + ruff check + python scripts/check_docs.py all exit 0."
   artifacts:
     - path: "web/export_state.py"
-      provides: "Fully rewritten module; routes through safe_storage helpers; no _TEST_BACKEND; no _backend()"
+      provides: "Fully rewritten module; routes through safe_storage helpers; no _TEST_BACKEND; no _backend(); getters hardened with isinstance guard"
       contains: "from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop"
     - path: "tests/test_export_cross_user_isolation.py"
-      provides: "Rewritten; monkeypatches web.safe_storage.app; documents sequential-simulation caveat in module docstring; includes new source_text leak regression test"
+      provides: "Rewritten; monkeypatches web.safe_storage.app; documents sequential-simulation caveat in module docstring; includes new D-15 source_text leak regression test via positive-export path"
       contains: "web.safe_storage.app"
     - path: "tests/test_export_state_selection.py"
-      provides: "Rewritten; _StateProxy class deleted; calls export_state helpers directly"
+      provides: "Rewritten; _StateProxy class deleted; calls export_state helpers directly; SimpleNamespace-based stubs"
       contains: "from web import export_state"
     - path: ".planning/phase87_storage_allowlist.yaml"
       provides: "Allowlist with web/export_state.py entry removed"
@@ -54,11 +56,11 @@ must_haves:
 ---
 
 <objective>
-Rewrite web/export_state.py to route through the Phase 87 safe_storage chokepoint instead of the _TEST_BACKEND shim; harden update_* functions with payload-shape guard + copy-on-update; delete the reader-side parallels_source_text legacy fallback in web/api.py; rewrite the 4 affected test files to monkeypatch web.safe_storage.app directly; delete the web/export_state.py entry from the Phase 87 allowlist; preserve plan-boundary green status.
+Rewrite web/export_state.py to route through the Phase 87 safe_storage chokepoint instead of the _TEST_BACKEND shim; harden update_* functions with payload-shape guard + copy-on-update AND harden getters with isinstance guard (Refinement 4); delete the reader-side parallels_source_text legacy fallback in web/api.py; rewrite the 4 affected test files to monkeypatch web.safe_storage.app directly with SimpleNamespace-based stubs (Refinement 6); add a strengthened D-15 source_text leak test exercising a positive-export path (Refinement 2); delete the web/export_state.py entry from the Phase 87 allowlist; preserve plan-boundary green status.
 
 Purpose: Eliminate the _TEST_BACKEND production-code shim — a defense-in-depth hardening per Phase 87 chokepoint discipline. Complete the D-13 fold-in Plan 88-01 staged (writer side wrote source_text into meta) by removing the now-dead reader-side fallback. Set up Plan 88-03 to delete the now write-orphaned AppState fields without test churn (tests must already be state.*-free by end of Plan 88-02).
 
-Output: 7 modified files. AppState fields are still physically present on the class (Plan 88-03 deletes). The Phase 87 lint scanner sees one fewer allowlist entry. Source-text leak test proves the legacy fallback is genuinely dead.
+Output: 7 modified files. AppState fields are still physically present on the class (Plan 88-03 deletes). The Phase 87 lint scanner sees one fewer allowlist entry. Source-text leak test proves the legacy fallback is genuinely dead via a positive-export path.
 </objective>
 
 <execution_context>
@@ -95,21 +97,19 @@ with patch('web.safe_storage.app') as mock_app:
     # ... call into export_state or run a request through TestClient ...
 ```
 
-Equivalent monkeypatch form (preferred for fixtures that yield then teardown):
+Equivalent monkeypatch form (preferred for fixtures that yield then teardown) — per Refinement 6 (Codex review) use SimpleNamespace for instance-isolated stubs:
 
 ```python
-class _StubApp:
-    class storage:
-        user: dict = {}
+from types import SimpleNamespace
+
 def _make_stub(initial_storage: dict):
-    stub = _StubApp()
-    stub.storage.user = initial_storage
-    return stub
+    """Instance-isolated stub mirroring app.storage.user surface."""
+    return SimpleNamespace(storage=SimpleNamespace(user=initial_storage))
 
 monkeypatch.setattr('web.safe_storage.app', _make_stub({...}))
 ```
 
-Either form is acceptable — `with patch(...)` mirrors the Phase 87 canonical tests, `monkeypatch.setattr` mirrors the Phase 87 fixture pattern.
+Either form is acceptable — `with patch(...)` mirrors the Phase 87 canonical tests, `monkeypatch.setattr` with `SimpleNamespace`-based factory mirrors the Phase 87 fixture pattern with instance isolation.
 
 The 4 tests being rewritten and their current shim usage:
 - tests/test_export_cross_user_isolation.py — uses _TEST_BACKEND swap between User A and User B requests
@@ -122,7 +122,7 @@ The 4 tests being rewritten and their current shim usage:
 <tasks>
 
 <task type="auto">
-  <name>Task 1: Rewrite web/export_state.py to route through safe_storage chokepoint</name>
+  <name>Task 1: Rewrite web/export_state.py to route through safe_storage chokepoint (with getter hardening per Refinement 4)</name>
   <files>web/export_state.py</files>
   <read_first>
     - web/export_state.py (full current file, 178 lines)
@@ -130,7 +130,19 @@ The 4 tests being rewritten and their current shim usage:
     - .planning/phases/88-state-separation-by-deletion/88-CONTEXT.md (D-09, D-10, D-11, D-12)
   </read_first>
   <action>
-Full rewrite of web/export_state.py. The 7 public functions (set_search_export, update_search_export_results, update_search_export_selection, clear_search_export, set_parallels_export, update_parallels_export_filtered, clear_parallels_export) keep their exact signatures and return types. The 2 read functions (get_search_export, get_parallels_export) keep their signatures. Internal implementation routes through web.safe_storage helpers.
+**Tooling note (per Codex review, Refinement 7):** Acceptance-criterion shell
+commands below assume Bash + GNU grep are available via the `Bash` tool in
+the execute-phase runtime. If running on a pure-PowerShell shell, the
+equivalent commands are:
+  - `grep -nE "pat" file` → `rg -nN "pat" file`
+  - `grep -c "pat" file`  → `(rg -c "pat" file)` (rg returns count)
+  - `grep -rn "pat" dir`  → `rg -n "pat" dir`
+  - `test -f path && echo OK` → `python -c "import os; assert os.path.isfile('path'); print('OK')"`
+The executor agent SHOULD run the Bash-style commands first via the Bash
+tool; fallback to PowerShell equivalents only if the Bash invocation fails
+or is unavailable.
+
+Full rewrite of web/export_state.py. The 7 public functions (set_search_export, update_search_export_results, update_search_export_selection, clear_search_export, set_parallels_export, update_parallels_export_filtered, clear_parallels_export) keep their exact signatures and return types. The 2 read functions (get_search_export, get_parallels_export) keep their signatures BUT are hardened with isinstance guard per Refinement 4 (Codex review). Internal implementation routes through web.safe_storage helpers.
 
 Per D-09: Delete _TEST_BACKEND module-level variable. Delete _backend() helper function. No module-level mutable test-injection state remains.
 
@@ -139,6 +151,8 @@ Per D-10: Setter/updater/clearer functions return None explicitly. The safe_user
 Per D-11: update_search_export_results, update_search_export_selection, update_parallels_export_filtered add `isinstance(payload, dict)` guard immediately after the safe_user_get retrieval and before any payload[k] = v mutation. If payload is None or not a dict, the function returns silently (preserves current "no-op when payload missing" behavior).
 
 Per D-12: Same 3 update_* functions adopt copy-on-update: after retrieving the payload, do `payload = dict(payload)` BEFORE mutating, then `safe_user_set(_KEY, payload)`. This guards against the (theoretical) race where two same-session requests share a payload reference and interleave read-modify-write.
+
+**Per Refinement 4 (cross-AI review — Codex MEDIUM):** Extend D-11 to getters. `get_search_export()` and `get_parallels_export()` must return None if storage holds a non-dict at the key (poisoned-shape defense). Callers in web/api.py do `payload.get('results')` which would crash TypeError on a non-dict payload; this guard makes the contract explicit — return type is dict-or-None, never list/str/etc.
 
 Concrete new module body to write verbatim:
 
@@ -165,6 +179,11 @@ Update functions adopt:
     (defends against poisoned-shape storage state)
   - copy-on-update (``payload = dict(payload)``) before reassigning
     (defends against shared-reference races between same-session requests)
+
+Read functions adopt (Phase 88 D-11 extension, Refinement 4 — Codex review):
+  - ``isinstance(payload, dict)`` guard on return — returns None if storage
+    holds a non-dict value at the key (defends callers from
+    ``payload.get('results')`` TypeError on poisoned storage).
 """
 from typing import Optional, List, Dict, Any
 
@@ -200,8 +219,15 @@ def set_search_export(
 
 
 def get_search_export() -> Optional[Dict[str, Any]]:
-    """Read this session's search export payload, or None if unset/pruned."""
-    return safe_user_get(_SEARCH_KEY, None)
+    """Read this session's search export payload, or None if unset/pruned.
+
+    Phase 88 D-11 extension (Codex review): returns None if storage holds a
+    non-dict at the key (poisoned-shape defense). Callers in web/api.py do
+    `payload.get('results')` and would crash on a non-dict; this guard makes
+    the contract explicit — return type is dict-or-None, never list/str/etc.
+    """
+    payload = safe_user_get(_SEARCH_KEY, None)
+    return payload if isinstance(payload, dict) else None
 
 
 def update_search_export_results(results: List[Dict[str, Any]]) -> None:
@@ -253,8 +279,13 @@ def set_parallels_export(
 
 
 def get_parallels_export() -> Optional[Dict[str, Any]]:
-    """Read this session's parallels export payload, or None."""
-    return safe_user_get(_PARALLELS_KEY, None)
+    """Read this session's parallels export payload, or None.
+
+    Phase 88 D-11 extension (Codex review): see get_search_export() — same
+    poisoned-shape defense applies. Returns dict-or-None invariant.
+    """
+    payload = safe_user_get(_PARALLELS_KEY, None)
+    return payload if isinstance(payload, dict) else None
 
 
 def update_parallels_export_filtered(filtered: List[Dict[str, Any]]) -> None:
@@ -274,7 +305,7 @@ def clear_parallels_export() -> None:
 
 Verification of preservation:
 - All 7 setter/updater/clearer functions return None (signatures unchanged from current).
-- get_search_export and get_parallels_export keep Optional[Dict[str, Any]] return type.
+- get_search_export and get_parallels_export keep Optional[Dict[str, Any]] return type AND now return None on non-dict storage values.
 - No `from nicegui import app` remains — only safe_storage imports.
 - No _TEST_BACKEND, no _backend().
   </action>
@@ -290,8 +321,20 @@ Verification of preservation:
     - `python -c "from web import export_state; assert export_state.set_parallels_export([], [], None) is None"` exits 0.
     - `python -c "import ast; ast.parse(open('web/export_state.py', encoding='utf-8').read())"` exits 0.
     - `python -m ruff check web/export_state.py` exits 0.
+    - **Refinement 4 isinstance-guard on getters:** Either of the following must verify the guard exists (executor's discretion — bare Python one-liner OR add equivalent assertions into the test_export_state_selection.py rewrite as a small new test function `test_getters_return_none_on_poisoned_payload`):
+      ```
+      python -c "from types import SimpleNamespace; \
+      import web.safe_storage as ss; \
+      ss.app = SimpleNamespace(storage=SimpleNamespace(user={'export_search_payload': 'not-a-dict'})); \
+      from web import export_state; \
+      assert export_state.get_search_export() is None, 'isinstance guard missing on get_search_export'; \
+      ss.app.storage.user = {'export_parallels_payload': ['not','a','dict']}; \
+      assert export_state.get_parallels_export() is None, 'isinstance guard missing on get_parallels_export'; \
+      print('OK')"
+      ```
+      exits 0.
   </acceptance_criteria>
-  <done>web/export_state.py rewritten: no _TEST_BACKEND, no _backend, all functions route through safe_storage helpers, update_* functions hardened with isinstance guard + copy-on-update, ABI preserved (None returns).</done>
+  <done>web/export_state.py rewritten: no _TEST_BACKEND, no _backend, all functions route through safe_storage helpers, update_* functions hardened with isinstance guard + copy-on-update, getters hardened with isinstance guard per Refinement 4, ABI preserved (None returns).</done>
 </task>
 
 <task type="auto">
@@ -405,16 +448,17 @@ Note on the bootstrap writer at parallels.py:457: this writer (`safe_user_set('p
 </task>
 
 <task type="auto">
-  <name>Task 3: Rewrite tests/test_export_cross_user_isolation.py (D-01, D-03, D-15)</name>
+  <name>Task 3: Rewrite tests/test_export_cross_user_isolation.py (D-01, D-03, D-15 strengthened per Refinement 2; SimpleNamespace stub per Refinement 6)</name>
   <files>tests/test_export_cross_user_isolation.py</files>
   <read_first>
     - tests/test_export_cross_user_isolation.py (full current file)
     - tests/test_browse_state.py (canonical monkeypatch pattern, lines 5-80)
     - web/export_state.py (post-Task-1; the new module being tested)
+    - web/api.py (post-Task-2; specifically lines 2049-2070 to confirm the JSON envelope response shape for the strengthened D-15 assertion)
     - .planning/phases/88-state-separation-by-deletion/88-CONTEXT.md (D-01, D-03, D-15)
   </read_first>
   <action>
-Rewrite tests/test_export_cross_user_isolation.py to monkeypatch web.safe_storage.app directly (D-01) instead of swapping web.export_state._TEST_BACKEND. Add a new test asserting source_text cannot leak across sessions via the deleted fallback (D-15). Document the sequential-simulation caveat (D-03) in the module docstring.
+Rewrite tests/test_export_cross_user_isolation.py to monkeypatch web.safe_storage.app directly (D-01) instead of swapping web.export_state._TEST_BACKEND. Add a strengthened D-15 test that exercises a POSITIVE export path per Refinement 2 (Codex review). Document the sequential-simulation caveat (D-03) in the module docstring. Use SimpleNamespace-based stubs per Refinement 6 (Codex review).
 
 Module docstring (rewrite verbatim):
 
@@ -445,24 +489,22 @@ manual checklist).
 """
 ```
 
-Replace the existing fixture pattern with the monkeypatch-based pattern. Concrete shape (preserve User A vs. User B assertion semantics, change only the storage-injection mechanism):
+Replace the existing fixture pattern with the monkeypatch-based pattern using SimpleNamespace stubs (Refinement 6). Concrete shape (preserve User A vs. User B assertion semantics, change only the storage-injection mechanism):
 
 ```python
+from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
 
-class _StubApp:
-    """Stub mirroring app.storage.user surface used by safe_storage helpers."""
-    class storage:
-        user: dict = {}
+def _make_stub(initial_storage: dict):
+    """Instance-isolated stub mirroring app.storage.user surface.
 
-
-def _make_stub(initial_storage: dict) -> _StubApp:
-    stub = _StubApp()
-    stub.storage.user = initial_storage
-    return stub
+    Per Phase 88 review (Codex LOW, Refinement 6): each invocation returns
+    a fresh SimpleNamespace tree — no class-level state shared across tests.
+    """
+    return SimpleNamespace(storage=SimpleNamespace(user=initial_storage))
 
 
 def _make_mock_meta_mgr():
@@ -545,24 +587,32 @@ def test_two_sessions_get_independent_filenames(monkeypatch):
 
 
 def test_parallels_source_text_cannot_leak_via_deleted_fallback(monkeypatch):
-    """Phase 88 D-15: prove the parallels_source_text legacy fallback is dead.
+    """Phase 88 D-15 (strengthened per Codex review, Refinement 2) — prove the
+    parallels_source_text legacy fallback is dead via a POSITIVE export path.
 
-    User A's session writes 'alpha-text' to the deleted-fallback key
-    ``app.storage.user['parallels_source_text']``. User B's session has
-    NO parallels export payload and NO source_text in any form.
+    Setup:
+      - User A's storage has `parallels_source_text` = 'alpha-leak-bait' set
+        directly in app.storage.user (simulates the legacy writer path).
+      - User B's storage has a VALID parallels payload (results + filtered +
+        meta with NO source_text key). The export handler will reach the
+        positive-export code path that USED to consult the legacy fallback.
 
-    Before Phase 88 D-14: User B's /api/export/parallels/excel would have
-    fallen back to safe_user_get('parallels_source_text', '') — but since
-    both sessions share storage in the singleton-mirror world, B would
-    have read A's value.
+    Before Phase 88 D-14: User B's /api/export/parallels/json would have read
+    `meta.get('source_text') or safe_user_get('parallels_source_text', '')`,
+    so if User A's session leaked into User B's storage, User B's exported
+    JSON envelope would contain 'alpha-leak-bait'.
 
-    After Phase 88 D-14: the fallback is deleted; User B's handler reads
-    only meta['source_text'] from their own (absent) export payload, gets
-    '', and returns 400 (no parallels results) without ever touching the
-    legacy key.
+    After Phase 88 D-14: the fallback is gone; User B's source_text comes
+    exclusively from User B's own meta['source_text'], which is empty.
+    The exported envelope must NOT contain 'alpha-leak-bait' even when
+    User A's bait sits in the (now isolated) legacy storage key.
 
-    Even if the legacy key is set in User A's storage, the assertion below
-    proves User B's response is independent.
+    Why this is stronger than the previous empty-storage 400 test (Refinement 2,
+    Codex MEDIUM): A reintroduced fallback could pass the 400-path test if it
+    sits BEHIND a `if not parallels_results and not filtered_results: return
+    400` early return — the bait would never be touched in the 400 path. This
+    POSITIVE-path test ensures results EXIST so the fallback (if reintroduced)
+    WOULD be consulted.
     """
     from web.api import init_api_routes, state
 
@@ -573,31 +623,50 @@ def test_parallels_source_text_cannot_leak_via_deleted_fallback(monkeypatch):
     saved_meta = state.meta_mgr
     state.meta_mgr = _make_mock_meta_mgr()
     try:
-        # User A: has source_text in legacy key, no parallels payload.
-        user_a_storage = {'parallels_source_text': 'alpha-leak-bait'}
-        monkeypatch.setattr('web.safe_storage.app', _make_stub(user_a_storage))
-        r_a = client.get('/api/export/parallels/excel')
-        # No parallels results -> 400 either way; the goal is to prove
-        # the handler does NOT crash because it no longer reads the legacy key.
-        assert r_a.status_code == 400, f"Expected 400 (no parallels results), got {r_a.status_code}"
-        assert b'alpha-leak-bait' not in r_a.content, (
-            "Legacy fallback should be dead — source_text must not appear in any response"
-        )
-
-        # User B: empty storage. Different session simulated by storage swap.
-        user_b_storage = {}
+        # User B's session: valid parallels payload with results, meta has
+        # no source_text. ALSO has the legacy bait key set — simulating
+        # the worst case where a leftover legacy write polluted storage.
+        # The fallback (if reintroduced) would surface this bait.
+        valid_results = [{
+            'uid': 'p1', 'shelfmark': 'T-S 12.1', 'snippet': 'sample',
+            'composition': 'comp', 'fragments': ['frag-a'],
+        }]
+        user_b_storage = {
+            'export_parallels_payload': {
+                'results': valid_results,
+                'filtered': valid_results,
+                'meta': {  # NO 'source_text' key — was previously sourced from legacy fallback
+                    'chunk_size': 3, 'mode': 'text', 'max_freq': None,
+                    'filters': None, 'boundary_options': None, 'warnings': [],
+                },
+            },
+            'parallels_source_text': 'alpha-leak-bait',  # legacy key — must NOT be read
+        }
         monkeypatch.setattr('web.safe_storage.app', _make_stub(user_b_storage))
-        r_b = client.get('/api/export/parallels/excel')
-        assert r_b.status_code == 400
-        assert b'alpha-leak-bait' not in r_b.content, (
-            "CROSS-USER LEAK: User A's source_text appeared in User B's response. "
-            "D-14 fallback deletion is broken."
+        r = client.get('/api/export/parallels/json')
+        # Handler reaches positive-export path (results exist).
+        assert r.status_code == 200, f"Expected 200 with valid results, got {r.status_code}: {r.text[:200]}"
+        body_bytes = r.content
+        assert b'alpha-leak-bait' not in body_bytes, (
+            "LEAK: legacy parallels_source_text fallback is still being read. "
+            "Phase 88 D-14 deleted it; if this fires, the fallback was reintroduced. "
+            "source_text should come exclusively from meta['source_text']."
+        )
+        # Also assert source_text in the response envelope is empty (no bait, no other surface).
+        # The exact envelope shape comes from the existing handler at web/api.py:2049-2070.
+        # Executor: read the actual response shape during execution and adjust the second
+        # assertion to match. The first assertion (alpha-leak-bait not in body_bytes) is
+        # the load-bearing one — it works regardless of envelope structure.
+        body = r.json()
+        assert (body.get('search_context') or {}).get('source_text', '') == '', (
+            "source_text must be empty when meta has no source_text key and "
+            "the legacy fallback is deleted."
         )
     finally:
         state.meta_mgr = saved_meta
 ```
 
-Preserve any other tests already in the file by porting them to the same monkeypatch pattern. The two tests above are illustrative; the executor should retain coverage parity with the pre-rewrite file (read it first to enumerate existing test functions and port each one).
+**Preserve coverage parity:** keep any other tests already in the file by porting them to the same monkeypatch pattern with `SimpleNamespace`-based stubs. The two tests above are illustrative; the executor should retain coverage parity with the pre-rewrite file (read it first to enumerate existing test functions and port each one). If the pre-rewrite file had a separate empty-storage 400-path version of the source_text test, the executor may either KEEP it alongside the new positive-path version (defense-in-depth) OR replace it with the positive-path version — both forms satisfy the D-15 contract; the positive-path version alone is sufficient per Refinement 2.
 
 CRITICAL: do NOT import or reference `web.export_state._TEST_BACKEND` anywhere in the rewritten file. Do NOT call `state.last_results = ...` anywhere in fixtures — the goal is to keep tests state.*-free so Plan 88-03 can delete the fields without test churn.
   </action>
@@ -608,14 +677,17 @@ CRITICAL: do NOT import or reference `web.export_state._TEST_BACKEND` anywhere i
     - `grep -n "_TEST_BACKEND" tests/test_export_cross_user_isolation.py` returns 0 matches.
     - `grep -nE "state\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\\s*=" tests/test_export_cross_user_isolation.py` returns 0 matches.
     - `grep -n "web.safe_storage.app" tests/test_export_cross_user_isolation.py` returns at least 4 matches (one per monkeypatch call in the 2 tests; more if existing tests are ported).
-    - `python -m pytest tests/test_export_cross_user_isolation.py -v` exits 0 with at least 2 tests passing (D-01 cross-user + D-15 source_text leak).
+    - `grep -n "class _StubApp" tests/test_export_cross_user_isolation.py` returns 0 matches (replaced with SimpleNamespace factory per Refinement 6).
+    - `grep -n "from types import SimpleNamespace" tests/test_export_cross_user_isolation.py` returns 1 match.
+    - `python -m pytest tests/test_export_cross_user_isolation.py -v` exits 0 with at least 2 tests passing (D-01 cross-user + D-15 strengthened positive-path source_text leak).
+    - `python -m pytest tests/test_export_cross_user_isolation.py::test_parallels_source_text_cannot_leak_via_deleted_fallback -v` exits 0 (the strengthened D-15 test passes).
     - `python -m ruff check tests/test_export_cross_user_isolation.py` exits 0.
   </acceptance_criteria>
-  <done>tests/test_export_cross_user_isolation.py rewritten: monkeypatches web.safe_storage.app, no _TEST_BACKEND, no state.X fixture setup, source_text leak regression test added (D-15), module docstring documents sequential-simulation caveat (D-03).</done>
+  <done>tests/test_export_cross_user_isolation.py rewritten: monkeypatches web.safe_storage.app with SimpleNamespace stubs (Refinement 6), no _TEST_BACKEND, no state.X fixture setup, strengthened D-15 source_text leak test exercises the positive-export path per Refinement 2 (proves the legacy fallback is dead even when the export reaches the code branch that USED to read it), module docstring documents sequential-simulation caveat (D-03).</done>
 </task>
 
 <task type="auto">
-  <name>Task 4: Rewrite tests/test_export_state_selection.py (D-02)</name>
+  <name>Task 4: Rewrite tests/test_export_state_selection.py (D-02; SimpleNamespace stub per Refinement 6)</name>
   <files>tests/test_export_state_selection.py</files>
   <read_first>
     - tests/test_export_state_selection.py (full current file)
@@ -624,7 +696,7 @@ CRITICAL: do NOT import or reference `web.export_state._TEST_BACKEND` anywhere i
     - .planning/phases/88-state-separation-by-deletion/88-CONTEXT.md (D-02)
   </read_first>
   <action>
-Rewrite tests/test_export_state_selection.py. Per D-02: delete the _StateProxy wrapper class entirely. Tests call export_state helpers directly to drive selection state, no shim, no state.X = fixture setup.
+Rewrite tests/test_export_state_selection.py. Per D-02: delete the _StateProxy wrapper class entirely. Tests call export_state helpers directly to drive selection state, no shim, no state.X = fixture setup. Per Refinement 6 (Codex review): use SimpleNamespace-based stubs for instance-isolated state.
 
 Module docstring (rewrite verbatim):
 
@@ -648,6 +720,11 @@ dict. The pre-Phase-88 ``_StateProxy`` wrapper and the
 ``export_state.set_search_export(...)`` and
 ``export_state.update_search_export_selection(...)`` directly.
 
+Per Phase 88 Refinement 6 (Codex review): the stub uses
+``SimpleNamespace(storage=SimpleNamespace(user=...))`` for
+instance-isolated state — no class-level ``_StubApp.storage.user`` shared
+across tests.
+
 Builds a bare FastAPI app per fixture (mirrors test_api_export_json.py
 HIGH-08 pattern) so handler logic can be exercised without NiceGUI.
 """
@@ -657,20 +734,19 @@ Core fixture pattern:
 
 ```python
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-class _StubApp:
-    class storage:
-        user: dict = {}
+def _make_stub(initial_storage: dict):
+    """Instance-isolated stub mirroring app.storage.user surface.
 
-
-def _make_stub(initial_storage: dict) -> _StubApp:
-    stub = _StubApp()
-    stub.storage.user = initial_storage
-    return stub
+    Per Phase 88 review (Codex LOW, Refinement 6): each invocation returns
+    a fresh SimpleNamespace tree — no class-level state shared across tests.
+    """
+    return SimpleNamespace(storage=SimpleNamespace(user=initial_storage))
 
 
 @pytest.fixture(scope='module')
@@ -785,11 +861,42 @@ def test_reset_clears_per_session_payload_then_export_returns_400(client, sessio
     assert b'No results to export' in r.content
 ```
 
+**Optional new test (executor's discretion — verifies Refinement 4 isinstance guard on getters):**
+
+```python
+def test_getters_return_none_on_poisoned_payload(monkeypatch):
+    """Phase 88 D-11 extension (Refinement 4 — Codex review): get_search_export
+    and get_parallels_export must return None when storage holds a non-dict at
+    the key. Callers in web/api.py do `payload.get('results')` which would
+    crash TypeError on a non-dict payload; the isinstance guard makes the
+    contract explicit.
+    """
+    from web import export_state
+
+    # Poison search payload with a string.
+    storage = {'export_search_payload': 'not-a-dict'}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+    assert export_state.get_search_export() is None, (
+        "isinstance guard missing on get_search_export — a non-dict payload "
+        "would crash callers doing payload.get('results')"
+    )
+
+    # Poison parallels payload with a list.
+    storage = {'export_parallels_payload': ['not', 'a', 'dict']}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+    assert export_state.get_parallels_export() is None, (
+        "isinstance guard missing on get_parallels_export"
+    )
+```
+
+If this test is added, it satisfies Refinement 4's acceptance criterion form. Either form (bare Python one-liner OR this test function) is acceptable; both satisfy the contract.
+
 CRITICAL deletions in this rewrite:
 - Delete `_StateProxy` class entirely (D-02).
 - Delete every line that does `state.last_results = ...`, `state.current_search_query = ...`, etc.
 - Delete `monkeypatch.setattr(export_state, '_TEST_BACKEND', ...)` lines.
 - Delete the `saved = {...}` save/restore block that captured state.* values (no longer needed).
+- Do NOT use class-level `_StubApp` (per Refinement 6) — use SimpleNamespace factory.
 
 Port ALL existing test functions in the file. Read the file first to enumerate them; each existing test must have a ported equivalent.
   </action>
@@ -801,14 +908,16 @@ Port ALL existing test functions in the file. Read the file first to enumerate t
     - `grep -n "_TEST_BACKEND" tests/test_export_state_selection.py` returns 0 matches.
     - `grep -nE "state\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids)\\s*=" tests/test_export_state_selection.py` returns 0 matches.
     - `grep -n "web.safe_storage.app" tests/test_export_state_selection.py` returns at least 1 match (in the fixture).
+    - `grep -n "class _StubApp" tests/test_export_state_selection.py` returns 0 matches (replaced with SimpleNamespace factory per Refinement 6).
+    - `grep -n "from types import SimpleNamespace" tests/test_export_state_selection.py` returns 1 match.
     - `python -m pytest tests/test_export_state_selection.py -v` exits 0 with all original tests still passing (read pre-rewrite test names and confirm same count).
     - `python -m ruff check tests/test_export_state_selection.py` exits 0.
   </acceptance_criteria>
-  <done>tests/test_export_state_selection.py rewritten: _StateProxy deleted, no _TEST_BACKEND, no state.X fixture setup, monkeypatch.setattr web.safe_storage.app pattern used; all ported tests pass.</done>
+  <done>tests/test_export_state_selection.py rewritten: _StateProxy deleted, no _TEST_BACKEND, no state.X fixture setup, monkeypatch.setattr web.safe_storage.app pattern with SimpleNamespace-based stubs (Refinement 6); all ported tests pass; optional getter-hardening test (Refinement 4) added.</done>
 </task>
 
 <task type="auto">
-  <name>Task 5: Rewrite tests/test_api_export_json.py and tests/test_api_legacy_unchanged.py</name>
+  <name>Task 5: Rewrite tests/test_api_export_json.py and tests/test_api_legacy_unchanged.py (SimpleNamespace stub per Refinement 6)</name>
   <files>tests/test_api_export_json.py, tests/test_api_legacy_unchanged.py</files>
   <read_first>
     - tests/test_api_export_json.py (full file)
@@ -822,6 +931,7 @@ Apply the same rewrite pattern from Task 4 to both files. The structural goals a
 2. Delete every `monkeypatch.setattr(export_state, '_TEST_BACKEND', ...)` line.
 3. Replace with `monkeypatch.setattr('web.safe_storage.app', _make_stub(initial_storage))` plus `export_state.set_search_export(...)` / `export_state.set_parallels_export(...)` to populate the per-session payload.
 4. Update module docstrings to reference Phase 88 D-04 and the monkeypatch pattern.
+5. **Per Refinement 6:** Use SimpleNamespace-based `_make_stub(initial_storage)` factory — NOT a class-level `_StubApp` with nested `storage` class. Each `_make_stub()` invocation returns a fresh `SimpleNamespace(storage=SimpleNamespace(user=initial_storage))`.
 
 For both files, the steps:
 
@@ -832,7 +942,22 @@ Step B — Identify per-test fixture setup. For each test, determine what storag
 - If the test exercises /api/export/parallels/excel -> storage has `export_parallels_payload` from `export_state.set_parallels_export(...)`.
 - If the test exercises a no-payload empty-state branch -> storage is `{}`.
 
-Step C — Write the new fixture using the `_StubApp` + `_make_stub(initial_storage)` pattern from Task 3/4. Use `monkeypatch.setattr('web.safe_storage.app', _make_stub({}))` then call the relevant `export_state.set_X(...)` helper to populate. If existing test passes `state.last_selected_uids = [...]` to drive selection, replace with `export_state.update_search_export_selection([...])`.
+Step C — Write the new fixture using the `SimpleNamespace`-based `_make_stub(initial_storage)` pattern from Task 3/4. Use `monkeypatch.setattr('web.safe_storage.app', _make_stub({}))` then call the relevant `export_state.set_X(...)` helper to populate. If existing test passes `state.last_selected_uids = [...]` to drive selection, replace with `export_state.update_search_export_selection([...])`.
+
+Concrete factory shape (use in BOTH files):
+
+```python
+from types import SimpleNamespace
+
+
+def _make_stub(initial_storage: dict):
+    """Instance-isolated stub mirroring app.storage.user surface.
+
+    Per Phase 88 review (Codex LOW, Refinement 6): each invocation returns
+    a fresh SimpleNamespace tree — no class-level state shared across tests.
+    """
+    return SimpleNamespace(storage=SimpleNamespace(user=initial_storage))
+```
 
 Step D — Port each test. The handler-call lines (e.g., `r = client.get('/api/export/json')`) and the assertion lines do not change. Only the storage-injection step changes.
 
@@ -844,6 +969,8 @@ Both files must end with:
 - 0 matches for `_TEST_BACKEND`
 - 0 matches for `state.last_results = ` and friends (the 10 fields)
 - At least 1 match for `web.safe_storage.app`
+- 0 matches for `class _StubApp` (replaced with SimpleNamespace factory per Refinement 6)
+- 1 match for `from types import SimpleNamespace`
 - Same number of test functions as pre-rewrite (or with renamed tests covering the same scenarios)
   </action>
   <verify>
@@ -853,10 +980,12 @@ Both files must end with:
     - `grep -n "_TEST_BACKEND" tests/test_api_export_json.py tests/test_api_legacy_unchanged.py` returns 0 matches total.
     - `grep -nE "state\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\\s*=" tests/test_api_export_json.py tests/test_api_legacy_unchanged.py` returns 0 matches total.
     - `grep -n "web.safe_storage.app" tests/test_api_export_json.py tests/test_api_legacy_unchanged.py` returns at least 2 matches (at least one per file).
+    - `grep -n "class _StubApp" tests/test_api_export_json.py tests/test_api_legacy_unchanged.py` returns 0 matches (replaced with SimpleNamespace factory per Refinement 6).
+    - `grep -n "from types import SimpleNamespace" tests/test_api_export_json.py tests/test_api_legacy_unchanged.py` returns at least 2 matches (one per file).
     - `python -m pytest tests/test_api_export_json.py tests/test_api_legacy_unchanged.py -v` exits 0 with original test count preserved.
     - `python -m ruff check tests/test_api_export_json.py tests/test_api_legacy_unchanged.py` exits 0.
   </acceptance_criteria>
-  <done>Both test files rewritten: no _TEST_BACKEND, no state.X fixture setup, monkeypatch.setattr web.safe_storage.app pattern used; all original tests ported and passing.</done>
+  <done>Both test files rewritten: no _TEST_BACKEND, no state.X fixture setup, monkeypatch.setattr web.safe_storage.app pattern with SimpleNamespace-based stubs (Refinement 6); all original tests ported and passing.</done>
 </task>
 
 <task type="auto">
@@ -917,7 +1046,7 @@ No other allowlist edits in this task. The web/auth_state.py entry remains untou
 </task>
 
 <task type="auto">
-  <name>Task 7: Plan-boundary green verification (pytest + ruff + check_docs)</name>
+  <name>Task 7: Plan-boundary green verification (pytest + ruff + check_docs) — greps scoped to web/ + tests/ per Refinement 1</name>
   <files></files>
   <read_first>
     - .planning/phases/88-state-separation-by-deletion/88-CONTEXT.md (D-05: plan boundaries MUST stay green)
@@ -930,15 +1059,17 @@ Commands (each must exit 0):
 2. `python -m ruff check .` (no new lint violations).
 3. `python scripts/check_docs.py` (docs health check).
 
-Cross-cutting verification (must all be true after Plan 88-02 lands):
+Cross-cutting verification (must all be true after Plan 88-02 lands).
 
-- `grep -rn "_TEST_BACKEND" .` returns 0 matches (gone from production code AND tests AND .planning/).
-- `grep -rn "_StateProxy" tests/` returns 0 matches.
-- `grep -rn "from web.export_state import _backend" .` returns 0 matches.
+**Scoped to web/ + tests/ per cross-AI review (Codex HIGH, Refinement 1):** planning artifacts and historical CLAUDE.md entries mention these names intentionally — a repo-wide `grep -rn "_TEST_BACKEND" .` would produce false-positive contradictions at verification time. The executor would see the grep fail and either chase a ghost or, worse, delete history files to satisfy the gate. Always scope to `web tests` (or `web/ tests/`).
+
+- `rg "_TEST_BACKEND" web tests` returns 0 matches (gone from production code AND tests; planning/docs/history intentionally mention this name and are excluded from the scan). Bash-form equivalent: `grep -rn "_TEST_BACKEND" web/ tests/`.
+- `rg "_StateProxy" tests` returns 0 matches (already scoped — leave alone).
+- `rg "from web.export_state import _backend" web tests` returns 0 matches.
 - `grep -nE "state\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\\s*=" tests/` returns 0 matches across the 4 rewritten test files (other tests outside the 4 are not in scope for Plan 88-02 — Plan 88-03 D-07 static scanner will catch them at Phase 88 close).
 - AppState class shape unchanged: `grep -cE "^\\s+self\\.(last_results|current_search_query|current_search_mode|current_search_gap|last_filters_applied|last_search_warnings|last_selected_uids|parallels_results|parallels_filtered|parallels_search_meta)\\s*[:=]" web/state.py` returns 10 (Plan 88-03 deletes these).
 
-If pytest surfaces a test failure outside the 4 export-specific tests and outside test_no_raw_storage_access, investigate — most likely cause is a missed reader site somewhere in web/ that was reading the old `_TEST_BACKEND` shim. Sanity-grep: `grep -rn "_TEST_BACKEND\\|export_state\\._backend" web/` MUST return 0 matches.
+If pytest surfaces a test failure outside the 4 export-specific tests and outside test_no_raw_storage_access, investigate — most likely cause is a missed reader site somewhere in web/ that was reading the old `_TEST_BACKEND` shim. Sanity-grep (already scoped — leave alone): `grep -rn "_TEST_BACKEND\\|export_state\\._backend" web/` MUST return 0 matches.
   </action>
   <verify>
     <automated>python -m pytest -q</automated>
@@ -947,11 +1078,11 @@ If pytest surfaces a test failure outside the 4 export-specific tests and outsid
     - `python -m pytest -q` exits 0 with at least 1880 tests passing (Phase 87 baseline 1879 + at least 1 new D-15 test).
     - `python -m ruff check .` exits 0.
     - `python scripts/check_docs.py` exits 0.
-    - `grep -rn "_TEST_BACKEND" .` returns 0 matches across the entire repo.
-    - `grep -rn "_StateProxy" tests/` returns 0 matches.
-    - `grep -rn "export_state._backend" .` returns 0 matches.
+    - `rg "_TEST_BACKEND" web tests` returns 0 matches (Bash-form equivalent: `grep -rn "_TEST_BACKEND" web/ tests/`). Scoped to web/ + tests/ per Refinement 1 — planning artifacts and historical CLAUDE.md entries mention these names intentionally.
+    - `rg "_StateProxy" tests` returns 0 matches (already scoped to `tests/`).
+    - `rg "export_state\._backend" web tests` returns 0 matches.
   </acceptance_criteria>
-  <done>Plan 88-02 leaves the tree green: pytest at or above Phase 87 baseline +1 new test, ruff clean, check_docs clean. _TEST_BACKEND is gone from the entire repo. AppState fields physically still exist on the class (Plan 88-03 deletes).</done>
+  <done>Plan 88-02 leaves the tree green: pytest at or above Phase 87 baseline +1 new test, ruff clean, check_docs clean. _TEST_BACKEND is gone from web/ + tests/ (planning/docs historical mentions intentionally preserved). AppState fields physically still exist on the class (Plan 88-03 deletes).</done>
 </task>
 
 </tasks>
@@ -971,33 +1102,36 @@ If pytest surfaces a test failure outside the 4 export-specific tests and outsid
 |-----------|----------|-----------|-------------|-----------------|
 | T-88-02-01 | Information Disclosure | Test monkeypatch wrong target | mitigate | If a test does `monkeypatch.setattr('web.export_state.app', stub)` (wrong path — that module has no `.app` after Task 1) instead of `web.safe_storage.app`, the stub no-ops and the helper reads the real `app.storage.user` which is undefined in TestClient context — pytest fails loudly with `RuntimeError: app.storage.user can only be accessed within a request`. This is a fail-loud guard; the wrong-target mistake cannot silently pass. Acceptance criteria in Tasks 3-5 grep for `web.safe_storage.app` to catch the right pattern. |
 | T-88-02-02 | Tampering | export_state ABI silent change | mitigate | D-10 explicitly wraps the safe_user_set boolean return so callers in search.py/search_results.py/parallels.py see the same `None` return as today. Task 1 acceptance criteria verifies `export_state.set_search_export([], 'q') is None`. If the wrap is broken, the unit test fails immediately. |
-| T-88-02-03 | Information Disclosure | parallels_source_text legacy fallback | mitigate | D-15 regression test directly proves User A's source_text cannot leak into User B's response. The test puts `'alpha-leak-bait'` in User A's storage and asserts the string is absent from User B's response body. If the fallback is reintroduced (e.g., a future PR re-adds `safe_user_get('parallels_source_text', '')`), this test fails. |
-| T-88-02-04 | Tampering | Poisoned-shape storage payload | mitigate | D-11 `isinstance(payload, dict)` guard in the 3 update_* functions defends against storage holding a non-dict value for `_SEARCH_KEY` or `_PARALLELS_KEY`. Without the guard, `payload['results'] = ...` would raise TypeError on, e.g., a corrupted None/list/str. With the guard, the function returns silently — same behavior as a missing payload (existing contract). |
+| T-88-02-03 | Information Disclosure | parallels_source_text legacy fallback | mitigate | D-15 strengthened regression test (Refinement 2) directly proves User A's source_text cannot leak into User B's response via a POSITIVE export path. The test puts `'alpha-leak-bait'` in storage AND populates valid parallels results so the handler reaches the code branch that USED to read the fallback — asserts the bait string is absent from the response body. If the fallback is reintroduced (e.g., a future PR re-adds `safe_user_get('parallels_source_text', '')`), this test fails — and crucially, it fails EVEN IF the fallback is hidden behind a no-results early return (the previous weak-test failure mode). |
+| T-88-02-04 | Tampering | Poisoned-shape storage payload | mitigate | D-11 `isinstance(payload, dict)` guard in the 3 update_* functions defends against storage holding a non-dict value for `_SEARCH_KEY` or `_PARALLELS_KEY`. Without the guard, `payload['results'] = ...` would raise TypeError on, e.g., a corrupted None/list/str. Refinement 4 extends the guard to getters — `get_search_export()` and `get_parallels_export()` return None on non-dict storage, defending callers in web/api.py that do `payload.get('results')`. With the guard, both reads and updates return silently/None — same behavior as a missing payload (existing contract). |
 | T-88-02-05 | Tampering | Shared-reference mutation race | accept | D-12 copy-on-update is defensive but not atomic. Two same-session requests interleaving read-modify-write on the same payload could still race because the read-modify-write is not under lock. Real atomicity requires CAS or a lock — explicitly deferred per CONTEXT.md "Deferred Ideas". For Phase 88 the copy-on-update narrows the window: each request gets its own copy of the dict, mutates it locally, then writes back. The race window is the time between read and write — narrow but nonzero. Accepted because Phase 88 is about state separation, not atomicity. |
 | T-88-02-06 | Denial of Service | Allowlist count drift | mitigate | Task 6 deletes the `web/export_state.py` allowlist entry. test_allowlist_counts_exact enforces exact count match — if Task 1 fails to delete `_backend()` correctly and a `app.storage.user` raw access lingers, this test fails because the entry is gone but the access still exists. The acceptance criterion in Task 6 explicitly runs `test_no_raw_storage_access.py` to verify. |
 
 **No HIGH-severity threats.** Plan 88-02 reduces attack surface by:
 (a) Deleting the `_TEST_BACKEND` production-code shim — a test-only mechanism that lived in production code violating Phase 87 chokepoint discipline.
 (b) Deleting the parallels_source_text reader-side fallback — a legacy fallback that read from a session-shared dict at a different key than the rest of the export state.
+(c) Hardening BOTH update_* AND getters with isinstance guard (Refinement 4) — the contract is now explicit: storage values for the two export keys are dict-or-None.
 
-The mitigations (D-11 + D-12 hardening, D-15 leak test, Task 6 allowlist deletion) all reduce the attack surface from where Plan 88-01 left it.
+The mitigations (D-11 + D-12 hardening, D-15 strengthened leak test per Refinement 2, Task 6 allowlist deletion) all reduce the attack surface from where Plan 88-01 left it.
 </threat_model>
 
 <verification>
 1. All 7 tasks pass acceptance criteria.
 2. Plan-boundary green (Task 7): full pytest at Phase 87 baseline + 1 new D-15 test, ruff clean, check_docs clean.
-3. _TEST_BACKEND is gone from the entire repository (production + tests + .planning + docs).
+3. _TEST_BACKEND is gone from web/ + tests/ (scoped per Refinement 1 — planning/docs/history mentions intentionally preserved).
 4. _StateProxy is gone from tests/.
 5. Phase 87 lint scanner still passes; web/export_state.py allowlist entry is deleted; 3 entries remain (auth_state, main, supabase_client — all scoped to Phase 90/91 deletion).
 6. AppState class shape STILL has the 10 fields (Plan 88-03 deletes them). Tests no longer reference them in fixtures, so Plan 88-03's deletion will not regress any test.
-7. parallels_source_text legacy fallback proven dead by D-15 regression test.
+7. parallels_source_text legacy fallback proven dead by D-15 strengthened regression test (positive-export path per Refinement 2).
+8. Getters hardened with isinstance guard per Refinement 4 — get_search_export() and get_parallels_export() return None on poisoned non-dict storage.
+9. Test stubs use SimpleNamespace per Refinement 6 — instance-isolated, no class-level shared state.
 </verification>
 
 <success_criteria>
 - STATE-03 satisfied: reader sites in api.py (the 3 parallels export handlers + the previously-migrated search export handlers) all read exclusively through web.export_state helpers, which now route through safe_storage chokepoint. No fallback to legacy app.storage.user keys.
-- STATE-04 satisfied: _TEST_BACKEND shim removed from web/export_state.py; tests use monkeypatch.setattr web.safe_storage.app fixture pattern.
-- STATE-05 satisfied: tests/test_export_cross_user_isolation.py rewritten to assert against per-session storage directly (via monkeypatched stub), no _TEST_BACKEND reference.
-- STATE-06 satisfied: tests/test_export_state_selection.py + tests/test_api_export_json.py + tests/test_api_legacy_unchanged.py rewritten, _StateProxy + state.* setup deleted, tests use only export_state helpers.
+- STATE-04 satisfied: _TEST_BACKEND shim removed from web/export_state.py; tests use monkeypatch.setattr web.safe_storage.app fixture pattern with SimpleNamespace stubs.
+- STATE-05 satisfied: tests/test_export_cross_user_isolation.py rewritten to assert against per-session storage directly (via monkeypatched stub), no _TEST_BACKEND reference; strengthened D-15 source_text leak test exercises positive-export path per Refinement 2.
+- STATE-06 satisfied: tests/test_export_state_selection.py + tests/test_api_export_json.py + tests/test_api_legacy_unchanged.py rewritten, _StateProxy + state.* setup deleted, tests use only export_state helpers, all stubs use SimpleNamespace.
 - Phase 87 invariants intact: lint scanner still passes; one fewer allowlist entry.
 - Zero user-visible behavior change: export_state ABI unchanged; reader sites behave identically except they no longer fall back to the legacy parallels_source_text key (which Plan 88-01 already populated via meta dict on every writer path).
 </success_criteria>
@@ -1005,3 +1139,4 @@ The mitigations (D-11 + D-12 hardening, D-15 leak test, Task 6 allowlist deletio
 <output>
 After completion, create `.planning/phases/88-state-separation-by-deletion/88-02-export-state-rewrite-SUMMARY.md` per @$HOME/.claude/get-shit-done/templates/summary.md.
 </output>
+</content>
