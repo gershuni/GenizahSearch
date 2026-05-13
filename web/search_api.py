@@ -1195,9 +1195,13 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
           endpoint='parallels').
         - 'result_count': len(bundle.main_results) on success.
 
-        Statelessness D-20: handler MUST NOT touch state.last_results /
-        state.parallels_results / state.current_search_query / app.storage /
-        request.cookies.
+        Statelessness D-20: handler MUST NOT touch the per-session export
+        state (web.export_state) or app.storage / request.cookies -- handlers
+        are stateless and respond purely from request body + corpus indexes.
+        Historical note: pre-Phase-88, the rule named the AppState singleton
+        mirror fields (deleted in Phase 88 STATE-01) which Phase 88 removed;
+        the rule now reads against the per-session payload helper surface
+        instead.
         """
         # 0. Manual JSON parse so malformed JSON flows through wrap_endpoint
         #    envelope instead of FastAPI's 422 default. FastAPI body injection

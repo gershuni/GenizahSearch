@@ -1843,9 +1843,12 @@ def init_api_routes(app_override=None):
     @target_app.get('/api/export/excel')
     def export_excel():
         """Export search results to Excel format using unified export service."""
-        # Per-session read (web.export_state). The previous singleton path
-        # (state.last_results / state.current_search_query) leaked User A's
-        # query name into User B's xlsx filename across separate devices.
+        # Reads per-session payload via web.export_state (Phase 88, 2026-05-13).
+        # Historical context: the pre-Phase-88 AppState mirror fields (deleted
+        # in STATE-01) leaked User A's query name into User B's xlsx filename
+        # across separate devices (2026-05-12 incident). Phase 88 removed the
+        # singleton mirrors entirely; export state is now per-session via
+        # app.storage.user routed through web.safe_storage.
         from web.export_state import get_search_export
         payload = get_search_export()
         if not payload or not payload.get('results'):
