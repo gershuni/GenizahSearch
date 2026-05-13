@@ -12,8 +12,8 @@ Land the primitives the rest of the milestone depends on. **This phase must comp
 
 - [ ] **FOUND-01**: `_session_uuid` minted on first request to any page, stored in `app.storage.user['_session_uuid']`, stable across token refresh
 - [ ] **FOUND-02**: `web/safe_storage.py` adopted and finalized as the single chokepoint adapter for all per-user state (carried forward from hold-commit `aab16e6d`, audited for completeness)
-- [ ] **FOUND-03**: Explicit allowlist of permitted raw `app.storage.user` access sites with per-entry justification (e.g. bootstrap code that pre-dates session existence)
-- [ ] **FOUND-04**: CI/lint guard (grep-based check or ruff custom rule) rejects new raw `app.storage.user.get/pop/[key] = ...` outside the allowlist
+- [x] **FOUND-03**: Explicit allowlist of permitted raw `app.storage.user` access sites with per-entry justification (e.g. bootstrap code that pre-dates session existence)
+- [x] **FOUND-04**: CI/lint guard (grep-based check or ruff custom rule) rejects new raw `app.storage.user.get/pop/[key] = ...` outside the allowlist
 - [ ] **FOUND-05**: All 6 existing `safe_storage` tests (`tests/test_safe_storage.py`) pass without modification
 
 ## State Separation — Phase 88
@@ -90,8 +90,8 @@ Prove the invariants hold end-to-end and document the architecture so it survive
 |-------------|-------|--------|
 | FOUND-01 | Phase 87 | Pending |
 | FOUND-02 | Phase 87 | Pending |
-| FOUND-03 | Phase 87 | Pending |
-| FOUND-04 | Phase 87 | Pending |
+| FOUND-03 | Phase 87 | Complete |
+| FOUND-04 | Phase 87 | Complete |
 | FOUND-05 | Phase 87 | Pending |
 | STATE-01 | Phase 88 | Pending |
 | STATE-02 | Phase 88 | Pending |

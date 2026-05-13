@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Roadmap created -- ROADMAP.md, STATE.md, REQUIREMENTS.md traceability filled
-last_updated: "2026-05-13T04:14:27.515Z"
-last_activity: 2026-05-13 -- Phase 87 planning complete
+stopped_at: Completed 87-01-VALIDATION-FOUNDATION-PLAN.md
+last_updated: "2026-05-13T05:03:54.627Z"
+last_activity: 2026-05-13
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 13
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.12 Multitenant Architecture (Path B) -- Phase 87: Foundations (pending discussion)
+**Current focus:** Phase 87 — Foundations -- Session UUID and Safe Storage Chokepoint
 
 ## Current Position
 
-Phase: 87 of 92 (Foundations -- Session UUID and Safe Storage Chokepoint)
-Plan: --
-Status: Ready to execute
-Last activity: 2026-05-13 -- Phase 87 planning complete
+Phase: 87 (Foundations -- Session UUID and Safe Storage Chokepoint) — EXECUTING
+Plan: 2 of 8 (next: 87-02-SESSION-UUID-HELPERS)
+Status: Executing Phase 87
+Last activity: 2026-05-13 -- Plan 87-01 complete (Wave 0 failing-test gate)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 13%
 
 ## Phase Queue (v7.12)
 
@@ -67,6 +67,7 @@ Progress: [░░░░░░░░░░] 0%
 - NO `auth.set_session()` mid-flight: Codex verified `gotrue_client.py:713` -- `set_session()` is networked, not local state mutation
 - Refresh-only locking keyed by `_session_uuid`: UUID-keyed locks are stable across token rotation; no cached authenticated client objects
 - `_TEST_BACKEND` shim removed: tests use real session storage with proper fixtures or adapter injection
+- Phase 87-01 Wave 0 gate established: 10 failing test stubs + 6-test AST lint scanner + 4-entry allowlist YAML. PyYAML 6.0.3 confirmed. test_safe_storage.py byte-unchanged (FOUND-05 invariant SHA256 = e165bf0e...)
 
 ### Carryover from hold commits (master-main at cca23db3)
 
@@ -83,7 +84,7 @@ Progress: [░░░░░░░░░░] 0%
 
 ## Session Continuity
 
-Last session: 2026-05-13
-Stopped at: Roadmap created -- ROADMAP.md, STATE.md, REQUIREMENTS.md traceability filled
+Last session: 2026-05-13T05:03:54.621Z
+Stopped at: Completed 87-01-VALIDATION-FOUNDATION-PLAN.md
 Resume file: None
 Next step: `/gsd-discuss-phase 87` (Foundations: session UUID + safe_storage chokepoint)
