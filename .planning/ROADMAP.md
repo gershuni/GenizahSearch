@@ -327,7 +327,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 84. CUDL Shelfmark Normalization | v7.11 | 5/5 | Complete | 2026-05-12 |
 | 85. Synthetic FJMS Inventory Rows | v7.11 | 5/5 | Complete | 2026-05-12 |
 | 86. CUDL Coverage Audit + Synthetic Re-attempt | v7.11 | 4/5 | Complete | 2026-05-12 |
-| 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 8/8 | Complete | 2026-05-13 |
+| 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 8/8 | Complete    | 2026-05-13 |
 | 88. State Separation by Deletion | v7.12 | 0/TBD | Not started | - |
 | 89. Lists Cache Per-Request | v7.12 | 0/TBD | Not started | - |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/TBD | Not started | - |
