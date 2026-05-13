@@ -1,0 +1,135 @@
+# Phase 87 Storage Allowlist
+# Each entry exempts specific raw `app.storage.user` access patterns from the
+# lint test in tests/test_no_raw_storage_access.py. Per FOUND-03, every entry
+# MUST have a justification.
+#
+# Schema (revised per 87-REVIEWS.md H1):
+#   patterns: list of objects, each with:
+#     - source: exact substring matched against ast.get_source_segment output
+#     - expected_count: int — how many AST nodes in the file are expected to
+#       match this pattern. Enforced by test_allowlist_counts_exact.
+#     - enclosing (optional): function or class name for human readability.
+#
+# Pattern matching is substring-based against the AST node source segment.
+# Patterns are matched per-file; an entry applies ONLY to its `file:` path.
+#
+# To remove an entry: migrate the call site to web.safe_storage helpers.
+# To add an entry: open a PR with justification — entries require review.
+# To extend an entry: bump expected_count if the new raw access is also justified.
+
+allowed_raw_access:
+  - file: web/auth_state.py
+    patterns:
+      - source: "app.storage.user.get(cls.USER_KEY)"
+        expected_count: 1
+        enclosing: "GlobalAuthState.get_user"
+      - source: "app.storage.user.get(cls.PROFILE_KEY)"
+        expected_count: 1
+        enclosing: "GlobalAuthState.get_profile"
+      - source: "app.storage.user[cls.USER_KEY]"
+        expected_count: 1
+        enclosing: "GlobalAuthState.set_auth (line 95)"
+      - source: "app.storage.user[cls.PROFILE_KEY]"
+        expected_count: 2
+        enclosing: "GlobalAuthState.set_auth (line 97) + GlobalAuthState.update_profile_cache (line 117)"
+      - source: "app.storage.user['auth_session']"
+        expected_count: 1
+        enclosing: "GlobalAuthState (auth_session access)"
+      - source: "app.storage.user.pop(cls.USER_KEY, None)"
+        expected_count: 1
+        enclosing: "GlobalAuthState.clear_user"
+      - source: "app.storage.user.pop(cls.PROFILE_KEY, None)"
+        expected_count: 1
+        enclosing: "GlobalAuthState.clear_profile"
+      - source: "app.storage.user.pop('auth_session', None)"
+        expected_count: 1
+        enclosing: "GlobalAuthState (auth_session clear)"
+    justification: |
+      GlobalAuthState class methods (lines 42, 50, 95, 97, 117, 122, 123, 124,
+      176) already wrap each access in try/except. Phase 91 AUTHW-01 explicitly
+      migrates this file as part of the atomic auth-write refactor. Migrating
+      here would duplicate Phase 91's work. The atomicity guarantees Phase 91
+      needs (write all 3 auth keys together or roll back) require coordinated
+      changes that Phase 87 cannot make in isolation. See REQUIREMENTS.md
+      AUTHW-01 for the migration plan.
+      Total expected: 8 unique patterns covering all 9 historical raw-access sites.
+      Verified counts in web/auth_state.py (revision-2 audit):
+        get(cls.USER_KEY)        =1 (line 42)
+        get(cls.PROFILE_KEY)     =1 (line 50)
+        [cls.USER_KEY]           =1 (line 95, set_auth)
+        [cls.PROFILE_KEY]        =2 (line 97 in set_auth + line 117 in update_profile_cache)
+        ['auth_session']         =1 (line 176, do_login)
+        pop(cls.USER_KEY, None)  =1 (line 122)
+        pop(cls.PROFILE_KEY, None)=1 (line 123)
+        pop('auth_session', None)=1 (line 124)
+        TOTAL = 9 access sites, 8 distinct source patterns (PROFILE_KEY assignment
+        appears twice at lines 97 and 117, sharing source segment).
+      expected_count enforces exact match — adding a 10th raw access in this file
+      (even one that substring-matches an existing pattern) will fail
+      test_allowlist_counts_exact.
+
+  - file: web/main.py
+    patterns:
+      - source: "app.storage.user[GlobalAuthState.USER_KEY]"
+        expected_count: 1
+        enclosing: "OAuth callback at main.py:1458"
+      - source: "app.storage.user[GlobalAuthState.PROFILE_KEY]"
+        expected_count: 1
+        enclosing: "OAuth callback at main.py:1460"
+      - source: "app.storage.user['auth_session']"
+        expected_count: 1
+        enclosing: "OAuth callback at main.py:1463"
+    justification: |
+      OAuth callback handler at main.py:1458-1463 writes USER_KEY, PROFILE_KEY,
+      and auth_session as a 3-key atomic block during the OAuth success path.
+      Atomicity of this multi-key write must be preserved for security
+      (half-login state is worse than no-login). Phase 91 AUTHW-02 explicitly
+      migrates this site as part of the auth-write atomicity refactor with
+      appropriate test coverage (test_auth_callback_resilience.py).
+      All OTHER main.py raw accesses (lines 327, 493, 567, 587, 598, 657, 663,
+      664, 691, 820, 952, 960, 968, 1283) are migrated in Phase 87 Plan 04.
+      With expected_count=1 per pattern, the OAuth block is locked at exactly
+      3 sites — any new raw access in main.py outside this block will fail the
+      count test even if it superficially substring-matches.
+
+  - file: web/supabase_client.py
+    patterns:
+      - source: "_app.storage.user"
+        expected_count: 1
+        enclosing: "get_user_client (captured-handle pattern, Codex round 4 CRITICAL-1)"
+    justification: |
+      Line 111 (`storage = _app.storage.user`) is the captured-handle pattern
+      inside `get_user_client()`. The AST scanner records the source segment
+      of the bare `Attribute` access — which is just `_app.storage.user`, NOT
+      the full assignment statement `storage = _app.storage.user`. The pattern
+      must be a substring of the recorded segment, so we match on
+      `_app.storage.user` and scope it via `enclosing: get_user_client`.
+      Codex round 4 CRITICAL-1 flagged this as unsafe (FilePersistentDict can
+      be GC'd mid-flight). Phase 90 AUTHC-01 DELETES `get_user_client()`
+      entirely (and `_client_cache`, `_session_locks`, `_locks_guard`,
+      `_CLIENT_CACHE_TTL`), making this allowlist entry self-eliminating.
+      Line 263 (`sign_out`) IS migrated in Phase 87 Plan 04 (uses
+      `_app.storage.user.get` alias — that's a Call site, not a bare
+      Attribute, so it's a different AST node with its own source segment
+      and does NOT count against this allowlist entry's expected_count=1).
+
+  - file: web/export_state.py
+    patterns:
+      - source: "app.storage.user"
+        expected_count: 1
+        enclosing: "_backend (production fallthrough for _TEST_BACKEND shim)"
+    justification: |
+      Line 48 (`return app.storage.user`) is the production fallthrough inside
+      `_backend()`, which exists ONLY to support the `_TEST_BACKEND` test
+      injection shim. The AST scanner records the source segment of the bare
+      `Attribute` access — which is just `app.storage.user`, NOT the full
+      return statement. The pattern must be a substring of the recorded
+      segment, so we match on `app.storage.user` and scope it via
+      `enclosing: _backend` to prevent any future bare `app.storage.user`
+      access elsewhere in this file from being silently legalized.
+      Phase 88 STATE-04 explicitly deletes `_TEST_BACKEND` and replaces it
+      with proper fixture injection, making this allowlist entry
+      self-eliminating. Migrating to safe_user_get/set/pop here would not
+      match the function's contract (it returns the dict-like backend object
+      itself, not a value-for-key). expected_count=1 + enclosing=_backend
+      enforces strict scope.
