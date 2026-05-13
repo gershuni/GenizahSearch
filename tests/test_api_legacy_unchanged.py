@@ -1,7 +1,7 @@
 """Legacy-route immutability spot check (D-23 + Concerns #2, #8 from 78-REVIEWS.md).
 
 Phase 78 promises that existing /api/* routes are byte-identical. The original
-plan only spot-checked happy paths — that cannot catch the regression where a
+plan only spot-checked happy paths -- that cannot catch the regression where a
 GLOBAL exception handler (registered by init_search_api) silently rewrites
 legacy validation-failure responses from FastAPI's default 422 detail envelope
 to Phase 78's new error envelope.
@@ -13,15 +13,30 @@ behavior remains the standard FastAPI 422 dump (NO `error.code` / `error.message
 envelope keys at the top level).
 
 These tests fail at IMPORT time today on `from web.search_api import
-init_search_api` — the intended RED state until Plan 03 lands.
+init_search_api` -- the intended RED state until Plan 03 lands.
+
+Updated 2026-05-13 (Phase 88 D-02/D-04): payload now read from per-session
+``web.export_state`` (formerly state.* singleton). Tests monkeypatch
+``web.safe_storage.app`` to a SimpleNamespace stub (Refinement 6) and use
+``export_state.set_search_export(...)`` to populate the per-session payload.
 """
 
 import pytest
+from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from web.api import init_api_routes
 from web.search_api import init_search_api  # RED until Plan 03
+
+
+def _make_stub(initial_storage: dict):
+    """Instance-isolated stub mirroring app.storage.user surface.
+
+    Per Phase 88 review (Codex LOW, Refinement 6): each invocation returns
+    a fresh SimpleNamespace tree -- no class-level state shared across tests.
+    """
+    return SimpleNamespace(storage=SimpleNamespace(user=initial_storage))
 
 
 @pytest.fixture
@@ -35,19 +50,19 @@ def client_with_both_inits():
 
 def test_legacy_export_route_shape_unchanged(client_with_both_inits, monkeypatch):
     """Happy path: GET /api/export/json (legacy Phase 77 route) returns the
-    Phase 77 envelope with no `error` key — proving init_search_api did not
+    Phase 77 envelope with no `error` key -- proving init_search_api did not
     accidentally short-circuit the legacy route.
 
-    Updated 2026-05-12: payload now read from per-session web.export_state
-    (formerly state.* singleton). Tests inject a stub backend dict via the
-    ``_TEST_BACKEND`` hook.
+    Updated 2026-05-13 (Phase 88 D-02/D-04): payload populated through
+    ``export_state.set_search_export(...)`` via monkeypatched
+    ``web.safe_storage.app`` SimpleNamespace stub (Refinement 6).
 
-    Reference: tests/test_api_export_json.py:54-150 for the seed pattern."""
+    Reference: tests/test_api_export_json.py for the seed pattern."""
     from web.state import state
-    import web.export_state as export_state
-    saved_results = state.last_results
-    saved_meta = state.meta_mgr
+    from web import export_state
     from unittest.mock import MagicMock
+
+    saved_meta = state.meta_mgr
     fake_meta = MagicMock()
     fake_meta.get_meta_for_id.return_value = ("T-S 12.345", "Test Title")
     fake_meta.get_library_for_id.return_value = "CUL"
@@ -56,6 +71,7 @@ def test_legacy_export_route_shape_unchanged(client_with_both_inits, monkeypatch
         'ie_id': 'IE99', 'p_num': '7', 'fl_id': None,
     }
     state.meta_mgr = fake_meta
+
     results = [{
         'uid': 'uid_001',
         'display': {
@@ -66,19 +82,19 @@ def test_legacy_export_route_shape_unchanged(client_with_both_inits, monkeypatch
         'snippet': 'a *match* here', 'full_text': 'lorem ipsum',
         'sort_score': 0.5,
     }]
-    state.last_results = results
-    fake_backend = {
-        'export_search_payload': {
-            'results': results,
-            'query': 'foo',
-            'mode': 'text',
-            'gap': None,
-            'filters': None,
-            'warnings': [],
-            'selected_uids': None,
-        }
-    }
-    monkeypatch.setattr(export_state, '_TEST_BACKEND', fake_backend)
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+    export_state.set_search_export(
+        results=results,
+        query='foo',
+        mode='text',
+        gap=None,
+        filters=None,
+        warnings=[],
+        selected_uids=None,
+    )
+
     try:
         r = client_with_both_inits.get('/api/export/json')
         assert r.status_code == 200, r.text
@@ -92,7 +108,6 @@ def test_legacy_export_route_shape_unchanged(client_with_both_inits, monkeypatch
             "legacy /api/export/json must NOT return Phase 78 error envelope on happy path"
         )
     finally:
-        state.last_results = saved_results
         state.meta_mgr = saved_meta
 
 
@@ -106,9 +121,9 @@ def test_legacy_validation_failure_envelope_unchanged(client_with_both_inits):
     inside the new endpoint only (per Concern #2 option b). This test enforces
     that decision.
 
-    Target route: GET /sitemap-manuscripts-{chunk}.xml — chunk is a typed `int`
+    Target route: GET /sitemap-manuscripts-{chunk}.xml -- chunk is a typed `int`
     path param (web/api.py:283-284). Hitting it with a non-int chunk drives a
-    standard FastAPI RequestValidationError → 422 with the default `{detail: [...]}`
+    standard FastAPI RequestValidationError -> 422 with the default `{detail: [...]}`
     envelope. If Plan 02 ever installs the Phase 78 handler globally, this test
     will detect it (response body would become {error:{code:'invalid_request',...}}).
     """
@@ -118,7 +133,7 @@ def test_legacy_validation_failure_envelope_unchanged(client_with_both_inits):
     #   (a) 422 with FastAPI's standard `{"detail": [...]}` shape.
     #   (b) 404 if the route doesn't match (path param parsing fails earlier).
     # The forbidden outcome is `{"error": {"code": "invalid_request", ...}}` at
-    # the top level — that would indicate the global handler was installed.
+    # the top level -- that would indicate the global handler was installed.
     if r.status_code == 422:
         body = r.json()
         # FastAPI default validation envelope.
@@ -132,7 +147,7 @@ def test_legacy_validation_failure_envelope_unchanged(client_with_both_inits):
             "This indicates Plan 02 installed exception handlers GLOBALLY (Concern #2 regression)."
         )
     elif r.status_code == 404:
-        # Path didn't match — try a different typed-param route.
+        # Path didn't match -- try a different typed-param route.
         # Fallback: hit /api/cambridge_image/some_sys_id?page=not_an_int
         # which has a typed `int` query param `page` (web/api.py:611).
         r2 = client_with_both_inits.get('/api/cambridge_image/9912345678901234?page=not_an_int')
@@ -152,7 +167,7 @@ def test_legacy_validation_failure_envelope_unchanged(client_with_both_inits):
                 'legacy route from web/api.py with a typed parameter.'
             )
     else:
-        # Any other status (200, 500, etc.) — still assert NOT the Phase 78 envelope.
+        # Any other status (200, 500, etc.) -- still assert NOT the Phase 78 envelope.
         try:
             body = r.json() if r.headers.get('content-type', '').startswith('application/json') else {}
         except ValueError:
@@ -206,7 +221,7 @@ def test_legacy_puzzle_image_route_status_unchanged(client_with_both_inits):
     """Spot check the puzzle image route status code is unchanged.
 
     /api/puzzle_image takes a query param fl_id; with a nonexistent value it
-    returns 400/404/422 — whichever it returned BEFORE Phase 78. Phase 78
+    returns 400/404/422 -- whichever it returned BEFORE Phase 78. Phase 78
     must not change that status code.
     """
     r = client_with_both_inits.get('/api/puzzle_image?fl_id=__nonexistent__')
