@@ -11,8 +11,9 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from nicegui import ui, app
+from nicegui import ui
 
+from web.safe_storage import safe_user_get
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
@@ -147,11 +148,7 @@ def create_report_button(
                 ui.button(tr('Cancel'), on_click=dlg.close).props('flat')
 
                 def submit():
-                    user_id = ''
-                    try:
-                        user_id = app.storage.user.get('user_id', '')
-                    except Exception:
-                        pass  # Browser storage operation failed; preference not persisted
+                    user_id = safe_user_get('user_id', '')
                     success = save_report(
                         dataset=dataset,
                         record_id=record_id,

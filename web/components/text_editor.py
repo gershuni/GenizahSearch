@@ -13,7 +13,8 @@ Provides inline text editing functionality with:
 - Save & Submit (to backend) option
 """
 
-from nicegui import ui, app
+from nicegui import ui
+from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_correction
@@ -32,7 +33,7 @@ AUTO_SAVE_INTERVAL = 30
 
 def get_local_edits() -> dict:
     """Get all local edits from storage."""
-    return app.storage.user.get(LOCAL_EDITS_KEY, {})
+    return safe_user_get(LOCAL_EDITS_KEY, {})
 
 
 def save_local_edit(document_id: str, page_number: int, text: str, original_text: str, notes: str = ""):
@@ -47,7 +48,7 @@ def save_local_edit(document_id: str, page_number: int, text: str, original_text
         "notes": notes,
         "timestamp": str(datetime.now())
     }
-    app.storage.user[LOCAL_EDITS_KEY] = edits
+    safe_user_set(LOCAL_EDITS_KEY, edits)
 
 
 def get_local_edit(document_id: str, page_number: int) -> Optional[dict]:
@@ -63,7 +64,7 @@ def delete_local_edit(document_id: str, page_number: int):
     key = f"{document_id}_{page_number}"
     if key in edits:
         del edits[key]
-        app.storage.user[LOCAL_EDITS_KEY] = edits
+        safe_user_set(LOCAL_EDITS_KEY, edits)
 
 
 def count_words(text: str) -> int:
