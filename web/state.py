@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngine, Indexer, ListsManager
 
 
@@ -23,31 +23,8 @@ class AppState:
         # User lists manager (auth-aware wrapper)
         self._user_lists_mgr = None
 
-        self.last_results: List[Dict[str, Any]] = []
-        self.current_search_query: str = ""
-        # Phase 77: search-context echo for JSON export envelope (D-06) and Excel/Word filename
-        # (current_search_query was declared above but never assigned — fixed by web/pages/search.py
-        # in the same plan). These mirror the page-scoped search_state into the global singleton
-        # so the stateful FastAPI download handlers in web/api.py can read them without coupling
-        # to NiceGUI session lifecycle.
-        self.current_search_mode: str = "text"
-        self.current_search_gap: Optional[int] = None
-        self.last_filters_applied: Optional[Dict[str, Any]] = None
-        self.last_search_warnings: List[str] = []
-        # Phase 77 gap-closure (Plan 06): per-row checkbox selection mirrored from
-        # SearchUIState.selected_indices. None means "no selection — export full
-        # state.last_results". Non-empty list means "filter state.last_results by
-        # these uids in the export handlers". Empty list `[]` is treated as None
-        # by the handlers (defensive — see web/api.py export handlers).
-        self.last_selected_uids: Optional[List[str]] = None
-
-        # Parallels results (for export functionality)
-        self.parallels_results: List[Dict[str, Any]] = []
-        self.parallels_filtered: List[Dict[str, Any]] = []
-        # Phase 77: parallels-context echo for JSON export envelope (D-06)
-        # Shape: {'source_text': str, 'chunk_size': int, 'mode': str, 'max_freq': Optional[float],
-        #         'filters': Optional[dict], 'boundary_options': Optional[dict], 'warnings': List[str]}
-        self.parallels_search_meta: Optional[Dict[str, Any]] = None
+        # Per-user export state migrated to web.export_state (Phase 88, 2026-05-13).
+        # See .planning/phases/88-state-separation-by-deletion/ for migration history.
 
     @property
     def lists_mgr(self):
