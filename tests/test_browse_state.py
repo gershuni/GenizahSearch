@@ -14,7 +14,7 @@ def test_missing_stamp_adopts_legacy_payload():
         'reading_desk_state': {'entries': [{'sys_id': '123', 'shelfmark': 'T-S 12.1'}], 'pgpid': None, 'selected_sources': {}},
         # No 'browse_snapshot_schema_version' key -> pre-74 snapshot.
     }
-    with patch('web.pages.browse_state.app') as mock_app:
+    with patch('web.safe_storage.app') as mock_app:
         mock_app.storage.user = storage
         from web.pages.browse_state import BrowseState, restore_browse_snapshot
 
@@ -35,7 +35,7 @@ def test_stale_version_wipes_snapshot():
         'reading_desk_state': {'entries': [{'sys_id': 'old'}]},
         'browse_snapshot_schema_version': 999,
     }
-    with patch('web.pages.browse_state.app') as mock_app:
+    with patch('web.safe_storage.app') as mock_app:
         mock_app.storage.user = storage
         from web.pages.browse_state import BrowseState, restore_browse_snapshot
 
@@ -59,7 +59,7 @@ def test_clear_snapshot_keep_position_preserves_position():
         'reading_desk_state': {'entries': [{'sys_id': '123'}]},
         'browse_snapshot_schema_version': 1,
     }
-    with patch('web.pages.browse_state.app') as mock_app:
+    with patch('web.safe_storage.app') as mock_app:
         mock_app.storage.user = storage
         from web.pages.browse_state import clear_browse_snapshot
 
@@ -77,7 +77,7 @@ def test_clear_snapshot_default_wipes_everything():
         'reading_desk_state': {'entries': []},
         'browse_snapshot_schema_version': 1,
     }
-    with patch('web.pages.browse_state.app') as mock_app:
+    with patch('web.safe_storage.app') as mock_app:
         mock_app.storage.user = storage
         from web.pages.browse_state import clear_browse_snapshot
 
@@ -91,7 +91,7 @@ def test_clear_snapshot_default_wipes_everything():
 def test_persist_round_trip():
     """persist_browse_snapshot writes position + desk; restore reads them back."""
     storage = {'session_persistence_enabled': True}
-    with patch('web.pages.browse_state.app') as mock_app:
+    with patch('web.safe_storage.app') as mock_app:
         mock_app.storage.user = storage
         from web.pages.browse_state import (
             BrowseState, persist_browse_snapshot, restore_browse_snapshot,
@@ -130,7 +130,7 @@ def test_restore_tolerates_user_storage_assertion():
     storage.get.side_effect = AssertionError(
         'user storage for 6432b6d0-538a-4129-90a3-3ba9a6085e93 should be created before accessing it'
     )
-    with patch('web.pages.browse_state.app') as mock_app:
+    with patch('web.safe_storage.app') as mock_app:
         mock_app.storage.user = storage
         from web.pages.browse_state import BrowseState, restore_browse_snapshot
 
@@ -151,7 +151,7 @@ def test_persist_tolerates_user_storage_assertion():
     storage.get.side_effect = AssertionError(
         'user storage for 6432b6d0-538a-4129-90a3-3ba9a6085e93 should be created before accessing it'
     )
-    with patch('web.pages.browse_state.app') as mock_app:
+    with patch('web.safe_storage.app') as mock_app:
         mock_app.storage.user = storage
         from web.pages.browse_state import BrowseState, persist_browse_snapshot
 
