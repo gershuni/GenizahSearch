@@ -1919,16 +1919,15 @@ def init_api_routes(app_override=None):
     def export_parallels_excel():
         """Export parallels results to Excel using unified export service."""
         from web.export_state import get_parallels_export
-        from web.safe_storage import safe_user_get
 
         session_payload = get_parallels_export() or {}
         parallels_results = session_payload.get('results') or []
         filtered_results = session_payload.get('filtered') or []
         meta = session_payload.get('meta') or {}
-        # source_text: prefer meta, fall back to legacy app.storage.user key.
+        # Phase 88 D-14: source_text reads exclusively from per-session meta.
+        # Legacy app.storage.user key fallback removed; writer at parallels.py
+        # populates meta['source_text'] on every completion path.
         source_text = meta.get('source_text') or ''
-        if not source_text:
-            source_text = safe_user_get('parallels_source_text', '') or ''
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -1953,15 +1952,14 @@ def init_api_routes(app_override=None):
     def export_parallels_word():
         """Export parallels results to Word using unified export service."""
         from web.export_state import get_parallels_export
-        from web.safe_storage import safe_user_get
 
         session_payload = get_parallels_export() or {}
         parallels_results = session_payload.get('results') or []
         filtered_results = session_payload.get('filtered') or []
         meta = session_payload.get('meta') or {}
+        # Phase 88 D-14: source_text reads exclusively from per-session meta.
+        # Legacy app.storage.user key fallback removed.
         source_text = meta.get('source_text') or ''
-        if not source_text:
-            source_text = safe_user_get('parallels_source_text', '') or ''
 
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
@@ -2047,23 +2045,18 @@ def init_api_routes(app_override=None):
             serialize_parallels_payload, build_parallels_filename,
         )
         from web.export_state import get_parallels_export
-        from web.safe_storage import safe_user_get
 
         session_payload = get_parallels_export() or {}
         parallels_results = session_payload.get('results') or []
         filtered_results = session_payload.get('filtered') or []
 
-        # Empty-state check first - avoids touching app.storage.user when there's
-        # nothing to export (storage requires a NiceGUI request context which is
-        # absent in tests / non-NiceGUI callers).
+        # Empty-state check first - avoids touching storage when there's nothing
+        # to export. Per Phase 88 D-14, source_text reads exclusively from meta.
         if not parallels_results and not filtered_results:
             return Response("No parallels results to export", status_code=400)
 
         meta = session_payload.get('meta') or {}
-        # Fallback: source_text from app.storage.user (legacy parallels write).
-        # safe_user_get absorbs the prune-race AssertionError internally.
-        storage_source_text = safe_user_get('parallels_source_text', '') or ''
-        source_text = (meta.get('source_text') or storage_source_text or '')
+        source_text = meta.get('source_text') or ''
 
         try:
             payload = serialize_parallels_payload(
