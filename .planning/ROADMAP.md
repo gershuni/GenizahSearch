@@ -19,7 +19,8 @@
 - **v7.8 Structural Foundation** -- Phases 63-66 (shipped 2026-04-15)
 - **v7.9 Decomposition** -- Phases 67-76 (complete 2026-04-17)
 - **v7.10 Search API** -- Phases 77-83 (shipped 2026-05-05)
-- **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (active 2026-05-05)
+- **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (shipped 2026-05-12)
+- **v7.12 Multitenant Architecture (Path B)** -- Phases 87-92 (active 2026-05-13)
 
 ## Phases
 
@@ -222,88 +223,109 @@ Public HTTP/JSON research-automation API over the Genizah corpus: `/api/search` 
 
 </details>
 
-### v7.11 CUDL Coverage & Synthetic Inventories (Phases 84-86) -- ACTIVE
+<details>
+<summary>v7.11 CUDL Coverage & Synthetic Inventories (Phases 84-86) -- SHIPPED 2026-05-12</summary>
 
-Goal: Close the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv so users searching for any CUDL-catalogued shelfmark land on a usable record. Bridge layer normalization (Mosseri/Or/CUL fixes) recovers thousands of already-existing rows; synthetic-row mechanism adds independent libraries.csv entries for the residue of FJMS-only inventories that have no NLI Alma record (e.g. T-S NS 329.96).
+3 phases, 14 plans (84: 5/5, 85: 5/5, 86: 4/5 executed + optional release plan).
+FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with normalizers for Mosseri label form, Cambridge Or. numeric collapse, CUL slash/comma/dot/leading-zero fixes; 6 wiring call sites. Synthetic libraries.csv infrastructure: is_synthetic_sys_id helper, Option-2 18-digit format, browse hide-NLI gates, is_synthetic on API responses, corrections-write reject. 108 image-bearing synthetic manuscripts injected (101 CUL + 7 Mosseri). T-S NS 329.96 (originating case) resolved. 5-tier CUDL coverage audit (96.23% phase84_hit, 0.08% synthetic, 1.13% residue needing human-in-loop). Deploy posture codified: scp DBs FIRST, then push code.
 
-#### Phase 84 -- CUDL Shelfmark Normalization
+</details>
 
-**Goal:** Cross-system shelfmark normalization that bridges CUDL's classmark form (e.g. `mosseriiii27o`, `tsar48.211`, `tsf8.2`) to libraries.csv's variants (`Moss. III,27O`, `T-S Ar. 48.211`, `T-S F 8/002`).
+### v7.12 Multitenant Architecture (Path B) (Phases 87-92) -- ACTIVE
 
-**Requirements:** NORM-01, NORM-02, NORM-03, NORM-04
+**Milestone Goal:** Refactor GenizahSearch's web layer off the desktop-inherited single-user mental model so per-user state, auth, and caches cannot leak across concurrent sessions sharing one Python process. The cross-user xlsx export leak (v7.11.1) was one instance of a class of bugs surfaced across 4 rounds of Codex review spanning AppState singleton mirrors, UserListsManager instance caching, process-wide auth client cache, and raw `app.storage.user` access at 30+ bootstrap sites.
 
-**Success criteria:**
-1. CUDL Mosseri classmarks resolve to existing `library_code=Mosseri` rows for ≥98% of the 3,883-classmark CUDL Mosseri set.
-2. Cambridge Or. classmarks resolve to existing libraries.csv rows for the `or<num>j<sub>` (letter-suffix) and `or<num>.<collapsed>` (numeric-collapse) patterns.
-3. Slash, comma, dot-after-letter, and leading-zero patterns in CUL shelfmarks normalize uniformly across all sub-collections.
-4. `scripts/scan_cudl_orphans.py` re-run reports a substantially reduced orphan count (target: ≤300 residue) with no regression on the 140K already-matching CUL rows.
-5. Existing browse external-link buttons (CUDL, Manchester, JTS) and shelfmark search produce identical results to v7.10 for non-Mosseri/non-Or shelfmarks.
+**Hard constraint:** No mid-flight `auth.set_session()` calls. Codex verified at `gotrue_client.py:713` that `set_session()` is networked (calls `get_user(access_token)` when JWT valid, `_refresh_access_token(refresh_token)` when expired), not a local state mutation. All auth code in this milestone must respect this finding.
 
-**Plans:** 5/5 plans complete
+**Scope:** Web-only (desktop is genuinely single-user; unaffected).
 
-Plans:
-- [x] 84-01-PLAN.md -- Bridge module foundation (cudl_normalize) + leading-zero collision audit (NORM-03)
-- [x] 84-02-PLAN.md -- Mosseri reverse alias index reusing construct_mosseri_cudl_label (NORM-01)
-- [x] 84-03-PLAN.md -- Or. patterns + numeric-collapse helper + collision exclusion + forward shelfmark_to_cudl_label (NORM-02, NORM-03)
-- [x] 84-04-PLAN.md -- Wire bridge into 4 D-08 call sites + runtime alias-index hook (NORM-01, NORM-02, NORM-03)
-- [x] 84-05-PLAN.md -- NORM-04 regression guard: golden fixture + scan diff + canonical-untouched assertion
+## Phase Details
 
-#### Phase 85 -- Synthetic FJMS Inventory Rows
+### Phase 87: Foundations -- Session UUID and Safe Storage Chokepoint
+**Goal**: Land `_session_uuid` and adopt `web/safe_storage.py` as the single chokepoint adapter for per-user state, so all subsequent phases have a stable cache key and a zero-raw-storage invariant to build on.
+**Depends on**: Nothing (first phase of this milestone; Phase 86 complete)
+**Requirements**: FOUND-01, FOUND-02, FOUND-03, FOUND-04, FOUND-05
+**Success Criteria** (what must be TRUE):
+  1. A second concurrent browser session never receives the same `_session_uuid` as the first session across 100 simulated independent requests — each session's UUID is minted once, stored in that session's `app.storage.user`, and never shared.
+  2. A static grep of `web/` for raw `app.storage.user.get(`, `app.storage.user.pop(`, and `app.storage.user[` returns only entries that appear in the Phase 87 allowlist file — every other call site has been migrated to a `safe_storage` helper.
+  3. The allowlist file contains a per-entry justification comment for every remaining raw access (e.g., bootstrap code that runs before session existence is guaranteed).
+  4. The CI lint check (grep-based or ruff custom rule) added in FOUND-04 rejects a synthetic test file containing a raw `app.storage.user.get(` call outside the allowlist, and passes the production code unchanged.
+  5. All 6 existing `tests/test_safe_storage.py` tests pass without modification.
+**Plans**: TBD
 
-**Goal:** Independent libraries.csv rows for the ~93 T-S FJMS-only inventories (and any residue from Mosseri/Or post-Phase-84) using Option-2 18-digit synthetic sys_id format (`99` + InventoryId-padded-10 + `000000`).
+### Phase 88: State Separation by Deletion
+**Goal**: Delete singleton mirrors on `AppState` so `web/export_state.py` is the only path for per-user export state, with the `_TEST_BACKEND` shim replaced by proper test fixtures.
+**Depends on**: Phase 87
+**Requirements**: STATE-01, STATE-02, STATE-03, STATE-04, STATE-05, STATE-06
+**Success Criteria** (what must be TRUE):
+  1. Static grep of `web/state.py:AppState` returns zero matches for the 10 deleted per-user fields (`last_results`, `current_search_query`, `current_search_mode`, `current_search_gap`, `last_filters_applied`, `last_search_warnings`, `last_selected_uids`, `parallels_results`, `parallels_filtered`, `parallels_search_meta`) — they do not exist on the class in any form.
+  2. A user opens two concurrent browser sessions, searches in session A, then triggers an xlsx export in session B; the exported file contains session B's result set (or an empty/error response if B has no results) — never session A's results.
+  3. Static grep of `web/export_state.py` returns zero matches for `_TEST_BACKEND` — the shim is gone and tests use proper fixture or adapter injection.
+  4. `tests/test_export_cross_user_isolation.py` passes and asserts cross-user isolation directly against per-session storage, with no reference to `_TEST_BACKEND`.
+  5. `tests/test_export_state_selection.py`, `tests/test_api_export_json.py`, and `tests/test_api_legacy_unchanged.py` all pass after dropping any `state.*` setup — they use only `export_state` helpers.
+**Plans**: TBD
 
-**Requirements:** SYNTH-01, SYNTH-02, SYNTH-03, SYNTH-04, SYNTH-05, SYNTH-06
+### Phase 89: Lists Cache Per-Request
+**Goal**: Drop the `UserListsManager` singleton and 10s TTL plumbing entirely; per-request instantiation becomes the simpler safe pattern.
+**Depends on**: Phase 87
+**Requirements**: LISTS-01, LISTS-02, LISTS-03, LISTS-04
+**Success Criteria** (what must be TRUE):
+  1. Static grep of `web/state.py:AppState` returns zero matches for `_user_lists_mgr` — the singleton attribute is gone.
+  2. Static grep of `web/user_lists.py` returns zero matches for `_cache_entry` and the 10s TTL constant — the time-based cache plumbing does not exist in the codebase.
+  3. A user logged in as User A opens the lists page; User B (different session, different user account) opens the lists page within what would have been the 10s TTL window; User B sees their own lists, not User A's.
+  4. `tests/test_user_lists_cache_isolation.py` passes and is written against the per-request model (no references to cache TTL, user_id keys, or singleton behavior).
+**Plans**: TBD
 
-**Success criteria:**
-1. `is_synthetic_sys_id()` helper plus encode/decode utilities exist in shared code, with a test suite covering boundary cases (real Alma, synthetic, malformed).
-2. The Tantivy index includes synthetic rows so `T-S NS 329.96` and similar shelfmarks return search results in all modes (text/title/shelfmark/Responsa).
-3. Browse renders synthetic-row pages with FJMS catalogue + bibliography + measurements + CUDL manifest images, gracefully handling absent NLI fields (no empty placeholders, no console errors, no broken links).
-4. FJMS enrichment dialogs (catalogue, bibliography, measurements, free description) populate via InventoryId fallback when sys_id is synthetic.
-5. Lists, exclusions, parallels, comments, corrections round-trip synthetic sys_ids without crashes or silent data loss; web and desktop parity preserved.
+### Phase 90: Auth Caching Rewrite -- No set_session
+**Goal**: Replace the process-wide auth client cache with request-scoped auth that does NOT call `auth.set_session()` to set headers; refresh locking keyed by `_session_uuid` with no cached client objects.
+**Depends on**: Phase 87
+**Requirements**: AUTHC-01, AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05
+**Success Criteria** (what must be TRUE):
+  1. Static grep of `web/supabase_client.py` returns zero matches for `_client_cache`, `_session_locks`, `_locks_guard`, and `_CLIENT_CACHE_TTL` — the process-wide cache is gone.
+  2. Static grep for `.auth.set_session(` across `web/` returns matches only inside the explicitly allowed OAuth bootstrap helper/path (the one place a session is legitimately established from an authorization code) — zero matches elsewhere. Substring `set_session(` alone is too broad and would false-fail on the legitimate OAuth helper; precision matters.
+  3. Refresh-only locks are keyed by `_session_uuid` values (not access tokens, not storage object IDs) — a token refresh mid-flight does not orphan the lock or create a second lock for the same session.
+  4. Static grep returns zero matches for `auth_resurrection` or the resurrection guard function name introduced in commit `cca23db3` — the guard is removed because the cache that made it necessary no longer exists.
+  5. A code comment in the auth path documents the Codex finding (citing `gotrue_client.py:713`) explaining why `set_session()` is not called mid-flight, visible to future contributors without requiring them to find the Codex transcripts.
+**Plans**: TBD
 
-**Plans:** 5/5 plans complete
+### Phase 91: Atomic Auth State Writes
+**Goal**: Migrate auth state writes through safe_storage helpers; `sign_out` revokes server-side on the user's authenticated client before popping `auth_session`.
+**Depends on**: Phase 87, Phase 90
+**Requirements**: AUTHW-01, AUTHW-02, AUTHW-03, AUTHW-04, AUTHW-05, AUTHW-06
+**Success Criteria** (what must be TRUE):
+  1. Static grep of `web/auth_state.py` functions `set_auth`, `clear_auth`, and `do_login` returns zero matches for raw `app.storage.user[` or `app.storage.user.pop(` — every write goes through a `safe_storage` helper.
+  2. The `sign_out` flow calls `client.auth.sign_out()` using the user's own authenticated client (verified by the client carrying the user's access token) before any local auth keys are popped from storage; local key cleanup happens in a `finally` block so it runs even when server revocation fails.
+  3. A mid-flight session prune (NiceGUI `AssertionError` on pruned storage) during the OAuth callback does not produce a 500 to the browser — the callback handles the prune gracefully and returns a meaningful error page or redirect.
+  4. `tests/test_auth_callback_resilience.py` (or AUTHW-05 equivalent) passes, asserting that a simulated prune during OAuth callback does not propagate an `AssertionError`.
+  5. The `persist_value` safe-wrap in `web/components/filter_panel.py` introduced in commit `cca23db3` is retained and passes the existing filter-panel tests.
+**Plans**: TBD
 
-Plans:
-- [x] 85-01-PLAN.md -- shared/synthetic_sys_id.py helper module (is_synthetic / encode / decode) + golden fixtures (SYNTH-01)
-- [x] 85-02-PLAN.md -- scripts/generate_synthetic_rows.py + libraries.csv marker block + csv_bank loader marker tolerance + audit artifacts (SYNTH-02, SYNTH-03)
-- [x] 85-03-PLAN.md -- scripts/export_fist_enrichment.py UNION ALL synthetic AlmaId rows in 11+ enrichment tables (SYNTH-05)
-- [x] 85-04-PLAN.md -- Browse hide-NLI + CUDL-default + D-14 network-call guards (web + desktop parity, ~22-26 sites) (SYNTH-04)
-- [x] 85-05-PLAN.md -- Public API is_synthetic field + PostHog property + community round-trip + corrections-write deferral (SYNTH-06)
-
-**Outcome (2026-05-09):** All five plans shipped (infrastructure intact); the actual synthetic-row population was reverted during UAT. Plan 02's "inclusive coverage stance" qualified InventoryIds with ANY FJMS signal, but the resulting 5,035 synthetic rows had only bibliography pointers (no text, image, or catalog description) — useless for actual research without the underlying manuscript. Additionally, 175 of those rows shadowed real-Alma series-children (e.g. synthetic `T-S NS 161` shadowed 1,009 real `T-S NS 161.x` rows). User-decision-revert: `libraries.csv` synthetic block emptied (markers preserved), `fist_data/synthetic_manifest.json` set to `[]`, `fjms_enrichment.db` restored from gz backup. Infrastructure (helper module, browse gates, /api `is_synthetic`, corrections-write reject) stays dormant; no synthetic sys_ids in production. **Phase 86 will re-attempt with stricter qualification criteria (CUDL-image-only, possibly relaxing D-05a for unambiguous overlaps).**
-
-#### Phase 86 -- CUDL Coverage Audit + Synthetic Re-attempt
-
-**Goal:** Confirm Phase 84 closed the normalization gap; re-attempt synthetic rows with image-bearing-only criteria; produce a durable report.
-
-**Requirements:** AUDIT-01, AUDIT-02, AUDIT-03
-
-**Success criteria:**
-1. `scripts/scan_cudl_orphans.py` re-run after Phase 84 reports fewer than 200 truly-orphan CUDL classmarks with reasoned categorization for each.
-2. `reports/cudl_coverage.md` documents the post-Phase-84 breakdown by collection (matched-by-normalization, residual-unmatched) with methodology and re-run instructions.
-3. The 461 NLI Oxford-mislabel rows fixed in v7.9.4 still resolve correctly; no library_code attribution regressions detected.
-4. Both apps build and pass test suite green; check_docs green; no PostHog error spike post-deploy.
-5. **Synthetic re-attempt with image-bearing criteria.** Modify `scripts/generate_synthetic_rows.py::_build_qualifying_inventories` to ONLY emit synthetic rows where:
-   (a) The InventoryId has a CUDL manifest in `nli_crossref.db.cambridge_manifests` (Tier 1 or Tier 2), AND
-   (b) No real-Alma row in libraries.csv has a child shelfmark of this synthetic's leaf (filter from `reports/synthetic_parent_shelfmarks.csv`), AND
-   (c) Optionally relax D-05a STRICT for known-safe multi_signature cases — when all FIST SignatureIds resolve to the same canonical_shelfmark + library_code, pick lowest SignatureId per the existing tie-break logic (so T-S NS 329.96 with 12 multi_signature entries CAN be synthesized). Baseline: ~100-500 image-bearing synthetics expected (instead of 5,035 bib-only). The originating user case (T-S NS 329.96) closes here.
-6. **Carry-forward residue artifacts:** keep `reports/synthetic_ambiguity_residue.csv` and `reports/synthetic_parent_shelfmarks.csv` as documentation of the Plan 02 attempt. Document the Phase 85 outcome in CHANGELOG so users + future maintainers understand why infrastructure exists with no production data.
-
-**Plans:** 4/5 plans executed
-
-Plans:
-- [x] 86-01-PLAN.md -- shared/fist_cudl_bridge.py sibling module + 4 D-02a normalizers (Mosseri Roman, prefix-strip, (N) series-strip, Or. dot-fix) + alias-index builder + unit tests (AUDIT-01)
-- [x] 86-02-PLAN.md -- _build_qualifying_inventories CUDL-walked rewrite + D-04 multi_signature relax + D-06 parent-shadow filter + pattern_guess residue column + T-S NS 329.96 closure fixture (AUDIT-01)
-- [x] 86-03-PLAN.md -- 86-RESIDUE-PATTERNS.md D-02c human-in-the-loop adjudication artifact + scripts/build_residue_patterns_artifact.py + CHECKPOINT + accepted-rule integration into bridge (AUDIT-01)
-- [x] 86-04-PLAN.md -- Operational sequence (generate --apply / export / scan) + reports/cudl_coverage.md (AUDIT-02) + scripts/audit_nli_attribution.py + tests/test_nli_oxford_attribution.py (AUDIT-03) + HUMAN-UAT + OPEN_ISSUES.md update (AUDIT-01, AUDIT-02, AUDIT-03)
-- [ ] 86-05-PLAN.md (optional) -- Release coordination: bump_version.py 7.11.0 + CHANGELOG + CLAUDE.md Recently Changed + README What's New; web-only deploy per feedback_no_github_release_for_web_only.md
+### Phase 92: Final Sweep and Acceptance
+**Goal**: Audit `web/` for any remaining raw `app.storage.user` accesses, re-validate against the 4 Codex transcripts, run cross-user smoke tests, and document the architecture in `docs/guides/MULTITENANT.md`.
+**Depends on**: Phase 87, Phase 88, Phase 89, Phase 90, Phase 91
+**Requirements**: SWEEP-01, SWEEP-02, SWEEP-03, SWEEP-04, SWEEP-05, SWEEP-06
+**Success Criteria** (what must be TRUE):
+  1. A full `grep -r "app\.storage\.user" web/` scan produces only entries that appear in the Phase 87 allowlist — the count of unallowlisted raw accesses is zero.
+  2. The two Codex round-4 deferred sites -- `parallels.py:3520` (deferred-callback raw access) and `text_editor.py` (auto-save raw access) -- are confirmed migrated to `safe_storage` helpers, verified by static grep showing neither file contains raw storage access outside the allowlist.
+  3. Two concurrent browser sessions execute the full research workflow (search → browse → lists → xlsx export) simultaneously; inspection of each session's exported xlsx and list contents shows no cross-session data; the test is documented in `SWEEP-05` smoke-test plan with pass/fail checkboxes.
+  4. Each issue previously flagged in the 4 Codex review transcripts (`_tmp/codex_*_response.txt`) is either marked "addressed" with a pointer to the commit/phase that fixed it, or "waived" with an explicit written rationale -- no issue is left silently unaddressed.
+  5. `docs/guides/MULTITENANT.md` exists and documents: the `safe_storage` chokepoint pattern, the `_session_uuid` stable cache key, the request-scoped auth strategy with the `set_session()` prohibition, the per-request lists instantiation, and the deletion-not-migration discipline -- sufficient for a future contributor to understand and extend the architecture without reading the Codex transcripts.
+**Plans**: TBD
 
 ## Progress
 
-**Phase 84 — CUDL Shelfmark Normalization (next)**
-
-Run `/gsd-discuss-phase 84` (or `/gsd-plan-phase 84` to skip discussion).
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 84. CUDL Shelfmark Normalization | v7.11 | 5/5 | Complete | 2026-05-12 |
+| 85. Synthetic FJMS Inventory Rows | v7.11 | 5/5 | Complete | 2026-05-12 |
+| 86. CUDL Coverage Audit + Synthetic Re-attempt | v7.11 | 4/5 | Complete | 2026-05-12 |
+| 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 0/TBD | Not started | - |
+| 88. State Separation by Deletion | v7.12 | 0/TBD | Not started | - |
+| 89. Lists Cache Per-Request | v7.12 | 0/TBD | Not started | - |
+| 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/TBD | Not started | - |
+| 91. Atomic Auth State Writes | v7.12 | 0/TBD | Not started | - |
+| 92. Final Sweep and Acceptance | v7.12 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-05 -- v7.11 CUDL Coverage milestone scoped. v7.10 Search API archived at .planning/milestones/v7.10-ROADMAP.md.*
+*Last updated: 2026-05-13 -- v7.12 Multitenant Architecture (Path B) roadmap added. Phases 87-92.*

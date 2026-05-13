@@ -86,8 +86,41 @@ Prove the invariants hold end-to-end and document the architecture so it survive
 
 ## Traceability
 
-(Filled by roadmapper after roadmap creation.)
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| FOUND-01 | Phase 87 | Pending |
+| FOUND-02 | Phase 87 | Pending |
+| FOUND-03 | Phase 87 | Pending |
+| FOUND-04 | Phase 87 | Pending |
+| FOUND-05 | Phase 87 | Pending |
+| STATE-01 | Phase 88 | Pending |
+| STATE-02 | Phase 88 | Pending |
+| STATE-03 | Phase 88 | Pending |
+| STATE-04 | Phase 88 | Pending |
+| STATE-05 | Phase 88 | Pending |
+| STATE-06 | Phase 88 | Pending |
+| LISTS-01 | Phase 89 | Pending |
+| LISTS-02 | Phase 89 | Pending |
+| LISTS-03 | Phase 89 | Pending |
+| LISTS-04 | Phase 89 | Pending |
+| AUTHC-01 | Phase 90 | Pending |
+| AUTHC-02 | Phase 90 | Pending |
+| AUTHC-03 | Phase 90 | Pending |
+| AUTHC-04 | Phase 90 | Pending |
+| AUTHC-05 | Phase 90 | Pending |
+| AUTHW-01 | Phase 91 | Pending |
+| AUTHW-02 | Phase 91 | Pending |
+| AUTHW-03 | Phase 91 | Pending |
+| AUTHW-04 | Phase 91 | Pending |
+| AUTHW-05 | Phase 91 | Pending |
+| AUTHW-06 | Phase 91 | Pending |
+| SWEEP-01 | Phase 92 | Pending |
+| SWEEP-02 | Phase 92 | Pending |
+| SWEEP-03 | Phase 92 | Pending |
+| SWEEP-04 | Phase 92 | Pending |
+| SWEEP-05 | Phase 92 | Pending |
+| SWEEP-06 | Phase 92 | Pending |
 
 ---
 
-*Last updated: 2026-05-13 — initial draft for v7.12 milestone*
+*Last updated: 2026-05-13 -- traceability filled by roadmapper; 32/32 requirements mapped across 6 phases*
