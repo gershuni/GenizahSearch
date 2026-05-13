@@ -2059,22 +2059,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # so reset it directly here — same shape as search_query/search_mode.
         text_position_select.value = 'anywhere'
         _safe_set('search_text_position', 'anywhere')
-        # Phase 77 gap-closure (Plan 06, Gap #1): mirror the page-scoped
-        # search_state clear into the global state singleton that the FastAPI
-        # export handlers (web/api.py:1816-1955) read from. Plan 01 populated
-        # these fields at execute-time; this reset path was missed in that
-        # plan's coverage. Mirrors the precedent at parallels.py:1959-1962.
-        state.last_results = []
-        state.current_search_query = ''
-        state.current_search_mode = 'exact'
-        state.current_search_gap = None
-        state.last_filters_applied = None
-        state.last_search_warnings = []
-        # Phase 77 gap-closure (Plan 06, Gap #2): drop any uid selection
-        # carried over from the prior search so a new export defaults to
-        # "full result set" (which is now empty — handlers return 400).
-        state.last_selected_uids = None
-        # 2026-05-12 cross-user fix: clear per-session export payload.
+        # Phase 88: Clear per-session export payload — singleton mirror removed.
         from web.export_state import clear_search_export
         clear_search_export()
         ui.notify(tr('Search reset'), type='info', timeout=2000)
@@ -2095,15 +2080,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _display = _apply_measurement_post_filters(search_state.results, search_state)
         render_results(_display)
         update_selection_ui()
-        # Phase 77 gap-closure (Plan 06, Gap #2): mirror the bulk-toggle
-        # selection to the global state singleton so /api/export/* handlers
-        # see the change.
-        state.last_selected_uids = compute_selected_uids(search_state)
-        # 2026-05-12 cross-user fix: mirror selection to per-session export
-        # payload so the FastAPI handlers (which now read per-session) honor
-        # the bulk-toggle.
+        # Phase 88: Mirror selection to per-session export payload (singleton mirror removed).
+        _selected_uids = compute_selected_uids(search_state)
         from web.export_state import update_search_export_selection
-        update_search_export_selection(state.last_selected_uids)
+        update_search_export_selection(_selected_uids)
 
     def update_selection_ui():
         """Update selection counter and bulk actions visibility."""
@@ -3794,30 +3774,30 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = state_snapshot['results']
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
-            # Phase 77 (HIGH-01): also populate global state so JSON export after restore
-            # is identical-shape to live export. The snapshot already carries query
-            # (entry['query'] read into query_input.value at line 3687) and params
-            # (mode/gap/filters at line 3684). See 77-REVIEWS.md HIGH-01.
-            state.last_results = state_snapshot['results']
-            state.current_search_query = entry.get('query', '') or ''
-            state.current_search_mode = params.get('mode') or 'text'
+            # Phase 88: populate per-session export payload after history restore so JSON
+            # export after restore is identical-shape to live export. The snapshot already
+            # carries query (entry['query'] read into query_input.value at line 3687) and
+            # params (mode/gap/filters at line 3684). See 77-REVIEWS.md HIGH-01 for the
+            # historical Phase 77 framing; the singleton mirror has been removed.
+            _results = state_snapshot['results']
+            _query = entry.get('query', '') or ''
+            _mode = params.get('mode') or 'text'
             try:
-                state.current_search_gap = int(params['gap']) if params.get('gap') is not None else None
+                _gap = int(params['gap']) if params.get('gap') is not None else None
             except (ValueError, TypeError):
-                state.current_search_gap = None
+                _gap = None
             # Snapshot's filters dict already has the 10-key shape constructed at
             # search.py:4232-4242. Pass it through verbatim (None when no active filters).
-            state.last_filters_applied = params.get('filters')
-            state.last_search_warnings = ['restored-from-history']
-            # 2026-05-12 cross-user fix: mirror to per-session export payload.
+            _filters_applied = params.get('filters')
+            _warnings = ['restored-from-history']
             from web.export_state import set_search_export
             set_search_export(
-                results=state_snapshot['results'],
-                query=entry.get('query', '') or '',
-                mode=state.current_search_mode,
-                gap=state.current_search_gap,
-                filters=state.last_filters_applied,
-                warnings=state.last_search_warnings,
+                results=_results,
+                query=_query,
+                mode=_mode,
+                gap=_gap,
+                filters=_filters_applied,
+                warnings=_warnings,
                 selected_uids=None,
             )
             # Update count display
@@ -4106,16 +4086,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = results
             search_state.domain_excluded_results = []
 
-            # Phase 77 (HIGH-01): populate envelope-echo state on the cancelled-partial
-            # path too. Without this, partial-result exports inherit stale query/mode/gap/
-            # filters from the previous completed search. See 77-REVIEWS.md HIGH-01.
-            state.current_search_query = clean_query
-            state.current_search_mode = mode
+            # Phase 88: populate per-session export payload on the cancelled-partial path so
+            # partial-result exports carry their own query/mode/gap/filters instead of
+            # inheriting stale values from a previous completed search. Historical context:
+            # 77-REVIEWS.md HIGH-01; the singleton mirror has been removed.
+            _current_search_query = clean_query
+            _current_search_mode = mode
             try:
-                state.current_search_gap = int(gap_input.value) if gap_input.value else None
+                _current_search_gap = int(gap_input.value) if gap_input.value else None
             except (ValueError, TypeError):
-                state.current_search_gap = None
-            state.last_filters_applied = {
+                _current_search_gap = None
+            _last_filters_applied = {
                 'domains': list(getattr(search_state, 'filter_domains', None) or []),
                 'authors': list(getattr(search_state, 'filter_authors', None) or []),
                 'works': list(getattr(search_state, 'filter_works', None) or []),
@@ -4127,18 +4108,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
                 'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
             }
-            state.last_search_warnings = ['partial-results']  # signal partial-result fidelity to consumers
-            # Still save results for display
-            state.last_results = results
-            # 2026-05-12 cross-user fix: mirror to per-session export payload.
+            _last_search_warnings = ['partial-results']  # signal partial-result fidelity to consumers
+            _last_results = results
             from web.export_state import set_search_export
             set_search_export(
                 results=results,
                 query=clean_query,
                 mode=mode,
-                gap=state.current_search_gap,
-                filters=state.last_filters_applied,
-                warnings=['partial-results'],
+                gap=_current_search_gap,
+                filters=_last_filters_applied,
+                warnings=_last_search_warnings,
                 selected_uids=None,
             )
 
@@ -4190,22 +4169,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             except Exception:
                 pass  # Translation lookup failed; continue without translation
 
-        # Phase 77: populate state for JSON export envelope echo (D-06) and filename.
-        # Fixes latent bug where state.current_search_query was declared in web/state.py
-        # but never assigned — Excel/Word filenames silently defaulted to "genizah.xlsx".
-        # See .planning/phases/77-serializer-json-export/77-RESEARCH.md §Pitfall 2.
-        state.current_search_query = clean_query
-        state.current_search_mode = mode
+        # Phase 88: populate per-session export payload for JSON export envelope echo
+        # (Phase 77 D-06) and filename. Singleton mirror removed. Historical context:
+        # 77-RESEARCH.md §Pitfall 2 documented the latent bug where current_search_query
+        # was declared in web/state.py but never assigned (filenames silently defaulted
+        # to "genizah.xlsx"); the per-session export payload now carries this value
+        # exclusively. /api/export/* (Excel/Word/JSON) honor this session's data only.
+        _current_search_query = clean_query
+        _current_search_mode = mode
         try:
-            state.current_search_gap = int(gap_input.value) if gap_input.value else None
+            _current_search_gap = int(gap_input.value) if gap_input.value else None
         except (ValueError, TypeError):
-            state.current_search_gap = None
-        # Mirror page-scoped filters into global state so the JSON download handler can
-        # echo them in the envelope. The 10-key shape mirrors the existing live snapshot
-        # at web/pages/search.py:4232-4242 (search history) so envelope replay matches
-        # what the search-history restore branch will reconstruct. List() copies prevent
-        # mutation-after-search bugs. Per HIGH-02 review feedback.
-        state.last_filters_applied = {
+            _current_search_gap = None
+        # Page-scoped filters threaded into the export payload so the JSON download
+        # handler can echo them in the envelope. The 10-key shape mirrors the live
+        # snapshot at web/pages/search.py history-restore branch so envelope replay
+        # matches what the search-history restore branch reconstructs. List() copies
+        # prevent mutation-after-search bugs. Per HIGH-02 review feedback.
+        _last_filters_applied = {
             'domains': list(getattr(search_state, 'filter_domains', None) or []),
             'authors': list(getattr(search_state, 'filter_authors', None) or []),
             'works': list(getattr(search_state, 'filter_works', None) or []),
@@ -4217,19 +4198,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
             'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
         }
-        state.last_search_warnings = []  # Phase 78 will populate; Phase 77 always [] per D-07
-        # Finalize search state for immediate display
-        state.last_results = results
-        # 2026-05-12 cross-user fix: mirror to per-session export payload so
-        # /api/export/* (Excel/Word/JSON) honor this session's data exclusively.
+        _last_search_warnings = []  # Phase 78 will populate; Phase 77 always [] per D-07
+        _last_results = results
         from web.export_state import set_search_export
         set_search_export(
             results=results,
             query=clean_query,
             mode=mode,
-            gap=state.current_search_gap,
-            filters=state.last_filters_applied,
-            warnings=[],
+            gap=_current_search_gap,
+            filters=_last_filters_applied,
+            warnings=_last_search_warnings,
             selected_uids=None,
         )
         search_state.is_running = False
