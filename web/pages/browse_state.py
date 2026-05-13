@@ -13,8 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional, List, Dict
 
-from nicegui import app
-
+from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 from web.services import BrowsePage, DocumentPage
 
 logger = logging.getLogger(__name__)
@@ -121,40 +120,41 @@ def restore_browse_snapshot(state: 'BrowseState') -> tuple:
     """
     # NiceGUI raises AssertionError "user storage for {uuid} should be created
     # before accessing it" when the session was pruned mid-flight (10s
-    # prune_user_storage scheduler races with a fresh page handler). Wrap the
-    # version-stamp read so the page renders with defaults instead of a 500.
-    try:
-        stored_version = app.storage.user.get('browse_snapshot_schema_version', 0)
-    except (AssertionError, Exception) as e:
-        logger.debug(f"[BrowseSnapshot] user storage unavailable on restore: {e}")
-        return (None, None)
+    # prune_user_storage scheduler races with a fresh page handler). The
+    # safe_user_get helper centralizes that guard — it returns the default
+    # value on AssertionError instead of bubbling a 500 to the user.
+    #
+    # Phase 87 Plan 05 migration (M2): browse_position and reading_desk_state
+    # are read INDEPENDENTLY via separate safe_user_get calls — one being
+    # absent must NOT short-circuit the other. M3 audit: all 4 raw access
+    # sites in this function had Class A try/except wrappers (caught only
+    # storage prune AssertionError with default-fallback bodies); all 4
+    # collapsed cleanly into safe_user_get / safe_user_set.
+    stored_version = safe_user_get('browse_snapshot_schema_version', 0)
     if stored_version == 0:
         # Pre-Phase-74 snapshots have no version stamp. Adopt the legacy payload
         # once by stamping to the current version; otherwise returning users
         # would have their reading_desk_state / browse_position silently wiped
         # on the first post-upgrade load (Codex review 74-CODEX-REVIEW2.md #1).
-        try:
-            app.storage.user['browse_snapshot_schema_version'] = _BROWSE_SNAPSHOT_VERSION
-        except Exception:
-            pass
+        safe_user_set('browse_snapshot_schema_version', _BROWSE_SNAPSHOT_VERSION)
     elif stored_version != _BROWSE_SNAPSHOT_VERSION:
         clear_browse_snapshot()
         return (None, None)
 
+    # M2: read browse_position and reading_desk_state INDEPENDENTLY. Either
+    # can be present without the other (e.g., single-page browse left a
+    # browse_position but no reading_desk_state). A missing browse_position
+    # must NOT cause reading_desk_state to be returned as None — the test
+    # test_clear_snapshot_keep_position_preserves_position exercises the
+    # inverse case (position present, desk absent).
     saved_position = None
     saved_desk = None
-    try:
-        pos = app.storage.user.get('browse_position')
-        if pos and pos.get('sys_id'):
-            saved_position = pos
-    except Exception:
-        pass
-    try:
-        desk = app.storage.user.get('reading_desk_state')
-        if desk and desk.get('entries'):
-            saved_desk = desk
-    except Exception as e:
-        logger.error(f"[ReadingDesk] Error reading snapshot: {e}")
+    pos = safe_user_get('browse_position')
+    if pos and pos.get('sys_id'):
+        saved_position = pos
+    desk = safe_user_get('reading_desk_state')
+    if desk and desk.get('entries'):
+        saved_desk = desk
 
     return (saved_position, saved_desk)
 
@@ -170,23 +170,31 @@ def persist_browse_snapshot(state: 'BrowseState', page=None) -> None:
         page:  BrowsePage object (for shelfmark / p_num extraction). Optional:
                if None, only reading-desk half is persisted.
     """
-    try:
-        if not app.storage.user.get('session_persistence_enabled', True):
-            return
-    except (AssertionError, Exception) as e:
-        logger.debug(f"[BrowseSnapshot] user storage unavailable on persist: {e}")
+    # Phase 87 Plan 05 (M3 Fix 4 — Codex MEDIUM M3 residual):
+    # The OUTER wrapper around session_persistence_enabled is Class A
+    # (storage-only gate); collapses to safe_user_get which absorbs
+    # AssertionError internally. The INNER wrapper around the multi-key
+    # writes is Class B and PRESERVED — it covers dict construction
+    # (`{'sys_id': state.sys_id, ...}`), conditional logic
+    # (`if page is not None and state.sys_id:` /
+    # `if state.view_joined and state.reading_desk_entries:`), and the
+    # list-comprehension over reading_desk_entries. Each of those can raise
+    # AttributeError / KeyError / TypeError on malformed state regardless
+    # of session-storage health. Only the raw storage calls inside the
+    # inner try are swapped for safe_user_set / safe_user_pop.
+    if not safe_user_get('session_persistence_enabled', True):
         return
     try:
-        app.storage.user['browse_snapshot_schema_version'] = _BROWSE_SNAPSHOT_VERSION
+        safe_user_set('browse_snapshot_schema_version', _BROWSE_SNAPSHOT_VERSION)
 
         # Position (browse.py:777-785 analog).
         if page is not None and state.sys_id:
-            app.storage.user['browse_position'] = {
+            safe_user_set('browse_position', {
                 'sys_id': state.sys_id,
                 'p_num': getattr(page, 'p_num', 1),
                 'shelfmark': getattr(page, 'shelfmark', ''),
                 'volume_ie': state.volume_ie,
-            }
+            })
 
         # Reading desk (browse.py:1056-1074 analog).
         if state.view_joined and state.reading_desk_entries:
@@ -194,13 +202,13 @@ def persist_browse_snapshot(state: 'BrowseState', page=None) -> None:
                 {'sys_id': e.get('sys_id', ''), 'shelfmark': e.get('shelfmark', '')}
                 for e in state.reading_desk_entries
             ]
-            app.storage.user['reading_desk_state'] = {
+            safe_user_set('reading_desk_state', {
                 'entries': rd_data,
                 'pgpid': state.joined_pgpid,
                 'selected_sources': state.reading_desk_selected_sources or {},
-            }
+            })
         else:
-            app.storage.user.pop('reading_desk_state', None)
+            safe_user_pop('reading_desk_state', None)
     except Exception as e:
         logger.error(f"[BrowseSnapshot] Error persisting state: {e}")
 
@@ -220,7 +228,5 @@ def clear_browse_snapshot(keep_position: bool = False) -> None:
     if not keep_position:
         keys.extend(('browse_position', 'browse_snapshot_schema_version'))
     for key in keys:
-        try:
-            app.storage.user.pop(key, None)
-        except Exception:
-            pass
+        # Class A wrapper collapsed — safe_user_pop absorbs prune-race AssertionError.
+        safe_user_pop(key, None)
