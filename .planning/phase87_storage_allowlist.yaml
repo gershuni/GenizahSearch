@@ -113,23 +113,3 @@ allowed_raw_access:
       Attribute, so it's a different AST node with its own source segment
       and does NOT count against this allowlist entry's expected_count=1).
 
-  - file: web/export_state.py
-    patterns:
-      - source: "app.storage.user"
-        expected_count: 1
-        enclosing: "_backend (production fallthrough for _TEST_BACKEND shim)"
-    justification: |
-      Line 48 (`return app.storage.user`) is the production fallthrough inside
-      `_backend()`, which exists ONLY to support the `_TEST_BACKEND` test
-      injection shim. The AST scanner records the source segment of the bare
-      `Attribute` access — which is just `app.storage.user`, NOT the full
-      return statement. The pattern must be a substring of the recorded
-      segment, so we match on `app.storage.user` and scope it via
-      `enclosing: _backend` to prevent any future bare `app.storage.user`
-      access elsewhere in this file from being silently legalized.
-      Phase 88 STATE-04 explicitly deletes `_TEST_BACKEND` and replaces it
-      with proper fixture injection, making this allowlist entry
-      self-eliminating. Migrating to safe_user_get/set/pop here would not
-      match the function's contract (it returns the dict-like backend object
-      itself, not a value-for-key). expected_count=1 + enclosing=_backend
-      enforces strict scope.
