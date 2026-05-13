@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Completed 87-03-LEAF-FILE-MIGRATIONS-PLAN.md
-last_updated: "2026-05-13T05:23:12.008Z"
-last_activity: 2026-05-13
+stopped_at: Completed 87-07-LINT-FINALIZATION-PLAN.md
+last_updated: "2026-05-13T06:01:30.720Z"
+last_activity: 2026-05-13 -- Plan 87-07 complete (lint acceptance gate closed; all 6 lint scanner tests GREEN; allowlist verified at 4 entries / 13 patterns / 14 expected_count nodes; 131 sites migrated across 14 files in Plans 03-06; full suite 1879/1879)
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 3
-  percent: 38
+  completed_plans: 7
+  percent: 88
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-13)
 ## Current Position
 
 Phase: 87 (Foundations -- Session UUID and Safe Storage Chokepoint) — EXECUTING
-Plan: 4 of 8 (next: 87-04-MAIN-AND-ALIAS-MIGRATIONS)
+Plan: 8 of 8 (next: 87-08-ACCEPTANCE-AND-DOCS)
 Status: Executing Phase 87
-Last activity: 2026-05-13 -- Plan 87-03 complete (5 leaf files migrated to safe_storage; 16 raw access sites eliminated)
+Last activity: 2026-05-13 -- Plan 87-07 complete (lint acceptance gate closed; all 6 lint scanner tests GREEN; allowlist verified at 4 entries / 13 patterns / 14 expected_count nodes; 131 sites migrated across 14 files in Plans 03-06; full suite 1879/1879)
 
-Progress: [████░░░░░░] 38%
+Progress: [█████████░] 88%
 
 ## Phase Queue (v7.12)
 
@@ -70,6 +70,10 @@ Progress: [████░░░░░░] 38%
 - Phase 87-01 Wave 0 gate established: 10 failing test stubs + 6-test AST lint scanner + 4-entry allowlist YAML. PyYAML 6.0.3 confirmed. test_safe_storage.py byte-unchanged (FOUND-05 invariant SHA256 = e165bf0e...)
 - Phase 87-02 complete: get_session_uuid/ensure_session_uuid added to web/safe_storage.py with M5 strict regex validation (^[0-9a-f]{32}$); ensure_session_uuid wired at create_layout (L349), reset_hints_route (L1288), auth_callback_route (L1450); /privacy-extension intentionally skipped (zero storage access — AST-confirmed). 17/17 phase 87 tests pass (6 safe_storage + 11 session_uuid). FOUND-05 SHA-256 invariant preserved. T-87-01 mitigation verified (100 sessions, 0 collisions); T-87-02 mitigation verified (4 dedicated regex-validation tests).
 - Phase 87-03 complete: 5 leaf files migrated to web.safe_storage helpers (text_editor.py 3 sites, translation_report.py 1 site, home.py 2 sites, settings.py 7 sites, search_results.py 3 sites — 16 total raw access sites eliminated). AST scanner confirms 0 violations across all 5 files. M3 defensive-wrapper audit: 13 wrappers encountered, all Class A (only absorbed prune-race AssertionError); 0 Class B wrappers needed preservation. The outer `try: ocr_banner.delete() except Exception: return` wrapper in home.py:_auto_dismiss_ocr preserved (non-storage UI failure mode). Removed now-unused `app` alias from `from nicegui import` line in all 5 files. 17/17 Phase 87 tests still GREEN; FOUND-05 SHA-256 invariant preserved (test_safe_storage.py byte-unchanged). FOUND-02 satisfied.
+- Phase 87-04 complete: 3 central files (web/main.py 14 inline + 18 caller routings + 2 helper deletions; web/api.py 3 nicegui_app alias sites; web/supabase_client.py 1 sign_out site) migrated to safe_storage helpers. 18 raw access sites eliminated. OAuth allowlist (3 sites at main.py + 1 at supabase_client.py:111) preserved verbatim. B1 bootstrap wiring preserved (ensure_session_uuid still called in create_layout/reset_hints_route/auth_callback_route). 21/21 Phase 87 tests + targeted regression 421/421 GREEN. FOUND-02 advanced.
+- Phase 87-05 complete: 3 browse-cluster files (web/pages/browse.py 4 sites, web/pages/browse_state.py 10 sites, web/pages/catalog_browse.py 3 sites) migrated — 17 raw access sites eliminated. M2 independent-read semantics preserved in restore_browse_snapshot; M3 Class B inner wrappers preserved in persist_browse_snapshot (Fix 4) and browse.py:1122. B3 monkeypatch fix applied to tests/test_browse_state.py (7 patches swapped to web.safe_storage.app). 28/28 relevant tests GREEN. FOUND-02 advanced.
+- Phase 87-06 complete: 3 search-cluster files (web/pages/parallels.py 35 sites, web/pages/search.py 14 sites, web/pages/search_state.py 31 sites) migrated — 80 raw access sites eliminated. Single largest migration in Phase 87. Codex round 4 MEDIUM-2 deferred-restore callback at parallels.py:3520 migrated with explicit documenting comment. M2 independent-read semantics preserved; M3 Class B wrappers preserved in persist_search_snapshot (both outer and inner per Fix 4). B3 dual-patch fix applied to tests/test_search_state.py. 31/31 Phase 87 + search-state tests GREEN. FOUND-02 advanced.
+- Phase 87-07 complete: lint acceptance gate closed. All 6 lint scanner tests pass GREEN against production code (test_allowlist_well_formed, test_lint_rejects_synthetic_violation, test_lint_handles_aliased_imports, test_lint_does_not_double_report_nested_nodes, test_allowlist_counts_exact, test_no_raw_storage_access_outside_allowlist). Allowlist preserved verbatim from Plan 01: 4 entries (auth_state, main, supabase_client, export_state) / 13 patterns / 14 expected_count nodes — exactly matching the AST-counted reality after Plans 03-06 migrated 131 sites across 14 files. Zero code changes needed in Plan 07 (outcome A: Wave 2 already brought codebase to target state). Full suite 1879/1879 pass, ruff clean, check_docs healthy. All 5 ROADMAP Phase 87 Success Criteria satisfied via automated test commands. FOUND-04 satisfied; lint scanner is now the permanent CI guard.
 
 ### Carryover from hold commits (master-main at cca23db3)
 
@@ -86,7 +90,7 @@ Progress: [████░░░░░░] 38%
 
 ## Session Continuity
 
-Last session: 2026-05-13T05:23:07.308Z
-Stopped at: Completed 87-03-LEAF-FILE-MIGRATIONS-PLAN.md
+Last session: 2026-05-13T05:58:49.312Z
+Stopped at: Completed 87-07-LINT-FINALIZATION-PLAN.md
 Resume file: None
-Next step: `/gsd-execute-phase 87` continues with `87-04-MAIN-AND-ALIAS-MIGRATIONS-PLAN.md` (main.py non-OAuth paths + alias-using sites; allowlisted OAuth atomic write at L1458/1460/1463 stays out of scope)
+Next step: `/gsd-execute-phase 87` continues with `87-08-ACCEPTANCE-AND-DOCS-PLAN.md` (final phase closeout: CHANGELOG entry, OPEN_ISSUES updates, milestone tracking). Technical work for Phase 87 is complete; Plan 08 is documentation-only.
