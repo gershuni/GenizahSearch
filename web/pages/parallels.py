@@ -12,6 +12,7 @@ import logging
 
 from nicegui import ui, run, app
 from web.state import state
+from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, get_language
 from urllib.parse import unquote
 import asyncio
@@ -337,13 +338,13 @@ def create_parallels_page(initial_text: str = None):
     # --- Composition History Management ---
     def _get_comp_history() -> list:
         """Get composition search history from storage."""
-        return app.storage.user.get('composition_history', [])
+        return safe_user_get('composition_history', [])
 
     def _add_to_comp_history(title: str, result_count: int, params: dict, state_snapshot: dict):
         """Add or update a composition history entry. Deduplicates by title."""
-        if not app.storage.user.get('session_persistence_enabled', True):
+        if not safe_user_get('session_persistence_enabled', True):
             return
-        limit = app.storage.user.get('search_history_limit', 20)
+        limit = safe_user_get('search_history_limit', 20)
         history = _get_comp_history()
 
         # Dedup by title
@@ -373,18 +374,18 @@ def create_parallels_page(initial_text: str = None):
 
         # Enforce limit
         history = history[:limit]
-        app.storage.user['composition_history'] = history
+        safe_user_set('composition_history', history)
 
     def _delete_comp_history_entry(index: int):
         """Delete a specific composition history entry by index."""
         history = _get_comp_history()
         if 0 <= index < len(history):
             history.pop(index)
-            app.storage.user['composition_history'] = history
+            safe_user_set('composition_history', history)
 
     def _clear_comp_history():
         """Clear all composition search history."""
-        app.storage.user['composition_history'] = []
+        safe_user_set('composition_history', [])
 
     # === UI Layout ===
 
@@ -453,10 +454,7 @@ def create_parallels_page(initial_text: str = None):
                         words = len([w for w in text.split() if w])
                         word_count_label.text = f"{words} {tr('Words')}"
                         # Save text to storage for persistence
-                        try:
-                            app.storage.user['parallels_source_text'] = text
-                        except Exception:
-                            pass  # Browser storage operation failed; preference not persisted
+                        safe_user_set('parallels_source_text', text)
 
                     text_input.on('update:model-value', update_word_count)
                     # Also update on blur to catch paste events
@@ -880,7 +878,7 @@ def create_parallels_page(initial_text: str = None):
                         with ui.row().classes('gap-2'):
                             def _import_exclusions_from_word_search():
                                 """Import per-manuscript exclusions from word search."""
-                                ws_excluded = app.storage.user.get('word_search_excluded_ids', [])
+                                ws_excluded = safe_user_get('word_search_excluded_ids', [])
                                 if not ws_excluded:
                                     ui.notify(tr('No word search exclusions to import'), type='info', timeout=2000)
                                     return
@@ -926,16 +924,16 @@ def create_parallels_page(initial_text: str = None):
                             if _filter_refs.get('text_input'):
                                 _filter_refs['text_input'].value = ''
                             # Reset filter storage to clean defaults
-                            app.storage.user['parallels_filter_domains'] = []
-                            app.storage.user['parallels_filter_authors'] = []
-                            app.storage.user['parallels_filter_works'] = []
-                            app.storage.user['parallels_filter_include_mode'] = True
-                            app.storage.user['parallels_filter_date_from'] = None
-                            app.storage.user['parallels_filter_date_to'] = None
-                            app.storage.user['parallels_filter_material_exclude'] = []
-                            app.storage.user['parallels_filter_text_all'] = []
-                            app.storage.user['parallels_filter_text_any'] = []
-                            app.storage.user['parallels_filter_text_not'] = []
+                            safe_user_set('parallels_filter_domains', [])
+                            safe_user_set('parallels_filter_authors', [])
+                            safe_user_set('parallels_filter_works', [])
+                            safe_user_set('parallels_filter_include_mode', True)
+                            safe_user_set('parallels_filter_date_from', None)
+                            safe_user_set('parallels_filter_date_to', None)
+                            safe_user_set('parallels_filter_material_exclude', [])
+                            safe_user_set('parallels_filter_text_all', [])
+                            safe_user_set('parallels_filter_text_any', [])
+                            safe_user_set('parallels_filter_text_not', [])
                             _update_p_chip_bar()
 
                         ui.button(tr('Clear All'), icon='clear_all',
@@ -1416,12 +1414,12 @@ def create_parallels_page(initial_text: str = None):
             custom_texts = {ref: filter_sources['loaded'][ref] for ref in filter_sources['loaded'].keys() if ref.startswith('custom:')}
 
             # Save Sefaria refs (text reloaded from cache)
-            app.storage.user['filter_sources_refs'] = sefaria_refs
-            app.storage.user['filter_sources_enabled'] = list(filter_sources['enabled'])
+            safe_user_set('filter_sources_refs', sefaria_refs)
+            safe_user_set('filter_sources_enabled', list(filter_sources['enabled']))
 
             # Save custom texts (small enough to store directly)
-            app.storage.user['filter_sources_custom'] = custom_texts
-            app.storage.user['filter_sources_custom_count'] = filter_sources.get('custom_count', 0)
+            safe_user_set('filter_sources_custom', custom_texts)
+            safe_user_set('filter_sources_custom_count', filter_sources.get('custom_count', 0))
         except Exception:
             pass  # Cache operation failed; continue without cached data
 
@@ -2048,11 +2046,11 @@ def create_parallels_page(initial_text: str = None):
         # Reset summary label
         summary_label.text = ''
         # Reset persistent storage to clean defaults
-        app.storage.user['parallels_results'] = []
-        app.storage.user['parallels_filtered'] = []
-        app.storage.user['parallels_source_text'] = ''
-        app.storage.user['parallels_domain_exclusions'] = []
-        app.storage.user['parallels_excluded_manuscript_ids'] = []
+        safe_user_set('parallels_results', [])
+        safe_user_set('parallels_filtered', [])
+        safe_user_set('parallels_source_text', '')
+        safe_user_set('parallels_domain_exclusions', [])
+        safe_user_set('parallels_excluded_manuscript_ids', [])
         _clear_active_snapshot()
         # Also clear from global state
         state.parallels_results = []
@@ -2340,12 +2338,12 @@ def create_parallels_page(initial_text: str = None):
                         meta=state.parallels_search_meta,
                     )
                     # Also store in user storage (for UI persistence across page reloads)
-                    app.storage.user['parallels_results'] = _compact_result_rows(
+                    safe_user_set('parallels_results', _compact_result_rows(
                         main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
-                    )
-                    app.storage.user['parallels_filtered'] = _compact_result_rows(
+                    ))
+                    safe_user_set('parallels_filtered', _compact_result_rows(
                         (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
-                    )
+                    ))
                     _persist_active_snapshot()
                 except Exception:
                     pass  # Browser storage operation failed; preference not persisted
@@ -2404,11 +2402,7 @@ def create_parallels_page(initial_text: str = None):
                         return fjms.get_printed_sys_ids(sys_ids) if fjms.is_available() else set()
 
                     # Read show_translations in main thread before entering thread pool
-                    _par_show_trans = False
-                    try:
-                        _par_show_trans = app.storage.user.get('show_translations', False)
-                    except Exception:
-                        pass  # Translation lookup failed; continue without translation
+                    _par_show_trans = safe_user_get('show_translations', False)
 
                     def collect_parallels_translations(sys_ids, show_trans=False):
                         """Batch-fetch title and PGP translations for parallels results (Phase 46-07)."""
@@ -2726,7 +2720,7 @@ def create_parallels_page(initial_text: str = None):
                             )
                             excluded = set(excluded_list) if excluded_list else set()
                             p_state.domain_exclusions = excluded
-                            app.storage.user['parallels_domain_exclusions'] = list(excluded)
+                            safe_user_set('parallels_domain_exclusions', list(excluded))
                             _update_parallels_domain_filter_btn()
                             main_filtered = _filter_parallels_by_domain(p_state.results)
                             filt_filtered = _filter_parallels_by_domain(p_state.filtered_results) if p_state.filtered_results else p_state.filtered_results
@@ -3517,10 +3511,14 @@ def create_parallels_page(initial_text: str = None):
     # Async function to restore filter sources from persistent storage
     async def restore_filter_sources():
         """Restore filter sources from cache files (async to avoid blocking)."""
-        stored_refs = app.storage.user.get('filter_sources_refs', [])
-        stored_enabled = set(app.storage.user.get('filter_sources_enabled', []))
-        stored_custom = app.storage.user.get('filter_sources_custom', {})
-        filter_sources['custom_count'] = app.storage.user.get('filter_sources_custom_count', 0)
+        # Phase 87 migration (87-REVIEWS.md MEDIUM-2 from Codex round 4): deferred
+        # callbacks may silently lose state on session prune (safe_storage helpers
+        # absorb AssertionError). This is intentional — the alternative would crash
+        # the asyncio event loop.
+        stored_refs = safe_user_get('filter_sources_refs', [])
+        stored_enabled = set(safe_user_get('filter_sources_enabled', []))
+        stored_custom = safe_user_get('filter_sources_custom', {})
+        filter_sources['custom_count'] = safe_user_get('filter_sources_custom_count', 0)
 
         # Restore custom texts immediately (they're already in storage)
         for ref, text in stored_custom.items():
