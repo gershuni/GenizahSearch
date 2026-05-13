@@ -1285,6 +1285,7 @@ def privacy_extension_route():
 @ui.page('/reset-hints')
 def reset_hints_route():
     """Hidden utility route to reset all feature discovery hints."""
+    ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before storage pops
     for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen'):
         app.storage.user.pop(key, None)
     ui.navigate.to('/')
@@ -1446,6 +1447,7 @@ async def auth_callback_route(code: str = None, error: str = None, error_descrip
     Supabase redirects here after Google login with ?code= parameter (PKCE flow).
     Also handles ?error= / ?error_description= from cancelled or failed OAuth attempts.
     """
+    ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before OAuth atomic writes / telemetry
     from web.supabase_client import get_profile, exchange_code_for_session
     from web.auth_state import GlobalAuthState
 
