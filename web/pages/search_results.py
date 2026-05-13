@@ -123,8 +123,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
         if common_uids is not None:
             results = [r for r in results if (r.get('uid') or r.get('display', {}).get('id')) in common_uids]
     search_state.displayed_results = results  # Track full filtered set for Advanced View navigation
-    state.last_results = results  # Keep export in sync with displayed (post-filter) results
-    # 2026-05-12 cross-user fix: also mirror to per-session export payload.
+    # Phase 88: Sync per-session export payload with displayed (post-filter) results (singleton mirror removed).
     from web.export_state import update_search_export_results
     update_search_export_results(results)
 
@@ -371,13 +370,10 @@ def create_result_card(search_state, refs, index, result):
                     else:
                         search_state.selected_indices.discard(idx)
                     refs.update_selection_ui()
-                    # Phase 77 gap-closure (Plan 06, Gap #2): mirror the per-row
-                    # selection change to the global state singleton so
-                    # /api/export/* handlers see the change.
-                    state.last_selected_uids = compute_selected_uids(search_state)
-                    # 2026-05-12 cross-user fix: mirror to per-session export payload.
+                    # Phase 88: Mirror selection to per-session export payload (singleton mirror removed).
+                    _selected_uids = compute_selected_uids(search_state)
                     from web.export_state import update_search_export_selection
-                    update_search_export_selection(state.last_selected_uids)
+                    update_search_export_selection(_selected_uids)
 
                 result_checkbox = ui.checkbox(
                     value=index in search_state.selected_indices,
