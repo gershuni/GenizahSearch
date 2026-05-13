@@ -6,7 +6,7 @@ General settings for search behavior, display preferences, and Lab Mode configur
 """
 
 import logging
-from nicegui import ui, app
+from nicegui import ui
 from web.state import state
 from web.translations import tr
 from web.components.typography import h1, h3
@@ -19,7 +19,8 @@ def create_settings_page():
 
     # 2026-05-12 Codex 3rd-pass HIGH: route page-render storage reads through
     # safe_user_get so a prune_user_storage race doesn't 500 /settings.
-    from web.safe_storage import safe_user_get as _safe_get
+    # Phase 87 FOUND-02: writes also routed through safe_user_set.
+    from web.safe_storage import safe_user_get as _safe_get, safe_user_set as _safe_set
 
     with ui.column().classes('w-full max-w-4xl mx-auto gap-2 fade-in p-4'):
 
@@ -58,7 +59,7 @@ def create_settings_page():
 
                             def change_theme():
                                 theme = theme_select.value
-                                app.storage.user['theme'] = theme
+                                _safe_set('theme', theme)
                                 ui.run_javascript(f'document.body.setAttribute("data-theme", "{theme}")')
 
                             theme_select.on('update:model-value', change_theme)
@@ -73,7 +74,7 @@ def create_settings_page():
                             ).classes('w-28').props('outlined dense')
 
                             def change_rpp():
-                                app.storage.user['results_per_page'] = rpp_select.value
+                                _safe_set('results_per_page', rpp_select.value)
 
                             rpp_select.on('update:model-value', change_rpp)
 
@@ -91,7 +92,7 @@ def create_settings_page():
                             ).classes('w-36').props('outlined dense')
 
                             def change_mode():
-                                app.storage.user['default_search_mode'] = mode_select.value
+                                _safe_set('default_search_mode', mode_select.value)
 
                             mode_select.on('update:model-value', change_mode)
 
@@ -106,7 +107,7 @@ def create_settings_page():
                             ).classes('w-20').props('outlined dense')
 
                             def change_gap():
-                                app.storage.user['default_gap'] = int(gap_input.value) if gap_input.value else 0
+                                _safe_set('default_gap', int(gap_input.value) if gap_input.value else 0)
 
                             gap_input.on('update:model-value', change_gap)
 
@@ -116,7 +117,7 @@ def create_settings_page():
                     lab_switch = ui.switch(tr('Enable Lab Mode by default'), value=lab_default)
 
                     def toggle_lab():
-                        app.storage.user['lab_mode_default'] = lab_switch.value
+                        _safe_set('lab_mode_default', lab_switch.value)
 
                     lab_switch.on('update:model-value', toggle_lab)
 
@@ -131,7 +132,7 @@ def create_settings_page():
                     ui.label(tr('When enabled, your search results, exclusions, and filters are preserved when you return')).classes('text-xs mr-10').style('color: var(--text-muted);')
 
                     def toggle_persistence():
-                        app.storage.user['session_persistence_enabled'] = persist_switch.value
+                        _safe_set('session_persistence_enabled', persist_switch.value)
 
                     persist_switch.on('update:model-value', toggle_persistence)
 
@@ -146,7 +147,7 @@ def create_settings_page():
                         ).classes('w-20').props('outlined dense')
 
                         def change_history_limit():
-                            app.storage.user['search_history_limit'] = int(history_limit_input.value) if history_limit_input.value else 20
+                            _safe_set('search_history_limit', int(history_limit_input.value) if history_limit_input.value else 20)
 
                         history_limit_input.on('update:model-value', change_history_limit)
 
