@@ -254,7 +254,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 **Plans**: 8 plans
 - [x] 87-01-VALIDATION-FOUNDATION-PLAN.md — Failing test stubs + allowlist scaffold (Wave 0)
 - [x] 87-02-SESSION-UUID-HELPERS-PLAN.md — get_session_uuid + ensure_session_uuid in web/safe_storage.py (Wave 1)
-- [ ] 87-03-LEAF-FILE-MIGRATIONS-PLAN.md — text_editor, translation_report, home, settings, search_results (Wave 1)
+- [x] 87-03-LEAF-FILE-MIGRATIONS-PLAN.md — text_editor, translation_report, home, settings, search_results (Wave 1)
 - [ ] 87-04-MAIN-AND-ALIAS-MIGRATIONS-PLAN.md — main.py + api.py (nicegui_app alias) + supabase_client.py (_app alias) (Wave 2)
 - [ ] 87-05-BROWSE-CLUSTER-MIGRATIONS-PLAN.md — browse.py + browse_state.py + catalog_browse.py (Wave 2)
 - [ ] 87-06-SEARCH-CLUSTER-MIGRATIONS-PLAN.md — parallels.py + search.py + search_state.py (Wave 2)
@@ -327,7 +327,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 84. CUDL Shelfmark Normalization | v7.11 | 5/5 | Complete | 2026-05-12 |
 | 85. Synthetic FJMS Inventory Rows | v7.11 | 5/5 | Complete | 2026-05-12 |
 | 86. CUDL Coverage Audit + Synthetic Re-attempt | v7.11 | 4/5 | Complete | 2026-05-12 |
-| 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 2/8 | In Progress|  |
+| 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 3/8 | In Progress|  |
 | 88. State Separation by Deletion | v7.12 | 0/TBD | Not started | - |
 | 89. Lists Cache Per-Request | v7.12 | 0/TBD | Not started | - |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/TBD | Not started | - |

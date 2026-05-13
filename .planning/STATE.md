@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Completed 87-02-SESSION-UUID-HELPERS-PLAN.md
-last_updated: "2026-05-13T05:13:14.810Z"
+stopped_at: Completed 87-03-LEAF-FILE-MIGRATIONS-PLAN.md
+last_updated: "2026-05-13T05:23:12.008Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 8
-  completed_plans: 2
-  percent: 25
+  completed_plans: 3
+  percent: 38
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-13)
 ## Current Position
 
 Phase: 87 (Foundations -- Session UUID and Safe Storage Chokepoint) — EXECUTING
-Plan: 3 of 8 (next: 87-03-LEAF-FILE-MIGRATIONS)
+Plan: 4 of 8 (next: 87-04-MAIN-AND-ALIAS-MIGRATIONS)
 Status: Executing Phase 87
-Last activity: 2026-05-13 -- Plan 87-02 complete (session UUID helpers + B1 bootstrap wiring + Fix 1 route coverage)
+Last activity: 2026-05-13 -- Plan 87-03 complete (5 leaf files migrated to safe_storage; 16 raw access sites eliminated)
 
-Progress: [███░░░░░░░] 25%
+Progress: [████░░░░░░] 38%
 
 ## Phase Queue (v7.12)
 
@@ -69,6 +69,7 @@ Progress: [███░░░░░░░] 25%
 - `_TEST_BACKEND` shim removed: tests use real session storage with proper fixtures or adapter injection
 - Phase 87-01 Wave 0 gate established: 10 failing test stubs + 6-test AST lint scanner + 4-entry allowlist YAML. PyYAML 6.0.3 confirmed. test_safe_storage.py byte-unchanged (FOUND-05 invariant SHA256 = e165bf0e...)
 - Phase 87-02 complete: get_session_uuid/ensure_session_uuid added to web/safe_storage.py with M5 strict regex validation (^[0-9a-f]{32}$); ensure_session_uuid wired at create_layout (L349), reset_hints_route (L1288), auth_callback_route (L1450); /privacy-extension intentionally skipped (zero storage access — AST-confirmed). 17/17 phase 87 tests pass (6 safe_storage + 11 session_uuid). FOUND-05 SHA-256 invariant preserved. T-87-01 mitigation verified (100 sessions, 0 collisions); T-87-02 mitigation verified (4 dedicated regex-validation tests).
+- Phase 87-03 complete: 5 leaf files migrated to web.safe_storage helpers (text_editor.py 3 sites, translation_report.py 1 site, home.py 2 sites, settings.py 7 sites, search_results.py 3 sites — 16 total raw access sites eliminated). AST scanner confirms 0 violations across all 5 files. M3 defensive-wrapper audit: 13 wrappers encountered, all Class A (only absorbed prune-race AssertionError); 0 Class B wrappers needed preservation. The outer `try: ocr_banner.delete() except Exception: return` wrapper in home.py:_auto_dismiss_ocr preserved (non-storage UI failure mode). Removed now-unused `app` alias from `from nicegui import` line in all 5 files. 17/17 Phase 87 tests still GREEN; FOUND-05 SHA-256 invariant preserved (test_safe_storage.py byte-unchanged). FOUND-02 satisfied.
 
 ### Carryover from hold commits (master-main at cca23db3)
 
@@ -85,7 +86,7 @@ Progress: [███░░░░░░░] 25%
 
 ## Session Continuity
 
-Last session: 2026-05-13T05:13:10.358Z
-Stopped at: Completed 87-02-SESSION-UUID-HELPERS-PLAN.md
+Last session: 2026-05-13T05:23:07.308Z
+Stopped at: Completed 87-03-LEAF-FILE-MIGRATIONS-PLAN.md
 Resume file: None
-Next step: `/gsd-discuss-phase 87` (Foundations: session UUID + safe_storage chokepoint)
+Next step: `/gsd-execute-phase 87` continues with `87-04-MAIN-AND-ALIAS-MIGRATIONS-PLAN.md` (main.py non-OAuth paths + alias-using sites; allowlisted OAuth atomic write at L1458/1460/1463 stays out of scope)
