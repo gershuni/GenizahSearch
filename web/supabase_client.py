@@ -259,8 +259,8 @@ def sign_out() -> Dict:
         # are now keyed by access_token (str), not id(storage) (int). Evict by
         # the current session's access_token so the cleanup actually fires.
         try:
-            from nicegui import app as _app
-            auth_session = (_app.storage.user.get('auth_session') or {})
+            from web.safe_storage import safe_user_get
+            auth_session = (safe_user_get('auth_session') or {})
             access_token = auth_session.get('access_token')
             if access_token:
                 _client_cache.pop(access_token, None)
