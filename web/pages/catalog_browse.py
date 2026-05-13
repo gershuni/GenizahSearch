@@ -13,7 +13,8 @@ Features:
 - RTL Hebrew support
 """
 
-from nicegui import ui, run, app
+from nicegui import ui, run
+from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
 from shared.fjms_service import get_fjms_service
@@ -334,11 +335,8 @@ def create_catalog_browse_page(
                 textual_frame = r.get('textual_frame_eng', '') or r.get('textual_frame_heb', '')
 
             # Phase 46: Gap-fill empty fields from FJMS translations when toggle is on
-            _show_cat_trans = False
-            try:
-                _show_cat_trans = app.storage.user.get('show_translations', False)
-            except Exception:
-                pass  # Translation lookup failed; continue without translation
+            # Class A wrapper collapsed — safe_user_get absorbs prune-race AssertionError.
+            _show_cat_trans = safe_user_get('show_translations', False)
             _is_translated_title = False
             if _show_cat_trans:
                 alma_id = r.get('alma_id', '')
@@ -951,7 +949,8 @@ def create_catalog_browse_page(
         incoming = _build_incoming_filters()
         if not incoming:
             return
-        app.storage.user['incoming_filters'] = incoming
+        # Class N/A — bare write, no wrapper. safe_user_set absorbs prune-race.
+        safe_user_set('incoming_filters', incoming)
         ui.navigate.to('/search?from_browse=1')
 
     def _parallels_in_results():
@@ -959,7 +958,8 @@ def create_catalog_browse_page(
         incoming = _build_incoming_filters()
         if not incoming:
             return
-        app.storage.user['incoming_filters'] = incoming
+        # Class N/A — bare write, no wrapper. safe_user_set absorbs prune-race.
+        safe_user_set('incoming_filters', incoming)
         ui.navigate.to('/parallels')
 
     # ══════════════════════════════════════════════════════════════
