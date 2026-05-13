@@ -278,31 +278,39 @@ def create_parallels_page(initial_text: str = None):
             p_state.filtered_results = _active_snapshot.get('filtered_results', []) or []
             p_state.domain_exclusions = set(_active_snapshot.get('domain_exclusions', []))
             p_state.excluded_manuscript_ids = set(_active_snapshot.get('excluded_manuscript_ids', []))
-            state.parallels_results = p_state.results
-            state.parallels_filtered = p_state.filtered_results
-            # 2026-05-12 cross-user fix: mirror to per-session export payload.
+            # Phase 88: per-session export payload is the sole writer path (singleton mirror removed).
+            # Per D-13 (Refinement 3 audit): thread snapshot's source_text into meta so export
+            # handlers can echo it in the envelope without falling back to a legacy storage key.
+            _snapshot_source_text = _active_snapshot.get('source_text', '') or ''
+            _snapshot_meta = {'source_text': _snapshot_source_text}
             from web.export_state import set_parallels_export
             set_parallels_export(
                 results=p_state.results,
                 filtered=p_state.filtered_results,
-                meta=None,
+                meta=_snapshot_meta,
             )
         except Exception:
             pass  # Snapshot restore failed; page falls back to empty
     else:
-        # 2026-05-12 Codex HIGH: safe_user_get guards bootstrap reads.
+        # Phase 88: safe_user_get guards bootstrap reads (Codex HIGH, 2026-05-12).
         _legacy_results = _safe_get('parallels_results')
         if _legacy_results is not None:
             try:
                 p_state.results = _legacy_results or []
                 _legacy_filtered = _safe_get('parallels_filtered', []) or []
-                state.parallels_results = p_state.results
-                state.parallels_filtered = _legacy_filtered
+                # Phase 88 D-13: fold the legacy parallels_source_text storage key into the
+                # per-session export meta so the API export handlers read source_text from
+                # the canonical export payload (legacy fallback in api.py is deleted in 88-02).
+                # If the legacy session lost its source_text (storage cleared, partial state),
+                # we always populate meta with an explicit empty string so the export envelope
+                # carries a known shape — bucket (b) positive export with empty source_text.
+                _legacy_source_text = _safe_get('parallels_source_text', '') or ''
+                _bootstrap_meta = {'source_text': _legacy_source_text}
                 from web.export_state import set_parallels_export
                 set_parallels_export(
                     results=p_state.results,
                     filtered=_legacy_filtered,
-                    meta=None,
+                    meta=_bootstrap_meta,
                 )
             except Exception:
                 pass  # Browser storage operation failed; preference not persisted
@@ -1977,15 +1985,12 @@ def create_parallels_page(initial_text: str = None):
             p_state.filtered_results = state_snapshot.get('filtered_results', [])
             p_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
 
-            # Update global state for export
-            state.parallels_results = p_state.results
-            state.parallels_filtered = p_state.filtered_results
-            # Phase 77 (HIGH-03): rebuild envelope-echo metadata from the snapshot's
-            # canonical fields (state_snapshot['source_text'] at line 2216, params dict
-            # at line 1834). Do NOT reconstruct from result rows — that loses fidelity
-            # (params.chunk_size/mode/filters are not necessarily present on result rows).
-            # See 77-REVIEWS.md HIGH-03.
-            state.parallels_search_meta = {
+            # Phase 88: build per-session export payload from snapshot canonical fields
+            # (state_snapshot['source_text'] at line 2216, params dict at line 1834). Do NOT
+            # reconstruct from result rows — that loses fidelity (params.chunk_size/mode/filters
+            # are not necessarily present on result rows). Historical context: 77-REVIEWS.md
+            # HIGH-03; singleton mirror removed.
+            _parallels_search_meta = {
                 'source_text': state_snapshot.get('source_text', '') or '',
                 'chunk_size': params.get('chunk_size'),
                 'mode': params.get('mode'),
@@ -1994,12 +1999,11 @@ def create_parallels_page(initial_text: str = None):
                 'boundary_options': None,
                 'warnings': ['restored-from-history'],
             }
-            # 2026-05-12 cross-user fix: mirror to per-session export payload.
             from web.export_state import set_parallels_export
             set_parallels_export(
                 results=p_state.results,
                 filtered=p_state.filtered_results,
-                meta=state.parallels_search_meta,
+                meta=_parallels_search_meta,
             )
 
             # Update header and render
@@ -2052,11 +2056,7 @@ def create_parallels_page(initial_text: str = None):
         safe_user_set('parallels_domain_exclusions', [])
         safe_user_set('parallels_excluded_manuscript_ids', [])
         _clear_active_snapshot()
-        # Also clear from global state
-        state.parallels_results = []
-        state.parallels_filtered = []
-        state.parallels_search_meta = None  # Phase 77: clear envelope-echo metadata on reset
-        # 2026-05-12 cross-user fix: clear per-session export payload.
+        # Phase 88: Clear per-session export payload — singleton mirror removed.
         from web.export_state import clear_parallels_export
         clear_parallels_export()
         ui.notify(tr('Composition reset'), type='info', timeout=2000)
@@ -2295,19 +2295,16 @@ def create_parallels_page(initial_text: str = None):
                 })
 
                 try:
-                    # Store both main and filtered results for export
-                    # Store in global state (for API export endpoints)
-                    state.parallels_results = main_results
-                    state.parallels_filtered = filtered_results
-                    # Phase 77: capture envelope-echo metadata for JSON export (D-06).
-                    # Variable provenance (verified live in web/pages/parallels.py):
-                    #   captured_chunk_size      — line 2032, int(chunk_size.value) or 5
-                    #   captured_freq_threshold  — line 2030, int(freq_threshold.value) or 50
-                    #   captured_mode            — line 2033, mode_select.value
+                    # Phase 88: build per-session export payload for /api/export/parallels/*
+                    # (singleton mirror removed). Variable provenance (verified live in
+                    # web/pages/parallels.py):
+                    #   captured_chunk_size      — int(chunk_size.value) or 5
+                    #   captured_freq_threshold  — int(freq_threshold.value) or 50
+                    #   captured_mode            — mode_select.value
                     #   text_input.value         — NiceGUI textarea, source text
-                    # HIGH-02 fix: also capture the active filter dict (same 10-key shape
-                    # as the live snapshot at parallels.py:2202-2213) so envelope replay
-                    # matches what history-restore reconstructs.
+                    # HIGH-02 fix (historical Phase 77): capture the active filter dict (same
+                    # 10-key shape as the live snapshot at parallels.py:2202-2213) so envelope
+                    # replay matches what history-restore reconstructs.
                     _parallels_filters = {
                         'domains': list(getattr(p_state, 'filter_domains', None) or []),
                         'authors': list(getattr(p_state, 'filter_authors', None) or []),
@@ -2320,7 +2317,7 @@ def create_parallels_page(initial_text: str = None):
                         'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
                         'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
                     } if _has_active_filters() else None
-                    state.parallels_search_meta = {
+                    _parallels_search_meta = {
                         'source_text': text_input.value or '',
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
@@ -2329,13 +2326,11 @@ def create_parallels_page(initial_text: str = None):
                         'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
                         'warnings': [],  # Phase 78 will populate
                     }
-                    # 2026-05-12 cross-user fix: mirror to per-session export payload
-                    # so /api/export/parallels/* honor only this session's data.
                     from web.export_state import set_parallels_export
                     set_parallels_export(
                         results=main_results,
                         filtered=filtered_results,
-                        meta=state.parallels_search_meta,
+                        meta=_parallels_search_meta,
                     )
                     # Also store in user storage (for UI persistence across page reloads)
                     safe_user_set('parallels_results', _compact_result_rows(
