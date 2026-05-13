@@ -9,11 +9,11 @@ Reads/writes export payloads through ``web.safe_storage`` chokepoint helpers
   - aliased-import enforcement (lint scanner verifies no raw access)
   - sole legal access pattern for per-user state outside the allowlist
 
-Phase 88 (this rewrite) removed the ``_TEST_BACKEND`` shim and the
-``_backend()`` helper that selected between it and ``app.storage.user``.
-Tests now monkeypatch ``web.safe_storage.app`` directly (mirrors the
-Phase 87 pattern in tests/test_browse_state.py), so production-code
-shims are no longer required.
+Phase 88 (this rewrite) removed the pre-Phase-88 test-backend shim and
+its production-code selector helper. Tests now monkeypatch
+``web.safe_storage.app`` directly (mirrors the Phase 87 pattern in
+tests/test_browse_state.py), so production-code shims are no longer
+required.
 
 Update functions adopt:
   - ``isinstance(payload, dict)`` guard before mutating retrieved payloads
